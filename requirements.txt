@@ -1,0 +1,9 @@
+loguru
+transformers
+fire
+fastapi
+uvicorn
+pydantic
+requests
+starlette
+gradio
