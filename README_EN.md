@@ -142,8 +142,8 @@ BibTeX:
 之后即可提交PR。
 
 ## Acknowledgements 
-
 - [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
-- [https://github.com/shibing624/actionflow/blob/main/actionflow](https://github.com/shibing624/actionflow/blob/main/actionflow)
+- [https://github.com/simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
 
 Thanks for their great work!
+
