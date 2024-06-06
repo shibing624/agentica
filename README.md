@@ -1,4 +1,4 @@
-[**🇨🇳中文**](https://github.com/shibing624/actionflow/blob/main/README.md) | [**🌐English**](https://github.com/shibing624/actionflow/blob/main/README_EN.md) | [**📖文档/Docs**](https://github.com/shibing624/actionflow/wiki) | [**🤖模型/Models**](https://huggingface.co/shibing624) 
+[**🇨🇳中文**](https://github.com/shibing624/actionflow/blob/main/README.md) | [**🌐English**](https://github.com/shibing624/actionflow/blob/main/README_EN.md)
 
 <div align="center">
   <a href="https://github.com/shibing624/actionflow">
