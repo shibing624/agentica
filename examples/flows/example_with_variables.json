@@ -1,0 +1,38 @@
+{
+    "system_message": "You are a brilliant entrepreneur. You are exceptional at generating new business ideas and marketing them.",
+    "tasks": [
+        {
+            "action": "Brainstorm five ideas for a product that targets {market} at a price point of {price_point}."
+        },
+        {
+            "action": "Choose the best idea from the list based on likely purchase intent."
+        },
+        {
+            "action": "Write a short description of the chosen product."
+        },
+        {
+            "action": "Create an image of the product based on the description.",
+            "settings": {
+                "tool_name": "create_image"
+            }
+        },
+        {
+            "action": "Come up with five name ideas for the chosen product."
+        },
+        {
+            "action": "Choose the best name from the list based on the attributes of top brands."
+        },
+        {
+            "action": "Write a tagline to go with the best name from the list."
+        },
+        {
+            "action": "Create a simple HTML page with the product name, tagline, description, and image."
+        },
+        {
+            "action": "Save the HTML to a .html file.",
+            "settings": {
+                "tool_name": "save_file"
+            }
+        }
+    ]
+}

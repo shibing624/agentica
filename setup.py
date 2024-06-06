@@ -39,9 +39,10 @@ setup(
     keywords='actionflow,Agent Tool,action,agent',
     install_requires=[
         "loguru",
-        "Pillow",
+        "beautifulsoup4",
         "fire",
-        "transformers",
+        "openai",
+        "python-dotenv",
     ],
     packages=find_packages(),
 )

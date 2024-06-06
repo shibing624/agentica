@@ -1,0 +1,26 @@
+{
+    "system_message": "You are a brilliant entrepreneur. You are exceptional at generating new business ideas and marketing them.",
+    "tasks": [
+        {
+            "action": "Brainstorm five ideas for a education product."
+        },
+        {
+            "action": "Choose the best idea from the list based on likely purchase intent."
+        },
+        {
+            "action": "Write a short description of the chosen product."
+        },
+        {
+            "action": "Create a simple HTML page with the chosen product, description, and list some benefits of the product in the table."
+        },
+        {
+            "action": "Save the HTML to a .html file.",
+            "settings": {
+                "tool_name": "save_file"
+            }
+        },
+        {
+            "action": "say bye bye"
+        }
+    ]
+}

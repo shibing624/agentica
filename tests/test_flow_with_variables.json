@@ -1,0 +1,11 @@
+{
+    "system_message": "System message with {system_message_variable}.",
+    "tasks": [
+        {
+            "action": "Task 1 action with {task_1_variable}."
+        },
+        {
+            "action": "Task 2 action with {{task_2_curly_bracket_non_variable}}."
+        }
+    ]
+}
