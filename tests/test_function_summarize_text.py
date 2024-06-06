@@ -81,7 +81,7 @@ def test_calculate_tokens(output):
     assert tokens == 254
 
 
-@patch("actionflow.functions.summarize_text.LLM")
+@patch("actionflow.tools.summarize_text.LLM")
 def test_execute(MockLLM, output):
     """
     Tests the execute method of the SummarizeText class.

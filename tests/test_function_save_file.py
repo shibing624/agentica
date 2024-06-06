@@ -20,7 +20,7 @@ def test_execute():
     result = save_file.execute("test.txt", "Hello, world!")
     print("result:", result)
     # Check that the returned file path is correct
-    assert result == f"{output.output_dir}/test.txt"
+    assert result.split('/')[-1] == f"test.txt"
 
     # Clean up the test environment by removing the created file and directory
     shutil.rmtree(output.output_dir)

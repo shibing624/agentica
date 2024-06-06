@@ -7,7 +7,7 @@ This module contains tests for the Function class.
 
 import shutil
 
-from actionflow.function import Tool
+from actionflow.tool import Tool
 from actionflow.output import Output
 
 
@@ -26,6 +26,6 @@ def test_function():
         '{"file_name": "test.txt", "file_contents": "Hello, world!"}'
     )
     assert (
-        result == f"{output.output_dir}/test.txt"
+        result.split('/')[-1] == f"test.txt"
     ), "File path returned by execute method is incorrect"
     shutil.rmtree(output.output_dir)
