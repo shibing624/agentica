@@ -65,7 +65,7 @@ python run_flow_demo.py --flow_path flows/example_with_variables.json --variable
 
 ## Create New Flows
 
-Copy [example.json](https://github.com/shibing624/actionflow/blob/main/actionflow/examples/flows/example.json) or create a flow from scratch in this format:
+Copy [examples/flows/example.json](https://github.com/shibing624/actionflow/blob/main/examples/flows/example.json) or create a flow from scratch in this format:
 
 ```json
 {
@@ -88,12 +88,12 @@ Copy [example.json](https://github.com/shibing624/actionflow/blob/main/actionflo
 }
 ```
 
-## Create New Functions
+## Create New Tools
 
 Copy [save_file.py](https://github.com/shibing624/actionflow/blob/main/actionflow/tools/save_file.py) and modify it, or follow these instructions (replace "tool_name" with your tool name):
 
-1. **Create `tool_name.py` in the [tools](https://github.com/shibing624/actionflow/tree/main/actionflow/functions) folder**.
-2. **Create a class within called `ToolName`** that inherits from `BaseFunction`.
+1. **Create `tool_name.py` in the [actionflow/tools](https://github.com/shibing624/actionflow/tree/main/actionflow/tools) folder**.
+2. **Create a class within called `ToolName`** that inherits from `BaseTool`.
 3. **Add `get_definition()` and `execute()` in the class**. See descriptions of these in `BaseTool`.
 
 That's it! You can now use your function in `tool_name` as shown above. 
@@ -114,7 +114,7 @@ That's it! You can now use your function in `tool_name` as shown above.
 APA:
 
 ```
-Xu, M. actionflow: A Human-Centric Framework for Large Language Model Agent Workflows (Version 1.0.1) [Computer software]. https://github.com/shibing624/actionflow
+Xu, M. actionflow: A Human-Centric Framework for Large Language Model Agent Workflows (Version 0.0.2) [Computer software]. https://github.com/shibing624/actionflow
 ```
 
 BibTeX:
@@ -142,8 +142,8 @@ BibTeX:
 之后即可提交PR。
 
 ## Acknowledgements 
+
 - [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
 - [https://github.com/simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
 
 Thanks for their great work!
-
