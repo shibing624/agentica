@@ -20,31 +20,17 @@
 
 **actionflow**: A Human-Centric Framework for Large Language Model Agent Workflows
 
-**Guide**
-
-- [Features](#Features)
-- [Install](#install)
-- [Usage](#usage)
-- [Contact](#Contact)
-- [Acknowledgements](#Acknowledgements)
-
 ## Features
 
-### 文本xxx
+`ActionFlow`是一个LLMs驱动的工作流构建工具，支持如下功能：
 
-- xxx
-
-## Demo
-
-Demo: https://huggingface.co/spaces/shibing624/actionflow
-
-![](https://github.com/shibing624/actionflow/blob/main/docs/hf_search.png)
-
+* 在标准Json文件中以自然语言（prompt）编写工作流
+* 工作流不仅支持多个prompt命令，还支持工具调用（tool_calls）
+* 基于变量名动态更改prompt输入
 
 ## Install
 
 ```
-pip install torch # conda install pytorch
 pip install -U actionflow
 ```
 
@@ -58,34 +44,59 @@ pip install -e .
 
 ## Usage
 
-### 1. 文本摘要
-```python
+1. Sign up for the [OpenAI API](https://platform.openai.com/overview) and get an [API key](https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key)
+2. Clone or download this repository.
+3. Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
+4. Run `pip install -r requirements.txt` to install dependencies.
 
-
+Now you can run flows from the command line, like this:
+```bash
+cd examples
+python run_flow_demo.py --flow_path flows/example.json
 ```
-### 命令行模式（CLI）
+### Optional Arguments
 
-- 支持批量获取文本摘要
+#### Use `variables` to pass variables to your flow
 
-code: [cli.py](https://github.com/shibing624/actionflow/blob/main/actionflow/cli.py)
-
-```
-> actionflow -h                                    
-
-NAME
-    actionflow
-
-SYNOPSIS
-    actionflow COMMAND
+```bash
+python run_flow_demo.py --flow_path flows/example_with_variables.json --variables 'market=college students' 'price_point=$50'
 ```
 
-run：
 
-```shell
-pip install actionflow -U
-actionflow -h
+## Create New Flows
+
+Copy [example.json](https://github.com/shibing624/actionflow/blob/main/actionflow/examples/flows/example.json) or create a flow from scratch in this format:
+
+```json
+{
+    "system_message": "An optional message that guides the model's behavior.",
+    "tasks": [
+        {
+            "action": "Instruct the LLM here!"
+        },
+        {
+            "action": "Actions can have settings, including function calls and temperature, like so:",
+            "settings": {
+                "tool_name": "save_file",
+                "temperature": 0.8
+            }
+        },
+        {
+            "action": "..."
+        }
+    ]
+}
 ```
 
+## Create New Functions
+
+Copy [save_file.py](https://github.com/shibing624/actionflow/blob/main/actionflow/tools/save_file.py) and modify it, or follow these instructions (replace "tool_name" with your tool name):
+
+1. **Create `tool_name.py` in the [tools](https://github.com/shibing624/actionflow/tree/main/actionflow/functions) folder**.
+2. **Create a class within called `ToolName`** that inherits from `BaseFunction`.
+3. **Add `get_definition()` and `execute()` in the class**. See descriptions of these in `BaseTool`.
+
+That's it! You can now use your function in `tool_name` as shown above. 
 
 ## Contact
 
@@ -133,5 +144,5 @@ BibTeX:
 ## Acknowledgements 
 
 - [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
-
+- [https://github.com/shibing624/actionflow/blob/main/actionflow](https://github.com/shibing624/actionflow/blob/main/actionflow)
 Thanks for their great work!

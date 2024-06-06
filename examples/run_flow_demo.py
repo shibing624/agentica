@@ -2,8 +2,8 @@
 This module is used to run Actionflow flows. To run one, use the following command:
 
 .. code-block:: bash
-
-    python -m run --flow=<flow name> --variables '<variable>=<value>' '<variable>=<value>'
+    cd examples
+    python run_flow_demo.py --flow_path=flows/example.json --variables '<variable>=<value>' '<variable>=<value>'
 
 Optionally, use -v for verbose output.
 
