@@ -7,13 +7,13 @@
         {
             "action": "Task 2 action with function.",
             "settings": {
-                "function_call": "test_function_for_task_2"
+                "tool_name": "test_function_for_task_2"
             }
         },
         {
             "action": "Task 3 action with function.",
             "settings": {
-                "function_call": "test_function_for_task_3"
+                "tool_name": "test_function_for_task_3"
             }
         }
     ]
