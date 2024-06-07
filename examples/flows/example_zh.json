@@ -1,0 +1,26 @@
+{
+    "system_message": "你是一个有用的AI助手",
+    "tasks": [
+        {
+            "action": "头脑风暴5个教育行业的产品"
+        },
+        {
+            "action": "根据可能的购买意图从列表中选择最佳想法。"
+        },
+        {
+            "action": "编写所选产品的简短描述。"
+        },
+        {
+            "action": "创建一个简单的HTML页面，包括所选产品、描述，并在表格中列出该产品的一些优点。"
+        },
+        {
+            "action": "将HTML保存为.html文件。",
+            "settings": {
+                "tool_name": "save_file"
+            }
+        },
+        {
+            "action": "总结我们的对话，并说byebye。"
+        }
+    ]
+}

@@ -17,6 +17,7 @@ try:
 except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
-api_key = os.getenv("OPENAI_API_KEY")
-base_url = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
-default_model = os.getenv("OPENAI_DEFAULT_MODEL")
+api_key = os.getenv("API_KEY")  # "your-api-key"
+# OpenAI API Base URL; "https://api.moonshot.cn/v1" for Moonshot API
+base_url = os.getenv("API_BASE", "https://api.openai.com/v1")
+default_model = os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")  # "gpt-3.5-turbo" or "moonshot-v1-8k" and so on

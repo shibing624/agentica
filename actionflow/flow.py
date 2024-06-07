@@ -154,7 +154,6 @@ class Flow:
             try:
                 self._process_task(task)
                 logger.debug(self.messages[pre_task_messages_length:])
-                self.output.save(self.messages_file_name, self.messages)
             except Exception as e:
                 logger.error(e)
                 return

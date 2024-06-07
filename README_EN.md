@@ -27,6 +27,7 @@
 - Writing workflows in standard JSON files using natural language (prompts)
 - Workflows support not only multiple prompt commands but also tool calls (tool_calls)
 - Dynamically altering prompt inputs based on variable names
+- Support OpenAI API and Moonshot API (kimi) calls
 
 ## Install
 
@@ -44,10 +45,8 @@ pip install -e .
 
 ## Usage
 
-1. Sign up for the [OpenAI API](https://platform.openai.com/overview) and get an [API key](https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key)
-2. Clone or download this repository.
-3. Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
-4. Run `pip install -r requirements.txt` to install dependencies.
+1. . Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
+2. Run `pip install -r requirements.txt` to install dependencies.
 
 Now you can run flows from the command line, like this:
 ```bash

@@ -22,7 +22,7 @@ class Output:
         """
         Initializes the Output object with a unique directory for the flow.
 
-        :param output_dir: str, The name of the flow.
+        :param output_dir: str, The save dir of the action flow process result.
         """
         self.output_dir = output_dir
         os.makedirs(self.output_dir, exist_ok=True)
@@ -42,7 +42,7 @@ class Output:
         if isinstance(file_contents, str):
             data_to_write = file_contents
         elif isinstance(file_contents, (list, dict)):
-            data_to_write = json.dumps(file_contents, indent=4)
+            data_to_write = json.dumps(file_contents, indent=4, ensure_ascii=False)
         else:
             raise TypeError("file_contents must be of type str, list, or dict")
 

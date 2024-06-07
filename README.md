@@ -24,9 +24,10 @@
 
 `ActionFlow`是一个LLMs驱动的工作流构建工具，支持如下功能：
 
-* 在标准Json文件中以自然语言（prompt）编写工作流
-* 工作流不仅支持多个prompt命令，还支持工具调用（tool_calls）
-* 基于变量名动态更改prompt输入
+- 通过自然语言（prompt）在`json`文件中编排复杂工作流
+- 工作流不仅支持多个prompt命令，还支持工具调用（tool_calls）
+- 基于变量名动态更改prompt输入
+- 支持OpenAI API和Moonshot API(kimi)调用
 
 ## Install
 
@@ -44,10 +45,7 @@ pip install -e .
 
 ## Usage
 
-1. Sign up for the [OpenAI API](https://platform.openai.com/overview) and get an [API key](https://help.openai.com/en/articles/4936850-where-do-i-find-my-secret-api-key)
-2. Clone or download this repository.
-3. Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
-4. Run `pip install -r requirements.txt` to install dependencies.
+Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
 
 Now you can run flows from the command line, like this:
 ```bash

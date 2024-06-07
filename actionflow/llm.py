@@ -53,7 +53,7 @@ class LLM:
         self.client = client
         logger.debug(f"OpenAI client created, api_key={show_api_key}, api_base={base_url}, client={client}")
 
-    @retry(wait=wait_exponential(multiplier=1, min=4, max=10))
+    @retry(wait=wait_exponential(multiplier=1, max=5))
     def respond(
             self,
             settings: Settings,
