@@ -8,8 +8,8 @@ This module contains tests for the GetUrl function in the actionflow.functions.g
 import shutil
 from unittest.mock import patch
 
-from actionflow.tools.get_url import GetUrl
 from actionflow.output import Output
+from actionflow.tools.get_url import GetUrl
 
 
 def test_execute_html():
@@ -51,6 +51,28 @@ def test_execute_text():
 
         # Check that the returned content is correct
         assert result == "Hello, world!"
+
+    # Clean up the test environment by removing the created directory
+    shutil.rmtree(output.output_dir)
+
+
+def test_execute_markdown():
+    """
+    Tests the execute method of the GetUrl function with format set to 'markdown'.
+    """
+    output = Output("test_get_url_execute_markdown")
+    get_url = GetUrl(output)
+
+    with patch("requests.get") as mocked_get:
+        # Mock the returned response
+        mocked_get.return_value.status_code = 200
+        mocked_get.return_value.text = "# Hello, world!"
+
+        # Execute the GetUrl function
+        result = get_url.execute("http://test.com", "markdown")
+
+        # Check that the returned content is correct
+        assert result == "# Hello, world!"
 
     # Clean up the test environment by removing the created directory
     shutil.rmtree(output.output_dir)

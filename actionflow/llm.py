@@ -7,7 +7,13 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from openai import OpenAI
-from tenacity import retry, wait_exponential
+from tenacity import (
+    after_log,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from actionflow.config import api_key, base_url, default_model
 
@@ -53,7 +59,14 @@ class LLM:
         self.client = client
         logger.debug(f"OpenAI client created, api_key={show_api_key}, api_base={base_url}, client={client}")
 
-    @retry(wait=wait_exponential(multiplier=1, max=5))
+    def __repr__(self):
+        return f"LLM(client={self.client})"
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_random_exponential(min=1, max=10),
+        retry=retry_if_exception_type(ConnectionError),
+    )
     def respond(
             self,
             settings: Settings,

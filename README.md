@@ -62,7 +62,7 @@ python run_flow_demo.py --flow_path flows/example_with_variables.json --variable
 ```
 
 
-## 新建工作流（Flow）
+## 新建工作流（ActionFlow）
 
 复制 [examples/flows/example.json](https://github.com/shibing624/actionflow/blob/main/examples/flows/example.json) 或者按照如下格式创建一个工作流（json文件）：
 

@@ -22,12 +22,6 @@ class CreateImage(BaseTool):
     This class inherits from the BaseFunction class. It defines a function for creating an image from a description using OpenAI's API.
     """
 
-    def __init__(self, output: Output):
-        """
-        Initializes the SummarizeText object.
-        """
-        super().__init__(output)
-        self.llm = LLM()
 
     def get_definition(self) -> dict:
         """
@@ -46,7 +40,10 @@ class CreateImage(BaseTool):
                     "properties": {
                         "prompt": {
                             "type": "string",
-                            "description": "The prompt that describes the image. Be specific and detailed about the content and style of the image.",
+                            "description": (
+                                "The prompt that describes the image. "
+                                "Be specific and detailed about the content and style of the image.",
+                            )
                         }
                     },
                     "required": ["prompt"],
@@ -103,7 +100,7 @@ class CreateImage(BaseTool):
         :return: The URL of the image.
         :rtype: str
         """
-        response = self.llm.client.images.generate(prompt=prompt, n=n, size=size, model=model)
+        response = LLM().client.images.generate(prompt=prompt, n=n, size=size, model=model)
         return response.data[0].url
 
     def _download_and_save_image(self, image_url: str, image_path: str) -> None:

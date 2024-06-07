@@ -2,8 +2,9 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description:
-This module defines the Flow and Task classes which are used to load and execute a series of tasks defined in a JSON file.
-Each task is processed by the LLM (Large Language Model) and the results are saved in a JSON file.
+This module defines the ActionFlow and Task classes which are used to load and execute a series of tasks
+    defined in a JSON file. Each task is processed by the LLM (Large Language Model) and the results are
+    saved in a JSON file.
 """
 
 import json
@@ -32,8 +33,11 @@ class Task:
         self.action = action
         self.settings = settings if settings else Settings()
 
+    def __repr__(self):
+        return f"Task(action={self.action}, settings={self.settings})"
 
-class Flow:
+
+class ActionFlow:
     """
     Represents a flow of tasks loaded from a JSON file.
 
@@ -50,19 +54,21 @@ class Flow:
         default_output_dir = os.path.join("outputs", f"{flow_name}_{timestamp}")
         self.output_dir = output_dir if output_dir else default_output_dir
         self.output = Output(self.output_dir)
-        self.messages = self._get_initial_messages()
-        self.messages_file_name = "messages.json"
         self.llm = LLM()
         self.tools = self._get_tools()
+        self.messages = self._get_initial_messages()
+        self.messages_file_name = "messages.json"
         logger.debug(
-            f"Flow loaded: {flow_path}, "
+            f"ActionFlow loaded: {flow_path}, "
             f"output: {self.output}, "
             f"variables: {variables}, "
             f"tasks size: {len(self.tasks)}, "
-            f"messages: {self.messages}, "
             f"tools: {self.tools}, "
             f"llm: {self.llm}"
         )
+
+    def __repr__(self):
+        return f"ActionFlow(flow_path={self.flow_path}, output: {self.output}, tools: {self.tools}, llm: {self.llm})"
 
     def _load_flow(self, file_path: str) -> None:
         """
@@ -175,13 +181,14 @@ class Flow:
 
     def _get_tools(self) -> list:
         """
-        Get tool definitions for tasks.
+        Get Tool objects for the tasks.
         """
-        return [
-            Tool(task.settings.tool_name, self.output).definition
-            for task in self.tasks
-            if task.settings.tool_name is not None
-        ]
+        tools = []
+        for task in self.tasks:
+            name = task.settings.tool_name
+            if name is not None:
+                tools.append(Tool(name, self.output))
+        return tools
 
     def _process_task(self, task: Task):
         """
@@ -192,13 +199,20 @@ class Flow:
         """
         self.messages.append({"role": "user", "content": task.action})
 
+        # Set the tool choice to "none" if the task does not require a tool.
         task.settings.tool_choice = (
             "none"
             if task.settings.tool_name is None
             else {"type": "function", "function": {"name": task.settings.tool_name}}
         )
 
-        message = self.llm.respond(task.settings, self.messages, self.tools)
+        # If the task has a tool, add the tool definition to the current tools.
+        if task.settings.tool_name is not None:
+            current_tools = [Tool(task.settings.tool_name, self.output).definition]
+        else:
+            current_tools = None
+
+        message = self.llm.respond(task.settings, self.messages, current_tools)
         if message.content:
             self._process_message(message)
         elif message.tool_calls:
@@ -218,13 +232,36 @@ class Flow:
         Process a tool call from the assistant.
 
         :param message: The message from the assistant.
-        :type message: Message
+            Note "message" must include "tool_calls",
+            and "tool_calls" must include "function", for example:
+            {...
+                "choices": [
+                    {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": null,
+                        "tool_calls": [
+                        {
+                            "id": "call_5l72",
+                            "type": "function",
+                            "function": {
+                            "name": "execute",
+                            "arguments": "{\n  \"language\": \"python\",\n  \"code\": \"print('Hello, World!')\"\n}"
+                            }
+                        }
+                        ]
+                    },
+                    "finish_reason": "stop"
+                    }
+                ],
+            ...}
         :param task: The task to be processed.
-        :type task: Task
         """
         tool_name = message.tool_calls[0].function.name
         arguments = message.tool_calls[0].function.arguments
         tool = Tool(tool_name, self.output)
+        logger.debug(f"Processing task: {task}, tool call: {tool_name}")
         tool_content = tool.execute(arguments)
         self.messages.append(
             {

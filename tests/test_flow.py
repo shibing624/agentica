@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 import pytest
 
-from actionflow.flow import Flow
+from actionflow.actionflow import ActionFlow
 from actionflow.llm import Settings
 
 
@@ -74,7 +74,7 @@ def test_file_not_found(flows_path):
     Test that a FileNotFoundError is raised if the flow file does not exist.
     """
     with pytest.raises(FileNotFoundError):
-        _ = Flow("file_not_found")
+        _ = ActionFlow("file_not_found")
 
 
 def test_flow_basic(flows_path):
@@ -85,7 +85,7 @@ def test_flow_basic(flows_path):
         mock_llm = MockLLM.return_value
         mock_llm.respond.side_effect = mock_llm_respond
 
-        flow = Flow("test_flow_basic.json")
+        flow = ActionFlow("test_flow_basic.json")
 
         assert flow.system_message == "Test system message."
         assert len(flow.tasks) == 3
@@ -124,7 +124,7 @@ def test_flow_with_variables(flows_path):
         "system_message_variable": "system_message_variable_value",
         "task_1_variable": "task_1_variable_value",
     }
-    flow = Flow("test_flow_with_variables.json", variables, flows_path)
+    flow = ActionFlow("test_flow_with_variables.json", variables, flows_path)
 
     # Test that we set variables correctly
     assert flow.system_message == "System message with system_message_variable_value."
@@ -139,7 +139,7 @@ def test_flow_with_variables(flows_path):
     with pytest.raises(
             ValueError, match="Extra variables provided: {'extra_variable'}."
     ):
-        _ = Flow("test_flow_with_variables.json", variables, flows_path)
+        _ = ActionFlow("test_flow_with_variables.json", variables, flows_path)
 
     # Test that we raise an error if we don't provide all variables
     variables.pop("extra_variable")
@@ -147,7 +147,7 @@ def test_flow_with_variables(flows_path):
     with pytest.raises(
             ValueError, match="Missing variable values for: {'system_message_variable'}."
     ):
-        _ = Flow("test_flow_with_variables.json", variables, flows_path)
+        _ = ActionFlow("test_flow_with_variables.json", variables, flows_path)
 
     if os.path.exists('outputs'):
         shutil.rmtree('outputs')
@@ -166,7 +166,7 @@ def test_flow_with_functions(flows_path):
             mock_llm = MockLLM.return_value
             mock_llm.respond.side_effect = mock_llm_respond
 
-            flow = Flow("test_flow_with_functions.json")
+            flow = ActionFlow("test_flow_with_functions.json")
 
             # Ensure that we have the correct number of functions
             assert len(flow.tools) == 2

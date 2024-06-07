@@ -64,9 +64,13 @@ class Tool:
         :param output: The output object.
         :type output: Output
         """
+        self.tool_name = tool_name
         self.module = importlib.import_module(f"actionflow.tools.{tool_name}")
         self.tool_class = getattr(self.module, tool_name.replace("_", " ").title().replace(" ", ""))
         self.instance = self.tool_class(output)
+
+    def __repr__(self):
+        return f"Tool(tool_name={self.tool_name})"
 
     @property
     def definition(self) -> dict:
@@ -87,5 +91,6 @@ class Tool:
         :return: The result of the tool execution.
         :rtype: str
         """
-        args_dict = json.loads(args_json)
+        args_dict = json.loads(args_json, strict=False)
         return self.instance.execute(**args_dict)
+

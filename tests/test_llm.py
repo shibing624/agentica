@@ -17,8 +17,8 @@ def test_settings(monkeypatch):
     """
 
     # Test that we're properly setting the default model
-    if "OPENAI_DEFAULT_MODEL" in os.environ:
-        monkeypatch.delenv("OPENAI_DEFAULT_MODEL")
+    if "DEFAULT_MODEL" in os.environ:
+        monkeypatch.delenv("DEFAULT_MODEL")
     settings = Settings()
     assert len(settings.model) > 0
 

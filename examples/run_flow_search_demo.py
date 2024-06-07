@@ -46,7 +46,7 @@ def main():
     parser.add_argument(
         "--flow_path",
         type=str,
-        default="flows/example_zh.json",
+        default="flows/example_search.json",
         help="The file path of the flow to run. the json file",
     )
     parser.add_argument(

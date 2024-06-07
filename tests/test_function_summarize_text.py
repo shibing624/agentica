@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
-from actionflow.tools.summarize_text import SummarizeText
 from actionflow.output import Output
+from actionflow.tools.summarize_text import SummarizeText
 
 
 @pytest.fixture
@@ -48,28 +48,6 @@ def test_prepare_messages(output):
     messages = summarizer._prepare_messages("text", "instructions")
     assert messages[0]["content"] == "You are an AI summarizer. instructions"
     assert messages[1]["content"] == "Text to summarize: text"
-
-
-def test_select_model_base(output):
-    """
-    Tests the _select_model method of the SummarizeText class. It checks that the correct model is selected for 4000 tokens or less.
-    """
-    summarizer = SummarizeText(output)
-    # Constructing a message size that fits the base model
-    messages = [{"content": "a" * (1000 * summarizer.chars_per_token)}]
-    model, _ = summarizer._select_model(messages)
-    assert model == "gpt-3.5-turbo"
-
-
-def test_select_model_16k(output):
-    """
-    Tests the _select_model method of the SummarizeText class. It checks that the correct model is selected for more than 4000 tokens.
-    """
-    summarizer = SummarizeText(output)
-    # Constructing a message size that requires the larger 16k model
-    messages = [{"content": "a" * (5000 * summarizer.chars_per_token)}]
-    model, _ = summarizer._select_model(messages)
-    assert model == "gpt-3.5-turbo-16k"
 
 
 def test_calculate_tokens(output):

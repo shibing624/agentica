@@ -4,4 +4,4 @@
 @description: 
 """
 from actionflow.version import __version__
-from actionflow.flow import Flow
+from actionflow.actionflow import ActionFlow

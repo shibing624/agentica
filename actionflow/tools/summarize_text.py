@@ -5,11 +5,11 @@
 This module contains a class for summarizing text.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-from actionflow.tool import BaseTool
 from actionflow.llm import LLM, Settings
 from actionflow.output import Output
+from actionflow.tool import BaseTool
 
 
 class SummarizeText(BaseTool):
@@ -22,7 +22,6 @@ class SummarizeText(BaseTool):
         Initializes the SummarizeText object.
         """
         super().__init__(output)
-        self.llm = LLM()
         self.default_instructions = (
             "Return a summary that succinctly captures its main points."
         )
@@ -69,8 +68,7 @@ class SummarizeText(BaseTool):
         """
         truncated_text = self._truncate_text(text_to_summarize)
         messages = self._prepare_messages(truncated_text, instructions)
-        model, max_return_tokens = self._select_model(messages)
-        return self._summarize(model, messages, max_return_tokens)
+        return self._summarize(messages)
 
     def _truncate_text(self, text: str) -> str:
         """
@@ -103,43 +101,32 @@ class SummarizeText(BaseTool):
             {"role": "user", "content": user_content},
         ]
 
-    def _select_model(self, messages: List[Dict[str, str]]) -> Tuple[str, int]:
-        """
-        Selects the model to use for summarizing the text.
-
-        :param messages: The messages for the language model.
-        :type messages: list[dict[str, str]]
-        :return: The model to use for summarizing the text and the maximum number of tokens to return.
-        :rtype: tuple[str, int]
-        """
-        messages_tokens = self._calculate_tokens(messages)
-        if messages_tokens > 4000:
-            return "gpt-3.5-turbo-16k", 16000 - messages_tokens
-        else:
-            return "gpt-3.5-turbo", 4000 - messages_tokens
-
     def _calculate_tokens(self, messages: List[Dict[str, str]]) -> int:
         return int(len(str(messages)) / self.chars_per_token)
 
     def _summarize(
             self,
-            model: str,
             messages: List[Dict[str, str]],
-            max_return_tokens: int
+            max_return_tokens: int = 1000,
     ) -> str:
         """
         Summarizes text.
-        :param model: The model to use for summarizing the text.
-        :type model: str
         :param messages: The messages for the language model.
         :type messages: list[dict[str, str]]
         :param max_return_tokens: The maximum number of tokens to return.
         :type max_return_tokens: int
         """
         settings = Settings(
-            model=model,
             max_tokens=max_return_tokens,
             temperature=0,
         )
-        summary_message = self.llm.respond(settings, messages)
+        summary_message = LLM().respond(settings, messages)
         return summary_message.content
+
+
+if __name__ == '__main__':
+    output = Output('o')
+    summarizer = SummarizeText(output)
+    text = "a" * 110
+    r = summarizer.execute(text)
+    print(text, '\n\n', r)

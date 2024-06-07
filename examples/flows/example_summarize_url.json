@@ -2,19 +2,22 @@
     "system_message": "You summarize URLs.",
     "tasks": [
         {
-            "action": "Get text from the URL {url}.",
+            "action": "hi"
+        },
+        {
+            "action": "获取网页内容，我要markdown格式的，网站链接是 https://www.edu.cn/rd/gao_xiao_cheng_guo/gao_xiao_zi_xun/202406/t20240604_2614068.shtml",
             "settings": {
                 "tool_name": "get_url"
             }
         },
         {
-            "action": "Summarize the text.",
+            "action": "把上面的内容生成摘要",
             "settings": {
                 "tool_name": "summarize_text"
             }
         },
         {
-            "action": "Save the summary as summary.txt.",
+            "action": "把生成的摘要保存为 summary.md",
             "settings": {
                 "tool_name": "save_file"
             }

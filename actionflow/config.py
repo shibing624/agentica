@@ -8,7 +8,7 @@ import os
 from loguru import logger
 
 pwd_path = os.path.abspath(os.path.dirname(__file__))
-dotenv_path = os.getenv("DOTENV_PATH", os.path.join(pwd_path, "../.env"))
+dotenv_path = os.environ.get("DOTENV_PATH", os.path.join(pwd_path, "../.env"))
 try:
     from dotenv import load_dotenv  # noqa
 
@@ -17,7 +17,17 @@ try:
 except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
-api_key = os.getenv("API_KEY")  # "your-api-key"
+api_key = os.environ.get("API_KEY")  # "your-api-key"
 # OpenAI API Base URL; "https://api.moonshot.cn/v1" for Moonshot API
-base_url = os.getenv("API_BASE", "https://api.openai.com/v1")
-default_model = os.getenv("DEFAULT_MODEL", "gpt-3.5-turbo")  # "gpt-3.5-turbo" or "moonshot-v1-8k" and so on
+base_url = os.environ.get("API_BASE", "https://api.openai.com/v1")
+default_model = os.environ.get("DEFAULT_MODEL", "gpt-3.5-turbo")  # "gpt-3.5-turbo" or "moonshot-v1-8k" and so on
+
+# get url api key
+JINA_API_KEY = os.environ.get("JINA_API_KEY")
+
+# Search engine api key
+SERPER_API_KEY = os.environ.get("SERPER_API_KEY")
+# SERPAPI_API_KEY = os.environ.get("SERPAPI_API_KEY")
+
+# Code-interpreter E2B api key
+E2B_API_KEY = os.environ.get("E2B_API_KEY")
