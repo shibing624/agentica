@@ -29,13 +29,13 @@
 
 ## Install
 
-```
+```bash
 pip install -U actionflow
 ```
 
 or
 
-```
+```bash
 git clone https://github.com/shibing624/actionflow.git
 cd actionflow
 pip install -e .
@@ -43,25 +43,26 @@ pip install -e .
 
 ## Usage
 
-Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
+1. 复制[example.env](https://github.com/shibing624/actionflow/blob/main/example.env)文件为`.env`，并粘贴OpenAI API key或者Moonshoot API key。
 
-Now you can run flows from the command line, like this:
+2. 运行actionflow示例：
+
 ```bash
 cd examples
 python run_flow_demo.py --flow_path flows/example.json
 ```
-### Optional Arguments
+### 可选参数
 
-#### Use `variables` to pass variables to your flow
+#### 使用`variables`参数
 
 ```bash
 python run_flow_demo.py --flow_path flows/example_with_variables.json --variables 'market=college students' 'price_point=$50'
 ```
 
 
-## Create New Flows
+## 新建工作流（Flow）
 
-Copy [examples/flows/example.json](https://github.com/shibing624/actionflow/blob/main/examples/flows/example.json) or create a flow from scratch in this format:
+复制 [examples/flows/example.json](https://github.com/shibing624/actionflow/blob/main/examples/flows/example.json) 或者按照如下格式创建一个工作流（json文件）：
 
 ```json
 {
@@ -84,15 +85,14 @@ Copy [examples/flows/example.json](https://github.com/shibing624/actionflow/blob
 }
 ```
 
-## Create New Tools
+## 新建工具（Tools）
 
-Copy [save_file.py](https://github.com/shibing624/actionflow/blob/main/actionflow/tools/save_file.py) and modify it, or follow these instructions (replace "tool_name" with your tool name):
+复制 [actionflow/tools/save_file.py](https://github.com/shibing624/actionflow/blob/main/actionflow/tools/save_file.py) 并修改，或者按如下指引新增一个工具（记得替换`tool_name`为你的工具名）：
+1. **在[actionflow/tools](https://github.com/shibing624/actionflow/tree/main/actionflow/tools)文件夹新增`tool_name.py`**
+2. **新建类`ToolName`** 继承自`BaseTool`
+3. **在类中新增`get_definition()`和`execute()`方法**，具体参考`BaseTool`
 
-1. **Create `tool_name.py` in the [actionflow/tools](https://github.com/shibing624/actionflow/tree/main/actionflow/tools) folder**.
-2. **Create a class within called `ToolName`** that inherits from `BaseTool`.
-3. **Add `get_definition()` and `execute()` in the class**. See descriptions of these in `BaseTool`.
-
-That's it! You can now use your function in `tool_name` as shown above. 
+这样，你就可以在工作流中使用新增的`tool_name`工具。 
 
 ## Contact
 

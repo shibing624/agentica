@@ -43,8 +43,7 @@ pip install -e .
 
 ## Usage
 
-1. . Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
-2. Run `pip install -r requirements.txt` to install dependencies.
+Create a `.env` file from [example.env](https://github.com/shibing624/actionflow/blob/main/example.env) and add your OpenAI API key.
 
 Now you can run flows from the command line, like this:
 ```bash
