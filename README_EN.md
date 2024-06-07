@@ -8,7 +8,7 @@
 
 -----------------
 
-# ActionFlow: A Human-Centric Framework for Large Language Model Agent Workflows
+# ActionFlow: LLMs Agent Workflows with Prompts and Tools
 [![PyPI version](https://badge.fury.io/py/actionflow.svg)](https://badge.fury.io/py/actionflow)
 [![Downloads](https://static.pepy.tech/badge/actionflow)](https://pepy.tech/project/actionflow)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -19,8 +19,6 @@
 
 
 **actionflow**: A Human-Centric Framework for Large Language Model Agent Workflows
-
-## Features
 
 `ActionFlow` is an LLM-driven workflow building tool that supports the following features:
 

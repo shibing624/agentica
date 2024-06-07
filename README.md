@@ -8,7 +8,7 @@
 
 -----------------
 
-# ActionFlow: A Human-Centric Framework for Large Language Model Agent Workflows
+# ActionFlow: LLMs Agent Workflows with Prompts and Tools
 [![PyPI version](https://badge.fury.io/py/actionflow.svg)](https://badge.fury.io/py/actionflow)
 [![Downloads](https://static.pepy.tech/badge/actionflow)](https://pepy.tech/project/actionflow)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -20,12 +20,10 @@
 
 **actionflow**: A Human-Centric Framework for Large Language Model Agent Workflows
 
-## Features
-
 `ActionFlow`是一个LLMs驱动的工作流构建工具，支持如下功能：
 
 - 通过自然语言（prompt）在`json`文件中编排复杂工作流
-- 工作流不仅支持多个prompt命令，还支持工具调用（tool_calls）
+- 工作流的编排不仅支持多个prompt命令，还支持工具调用（tool_calls）
 - 基于变量名动态更改prompt输入
 - 支持OpenAI API和Moonshot API(kimi)调用
 
