@@ -8,7 +8,7 @@
 
 -----------------
 
-# ActionFlow: LLMs Agent Workflows with Prompts and Tools
+# ActionFlow: Agent Workflows with Prompts and Tools
 [![PyPI version](https://badge.fury.io/py/actionflow.svg)](https://badge.fury.io/py/actionflow)
 [![Downloads](https://static.pepy.tech/badge/actionflow)](https://pepy.tech/project/actionflow)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
