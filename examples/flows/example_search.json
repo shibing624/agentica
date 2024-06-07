@@ -8,10 +8,7 @@
             }
         },
         {
-            "action": "把上面的内容生成摘要",
-            "settings": {
-                "tool_name": "summarize_text"
-            }
+            "action": "把上面的内容生成摘要"
         },
         {
             "action": "介绍北京"
