@@ -18,14 +18,14 @@
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 
-**actionflow**: A Human-Centric Framework for Large Language Model Agent Workflows, build your agent workflows quickly. 
+**actionflow**: A Human-Centric Framework for Large Language Model Agent Workflows, build your agent workflows quickly
 
-**actionflow**: 快速构建你自己的Agent工作流。
+**actionflow**: 快速构建你自己的Agent工作流
 
 `ActionFlow`是一个Agent工作流构建工具，功能：
 
 - 通过自然语言（prompt）在`json`文件中编排复杂工作流
-- 工作流的编排不仅支持多个prompt命令，还支持工具调用（tool_calls）
+- 工作流的编排不仅支持prompt命令，还支持工具调用（tool_calls）
 - 基于变量名动态更改prompt输入
 - 支持OpenAI API和Moonshot API(kimi)调用
 
