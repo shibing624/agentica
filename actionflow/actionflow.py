@@ -45,10 +45,16 @@ class ActionFlow:
     :param flow_path: str, The file path of the flow.
     :param variables: dict, optional, Variables to be used in the flow. Defaults to an empty dictionary.
     :param output_dir: str, optional, The directory where the output files will be saved. Defaults to None.
-    :param max_context_tokens: int, optional, The maximum number of tokens to be used in the context. Defaults to 8000.
+    :param max_context_tokens: int, optional, The maximum number of tokens.
     """
 
-    def __init__(self, flow_path: str, variables: dict = None, output_dir: str = None, max_context_tokens: int = 8000):
+    def __init__(
+            self,
+            flow_path: str,
+            variables: dict = None,
+            output_dir: str = None,
+            max_context_tokens: int = 8000
+    ):
         self.flow_path = flow_path
         self._load_flow(flow_path)
         self._validate_and_format_messages(variables or {})
@@ -230,9 +236,12 @@ class ActionFlow:
         self.messages.append({"role": "user", "content": task.action})
 
         # If the task has a tool, add the tool definition to the current tools, and Set the tool choice
-        if task.settings.tool_name is not None:
+        if task.settings.tool_name:
             current_tools = [Tool(task.settings.tool_name, self.output).definition]
-            task.settings.tool_choice = {"type": "function", "function": {"name": task.settings.tool_name}}
+            if task.settings.tool_choice not in ["none", "auto"]:
+                task.settings.tool_choice = {
+                    "type": "function", "function": {"name": task.settings.tool_name}
+                }
         else:
             current_tools = None
             task.settings.tool_choice = "none"

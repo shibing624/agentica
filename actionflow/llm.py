@@ -24,7 +24,7 @@ class Settings:
 
     model: str = default_model
     tool_name: Optional[str] = None
-    tool_choice: Optional[str] = "auto"  # tool_choice="none" means no tool, default "auto"
+    tool_choice: Optional[str] = None  # tool_choice="none" means no tool, "auto" means auto-select current tool
     temperature: float = 1.0
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
