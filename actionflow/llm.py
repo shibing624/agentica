@@ -5,7 +5,6 @@ This module provides a class for interacting with OpenAI's LLMs. It includes a d
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
 from openai import OpenAI
 from tenacity import (
     retry,
@@ -58,6 +57,8 @@ class LLM:
         :param base_url: The base URL for the OpenAI API.
         :type base_url: str
         """
+        if not api_key:
+            raise ValueError("LLM `api_key` is required.")
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.api_key = api_key
         self.base_url = base_url

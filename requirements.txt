@@ -5,3 +5,8 @@ tiktoken
 python-dotenv
 pytest
 tenacity
+rich~=13.6.0
+nbclient~=0.9.0
+nbformat~=5.9.2
+ipython~=8.17.2
+ipykernel~=6.27.0
