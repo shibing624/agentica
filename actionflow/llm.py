@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 from openai import OpenAI
 from tenacity import (
-    after_log,
     retry,
     retry_if_exception_type,
     stop_after_attempt,
@@ -50,17 +49,22 @@ class LLM:
     This class is responsible for managing the interaction with OpenAI's LLMs.
     """
 
-    def __init__(self):
+    def __init__(self, api_key: str = api_key, base_url: str = base_url):
         """
         Initializes the LLM object by loading the environment variables and setting the OpenAI API key.
+
+        :param api_key: The OpenAI API key.
+        :type api_key: str
+        :param base_url: The base URL for the OpenAI API.
+        :type base_url: str
         """
-        show_api_key = "*" * 6 + api_key[-4:]
-        client = OpenAI(api_key=api_key, base_url=base_url)
-        self.client = client
-        logger.debug(f"OpenAI client created, api_key={show_api_key}, api_base={base_url}, client={client}")
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.api_key = api_key
+        self.base_url = base_url
 
     def __repr__(self):
-        return f"LLM(client={self.client})"
+        show_api_key = "*" * 6 + self.api_key[-4:]
+        return f"LLM(api_key={show_api_key}, base_url={base_url}, client={self.client})"
 
     @retry(
         stop=stop_after_attempt(3),
@@ -89,5 +93,6 @@ class LLM:
         openai_args["messages"] = messages
         if tools:
             openai_args["tools"] = tools
+        # logger.debug(f"openai_args={openai_args}")
         response = self.client.chat.completions.create(**openai_args)
         return response.choices[0].message

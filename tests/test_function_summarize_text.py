@@ -35,9 +35,9 @@ def test_truncate_text(output):
     Tests the _truncate_text method of the SummarizeText class. It checks that the text is truncated correctly.
     """
     summarizer = SummarizeText(output)
-    text = "a" * (summarizer.max_tokens * summarizer.chars_per_token + 10)
+    text = "a" * (summarizer.max_input_chars + 10)
     truncated_text = summarizer._truncate_text(text)
-    assert len(truncated_text) == summarizer.max_tokens * summarizer.chars_per_token
+    assert len(truncated_text) == summarizer.max_input_chars
 
 
 def test_prepare_messages(output):
@@ -48,15 +48,6 @@ def test_prepare_messages(output):
     messages = summarizer._prepare_messages("text", "instructions")
     assert messages[0]["content"] == "You are an AI summarizer. instructions"
     assert messages[1]["content"] == "Text to summarize: text"
-
-
-def test_calculate_tokens(output):
-    """
-    Tests the _calculate_tokens method of the SummarizeText class. It checks that the number of tokens is calculated correctly.
-    """
-    summarizer = SummarizeText(output)
-    tokens = summarizer._calculate_tokens([{"content": "a" * 1000}])
-    assert tokens == 254
 
 
 @patch("actionflow.tools.summarize_text.LLM")

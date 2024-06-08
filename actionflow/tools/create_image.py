@@ -13,7 +13,6 @@ import time
 import requests
 
 from actionflow.llm import LLM
-from actionflow.output import Output
 from actionflow.tool import BaseTool
 
 
@@ -21,7 +20,6 @@ class CreateImage(BaseTool):
     """
     This class inherits from the BaseFunction class. It defines a function for creating an image from a description using OpenAI's API.
     """
-
 
     def get_definition(self) -> dict:
         """

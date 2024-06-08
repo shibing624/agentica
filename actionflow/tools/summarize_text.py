@@ -4,7 +4,7 @@
 @description:
 This module contains a class for summarizing text.
 """
-
+import os
 from typing import Dict, List
 
 from actionflow.llm import LLM, Settings
@@ -17,16 +17,14 @@ class SummarizeText(BaseTool):
     This class inherits from the BaseFunction class. It defines a function for summarizing text.
     """
 
-    def __init__(self, output: Output):
+    def __init__(self, output: Output, max_input_chars: int = 4000):
         """
         Initializes the SummarizeText object.
         """
         super().__init__(output)
-        self.default_instructions = (
-            "Return a summary that succinctly captures its main points."
-        )
-        self.chars_per_token = 4  # See https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count-them
-        self.max_tokens = 14000  # To allow room for the instructions and summary
+        self.default_instructions = "Return a summary that succinctly captures its main points."
+        # See https://help.openai.com/en/articles/4936856-what-are-tokens-and-how-to-count-them
+        self.max_input_chars = max_input_chars  # To allow room for the instructions and summary
 
     def get_definition(self) -> dict:
         """
@@ -36,23 +34,26 @@ class SummarizeText(BaseTool):
         :rtype: dict
         """
         return {
-            "name": "summarize_text",
-            "description": "Summarizes text.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "text_to_summarize": {
-                        "type": "string",
-                        "description": "The text to summarize.",
+            "type": "function",
+            "function": {
+                "name": "summarize_text",
+                "description": "Summarizes text.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text_to_summarize": {
+                            "type": "string",
+                            "description": "The text to summarize.",
+                        },
+                        "instructions": {
+                            "type": "string",
+                            "description": "Instructions for summarizing the text.",
+                            "default": self.default_instructions,
+                        }
                     },
-                    "instructions": {
-                        "type": "string",
-                        "description": "Instructions for summarizing the text.",
-                        "default": self.default_instructions,
-                    },
+                    "required": ["text_to_summarize"],
                 },
-                "required": ["text_to_summarize"],
-            },
+            }
         }
 
     def execute(self, text_to_summarize: str, instructions: str = None) -> str:
@@ -79,11 +80,9 @@ class SummarizeText(BaseTool):
         :return: The truncated text.
         :rtype: str
         """
-        return text[: self.max_tokens * self.chars_per_token]
+        return text[: self.max_input_chars]
 
-    def _prepare_messages(
-            self, truncated_text: str, instructions: str
-    ) -> List[Dict[str, str]]:
+    def _prepare_messages(self, truncated_text: str, instructions: str) -> List[Dict[str, str]]:
         """
         Prepares messages for the language model.
 
@@ -100,9 +99,6 @@ class SummarizeText(BaseTool):
             {"role": "system", "content": system_content},
             {"role": "user", "content": user_content},
         ]
-
-    def _calculate_tokens(self, messages: List[Dict[str, str]]) -> int:
-        return int(len(str(messages)) / self.chars_per_token)
 
     def _summarize(
             self,
@@ -130,3 +126,4 @@ if __name__ == '__main__':
     text = "a" * 110
     r = summarizer.execute(text)
     print(text, '\n\n', r)
+    os.removedirs('o')

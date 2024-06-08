@@ -3,10 +3,13 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
+import os
+
 import requests
 from bs4 import BeautifulSoup
 
 from actionflow.config import JINA_API_KEY
+from actionflow.output import Output
 from actionflow.tool import BaseTool
 
 
@@ -87,3 +90,12 @@ class GetUrl(BaseTool):
                     return soup.get_text()
             else:
                 raise Exception(f"Failed to fetch URL. HTTP status code: {response.status_code}")
+
+
+if __name__ == '__main__':
+    output = Output('o')
+    m = GetUrl(output)
+    text = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+    r = m.execute(text)
+    print(text, '\n\n', r)
+    os.removedirs('o')

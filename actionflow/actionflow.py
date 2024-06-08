@@ -12,6 +12,7 @@ import os
 import re
 from datetime import datetime
 
+import tiktoken
 from loguru import logger
 
 from actionflow.llm import LLM, Settings
@@ -43,9 +44,11 @@ class ActionFlow:
 
     :param flow_path: str, The file path of the flow.
     :param variables: dict, optional, Variables to be used in the flow. Defaults to an empty dictionary.
+    :param output_dir: str, optional, The directory where the output files will be saved. Defaults to None.
+    :param max_context_tokens: int, optional, The maximum number of tokens to be used in the context. Defaults to 8000.
     """
 
-    def __init__(self, flow_path: str, variables: dict = None, output_dir: str = None):
+    def __init__(self, flow_path: str, variables: dict = None, output_dir: str = None, max_context_tokens: int = 8000):
         self.flow_path = flow_path
         self._load_flow(flow_path)
         self._validate_and_format_messages(variables or {})
@@ -55,20 +58,14 @@ class ActionFlow:
         self.output_dir = output_dir if output_dir else default_output_dir
         self.output = Output(self.output_dir)
         self.llm = LLM()
+        self.max_context_tokens = max_context_tokens
         self.tools = self._get_tools()
         self.messages = self._get_initial_messages()
         self.messages_file_name = "messages.json"
-        logger.debug(
-            f"ActionFlow loaded: {flow_path}, "
-            f"output: {self.output}, "
-            f"variables: {variables}, "
-            f"tasks size: {len(self.tasks)}, "
-            f"tools: {self.tools}, "
-            f"llm: {self.llm}"
-        )
 
     def __repr__(self):
-        return f"ActionFlow(flow_path={self.flow_path}, output: {self.output}, tools: {self.tools}, llm: {self.llm})"
+        return f"ActionFlow(flow_path={self.flow_path}, output: {self.output}, " \
+               f"tools: {self.tools}, llm: {self.llm}, tasks size: {len(self.tasks)})"
 
     def _load_flow(self, file_path: str) -> None:
         """
@@ -190,6 +187,39 @@ class ActionFlow:
                 tools.append(Tool(name, self.output))
         return tools
 
+    def count_token_length(self, text, model_name="gpt-3.5-turbo"):
+        """Count token length."""
+        try:
+            encoding = tiktoken.encoding_for_model(model_name)
+        except KeyError:
+            model = "cl100k_base"
+            encoding = tiktoken.get_encoding(model)
+        length = len(encoding.encode(text))
+        return length
+
+    def _trim_messages_to_max_context_tokens(self, messages, model_name="gpt-3.5-turbo"):
+        """
+        Trims the chat history to ensure it does not exceed the max_context_tokens limit.
+
+        :param messages: The current chat history.
+        :return: A trimmed chat history.
+        """
+        total_tokens = 0
+        trimmed_messages = []
+        for message in reversed(messages):
+            message_tokens = self.count_token_length(message.get("content", ""), model_name)
+            if total_tokens + message_tokens > self.max_context_tokens:
+                break
+            trimmed_messages.insert(0, message)
+            total_tokens += message_tokens
+        # Add system message
+        for message in messages:
+            if message["role"] == "system":
+                trimmed_messages.insert(0, message)
+                break
+
+        return trimmed_messages
+
     def _process_task(self, task: Task):
         """
         Process a single task.
@@ -207,7 +237,8 @@ class ActionFlow:
             current_tools = None
             task.settings.tool_choice = "none"
 
-        message = self.llm.respond(task.settings, self.messages, current_tools)
+        current_messages = self._trim_messages_to_max_context_tokens(self.messages, task.settings.model)
+        message = self.llm.respond(task.settings, current_messages, current_tools)
         if message.content:
             self._process_message(message)
         elif message.tool_calls:

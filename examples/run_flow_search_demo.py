@@ -13,8 +13,6 @@ This module is used to run Actionflow flows. To run one, use the following comma
 import argparse
 import sys
 
-from loguru import logger
-
 sys.path.append('..')
 from actionflow import ActionFlow
 
@@ -55,17 +53,12 @@ def main():
         help="Variables to be used in the flow. Should be in the format key1=value1 key2=value2. Put key=value pairs in quotes if they contain space.",
         dest="variables",
     )
-    parser.add_argument(
-        "--verbose", action="store_true", help="Show detailed output."
-    )
 
     args = parser.parse_args()
     variables = parse_variables(args.variables)
-    if args.verbose:
-        logger.info("Verbose mode enabled.")
-        logger.info(f"ActionFlow name: {args.flow}, variables: {variables}")
 
     flow = ActionFlow(flow_path=args.flow_path, variables=variables)
+    print(flow)
     flow.run()
 
 

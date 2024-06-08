@@ -1,6 +1,7 @@
 loguru
 beautifulsoup4
 openai
+tiktoken
 python-dotenv
 pytest
 tenacity

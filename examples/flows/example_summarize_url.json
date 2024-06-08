@@ -2,9 +2,6 @@
     "system_message": "You summarize URLs.",
     "tasks": [
         {
-            "action": "hi"
-        },
-        {
             "action": "获取网页内容，我要markdown格式的，网站链接是 https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#1",
             "settings": {
                 "tool_name": "get_url"
@@ -13,7 +10,7 @@
         {
             "action": "把上面的内容生成摘要，格式要markdown的，整理为一篇规范的汇报短文",
             "settings": {
-                "max_tokens": 4096
+                "tool_name": "summarize_text"
             }
         },
         {

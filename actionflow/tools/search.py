@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+import os
 from typing import Any, Dict, Tuple, Optional
 
 import aiohttp
@@ -179,3 +180,4 @@ if __name__ == '__main__':
     search = Search(output)
     r = search.execute("北京的新闻top3")
     print(type(r), '\n\n', r)
+    os.removedirs('o')
