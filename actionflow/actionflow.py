@@ -199,18 +199,13 @@ class ActionFlow:
         """
         self.messages.append({"role": "user", "content": task.action})
 
-        # Set the tool choice to "none" if the task does not require a tool.
-        task.settings.tool_choice = (
-            "none"
-            if task.settings.tool_name is None
-            else {"type": "function", "function": {"name": task.settings.tool_name}}
-        )
-
-        # If the task has a tool, add the tool definition to the current tools.
+        # If the task has a tool, add the tool definition to the current tools, and Set the tool choice
         if task.settings.tool_name is not None:
             current_tools = [Tool(task.settings.tool_name, self.output).definition]
+            task.settings.tool_choice = {"type": "function", "function": {"name": task.settings.tool_name}}
         else:
             current_tools = None
+            task.settings.tool_choice = "none"
 
         message = self.llm.respond(task.settings, self.messages, current_tools)
         if message.content:
@@ -243,7 +238,7 @@ class ActionFlow:
                         "content": null,
                         "tool_calls": [
                         {
-                            "id": "call_5l72",
+                            "id": "call_id",
                             "type": "function",
                             "function": {
                             "name": "execute",
