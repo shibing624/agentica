@@ -94,6 +94,9 @@ class LLM:
         openai_args["messages"] = messages
         if tools:
             openai_args["tools"] = tools
+        else:
+            # drop settings.tool_choice if tools is not provided
+            openai_args.pop("tool_choice", None)
         # logger.debug(f"openai_args={openai_args}")
         response = self.client.chat.completions.create(**openai_args)
         return response.choices[0].message
