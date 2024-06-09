@@ -8,13 +8,13 @@
             }
         },
         {
-            "action": "把上面的内容生成摘要，格式要markdown的，整理为一篇规范的汇报短文",
+            "action": "把上面的内容生成摘要，要求：要点罗列，输出为一篇规范的汇报短文",
             "settings": {
                 "tool_name": "summarize_text"
             }
         },
         {
-            "action": "把生成的文章保存为 summary.md",
+            "action": "保存摘要为 summary.md",
             "settings": {
                 "tool_name": "save_file"
             }

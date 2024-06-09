@@ -15,6 +15,7 @@ from datetime import datetime
 import tiktoken
 from loguru import logger
 
+from actionflow.config import MODEL_TOKEN_LIMIT, DEFAULT_MODEL
 from actionflow.llm import LLM, Settings
 from actionflow.output import Output
 from actionflow.tool import Tool
@@ -53,7 +54,6 @@ class ActionFlow:
             flow_path: str,
             variables: dict = None,
             output_dir: str = None,
-            max_context_tokens: int = 8000
     ):
         self.flow_path = flow_path
         self._load_flow(flow_path)
@@ -64,7 +64,7 @@ class ActionFlow:
         self.output_dir = output_dir if output_dir else default_output_dir
         self.output = Output(self.output_dir)
         self.llm = LLM()
-        self.max_context_tokens = max_context_tokens
+        self.max_context_tokens = MODEL_TOKEN_LIMIT.get(DEFAULT_MODEL, 4096)
         self.tools = self._get_tools()
         self.messages = self._get_initial_messages()
         self.messages_file_name = "messages.json"
@@ -85,8 +85,8 @@ class ActionFlow:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}.")
 
-        with open(file_path, "r") as file:
-            data = json.load(file)
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
         self.system_message = data.get("system_message")
         self.tasks = [

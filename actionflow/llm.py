@@ -13,7 +13,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from actionflow.config import api_key, base_url, default_model
+from actionflow.config import API_KEY, BASE_URL, DEFAULT_MODEL
 
 
 @dataclass
@@ -22,7 +22,7 @@ class Settings:
     This dataclass holds the settings for interacting with OpenAI's LLMs.
     """
 
-    model: str = default_model
+    model: str = DEFAULT_MODEL
     tool_name: Optional[str] = None
     tool_choice: Optional[str] = None  # tool_choice="none" means no tool, "auto" means auto-select current tool
     temperature: float = 1.0
@@ -48,7 +48,7 @@ class LLM:
     This class is responsible for managing the interaction with OpenAI's LLMs.
     """
 
-    def __init__(self, api_key: str = api_key, base_url: str = base_url):
+    def __init__(self, api_key: str = API_KEY, base_url: str = BASE_URL):
         """
         Initializes the LLM object by loading the environment variables and setting the OpenAI API key.
 
@@ -65,7 +65,7 @@ class LLM:
 
     def __repr__(self):
         show_api_key = "*" * 6 + self.api_key[-4:]
-        return f"LLM(api_key={show_api_key}, base_url={base_url}, client={self.client})"
+        return f"LLM(api_key={show_api_key}, base_url={BASE_URL}, client={self.client})"
 
     @retry(
         stop=stop_after_attempt(3),
@@ -100,3 +100,4 @@ class LLM:
         # logger.debug(f"openai_args={openai_args}")
         response = self.client.chat.completions.create(**openai_args)
         return response.choices[0].message
+
