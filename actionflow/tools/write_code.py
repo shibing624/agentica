@@ -63,7 +63,8 @@ class WriteCode(BaseTool):
             "type": "function",
             "function": {
                 "name": "write_code",
-                "description": "Generate Python code based on the provided task description, plan status, and tool info.",
+                "description": "Generate Python code based on the provided task description, "
+                               "plan status, and tool info.",
                 "parameters": {
                     "type": "object",
                     "properties": {
