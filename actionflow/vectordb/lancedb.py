@@ -10,8 +10,6 @@ from enum import Enum
 from hashlib import md5
 from typing import List, Optional
 
-from loguru import logger
-
 try:
     import lancedb
     import pyarrow as pa
@@ -19,9 +17,10 @@ except ImportError:
     raise ImportError("`lancedb` not installed, please install it via `pip install lancedb`.")
 
 from actionflow.document import Document
-from actionflow.embs.base import Emb
-from actionflow.emb_dbs.base import EmbDb
-from actionflow.embs.openai_emb import OpenAIEmb
+from actionflow.emb.base import Emb
+from actionflow.vectordb.base import VectorDb
+from actionflow.emb.openai_emb import OpenAIEmb
+from actionflow.utils.log import logger
 
 
 class Distance(str, Enum):
@@ -30,7 +29,7 @@ class Distance(str, Enum):
     max_inner_product = "max_inner_product"
 
 
-class LanceEmbDb(EmbDb):
+class LanceDb(VectorDb):
     def __init__(
             self,
             embedder: Emb = OpenAIEmb(),
@@ -93,7 +92,7 @@ class LanceEmbDb(EmbDb):
 
         logger.info(f"Creating table: {self.table_name}")
         tbl = self.client.create_table(self.table_name, schema=schema, mode="overwrite")
-        return tbl # type: ignore
+        return tbl  # type: ignore
 
     def doc_exists(self, document: Document) -> bool:
         """
@@ -132,7 +131,7 @@ class LanceEmbDb(EmbDb):
             logger.debug(f"Inserted document: {document.name} ({document.meta_data})")
 
         self.connection.add(data)
-        logger.debug(f"Upsert {len(data)} documents")
+        logger.info(f"Upsert {len(data)} documents")
 
     def upsert(self, documents: List[Document]) -> None:
         """
@@ -184,7 +183,7 @@ class LanceEmbDb(EmbDb):
 
     def delete(self) -> None:
         if self.exists():
-            logger.debug(f"Deleting collection: {self.table_name}")
+            logger.info(f"Deleting collection: {self.table_name}")
             self.client.drop_table(self.table_name)
 
     def exists(self) -> bool:

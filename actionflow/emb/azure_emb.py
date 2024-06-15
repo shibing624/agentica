@@ -8,8 +8,8 @@ from os import getenv
 from typing import Optional, Dict, List, Tuple, Any
 from typing_extensions import Literal
 
-from actionflow.embs.base import Emb
-from loguru import logger
+from actionflow.emb.base import Emb
+from actionflow.utils.log import logger
 
 try:
     from openai import AzureOpenAI as AzureOpenAIClient

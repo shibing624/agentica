@@ -1,3 +1,6 @@
+import sys
+
+sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 from actionflow.sqlite_storage import SqliteStorage
 

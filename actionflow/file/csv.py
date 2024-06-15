@@ -1,13 +1,12 @@
+import csv
 from pathlib import Path
 from typing import Any
 
-from loguru import logger
-
 from actionflow.file.base import File
+from actionflow.utils.log import logger
 
 
 class CsvFile(File):
-    path: str
     type: str = "CSV"
 
     def get_metadata(self) -> dict[str, Any]:
@@ -17,10 +16,8 @@ class CsvFile(File):
         if self.columns is None:
             try:
                 # Get the columns from the file
-                import csv
-
-                with open(self.path) as csvfile:
-                    dict_reader = csv.DictReader(csvfile)
+                with open(self.data_path) as f:
+                    dict_reader = csv.DictReader(f)
                     if dict_reader.fieldnames is not None:
                         self.columns = list(dict_reader.fieldnames)
             except Exception as e:

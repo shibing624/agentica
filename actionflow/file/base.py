@@ -7,7 +7,7 @@ class File(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     columns: Optional[List[str]] = None
-    path: Optional[str] = None
+    data_path: Optional[str] = None
     type: str = "FILE"
 
     def get_metadata(self) -> dict[str, Any]:

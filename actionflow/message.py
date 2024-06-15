@@ -9,8 +9,9 @@ part of the code from https://github.com/phidatahq/phidata
 import json
 from typing import Optional, Any, Dict, List, Union
 
-from loguru import logger
 from pydantic import BaseModel, ConfigDict
+
+from actionflow.utils.log import logger
 
 
 class Message(BaseModel):

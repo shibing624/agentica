@@ -11,7 +11,7 @@ from typing import List
 from actionflow.document import Document
 
 
-class EmbDb(ABC):
+class VectorDb(ABC):
     """Base class for managing Vector Databases"""
 
     @abstractmethod

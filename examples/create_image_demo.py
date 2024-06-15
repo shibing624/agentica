@@ -1,3 +1,6 @@
+import sys
+
+sys.path.append('..')
 from actionflow import Assistant, OpenAILLM
 from actionflow.tools.create_image import CreateImageTool
 

@@ -8,7 +8,7 @@ from os import getenv
 from typing import Optional, Dict, Any
 
 from actionflow.config import FAST_LLM
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm.openai_llm import OpenAILLM
 
 try:
     from openai import AzureOpenAI as AzureOpenAIClient

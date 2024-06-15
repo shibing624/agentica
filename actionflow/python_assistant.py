@@ -2,11 +2,11 @@ import json
 from textwrap import dedent
 from typing import Optional, List, Dict, Any
 
-from loguru import logger
 from pydantic import model_validator
 
 from actionflow.assistant import Assistant
 from actionflow.file.base import File
+from actionflow.utils.log import logger
 from actionflow.tools.run_python_code import RunPythonCodeTool
 
 

@@ -8,8 +8,6 @@ import os
 from sqlite3 import OperationalError
 from typing import Optional, Any, List
 
-from loguru import logger
-
 try:
     from sqlalchemy.dialects import sqlite
     from sqlalchemy.engine import create_engine, Engine
@@ -24,6 +22,7 @@ except ImportError:
 
 from actionflow.run_record import RunRecord
 from actionflow.utils.misc import current_datetime
+from actionflow.utils.log import logger
 
 
 class SqliteStorage:

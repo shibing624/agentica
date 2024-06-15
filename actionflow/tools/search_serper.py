@@ -9,10 +9,10 @@ import os
 from typing import Any, Dict, Optional, Union, List
 
 import aiohttp
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from actionflow.tool import Toolkit
+from actionflow.utils.log import logger
 
 
 class SerperWrapper(BaseModel):

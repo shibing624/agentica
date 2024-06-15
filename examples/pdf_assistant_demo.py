@@ -1,11 +1,13 @@
 from typing import Optional, List
 
 import typer
+import sys
 
+sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 from actionflow.documents import TextDocuments
-from actionflow.emb_dbs.lance_emb_db import LanceEmbDb
-from actionflow.embs.hash_emb import HashEmb
+from actionflow.vectordb.lancedb import LanceDb
+from actionflow.emb.hash_emb import HashEmb
 from actionflow.sqlite_storage import SqliteStorage
 
 llm = AzureOpenAILLM()
@@ -15,7 +17,7 @@ db_file = f"{output_dir}/medical_corpus.db"
 table_name = 'medical_corpus'
 knowledge_base = TextDocuments(
     data_path="data/medical_corpus.txt",
-    emb_db=LanceEmbDb(
+    emb_db=LanceDb(
         embedder=HashEmb(),
         uri=f"{output_dir}/medical_corpus.lancedb",
     )

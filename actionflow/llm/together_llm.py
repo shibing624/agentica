@@ -8,11 +8,10 @@ import json
 from os import getenv
 from typing import Optional, List, Iterator, Dict, Any
 
-from loguru import logger
-
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.message import Message
 from actionflow.tool import FunctionCall, get_function_call_for_tool_call
+from actionflow.utils.log import logger
 from actionflow.utils.timer import Timer
 
 

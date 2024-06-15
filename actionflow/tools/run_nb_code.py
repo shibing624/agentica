@@ -12,7 +12,6 @@ import time
 from typing import Literal, Tuple
 
 import nbformat
-from loguru import logger
 from nbclient import NotebookClient
 from nbclient.exceptions import CellTimeoutError, DeadKernelError
 from nbformat import NotebookNode
@@ -25,6 +24,7 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 
 from actionflow.tool import Toolkit
+from actionflow.utils.log import logger
 
 
 class RunNbCodeWrapper:

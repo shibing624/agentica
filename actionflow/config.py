@@ -5,7 +5,7 @@
 """
 import os
 
-from loguru import logger
+from actionflow.utils.log import logger
 
 pwd_path = os.path.abspath(os.path.dirname(__file__))
 

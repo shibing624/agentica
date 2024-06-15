@@ -1,10 +1,17 @@
 from rich.pretty import pprint
-from actionflow.assistant import Assistant, AssistantMemory
+import sys
 
-assistant = Assistant()
+sys.path.append('..')
+from actionflow.assistant import Assistant, AssistantMemory
+from actionflow import AzureOpenAILLM
+
+llm = AzureOpenAILLM()
+assistant = Assistant(llm=llm)
 
 # -*- Print a response
 assistant.print_response("Share a 5 word horror story.")
+assistant.print_response("What's the weather like today?")
+assistant.print_response("我前面问了些啥")
 
 # -*- Get the memory
 memory: AssistantMemory = assistant.memory

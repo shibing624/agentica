@@ -1,6 +1,6 @@
 from typing import List
 
-from loguru import logger
+from actionflow.utils.log import logger
 
 
 def run_shell_command(args: List[str], tail: int = 100) -> str:
@@ -10,7 +10,7 @@ def run_shell_command(args: List[str], tail: int = 100) -> str:
 
     try:
         result = subprocess.run(args, capture_output=True, text=True)
-        logger.debug(f"Result: {result}")
+        logger.info(f"Result: {result}")
         logger.debug(f"Return code: {result.returncode}")
         if result.returncode != 0:
             return f"Error: {result.stderr}"

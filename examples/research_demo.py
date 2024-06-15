@@ -5,9 +5,11 @@ and writes an article in Markdown format.
 
 from datetime import datetime
 from textwrap import dedent
+import sys
 
+sys.path.append('..')
 from actionflow import Assistant
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.tools.search_exa import SearchExaTool
 
 today = datetime.now().strftime("%Y-%m-%d")

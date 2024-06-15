@@ -6,7 +6,6 @@
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
-from loguru import logger
 from rich.console import Console
 from rich.style import Style
 
@@ -127,5 +126,5 @@ def confirm_yes_no(question, default: str = "yes") -> bool:
     elif choice in inp_to_result_map:
         return inp_to_result_map[choice]
     else:
-        logger.error(f"{choice} invalid")
+        print(f"{choice} invalid")
         return False

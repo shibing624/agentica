@@ -1,4 +1,7 @@
 import json
+import sys
+
+sys.path.append('..')
 from actionflow import Assistant,AzureOpenAILLM
 
 data_analyst = Assistant(

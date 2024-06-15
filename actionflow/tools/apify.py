@@ -1,7 +1,7 @@
 from os import getenv
 from typing import List, Optional
 
-from loguru import logger
+from actionflow.utils.log import logger
 
 from actionflow.tool import Toolkit
 

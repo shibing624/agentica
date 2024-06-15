@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, List
 
 from pydantic import BaseModel, ConfigDict
 
-from actionflow.embs.base import Emb
+from actionflow.emb.base import Emb
 
 
 class Document(BaseModel):

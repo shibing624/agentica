@@ -26,7 +26,6 @@ from typing import (
 )
 from uuid import uuid4
 
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 from rich.box import ROUNDED
 from rich.live import Live
@@ -37,16 +36,16 @@ from rich.table import Table
 
 from actionflow.document import Document
 from actionflow.documents import Documents
-from actionflow.llms.base import LLM
+from actionflow.llm.base import LLM
 from actionflow.memory import AssistantMemory, Memory
 from actionflow.message import Message, get_text_from_message
 from actionflow.references import References
 from actionflow.run_record import RunRecord
 from actionflow.sqlite_storage import SqliteStorage
 from actionflow.tool import Tool, Toolkit, Function
-from actionflow.utils.misc import console
-from actionflow.utils.misc import merge_dictionaries, remove_indent
+from actionflow.utils.misc import console, merge_dictionaries, remove_indent
 from actionflow.utils.timer import Timer
+from actionflow.utils.log import logger, set_log_level_to_debug
 
 
 class Assistant(BaseModel):
@@ -212,12 +211,9 @@ class Assistant(BaseModel):
 
     @field_validator("debug_mode", mode="before")
     def set_log_level(cls, v: bool) -> bool:
-        # log_file = os.path.join("logs", f"{datetime.now()}.log")
         if v:
-            # logger.add(log_file, rotation="1 week", retention="1 month", level="DEBUG")
+            set_log_level_to_debug()
             logger.debug("Debug logs enabled")
-        else:
-            logger.remove()  # Remove the default logger
         return v
 
     @field_validator("run_id", mode="before")
@@ -277,7 +273,7 @@ class Assistant(BaseModel):
     def update_llm(self) -> None:
         if self.llm is None:
             try:
-                from actionflow.llms.openai_llm import OpenAILLM
+                from actionflow.llm.openai_llm import OpenAILLM
             except ModuleNotFoundError as e:
                 logger.exception(e)
                 logger.error("use `openai` as the default LLM. ")
@@ -903,11 +899,15 @@ class Assistant(BaseModel):
         # -*- Save run to storage
         self.write_to_storage()
 
+        # Save chat history to file
         try:
             os.makedirs(self.output_dir, exist_ok=True)
-            save_file = os.path.join(self.output_dir, f"llm_response_{self.run_id}.md")
+            save_file = os.path.join(self.output_dir, f"output_{self.run_id}.json")
+            messages_str = json.dumps(
+                [i.dict() for i in self.memory.llm_messages], indent=2, ensure_ascii=False
+            )
             with open(save_file, "w", encoding='utf-8') as f:
-                f.write(self.output)
+                f.write(messages_str)
             logger.info(f"Saved output to file: {save_file}")
         except Exception as e:
             logger.warning(f"Failed to save output to file: {e}")

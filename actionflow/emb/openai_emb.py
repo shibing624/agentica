@@ -7,8 +7,8 @@ part of the code from https://github.com/phidatahq/phidata
 from typing import Optional, Dict, List, Tuple, Any
 from typing_extensions import Literal
 from os import getenv
-from actionflow.embs.base import Emb
-from loguru import logger
+from actionflow.emb.base import Emb
+from actionflow.utils.log import logger
 
 try:
     from openai import OpenAI as OpenAIClient

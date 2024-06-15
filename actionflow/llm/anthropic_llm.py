@@ -8,9 +8,13 @@ import json
 from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any
 
-from loguru import logger
+try:
+    from anthropic import Anthropic as AnthropicClient
+    from anthropic.types import Message as AnthropicMessage
+except ImportError:
+    raise ImportError("`anthropic` not installed, please install it using `pip install anthropic`.")
 
-from actionflow.llms.base import LLM
+from actionflow.llm.base import LLM
 from actionflow.message import Message
 from actionflow.tool import (
     FunctionCall,
@@ -18,13 +22,8 @@ from actionflow.tool import (
     extract_tool_from_xml,
     remove_function_calls_from_string,
 )
+from actionflow.utils.log import logger
 from actionflow.utils.timer import Timer
-
-try:
-    from anthropic import Anthropic as AnthropicClient
-    from anthropic.types import Message as AnthropicMessage
-except ImportError:
-    raise ImportError("`anthropic` not installed, please install it using `pip install anthropic`.")
 
 
 class AnthropicLLM(LLM):

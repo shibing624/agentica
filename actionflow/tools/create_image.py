@@ -12,8 +12,7 @@ from typing import Optional, cast
 
 import requests
 
-from actionflow.llms.base import LLM
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm import LLM, OpenAILLM
 from actionflow.tool import Toolkit
 
 

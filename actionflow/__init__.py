@@ -5,5 +5,5 @@
 """
 from actionflow.version import __version__
 from actionflow.assistant import Assistant
-from actionflow.llms.openai_llm import OpenAILLM
-from actionflow.llms.azure_llm import AzureOpenAILLM
+from actionflow.llm.openai_llm import OpenAILLM
+from actionflow.llm.azure_llm import AzureOpenAILLM

@@ -7,8 +7,9 @@ import sys
 
 sys.path.append('..')
 from actionflow import Assistant
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.tools.search_serper import SearchSerperTool
+
 m = Assistant(
     llm=OpenAILLM(model='gpt-3.5-turbo-1106'),
     description="You are a helpful ai assistant.",
@@ -22,7 +23,8 @@ m = Assistant(
     markdown=True,
     debug_mode=True,
 )
-# -*- Print a response to the cli
+print("LLM:", m.llm)
+# -*- Print a response to the console -*-
 m.print_response("分享一个减肥早餐食谱")
 m.print_response("当前最新最流行的燃脂减肥餐单")
 m.print_response("我前面问了啥")

@@ -7,18 +7,18 @@ part of the code from https://github.com/phidatahq/phidata
 from pathlib import Path
 from typing import List, Optional, Iterator, Dict, Any, Union
 
-from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 from actionflow.document import Document
-from actionflow.emb_dbs.base import EmbDb
+from actionflow.utils.log import logger
+from actionflow.vectordb.base import VectorDb
 
 
 class Documents(BaseModel):
     """Base class for LLM knowledge base, which is a collection of documents."""
 
     # Embeddings db to store the knowledge base
-    emb_db: Optional[EmbDb] = None
+    emb_db: Optional[VectorDb] = None
     # Number of relevant documents to return on search
     num_documents: int = 2
     # Number of documents to optimize the vector db on

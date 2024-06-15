@@ -13,8 +13,9 @@ import json
 from collections import OrderedDict
 from typing import Callable, get_type_hints, Any, Dict, Union, get_args, get_origin, Optional
 
-from loguru import logger
 from pydantic import BaseModel, validate_call
+
+from actionflow.utils.log import logger
 
 
 class Function(BaseModel):

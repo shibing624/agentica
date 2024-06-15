@@ -11,7 +11,7 @@ import os
 import runpy
 from typing import Optional
 
-from loguru import logger
+from actionflow.utils.log import logger
 
 from actionflow.tool import Toolkit
 

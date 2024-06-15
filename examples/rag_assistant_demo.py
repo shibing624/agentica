@@ -1,10 +1,13 @@
+import sys
+
+sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 from actionflow.documents import TextDocuments
-from actionflow.emb_dbs.lance_emb_db import LanceEmbDb
+from actionflow.vectordb.lancedb import LanceDb
 
 knowledge_base = TextDocuments(
     path="data/medical_corpus.txt",
-    emb_db=LanceEmbDb(),
+    emb_db=LanceDb(),
 )
 # Load the knowledge base
 knowledge_base.load(recreate=False)

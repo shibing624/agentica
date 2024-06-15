@@ -6,8 +6,8 @@ part of the code from https://github.com/phidatahq/phidata
 """
 from typing import Optional, Dict, List, Tuple, Any
 
-from actionflow.embs.base import Emb
-from loguru import logger
+from actionflow.emb.base import Emb
+from actionflow.utils.log import logger
 
 try:
     from ollama import Client as OllamaClient

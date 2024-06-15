@@ -1,6 +1,9 @@
 from typing import List
 from pydantic import BaseModel, Field
 from rich.pretty import pprint
+import sys
+
+sys.path.append('..')
 from actionflow import Assistant
 
 

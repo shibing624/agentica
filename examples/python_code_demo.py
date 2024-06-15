@@ -7,9 +7,9 @@ import sys
 
 sys.path.append('..')
 from actionflow.file.csv import CsvFile
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.python_assistant import PythonAssistant
-from actionflow.llms.azure_llm import AzureOpenAILLM
+from actionflow.llm.azure_llm import AzureOpenAILLM
 python_assistant = PythonAssistant(
     llm=AzureOpenAILLM(),
     files=[

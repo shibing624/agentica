@@ -8,9 +8,8 @@ import json
 from os import getenv
 from typing import Optional, Dict, Any, List
 
-from loguru import logger
-
 from actionflow.tool import Toolkit
+from actionflow.utils.log import logger
 
 try:
     from exa_py import Exa

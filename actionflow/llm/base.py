@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from actionflow.message import Message
 from actionflow.tool import Function, FunctionCall, Tool,Toolkit
 from actionflow.utils.timer import Timer
-from loguru import logger
+from actionflow.utils.log import logger
 
 
 class LLM(BaseModel):

@@ -9,12 +9,12 @@ from os import getenv
 from typing import Optional, List, Iterator, Dict, Any, Union, Tuple
 
 import httpx
-from loguru import logger
 
 from actionflow.config import FAST_LLM
-from actionflow.llms.base import LLM
+from actionflow.llm.base import LLM
 from actionflow.message import Message
 from actionflow.tool import FunctionCall, get_function_call, get_function_call_for_tool_call
+from actionflow.utils.log import logger
 from actionflow.utils.timer import Timer
 
 try:

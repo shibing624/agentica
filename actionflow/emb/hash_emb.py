@@ -6,7 +6,7 @@
 import hashlib
 from typing import List, Tuple, Optional, Dict
 
-from actionflow.embs.base import Emb
+from actionflow.emb.base import Emb
 
 
 class HashEmb(Emb):

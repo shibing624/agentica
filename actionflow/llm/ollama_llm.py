@@ -8,11 +8,10 @@ import json
 from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any, Mapping, Union
 
-from actionflow.llms.base import LLM
+from actionflow.llm.base import LLM
 from actionflow.message import Message
-from actionflow.tool import FunctionCall, get_function_call, get_function_call_for_tool_call
-
-from loguru import logger
+from actionflow.tool import FunctionCall, get_function_call_for_tool_call
+from actionflow.utils.log import logger
 from actionflow.utils.timer import Timer
 
 try:

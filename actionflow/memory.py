@@ -4,6 +4,7 @@
 @description: 
 """
 from __future__ import annotations
+
 import csv
 import json
 from abc import ABC, abstractmethod
@@ -12,13 +13,13 @@ from enum import Enum
 from hashlib import md5
 from typing import Dict, List, Any, Optional, cast, Tuple
 
-from loguru import logger
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from actionflow.llms.base import LLM
-from actionflow.llms.openai_llm import OpenAILLM
+from actionflow.llm.base import LLM
+from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.message import Message
 from actionflow.references import References
+from actionflow.utils.log import logger
 
 
 class Memory(BaseModel):
