@@ -7,3 +7,6 @@ from actionflow.version import __version__
 from actionflow.assistant import Assistant
 from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.llm.azure_llm import AzureOpenAILLM
+from actionflow.task import Task
+from actionflow.actionflow import Actionflow
+

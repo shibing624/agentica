@@ -192,6 +192,8 @@ class Assistant(BaseModel):
     output: Optional[Any] = None
     # Save the output to output_dir
     output_dir: Optional[str] = "outputs"
+    # Save the output to a file with this name, if provided save the output to a file
+    output_file_name: Optional[str] = None
 
     # -*- Assistant Task data
     # Metadata associated with the assistant tasks
@@ -899,7 +901,7 @@ class Assistant(BaseModel):
         # -*- Save run to storage
         self.write_to_storage()
 
-        # Save chat history to file
+        # Save llm_messages to file
         try:
             os.makedirs(self.output_dir, exist_ok=True)
             save_file = os.path.join(self.output_dir, f"output_{self.run_id}.json")
@@ -908,9 +910,19 @@ class Assistant(BaseModel):
             )
             with open(save_file, "w", encoding='utf-8') as f:
                 f.write(messages_str)
-            logger.info(f"Saved output to file: {save_file}")
+            logger.info(f"Saved messages to file: {save_file}")
         except Exception as e:
             logger.warning(f"Failed to save output to file: {e}")
+
+        # Save output_file_name file
+        if self.output_file_name:
+            try:
+                save_file = os.path.join(self.output_dir, self.output_file_name)
+                with open(save_file, "w", encoding='utf-8') as f:
+                    f.write(self.output)
+                logger.info(f"Saved output to file: {save_file}")
+            except Exception as e:
+                logger.warning(f"Failed to save output to file: {e}")
         logger.debug(f"*********** Assistant Run End: {self.run_id} ***********")
 
         # -*- Yield final response if not streaming

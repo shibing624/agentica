@@ -8,7 +8,7 @@
 
 -----------------
 
-# ActionFlow: Agent Workflows with Prompts and Tools
+# Actionflow: Agent Workflows with Prompts and Tools
 [![PyPI version](https://badge.fury.io/py/actionflow.svg)](https://badge.fury.io/py/actionflow)
 [![Downloads](https://static.pepy.tech/badge/actionflow)](https://pepy.tech/project/actionflow)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -22,7 +22,7 @@
 
 **actionflow**: 快速构建你自己的Agent工作流
 
-`ActionFlow`是一个Agent工作流构建工具，功能：
+`Actionflow`是一个Agent工作流构建工具，功能：
 
 - 通过自然语言（prompt）在`json`文件中编排复杂工作流
 - 工作流的编排不仅支持prompt命令，还支持工具调用（tool_calls）
@@ -62,7 +62,7 @@ python run_flow_demo.py --flow_path flows/example_with_variables.json --variable
 ```
 
 
-## 新建工作流（ActionFlow）
+## 新建工作流（Actionflow）
 
 复制 [examples/flows/example.json](https://github.com/shibing624/actionflow/blob/main/examples/flows/example.json) 或者按照如下格式创建一个工作流（json文件）：
 

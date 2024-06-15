@@ -24,7 +24,7 @@ class FileTool(Toolkit):
     ):
         super().__init__(name="file_tool")
 
-        self.data_dir: Path = Path(data_dir) or Path.cwd()
+        self.data_dir: Path = Path(data_dir) if data_dir else Path.cwd()
         if save_file:
             self.register(self.save_file, sanitize_arguments=False)
         if read_file:

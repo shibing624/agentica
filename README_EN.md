@@ -8,7 +8,7 @@
 
 -----------------
 
-# ActionFlow: Agent Workflows with Prompts and Tools
+# Actionflow: Agent Workflows with Prompts and Tools
 [![PyPI version](https://badge.fury.io/py/actionflow.svg)](https://badge.fury.io/py/actionflow)
 [![Downloads](https://static.pepy.tech/badge/actionflow)](https://pepy.tech/project/actionflow)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -20,7 +20,7 @@
 
 **actionflow**: A Human-Centric Framework for Large Language Model Agent Workflows
 
-`ActionFlow` is an LLM-driven workflow building tool that supports the following features:
+`Actionflow` is an LLM-driven workflow building tool that supports the following features:
 
 - Writing workflows in standard JSON files using natural language (prompts)
 - Workflows support not only multiple prompt commands but also tool calls (tool_calls)
