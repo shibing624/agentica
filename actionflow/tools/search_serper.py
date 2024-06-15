@@ -6,15 +6,13 @@
 import asyncio
 import json
 import os
-from typing import Any, Dict, Tuple, Optional
+from typing import Any, Dict, Optional, Union, List
 
 import aiohttp
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from actionflow.config import SERPER_API_KEY
-from actionflow.output import Output
-from actionflow.tool import BaseTool
+from actionflow.tool import Toolkit
 
 
 class SerperWrapper(BaseModel):
@@ -39,7 +37,7 @@ class SerperWrapper(BaseModel):
             )
         return values
 
-    async def run(self, query: str, max_results: int = 8, as_string: bool = True, **kwargs: Any) -> str:
+    async def run(self, query: Union[str, List[str]], max_results: int = 8, as_string: bool = True, **kwargs: Any):
         """Run query through Serper and parse result async."""
         if isinstance(query, str):
             return self._process_response((await self.results([query], max_results))[0], as_string=as_string)
@@ -47,10 +45,10 @@ class SerperWrapper(BaseModel):
             results = [self._process_response(res, as_string) for res in await self.results(query, max_results)]
         return "\n".join(results) if as_string else results
 
-    async def results(self, queries: list[str], max_results: int = 8) -> dict:
+    async def results(self, queries: List[str], max_results: int = 8) -> dict:
         """Use aiohttp to run query through Serper and return the results async."""
 
-        def construct_url_and_payload_and_headers() -> Tuple[str, Dict[str, str]]:
+        def construct_url_and_payload_and_headers():
             payloads = self.get_payloads(queries, max_results)
             url = "https://google.serper.dev/search"
             headers = self.get_headers()
@@ -63,13 +61,13 @@ class SerperWrapper(BaseModel):
                     response.raise_for_status()
                     res = await response.json()
         else:
-            async with self.aiosession.get.post(url, data=payloads, headers=headers, proxy=self.proxy) as response:
+            async with self.aiosession.post(url, data=payloads, headers=headers, proxy=self.proxy) as response:
                 response.raise_for_status()
                 res = await response.json()
 
         return res
 
-    def get_payloads(self, queries: list[str], max_results: int) -> Dict[str, str]:
+    def get_payloads(self, queries: list[str], max_results: int):
         """Get payloads for Serper."""
         payloads = []
         for query in queries:
@@ -119,45 +117,35 @@ class SerperWrapper(BaseModel):
         return str(toret) + "\n" + str(toret_l) if as_string else toret_l
 
 
-class Search(BaseTool):
+class SearchSerperTool(Toolkit):
     """
     This class inherits from the BaseFunction class. It defines a function for fetching the contents of a URL.
     """
 
-    def get_definition(self) -> dict:
-        """
-        Returns a dictionary that defines the function. It includes the function's name, description, and parameters.
+    def __init__(
+            self,
+            api_key: Optional[str] = None,
+            timeout: int = 60
+    ):
+        super().__init__(name="search_serper")
 
-        :return: A dictionary that defines the function.
-        :rtype: dict
-        """
-        return {
-            "type": "function",
-            "function": {
-                "name": "search",
-                "description": "Search using the Google Serper search engine.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query.",
-                        }
-                    },
-                    "required": ["query"],
-                },
-            }
-        }
+        self.timeout: Optional[int] = timeout
+        self.api_key: Optional[str] = api_key or os.getenv("SERPER_API_KEY")
+        self.register(self.search_google)
 
-    def execute(self, query: str, max_results: int = 8, as_string: bool = True, ignore_errors: bool = False) -> str:
+    def search_google(
+            self,
+            query: str,
+            max_results: int = 8,
+            as_string: bool = True,
+    ) -> str:
         """
-        Synchronously execute a search query by running the asynchronous search engine method.
+        Use this function to search google for a query.
 
         Args:
             query: The search query.
             max_results: The maximum number of results to return. Defaults to 8.
             as_string: Whether to return the results as a string or a list of dictionaries. Defaults to True.
-            ignore_errors: Whether to ignore errors during the search. Defaults to False.
 
         Returns:
             The search results as a string or a list of dictionaries.
@@ -165,19 +153,14 @@ class Search(BaseTool):
         loop = asyncio.get_event_loop()
         try:
             return loop.run_until_complete(
-                SerperWrapper(api_key=SERPER_API_KEY).run(query, max_results=max_results, as_string=as_string)
+                SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
             )
         except Exception as e:
-            # Handle errors in the API call
             logger.error(f"Failed to search {query} due to {e}")
-            if not ignore_errors:
-                raise e
             return "" if as_string else []
 
 
 if __name__ == '__main__':
-    output = Output('o')
-    search = Search(output)
-    r = search.execute("北京的新闻top3")
+    search = SearchSerperTool()
+    r = search.search_google("北京的新闻top3")
     print(type(r), '\n\n', r)
-    os.removedirs('o')

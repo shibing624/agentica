@@ -11,7 +11,7 @@ from loguru import logger
 from actionflow.llm import LLM, Settings
 from actionflow.output import Output
 from actionflow.tool import BaseTool
-from actionflow.utils import CodeParser
+from actionflow.utils import NotebookCodeParser
 
 SYSTEM_PROMPT = (
     "As a data scientist, you need to help the user achieve their goal step by step in a "
@@ -43,14 +43,7 @@ your code
 """
 
 
-class WriteCode(BaseTool):
-
-    def __init__(self, output: Output):
-        """
-        Initializes the SummarizeText object.
-        """
-        super().__init__(output)
-        self.llm = LLM()
+class WriteNbCode(BaseTool):
 
     def get_definition(self) -> dict:
         """
@@ -62,7 +55,7 @@ class WriteCode(BaseTool):
         return {
             "type": "function",
             "function": {
-                "name": "write_code",
+                "name": "write_nb_code",
                 "description": "Generate Python code based on the provided task description, "
                                "plan status, and tool info.",
                 "parameters": {
@@ -108,8 +101,8 @@ class WriteCode(BaseTool):
         # LLM call
         try:
             settings = Settings(temperature=0)
-            rsp_message = self.llm.respond(settings, messages)
-            code = CodeParser.parse_code(block="", text=rsp_message.content)
+            rsp_message = LLM().respond(settings, messages)
+            code = NotebookCodeParser.parse_code(block="", text=rsp_message.content)
             return code
         except Exception as e:
             logger.error(f"Error during LLM response: {e}")
@@ -118,7 +111,7 @@ class WriteCode(BaseTool):
 
 if __name__ == '__main__':
     output = Output('o')
-    write_code_tool = WriteCode(output)
+    write_code_tool = WriteNbCode(output)
 
     # Example 1
     task_description = "Write a Python function that adds two numbers."
@@ -151,4 +144,4 @@ if __name__ == '__main__':
     print(generated_code)
     import os
 
-    os.removedirs(output.output_dir)
+    os.removedirs(output.data_dir)

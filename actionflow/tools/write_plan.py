@@ -10,7 +10,7 @@ from loguru import logger
 from actionflow.llm import LLM, Settings
 from actionflow.output import Output
 from actionflow.tool import BaseTool
-from actionflow.utils import CodeParser
+from actionflow.utils.nb_code_parser import NotebookCodeParser
 
 SYSTEM_PROMPT = (
     "You are an AI assistant that helps users create detailed plans for their tasks. "
@@ -44,13 +44,6 @@ Output a list of JSON objects in the following format:
 
 
 class WritePlan(BaseTool):
-
-    def __init__(self, output: Output):
-        """
-        Initializes the WritePlan object.
-        """
-        super().__init__(output)
-        self.llm = LLM()
 
     def get_definition(self) -> dict:
         """
@@ -99,8 +92,8 @@ class WritePlan(BaseTool):
         # LLM call
         try:
             settings = Settings()
-            rsp_message = self.llm.respond(settings, messages)
-            plan = CodeParser.parse_code(block="", text=rsp_message.content)
+            rsp_message = LLM().respond(settings, messages)
+            plan = NotebookCodeParser.parse_code(block="", text=rsp_message.content)
             return plan
         except Exception as e:
             logger.error(f"Error during LLM response: {e}")
@@ -126,4 +119,4 @@ if __name__ == '__main__':
 
     import os
 
-    os.removedirs(output.output_dir)
+    os.removedirs(output.data_dir)

@@ -11,7 +11,7 @@ import re
 from loguru import logger
 
 
-class CodeParser:
+class NotebookCodeParser:
     @classmethod
     def parse_block(cls, block: str, text: str) -> str:
         blocks = cls.parse_blocks(text)

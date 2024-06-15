@@ -143,5 +143,5 @@ BibTeX:
 
 - [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
 - [https://github.com/simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
-
+- [https://github.com/phidatahq/phidata](https://github.com/phidatahq/phidata)
 Thanks for their great work!

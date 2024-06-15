@@ -7,10 +7,9 @@ part of the code is from https://github.com/geekan/MetaGPT
 from __future__ import annotations
 
 import base64
-import os
 import re
 import time
-from typing import Literal, Any, Dict, Tuple
+from typing import Literal, Tuple
 
 import nbformat
 from loguru import logger
@@ -25,12 +24,11 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from actionflow.output import Output
-from actionflow.tool import BaseTool
+from actionflow.tool import Toolkit
 
 
-class ExecuteNbCode:
-    """Execute notebook code block, return result to llm, and display it."""
+class RunNbCodeWrapper:
+    """Run notebook code block, return result to llm, and display it."""
 
     nb: NotebookNode
     nb_client: NotebookClient
@@ -46,7 +44,7 @@ class ExecuteNbCode:
         self.nb = nb
         self.timeout = timeout
         self.console = Console()
-        self.interaction = ("ipython" if self.is_ipython() else "terminal")
+        self.interaction = "ipython" if self.is_ipython() else "terminal"
         self.nb_client = NotebookClient(nb, timeout=timeout)
 
     def build(self):
@@ -139,7 +137,7 @@ class ExecuteNbCode:
             parsed_output.append(output_text)
         return is_success, ",".join(parsed_output)
 
-    def show_bytes_figure(self, image_base64: str, interaction_type: Literal["ipython", None]):
+    def show_bytes_figure(self, image_base64: str, interaction_type: str):
         image_bytes = base64.b64decode(image_base64)
         if interaction_type == "ipython":
             from IPython.display import Image, display
@@ -242,46 +240,19 @@ def display_markdown(content: str):
         live.refresh()
 
 
-class ExecuteCode(BaseTool):
-    """Execute notebook code block, return result to llm, and display it."""
+class RunNbCodeTool(Toolkit):
+    """Run notebook code block, return result to llm, and display it."""
 
-    def __init__(self, output: Output, timeout: int = 600):
-        super().__init__(output)
-        self.executor = ExecuteNbCode(timeout=timeout)
+    def __init__(self, timeout: int = 600):
+        super().__init__(name="run_nb_code_tool")
+        self.executor = RunNbCodeWrapper(timeout=timeout)
+        self.register(self.execute_nb_code)
 
-    def get_definition(self) -> Dict[str, Any]:
-        """
-        Returns a dictionary that defines the function. It includes the function's name, description, and parameters.
+    def execute_nb_code(self, code: str) -> str:
+        """Execute a code block in a Jupyter Notebook and return the result.
 
-        :return: A dictionary that defines the function.
-        :rtype: dict
-        """
-        return {
-            "type": "function",
-            "function": {
-                "name": "execute_code",
-                "description": "Execute a code block in a Jupyter Notebook and return the result.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "code": {
-                            "type": "string",
-                            "description": "The code to execute.",
-                        }
-                    },
-                    "required": ["code"],
-                },
-            }
-        }
-
-    def execute(self, code: str) -> str:
-        """
-        Execute a code block in a Jupyter Notebook and return the result.
-
-        :param code: The code to execute.
-        :type code: str
-        :return: The result of the code execution.
-        :rtype: str
+        :param code: str, The code to execute.
+        :return: str, The result of the code execution.
         """
         try:
             outputs, success = self.executor.run(code)
@@ -291,7 +262,7 @@ class ExecuteCode(BaseTool):
 
 
 if __name__ == '__main__':
-    executor = ExecuteNbCode()
+    executor = RunNbCodeWrapper()
     output, success = executor.run("print('Hello, world!')")
     print("Output:", output)
     print("Success:", success)
@@ -345,8 +316,6 @@ if __name__ == '__main__':
     cleaned_output = remove_escape_and_color_codes("\x1b[31mThis is red text\x1b[0m")
     print("Cleaned Output:", cleaned_output)
 
-    output = Output('o')
-    m = ExecuteCode(output)
-    r = m.execute("import math\nprint(math.sqrt(79192201))")
+    m = RunNbCodeTool()
+    r = m.execute_nb_code("import math\nprint(math.sqrt(79192201))")
     print(type(r), '\n\n', r)
-    os.removedirs('o')

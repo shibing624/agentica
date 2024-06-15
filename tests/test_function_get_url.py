@@ -31,7 +31,7 @@ def test_execute_html():
         assert result == "<html><body>Hello, world!</body></html>"
 
     # Clean up the test environment by removing the created directory
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)
 
 
 def test_execute_text():
@@ -53,7 +53,7 @@ def test_execute_text():
         assert result == "Hello, world!"
 
     # Clean up the test environment by removing the created directory
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)
 
 
 def test_execute_markdown():
@@ -75,4 +75,4 @@ def test_execute_markdown():
         assert result == "# Hello, world!"
 
     # Clean up the test environment by removing the created directory
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)

@@ -7,9 +7,9 @@
 import sys
 
 sys.path.append('..')
-from actionflow import ActionFlow
+from actionflow import Assistant
 
 if __name__ == "__main__":
-    flow = ActionFlow(flow_path="flows/example_summarize_url.json")
+    flow = Assistant(flow_path="flows/example_summarize_url.json")
     print(flow)
     flow.run()

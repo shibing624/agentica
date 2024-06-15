@@ -14,7 +14,7 @@ import argparse
 import sys
 
 sys.path.append('..')
-from actionflow import ActionFlow
+from actionflow import Assistant
 
 
 def parse_variables(variables: list[str]) -> dict[str, str]:
@@ -57,7 +57,7 @@ def main():
     args = parser.parse_args()
     variables = parse_variables(args.variables)
 
-    flow = ActionFlow(flow_path=args.flow_path, variables=variables)
+    flow = Assistant(flow_path=args.flow_path, variables=variables)
     print(flow)
     flow.run()
 
