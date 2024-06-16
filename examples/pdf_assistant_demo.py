@@ -21,10 +21,9 @@ knowledge_base = TextDocuments(
         embedder=Text2VecEmb(),
         uri=f"{output_dir}/medical_corpus.lancedb",
     ),
-
 )
 # Comment out after first run
-knowledge_base.load(recreate=True)
+knowledge_base.load(recreate=False)
 
 storage = SqliteStorage(table_name=table_name, db_file=db_file)
 

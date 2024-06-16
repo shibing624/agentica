@@ -12,8 +12,7 @@ from actionflow.utils.log import logger
 try:
     from ollama import Client as OllamaClient
 except ImportError:
-    logger.error("`ollama` not installed, please install it via `pip install ollama`")
-    raise
+    raise ImportError("`ollama` not installed, please install it via `pip install ollama`")
 
 
 class OllamaEmb(Emb):
