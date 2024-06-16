@@ -18,7 +18,7 @@ class Documents(BaseModel):
     """Base class for LLM knowledge base, which is a collection of documents."""
 
     # Embeddings db to store the knowledge base
-    emb_db: Optional[VectorDb] = None
+    vector_db: Optional[VectorDb] = None
     # Number of relevant documents to return on search
     num_documents: int = 2
     # Number of documents to optimize the vector db on
@@ -36,13 +36,13 @@ class Documents(BaseModel):
     def search(self, query: str, num_documents: Optional[int] = None) -> List[Document]:
         """Returns relevant documents matching the query"""
         try:
-            if self.emb_db is None:
+            if self.vector_db is None:
                 logger.warning("No vector db provided")
                 return []
 
             _num_documents = num_documents or self.num_documents
             logger.debug(f"Getting {_num_documents} relevant documents for query: {query}")
-            return self.emb_db.search(query=query, limit=_num_documents)
+            return self.vector_db.search(query=query, limit=_num_documents)
         except Exception as e:
             logger.error(f"Error searching for documents: {e}")
             return []
@@ -57,38 +57,38 @@ class Documents(BaseModel):
                 Defaults to True.
         """
 
-        if self.emb_db is None:
+        if self.vector_db is None:
             logger.warning("No vector db provided")
             return
 
         if recreate:
             logger.info("Deleting collection")
-            self.emb_db.delete()
+            self.vector_db.delete()
 
         logger.info("Creating collection")
-        self.emb_db.create()
+        self.vector_db.create()
 
         logger.info("Loading knowledge base")
         num_documents = 0
         for document_list in self.document_lists:
             documents_to_load = document_list
             # Upsert documents if upsert is True and vector db supports upsert
-            if upsert and self.emb_db.upsert_available():
-                self.emb_db.upsert(documents=documents_to_load)
+            if upsert and self.vector_db.upsert_available():
+                self.vector_db.upsert(documents=documents_to_load)
             # Insert documents
             else:
                 # Filter out documents which already exist in the vector db
                 if skip_existing:
                     documents_to_load = [
-                        document for document in document_list if not self.emb_db.doc_exists(document)
+                        document for document in document_list if not self.vector_db.doc_exists(document)
                     ]
-                self.emb_db.insert(documents=documents_to_load)
+                self.vector_db.insert(documents=documents_to_load)
             num_documents += len(documents_to_load)
             logger.info(f"Added {len(documents_to_load)} documents to knowledge base")
 
         if self.optimize_on is not None and num_documents > self.optimize_on:
             logger.info("Optimizing Vector DB")
-            self.emb_db.optimize()
+            self.vector_db.optimize()
 
     def load_documents(self, documents: List[Document], upsert: bool = False, skip_existing: bool = True) -> None:
         """Load documents to the knowledge base
@@ -101,29 +101,29 @@ class Documents(BaseModel):
         """
 
         logger.info("Loading knowledge base")
-        if self.emb_db is None:
+        if self.vector_db is None:
             logger.warning("No vector db provided")
             return
 
         logger.debug("Creating collection")
-        self.emb_db.create()
+        self.vector_db.create()
 
         # Upsert documents if upsert is True
-        if upsert and self.emb_db.upsert_available():
-            self.emb_db.upsert(documents=documents)
+        if upsert and self.vector_db.upsert_available():
+            self.vector_db.upsert(documents=documents)
             logger.info(f"Loaded {len(documents)} documents to knowledge base")
             return
 
         # Filter out documents which already exist in the vector db
         documents_to_load = (
-            [document for document in documents if not self.emb_db.doc_exists(document)]
+            [document for document in documents if not self.vector_db.doc_exists(document)]
             if skip_existing
             else documents
         )
 
         # Insert documents
         if len(documents_to_load) > 0:
-            self.emb_db.insert(documents=documents_to_load)
+            self.vector_db.insert(documents=documents_to_load)
             logger.info(f"Loaded {len(documents_to_load)} documents to knowledge base")
         else:
             logger.info("No new documents to load")
@@ -170,18 +170,18 @@ class Documents(BaseModel):
 
     def exists(self) -> bool:
         """Returns True if the knowledge base exists"""
-        if self.emb_db is None:
+        if self.vector_db is None:
             logger.warning("No vector db provided")
             return False
-        return self.emb_db.exists()
+        return self.vector_db.exists()
 
     def clear(self) -> bool:
         """Clear the knowledge base"""
-        if self.emb_db is None:
+        if self.vector_db is None:
             logger.warning("No vector db available")
             return True
 
-        return self.emb_db.clear()
+        return self.vector_db.clear()
 
 
 class Reader(BaseModel):

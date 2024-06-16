@@ -6,7 +6,7 @@ import typer
 sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 from actionflow.documents import TextDocuments
-from actionflow.vectordb.lancedb import LanceDb
+from actionflow.vectordb.lancedb import LanceDb  # noqa
 from actionflow.emb.text2vec_emb import Text2VecEmb
 from actionflow.sqlite_storage import SqliteStorage
 
@@ -17,7 +17,7 @@ db_file = f"{output_dir}/medical_corpus.db"
 table_name = 'medical_corpus'
 knowledge_base = TextDocuments(
     data_path="data/medical_corpus.txt",
-    emb_db=LanceDb(
+    vector_db=LanceDb(
         embedder=Text2VecEmb(),
         uri=f"{output_dir}/medical_corpus.lancedb",
     ),

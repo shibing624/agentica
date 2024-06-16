@@ -17,8 +17,8 @@ except ImportError:
     raise ImportError("`lancedb` not installed, please install it via `pip install lancedb`.")
 
 from actionflow.document import Document
-from actionflow.emb.base import Emb, Distance
-from actionflow.vectordb.base import VectorDb
+from actionflow.emb.base import Emb
+from actionflow.vectordb.base import VectorDb, Distance
 from actionflow.emb.openai_emb import OpenAIEmb
 from actionflow.utils.log import logger
 

@@ -3,5 +3,4 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
-from .base import VectorDb
-from .lancedb import LanceDb
+from .base import VectorDb, Distance
