@@ -1,13 +1,13 @@
+import sys
 from typing import Optional, List
 
 import typer
-import sys
 
 sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 from actionflow.documents import TextDocuments
 from actionflow.vectordb.lancedb import LanceDb
-from actionflow.emb.hash_emb import HashEmb
+from actionflow.emb.text2vec_emb import Text2VecEmb
 from actionflow.sqlite_storage import SqliteStorage
 
 llm = AzureOpenAILLM()
@@ -18,12 +18,13 @@ table_name = 'medical_corpus'
 knowledge_base = TextDocuments(
     data_path="data/medical_corpus.txt",
     emb_db=LanceDb(
-        embedder=HashEmb(),
+        embedder=Text2VecEmb(),
         uri=f"{output_dir}/medical_corpus.lancedb",
-    )
+    ),
+
 )
 # Comment out after first run
-knowledge_base.load()
+knowledge_base.load(recreate=True)
 
 storage = SqliteStorage(table_name=table_name, db_file=db_file)
 
@@ -48,7 +49,8 @@ def pdf_assistant(new: bool = False, user: str = "user"):
         search_knowledge=True,
         # Enable the assistant to read the chat history
         read_chat_history=True,
-        output_dir=output_dir
+        output_dir=output_dir,
+        debug_mode=True,
     )
     if run_id is None:
         run_id = assistant.run_id

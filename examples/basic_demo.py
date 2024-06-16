@@ -6,12 +6,11 @@
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant
-from actionflow.llm.openai_llm import OpenAILLM
+from actionflow import Assistant, OpenAILLM, AzureOpenAILLM
 from actionflow.tools.search_serper import SearchSerperTool
 
 m = Assistant(
-    llm=OpenAILLM(model='gpt-3.5-turbo-1106'),
+    llm=AzureOpenAILLM(),
     description="You are a helpful ai assistant.",
     instructions=["食谱应该少于5种材料。"],
     show_tool_calls=True,
@@ -24,7 +23,8 @@ m = Assistant(
     debug_mode=True,
 )
 print("LLM:", m.llm)
+
 # -*- Print a response to the console -*-
-m.print_response("分享一个减肥早餐食谱")
-m.print_response("当前最新最流行的燃脂减肥餐单")
+m.print_response("介绍一个减肥早餐食谱")
+m.print_response("当前韩国最新最流行的燃脂减肥餐单")
 m.print_response("我前面问了啥")

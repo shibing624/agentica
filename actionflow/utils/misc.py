@@ -5,7 +5,7 @@
 """
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-
+import hashlib
 from rich.console import Console
 from rich.style import Style
 
@@ -128,3 +128,22 @@ def confirm_yes_no(question, default: str = "yes") -> bool:
     else:
         print(f"{choice} invalid")
         return False
+
+
+
+def calculate_sha256(file):
+    sha256 = hashlib.sha256()
+    # Read the file in chunks to efficiently handle large files
+    for chunk in iter(lambda: file.read(8192), b""):
+        sha256.update(chunk)
+    return sha256.hexdigest()
+
+
+def calculate_sha256_string(string):
+    # Create a new SHA-256 hash object
+    sha256_hash = hashlib.sha256()
+    # Update the hash object with the bytes of the input string
+    sha256_hash.update(string.encode("utf-8"))
+    # Get the hexadecimal representation of the hash
+    hashed_string = sha256_hash.hexdigest()
+    return hashed_string

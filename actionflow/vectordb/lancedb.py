@@ -17,16 +17,10 @@ except ImportError:
     raise ImportError("`lancedb` not installed, please install it via `pip install lancedb`.")
 
 from actionflow.document import Document
-from actionflow.emb.base import Emb
+from actionflow.emb.base import Emb, Distance
 from actionflow.vectordb.base import VectorDb
 from actionflow.emb.openai_emb import OpenAIEmb
 from actionflow.utils.log import logger
-
-
-class Distance(str, Enum):
-    cosine = "cosine"
-    l2 = "l2"
-    max_inner_product = "max_inner_product"
 
 
 class LanceDb(VectorDb):
@@ -35,7 +29,7 @@ class LanceDb(VectorDb):
             embedder: Emb = OpenAIEmb(),
             distance: Distance = Distance.cosine,
             connection: Optional[lancedb.db.LanceTable] = None,
-            uri: Optional[str] = "/tmp/lancedb",
+            uri: Optional[str] = "/tmp/af_lance.db",
             table_name: Optional[str] = "af",
             nprobes: Optional[int] = 20,
             **kwargs,
