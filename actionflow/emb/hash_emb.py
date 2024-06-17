@@ -4,7 +4,7 @@
 @description:
 """
 import hashlib
-from typing import List, Tuple, Optional, Dict
+from typing import List
 
 from actionflow.emb.base import Emb
 
@@ -20,8 +20,3 @@ class HashEmb(Emb):
         hash_list = list(hash_object.digest())
         float_list = [float(x) / 255.0 for x in hash_list]
         return float_list
-
-    def get_embedding_and_usage(self, text: str) -> Tuple[List[float], Optional[Dict]]:
-        usage = None
-        embedding = self.get_embedding(text)
-        return embedding, usage

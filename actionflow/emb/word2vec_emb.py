@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 
 try:
     from text2vec import Word2Vec
@@ -37,8 +37,3 @@ class Word2VecEmb(Emb):
     def get_embedding(self, text: str) -> List[float]:
         # Calculate emb of the text
         return self.get_client.encode([text])[0]
-
-    def get_embedding_and_usage(self, text: str) -> Tuple[List[float], Optional[Dict]]:
-        usage = None
-        embedding = self.get_embedding(text)
-        return embedding, usage

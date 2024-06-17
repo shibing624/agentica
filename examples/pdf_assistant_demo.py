@@ -5,25 +5,29 @@ import typer
 
 sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
+from actionflow.llm.ollama_llm import OllamaLLM
 from actionflow.documents import TextDocuments
 from actionflow.vectordb.lancedb import LanceDb  # noqa
 from actionflow.emb.text2vec_emb import Text2VecEmb
 from actionflow.sqlite_storage import SqliteStorage
 
 llm = AzureOpenAILLM()
+# llm = OllamaLLM(model="qwen:0.5b")
 print(llm)
+emb = Text2VecEmb()
+print(emb)
 output_dir = "outputs"
 db_file = f"{output_dir}/medical_corpus.db"
 table_name = 'medical_corpus'
 knowledge_base = TextDocuments(
     data_path="data/medical_corpus.txt",
     vector_db=LanceDb(
-        embedder=Text2VecEmb(),
+        embedder=emb,
         uri=f"{output_dir}/medical_corpus.lancedb",
     ),
 )
 # Comment out after first run
-knowledge_base.load(recreate=False)
+knowledge_base.load(recreate=True)
 
 storage = SqliteStorage(table_name=table_name, db_file=db_file)
 

@@ -22,7 +22,7 @@ except ImportError:
 
 class OllamaLLM(LLM):
     name: str = "Ollama"
-    model: str = "openhermes"
+    model: str = "openhermes"  # or "qwen:0.5b" for test
     host: Optional[str] = None
     timeout: Optional[Any] = None
     format: Optional[str] = None

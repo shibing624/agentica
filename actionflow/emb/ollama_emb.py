@@ -4,7 +4,7 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Any
 
 from actionflow.emb.base import Emb
 from actionflow.utils.log import logger
@@ -16,9 +16,9 @@ except ImportError:
 
 
 class OllamaEmb(Emb):
-    model: str = "openhermes"
-    dimensions: int = 4096
-    host: Optional[str] = None
+    model: str = "quentinz/bge-base-zh-v1.5"
+    dimensions: int = 384
+    host: Optional[str] = "http://localhost:11434"
     timeout: Optional[Any] = None
     options: Optional[Any] = None
     client_kwargs: Optional[Dict[str, Any]] = None
@@ -54,14 +54,3 @@ class OllamaEmb(Emb):
         except Exception as e:
             logger.warning(e)
             return []
-
-    def get_embedding_and_usage(self, text: str) -> Tuple[List[float], Optional[Dict]]:
-        embedding = []
-        usage = None
-        try:
-            response = self._response(text=text)
-            if response is not None:
-                embedding = response.get("embedding", [])
-        except Exception as e:
-            logger.warning(e)
-        return embedding, usage

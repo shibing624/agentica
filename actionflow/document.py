@@ -31,8 +31,10 @@ class Document(BaseModel):
         _embedder = embedder or self.embedder
         if _embedder is None:
             raise ValueError("No embedder provided")
-
-        self.embedding, self.usage = _embedder.get_embedding_and_usage(self.content)
+        if hasattr(_embedder, "get_embedding_and_usage"):
+            self.embedding, self.usage = _embedder.get_embedding_and_usage(self.content)
+        else:
+            self.embedding = _embedder.get_embedding(self.content)
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a dictionary representation of the document"""
