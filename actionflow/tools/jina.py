@@ -11,9 +11,9 @@ from os import getenv
 from typing import Optional
 
 import requests
-from actionflow.utils.log import logger
 
 from actionflow.tool import Toolkit
+from actionflow.utils.log import logger
 
 
 class JinaTool(Toolkit):
@@ -54,23 +54,14 @@ class JinaTool(Toolkit):
         headers = {'X-Return-Format': 'markdown', 'X-Timeout': f'{timeout}'}
         if self.api_key:
             headers['Authorization'] = f'Bearer {self.api_key}'
-        response = requests.get(f'https://r.jina.ai/{url}', headers=headers)
-        if response.status_code != 200:
-            logger.error(f"Failed to fetch URL. HTTP status code: {response.status_code}")
-        else:
-            result = response.text
-            # suffix = ".md"
-            # # Save content to a file with a suitable name
-            # if content:
-            #     file_name = url.split('/')[-1].split('#')[0] + suffix
-            #     file_path = os.path.join(self.output.output_dir, file_name)
-            #     with open(file_path, 'w', encoding='utf-8') as f:
-            #         f.write(content)
-            #         logger.debug(f"Saved url content, written to: {file_path}")
-            #     # Trim the content to short characters for llm content
-            #     if len(content) > 8000:
-            #         content = content[:8000] + '...'
-
+        try:
+            response = requests.get(f'https://r.jina.ai/{url}', headers=headers)
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch URL. HTTP status code: {response.status_code}")
+            else:
+                result = response.text
+        except Exception as e:
+            logger.error(f"Failed to fetch URL. Error: {e}")
         return result
 
     def jina_search(self, query: str) -> str:
@@ -89,12 +80,14 @@ class JinaTool(Toolkit):
         headers = {'X-Return-Format': 'markdown'}
         if self.api_key:
             headers['Authorization'] = f'Bearer {self.api_key}'
-        response = requests.get(f'https://s.jina.ai/{query}', headers=headers)
-        if response.status_code != 200:
-            logger.error(f"Failed to fetch URL. HTTP status code: {response.status_code}")
-        else:
-            result = response.text
-
+        try:
+            response = requests.get(f'https://s.jina.ai/{query}', headers=headers)
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch URL. HTTP status code: {response.status_code}")
+            else:
+                result = response.text
+        except Exception as e:
+            logger.error(f"Failed to fetch URL. Error: {e}")
         return result
 
 

@@ -3,9 +3,10 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
+import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
-import hashlib
+
 from rich.console import Console
 from rich.style import Style
 
@@ -130,7 +131,6 @@ def confirm_yes_no(question, default: str = "yes") -> bool:
         return False
 
 
-
 def calculate_sha256(file):
     sha256 = hashlib.sha256()
     # Read the file in chunks to efficiently handle large files
@@ -147,3 +147,19 @@ def calculate_sha256_string(string):
     # Get the hexadecimal representation of the hash
     hashed_string = sha256_hash.hexdigest()
     return hashed_string
+
+
+def literal_similarity(text1, text2):
+    """
+    判断两个文本的字面相似度
+
+    参数:
+    text1: 第一个文本字符串
+    text2: 第二个文本字符串
+
+    返回值:
+    相似度分数，介于0和1之间，其中1表示完全相同
+    """
+    from difflib import SequenceMatcher
+    matcher = SequenceMatcher(None, text1, text2)
+    return matcher.ratio()
