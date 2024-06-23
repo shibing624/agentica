@@ -221,12 +221,13 @@ class OpenAILLM(LLM):
         )
 
     def invoke_stream(self, messages: List[Message]) -> Iterator[ChatCompletionChunk]:
+        logger.debug(f"Invoking stream with model: {self.model}, messages: {messages}")
         yield from self.get_client().chat.completions.create(
             model=self.model,
-            messages=[m.to_dict() for m in messages],  # type: ignore
+            messages=[m.to_dict() for m in messages],
             stream=True,
             **self.api_kwargs,
-        )  # type: ignore
+        )
 
     async def ainvoke_stream(self, messages: List[Message]) -> Any:
         async_stream = await self.get_async_client().chat.completions.create(

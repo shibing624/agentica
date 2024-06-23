@@ -3,16 +3,19 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
-import asyncio
+import http.client
 import json
 import os
-from typing import Any, Dict, Optional, Union, List
+import ssl
+from typing import Dict, Optional
 
-import aiohttp
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from actionflow.tool import Toolkit
 from actionflow.utils.log import logger
+
+# 创建一个不验证 SSL 证书的上下文
+ssl._create_default_https_context = ssl._create_unverified_context
 
 
 class SerperWrapper(BaseModel):
@@ -20,7 +23,6 @@ class SerperWrapper(BaseModel):
 
     api_key: str
     payload: dict = Field(default_factory=lambda: {"page": 1, "num": 10})
-    aiosession: Optional[aiohttp.ClientSession] = None
     proxy: Optional[str] = None
 
     @model_validator(mode="before")
@@ -37,46 +39,25 @@ class SerperWrapper(BaseModel):
             )
         return values
 
-    async def run(self, query: Union[str, List[str]], max_results: int = 8, as_string: bool = True, **kwargs: Any):
-        """Run query through Serper and parse result async."""
-        if isinstance(query, str):
-            return self._process_response((await self.results([query], max_results))[0], as_string=as_string)
-        else:
-            results = [self._process_response(res, as_string) for res in await self.results(query, max_results)]
-        return "\n".join(results) if as_string else results
+    def run(self, query: str, max_results: int = 8, as_string: bool = True):
+        """Run query through Serper and parse result"""
+        headers = self.get_headers()
 
-    async def results(self, queries: List[str], max_results: int = 8) -> dict:
-        """Use aiohttp to run query through Serper and return the results async."""
-
-        def construct_url_and_payload_and_headers():
-            payloads = self.get_payloads(queries, max_results)
-            url = "https://google.serper.dev/search"
-            headers = self.get_headers()
-            return url, payloads, headers
-
-        url, payloads, headers = construct_url_and_payload_and_headers()
-        if not self.aiosession:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, data=payloads, headers=headers, proxy=self.proxy) as response:
-                    response.raise_for_status()
-                    res = await response.json()
-        else:
-            async with self.aiosession.post(url, data=payloads, headers=headers, proxy=self.proxy) as response:
-                response.raise_for_status()
-                res = await response.json()
-
+        conn = http.client.HTTPSConnection("google.serper.dev")
+        payload = json.dumps({
+            "q": query,
+            "num": max_results,
+        })
+        try:
+            conn.request("POST", "/search", payload, headers)
+            res = conn.getresponse()
+            data = res.read()
+            data = json.loads(data.decode("utf-8"))
+            res = self._process_response(data, as_string=as_string)
+        except Exception as e:
+            logger.error(f"Failed to search {query} due to {e}")
+            res = ""
         return res
-
-    def get_payloads(self, queries: list[str], max_results: int):
-        """Get payloads for Serper."""
-        payloads = []
-        for query in queries:
-            _payload = {
-                "q": query,
-                "num": max_results,
-            }
-            payloads.append({**self.payload, **_payload})
-        return json.dumps(payloads, sort_keys=True)
 
     def get_headers(self) -> Dict[str, str]:
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
@@ -150,11 +131,8 @@ class SearchSerperTool(Toolkit):
         Returns:
             The search results as a string or a list of dictionaries.
         """
-        loop = asyncio.get_event_loop()
         try:
-            return loop.run_until_complete(
-                SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
-            )
+            return SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
         except Exception as e:
             logger.error(f"Failed to search {query} due to {e}")
             return "" if as_string else []
@@ -162,5 +140,6 @@ class SearchSerperTool(Toolkit):
 
 if __name__ == '__main__':
     search = SearchSerperTool()
+    print(search.api_key)
     r = search.search_google("北京的新闻top3")
     print(type(r), '\n\n', r)

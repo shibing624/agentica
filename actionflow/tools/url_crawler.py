@@ -6,6 +6,7 @@
 
 import json
 import random
+import ssl
 import time
 from typing import Set, Dict, List, Tuple
 from urllib.parse import urljoin, urlparse
@@ -13,7 +14,6 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 try:
-    from bs4 import BeautifulSoup  # noqa: F401
     from bs4 import BeautifulSoup, Tag, NavigableString
 except ImportError:
     raise ImportError("The `bs4` package is not installed. Please install it via `pip install beautifulsoup4`.")
@@ -21,6 +21,10 @@ except ImportError:
 from actionflow.tool import Toolkit
 from actionflow.utils.log import logger
 from actionflow.utils.misc import literal_similarity
+
+# 创建一个不验证 SSL 证书的上下文
+ssl._create_default_https_context = ssl._create_unverified_context
+
 
 class UrlCrawlerTool(Toolkit):
     max_depth: int = 2
@@ -112,8 +116,6 @@ class UrlCrawlerTool(Toolkit):
                     markdown += child_text
 
         return markdown.strip()
-
-
 
     def crawl(self, url: str, starting_depth: int = 1) -> Dict[str, str]:
         """

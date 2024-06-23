@@ -5,6 +5,7 @@
 """
 
 import json
+import ssl
 from os import getenv
 from typing import Optional, Dict, Any, List
 
@@ -15,6 +16,9 @@ try:
     from exa_py import Exa
 except ImportError:
     raise ImportError("`exa_py` not installed. Please install using `pip install exa_py`")
+
+# 创建一个不验证 SSL 证书的上下文
+ssl._create_default_https_context = ssl._create_unverified_context
 
 
 class SearchExaTool(Toolkit):
