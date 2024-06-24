@@ -22,7 +22,7 @@ from actionflow.tool import Toolkit
 from actionflow.utils.log import logger
 from actionflow.utils.misc import literal_similarity
 
-# 创建一个不验证 SSL 证书的上下文
+# # Create a default context for HTTPS requests (not recommended for production)
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
