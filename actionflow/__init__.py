@@ -4,6 +4,7 @@
 @description: 
 """
 from actionflow.version import __version__
+from actionflow.config import DOTENV_PATH, SMART_LLM, FAST_LLM
 from actionflow.assistant import Assistant
 from actionflow.llm.openai_llm import OpenAILLM
 from actionflow.llm.azure_llm import AzureOpenAILLM

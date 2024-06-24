@@ -5,8 +5,6 @@
 """
 import os
 
-from actionflow.utils.log import logger
-
 pwd_path = os.path.abspath(os.path.dirname(__file__))
 
 # Load environment variables from .env file
@@ -14,6 +12,7 @@ env_path = os.path.realpath(os.path.join(pwd_path, "../.env"))
 DOTENV_PATH = os.environ.get("DOTENV_PATH", env_path)
 try:
     from dotenv import load_dotenv  # noqa
+    from loguru import logger  # noqa, need to import logger here to avoid circular import
 
     if load_dotenv(DOTENV_PATH, override=True):
         logger.info(f"Loaded environment variables from {DOTENV_PATH}")

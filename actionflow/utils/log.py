@@ -33,9 +33,10 @@ def get_logger(log_level: str = "INFO", log_file: str = None) -> logger:
     return logger
 
 
+log_level = os.environ.get("LOG_LEVEL") or "INFO"
 logger = get_logger(
-    log_level=os.getenv("LOG_LEVEL") or "INFO",
-    log_file=os.getenv("LOG_FILE")
+    log_level=log_level,
+    log_file=os.environ.get("LOG_FILE")
 )
 
 
