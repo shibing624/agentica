@@ -76,7 +76,7 @@ writer = Assistant(
     ),
 )
 
-news_article = Actionflow(
+flow = Actionflow(
     name="News Article Workflow",
     tasks=[
         Task(
@@ -92,7 +92,7 @@ news_article = Actionflow(
     debug_mode=True,
 )
 
-news_article.print_response(
+flow.print_response(
     "美国继续制裁俄罗斯",
     markdown=True,
 )

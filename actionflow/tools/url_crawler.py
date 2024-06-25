@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: URL 遍历抓取工具
+@description: URL Crawler Tool
 """
 
 import json
@@ -22,7 +22,7 @@ from actionflow.tool import Toolkit
 from actionflow.utils.log import logger
 from actionflow.utils.misc import literal_similarity
 
-# # Create a default context for HTTPS requests (not recommended for production)
+# Create a default context for HTTPS requests (not recommended for production)
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
