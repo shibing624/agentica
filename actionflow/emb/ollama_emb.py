@@ -36,7 +36,8 @@ class OllamaEmb(Emb):
             _ollama_params["timeout"] = self.timeout
         if self.client_kwargs:
             _ollama_params.update(self.client_kwargs)
-        return OllamaClient(**_ollama_params)
+        self.ollama_client = OllamaClient(**_ollama_params)
+        return self.ollama_client
 
     def _response(self, text: str) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {}

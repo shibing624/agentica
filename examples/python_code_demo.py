@@ -14,7 +14,7 @@ python_assistant = PythonAssistant(
     llm=AzureOpenAILLM(),
     files=[
         CsvFile(
-            path="https://phidata-public.s3.amazonaws.com/demo_data/IMDB-Movie-Data.csv",
+            data_path="https://phidata-public.s3.amazonaws.com/demo_data/IMDB-Movie-Data.csv",
             description="Contains information about movies from IMDB.",
         )
     ],

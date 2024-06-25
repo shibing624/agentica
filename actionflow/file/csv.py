@@ -11,7 +11,7 @@ class CsvFile(File):
 
     def get_metadata(self) -> dict[str, Any]:
         if self.name is None:
-            self.name = Path(self.path).name
+            self.name = Path(self.data_path).name
 
         if self.columns is None:
             try:

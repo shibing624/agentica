@@ -584,10 +584,10 @@ class OpenAILLM(LLM):
                 assistant_message_tool_calls.extend(response_tool_calls)
 
         t.stop()
-        logger.debug(f"Time to generate response: {t.elapsed:.4f}s")
         if completion_tokens > 0:
-            logger.debug(f"Time per output token: {t.elapsed / completion_tokens:.4f}s")
-            logger.debug(f"Throughput: {completion_tokens / t.elapsed:.4f} tokens/s")
+            logger.debug(f"Time to generate response: {t.elapsed:.4f}s, "
+                         f"Time per output token: {t.elapsed / completion_tokens:.4f}s, "
+                         f"Throughput: {completion_tokens / t.elapsed:.4f} tokens/s")
 
         # -*- Create assistant message
         assistant_message = Message(role="assistant")
@@ -665,14 +665,13 @@ class OpenAILLM(LLM):
             self.metrics["tokens_per_second"].append(f"{completion_tokens / t.elapsed:.4f}")
 
         # Add token usage to metrics
-        # TODO: compute prompt tokens
-        prompt_tokens = 0
+        prompt_tokens = sum([self.calculate_tokens(i.get_content_string()) for i in messages if i])
         assistant_message.metrics["prompt_tokens"] = prompt_tokens
         if "prompt_tokens" not in self.metrics:
             self.metrics["prompt_tokens"] = prompt_tokens
         else:
             self.metrics["prompt_tokens"] += prompt_tokens
-        logger.debug(f"Estimated completion tokens: {completion_tokens}")
+        logger.debug(f"Completion tokens size: {completion_tokens}")
         assistant_message.metrics["completion_tokens"] = completion_tokens
         if "completion_tokens" not in self.metrics:
             self.metrics["completion_tokens"] = completion_tokens
@@ -744,6 +743,19 @@ class OpenAILLM(LLM):
                 # -*- Yield new response using results of tool calls
                 yield from self.response_stream(messages=messages)
         logger.debug("---------- OpenAI Response End ----------")
+
+    @staticmethod
+    def calculate_tokens(content: str) -> int:
+        """
+        Calculate the number of tokens in the content.
+            English chars: every 3 chars count as 1 token
+            Chinese chars: every 1 char count as 1 token
+        :param content: str
+        :return: int
+        """
+        english_chars = sum(1 for c in content if c.isascii())
+        chinese_chars = len(content) - english_chars
+        return english_chars // 3 + chinese_chars
 
     async def aresponse_stream(self, messages: List[Message]) -> Any:
         logger.debug("---------- OpenAI Async Response Start ----------")
@@ -855,8 +867,7 @@ class OpenAILLM(LLM):
         self.metrics["response_times"].append(t.elapsed)
 
         # Add token usage to metrics
-        # TODO: compute prompt tokens
-        prompt_tokens = 0
+        prompt_tokens = sum([self.calculate_tokens(i.get_content_string()) for i in messages if i])
         assistant_message.metrics["prompt_tokens"] = prompt_tokens
         if "prompt_tokens" not in self.metrics:
             self.metrics["prompt_tokens"] = prompt_tokens

@@ -107,7 +107,7 @@ class PythonAssistant(Assistant):
 
         _instructions += [
             "If you do not have the data you need, **THINK** if you can write a python function to download the data "
-            "from the internet, you can use `requests.get(url, verify=False)` or Bypass SSL verification",
+            "from the internet, you need to bypass SSL verification to download the data.",
             "If the data you need is not available in a file or publicly, stop and prompt the user to provide "
             "the missing information.",
             "Once you have all the information, write python functions to accomplishes the task.",

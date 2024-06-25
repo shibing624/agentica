@@ -4,13 +4,13 @@ sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 
 assistant = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4-turbo",max_tokens=4096),
+    llm=AzureOpenAILLM(model="gpt-4-turbo", max_tokens=4096),
 )
 
 # Single Image
 assistant.print_response(
     [
-        {"type": "text", "text": "What's in this image, describe in 1 sentence"},
+        {"type": "text", "text": "描述图片"},
         {
             "type": "image_url",
             "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
@@ -23,7 +23,7 @@ assistant.print_response(
     [
         {
             "type": "text",
-            "text": "Is there any difference between these. Describe them in 1 sentence.",
+            "text": "一句话说明两张图片的不同",
         },
         {
             "type": "image_url",
@@ -31,8 +31,7 @@ assistant.print_response(
         },
         {
             "type": "image_url",
-            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "image_url": "https://img-blog.csdnimg.cn/img_convert/0ab31bdb17bebbab9c8f4185f3655b6d.jpeg",
         },
     ],
-    markdown=True,
 )

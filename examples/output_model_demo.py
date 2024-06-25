@@ -23,4 +23,4 @@ movie_assistant = Assistant(
     output_model=MovieScript,
     # debug_mode=True,
 )
-pprint(movie_assistant.run("New York"))
+pprint(movie_assistant.run("Beijing love story"))

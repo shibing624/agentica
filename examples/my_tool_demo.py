@@ -22,4 +22,4 @@ def exponentiate(base: int, exponent: int) -> str:
 
 assistant = Assistant(llm=AzureOpenAILLM(), tools=[multiply, add, exponentiate], debug_mode=True)
 assistant.print_response("3乘以10000005是啥?")
-# assistant.print_response("将3的五次方乘以(12和3的和). step by step to show the result.")
+assistant.print_response("将3的五次方乘以(12和3的和). step by step to show the result.")

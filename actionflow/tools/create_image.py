@@ -29,7 +29,7 @@ class CreateImageTool(Toolkit):
 
     ):
         super().__init__(name="create_image_tool")
-        self.data_dir: str = data_dir or os.path.curdir
+        self.data_dir: str = data_dir or "outputs"
         self.llm = llm
 
         self.register(self.create_delle_image)
@@ -108,5 +108,6 @@ class CreateImageTool(Toolkit):
         :type image_path: str
         """
         image_data = requests.get(image_url).content
-        with open(image_path, "wb") as handler:
-            handler.write(image_data)
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        with open(image_path, "wb") as f:
+            f.write(image_data)

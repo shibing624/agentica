@@ -32,7 +32,8 @@ class Text2VecEmb(Emb):
         if self.client_params:
             _client_params.update(self.client_params)
 
-        return SentenceModel(**_client_params)
+        self.client = SentenceModel(**_client_params)
+        return self.client
 
     def get_embedding(self, text: str) -> List[float]:
         # Calculate emb of the text

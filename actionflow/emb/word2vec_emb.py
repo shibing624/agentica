@@ -31,8 +31,8 @@ class Word2VecEmb(Emb):
             _client_params["model_name_or_path"] = self.model
         if self.client_params:
             _client_params.update(self.client_params)
-
-        return Word2Vec(**_client_params)
+        self.client = Word2Vec(**_client_params)
+        return self.client
 
     def get_embedding(self, text: str) -> List[float]:
         # Calculate emb of the text

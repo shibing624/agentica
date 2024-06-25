@@ -3,20 +3,17 @@ The research Assistant searches for EXA for a topic
 and writes an article in Markdown format.
 """
 
-from datetime import datetime
-from textwrap import dedent
 import sys
+from textwrap import dedent
 
 sys.path.append('..')
 from actionflow import Assistant
 from actionflow.llm.openai_llm import OpenAILLM
-from actionflow.tools.search_exa import SearchExaTool
-
-today = datetime.now().strftime("%Y-%m-%d")
+from actionflow.tools.search_serper import SearchSerperTool
 
 m = Assistant(
     llm=OpenAILLM(model='gpt-4o'),
-    tools=[SearchExaTool(start_published_date=today, type="keyword")],
+    tools=[SearchSerperTool()],
     description="You are a senior NYT researcher writing an article on a topic.中文撰写报告",
     instructions=[
         "For the provided topic, run 3 different searches.",

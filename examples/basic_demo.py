@@ -12,10 +12,9 @@ from actionflow.tools.search_serper import SearchSerperTool
 m = Assistant(
     llm=AzureOpenAILLM(),
     description="You are a helpful ai assistant.",
-    instructions=["食谱应该少于5种材料。"],
     show_tool_calls=True,
     # Enable the assistant to search the knowledge base
-    search_knowledge=True,
+    search_knowledge=False,
     tools=[SearchSerperTool()],
     # Enable the assistant to read the chat history
     read_chat_history=True,
@@ -23,6 +22,9 @@ m = Assistant(
     debug_mode=True,
 )
 print("LLM:", m.llm)
+
+r = m.run("介绍林黛玉", stream=False)
+print(r)
 
 # -*- Print a response to the console -*-
 m.print_response("介绍一个减肥早餐食谱")
