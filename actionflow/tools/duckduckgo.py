@@ -40,6 +40,27 @@ class DuckDuckGoTool(Toolkit):
         if news:
             self.register(self.duckduckgo_news)
 
+    @staticmethod
+    def search_with_ddgs(query: str):
+        """
+        Search with ddgs and return the contexts.
+        """
+        from duckduckgo_search import DDGS
+        contexts = []
+        search_results = []
+        with DDGS() as ddgs:
+            ddgs_gen = ddgs.text(query, backend="lite", timelimit="d, w, m, y")
+            for r in ddgs_gen:
+                search_results.append(r)
+        for idx, result in enumerate(search_results):
+            if result["body"] and result["href"]:
+                contexts.append({
+                    "name": result["title"],
+                    "url": result["href"],
+                    "snippet": result["body"]
+                })
+        return contexts
+
     def duckduckgo_search(self, query: str, max_results: int = 5) -> str:
         """Use this function to search DuckDuckGo for a query.
 
@@ -51,11 +72,8 @@ class DuckDuckGoTool(Toolkit):
             The result from DuckDuckGo.
         """
         logger.debug(f"Searching DDG for: {query}")
-        gen_res = self.ddgs.text(query, max_results=max_results)
-        res = [
-            {"link": i["href"], "snippet": i["body"], "title": i["title"]}
-            for (_, i) in zip(range(max_results), gen_res)
-        ]
+        gen_res = self.ddgs.text(query, backend="lite", timelimit="d, w, m, y")
+        res = list(gen_res)[:max_results]
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     def duckduckgo_news(self, query: str, max_results: int = 5) -> str:
@@ -69,15 +87,12 @@ class DuckDuckGoTool(Toolkit):
             The latest news from DuckDuckGo.
         """
         logger.debug(f"Searching DDG news for: {query}")
-        gen_res = self.ddgs.news(query, max_results=max_results)
-        res = [
-            {"link": i["href"], "snippet": i["body"], "title": i["title"]}
-            for (_, i) in zip(range(max_results), gen_res)
-        ]
+        gen_res = self.ddgs.news(query, timelimit="d, w, m, y")
+        res = list(gen_res)[:max_results]
         return json.dumps(res, indent=2, ensure_ascii=False)
 
 
 if __name__ == '__main__':
     ddg = DuckDuckGoTool()
     print(ddg.duckduckgo_search("Python"))
-    # print(ddg.duckduckgo_news("Python"))
+    print(ddg.duckduckgo_news("Python"))
