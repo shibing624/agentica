@@ -8,11 +8,14 @@ import sys
 sys.path.append('..')
 from actionflow import Assistant, AzureOpenAILLM
 from actionflow.actionflow import Actionflow, Task
+from actionflow.tools.file import FileTool
 
 idea_assistant = Assistant(
     name="brilliant entrepreneur",
     llm=AzureOpenAILLM(model="gpt-4o"),
     description="You are a brilliant entrepreneur. You are exceptional at generating new business ideas and marketing them.",
+    tools=[FileTool(data_dir="outputs")],
+    output_dir="outputs",
     output_file_name="save.md",
 )
 
