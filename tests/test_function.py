@@ -28,4 +28,4 @@ def test_function():
     assert (
         result.split('/')[-1] == f"test.txt"
     ), "File path returned by execute method is incorrect"
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)

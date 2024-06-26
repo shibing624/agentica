@@ -5,30 +5,22 @@
 """
 import os
 
-from loguru import logger
-
 pwd_path = os.path.abspath(os.path.dirname(__file__))
-DOTENV_PATH = os.environ.get("DOTENV_PATH", os.path.join(pwd_path, "../.env"))
+
+# Load environment variables from .env file
+env_path = os.path.realpath(os.path.join(pwd_path, "../.env"))
+DOTENV_PATH = os.environ.get("DOTENV_PATH", env_path)
 try:
     from dotenv import load_dotenv  # noqa
+    from loguru import logger  # noqa, need to import logger here to avoid circular import
 
     if load_dotenv(DOTENV_PATH, override=True):
         logger.info(f"Loaded environment variables from {DOTENV_PATH}")
 except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
-API_KEY = os.environ.get("API_KEY")  # "your-api-key"
-# OpenAI API Base URL; "https://api.moonshot.cn/v1" for Moonshot API
-BASE_URL = os.environ.get("API_BASE", "https://api.openai.com/v1")
-DEFAULT_MODEL = os.environ.get("DEFAULT_MODEL", "gpt-3.5-turbo")  # "gpt-3.5-turbo" or "moonshot-v1-8k" and so on
-
-# get url api key
-JINA_API_KEY = os.environ.get("JINA_API_KEY")
-
-# Search engine api key
-SERPER_API_KEY = os.environ.get("SERPER_API_KEY")
-# SERPAPI_API_KEY = os.environ.get("SERPAPI_API_KEY")
-
+SMART_LLM = os.environ.get("SMART_LLM")
+FAST_LLM = os.environ.get("FAST_LLM")
 # Code-interpreter E2B api key
 E2B_API_KEY = os.environ.get("E2B_API_KEY")
 

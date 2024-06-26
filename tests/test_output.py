@@ -17,8 +17,8 @@ def test_init():
     Tests the initialization of the Output object by checking if the output directory is created.
     """
     output = Output("test_output_init")
-    assert os.path.exists(output.output_dir), "Output path does not exist"
-    os.rmdir(output.output_dir)
+    assert os.path.exists(output.data_dir), "Output path does not exist"
+    os.rmdir(output.data_dir)
 
 
 def test_save():
@@ -29,7 +29,7 @@ def test_save():
     output = Output("test")
 
     # Test saving a text file
-    txt_file_path = os.path.join(output.output_dir, "test.txt")
+    txt_file_path = os.path.join(output.data_dir, "test.txt")
     output.save("test.txt", "test_output_save")
     assert os.path.exists(txt_file_path), "Text file was not saved correctly"
     with open(txt_file_path, "r") as f:
@@ -37,7 +37,7 @@ def test_save():
     os.remove(txt_file_path)
 
     # Test saving a JSON file
-    json_file_path = os.path.join(output.output_dir, "test.json")
+    json_file_path = os.path.join(output.data_dir, "test.json")
     output.save("test.json", [{"test": "test1"}, {"test": "test2"}])
     assert os.path.exists(json_file_path), "JSON file was not saved correctly"
     with open(json_file_path, "r") as f:
@@ -46,4 +46,4 @@ def test_save():
             {"test": "test2"},
         ], "JSON file content is incorrect"
 
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)

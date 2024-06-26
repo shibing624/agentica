@@ -23,4 +23,4 @@ def test_execute():
     assert result.split('/')[-1] == f"test.txt"
 
     # Clean up the test environment by removing the created file and directory
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)

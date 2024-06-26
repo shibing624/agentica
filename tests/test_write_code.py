@@ -1,7 +1,7 @@
 import pytest
 import pytest
 from actionflow.output import Output
-from actionflow.tools.write_code import WriteCode
+from actionflow.tools.write_nb_code import WriteNbCode
 import shutil
 import os
 
@@ -16,7 +16,7 @@ class MockLLM:
 @pytest.fixture
 def write_code():
     output = Output('outputs')
-    write_code_tool = WriteCode(output)
+    write_code_tool = WriteNbCode(output)
     write_code_tool.llm = MockLLM()  # Mock the LLM
     return write_code_tool
 

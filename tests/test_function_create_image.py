@@ -41,4 +41,4 @@ def test_execute(mock_get, mock_create):
         assert f.read() == b"mock image content"
 
     # Clean up the test environment by removing the created file and directory
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)

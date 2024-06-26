@@ -5,51 +5,40 @@
 This module contains a class for creating an image from a description using OpenAI's API.
 It generates a unique image name based on the prompt and the current time, downloads the image, and saves it to a specified output path.
 """
-
 import hashlib
 import os
 import time
+from typing import Optional, cast
 
 import requests
 
-from actionflow.llm import LLM
-from actionflow.tool import BaseTool
+from actionflow.llm import LLM, OpenAILLM
+from actionflow.tool import Toolkit
 
 
-class CreateImage(BaseTool):
+class CreateImageTool(Toolkit):
     """
-    This class inherits from the BaseFunction class. It defines a function for creating an image from a description using OpenAI's API.
+    This class inherits from the Toolkit class.
+        It defines a function for creating an image from a description using OpenAI's API.
     """
 
-    def get_definition(self) -> dict:
-        """
-        Returns a dictionary that defines the function. It includes the function's name, description, and parameters.
+    def __init__(
+            self,
+            data_dir: Optional[str] = None,
+            llm: Optional[LLM] = None
 
-        :return: A dictionary that defines the function.
-        :rtype: dict
-        """
-        return {
-            "type": "function",  # "type": "function" indicates that this is a function definition.
-            "function": {
-                "name": "create_image",
-                "description": "Creates an image from a description. Returns the path to the image.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "prompt": {
-                            "type": "string",
-                            "description": (
-                                "The prompt that describes the image. "
-                                "Be specific and detailed about the content and style of the image.",
-                            )
-                        }
-                    },
-                    "required": ["prompt"],
-                },
-            }
-        }
+    ):
+        super().__init__(name="create_image_tool")
+        self.data_dir: str = data_dir or "outputs"
+        self.llm = llm
 
-    def execute(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
+        self.register(self.create_delle_image)
+
+    def update_llm(self) -> None:
+        if self.llm is None:
+            self.llm = OpenAILLM()
+
+    def create_delle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
         """
         Creates an image from a description using OpenAI's API, generates a unique image name based on the prompt
             and the current time, downloads the image, and saves it to a specified output path.
@@ -60,13 +49,17 @@ class CreateImage(BaseTool):
         :type n: int, optional
         :param size: The size of the image. Defaults to "1024x1024". Currently, only "1024x1024" is supported.
         :type size: str, optional
-        :param model: The model to use for image generation. Defaults to 'dall-e-3'.
+        :param model: The model to use for image generation, can be dall-e-2 or dall-e-3, Defaults to 'dall-e-3'.
         :return: The path to the image.
         :rtype: str
         """
+
+        # Update the LLM (set defaults, add logit etc.)
+        self.update_llm()
+
         image_name = self._generate_image_name(prompt)
         image_url = self._create_image(prompt, n, size, model)
-        image_path = f"{self.output.output_dir}/{image_name}"
+        image_path = f"{self.data_dir}/{image_name}"
         self._download_and_save_image(image_url, image_path)
         return os.path.abspath(image_path)
 
@@ -98,7 +91,11 @@ class CreateImage(BaseTool):
         :return: The URL of the image.
         :rtype: str
         """
-        response = LLM().client.images.generate(prompt=prompt, n=n, size=size, model=model)
+
+        # -*- generate_a_response_from_the_llm (includes_running_function_calls)
+        self.llm = cast(LLM, self.llm)
+
+        response = self.llm.get_client().images.generate(prompt=prompt, n=n, size=size, model=model)
         return response.data[0].url
 
     def _download_and_save_image(self, image_url: str, image_path: str) -> None:
@@ -111,5 +108,6 @@ class CreateImage(BaseTool):
         :type image_path: str
         """
         image_data = requests.get(image_url).content
-        with open(image_path, "wb") as handler:
-            handler.write(image_data)
+        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        with open(image_path, "wb") as f:
+            f.write(image_data)

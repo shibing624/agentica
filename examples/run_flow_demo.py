@@ -1,66 +1,39 @@
-# -*- coding: utf-8 -*-
 """
-@author:XuMing(xuming624@qq.com)
-@description:
-This module is used to run Actionflow flows. To run one, use the following command:
-
-.. code-block:: bash
-    cd examples
-    python run_flow_demo.py --flow_path=flows/example.json --variables '<variable>=<value>' '<variable>=<value>'
-
+Please install dependencies using:
+pip install actionflow
 """
 
-import argparse
 import sys
 
 sys.path.append('..')
-from actionflow import ActionFlow
+from actionflow import Assistant, AzureOpenAILLM
+from actionflow.actionflow import Actionflow, Task
+from actionflow.tools.file import FileTool
 
+idea_assistant = Assistant(
+    name="企业家",
+    llm=AzureOpenAILLM(model="gpt-4o"),
+    description="你是一位杰出的企业家。你擅长于产生新的商业创意并将其营销推广。",
+    tools=[FileTool(data_dir="outputs")],
+    output_dir="outputs",
+    output_file_name="save.md",
+)
 
-def parse_variables(variables: list[str]) -> dict[str, str]:
-    """
-    Parses the variables provided as command line arguments.
+workflow = Actionflow(
+    name="商业想法生成",
+    tasks=[
+        Task(
+            description="""
+            1.提出五个教育产品创意。
+            2.根据可能的购买意图，从列表中选择最佳想法。
+            3.编写所选产品的简短描述。
+            4.创建一个简单的HTML页面，包括所选产品、描述，并在表格中列出该产品的一些优点。
+            5.将HTML页面保存为 'product.html'.
+            """,
+            assistant=idea_assistant,
+        ),
+    ],
+    debug_mode=True,
+)
 
-    :param variables: A list of strings where each string is a key-value pair in the format 'key=value'.
-    :type variables: list[str]
-    :return: A dictionary where the keys are the variable names and the values are the corresponding values.
-    :rtype: dict[str, str]
-    """
-    if not variables:
-        return {}
-
-    variable_dict = {}
-    for variable in variables:
-        key, value = variable.split("=")
-        variable_dict[key] = value
-    return variable_dict
-
-
-def main():
-    """
-    The main function that parses command line arguments and runs the specified flow.
-    """
-    parser = argparse.ArgumentParser(description="Actionflow")
-    parser.add_argument(
-        "--flow_path",
-        type=str,
-        default="flows/example_zh.json",
-        help="The file path of the flow to run. the json file",
-    )
-    parser.add_argument(
-        "--variables",
-        nargs="*",
-        help="Variables to be used in the flow. Should be in the format key1=value1 key2=value2. Put key=value pairs in quotes if they contain space.",
-        dest="variables",
-    )
-
-    args = parser.parse_args()
-    variables = parse_variables(args.variables)
-
-    flow = ActionFlow(flow_path=args.flow_path, variables=variables)
-    print(flow)
-    flow.run()
-
-
-if __name__ == "__main__":
-    main()
+workflow.print_response(markdown=True)

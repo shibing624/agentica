@@ -17,7 +17,7 @@ def output():
     flow = "test_summarize_text"
     output = Output(flow)
     yield output
-    shutil.rmtree(output.output_dir)
+    shutil.rmtree(output.data_dir)
 
 
 def test_get_definition(output):
