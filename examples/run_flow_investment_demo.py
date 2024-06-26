@@ -53,7 +53,7 @@ investment_lead = Assistant(
     output_file_name=investment_report,
 )
 
-investment_workflow = Actionflow(
+workflow = Actionflow(
     name="Investment Research Workflow",
     tasks=[
         Task(
@@ -74,4 +74,4 @@ investment_workflow = Actionflow(
     debug_mode=True,
 )
 
-investment_workflow.print_response(markdown=True, stream=False)
+workflow.print_response(markdown=True, stream=False)

@@ -1,66 +1,35 @@
-# -*- coding: utf-8 -*-
 """
-@author:XuMing(xuming624@qq.com)
-@description:
-This module is used to run Actionflow flows. To run one, use the following command:
-
-.. code-block:: bash
-    cd examples
-    python run_flow_demo.py --flow_path=flows/example.json --variables '<variable>=<value>' '<variable>=<value>'
-
+Please install dependencies using:
+pip install actionflow
 """
 
-import argparse
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant
+from actionflow import Assistant, AzureOpenAILLM
+from actionflow.actionflow import Actionflow, Task
 
+idea_assistant = Assistant(
+    name="brilliant entrepreneur",
+    llm=AzureOpenAILLM(model="gpt-4o"),
+    description="You are a brilliant entrepreneur. You are exceptional at generating new business ideas and marketing them.",
+    output_file_name="save.md",
+)
 
-def parse_variables(variables: list[str]) -> dict[str, str]:
-    """
-    Parses the variables provided as command line arguments.
+workflow = Actionflow(
+    name="Brainstorm Workflow",
+    tasks=[
+        Task(
+            description="""1.Brainstorm five ideas for a education product.
+            2.Choose the best idea from the list based on likely purchase intent
+            3.Write a short description of the chosen product.
+            4.Create a simple HTML page with the chosen product, description, and list some benefits of the product in the table. 
+            5.Save the HTML page as 'product.html'.
+            """,
+            assistant=idea_assistant,
+        ),
+    ],
+    debug_mode=True,
+)
 
-    :param variables: A list of strings where each string is a key-value pair in the format 'key=value'.
-    :type variables: list[str]
-    :return: A dictionary where the keys are the variable names and the values are the corresponding values.
-    :rtype: dict[str, str]
-    """
-    if not variables:
-        return {}
-
-    variable_dict = {}
-    for variable in variables:
-        key, value = variable.split("=")
-        variable_dict[key] = value
-    return variable_dict
-
-
-def main():
-    """
-    The main function that parses command line arguments and runs the specified flow.
-    """
-    parser = argparse.ArgumentParser(description="Actionflow")
-    parser.add_argument(
-        "--flow_path",
-        type=str,
-        default="flows/example_zh.json",
-        help="The file path of the flow to run. the json file",
-    )
-    parser.add_argument(
-        "--variables",
-        nargs="*",
-        help="Variables to be used in the flow. Should be in the format key1=value1 key2=value2. Put key=value pairs in quotes if they contain space.",
-        dest="variables",
-    )
-
-    args = parser.parse_args()
-    variables = parse_variables(args.variables)
-
-    flow = Assistant(flow_path=args.flow_path, variables=variables)
-    print(flow)
-    flow.run()
-
-
-if __name__ == "__main__":
-    main()
+workflow.print_response(markdown=True)
