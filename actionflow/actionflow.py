@@ -4,6 +4,8 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
+from __future__ import annotations
+
 from typing import List, Any, Optional, Dict, Iterator, Union
 from uuid import uuid4
 
