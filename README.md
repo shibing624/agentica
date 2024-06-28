@@ -24,12 +24,32 @@
 
 `Actionflow`是一个Agent工作流构建工具，功能：
 
-- 通过自然语言（prompt）在`json`文件中编排复杂工作流
+- 简单代码快速编排复杂工作流
 - 工作流的编排不仅支持prompt命令，还支持工具调用（tool_calls）
-- 基于变量名动态更改prompt输入
 - 支持OpenAI API和Moonshot API(kimi)调用
 
-## Install
+## Why Actionflow
+![llm_agnet](docs/llm_agent.png)
+
+**规划（Planning）**
+- 子目标和分解：`LLM Agent`能够将大型任务分解为较小的、可管理的子目标，以便有效的处理复杂任务
+- 反思和细化：`LLM Agent`可以对过去的行为进行自我批评和反省，从错误中吸取经验教训，并为接下来的行动进行分析、总结和提炼，这种反思和细化可以帮助`Agent`提高自身的智能和适应性，从而提高最终结果的质量
+
+**记忆 （Memory）**
+- 短期记忆：所有上下文学习都是依赖模型的短期记忆能力进行的，通常是指写到prompt中的信息
+- 长期记忆：这种设计使得`Agent`能够长期保存和调用无限信息的能力，一般通过外部载体存储和快速检索来实现
+
+**工具使用（Tool use）**
+- `LLM Agent`可以学习如何调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
+
+
+![actionflow_arch](docs/actionflow_arch.png)
+
+- Planner：负责让LLM生成一个多步计划来完成一个大任务，可以生成一个相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
+- Worker：接受“链式计划”，循环遍历计划中的每个子任务，并调用工具完成任务，可以自动反思纠错以完成任务
+- Solver：求解器将所有这些输出整合为最终答案
+
+## Installation
 
 ```bash
 pip install -U actionflow
@@ -40,61 +60,22 @@ or
 ```bash
 git clone https://github.com/shibing624/actionflow.git
 cd actionflow
-pip install -e .
+pip install .
 ```
 
-## Usage
+## Getting Started
 
 1. 复制[example.env](https://github.com/shibing624/actionflow/blob/main/example.env)文件为`.env`，并粘贴OpenAI API key或者Moonshoot API key。
 
-2. 运行actionflow示例：
+2. 运行Agent示例：
 
 ```bash
 cd examples
 python run_flow_demo.py --flow_path flows/example.json
 ```
-### 可选参数
-
-#### 使用`variables`参数
-
-```bash
-python run_flow_demo.py --flow_path flows/example_with_variables.json --variables 'market=college students' 'price_point=$50'
-```
 
 
-## 新建工作流（Actionflow）
-
-复制 [examples/flows/example.json](https://github.com/shibing624/actionflow/blob/main/examples/flows/example.json) 或者按照如下格式创建一个工作流（json文件）：
-
-```json
-{
-    "system_message": "An optional message that guides the model's behavior.",
-    "tasks": [
-        {
-            "action": "Instruct the LLM here!"
-        },
-        {
-            "action": "Actions can have settings, including function calls and temperature, like so:",
-            "settings": {
-                "tool_name": "save_file",
-                "temperature": 0.8
-            }
-        },
-        {
-            "action": "..."
-        }
-    ]
-}
-```
-
-## 新建工具（Tools）
-
-复制 [actionflow/tools/save_file.py](https://github.com/shibing624/actionflow/blob/main/actionflow/tools/save_file.py) 并修改，或者按如下指引新增一个工具（记得替换`tool_name`为你的工具名）：
-1. **在[actionflow/tools](https://github.com/shibing624/actionflow/tree/main/actionflow/tools)文件夹新增`tool_name.py`**
-2. **新建类`ToolName`** 继承自`BaseTool`
-3. **在类中新增`get_definition()`和`execute()`方法**，具体参考`BaseTool`
-
-这样，你就可以在工作流中使用新增的`tool_name`工具。 
+### 工作流（Workflow）
 
 ## Contact
 
@@ -129,7 +110,6 @@ BibTeX:
 ## License
 
 授权协议为 [The Apache License 2.0](/LICENSE)，可免费用做商业用途。请在产品说明中附加`actionflow`的链接和授权协议。
-
 ## Contribute
 
 项目代码还很粗糙，如果大家对代码有所改进，欢迎提交回本项目，在提交之前，注意以下两点：
@@ -144,4 +124,6 @@ BibTeX:
 - [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
 - [https://github.com/simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
 - [https://github.com/phidatahq/phidata](https://github.com/phidatahq/phidata)
+
+
 Thanks for their great work!
