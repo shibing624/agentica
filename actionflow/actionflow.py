@@ -45,8 +45,6 @@ class Actionflow(BaseModel):
     # -*- Actionflow Output
     # Final output of this Actionflow
     output: Optional[Any] = None
-    # Save the output to a file
-    # save_output_to_file: Optional[str] = None
 
     # debug_mode=True enables debug logs
     debug_mode: bool = False
