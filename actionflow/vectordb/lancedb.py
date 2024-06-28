@@ -6,7 +6,6 @@ part of the code from https://github.com/phidatahq/phidata
 """
 
 import json
-from enum import Enum
 from hashlib import md5
 from typing import List, Optional
 

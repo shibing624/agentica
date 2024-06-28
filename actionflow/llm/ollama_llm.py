@@ -8,16 +8,16 @@ import json
 from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any, Mapping, Union
 
+try:
+    from ollama import Client as OllamaClient
+except ImportError:
+    raise ImportError("`ollama` not installed, please run `pip install ollama`")
+
 from actionflow.llm.base import LLM
 from actionflow.message import Message
 from actionflow.tool import FunctionCall, get_function_call_for_tool_call
 from actionflow.utils.log import logger
 from actionflow.utils.timer import Timer
-
-try:
-    from ollama import Client as OllamaClient
-except ImportError:
-    raise ImportError("`ollama` not installed, please run `pip install ollama`")
 
 
 class OllamaLLM(LLM):

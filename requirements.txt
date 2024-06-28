@@ -4,6 +4,8 @@ openai
 tiktoken
 python-dotenv
 pytest
+pydantic
+yfinance
 tenacity
 rich
 nbclient

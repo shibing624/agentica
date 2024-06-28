@@ -10,13 +10,6 @@ from typing import Optional, List, Iterator, Dict, Any, Union, Tuple
 
 import httpx
 
-from actionflow.config import FAST_LLM
-from actionflow.llm.base import LLM
-from actionflow.message import Message
-from actionflow.tool import FunctionCall, get_function_call, get_function_call_for_tool_call
-from actionflow.utils.log import logger
-from actionflow.utils.timer import Timer
-
 try:
     from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
     from openai.types.completion_usage import CompletionUsage
@@ -34,6 +27,12 @@ try:
     from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 except ImportError:
     raise ImportError("`openai` not installed, please run `pip install openai -U`.")
+from actionflow.config import FAST_LLM
+from actionflow.llm.base import LLM
+from actionflow.message import Message
+from actionflow.tool import FunctionCall, get_function_call, get_function_call_for_tool_call
+from actionflow.utils.log import logger
+from actionflow.utils.timer import Timer
 
 
 class OpenAILLM(LLM):

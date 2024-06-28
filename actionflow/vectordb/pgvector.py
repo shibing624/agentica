@@ -1,5 +1,5 @@
-from typing import Optional, List, Union, Dict, Any
 from hashlib import md5
+from typing import Optional, List, Union, Dict, Any
 
 from pydantic import BaseModel
 
@@ -19,10 +19,9 @@ try:
 except ImportError:
     raise ImportError("`pgvector` not installed, please install it via `pip install pgvector`.")
 
-
 from actionflow.document import Document
 from actionflow.emb.base import Emb
-from actionflow.vectordb.base import VectorDb,Distance
+from actionflow.vectordb.base import VectorDb, Distance
 from actionflow.emb.openai_emb import OpenAIEmb
 from actionflow.utils.log import logger
 
@@ -49,14 +48,14 @@ class HNSW(BaseModel):
 
 class PgVector(VectorDb):
     def __init__(
-        self,
-        collection: str,
-        schema: Optional[str] = "ai",
-        db_url: Optional[str] = None,
-        db_engine: Optional[Engine] = None,
-        embedder: Optional[Emb] = None,
-        distance: Distance = Distance.cosine,
-        index: Optional[Union[Ivfflat, HNSW]] = HNSW(),
+            self,
+            collection: str,
+            schema: Optional[str] = "ai",
+            db_url: Optional[str] = None,
+            db_engine: Optional[Engine] = None,
+            embedder: Optional[Emb] = None,
+            distance: Distance = Distance.cosine,
+            index: Optional[Union[Ivfflat, HNSW]] = HNSW(),
     ):
         _engine: Optional[Engine] = db_engine
         if _engine is None and db_url is not None:

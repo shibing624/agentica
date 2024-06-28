@@ -4,16 +4,16 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from uuid import uuid4
 from typing import List, Any, Optional, Dict, Iterator, Union
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator, Field
 
 from actionflow.llm.base import LLM
+from actionflow.message import get_text_from_message
 from actionflow.task import Task
 from actionflow.utils.log import logger, set_log_level_to_debug
 from actionflow.utils.timer import Timer
-from actionflow.message import Message, get_text_from_message
 
 
 class Actionflow(BaseModel):
@@ -63,11 +63,11 @@ class Actionflow(BaseModel):
         return v if v is not None else str(uuid4())
 
     def _run(
-        self,
-        message: Optional[Union[List, Dict, str]] = None,
-        *,
-        stream: bool = True,
-        **kwargs: Any,
+            self,
+            message: Optional[Union[List, Dict, str]] = None,
+            *,
+            stream: bool = True,
+            **kwargs: Any,
     ) -> Iterator[str]:
         logger.debug(f"*********** Actionflow Run Start: {self.run_id} ***********")
 
@@ -118,11 +118,11 @@ class Actionflow(BaseModel):
         logger.debug(f"*********** Actionflow Run End: {self.run_id} ***********")
 
     def run(
-        self,
-        message: Optional[Union[List, Dict, str]] = None,
-        *,
-        stream: bool = True,
-        **kwargs: Any,
+            self,
+            message: Optional[Union[List, Dict, str]] = None,
+            *,
+            stream: bool = True,
+            **kwargs: Any,
     ) -> Union[Iterator[str], str]:
         if stream:
             resp = self._run(message=message, stream=True, **kwargs)
@@ -131,13 +131,13 @@ class Actionflow(BaseModel):
             return "".join(self._run(message=message, stream=False, **kwargs))
 
     def print_response(
-        self,
-        message: Optional[Union[List, Dict, str]] = None,
-        *,
-        stream: bool = True,
-        markdown: bool = False,
-        show_message: bool = True,
-        **kwargs: Any,
+            self,
+            message: Optional[Union[List, Dict, str]] = None,
+            *,
+            stream: bool = True,
+            markdown: bool = False,
+            show_message: bool = True,
+            **kwargs: Any,
     ) -> None:
         from actionflow.utils.misc import console
         from rich.live import Live
@@ -171,7 +171,7 @@ class Actionflow(BaseModel):
             response_timer = Timer()
             response_timer.start()
             with Progress(
-                SpinnerColumn(spinner_name="dots"), TextColumn("{task.description}"), transient=True
+                    SpinnerColumn(spinner_name="dots"), TextColumn("{task.description}"), transient=True
             ) as progress:
                 progress.add_task("Working...")
                 response = self.run(message=message, stream=False, **kwargs)  # type: ignore
@@ -188,12 +188,12 @@ class Actionflow(BaseModel):
             console.print(table)
 
     def cli(
-        self,
-        user: str = "User",
-        emoji: str = ":sunglasses:",
-        stream: bool = True,
-        markdown: bool = False,
-        exit_on: Optional[List[str]] = None,
+            self,
+            user: str = "User",
+            emoji: str = ":sunglasses:",
+            stream: bool = True,
+            markdown: bool = False,
+            exit_on: Optional[List[str]] = None,
     ) -> None:
         from rich.prompt import Prompt
 

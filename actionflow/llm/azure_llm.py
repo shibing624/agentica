@@ -7,13 +7,12 @@ part of the code from https://github.com/phidatahq/phidata
 from os import getenv
 from typing import Optional, Dict, Any
 
-from actionflow.config import FAST_LLM
-from actionflow.llm.openai_llm import OpenAILLM
-
 try:
     from openai import AzureOpenAI as AzureOpenAIClient
 except ImportError:
     raise ImportError("`openai` not installed, please run `pip install openai`")
+from actionflow.config import FAST_LLM
+from actionflow.llm.openai_llm import OpenAILLM
 
 
 class AzureOpenAILLM(OpenAILLM):
