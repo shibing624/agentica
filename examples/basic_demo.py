@@ -22,11 +22,6 @@ m = Assistant(
     debug_mode=True,
 )
 print("LLM:", m.llm)
-
-r = m.run("介绍林黛玉", stream=False)
-print(r)
-
-# -*- Print a response to the console -*-
-m.print_response("介绍一个减肥早餐食谱")
-m.print_response("当前韩国最新最流行的燃脂减肥餐单")
-m.print_response("我前面问了啥")
+print(m.run("介绍林黛玉", stream=False))
+print(m.run("北京最近的新闻", stream=False))
+print(m.run("我前面问了啥", stream=False))

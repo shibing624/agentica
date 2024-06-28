@@ -22,32 +22,26 @@
 
 **actionflow**: 快速构建你自己的Agent工作流
 
+## Overview
+![llm_agnet](https://github.com/shibing624/actionflow/blob/main/docs/llm_agent.png)
+
+- **规划（Planning）**：任务拆解、生成计划、反思
+- **记忆（Memory）**：短期记忆（prompt实现）、长期记忆（RAG实现）
+- **工具使用（Tool use）**：function call能力，调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
+
+
+![actionflow_arch](https://github.com/shibing624/actionflow/blob/main/docs/actionflow_arch.png)
+
+- **Planner**：负责让LLM生成一个多步计划来完成复杂任务，生成相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
+- **Worker**：接受“链式计划”，循环遍历计划中的每个子任务，并调用工具完成任务，可以自动反思纠错以完成任务
+- **Solver**：求解器将所有这些输出整合为最终答案
+
+## Features
 `Actionflow`是一个Agent工作流构建工具，功能：
 
 - 简单代码快速编排复杂工作流
 - 工作流的编排不仅支持prompt命令，还支持工具调用（tool_calls）
 - 支持OpenAI API和Moonshot API(kimi)调用
-
-## Why Actionflow
-![llm_agnet](docs/llm_agent.png)
-
-**规划（Planning）**
-- 子目标和分解：`LLM Agent`能够将大型任务分解为较小的、可管理的子目标，以便有效的处理复杂任务
-- 反思和细化：`LLM Agent`可以对过去的行为进行自我批评和反省，从错误中吸取经验教训，并为接下来的行动进行分析、总结和提炼，这种反思和细化可以帮助`Agent`提高自身的智能和适应性，从而提高最终结果的质量
-
-**记忆 （Memory）**
-- 短期记忆：所有上下文学习都是依赖模型的短期记忆能力进行的，通常是指写到prompt中的信息
-- 长期记忆：这种设计使得`Agent`能够长期保存和调用无限信息的能力，一般通过外部载体存储和快速检索来实现
-
-**工具使用（Tool use）**
-- `LLM Agent`可以学习如何调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
-
-
-![actionflow_arch](docs/actionflow_arch.png)
-
-- Planner：负责让LLM生成一个多步计划来完成一个大任务，可以生成一个相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
-- Worker：接受“链式计划”，循环遍历计划中的每个子任务，并调用工具完成任务，可以自动反思纠错以完成任务
-- Solver：求解器将所有这些输出整合为最终答案
 
 ## Installation
 
@@ -67,15 +61,37 @@ pip install .
 
 1. 复制[example.env](https://github.com/shibing624/actionflow/blob/main/example.env)文件为`.env`，并粘贴OpenAI API key或者Moonshoot API key。
 
-2. 运行Agent示例：
+2. 运行Agent示例，自动调用google搜索工具：
 
-```bash
-cd examples
-python run_flow_demo.py --flow_path flows/example.json
+```python
+from actionflow import Assistant, OpenAILLM, AzureOpenAILLM
+from actionflow.tools.search_serper import SearchSerperTool
+
+m = Assistant(
+    llm=AzureOpenAILLM(),
+    description="You are a helpful ai assistant.",
+    show_tool_calls=True,
+    # Enable the assistant to search the knowledge base
+    search_knowledge=False,
+    tools=[SearchSerperTool()],
+    # Enable the assistant to read the chat history
+    read_chat_history=True,
+    debug_mode=True,
+)
+print("LLM:", m.llm)
+print(m.run("介绍林黛玉", stream=False))
+print(m.run("北京最近的新闻", stream=False))
+print(m.run("我前面问了啥", stream=False))
 ```
 
+## Examples
+运行工作流（Workflow）示例：
 
-### 工作流（Workflow）
+- [examples/rag_assistant_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/rag_assistant_demo.py) 实现了RAG功能，基于PDF文档回答问题
+- [examples/python_assistant_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/python_assistant_demo.py) 实现了Code Interpreter功能，自动生成python代码，并执行
+- [examples/research_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/research_demo.py) 实现了Research功能，自动调用搜索工具，汇总信息后撰写科技报告
+- [examples/run_flow_news_article_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/run_flow_news_article_demo.py) 实现了写新闻稿的工作流，multi-agent的实现，定义了多个Assistant和Task，多次调用搜索工具，并生成高级排版的新闻文章
+- [examples/run_flow_investment_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/run_flow_investment_demo.py) 实现了投资研究的工作流，依次执行股票信息收集、股票分析、撰写分析报告，复查报告等多个Task
 
 ## Contact
 
