@@ -4,9 +4,11 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from typing import Optional, Dict, List, Tuple, Any
-from typing_extensions import Literal
 from os import getenv
+from typing import Optional, Dict, List, Tuple, Any
+
+from typing_extensions import Literal
+
 from actionflow.emb.base import Emb
 from actionflow.utils.log import logger
 
@@ -18,7 +20,7 @@ except ImportError:
 
 
 class OpenAIEmb(Emb):
-    model: str = "text-embedding-ada-002"
+    model: str = "text-embedding-ada-002"  # or text-embedding-3-small
     dimensions: int = 1536
     encoding_format: Literal["float", "base64"] = "float"
     user: Optional[str] = None
