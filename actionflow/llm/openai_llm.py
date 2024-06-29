@@ -543,6 +543,7 @@ class OpenAILLM(LLM):
         assistant_message_function_name = ""
         assistant_message_function_arguments_str = ""
         assistant_message_tool_calls: Optional[List[ChoiceDeltaToolCall]] = None
+        prompt_tokens = sum([self.calculate_tokens(i.get_content_string()) for i in messages if i])
         completion_tokens = 0
         time_to_first_token = None
         t = Timer()
@@ -586,7 +587,9 @@ class OpenAILLM(LLM):
         if completion_tokens > 0:
             logger.debug(f"Time to generate response: {t.elapsed:.4f}s, "
                          f"Time per output token: {t.elapsed / completion_tokens:.4f}s, "
-                         f"Throughput: {completion_tokens / t.elapsed:.4f} tokens/s")
+                         f"Throughput: {completion_tokens / t.elapsed:.4f} tokens/s, "
+                         f"Prompt tokens size: {prompt_tokens}, "
+                         f"Completion tokens size: {completion_tokens}")
 
         # -*- Create assistant message
         assistant_message = Message(role="assistant")
@@ -664,13 +667,11 @@ class OpenAILLM(LLM):
             self.metrics["tokens_per_second"].append(f"{completion_tokens / t.elapsed:.4f}")
 
         # Add token usage to metrics
-        prompt_tokens = sum([self.calculate_tokens(i.get_content_string()) for i in messages if i])
         assistant_message.metrics["prompt_tokens"] = prompt_tokens
         if "prompt_tokens" not in self.metrics:
             self.metrics["prompt_tokens"] = prompt_tokens
         else:
             self.metrics["prompt_tokens"] += prompt_tokens
-        logger.debug(f"Completion tokens size: {completion_tokens}")
         assistant_message.metrics["completion_tokens"] = completion_tokens
         if "completion_tokens" not in self.metrics:
             self.metrics["completion_tokens"] = completion_tokens

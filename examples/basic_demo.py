@@ -6,7 +6,7 @@
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, OpenAILLM, AzureOpenAILLM
+from actionflow import Assistant, AzureOpenAILLM
 from actionflow.tools.search_serper import SearchSerperTool
 
 m = Assistant(
@@ -22,6 +22,6 @@ m = Assistant(
     debug_mode=True,
 )
 print("LLM:", m.llm)
-print(m.run("介绍林黛玉", stream=False))
-print(m.run("北京最近的新闻", stream=False))
-print(m.run("我前面问了啥", stream=False))
+m.run("一句话介绍林黛玉")
+m.run("北京最近的新闻", stream=True, print_output=True)
+print(m.run("总结前面的问答", stream=False, print_output=False))

@@ -23,4 +23,4 @@ python_assistant = PythonAssistant(
     debug_mode=True,
 )
 
-python_assistant.print_response("What is the min rating of movies?")
+python_assistant.run("What is the min rating of movies?")

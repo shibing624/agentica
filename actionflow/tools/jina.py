@@ -36,12 +36,13 @@ class JinaTool(Toolkit):
         if jina_search:
             self.register(self.jina_search)
 
-    def jina_url_reader(self, url: str, timeout: int = 60) -> str:
+    def jina_url_reader(self, url: str, timeout: int = 60, save_file: str = None) -> str:
         """
         Crawls a website using Jina's website-content-crawler actor.
 
         :param url: str, The URL to crawl.
         :param timeout: int, The timeout for the crawling.
+        :param save_file: str, The file name to save the crawled Markdown content to, ending in .md.
 
         :return: str, The result of the crawling, Markdown format.
         """
@@ -62,13 +63,18 @@ class JinaTool(Toolkit):
                 result = response.text
         except Exception as e:
             logger.error(f"Failed to fetch URL. Error: {e}")
+
+        if save_file and result:
+            with open(save_file, 'w', encoding='utf-8') as f:
+                f.write(result)
         return result
 
-    def jina_search(self, query: str) -> str:
+    def jina_search(self, query: str, save_file: str = None) -> str:
         """
         Search using Jina's web-search actor.
 
-        :param query: The URLs to scrape.
+        :param query: str, The query to search for.
+        :param save_file: str, The file name to save the crawled Markdown content to, ending in .md.
 
         :return: The results of the search.
         """
@@ -88,6 +94,10 @@ class JinaTool(Toolkit):
                 result = response.text
         except Exception as e:
             logger.error(f"Failed to fetch URL. Error: {e}")
+        if save_file and result:
+            with open(save_file, 'w', encoding='utf-8') as f:
+                f.write(result)
+
         return result
 
 

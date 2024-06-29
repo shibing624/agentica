@@ -11,9 +11,8 @@ import os
 import runpy
 from typing import Optional
 
-from actionflow.utils.log import logger
-
 from actionflow.tool import Toolkit
+from actionflow.utils.log import logger
 
 
 @functools.lru_cache(maxsize=None)
@@ -38,25 +37,21 @@ class RunPythonCodeTool(Toolkit):
         # Restricted global and local scope
         self.safe_globals: dict = safe_globals or globals()
         if run_code:
-            self.register(self.run_python_code, sanitize_arguments=False)
+            self.register(self.save_and_run_python_code, sanitize_arguments=False)
         if pip_install:
             self.register(self.pip_install_package)
 
-    def run_python_code(
+    def save_and_run_python_code(
             self, file_name: str, code: str, variable_to_return: Optional[str] = None, overwrite: bool = True
     ) -> str:
         """
-        This function saves Python code to a file called `file_name` and then runs it.
-            If successful, returns the value of `variable_to_return` if provided otherwise returns a success message.
-            If failed, returns an error message.
+        Saves Python code to a specified file, then runs the file.
 
-            Make sure the file_name ends with `.py`
-
-        :param file_name: The name of the file the code will be saved to.
-        :param code: The code to save and run.
-        :param variable_to_return: Optional[str], The variable to return.
-        :param overwrite: Overwrite the file if it already exists.
-        :return: if run is successful, the value of `variable_to_return` if provided else file name.
+        :param file_name: The name of the file to save and run, e.g., "test_script.py", required.
+        :param code: The code to save and run, e.g., "a = 5\nb = 110\nc = a + b\nprint(c)", required.
+        :param variable_to_return: Optional[str], The variable to return the value of after execution, default is None.
+        :param overwrite: Whether to overwrite the file if it already exists, default is True.
+        :return: The value of `variable_to_return` if provided and available, otherwise a success message or error message.
         """
         try:
             warn()
@@ -87,9 +82,6 @@ class RunPythonCodeTool(Toolkit):
 
     def pip_install_package(self, package_name: str) -> str:
         """This function installs a package using pip in the current environment.
-        If successful, returns a success message.
-        If failed, returns an error message.
-
         :param package_name: The name of the package to install.
         :return: success message if successful, otherwise returns an error message.
         """
@@ -110,7 +102,7 @@ class RunPythonCodeTool(Toolkit):
 if __name__ == '__main__':
     tool = RunPythonCodeTool()
 
-    result = tool.run_python_code(
+    result = tool.save_and_run_python_code(
         file_name="test_script.py",
         code="a = 5\nb = 110\nc = a + b\nprint(c)",
         variable_to_return="c"

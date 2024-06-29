@@ -14,8 +14,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, Field
 from actionflow.llm.base import LLM
 from actionflow.message import get_text_from_message
 from actionflow.task import Task
-from actionflow.utils.log import logger, set_log_level_to_debug
-from actionflow.utils.timer import Timer
+from actionflow.utils.log import logger, set_log_level_to_debug, print_llm_stream
 
 
 class Actionflow(BaseModel):
@@ -106,7 +105,9 @@ class Actionflow(BaseModel):
             if stream and task.streamable:
                 for chunk in task.run(message=input_for_current_task, stream=True, **kwargs):
                     task_output += chunk if isinstance(chunk, str) else ""
-                    yield chunk if isinstance(chunk, str) else ""
+                    chunk_str = chunk if isinstance(chunk, str) else ""
+
+                    yield chunk_str
             else:
                 task_output = task.run(message=input_for_current_task, stream=False, **kwargs)  # type: ignore
 
@@ -122,77 +123,27 @@ class Actionflow(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
+            print_output: bool = True,
             **kwargs: Any,
     ) -> Union[Iterator[str], str]:
         if stream:
             resp = self._run(message=message, stream=True, **kwargs)
+            if print_output:
+                for chunk in resp:
+                    print_llm_stream(chunk)
             return resp
         else:
-            return "".join(self._run(message=message, stream=False, **kwargs))
-
-    def print_response(
-            self,
-            message: Optional[Union[List, Dict, str]] = None,
-            *,
-            stream: bool = True,
-            markdown: bool = False,
-            show_message: bool = True,
-            **kwargs: Any,
-    ) -> None:
-        from actionflow.utils.misc import console
-        from rich.live import Live
-        from rich.table import Table
-        from rich.status import Status
-        from rich.progress import Progress, SpinnerColumn, TextColumn
-        from rich.box import ROUNDED
-        from rich.markdown import Markdown
-
-        if stream:
-            response = ""
-            with Live() as live_log:
-                status = Status("Working...", spinner="dots")
-                live_log.update(status)
-                response_timer = Timer()
-                response_timer.start()
-                for resp in self.run(message=message, stream=True, **kwargs):
-                    if isinstance(resp, str):
-                        response += resp
-                    _response = Markdown(response) if markdown else response
-
-                    table = Table(box=ROUNDED, border_style="blue", show_header=False)
-                    if message and show_message:
-                        table.show_header = True
-                        table.add_column("Message")
-                        table.add_column(get_text_from_message(message))
-                    table.add_row(f"Response\n({response_timer.elapsed:.1f}s)", _response)  # type: ignore
-                    live_log.update(table)
-                response_timer.stop()
-        else:
-            response_timer = Timer()
-            response_timer.start()
-            with Progress(
-                    SpinnerColumn(spinner_name="dots"), TextColumn("{task.description}"), transient=True
-            ) as progress:
-                progress.add_task("Working...")
-                response = self.run(message=message, stream=False, **kwargs)  # type: ignore
-
-            response_timer.stop()
-            _response = Markdown(response) if markdown else response
-
-            table = Table(box=ROUNDED, border_style="blue", show_header=False)
-            if message and show_message:
-                table.show_header = True
-                table.add_column("Message")
-                table.add_column(get_text_from_message(message))
-            table.add_row(f"Response\n({response_timer.elapsed:.1f}s)", _response)  # type: ignore
-            console.print(table)
+            resp = "".join(self._run(message=message, stream=False, **kwargs))
+            if print_output:
+                print(resp)
+            return resp
 
     def cli(
             self,
             user: str = "User",
             emoji: str = ":sunglasses:",
             stream: bool = True,
-            markdown: bool = False,
+            print_output: bool = True,
             exit_on: Optional[List[str]] = None,
     ) -> None:
         from rich.prompt import Prompt
@@ -203,4 +154,4 @@ class Actionflow(BaseModel):
             if message in _exit_on:
                 break
 
-            self.print_response(message=message, stream=stream, markdown=markdown)
+            self.run(message=message, stream=stream, print_output=print_output)

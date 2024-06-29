@@ -55,4 +55,4 @@ m = Assistant(
     show_tool_calls=True,
     debug_mode=True,
 )
-m.print_response("苹果 WWDC 发布会")
+m.run("苹果 WWDC 发布会")

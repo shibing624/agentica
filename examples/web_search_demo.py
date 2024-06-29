@@ -12,4 +12,4 @@ from actionflow.tools.search_serper import SearchSerperTool
 assistant = Assistant(
     llm=AzureOpenAILLM(model="gpt-4o"), tools=[SearchSerperTool()],
     add_datetime_to_instructions=True, show_tool_calls=True)
-assistant.print_response("北京今天天气")
+assistant.run("北京今天天气")

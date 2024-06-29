@@ -27,25 +27,19 @@ from typing import (
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
-from rich.box import ROUNDED
-from rich.live import Live
-from rich.markdown import Markdown
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.status import Status
-from rich.table import Table
 
 from actionflow.document import Document
 from actionflow.documents import Documents
 from actionflow.llm.base import LLM
 from actionflow.memory import AssistantMemory, Memory
-from actionflow.message import Message, get_text_from_message
+from actionflow.message import Message
 from actionflow.references import References
 from actionflow.run_record import RunRecord
 from actionflow.sqlite_storage import SqliteStorage
 from actionflow.tool import Tool, Toolkit, Function
-from actionflow.utils.misc import console, merge_dictionaries, remove_indent
+from actionflow.utils.log import logger, set_log_level_to_debug, print_llm_stream
+from actionflow.utils.misc import merge_dictionaries, remove_indent
 from actionflow.utils.timer import Timer
-from actionflow.utils.log import logger, set_log_level_to_debug
 
 
 class Assistant(BaseModel):
@@ -160,7 +154,7 @@ class Assistant(BaseModel):
     limit_tool_access: bool = False
     # If True, add the current datetime to the prompt to give the assistant a sense of time
     # This allows for relative times like "tomorrow" to be used in the prompt
-    add_datetime_to_instructions: bool = False
+    add_datetime_to_instructions: bool = True
     # If markdown=true, add instructions to format the output using markdown
     markdown: bool = False
 
@@ -282,6 +276,7 @@ class Assistant(BaseModel):
                 exit(1)
 
             self.llm = OpenAILLM()
+        logger.debug(f"Using LLM: {self.llm}")
 
         # Set response_format if it is not set on the llm
         if self.output_model is not None and self.llm.response_format is None:
@@ -934,6 +929,7 @@ class Assistant(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
+            print_output: bool = True,
             messages: Optional[List[Union[Dict, Message]]] = None,
             **kwargs: Any,
     ) -> Union[Iterator[str], str, BaseModel]:
@@ -964,10 +960,16 @@ class Assistant(BaseModel):
         else:
             if stream and self.streamable:
                 resp = self._run(message=message, messages=messages, stream=True, **kwargs)
+                if print_output:
+                    for chunk in resp:
+                        print_llm_stream(chunk)
                 return resp
             else:
                 resp = self._run(message=message, messages=messages, stream=False, **kwargs)
-                return next(resp)
+                resp = next(resp)
+                if print_output:
+                    print(resp)
+                return resp
 
     async def _arun(
             self,
@@ -1094,6 +1096,7 @@ class Assistant(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
+            print_output: bool = True,
             messages: Optional[List[Union[Dict, Message]]] = None,
             **kwargs: Any,
     ) -> Union[AsyncIterator[str], str, BaseModel]:
@@ -1125,10 +1128,16 @@ class Assistant(BaseModel):
         else:
             if stream and self.streamable:
                 resp = self._arun(message=message, messages=messages, stream=True, **kwargs)
+                if print_output:
+                    async for chunk in resp:
+                        print_llm_stream(chunk)
                 return resp
             else:
                 resp = self._arun(message=message, messages=messages, stream=False, **kwargs)
-                return await resp.__anext__()
+                r = await resp.__anext__()
+                if print_output:
+                    print(r)
+                return r
 
     def chat(
             self, message: Union[List, Dict, str], stream: bool = True, **kwargs: Any
@@ -1311,10 +1320,6 @@ class Assistant(BaseModel):
         except Exception as e:
             return f"Failed to update memory: {e}"
 
-    ###########################################################################
-    # Print Response
-    ###########################################################################
-
     def convert_response_to_string(self, response: Any) -> str:
         if isinstance(response, str):
             return response
@@ -1322,123 +1327,6 @@ class Assistant(BaseModel):
             return response.model_dump_json(exclude_none=True, indent=2)
         else:
             return json.dumps(response, indent=2, ensure_ascii=False)
-
-    def print_response(
-            self,
-            message: Optional[Union[List, Dict, str]] = None,
-            *,
-            messages: Optional[List[Union[Dict, Message]]] = None,
-            stream: bool = True,
-            markdown: bool = False,
-            show_message: bool = True,
-            **kwargs: Any,
-    ) -> None:
-        if markdown:
-            self.markdown = True
-
-        if self.output_model is not None:
-            self.markdown = False
-            stream = False
-
-        if stream:
-            response = ""
-            with Live() as live_log:
-                status = Status("Working...", spinner="dots")
-                live_log.update(status)
-                t = Timer()
-                t.start()
-                for resp in self.run(message=message, messages=messages, stream=True, **kwargs):
-                    if isinstance(resp, str):
-                        response += resp
-                    _response = Markdown(response) if self.markdown else response
-
-                    table = Table(box=ROUNDED, border_style="blue", show_header=False)
-                    if message and show_message:
-                        table.show_header = True
-                        table.add_column("Message")
-                        table.add_column(get_text_from_message(message))
-                    table.add_row(f"Response\n({t.elapsed:.1f}s)", _response)  # type: ignore
-                    live_log.update(table)
-                t.stop()
-        else:
-            t = Timer()
-            t.start()
-            with Progress(
-                    SpinnerColumn(spinner_name="dots"), TextColumn("{task.description}"), transient=True
-            ) as progress:
-                progress.add_task("Working...")
-                response = self.run(message=message, messages=messages, stream=False, **kwargs)  # type: ignore
-
-            t.stop()
-            _response = Markdown(response) if self.markdown else self.convert_response_to_string(response)
-
-            table = Table(box=ROUNDED, border_style="blue", show_header=False)
-            if message and show_message:
-                table.show_header = True
-                table.add_column("Message")
-                table.add_column(get_text_from_message(message))
-            table.add_row(f"Response\n({t.elapsed:.1f}s)", _response)  # type: ignore
-            console.print(table)
-
-    async def async_print_response(
-            self,
-            message: Optional[Union[List, Dict, str]] = None,
-            messages: Optional[List[Union[Dict, Message]]] = None,
-            stream: bool = True,
-            markdown: bool = False,
-            show_message: bool = True,
-            **kwargs: Any,
-    ) -> None:
-        if markdown:
-            self.markdown = True
-
-        if self.output_model is not None:
-            self.markdown = False
-
-        if stream:
-            response = ""
-            with Live() as live_log:
-                status = Status("Working...", spinner="dots")
-                live_log.update(status)
-                t = Timer()
-                t.start()
-                async for resp in await self.arun(
-                        message=message,
-                        messages=messages,
-                        stream=True,
-                        **kwargs
-                ):  # type: ignore
-                    if isinstance(resp, str):
-                        response += resp
-                    _response = Markdown(response) if self.markdown else response
-
-                    table = Table(box=ROUNDED, border_style="blue", show_header=False)
-                    if message and show_message:
-                        table.show_header = True
-                        table.add_column("Message")
-                        table.add_column(get_text_from_message(message))
-                    table.add_row(f"Response\n({t.elapsed:.1f}s)", _response)  # type: ignore
-                    live_log.update(table)
-                t.stop()
-        else:
-            t = Timer()
-            t.start()
-            with Progress(
-                    SpinnerColumn(spinner_name="dots"), TextColumn("{task.description}"), transient=True
-            ) as progress:
-                progress.add_task("Working...")
-                response = await self.arun(message=message, messages=messages, stream=False, **kwargs)
-
-            t.stop()
-            _response = Markdown(response) if self.markdown else self.convert_response_to_string(response)
-
-            table = Table(box=ROUNDED, border_style="blue", show_header=False)
-            if message and show_message:
-                table.show_header = True
-                table.add_column("Message")
-                table.add_column(get_text_from_message(message))
-            table.add_row(f"Response\n({t.elapsed:.1f}s)", _response)  # type: ignore
-            console.print(table)
 
     def cli(
             self,
@@ -1454,11 +1342,11 @@ class Assistant(BaseModel):
         _exit_on = exit_on or ["exit", "quit", "bye"]
         logger.debug(f"Enable cli, exit with {_exit_on[0]}")
         if message:
-            self.print_response(message=message, stream=stream, markdown=markdown, **kwargs)
+            self.run(message=message, stream=stream, markdown=markdown, **kwargs)
 
         while True:
             message = Prompt.ask(f"[bold] {emoji} {user} [/bold]")
             if message in _exit_on:
                 break
 
-            self.print_response(message=message, stream=stream, markdown=markdown, **kwargs)
+            self.run(message=message, stream=stream, markdown=markdown, **kwargs)

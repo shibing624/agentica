@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from textwrap import dedent
 from typing import Optional, List, Dict, Any
 
@@ -6,8 +7,8 @@ from pydantic import model_validator
 
 from actionflow.assistant import Assistant
 from actionflow.file.base import File
-from actionflow.utils.log import logger
 from actionflow.tools.run_python_code import RunPythonCodeTool
+from actionflow.utils.log import logger
 
 
 class PythonAssistant(Assistant):
@@ -44,7 +45,6 @@ class PythonAssistant(Assistant):
 
         if add_python_tool:
             logger.debug("Adding RunPythonCodeTool to the PythonAssistant.")
-            self.data_dir = self.data_dir or self.output_dir
             self._python_tool = RunPythonCodeTool(
                 data_dir=self.data_dir,
                 run_code=self.run_code,
@@ -133,11 +133,14 @@ class PythonAssistant(Assistant):
 
         if self.run_code:
             _instructions += [
-                "After the script is ready, save and run it using the `run_python_code` function."
-                "If the python script needs to return the answer to you, specify the `variable_to_return` "
-                "parameter correctly"
-                "Give the file name with `xxx.py`, replace xxx with a good file name, share it with the user."
+                "Once the Python script is complete, assign the script to the `code` variable, "
+                "Then, call the `save_and_run_python_code` function, "
+                "You must provide values for both the `file_name` and `code` parameters. "
+                "To save the code to a file and execute it, set `file_name` to a string in the format `xxx.py`, where `xxx` is a suitable name for the file. "
+                "If the Python script needs to return a result to you, make sure to correctly set the `variable_to_return` parameter."
             ]
+        if self.add_datetime_to_instructions:
+            _instructions += [f"The current time is {datetime.now()}"]
         _instructions += ["Continue till you have accomplished the task."]
 
         # Add instructions for using markdown
@@ -157,7 +160,7 @@ class PythonAssistant(Assistant):
         # -*- Build the default system prompt
         # First add the Assistant description
         _system_prompt = (
-            self.description or "You are an expert in Python and can accomplish any task that is asked of you."
+                self.description or "You are an expert in Python and can accomplish any task that is asked of you."
         )
         _system_prompt += "\n"
 

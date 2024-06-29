@@ -21,4 +21,4 @@ assistant = Assistant(
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
     add_references_to_prompt=True,
 )
-assistant.print_response("肛门病变可能是什么疾病的症状?", markdown=True)
+assistant.run("肛门病变可能是什么疾病的症状?")

@@ -27,8 +27,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 
 class UrlCrawlerTool(Toolkit):
-    max_depth: int = 2
-    max_links: int = 10
+    max_depth: int = 1
+    max_links: int = 1
 
     _visited: Set[str] = set()
     _urls_to_crawl: List[Tuple[str, int]] = []
@@ -64,19 +64,9 @@ class UrlCrawlerTool(Toolkit):
         # Return primary domain (excluding subdomains)
         return ".".join(domain_parts[-2:])
 
-    def _extract_main_content(self, soup: BeautifulSoup) -> str:
-        """
-        Extracts the main content from a BeautifulSoup object.
-
-        :param soup: The BeautifulSoup object to extract the main content from.
-        :return: The main content in markdown format.
-        """
-        # Convert the whole document to markdown
-        md = self._convert_to_markdown(soup)
-        return md
-
     def _convert_to_markdown(self, element: Tag) -> str:
         """
+        Extracts the main content from a BeautifulSoup object.
         Converts an HTML element to markdown format.
 
         :param element: The HTML element to convert.
@@ -117,7 +107,7 @@ class UrlCrawlerTool(Toolkit):
 
         return markdown.strip()
 
-    def crawl(self, url: str, starting_depth: int = 1) -> Dict[str, str]:
+    def crawl(self, url: str, starting_depth: int = 1, return_format: str = "markdown") -> Dict[str, str]:
         """
         Crawls a website and returns a dictionary of URLs and their corresponding content.
 
@@ -165,16 +155,20 @@ class UrlCrawlerTool(Toolkit):
                 soup = BeautifulSoup(response.content, "html.parser")
 
                 # Extract main content
-                main_content = self._extract_main_content(soup)
-                if main_content:
+                if return_format == "markdown":
+                    content = self._convert_to_markdown(soup)
+                else:
+                    # Return the raw HTML content
+                    content = str(soup)
+                if content:
                     is_duplicate = False
                     for _url, c in crawler_result.items():
-                        if literal_similarity(main_content, c) > 0.8:
+                        if literal_similarity(content, c) > 0.8:
                             logger.debug(f"Duplicate content found: {_url}, skipping...")
                             is_duplicate = True
                             break
                     if not is_duplicate:
-                        crawler_result[current_url] = main_content
+                        crawler_result[current_url] = content
                         num_links += 1
 
                 # Add found URLs to the global list, with incremented depth

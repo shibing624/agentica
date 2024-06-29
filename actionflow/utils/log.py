@@ -3,17 +3,25 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
-import os
 import sys
 
-from loguru import logger
+from loguru import logger as _logger
+
+from actionflow.config import LOG_FILE, LOG_LEVEL
 
 
-def get_logger(log_level: str = "INFO", log_file: str = None) -> logger:
+def get_logger(log_level: str = "INFO", log_file: str = None):
     """Get logger instance."""
-    logger.remove()
+    _logger.remove()
+    _logger.add(
+        sink=sys.stdout,
+        level=log_level,
+        enqueue=True,  # 异步输出日志
+        backtrace=False,  # 设置为 True 以打印回溯
+        diagnose=False,  # 设置为 True 以自动显示变量
+    )
     if log_file:
-        logger.add(
+        _logger.add(
             sink=log_file,
             level=log_level,
             rotation="1 week",
@@ -22,22 +30,10 @@ def get_logger(log_level: str = "INFO", log_file: str = None) -> logger:
             backtrace=False,
             diagnose=False,
         )
-    else:
-        logger.add(
-            sink=sys.stdout,
-            level=log_level,
-            enqueue=True,  # 异步输出日志
-            backtrace=False,  # 设置为 True 以打印回溯
-            diagnose=False,  # 设置为 True 以自动显示变量
-        )
-    return logger
+    return _logger
 
 
-log_level = os.environ.get("LOG_LEVEL") or "INFO"
-logger = get_logger(
-    log_level=log_level,
-    log_file=os.environ.get("LOG_FILE")
-)
+logger = get_logger(log_level=LOG_LEVEL, log_file=LOG_FILE)
 
 
 def set_log_level_to_debug():
@@ -49,3 +45,15 @@ def set_log_level_to_debug():
         backtrace=True,
         diagnose=True,
     )
+    if LOG_FILE:
+        logger.add(
+            sink=LOG_FILE,
+            level="DEBUG",
+            enqueue=True,
+            backtrace=True,
+            diagnose=True,
+        )
+
+
+def print_llm_stream(msg):
+    print(msg, end="", flush=True)

@@ -4,7 +4,7 @@
 @description: 
 """
 import os
-
+from datetime import datetime
 pwd_path = os.path.abspath(os.path.dirname(__file__))
 
 # Load environment variables from .env file
@@ -19,6 +19,11 @@ try:
 except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
+ACTIONFLOW_HOME = os.environ.get("ACTIONFLOW_HOME", os.path.realpath(os.path.curdir))
+current_date = datetime.now()
+formatted_date = current_date.strftime("%Y%m%d")
+LOG_FILE = os.environ.get("LOG_FILE", f"{ACTIONFLOW_HOME}/logs/{formatted_date}.log")
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 SMART_LLM = os.environ.get("SMART_LLM")
 FAST_LLM = os.environ.get("FAST_LLM")
 # Code-interpreter E2B api key

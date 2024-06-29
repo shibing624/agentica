@@ -92,7 +92,6 @@ flow = Actionflow(
     debug_mode=True,
 )
 
-flow.print_response(
+flow.run(
     "美国继续制裁俄罗斯",
-    markdown=True,
 )

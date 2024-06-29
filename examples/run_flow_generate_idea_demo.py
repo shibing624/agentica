@@ -36,4 +36,4 @@ workflow = Actionflow(
     debug_mode=True,
 )
 
-workflow.print_response(markdown=True)
+workflow.run()

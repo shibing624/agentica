@@ -8,7 +8,7 @@ assistant = Assistant(
 )
 
 # Single Image
-assistant.print_response(
+assistant.run(
     [
         {"type": "text", "text": "描述图片"},
         {
@@ -19,7 +19,7 @@ assistant.print_response(
 )
 
 # Multiple Images
-assistant.print_response(
+assistant.run(
     [
         {
             "type": "text",

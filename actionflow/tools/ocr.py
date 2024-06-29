@@ -5,7 +5,7 @@
 """
 
 import ssl
-
+import json
 try:
     import easyocr
 except ImportError:
@@ -31,21 +31,26 @@ class OcrTool(Toolkit):
         logger.debug(f"Initialized easyocr tool with languages: {languages} and GPU: {use_gpu}")
         self.register(self.read_text)
 
-    def read_text(self, image_path: str, detail: int = 0) -> list:
+    def read_text(self, image_path: str, detail: int = 0) -> str:
         """
         Reads text from an image.
 
         :param image_path: Path to the image file.
         :param detail: Whether to return detailed information (1 for yes, 0 for no).
-        :return: List of recognized text
+        :return: str, the recognized text.
         """
         try:
             result = self.reader.readtext(image_path, detail=detail)
             logger.debug(f"Recognized text: {result}, from image: {image_path}")
-            return result
+            if detail == 0:
+                result_str = " ".join([text for text in result])
+            else:
+                result = [dict(text=str(text), box=str(box), prob=str(prob)) for box, text, prob in result]
+                result_str = json.dumps(result, ensure_ascii=False)
+            return result_str
         except Exception as e:
             logger.error(f"An error occurred while reading the text: {e}")
-            return []
+            return ""
 
 
 if __name__ == '__main__':
@@ -55,4 +60,7 @@ if __name__ == '__main__':
     # Example usage
     # Recognize text in a Chinese image
     chinese_text = ocr_tool.read_text('../../examples/data/chinese.jpg')
+    print('Chinese text:', chinese_text)
+
+    chinese_text = ocr_tool.read_text('../../examples/data/chinese.jpg', detail=1)
     print('Chinese text:', chinese_text)

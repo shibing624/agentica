@@ -9,9 +9,9 @@ llm = AzureOpenAILLM()
 assistant = Assistant(llm=llm)
 
 # -*- Print a response
-assistant.print_response("Share a 5 word horror story.")
-assistant.print_response("What's the weather like today?")
-assistant.print_response("我前面问了些啥")
+assistant.run("Share a 5 word horror story.")
+assistant.run("What's the weather like today?")
+assistant.run("我前面问了些啥")
 
 # -*- Get the memory
 memory: AssistantMemory = assistant.memory

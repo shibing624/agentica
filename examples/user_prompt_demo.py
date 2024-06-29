@@ -8,4 +8,4 @@ assistant = Assistant(
     user_prompt="Love in the year 12000.",
     debug_mode=True,
 )
-assistant.print_response()
+assistant.run()

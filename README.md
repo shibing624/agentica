@@ -80,23 +80,26 @@ m = Assistant(
     read_chat_history=True,
     debug_mode=True,
 )
-print("LLM:", m.llm)
-print(m.run("介绍林黛玉", stream=False))
-print(m.run("北京最近的新闻", stream=False))
-print(m.run("我前面问了啥", stream=False))
+m.run("一句话介绍林黛玉")
+m.run("北京最近的新闻", stream=True, print_output=True)
+m.run("总结前面的问答")
 ```
 
 
 ## Examples
 Actionflow示例：
 
-| 示例 | 描述 |
-| --- | --- |
-| [examples/rag_assistant_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/rag_assistant_demo.py) | 实现了RAG功能，基于PDF文档回答问题 |
-| [examples/python_assistant_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/python_assistant_demo.py) | 实现了Code Interpreter功能，自动生成python代码，并执行 |
-| [examples/research_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/research_demo.py) | 实现了Research功能，自动调用搜索工具，汇总信息后撰写科技报告 |
-| [examples/run_flow_news_article_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/run_flow_news_article_demo.py) | 实现了写新闻稿的工作流，multi-agent的实现，定义了多个Assistant和Task，多次调用搜索工具，并生成高级排版的新闻文章 |
-| [examples/run_flow_investment_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/run_flow_investment_demo.py) | 实现了投资研究的工作流，依次执行股票信息收集、股票分析、撰写分析报告，复查报告等多个Task |
+| 示例                                                                                                                                  | 描述                                                                                                                              |
+|-------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| [examples/rag_assistant_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/rag_assistant_demo.py)                 | 实现了RAG功能，基于PDF文档回答问题                                                                                                            |
+| [examples/python_assistant_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/python_assistant_demo.py)           | 实现了Code Interpreter功能，自动生成python代码，并执行                                                                                          |
+| [examples/research_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/research_demo.py)                           | 实现了Research功能，自动调用搜索工具，汇总信息后撰写科技报告                                                                                              |
+| [examples/run_flow_news_article_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/run_flow_news_article_demo.py) | 实现了写新闻稿的工作流，multi-agent的实现，定义了多个Assistant和Task，多次调用搜索工具，并生成高级排版的新闻文章                                                            |
+| [examples/run_flow_investment_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/run_flow_investment_demo.py)     | 实现了投资研究的工作流：股票信息收集 - 股票分析 - 撰写分析报告 - 复查报告等多个Task                                                                                |
+| [examples/crawl_webpage.py](https://github.com/shibing624/actionflow/blob/main/examples/crawl_webpage.py)                           | 实现了网页分析工作流：从Url爬取融资快讯 - 分析网页内容和格式 - 提取核心信息 - 汇总保存为md文件                                                                          |
+| [examples/find_paper_from_arxiv.py](https://github.com/shibing624/actionflow/blob/main/examples/find_paper_from_arxiv.py)           | 实现了论文推荐工作流：自动从arxiv搜索多组论文 - 相似论文去重 - 提取核心论文信息 - 保存为csv文件                                                                        |
+| [examples/remove_image_background.py](https://github.com/shibing624/actionflow/blob/main/examples/remove_image_background.py)       | 实现了自动去除图片背景功能，包括自动通过pip安装库，调用库实现去除图片背景                                                                                          |
+| [examples/text_classification_demo.py](https://github.com/shibing624/actionflow/blob/main/examples/text_classification_demo.py)     | 实现了自动训练分类模型的工作流：读取训练集文件并理解格式 - 谷歌搜索pytextclassifier库 - 爬取github页面了解pytextclassifier的调用方法 - 写代码并执行fasttext模型训练 - check训练好的模型预测结果 |
 
 
 ## Contact
