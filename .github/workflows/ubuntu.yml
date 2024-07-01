@@ -40,9 +40,9 @@ jobs:
           pip install torch
       - name: Install from pypi
         run: |
-          pip install -U similarities
-          python -c "import similarities; print(similarities.__version__)"
-          pip uninstall -y similarities
+          pip install -U agentica
+          python -c "import agentica; print(agentica.__version__)"
+          pip uninstall -y agentica
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
