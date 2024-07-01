@@ -1,14 +1,14 @@
 """
 Please install dependencies using:
-pip install actionflow
+pip install agentica
 """
 
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
-from actionflow.actionflow import Actionflow, Task
-from actionflow.tools.file import FileTool
+from agentica import Assistant, AzureOpenAILLM
+from agentica.workflow import Workflow, Task
+from agentica.tools.file import FileTool
 
 idea_assistant = Assistant(
     name="企业家",
@@ -19,7 +19,7 @@ idea_assistant = Assistant(
     output_file_name="save.md",
 )
 
-workflow = Actionflow(
+workflow = Workflow(
     name="商业想法生成",
     tasks=[
         Task(

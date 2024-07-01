@@ -1,7 +1,7 @@
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
+from agentica import Assistant, AzureOpenAILLM
 
 assistant = Assistant(
     llm=AzureOpenAILLM(model="gpt-4-turbo", max_tokens=4096),

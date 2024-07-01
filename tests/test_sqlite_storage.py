@@ -7,8 +7,8 @@ import os
 import tempfile
 import pytest
 from datetime import datetime
-from actionflow.run_record import RunRecord
-from actionflow.sqlite_storage import SqliteStorage
+from agentica.run_record import RunRecord
+from agentica.sqlite_storage import SqliteStorage
 
 # Mock current_datetime function
 def mock_current_datetime():

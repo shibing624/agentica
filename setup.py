@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 # Avoids IDE errors, but actual version is read from version.py
 __version__ = ""
-exec(open('actionflow/version.py').read())
+exec(open('agentica/version.py').read())
 
 if sys.version_info < (3,):
     sys.exit('Sorry, Python3 is required.')
@@ -14,18 +14,18 @@ with open('README.md', 'r', encoding='utf-8') as f:
     readme = f.read()
 
 setup(
-    name='actionflow',
+    name='agentica',
     version=__version__,
-    description='LLM agent workflows',
+    description='LLM agents',
     long_description=readme,
     long_description_content_type='text/markdown',
     author='XuMing',
     author_email='xuming624@qq.com',
-    url='https://github.com/shibing624/actionflow',
+    url='https://github.com/shibing624/agentica',
     license="Apache License 2.0",
     zip_safe=False,
     python_requires=">=3.8.0",
-    entry_points={"console_scripts": ["actionflow = actionflow.cli:main"]},
+    entry_points={"console_scripts": ["agentica = agentica.cli:main"]},
     classifiers=[
         "Development Status :: 5 - Production/Stable",
         "Intended Audience :: Developers",
@@ -36,14 +36,13 @@ setup(
         "Programming Language :: Python :: 3",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
-    keywords='actionflow,Agent Tool,action,agent',
+    keywords='Agentica,Agent Tool,action,agent,agentica',
     install_requires=[
         "loguru",
         "beautifulsoup4",
         "fire",
         "openai",
         "python-dotenv",
-        "sqlalchemy",
         "pydantic",
     ],
     packages=find_packages(),

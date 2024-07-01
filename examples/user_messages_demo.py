@@ -1,7 +1,7 @@
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, OpenAILLM
+from agentica import Assistant, OpenAILLM
 
 Assistant(
     llm=OpenAILLM(model="gpt-3.5-turbo", stop="</answer>"),

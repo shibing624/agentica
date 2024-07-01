@@ -4,12 +4,12 @@ from typing import Optional, List
 import typer
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
-from actionflow.llm.ollama_llm import OllamaLLM
-from actionflow.documents import TextDocuments
-from actionflow.vectordb.lancedb import LanceDb  # noqa
-from actionflow.emb.text2vec_emb import Text2VecEmb
-from actionflow.sqlite_storage import SqliteStorage
+from agentica import Assistant, AzureOpenAILLM
+from agentica.llm.ollama_llm import OllamaLLM
+from agentica.documents import TextDocuments
+from agentica.vectordb.lancedb import LanceDb  # noqa
+from agentica.emb.text2vec_emb import Text2VecEmb
+from agentica.sqlite_storage import SqliteStorage
 
 llm = AzureOpenAILLM()
 # llm = OllamaLLM(model="qwen:0.5b")

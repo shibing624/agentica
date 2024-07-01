@@ -6,8 +6,8 @@
 import sys
 
 sys.path.append('..')
-from actionflow import PythonAssistant, AzureOpenAILLM
-from actionflow.tools.jina import JinaTool
+from agentica import PythonAssistant, AzureOpenAILLM
+from agentica.tools.jina import JinaTool
 
 m = PythonAssistant(
     llm=AzureOpenAILLM(),

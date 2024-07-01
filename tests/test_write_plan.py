@@ -3,12 +3,12 @@ from unittest.mock import patch, MagicMock
 import pytest
 import shutil
 import os
-from actionflow.output import Output
-from actionflow.tools.write_plan import WritePlan
+from agentica.output import Output
+from agentica.tools.write_plan import WritePlan
 
 @pytest.fixture
 def write_plan_tool():
-    with patch('actionflow.llm.LLM') as MockLLM:
+    with patch('agentica.llm.LLM') as MockLLM:
         mock_llm = MockLLM.return_value
         output = Output('outputs')
         tool = WritePlan(output)
@@ -45,7 +45,7 @@ def test_get_definition(write_plan_tool):
         shutil.rmtree('outputs')
 
 
-@patch('actionflow.llm.LLM.respond')
+@patch('agentica.llm.LLM.respond')
 def test_execute(mock_respond, write_plan_tool):
     mock_response = MagicMock()
     mock_response.content = """

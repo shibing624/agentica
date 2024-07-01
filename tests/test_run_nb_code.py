@@ -1,6 +1,6 @@
 import pytest
 
-from actionflow.tools.run_nb_code import RunNbCodeWrapper
+from agentica.tools.run_nb_code import RunNbCodeWrapper
 
 
 def test_code_running():

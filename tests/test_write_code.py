@@ -1,7 +1,7 @@
 import pytest
 import pytest
-from actionflow.output import Output
-from actionflow.tools.write_nb_code import WriteNbCode
+from agentica.output import Output
+from agentica.tools.write_nb_code import WriteNbCode
 import shutil
 import os
 

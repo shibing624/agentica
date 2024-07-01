@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: 自动去图片背景示例
 
-pip install rembg actionflow
+pip install rembg agentica
 
 自动安装rembg库，并执行去背景操作
 """
@@ -11,7 +11,7 @@ pip install rembg actionflow
 import sys
 
 sys.path.append('..')
-from actionflow import PythonAssistant, AzureOpenAILLM
+from agentica import PythonAssistant, AzureOpenAILLM
 
 m = PythonAssistant(
     llm=AzureOpenAILLM(),

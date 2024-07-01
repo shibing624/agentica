@@ -2,15 +2,15 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description:
-This module contains a test for the CreateImage class in the actionflow.functions.create_image module. It uses the unittest.mock library to mock the OpenAI and requests APIs, and checks that the image creation process works correctly.
+This module contains a test for the CreateImage class in the agentica.functions.create_image module. It uses the unittest.mock library to mock the OpenAI and requests APIs, and checks that the image creation process works correctly.
 """
 
 import re
 import shutil
 from unittest.mock import MagicMock, patch
 
-from actionflow.tools.create_image import CreateImage
-from actionflow.output import Output
+from agentica.tools.create_image import CreateImage
+from agentica.output import Output
 
 
 @patch("openai.Image.create")

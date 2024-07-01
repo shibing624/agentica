@@ -6,9 +6,9 @@
 import sys
 
 sys.path.append('..')
-from actionflow import AzureOpenAILLM, Assistant
-from actionflow.tools.jina import JinaTool
-from actionflow.tools.file import FileTool
+from agentica import AzureOpenAILLM, Assistant
+from agentica.tools.jina import JinaTool
+from agentica.tools.file import FileTool
 
 m = Assistant(
     llm=AzureOpenAILLM(),

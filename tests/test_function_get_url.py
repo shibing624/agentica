@@ -2,14 +2,14 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description:
-This module contains tests for the GetUrl function in the actionflow.functions.get_url module. It checks that the URL fetching process works correctly.
+This module contains tests for the GetUrl function in the agentica.functions.get_url module. It checks that the URL fetching process works correctly.
 """
 
 import shutil
 from unittest.mock import patch
 
-from actionflow.output import Output
-from actionflow.tools.get_url import GetUrl
+from agentica.output import Output
+from agentica.tools.get_url import GetUrl
 
 
 def test_execute_html():

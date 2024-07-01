@@ -1,8 +1,8 @@
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
-from actionflow.sqlite_storage import SqliteStorage
+from agentica import Assistant, AzureOpenAILLM
+from agentica.sqlite_storage import SqliteStorage
 
 if __name__ == '__main__':
     llm = AzureOpenAILLM()

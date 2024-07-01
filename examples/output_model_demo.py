@@ -4,7 +4,7 @@ from rich.pretty import pprint
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant
+from agentica import Assistant
 
 
 class MovieScript(BaseModel):

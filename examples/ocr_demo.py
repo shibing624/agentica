@@ -3,14 +3,14 @@
 @author:XuMing(xuming624@qq.com)
 @description: 自动调用OCR工具
 
-pip install easyocr actionflow
+pip install easyocr agentica
 """
 
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
-from actionflow.tools.ocr import OcrTool
+from agentica import Assistant, AzureOpenAILLM
+from agentica.tools.ocr import OcrTool
 
 m = Assistant(
     llm=AzureOpenAILLM(),

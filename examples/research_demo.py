@@ -7,9 +7,9 @@ import sys
 from textwrap import dedent
 
 sys.path.append('..')
-from actionflow import Assistant
-from actionflow.llm.openai_llm import OpenAILLM
-from actionflow.tools.search_serper import SearchSerperTool
+from agentica import Assistant
+from agentica.llm.openai_llm import OpenAILLM
+from agentica.tools.search_serper import SearchSerperTool
 
 m = Assistant(
     llm=OpenAILLM(model='gpt-4o'),

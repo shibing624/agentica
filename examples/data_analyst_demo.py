@@ -2,7 +2,7 @@ import json
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant,AzureOpenAILLM
+from agentica import Assistant,AzureOpenAILLM
 
 data_analyst = Assistant(
     llm=AzureOpenAILLM(),

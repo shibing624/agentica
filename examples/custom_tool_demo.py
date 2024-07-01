@@ -2,7 +2,7 @@ import sys
 
 sys.path.append('..')
 
-from actionflow import Assistant, AzureOpenAILLM
+from agentica import Assistant, AzureOpenAILLM
 
 
 def multiply(first_int: int, second_int: int) -> str:

@@ -8,7 +8,7 @@ This module contains tests for the LLM class.
 import os
 from unittest.mock import MagicMock, patch
 
-from actionflow.llm import Settings
+from agentica.llm import Settings
 
 
 def test_settings(monkeypatch):
@@ -23,7 +23,7 @@ def test_settings(monkeypatch):
     assert len(settings.model) > 0
 
 
-@patch("actionflow.llm.LLM")
+@patch("agentica.llm.LLM")
 def test_respond(mock_llm_class):
     """
     Tests the respond method of the LLM class.

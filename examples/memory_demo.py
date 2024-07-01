@@ -2,8 +2,8 @@ from rich.pretty import pprint
 import sys
 
 sys.path.append('..')
-from actionflow.assistant import Assistant, AssistantMemory
-from actionflow import AzureOpenAILLM
+from agentica.assistant import Assistant, AssistantMemory
+from agentica import AzureOpenAILLM
 
 llm = AzureOpenAILLM()
 assistant = Assistant(llm=llm)

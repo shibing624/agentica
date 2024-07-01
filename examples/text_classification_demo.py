@@ -3,16 +3,16 @@
 @author:XuMing(xuming624@qq.com)
 @description: 自动调用LLM训练分类模型
 
-pip install pytextclassifier actionflow
+pip install pytextclassifier agentica
 """
 
 import sys
 
 sys.path.append('..')
-from actionflow import PythonAssistant, AzureOpenAILLM
-from actionflow.tools.jina import JinaTool
-from actionflow.tools.url_crawler import UrlCrawlerTool
-from actionflow.tools.search_serper import SearchSerperTool
+from agentica import PythonAssistant, AzureOpenAILLM
+from agentica.tools.jina import JinaTool
+from agentica.tools.url_crawler import UrlCrawlerTool
+from agentica.tools.search_serper import SearchSerperTool
 m = PythonAssistant(
     llm=AzureOpenAILLM(),
     description="You are a helpful ai assistant.",

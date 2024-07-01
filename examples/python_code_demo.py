@@ -6,10 +6,10 @@
 import sys
 
 sys.path.append('..')
-from actionflow.file.csv import CsvFile
-from actionflow.llm.openai_llm import OpenAILLM
-from actionflow.python_assistant import PythonAssistant
-from actionflow.llm.azure_llm import AzureOpenAILLM
+from agentica.file.csv import CsvFile
+from agentica.llm.openai_llm import OpenAILLM
+from agentica.python_assistant import PythonAssistant
+from agentica.llm.azure_llm import AzureOpenAILLM
 python_assistant = PythonAssistant(
     llm=AzureOpenAILLM(),
     files=[

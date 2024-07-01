@@ -1,7 +1,7 @@
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant
+from agentica import Assistant
 
 assistant = Assistant(
     system_prompt="Share a 2 sentence story about",

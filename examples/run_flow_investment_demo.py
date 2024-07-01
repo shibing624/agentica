@@ -1,14 +1,14 @@
 """
 Please install dependencies using:
-pip install yfinance actionflow
+pip install yfinance agentica
 """
 
 import sys
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
-from actionflow.actionflow import Actionflow, Task
-from actionflow.tools.yfinance import YFinanceTool
+from agentica import Assistant, AzureOpenAILLM
+from agentica.workflow import Workflow, Task
+from agentica.tools.yfinance import YFinanceTool
 
 stock_analyst_report = "stock_analyst_report.md"
 research_analyst_report = "research_analyst_report.md"
@@ -53,7 +53,7 @@ investment_lead = Assistant(
     output_file_name=investment_report,
 )
 
-workflow = Actionflow(
+workflow = Workflow(
     name="Investment Research Workflow",
     tasks=[
         Task(

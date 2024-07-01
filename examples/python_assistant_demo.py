@@ -6,9 +6,9 @@ and writes an article in Markdown format.
 import sys
 
 sys.path.append('..')
-from actionflow.python_assistant import PythonAssistant
-from actionflow import AzureOpenAILLM
-from actionflow.tools.search_serper import SearchSerperTool
+from agentica.python_assistant import PythonAssistant
+from agentica import AzureOpenAILLM
+from agentica.tools.search_serper import SearchSerperTool
 
 m = PythonAssistant(
     llm=AzureOpenAILLM(model='gpt-4o'),

@@ -11,9 +11,9 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 sys.path.append('..')
-from actionflow import Assistant, AzureOpenAILLM
-from actionflow.actionflow import Actionflow, Task
-from actionflow.tools.search_exa import SearchExaTool
+from agentica import Assistant, AzureOpenAILLM
+from agentica.workflow import Workflow, Task
+from agentica.tools.search_exa import SearchExaTool
 
 
 class NewsArticle(BaseModel):
@@ -76,7 +76,7 @@ writer = Assistant(
     ),
 )
 
-flow = Actionflow(
+flow = Workflow(
     name="News Article Workflow",
     tasks=[
         Task(
