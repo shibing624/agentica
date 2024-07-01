@@ -6,20 +6,7 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM, OpenAILLM
-from agentica.tools.search_serper import SearchSerperTool
-
-PROMPT_TEMPLATE: str = """
-## BACKGROUND
-Suppose you are {name}, you are in a debate with {opponent_name}.
-## DEBATE HISTORY
-Previous rounds:
-{context}
-## YOUR TURN
-Now it's your turn, you should closely respond to your opponent's latest argument, state your position, defend your arguments, and attack your opponent's arguments,
-craft a strong and emotional response in 80 words, in {name}'s rhetoric and viewpoints, your will argue:
-"""
-
+from agentica import Assistant, OpenAILLM
 
 Biden = Assistant(
     llm=OpenAILLM(model='gpt-4o'),
