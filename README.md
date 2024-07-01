@@ -18,9 +18,9 @@
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 
-**agentica**: A Human-Centric Framework for Large Language Model Agent Workflows, build your agent workflows quickly
+**agentica**: A Human-Centric Framework for Large Language Model Agent Building.
 
-**agentica**: 快速构建你自己的Agent
+**agentica**: 构建你自己的Agent
 
 ## Overview
 
@@ -41,7 +41,7 @@
 ## Features
 `agentica`是一个Agent构建工具，功能：
 
-- 简单代码快速编排Agent，可以拆解任务并执行，支持RAG、Workflow等多种任务
+- 简单代码快速编排Agent，支持RAG、Workflow、MultiAgent、MultiRole等
 - Agent支持prompt自定义，支持多种工具调用（tool_calls）
 - 支持OpenAI API和Moonshot API(kimi)调用
 
