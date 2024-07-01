@@ -29,7 +29,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 
 from agentica.document import Document
-from agentica.documents import Documents
+from agentica.knowledge_base import KnowledgeBase
 from agentica.llm.base import LLM
 from agentica.memory import AssistantMemory, Memory
 from agentica.message import Message
@@ -81,7 +81,7 @@ class Assistant(BaseModel):
     update_memory_after_run: bool = True
 
     # -*- Assistant Knowledge Base
-    knowledge_base: Optional[Documents] = None
+    knowledge_base: Optional[KnowledgeBase] = None
     # Enable RAG by adding references from the knowledge base to the prompt.
     add_references_to_prompt: bool = False
 

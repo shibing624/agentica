@@ -4,34 +4,190 @@
 @description: 
 part of the code from https://github.com/phidatahq/phidata
 """
+import re
 from pathlib import Path
 from typing import List, Optional, Iterator, Dict, Any, Union
 
 from pydantic import BaseModel, ConfigDict
 
 from agentica.document import Document
+from agentica.utils.file_parser import (
+    read_json_file,
+    read_csv_file,
+    read_txt_file,
+    read_pdf_file,
+    read_pdf_url,
+    read_docx_file,
+    read_excel_file
+)
 from agentica.utils.log import logger
 from agentica.vectordb.base import VectorDb
 
 
-class Documents(BaseModel):
-    """Base class for LLM knowledge base, which is a collection of documents."""
+class KnowledgeBase(BaseModel):
+    """LLM knowledge base, which is a collection of documents."""
 
+    # Input knowledge base file path, which can be a file or a directory or a URL
+    data_path: Union[str, List[str]]
     # Embeddings db to store the knowledge base
     vector_db: Optional[VectorDb] = None
     # Number of relevant documents to return on search
     num_documents: int = 2
     # Number of documents to optimize the vector db on
-    optimize_on: Optional[int] = 1000
+    optimize_on: Optional[int] = 2000
+
+    chunk_size: int = 1000
+    chunk: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @staticmethod
+    def _clean_text(text: str) -> str:
+        """Clean the text by replacing multiple newlines with a single newline"""
+
+        # Replace multiple newlines with a single newline
+        cleaned_text = re.sub(r"\n+", "\n", text)
+        # Replace multiple spaces with a single space
+        cleaned_text = re.sub(r"\s+", " ", cleaned_text)
+        # Replace multiple tabs with a single tab
+        cleaned_text = re.sub(r"\t+", "\t", cleaned_text)
+        # Replace multiple carriage returns with a single carriage return
+        cleaned_text = re.sub(r"\r+", "\r", cleaned_text)
+        # Replace multiple form feeds with a single form feed
+        cleaned_text = re.sub(r"\f+", "\f", cleaned_text)
+        # Replace multiple vertical tabs with a single vertical tab
+        cleaned_text = re.sub(r"\v+", "\v", cleaned_text)
+
+        return cleaned_text
+
+    def chunk_document(self, document: Document, chunk_size: int = 1000) -> List[Document]:
+        """Chunk the document content into smaller documents"""
+        content = document.content
+        cleaned_content = self._clean_text(content)
+        content_length = len(cleaned_content)
+        chunked_documents: List[Document] = []
+        chunk_number = 1
+        chunk_meta_data = document.meta_data
+
+        start = 0
+        while start < content_length:
+            end = start + chunk_size
+
+            # Ensure we're not splitting a word in half
+            if end < content_length:
+                while end > start and cleaned_content[end] not in [" ", "\n", "\r", "\t"]:
+                    end -= 1
+
+            # If the entire chunk is a word, then just split it at self.chunk_size
+            if end == start:
+                end = start + chunk_size
+
+            # If the end is greater than the content length, then set it to the content length
+            if end > content_length:
+                end = content_length
+
+            chunk = cleaned_content[start:end]
+            meta_data = chunk_meta_data.copy()
+            meta_data["chunk"] = chunk_number
+            chunk_id = None
+            if document.id:
+                chunk_id = f"{document.id}_{chunk_number}"
+            elif document.name:
+                chunk_id = f"{document.name}_{chunk_number}"
+            meta_data["chunk_size"] = len(chunk)
+            chunked_documents.append(
+                Document(
+                    id=chunk_id,
+                    name=document.name,
+                    meta_data=meta_data,
+                    content=chunk,
+                )
+            )
+            chunk_number += 1
+            start = end
+        return chunked_documents
+
+    def _read_file(self, path: Path) -> List[Document]:
+        if not path:
+            raise ValueError("No path provided")
+
+        if not path.exists():
+            raise FileNotFoundError(f"Could not find file: {path}")
+
+        try:
+            file_name = path.name.split("/")[-1].split(".")[0].replace("/", "_").replace(" ", "_")
+            if path.suffix in [".json", ".jsonl"]:
+                file_contents = read_json_file(path)
+            elif path.suffix in [".csv"]:
+                file_contents = read_csv_file(path)
+            elif path.suffix in [".txt"]:
+                file_contents = read_txt_file(path)
+            elif path.suffix in [".pdf"]:
+                file_contents = read_pdf_file(path)
+            elif path.suffix in [".doc", ".docx"]:
+                if path.suffix == ".doc":
+                    raise ValueError("Unsupported doc format. Please convert to docx.")
+                file_contents = read_docx_file(path)
+            elif path.suffix in [".xls", ".xlsx"]:
+                file_contents = read_excel_file(path)
+            else:
+                raise ValueError(f"Unsupported file format: {path.suffix}")
+            documents = [
+                Document(
+                    name=file_name,
+                    id=file_name,
+                    content=file_contents,
+                )
+            ]
+            if self.chunk:
+                chunked_documents = []
+                for document in documents:
+                    chunked_documents.extend(self.chunk_document(document, self.chunk_size))
+                return chunked_documents
+            return documents
+        except Exception as e:
+            logger.error(f"Error reading: {path}: {e}")
+        return []
+
+    def _read_pdf_url(self, path: str) -> List[Document]:
+        try:
+            file_contents = read_pdf_url(path)
+            documents = [
+                Document(
+                    name=path,
+                    id=path,
+                    content=file_contents,
+                )
+            ]
+            if self.chunk:
+                chunked_documents = []
+                for document in documents:
+                    chunked_documents.extend(self.chunk_document(document, self.chunk_size))
+                return chunked_documents
+            return documents
+        except Exception as e:
+            logger.error(f"Error reading: {path}: {e}")
+        return []
 
     @property
     def document_lists(self) -> Iterator[List[Document]]:
         """Iterator that yields lists of documents in the knowledge base
         Each object yielded by the iterator is a list of documents.
         """
-        raise NotImplementedError
+        if isinstance(self.data_path, str):
+            self.data_path = [self.data_path]
+        for path in self.data_path:
+            _file_path: Path = Path(path)
+            if _file_path.exists() and _file_path.is_dir():
+                for _file in _file_path.glob("**/*"):
+                    if _file_path.suffix:
+                        yield self._read_file(_file)
+            elif _file_path.exists() and _file_path.is_file() and _file_path.suffix:
+                yield self._read_file(_file_path)
+            elif path.startswith("http"):
+                yield self._read_pdf_url(path)
+            else:
+                raise ValueError(f"Unsupported file format: {path}")
 
     def search(self, query: str, num_documents: Optional[int] = None) -> List[Document]:
         """Returns relevant documents matching the query"""
@@ -182,134 +338,3 @@ class Documents(BaseModel):
             return True
 
         return self.vector_db.clear()
-
-
-class Reader(BaseModel):
-    chunk: bool = True
-    chunk_size: int = 1000
-    separators: List[str] = ["\n", "\n\n", "\r", "\r\n", "\n\r", "\t", " ", "  "]
-
-    def read(self, obj: Any) -> List[Document]:
-        raise NotImplementedError
-
-    def clean_text(self, text: str) -> str:
-        """Clean the text by replacing multiple newlines with a single newline"""
-        import re
-
-        # Replace multiple newlines with a single newline
-        cleaned_text = re.sub(r"\n+", "\n", text)
-        # Replace multiple spaces with a single space
-        cleaned_text = re.sub(r"\s+", " ", cleaned_text)
-        # Replace multiple tabs with a single tab
-        cleaned_text = re.sub(r"\t+", "\t", cleaned_text)
-        # Replace multiple carriage returns with a single carriage return
-        cleaned_text = re.sub(r"\r+", "\r", cleaned_text)
-        # Replace multiple form feeds with a single form feed
-        cleaned_text = re.sub(r"\f+", "\f", cleaned_text)
-        # Replace multiple vertical tabs with a single vertical tab
-        cleaned_text = re.sub(r"\v+", "\v", cleaned_text)
-
-        return cleaned_text
-
-    def chunk_document(self, document: Document) -> List[Document]:
-        """Chunk the document content into smaller documents"""
-        content = document.content
-        cleaned_content = self.clean_text(content)
-        content_length = len(cleaned_content)
-        chunked_documents: List[Document] = []
-        chunk_number = 1
-        chunk_meta_data = document.meta_data
-
-        start = 0
-        while start < content_length:
-            end = start + self.chunk_size
-
-            # Ensure we're not splitting a word in half
-            if end < content_length:
-                while end > start and cleaned_content[end] not in [" ", "\n", "\r", "\t"]:
-                    end -= 1
-
-            # If the entire chunk is a word, then just split it at self.chunk_size
-            if end == start:
-                end = start + self.chunk_size
-
-            # If the end is greater than the content length, then set it to the content length
-            if end > content_length:
-                end = content_length
-
-            chunk = cleaned_content[start:end]
-            meta_data = chunk_meta_data.copy()
-            meta_data["chunk"] = chunk_number
-            chunk_id = None
-            if document.id:
-                chunk_id = f"{document.id}_{chunk_number}"
-            elif document.name:
-                chunk_id = f"{document.name}_{chunk_number}"
-            meta_data["chunk_size"] = len(chunk)
-            chunked_documents.append(
-                Document(
-                    id=chunk_id,
-                    name=document.name,
-                    meta_data=meta_data,
-                    content=chunk,
-                )
-            )
-            chunk_number += 1
-            start = end
-        return chunked_documents
-
-
-class TextReader(Reader):
-    """Reader for Text files"""
-
-    def read(self, path: Path) -> List[Document]:
-        if not path:
-            raise ValueError("No path provided")
-
-        if not path.exists():
-            raise FileNotFoundError(f"Could not find file: {path}")
-
-        try:
-            logger.info(f"Reading: {path}")
-            file_name = path.name.split("/")[-1].split(".")[0].replace("/", "_").replace(" ", "_")
-            file_contents = path.read_text()
-            documents = [
-                Document(
-                    name=file_name,
-                    id=file_name,
-                    content=file_contents,
-                )
-            ]
-            if self.chunk:
-                chunked_documents = []
-                for document in documents:
-                    chunked_documents.extend(self.chunk_document(document))
-                return chunked_documents
-            return documents
-        except Exception as e:
-            logger.error(f"Error reading: {path}: {e}")
-        return []
-
-
-class TextDocuments(Documents):
-    data_path: Union[str, Path]
-    formats: List[str] = [".txt"]
-    reader: TextReader = TextReader()
-
-    @property
-    def document_lists(self) -> Iterator[List[Document]]:
-        """Iterate over text files and yield lists of documents.
-        Each object yielded by the iterator is a list of documents.
-
-        Returns:
-            Iterator[List[Document]]: Iterator yielding list of documents
-        """
-
-        _file_path: Path = Path(self.data_path) if isinstance(self.data_path, str) else self.data_path
-
-        if _file_path.exists() and _file_path.is_dir():
-            for _file in _file_path.glob("**/*"):
-                if _file.suffix in self.formats:
-                    yield self.reader.read(path=_file)
-        elif _file_path.exists() and _file_path.is_file() and _file_path.suffix in self.formats:
-            yield self.reader.read(path=_file_path)

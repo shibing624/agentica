@@ -2,18 +2,17 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: Basic example of using the assistant with a naive retrieval-based model.
-
 """
 
 import sys
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
-from agentica.documents import TextDocuments
+from agentica.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 
-knowledge_base = TextDocuments(
+knowledge_base = KnowledgeBase(
     data_path="data/medical_corpus.txt",
     vector_db=LanceDb(
         embedder=Text2VecEmb(),

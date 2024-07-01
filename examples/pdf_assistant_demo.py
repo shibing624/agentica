@@ -6,7 +6,7 @@ import typer
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
 from agentica.llm.ollama_llm import OllamaLLM
-from agentica.documents import TextDocuments
+from agentica.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb  # noqa
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.sqlite_storage import SqliteStorage
@@ -19,7 +19,7 @@ print(emb)
 output_dir = "outputs"
 db_file = f"{output_dir}/medical_corpus.db"
 table_name = 'medical_corpus'
-knowledge_base = TextDocuments(
+knowledge_base = KnowledgeBase(
     data_path="data/medical_corpus.txt",
     vector_db=LanceDb(
         embedder=emb,
