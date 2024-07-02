@@ -20,10 +20,10 @@ knowledge_base = KnowledgeBase(
     ),
 )
 # Load the knowledge base
-knowledge_base.load(recreate=True)
+knowledge_base.load(recreate=False)
 
 assistant = Assistant(
-    llm=AzureOpenAILLM(),
+    llm=AzureOpenAILLM(model='gpt-4o'),
     knowledge_base=knowledge_base,
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
     add_references_to_prompt=True,

@@ -24,7 +24,7 @@ Lets build the LLM OS proposed by Andrej Karpathy [in this tweet](https://twitte
 
 ## The LLM OS design:
 
-<img alt="LLM OS" src="https://github.com/phidatahq/phidata/assets/22579644/5cab9655-55a9-4027-80ac-badfeefa4c14" width="600" />
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="600" />
 
 - LLMs are the kernel process of an emerging operating system.
 - This process (LLM) can solve problems by coordinating other resources (memory, computation tools).
@@ -40,7 +40,6 @@ Lets build the LLM OS proposed by Andrej Karpathy [in this tweet](https://twitte
   - [ ] Can be customized and fine-tuned for specific tasks
   - [x] Can communicate with other LLMs
 
-[x] indicates functionality that is implemented in this LLM OS app
 
 ## Running the LLM OS:
 
