@@ -13,6 +13,7 @@
 | [examples/find_paper_from_arxiv.py](https://github.com/shibing624/agentica/blob/main/examples/find_paper_from_arxiv.py)           | 实现了论文推荐工作流：自动从arxiv搜索多组论文 - 相似论文去重 - 提取核心论文信息 - 保存为csv文件                                                                        |
 | [examples/remove_image_background.py](https://github.com/shibing624/agentica/blob/main/examples/remove_image_background.py)       | 实现了自动去除图片背景功能，包括自动通过pip安装库，调用库实现去除图片背景                                                                                          |
 | [examples/text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/text_classification_demo.py)     | 实现了自动训练分类模型的工作流：读取训练集文件并理解格式 - 谷歌搜索pytextclassifier库 - 爬取github页面了解pytextclassifier的调用方法 - 写代码并执行fasttext模型训练 - check训练好的模型预测结果 |
+| [examples/llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/llm_os_demo.py)                               | 实现了LLM OS的初步设计，基于LLM设计操作系统，可以通过LLM协同RAG、代码执行器、Shell等工具来解决问题。                                                                |
 
 
 
@@ -54,12 +55,12 @@ source ~/.venvs/aienv/bin/activate
 ### 2. Install libraries
 
 ```shell
-pip install agentica
+pip install agentica streamlit text2vec sqlalchemy lancedb pyarrow yfinance
 ```
 
 ### 3. Export credentials
 
-- Our initial implementation uses GPT-4, so export your OpenAI API Key in the `.env` file
+- Our initial implementation uses GPT-4, so export your OpenAI API Key in the `../.env` file
 
 ```shell
 OPENAI_API_KEY=***
@@ -74,12 +75,15 @@ cd examples
 streamlit run llm_os_demo.py
 ```
 
+![llm_os](https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png)
+
 - Open [localhost:8501](http://localhost:8501) to view your LLM OS.
 - Add a blog URL to knowledge base: https://blog.samaltman.com/gpt-4o
 - Ask: What is gpt-4o?
 - `Web search`: 北京今天天气?
 - Enable `shell tool` and ask: is docker running?
-- `Data Analyst`: 推荐5个高分科幻电影，要求评分大于8.5
-- `Python Assistant`: 编写 Python 代码生成一个包含20个100到200之间的随机数的列表，并计算它们的平均值。
+- `Python Assistant`: 帮我计算下 [168, 151, 171, 105, 124, 159, 153, 132, 112.2] , 计算它们的平均值。
 - Enable the `Research Assistant` and ask: write a report on the ibm hashicorp acquisition
 - Enable the `Investment Assistant` and ask: shall i invest in nvda?
+
+

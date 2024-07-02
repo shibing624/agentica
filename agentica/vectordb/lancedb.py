@@ -9,6 +9,8 @@ import json
 from hashlib import md5
 from typing import List, Optional
 
+from tqdm import tqdm
+
 try:
     import lancedb
     import pyarrow as pa
@@ -104,7 +106,7 @@ class LanceDb(VectorDb):
     def insert(self, documents: List[Document]) -> None:
         logger.debug(f"Inserting {len(documents)} documents")
         data = []
-        for document in documents:
+        for document in tqdm(documents, desc="Inserting documents"):
             document.embed(embedder=self.embedder)
             cleaned_content = document.content.replace("\x00", "\ufffd")
             doc_id = str(md5(cleaned_content.encode()).hexdigest())
@@ -121,7 +123,7 @@ class LanceDb(VectorDb):
                     "payload": json.dumps(payload),
                 }
             )
-            logger.debug(f"Inserted document: {document.name} ({document.meta_data})")
+            # logger.debug(f"Inserted document: {document.name} ({document.meta_data})")
 
         self.connection.add(data)
         logger.info(f"Upsert {len(data)} documents")

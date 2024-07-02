@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description:
+
+pip install streamlit agentica text2vec sqlalchemy lancedb pyarrow yfinance
 """
 import sys
 from textwrap import dedent
-from typing import List
-from typing import Optional
-
-import nest_asyncio
+from typing import List, Optional
+import os
 import streamlit as st
 
 sys.path.append('..')
@@ -31,7 +31,6 @@ def get_llm_os(
         google_search: bool = False,
         file_tool: bool = False,
         shell_tool: bool = False,
-        data_analyst: bool = False,
         python_assistant: bool = False,
         research_assistant: bool = False,
         investment_assistant: bool = False,
@@ -61,26 +60,12 @@ def get_llm_os(
     # Add team members available to the LLM OS
     team: List[Assistant] = []
     embedder = Text2VecEmb()
-    if data_analyst:
-        knowledge_base = KnowledgeBase(
-            data_path="data/IMDB-Movie-Data.csv",
-            vector_db=LanceDb(
-                embedder=embedder,
-            ),
-        )
-        # Load the knowledge base
-        knowledge_base.load(recreate=False)
-        _data_analyst = Assistant(
-            llm=llm,
-            name="Data Analyst",
-            role="Analyze movie data and provide insights",
-            knowledge_base=knowledge_base,
-            add_references_to_prompt=True,
-        )
-        team.append(_data_analyst)
-        extra_instructions.append(
-            "To answer questions about my favorite movies, delegate the task to the `Data Analyst`."
-        )
+    lance_db = LanceDb(
+        uri="outputs/llm_os_lancedb",
+        collection="llm_os_documents",
+        embedder=embedder,
+    )
+    knowledge_base = None
     if python_assistant:
         _python_assistant = PythonAssistant(
             name="Python Assistant",
@@ -240,15 +225,7 @@ def get_llm_os(
         # Add long-term memory to the LLM OS backed by a PostgreSQL database
         storage=SqliteStorage(table_name="llm_os", db_file="outputs/llm_os.db"),
         # Add a knowledge base to the LLM OS
-        knowledge_base=KnowledgeBase(
-            vector_db=LanceDb(
-                uri="outputs/llm_os_lancedb",
-                collection="llm_os_documents",
-                embedder=embedder,
-            ),
-            # 3 references are added to the prompt when searching the knowledge base
-            num_documents=3,
-        ),
+        knowledge_base=knowledge_base if knowledge_base else KnowledgeBase(vector_db=lance_db),
         # Add selected tools to the LLM OS
         tools=tools,
         # Add selected team members to the LLM OS
@@ -342,22 +319,6 @@ def main():
     # Sidebar checkboxes for selecting team members
     st.sidebar.markdown("### Select Team Members")
 
-    # Enable Data Analyst
-    if "data_analyst_enabled" not in st.session_state:
-        st.session_state["data_analyst_enabled"] = False
-    # Get data_analyst_enabled from session state if set
-    data_analyst_enabled = st.session_state["data_analyst_enabled"]
-    # Checkbox for enabling web search
-    data_analyst = st.sidebar.checkbox(
-        "Data Analyst",
-        value=data_analyst_enabled,
-        help="Enable the Data Analyst assistant for data related queries.",
-    )
-    if data_analyst_enabled != data_analyst:
-        st.session_state["data_analyst_enabled"] = data_analyst
-        data_analyst_enabled = data_analyst
-        restart_assistant()
-
     # Enable Python Assistant
     if "python_assistant_enabled" not in st.session_state:
         st.session_state["python_assistant_enabled"] = False
@@ -408,7 +369,6 @@ def main():
 
     # Get the assistant
     llm_os: Assistant
-    llm = AzureOpenAILLM(model='gpt-4o')
     if "llm_os" not in st.session_state or st.session_state["llm_os"] is None:
         logger.info(f"---*--- Creating {llm_id} LLM OS ---*---")
         llm = AzureOpenAILLM(model=llm_id)
@@ -417,7 +377,6 @@ def main():
             google_search=google_search_enabled,
             file_tool=file_tool_enabled,
             shell_tool=shell_tool_enabled,
-            data_analyst=data_analyst_enabled,
             python_assistant=python_assistant_enabled,
             research_assistant=research_assistant_enabled,
             investment_assistant=investment_assistant_enabled,
@@ -477,6 +436,7 @@ def main():
             "Add URL to Knowledge Base", type="default", key=st.session_state["url_scrape_key"]
         )
         add_url_button = st.sidebar.button("Add URL")
+        input_url = input_url.strip()
         if add_url_button:
             if input_url is not None:
                 alert = st.sidebar.info("Processing URLs...", icon="ℹ️")
@@ -493,18 +453,27 @@ def main():
         if "file_uploader_key" not in st.session_state:
             st.session_state["file_uploader_key"] = 100
 
+        file_types = ["pdf", "txt", "md", "docx", "xlsx", "json", "jsonl", "csv", "tsv", "html"]
         uploaded_file = st.sidebar.file_uploader(
-            "Add a PDF :page_facing_up:", type="pdf", key=st.session_state["file_uploader_key"]
+            "Add a PDF :page_facing_up:", type=file_types, key=st.session_state["file_uploader_key"]
         )
         if uploaded_file is not None:
-            alert = st.sidebar.info("Processing PDF...", icon="🧠")
+            save_pdf_dir = "outputs/pdfs/"
+            if not os.path.exists(save_pdf_dir):
+                os.makedirs(save_pdf_dir)
+            save_file_path = os.path.join(save_pdf_dir, uploaded_file.name)
+            with open(save_file_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            logger.info(f"File saved to: {save_file_path}")
+            alert = st.sidebar.info("Processing File(eg:pdf/txt/md/...)", icon="🧠")
             auto_rag_name = uploaded_file.name.split(".")[0]
             if f"{auto_rag_name}_uploaded" not in st.session_state:
-                auto_rag_documents: List[Document] = llm_os.knowledge_base.read_file(uploaded_file)
+                auto_rag_documents: List[Document] = llm_os.knowledge_base.read_file(save_file_path)
+                logger.debug(f"auto_rag_documents size: {len(auto_rag_documents)}")
                 if auto_rag_documents:
                     llm_os.knowledge_base.load_documents(auto_rag_documents, upsert=True)
                 else:
-                    st.sidebar.error("Could not read PDF")
+                    st.sidebar.error(f"Could not read file: {uploaded_file.name}")
                 st.session_state[f"{auto_rag_name}_uploaded"] = True
             alert.empty()
 
@@ -527,12 +496,12 @@ def main():
         new_llm_os_run_id = st.sidebar.selectbox("Run ID", options=llm_os_run_ids)
         if st.session_state["llm_os_run_id"] != new_llm_os_run_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_llm_os_run_id} ---*---")
+            llm = AzureOpenAILLM(model=llm_id)
             st.session_state["llm_os"] = get_llm_os(
                 llm=llm,
                 google_search=google_search_enabled,
                 file_tool=file_tool_enabled,
                 shell_tool=shell_tool_enabled,
-                data_analyst=data_analyst_enabled,
                 python_assistant=python_assistant_enabled,
                 research_assistant=research_assistant_enabled,
                 investment_assistant=investment_assistant_enabled,

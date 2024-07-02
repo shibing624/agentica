@@ -2,6 +2,7 @@ from hashlib import md5
 from typing import Optional, List, Union, Dict, Any
 
 from pydantic import BaseModel
+from tqdm import tqdm
 
 try:
     from sqlalchemy.dialects import postgresql
@@ -173,7 +174,7 @@ class PgVector(VectorDb):
     def insert(self, documents: List[Document], batch_size: int = 10) -> None:
         with self.Session() as sess:
             counter = 0
-            for document in documents:
+            for document in tqdm(documents, desc="Inserting documents"):
                 document.embed(embedder=self.embedder)
                 cleaned_content = document.content.replace("\x00", "\ufffd")
                 content_hash = md5(cleaned_content.encode()).hexdigest()
@@ -189,7 +190,7 @@ class PgVector(VectorDb):
                 )
                 sess.execute(stmt)
                 counter += 1
-                logger.debug(f"Inserted document: {document.name} ({document.meta_data})")
+                # logger.debug(f"Inserted document: {document.name} ({document.meta_data})")
 
                 # Commit every `batch_size` documents
                 if counter >= batch_size:

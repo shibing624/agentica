@@ -12,3 +12,4 @@ nbclient
 nbformat
 ipython
 ipykernel~=6.27.0
+text2vec
