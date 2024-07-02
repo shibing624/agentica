@@ -41,9 +41,9 @@
 ## Features
 `agentica`是一个Agent构建工具，功能：
 
-- 简单代码快速编排Agent，支持RAG、Workflow、MultiAgent、MultiRole等
+- 简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Multi-Role、Workflow等功能
 - Agent支持prompt自定义，支持多种工具调用（tool_calls）
-- 支持OpenAI API和Moonshot API(kimi)调用
+- 支持OpenAI/Azure/Claude/Ollama/Together API调用
 
 ## Installation
 
