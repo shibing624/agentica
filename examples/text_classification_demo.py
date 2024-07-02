@@ -28,4 +28,5 @@ prompt = """
 必须说明的是，pytextclassifier本地已经安装了，你可以直接调用。pytextclassifier的用法你谷歌搜索下github链接，再读一下readme，就能明白了。
 训练5个epochs就可以了，训练模型后，试着跑下`data/thucnews_train_1k.txt`文件中前10条记录的分类结果，输出预测标签结果和原标签，方便我check对比效果。
 """
-m.run(prompt)
+r = m.run(prompt)
+print("".join(r))

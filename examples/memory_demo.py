@@ -1,5 +1,6 @@
-from rich.pretty import pprint
 import sys
+
+from rich.pretty import pprint
 
 sys.path.append('..')
 from agentica.assistant import Assistant, AssistantMemory
@@ -9,9 +10,12 @@ llm = AzureOpenAILLM()
 assistant = Assistant(llm=llm)
 
 # -*- Print a response
-assistant.run("Share a 5 word horror story.")
-assistant.run("What's the weather like today?")
-assistant.run("我前面问了些啥")
+r = assistant.run("Share a 5 word horror story.")
+print(r, "".join(r))
+r = assistant.run("What's the weather like today?")
+print("".join(r))
+r = assistant.run("我前面问了些啥")
+print("".join(r))
 
 # -*- Get the memory
 memory: AssistantMemory = assistant.memory

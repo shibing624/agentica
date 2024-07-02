@@ -36,7 +36,8 @@ debate = Assistant(
     output_file_name="debate.md",
     debug_mode=True,
 )
-debate.run(
+r = debate.run(
     """Trump and Biden are in a debate, Biden speak first, and then Trump speak, and then Biden speak, and so on, in 3 turns.
     Now begin."""
 )
+print("".join(r))

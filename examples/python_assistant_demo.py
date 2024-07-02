@@ -19,7 +19,8 @@ m = PythonAssistant(
     show_tool_calls=True,
     debug_mode=True,
 )
-m.run(
+r = m.run(
     "如果Eliud Kipchoge能够无限期地保持他创造记录的马拉松速度，那么他需要多少小时才能跑完地球和月球在最近接时之间的距离？"
     "请在进行计算时使用维基百科页面上的最小近地点值。将结果用中文回答"
 )
+print("".join(r))

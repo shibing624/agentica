@@ -23,4 +23,5 @@ movie_assistant = Assistant(
     output_model=MovieScript,
     # debug_mode=True,
 )
-pprint(movie_assistant.run("Beijing love story"))
+r = movie_assistant.run("Write a movie script.")
+pprint("".join(r))

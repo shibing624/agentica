@@ -22,4 +22,5 @@ prompt = """
 This is a image, you need to use python toolkit rembg to remove the background of the image and save the result. 
 image path: data/chinese.jpg ; save path: chinese_remove_bg.png
 """
-m.run(prompt)
+r = m.run(prompt)
+print("".join(r))

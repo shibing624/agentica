@@ -58,5 +58,7 @@ assistant = Assistant(
     references_function=custom_references_function,
     # Adds references to the prompt.
     add_references_to_prompt=True,
+    debug_mode=False,
 )
-assistant.run("How to make Thai curry?")
+r = assistant.run("How to make Thai curry?")
+print(r, "".join(r))

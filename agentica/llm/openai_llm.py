@@ -565,7 +565,6 @@ class OpenAILLM(LLM):
                 completion_tokens += 1
                 if completion_tokens == 1:
                     time_to_first_token = t.elapsed
-                    logger.debug(f"Time to first token: {time_to_first_token:.4f}s")
                 yield response_content
 
             # -*- Parse function call
@@ -585,9 +584,8 @@ class OpenAILLM(LLM):
 
         t.stop()
         if completion_tokens > 0:
-            logger.debug(f"Time to generate response: {t.elapsed:.4f}s, "
-                         f"Time per output token: {t.elapsed / completion_tokens:.4f}s, "
-                         f"Throughput: {completion_tokens / t.elapsed:.4f} tokens/s, "
+            logger.debug(f"Time to first token: {time_to_first_token:.4f}s, "
+                         f"Time to generate response: {t.elapsed:.4f}s, "
                          f"Prompt tokens size: {prompt_tokens}, "
                          f"Completion tokens size: {completion_tokens}")
 

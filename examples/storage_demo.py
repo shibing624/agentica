@@ -13,8 +13,10 @@ if __name__ == '__main__':
         storage=SqliteStorage(table_name="assistant_runs", db_file="outputs/assistant_runs.db"),
         output_dir="outputs"
     )
-    assistant.run("How many people live in Canada?")
-    assistant.run("What is their national anthem called?")
+    r = assistant.run("How many people live in Canada?")
+    print("".join(r))
+    r = assistant.run("What is their national anthem called?")
+    print("".join(r))
 
 
     # Function to print all stored runs

@@ -11,6 +11,7 @@ from typing import List, Optional, Iterator, Dict, Any, Union
 from pydantic import BaseModel, ConfigDict
 
 from agentica.document import Document
+from agentica.tools.url_crawler import UrlCrawlerTool
 from agentica.utils.file_parser import (
     read_json_file,
     read_csv_file,
@@ -28,7 +29,7 @@ class KnowledgeBase(BaseModel):
     """LLM knowledge base, which is a collection of documents."""
 
     # Input knowledge base file path, which can be a file or a directory or a URL
-    data_path: Union[str, List[str]]
+    data_path: Union[str, List[str]] = None
     # Embeddings db to store the knowledge base
     vector_db: Optional[VectorDb] = None
     # Number of relevant documents to return on search
@@ -107,7 +108,11 @@ class KnowledgeBase(BaseModel):
             start = end
         return chunked_documents
 
-    def _read_file(self, path: Path) -> List[Document]:
+    def read_file(self, path: Union[Path, str]) -> List[Document]:
+        """
+        Reads a file and returns a list of documents.
+        """
+        path = Path(path) if isinstance(path, str) else path
         if not path:
             raise ValueError("No path provided")
 
@@ -149,7 +154,10 @@ class KnowledgeBase(BaseModel):
             logger.error(f"Error reading: {path}: {e}")
         return []
 
-    def _read_pdf_url(self, path: str) -> List[Document]:
+    def read_pdf_url(self, path: str) -> List[Document]:
+        """
+        Reads a pdf from a URL and returns a list of documents.
+        """
         try:
             file_contents = read_pdf_url(path)
             documents = [
@@ -169,6 +177,29 @@ class KnowledgeBase(BaseModel):
             logger.error(f"Error reading: {path}: {e}")
         return []
 
+    def read_url(self, url: str) -> List[Document]:
+        """
+        Reads a website and returns a list of documents.
+        """
+        try:
+            file_contents = UrlCrawlerTool(max_depth=1, max_links=1).url_crawl(url)
+            documents = [
+                Document(
+                    name=url,
+                    id=url,
+                    content=file_contents,
+                )
+            ]
+            if self.chunk:
+                chunked_documents = []
+                for document in documents:
+                    chunked_documents.extend(self.chunk_document(document, self.chunk_size))
+                return chunked_documents
+            return documents
+        except Exception as e:
+            logger.error(f"Error reading: {url}: {e}")
+        return []
+
     @property
     def document_lists(self) -> Iterator[List[Document]]:
         """Iterator that yields lists of documents in the knowledge base
@@ -181,11 +212,13 @@ class KnowledgeBase(BaseModel):
             if _file_path.exists() and _file_path.is_dir():
                 for _file in _file_path.glob("**/*"):
                     if _file_path.suffix:
-                        yield self._read_file(_file)
+                        yield self.read_file(_file)
             elif _file_path.exists() and _file_path.is_file() and _file_path.suffix:
-                yield self._read_file(_file_path)
+                yield self.read_file(_file_path)
+            elif path.startswith("http") and 'pdf' in path:
+                yield self.read_pdf_url(path)
             elif path.startswith("http"):
-                yield self._read_pdf_url(path)
+                yield self.read_url(path)
             else:
                 raise ValueError(f"Unsupported file format: {path}")
 

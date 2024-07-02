@@ -81,9 +81,10 @@ team = Assistant(
     show_tool_calls=True,
     debug_mode=True,
 )
-team.run(
+r = team.run(
     """
     Find the 7 most relevant articles on a topic: 美国继续制裁俄罗斯,
     Read each article and and write a NYT worthy news article. 用中文写。
     """
 )
+print("".join(r))

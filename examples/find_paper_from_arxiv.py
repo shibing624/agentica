@@ -27,4 +27,5 @@ https://arxiv.org/search/?query=large+model&searchtype=all&abstracts=show&order=
 大致步骤我理解是：分别爬取arxiv的搜索结果，保存各个爬取结果的前500字符到文件，阅读并理解文件内容，提取核心信息保存到csv文件，这时做论文标题字面去重（相似度卡0.8），检查csv文件中的第一篇论文的内容。
 记得在每个步骤后，打印出来，方便我理解和检查。
 """
-m.run(prompt)
+r = m.run(prompt)
+print(r, "".join(r))

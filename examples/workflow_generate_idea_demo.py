@@ -36,4 +36,5 @@ workflow = Workflow(
     debug_mode=True,
 )
 
-workflow.run()
+r = workflow.run()
+print("".join(r))

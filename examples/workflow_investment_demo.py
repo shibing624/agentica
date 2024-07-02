@@ -74,4 +74,5 @@ workflow = Workflow(
     debug_mode=True,
 )
 
-workflow.run(stream=False)
+r = workflow.run(stream=False)
+print(r)

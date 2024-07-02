@@ -5,6 +5,7 @@ from agentica import Assistant, AzureOpenAILLM
 
 assistant = Assistant(
     llm=AzureOpenAILLM(model="gpt-4-turbo", max_tokens=4096),
+    debug_mode=True,
 )
 
 # Single Image

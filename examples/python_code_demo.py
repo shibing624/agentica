@@ -23,4 +23,5 @@ python_assistant = PythonAssistant(
     debug_mode=True,
 )
 
-python_assistant.run("What is the min rating of movies?")
+r = python_assistant.run("What is the min rating of movies?")
+print("".join(r))

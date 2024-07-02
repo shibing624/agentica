@@ -8,4 +8,5 @@ assistant = Assistant(
     user_prompt="Love in the year 12000.",
     debug_mode=True,
 )
-assistant.run()
+r = assistant.run()
+print("".join(r))

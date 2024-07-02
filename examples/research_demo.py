@@ -55,4 +55,5 @@ m = Assistant(
     show_tool_calls=True,
     debug_mode=True,
 )
-m.run("苹果 WWDC 发布会")
+r = m.run("苹果 WWDC 发布会")
+print("".join(r))

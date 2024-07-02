@@ -82,9 +82,13 @@ m = Assistant(
   read_chat_history=True,
   debug_mode=True,
 )
-m.run("一句话介绍林黛玉")
-m.run("北京最近的新闻", stream=True, print_output=True)
-m.run("总结前面的问答")
+
+r = m.run("一句话介绍林黛玉")
+print(r, "".join(r))
+r = m.run("北京最近的新闻", stream=True, print_output=True)
+print(r, "".join(r))
+r = m.run("总结前面的问答", stream=False, print_output=False)
+print(r)
 ```
 
 

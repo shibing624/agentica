@@ -19,4 +19,5 @@ m = Assistant(
 prompt = """
 对图片`data/chinese.jpg`进行OCR识别，只给出ocr文字就可以。
 """
-m.run(prompt)
+r = m.run(prompt)
+print("".join(r))

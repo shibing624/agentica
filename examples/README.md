@@ -1,7 +1,6 @@
-# Workflow Examples
+# Agentica Examples
 
 
-## Examples
 | 示例                                                                                                                                  | 描述                                                                                                                              |
 |-------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
 | [examples/naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/naive_rag_demo.py)                         | 实现了基础版RAG，基于Txt文档回答问题                                                                                                           |
@@ -20,8 +19,6 @@
 
 
 Lets build the LLM OS proposed by Andrej Karpathy [in this tweet](https://twitter.com/karpathy/status/1723140519554105733), [this tweet](https://twitter.com/karpathy/status/1707437820045062561) and [this video](https://youtu.be/zjkBMFhNj_g?t=2535).
-
-Also checkout my [video](https://x.com/ashpreetbedi/status/1790109321939829139) on building the LLM OS for more information.
 
 ## The LLM OS design:
 
@@ -57,53 +54,32 @@ source ~/.venvs/aienv/bin/activate
 ### 2. Install libraries
 
 ```shell
-pip install -r cookbook/llm_os/requirements.txt
+pip install agentica
 ```
 
 ### 3. Export credentials
 
-- Our initial implementation uses GPT-4, so export your OpenAI API Key
+- Our initial implementation uses GPT-4, so export your OpenAI API Key in the `.env` file
 
 ```shell
-export OPENAI_API_KEY=***
+OPENAI_API_KEY=***
+EXA_API_KEY=xxx # optional
+SERPER_API_KEY=xxx # optional
 ```
 
-- To use Exa for research, export your EXA_API_KEY (get it from [here](https://dashboard.exa.ai/api-keys))
+### 4. Run the LLM OS App
 
 ```shell
-export EXA_API_KEY=xxx
-```
-
-### 4. Run PgVector
-
-We use PgVector to provide long-term memory and knowledge to the LLM OS.
-Please install [docker desktop](https://docs.docker.com/desktop/install/mac-install/) and run PgVector using either the helper script or the `docker run` command.
-
-- Run using the docker run command
-
-```shell
-docker run -d \
-  -e POSTGRES_DB=ai \
-  -e POSTGRES_USER=ai \
-  -e POSTGRES_PASSWORD=ai \
-  -e PGDATA=/var/lib/postgresql/data/pgdata \
-  -v pgvolume:/var/lib/postgresql/data \
-  -p 5532:5432 \
-  --name pgvector \
-  phidata/pgvector:16
-```
-
-### 5. Run the LLM OS App
-
-```shell
-streamlit run cookbook/llm_os/app.py
+cd examples
+streamlit run llm_os_demo.py
 ```
 
 - Open [localhost:8501](http://localhost:8501) to view your LLM OS.
-- Add a blog post to knowledge base: https://blog.samaltman.com/gpt-4o
+- Add a blog URL to knowledge base: https://blog.samaltman.com/gpt-4o
 - Ask: What is gpt-4o?
-- Web search: Whats happening in france?
-- Calculator: Whats 10!
-- Enable shell tools and ask: is docker running?
-- Enable the Research Assistant and ask: write a report on the ibm hashicorp acquisition
-- Enable the Investment Assistant and ask: shall i invest in nvda?
+- `Web search`: 北京今天天气?
+- Enable `shell tool` and ask: is docker running?
+- `Data Analyst`: 推荐5个高分科幻电影，要求评分大于8.5
+- `Python Assistant`: 编写 Python 代码生成一个包含20个100到200之间的随机数的列表，并计算它们的平均值。
+- Enable the `Research Assistant` and ask: write a report on the ibm hashicorp acquisition
+- Enable the `Investment Assistant` and ask: shall i invest in nvda?

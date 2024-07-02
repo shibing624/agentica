@@ -28,4 +28,5 @@ assistant = Assistant(
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
     add_references_to_prompt=True,
 )
-assistant.run("Finetune LLM有啥好处?")
+r = assistant.run("Finetune LLM有啥好处?")
+print(r, "".join(r))

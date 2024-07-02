@@ -790,6 +790,7 @@ class Assistant(BaseModel):
             *,
             stream: bool = True,
             messages: Optional[List[Union[Dict, Message]]] = None,
+            print_output: bool = True,
             **kwargs: Any,
     ) -> Iterator[str]:
         logger.debug(f"*********** Assistant Run Start: {self.run_id} ***********")
@@ -865,6 +866,8 @@ class Assistant(BaseModel):
         self.llm = cast(LLM, self.llm)
         if stream and self.streamable:
             for response_chunk in self.llm.response_stream(messages=llm_messages):
+                if print_output:
+                    print_llm_stream(response_chunk)
                 llm_response += response_chunk
                 yield response_chunk
         else:
@@ -922,6 +925,8 @@ class Assistant(BaseModel):
 
         # -*- Yield final response if not streaming
         if not stream:
+            if print_output:
+                print(llm_response)
             yield llm_response
 
     def run(
@@ -929,8 +934,8 @@ class Assistant(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
-            print_output: bool = True,
             messages: Optional[List[Union[Dict, Message]]] = None,
+            print_output: bool = True,
             **kwargs: Any,
     ) -> Union[Iterator[str], str, BaseModel]:
         # Convert response to structured output if output_model is set
@@ -959,16 +964,11 @@ class Assistant(BaseModel):
             return self.output or json_resp
         else:
             if stream and self.streamable:
-                resp = self._run(message=message, messages=messages, stream=True, **kwargs)
-                if print_output:
-                    for chunk in resp:
-                        print_llm_stream(chunk)
+                resp = self._run(message=message, messages=messages, stream=True, print_output=print_output, **kwargs)
                 return resp
             else:
-                resp = self._run(message=message, messages=messages, stream=False, **kwargs)
+                resp = self._run(message=message, messages=messages, stream=False, print_output=print_output, **kwargs)
                 resp = next(resp)
-                if print_output:
-                    print(resp)
                 return resp
 
     async def _arun(
@@ -977,6 +977,7 @@ class Assistant(BaseModel):
             *,
             stream: bool = True,
             messages: Optional[List[Union[Dict, Message]]] = None,
+            print_output: bool = True,
             **kwargs: Any,
     ) -> AsyncIterator[str]:
         logger.debug(f"*********** Run Start: {self.run_id} ***********")
@@ -1055,6 +1056,8 @@ class Assistant(BaseModel):
             response_stream = self.llm.aresponse_stream(messages=llm_messages)
             async for response_chunk in response_stream:  # type: ignore
                 llm_response += response_chunk
+                if print_output:
+                    print_llm_stream(response_chunk)
                 yield response_chunk
         else:
             llm_response = await self.llm.aresponse(messages=llm_messages)
@@ -1089,6 +1092,8 @@ class Assistant(BaseModel):
 
         # -*- Yield final response if not streaming
         if not stream:
+            if print_output:
+                print(llm_response)
             yield llm_response
 
     async def arun(
@@ -1096,8 +1101,8 @@ class Assistant(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
-            print_output: bool = True,
             messages: Optional[List[Union[Dict, Message]]] = None,
+            print_output: bool = True,
             **kwargs: Any,
     ) -> Union[AsyncIterator[str], str, BaseModel]:
         # Convert response to structured output if output_model is set
@@ -1127,17 +1132,11 @@ class Assistant(BaseModel):
             return self.output or json_resp
         else:
             if stream and self.streamable:
-                resp = self._arun(message=message, messages=messages, stream=True, **kwargs)
-                if print_output:
-                    async for chunk in resp:
-                        print_llm_stream(chunk)
+                resp = self._arun(message=message, messages=messages, stream=True, print_output=print_output, **kwargs)
                 return resp
             else:
-                resp = self._arun(message=message, messages=messages, stream=False, **kwargs)
-                r = await resp.__anext__()
-                if print_output:
-                    print(r)
-                return r
+                resp = self._arun(message=message, messages=messages, stream=False, print_output=print_output, **kwargs)
+                return await resp.__anext__()
 
     def chat(
             self, message: Union[List, Dict, str], stream: bool = True, **kwargs: Any

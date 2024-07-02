@@ -92,6 +92,5 @@ flow = Workflow(
     debug_mode=True,
 )
 
-flow.run(
-    "美国继续制裁俄罗斯",
-)
+r = flow.run("美国继续制裁俄罗斯")
+print("".join(r))
