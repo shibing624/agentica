@@ -66,6 +66,7 @@ class Workflow(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
+            print_output: bool = False,
             **kwargs: Any,
     ) -> Iterator[str]:
         logger.debug(f"*********** Workflow Run Start: {self.run_id} ***********")
@@ -106,7 +107,8 @@ class Workflow(BaseModel):
                 for chunk in task.run(message=input_for_current_task, stream=True, **kwargs):
                     task_output += chunk if isinstance(chunk, str) else ""
                     chunk_str = chunk if isinstance(chunk, str) else ""
-
+                    if print_output:
+                        print_llm_stream(chunk_str)
                     yield chunk_str
             else:
                 task_output = task.run(message=input_for_current_task, stream=False, **kwargs)  # type: ignore
@@ -115,6 +117,8 @@ class Workflow(BaseModel):
             workflow_output.append(task_output)
             logger.debug(f"*********** Task {idx} End ***********")
             if not stream:
+                if print_output:
+                    print(task_output)
                 yield task_output
         logger.debug(f"*********** Workflow Run End: {self.run_id} ***********")
 
@@ -123,19 +127,14 @@ class Workflow(BaseModel):
             message: Optional[Union[List, Dict, str]] = None,
             *,
             stream: bool = True,
-            print_output: bool = True,
+            print_output: bool = False,
             **kwargs: Any,
     ) -> Union[Iterator[str], str]:
         if stream:
-            resp = self._run(message=message, stream=True, **kwargs)
-            if print_output:
-                for chunk in resp:
-                    print_llm_stream(chunk)
+            resp = self._run(message=message, stream=True, print_output=print_output, **kwargs)
             return resp
         else:
-            resp = "".join(self._run(message=message, stream=False, **kwargs))
-            if print_output:
-                print(resp)
+            resp = "".join(self._run(message=message, stream=False, print_output=print_output, **kwargs))
             return resp
 
     def cli(
@@ -143,7 +142,7 @@ class Workflow(BaseModel):
             user: str = "User",
             emoji: str = ":sunglasses:",
             stream: bool = True,
-            print_output: bool = True,
+            print_output: bool = False,
             exit_on: Optional[List[str]] = None,
     ) -> None:
         from rich.prompt import Prompt

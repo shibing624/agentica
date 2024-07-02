@@ -1333,7 +1333,6 @@ class Assistant(BaseModel):
             user: str = "User",
             emoji: str = ":sunglasses:",
             stream: bool = True,
-            markdown: bool = False,
             exit_on: Optional[List[str]] = None,
             **kwargs: Any,
     ) -> None:
@@ -1341,11 +1340,11 @@ class Assistant(BaseModel):
         _exit_on = exit_on or ["exit", "quit", "bye"]
         logger.debug(f"Enable cli, exit with {_exit_on[0]}")
         if message:
-            self.run(message=message, stream=stream, markdown=markdown, **kwargs)
+            self.run(message=message, stream=stream, **kwargs)
 
         while True:
             message = Prompt.ask(f"[bold] {emoji} {user} [/bold]")
             if message in _exit_on:
                 break
 
-            self.run(message=message, stream=stream, markdown=markdown, **kwargs)
+            self.run(message=message, stream=stream, **kwargs)
