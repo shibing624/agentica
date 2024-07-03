@@ -112,6 +112,7 @@ print(r)
 
 ### LLM OS
 The LLM OS design:
+
 <img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="600" />
 
 #### Run the LLM OS App
