@@ -2,13 +2,5 @@ loguru
 beautifulsoup4
 openai
 python-dotenv
-pytest
 pydantic
-yfinance
-tenacity
-rich
-nbclient
-nbformat
-ipython
-ipykernel~=6.27.0
-text2vec
+requests
