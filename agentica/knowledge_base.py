@@ -182,12 +182,12 @@ class KnowledgeBase(BaseModel):
         Reads a website and returns a list of documents.
         """
         try:
-            file_contents = UrlCrawlerTool(max_depth=1, max_links=1).url_crawl(url)
+            content = UrlCrawlerTool().url_crawl(url)
             documents = [
                 Document(
                     name=url,
                     id=url,
-                    content=file_contents,
+                    content=content,
                 )
             ]
             if self.chunk:
