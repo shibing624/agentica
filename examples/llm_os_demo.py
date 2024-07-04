@@ -5,10 +5,11 @@
 
 pip install streamlit agentica text2vec sqlalchemy lancedb pyarrow yfinance
 """
+import os
 import sys
 from textwrap import dedent
 from typing import List, Optional
-import os
+
 import streamlit as st
 
 sys.path.append('..')
@@ -257,17 +258,14 @@ def get_llm_os(
     return llm_os
 
 
-# nest_asyncio.apply()
-
-st.set_page_config(
-    page_title="LLM OS",
-    page_icon=":orange_heart:",
-)
-st.title("LLM OS")
-st.markdown("##### :orange_heart: built using [agentica](https://github.com/shibing624/agentica)")
-
-
 def main():
+    st.set_page_config(
+        page_title="LLM OS",
+        page_icon=":orange_heart:",
+    )
+    st.title("LLM OS")
+    st.markdown("##### :orange_heart: built using [agentica](https://github.com/shibing624/agentica)")
+
     # Get LLM Model
     llm_id = st.sidebar.selectbox("Select LLM", options=["gpt-4o", "gpt-4-turbo"]) or "gpt-4o"
     # Set llm_id in session state
