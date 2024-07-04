@@ -25,7 +25,7 @@
 ## Overview
 
 #### LLM Agent
-![llm_agnet](https://github.com/shibing624/agentica/blob/main/docs/llm_agent.png)
+![llm_agnet](https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png)
 
 - **规划（Planning）**：任务拆解、生成计划、反思
 - **记忆（Memory）**：短期记忆（prompt实现）、长期记忆（RAG实现）
