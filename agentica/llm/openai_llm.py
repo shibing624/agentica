@@ -10,23 +10,20 @@ from typing import Optional, List, Iterator, Dict, Any, Union, Tuple
 
 import httpx
 
-try:
-    from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
-    from openai.types.completion_usage import CompletionUsage
-    from openai.types.chat.chat_completion import ChatCompletion
-    from openai.types.chat.chat_completion_chunk import (
-        ChatCompletionChunk,
-        ChoiceDelta,
-        ChoiceDeltaFunctionCall,
-        ChoiceDeltaToolCall,
-    )
-    from openai.types.chat.chat_completion_message import (
-        ChatCompletionMessage,
-        FunctionCall as ChatCompletionFunctionCall,
-    )
-    from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
-except ImportError:
-    raise ImportError("`openai` not installed, please run `pip install openai -U`.")
+from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
+from openai.types.completion_usage import CompletionUsage
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.chat_completion_chunk import (
+    ChatCompletionChunk,
+    ChoiceDelta,
+    ChoiceDeltaFunctionCall,
+    ChoiceDeltaToolCall,
+)
+from openai.types.chat.chat_completion_message import (
+    ChatCompletionMessage,
+    FunctionCall as ChatCompletionFunctionCall,
+)
+from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
 from agentica.config import FAST_LLM
 from agentica.llm.base import LLM
 from agentica.message import Message
