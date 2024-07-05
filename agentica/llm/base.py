@@ -104,9 +104,11 @@ class LLM(BaseModel):
         tools_for_api = []
         for tool in self.tools:
             if isinstance(tool, Tool):
-                tools_for_api.append(tool.to_dict())
+                if tool.to_dict() not in tools_for_api:
+                    tools_for_api.append(tool.to_dict())
             elif isinstance(tool, Dict):
-                tools_for_api.append(tool)
+                if tool not in tools_for_api:
+                    tools_for_api.append(tool)
         return tools_for_api
 
     def add_tool(self, tool: Union[Tool, Toolkit, Callable, Dict, Function]) -> None:

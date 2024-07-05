@@ -65,6 +65,7 @@ def test_use_kimi_tool():
                 }
             }
         }],
+        tool_choice='auto',
         temperature=0.3,
     )
 
@@ -111,3 +112,20 @@ def test_use_kimi_tool_and_resp():
     )
 
     print(completion.choices[0].message)
+
+    mm = [{'role': 'system', 'content': 'You must follow these instructions carefully:\n<instructions>\n1. The current time is 2024-07-05 23:54:34.272742\n</instructions>'},
+          {'role': 'user', 'content': '北京最近的新闻'},
+          {'role': 'assistant', 'content': 'Running tool calls...'},
+          {'role': 'user', 'content': "<tool_results><result><tool_name>search_google</tool_name><stdout>7月起北京300家药店可使用医保个人账户线上购药 · 首都医科大学宣武医院党委：“生命之舟”守护“未来之城” · 报告：中国医疗健康产业已进入高速增长期 · 北京首个社区医学专家 ...>"}
+          ]
+
+    completion = client.chat.completions.create(
+        model="moonshot-v1-8k",
+        messages=mm,
+        temperature=0.3,
+    )
+
+    print(completion.choices[0].message)
+
+
+
