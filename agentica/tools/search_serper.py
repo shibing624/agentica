@@ -117,7 +117,7 @@ class SearchSerperTool(Toolkit):
     def search_google(
             self,
             query: str,
-            max_results: int = 8,
+            max_results: int = 5,
             as_string: bool = True,
     ) -> str:
         """

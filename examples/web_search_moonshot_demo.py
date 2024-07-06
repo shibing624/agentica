@@ -10,6 +10,7 @@ from agentica.message import Message
 from agentica import Assistant, MoonshotLLM
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.tools.file import FileTool
+from agentica.tools.ocr import OcrTool
 
 llm = MoonshotLLM()
 
@@ -20,7 +21,7 @@ print(llm_r)
 
 m = Assistant(
     llm=llm,
-    tools=[SearchSerperTool(), FileTool()],
+    tools=[SearchSerperTool(), FileTool(), OcrTool()],
     add_datetime_to_instructions=True,
     show_tool_calls=True,
     read_chat_history=True,
