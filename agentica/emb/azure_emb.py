@@ -6,16 +6,13 @@ part of the code from https://github.com/phidatahq/phidata
 """
 from os import getenv
 from typing import Optional, Dict, List, Tuple, Any
+
+from openai import AzureOpenAI as AzureOpenAIClient
+from openai.types.create_embedding_response import CreateEmbeddingResponse
 from typing_extensions import Literal
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
-
-try:
-    from openai import AzureOpenAI as AzureOpenAIClient
-    from openai.types.create_embedding_response import CreateEmbeddingResponse
-except ImportError:
-    raise ImportError("`openai` not installed, please run `pip install openai`")
 
 
 class AzureOpenAIEmb(Emb):
@@ -57,7 +54,8 @@ class AzureOpenAIEmb(Emb):
             _client_params["azure_ad_token"] = self.azure_ad_token
         if self.azure_ad_token_provider:
             _client_params["azure_ad_token_provider"] = self.azure_ad_token_provider
-        return AzureOpenAIClient(**_client_params)
+        self.openai_client = AzureOpenAIClient(**_client_params)
+        return self.openai_client
 
     def _response(self, text: str) -> CreateEmbeddingResponse:
         _request_params: Dict[str, Any] = {

@@ -7,16 +7,12 @@ part of the code from https://github.com/phidatahq/phidata
 from os import getenv
 from typing import Optional, Dict, List, Tuple, Any
 
+from openai import OpenAI as OpenAIClient
+from openai.types.create_embedding_response import CreateEmbeddingResponse
 from typing_extensions import Literal
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
-
-try:
-    from openai import OpenAI as OpenAIClient
-    from openai.types.create_embedding_response import CreateEmbeddingResponse
-except ImportError:
-    raise ImportError("`openai` not installed, please run `pip install openai`")
 
 
 class OpenAIEmb(Emb):

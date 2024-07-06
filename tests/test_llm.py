@@ -5,12 +5,16 @@
 This module contains tests for the LLM class.
 """
 
-from unittest.mock import MagicMock, patch
-from openai import OpenAI
 import os
+from unittest.mock import MagicMock, patch
+
+from openai import OpenAI
+
 from agentica.config import DOTENV_PATH  # noqa
 from agentica.message import Message
+
 api_key = os.getenv("MOONSHOT_API_KEY")
+
 
 @patch("agentica.llm.openai_llm.OpenAILLM")
 def test_respond(mock_llm_class):
@@ -31,6 +35,7 @@ def test_respond(mock_llm_class):
     assert res == "Yes, I am here!", "Response is not as expected"
     assert res is not None, "Response is None"
     mock_llm_instance.response.assert_called_once_with(messages)
+
 
 def test_use_kimi_tool():
     client = OpenAI(
@@ -113,11 +118,14 @@ def test_use_kimi_tool_and_resp():
 
     print(completion.choices[0].message)
 
-    mm = [{'role': 'system', 'content': 'You must follow these instructions carefully:\n<instructions>\n1. The current time is 2024-07-05 23:54:34.272742\n</instructions>'},
-          {'role': 'user', 'content': '北京最近的新闻'},
-          {'role': 'assistant', 'content': 'Running tool calls...'},
-          {'role': 'user', 'content': "<tool_results><result><tool_name>search_google</tool_name><stdout>7月起北京300家药店可使用医保个人账户线上购药 · 首都医科大学宣武医院党委：“生命之舟”守护“未来之城” · 报告：中国医疗健康产业已进入高速增长期 · 北京首个社区医学专家 ...>"}
-          ]
+    mm = [
+        {'role': 'system',
+         'content': 'You must follow these instructions carefully:\n<instructions>\n1. The current time is 2024-07-05 23:54:34.272742\n</instructions>'},
+        {'role': 'user', 'content': '北京最近的新闻'},
+        {'role': 'assistant', 'content': 'Running tool calls...'},
+        {'role': 'user',
+         'content': "<tool_results><result><tool_name>search_google</tool_name><stdout>7月起北京300家药店可使用医保个人账户线上购药 · 首都医科大学宣武医院党委：“生命之舟”守护“未来之城” · 报告：中国医疗健康产业已进入高速增长期 · 北京首个社区医学专家 ...>"}
+    ]
 
     completion = client.chat.completions.create(
         model="moonshot-v1-8k",
@@ -126,6 +134,3 @@ def test_use_kimi_tool_and_resp():
     )
 
     print(completion.choices[0].message)
-
-
-
