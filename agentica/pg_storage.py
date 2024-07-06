@@ -4,65 +4,54 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-import os
-from sqlite3 import OperationalError
 from typing import Optional, Any, List
 
-from sqlalchemy.dialects import sqlite
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import create_engine, Engine
 from sqlalchemy.engine.row import Row
 from sqlalchemy.inspection import inspect
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import MetaData, Table, Column
-from sqlalchemy.sql.expression import select
-from sqlalchemy.types import String, JSON, DateTime
+from sqlalchemy.sql.expression import text, select
+from sqlalchemy.types import DateTime, String
 
 from agentica.run_record import RunRecord
-from agentica.utils.misc import current_datetime
 from agentica.utils.log import logger
 
 
-class SqliteStorage:
+class PgStorage:
     def __init__(
             self,
             table_name: str,
+            schema: Optional[str] = "ai",
             db_url: Optional[str] = None,
-            db_file: Optional[str] = None,
             db_engine: Optional[Engine] = None,
     ):
         """
-        This class provides assistant storage using a sqlite database.
+        This class provides assistant storage using a postgres table.
 
         The following order is used to determine the database connection:
             1. Use the db_engine if provided
             2. Use the db_url
-            3. Use the db_file
-            4. Create a new in-memory database
 
         :param table_name: The name of the table to store assistant runs.
+        :param schema: The schema to store the table in.
         :param db_url: The database URL to connect to.
-        :param db_file: The database file to connect to.
         :param db_engine: The database engine to use.
         """
         _engine: Optional[Engine] = db_engine
         if _engine is None and db_url is not None:
             _engine = create_engine(db_url)
-        elif _engine is None and db_file is not None:
-            db_dir = os.path.dirname(db_file)
-            os.makedirs(db_dir, exist_ok=True)
-            _engine = create_engine(f"sqlite:///{db_file}")
-        else:
-            logger.debug("Using in-memory database")
-            _engine = create_engine("sqlite://")
 
         if _engine is None:
-            raise ValueError("Must provide either db_url, db_file or db_engine")
+            raise ValueError("Must provide either db_url or db_engine")
 
         # Database attributes
         self.table_name: str = table_name
+        self.schema: Optional[str] = schema
         self.db_url: Optional[str] = db_url
         self.db_engine: Engine = _engine
-        self.metadata: MetaData = MetaData()
+        self.metadata: MetaData = MetaData(schema=self.schema)
 
         # Database session
         self.Session: sessionmaker[Session] = sessionmaker(bind=self.db_engine)
@@ -70,14 +59,11 @@ class SqliteStorage:
         # Database table for storage
         self.table: Table = self.get_table()
 
-        # Create the table if it does not exist
-        self.create()
-
     def get_table(self) -> Table:
         return Table(
             self.table_name,
             self.metadata,
-            # Database ID/Primary key for this run
+            # Primary key for this run
             Column("run_id", String, primary_key=True),
             # Assistant name
             Column("name", String),
@@ -85,61 +71,60 @@ class SqliteStorage:
             Column("run_name", String),
             # ID of the user participating in this run
             Column("user_id", String),
-            # LLM data (name, model, etc.)
-            Column("llm", JSON),
-            # Assistant memory
-            Column("memory", JSON),
+            # -*- LLM data (name, model, etc.)
+            Column("llm", postgresql.JSONB),
+            # -*- Assistant memory
+            Column("memory", postgresql.JSONB),
             # Metadata associated with this assistant
-            Column("assistant_data", JSON),
+            Column("assistant_data", postgresql.JSONB),
             # Metadata associated with this run
-            Column("run_data", JSON),
+            Column("run_data", postgresql.JSONB),
             # Metadata associated the user participating in this run
-            Column("user_data", JSON),
+            Column("user_data", postgresql.JSONB),
             # Metadata associated with the assistant tasks
-            Column("task_data", JSON),
+            Column("task_data", postgresql.JSONB),
             # The timestamp of when this run was created.
-            Column("created_at", DateTime, default=current_datetime),
+            Column("created_at", DateTime(timezone=True), server_default=text("now()")),
             # The timestamp of when this run was last updated.
-            Column("updated_at", DateTime, onupdate=current_datetime),
+            Column("updated_at", DateTime(timezone=True), onupdate=text("now()")),
             extend_existing=True,
         )
 
     def table_exists(self) -> bool:
         logger.debug(f"Checking if table exists: {self.table.name}")
         try:
-            return inspect(self.db_engine).has_table(self.table.name)
+            return inspect(self.db_engine).has_table(self.table.name, schema=self.schema)
         except Exception as e:
             logger.error(e)
             return False
 
     def create(self) -> None:
         if not self.table_exists():
-            logger.debug(f"Creating table: {self.table.name}")
-            self.metadata.create_all(self.db_engine)
+            if self.schema is not None:
+                with self.Session() as sess, sess.begin():
+                    logger.debug(f"Creating schema: {self.schema}")
+                    sess.execute(text(f"create schema if not exists {self.schema};"))
+            logger.debug(f"Creating table: {self.table_name}")
+            self.table.create(self.db_engine)
 
     def _read(self, session: Session, run_id: str) -> Optional[Row[Any]]:
         stmt = select(self.table).where(self.table.c.run_id == run_id)
         try:
             return session.execute(stmt).first()
-        except OperationalError as oe:
-            logger.warning(f"OperationalError occurred: {oe}")
+        except Exception:
             # Create table if it does not exist
             self.create()
-            # Retry the read operation after creating the table
-            return session.execute(stmt).first()
-        except Exception as e:
-            logger.warning(e)
         return None
 
     def read(self, run_id: str) -> Optional[RunRecord]:
-        with self.Session() as sess:
+        with self.Session() as sess, sess.begin():
             existing_row: Optional[Row[Any]] = self._read(session=sess, run_id=run_id)
             return RunRecord.model_validate(existing_row) if existing_row is not None else None
 
     def get_all_run_ids(self, user_id: Optional[str] = None) -> List[str]:
         run_ids: List[str] = []
         try:
-            with self.Session() as sess:
+            with self.Session() as sess, sess.begin():
                 # get all run_ids for this user
                 stmt = select(self.table)
                 if user_id is not None:
@@ -151,15 +136,14 @@ class SqliteStorage:
                 for row in rows:
                     if row is not None and row.run_id is not None:
                         run_ids.append(row.run_id)
-        except OperationalError:
+        except Exception:
             logger.debug(f"Table does not exist: {self.table.name}")
-            pass
         return run_ids
 
     def get_all_runs(self, user_id: Optional[str] = None) -> List[RunRecord]:
-        conversations: List[RunRecord] = []
+        runs: List[RunRecord] = []
         try:
-            with self.Session() as sess:
+            with self.Session() as sess, sess.begin():
                 # get all runs for this user
                 stmt = select(self.table)
                 if user_id is not None:
@@ -170,19 +154,19 @@ class SqliteStorage:
                 rows = sess.execute(stmt).fetchall()
                 for row in rows:
                     if row.run_id is not None:
-                        conversations.append(RunRecord.model_validate(row))
-        except OperationalError:
+                        runs.append(RunRecord.model_validate(row))
+        except Exception:
             logger.debug(f"Table does not exist: {self.table.name}")
-            pass
-        return conversations
+        return runs
 
     def upsert(self, row: RunRecord) -> Optional[RunRecord]:
         """
-        Create a new assistant run if it does not exist, otherwise update the existing conversation.
+        Create a new assistant run if it does not exist, otherwise update the existing assistant.
         """
-        with self.Session() as sess:
+
+        with self.Session() as sess, sess.begin():
             # Create an insert statement
-            stmt = sqlite.insert(self.table).values(
+            stmt = postgresql.insert(self.table).values(
                 run_id=row.run_id,
                 name=row.name,
                 run_name=row.run_name,
@@ -196,7 +180,7 @@ class SqliteStorage:
             )
 
             # Define the upsert if the run_id already exists
-            # See: https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#insert-on-conflict-upsert
+            # See: https://docs.sqlalchemy.org/en/20/dialects/postgresql.html#postgresql-insert-on-conflict
             stmt = stmt.on_conflict_do_update(
                 index_elements=["run_id"],
                 set_=dict(
@@ -214,22 +198,11 @@ class SqliteStorage:
 
             try:
                 sess.execute(stmt)
-                sess.commit()  # Make sure to commit the changes to the database
-                return self.read(run_id=row.run_id)
-            except OperationalError as oe:
-                logger.debug(f"OperationalError occurred: {oe}")
-                self.create()  # This will only create the table if it doesn't exist
-                try:
-                    sess.execute(stmt)
-                    sess.commit()
-                    return self.read(run_id=row.run_id)
-                except Exception as e:
-                    logger.warning(f"Error during upsert: {e}")
-                    sess.rollback()  # Rollback the session in case of any error
-            except Exception as e:
-                logger.warning(f"Error during upsert: {e}")
-                sess.rollback()
-        return None
+            except Exception:
+                # Create table and try again
+                self.create()
+                sess.execute(stmt)
+        return self.read(run_id=row.run_id)
 
     def delete(self) -> None:
         if self.table_exists():

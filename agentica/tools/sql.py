@@ -7,13 +7,10 @@ part of the code is from phidata
 import json
 from typing import List, Optional, Dict, Any
 
-try:
-    from sqlalchemy import create_engine, Engine
-    from sqlalchemy.orm import Session, sessionmaker
-    from sqlalchemy.inspection import inspect
-    from sqlalchemy.sql.expression import text
-except ImportError:
-    raise ImportError("`sqlalchemy` not installed, please install it via `pip install sqlalchemy`")
+from sqlalchemy import create_engine, Engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.inspection import inspect
+from sqlalchemy.sql.expression import text
 from agentica.tool import Toolkit
 from agentica.utils.log import logger
 

@@ -2,18 +2,14 @@ from hashlib import md5
 from typing import Optional, List, Union, Dict, Any
 
 from pydantic import BaseModel
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.engine import create_engine, Engine
+from sqlalchemy.inspection import inspect
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import MetaData, Table, Column
+from sqlalchemy.sql.expression import text, func, select
+from sqlalchemy.types import DateTime, String
 from tqdm import tqdm
-
-try:
-    from sqlalchemy.dialects import postgresql
-    from sqlalchemy.engine import create_engine, Engine
-    from sqlalchemy.inspection import inspect
-    from sqlalchemy.orm import Session, sessionmaker
-    from sqlalchemy.schema import MetaData, Table, Column
-    from sqlalchemy.sql.expression import text, func, select
-    from sqlalchemy.types import DateTime, String
-except ImportError:
-    raise ImportError("`sqlalchemy` not installed, please install it via `pip install sqlalchemy`.")
 
 try:
     from pgvector.sqlalchemy import Vector
