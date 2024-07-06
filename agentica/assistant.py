@@ -1212,13 +1212,13 @@ class Assistant(BaseModel):
     # Default Tools
     ###########################################################################
 
-    def get_chat_history(self, num_chats: Optional[int] = None) -> str:
+    def get_chat_history(self, num_chats: int = 5) -> str:
         """Use this function to get the chat history between the user and assistant.
 
         Args:
             num_chats: The number of chats to return.
                 Each chat contains 2 messages. One from the user and one from the assistant.
-                Default: None
+                Default: 5
 
         Returns:
             str: A JSON of a list of dictionaries representing the chat history.
@@ -1226,8 +1226,8 @@ class Assistant(BaseModel):
         Example:
             - To get the last chat, use num_chats=1.
             - To get the last 5 chats, use num_chats=5.
-            - To get all chats, use num_chats=None.
-            - To get the first chat, use num_chats=None and pick the first message.
+            - To get all chats, use num_chats=-1.
+            - To get the first chat, use num_chats=-1 and pick the first message.
         """
         history: List[Dict[str, Any]] = []
         all_chats = self.memory.get_chats()
@@ -1239,9 +1239,9 @@ class Assistant(BaseModel):
             history.insert(0, chat[1].to_dict())
             history.insert(0, chat[0].to_dict())
             chats_added += 1
-            if num_chats is not None and chats_added >= num_chats:
+            if 0 < num_chats <= chats_added:
                 break
-        return json.dumps(history)
+        return json.dumps(history, ensure_ascii=False)
 
     def get_tool_call_history(self, num_calls: int = 3) -> str:
         """Use this function to get the tools called by the assistant in reverse chronological order.
@@ -1255,13 +1255,13 @@ class Assistant(BaseModel):
 
         Example:
             - To get the last tool call, use num_calls=1.
-            - To get all tool calls, use num_calls=None.
+            - To get all tool calls, use num_calls=-1.
         """
         tool_calls = self.memory.get_tool_calls(num_calls)
         if len(tool_calls) == 0:
             return ""
         logger.debug(f"tool_calls: {tool_calls}")
-        return json.dumps(tool_calls)
+        return json.dumps(tool_calls, ensure_ascii=False)
 
     def search_knowledge_base(self, query: str) -> str:
         """Use this function to search the knowledge base for information about a query.

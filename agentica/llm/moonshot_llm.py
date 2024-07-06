@@ -18,7 +18,7 @@ from agentica.utils.timer import Timer
 
 class MoonshotLLM(LLM):
     name: str = "Moonshot"
-    model: str = "moonshot-v1-32k"
+    model: str = "moonshot-v1-8k"
     api_key: Optional[str] = getenv("MOONSHOT_API_KEY")
     base_url: str = "https://api.moonshot.cn/v1"
     temperature: Optional[float] = None
@@ -26,15 +26,15 @@ class MoonshotLLM(LLM):
     top_k: Optional[int] = None
     max_tokens: Optional[int] = None
     # Deactivate tool calls after 1 tool call
-    deactivate_tools_after_use: bool = True
+    deactivate_tools_after_use: bool = False
     request_params: Optional[Dict[str, Any]] = None
     client_params: Optional[Dict[str, Any]] = None
     # -*- Provide the client manually
-    kimi_client: Optional[OpenAIClient] = None
+    client: Optional[OpenAIClient] = None
 
     def get_client(self) -> OpenAIClient:
-        if self.kimi_client:
-            return self.kimi_client
+        if self.client:
+            return self.client
 
         _client_params: Dict[str, Any] = {}
         if self.api_key:
@@ -43,7 +43,8 @@ class MoonshotLLM(LLM):
             _client_params["base_url"] = self.base_url
         if self.client_params:
             _client_params.update(self.client_params)
-        return OpenAIClient(**_client_params)
+        self.client = OpenAIClient(**_client_params)
+        return self.client
 
     @property
     def api_kwargs(self) -> Dict[str, Any]:
@@ -96,11 +97,6 @@ class MoonshotLLM(LLM):
             stream=True,
             **self.api_kwargs,
         )
-
-    # def deactivate_function_calls(self) -> None:
-    #     # Deactivate tool calls by turning off JSON mode after 1 tool call
-    #     # This is triggered when the function call limit is reached.
-    #     self.tools = []
 
     def response(self, messages: List[Message]) -> str:
         logger.debug("---------- Moonshot Response Start ----------")
@@ -204,14 +200,14 @@ class MoonshotLLM(LLM):
                 messages.append(Message(role="user", content=fc_responses))
 
             # Deactivate tool calls after 1 tool call
-            # if self.deactivate_tools_after_use:
-            #     self.deactivate_function_calls()
+            if self.deactivate_tools_after_use:
+                self.deactivate_function_calls()
 
             # -*- Yield new response using results of tool calls
             last_message = messages[-1]
             if last_message.role == "user" and last_message.content is not None:
                 final_response += self.response(messages=messages)
-            return final_response
+                return final_response
         logger.debug("---------- Moonshot Response End ----------")
         # -*- Return content if no function calls are present
         if assistant_message.content is not None:

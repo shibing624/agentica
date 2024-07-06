@@ -49,7 +49,8 @@ class OllamaLLM(LLM):
             _ollama_params["timeout"] = self.timeout
         if self.client_kwargs:
             _ollama_params.update(self.client_kwargs)
-        return OllamaClient(**_ollama_params)
+        self.ollama_client = OllamaClient(**_ollama_params)
+        return self.ollama_client
 
     @property
     def api_kwargs(self) -> Dict[str, Any]:
@@ -59,8 +60,6 @@ class OllamaLLM(LLM):
         elif self.response_format is not None:
             if self.response_format.get("type") == "json_object":
                 kwargs["format"] = "json"
-        # elif self.functions is not None:
-        #     kwargs["format"] = "json"
         if self.options is not None:
             kwargs["options"] = self.options
         if self.keep_alive is not None:

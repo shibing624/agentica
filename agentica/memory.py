@@ -549,7 +549,7 @@ class AssistantMemory(BaseModel):
                 for tool_call in llm_message.tool_calls:
                     tool_calls.append(tool_call)
 
-        if num_calls:
+        if num_calls and num_calls > 0:
             return tool_calls[:num_calls]
         return tool_calls
 

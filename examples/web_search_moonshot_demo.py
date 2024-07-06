@@ -23,11 +23,15 @@ m = Assistant(
     tools=[SearchSerperTool(), FileTool()],
     add_datetime_to_instructions=True,
     show_tool_calls=True,
-    add_chat_history_to_messages=True,
+    read_chat_history=True,
     debug_mode=True,
 )
 
 r = m.run("北京最近的top3新闻", stream=False, print_output=False)
 print(r)
 r = m.run("一句话介绍北京", stream=False, print_output=False)
+print(r)
+r = m.run("对图片`data/chinese.jpg`进行OCR识别，给出完整结果。", stream=False, print_output=False)
+print(r)
+r = m.run("总结我们的对话。", stream=False, print_output=False)
 print(r)

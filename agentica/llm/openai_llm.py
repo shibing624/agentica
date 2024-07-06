@@ -9,9 +9,7 @@ from os import getenv
 from typing import Optional, List, Iterator, Dict, Any, Union, Tuple
 
 import httpx
-
 from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
-from openai.types.completion_usage import CompletionUsage
 from openai.types.chat.chat_completion import ChatCompletion
 from openai.types.chat.chat_completion_chunk import (
     ChatCompletionChunk,
@@ -24,6 +22,8 @@ from openai.types.chat.chat_completion_message import (
     FunctionCall as ChatCompletionFunctionCall,
 )
 from openai.types.chat.chat_completion_message_tool_call import ChatCompletionMessageToolCall
+from openai.types.completion_usage import CompletionUsage
+
 from agentica.config import FAST_LLM
 from agentica.llm.base import LLM
 from agentica.message import Message
@@ -92,7 +92,8 @@ class OpenAILLM(LLM):
             _client_params["http_client"] = self.http_client
         if self.client_params:
             _client_params.update(self.client_params)
-        return OpenAIClient(**_client_params)
+        self.client = OpenAIClient(**_client_params)
+        return self.client
 
     def get_async_client(self) -> AsyncOpenAIClient:
         if self.async_client:
@@ -121,7 +122,8 @@ class OpenAILLM(LLM):
             )
         if self.client_params:
             _client_params.update(self.client_params)
-        return AsyncOpenAIClient(**_client_params)
+        self.async_client = AsyncOpenAIClient(**_client_params)
+        return self.async_client
 
     @property
     def api_kwargs(self) -> Dict[str, Any]:

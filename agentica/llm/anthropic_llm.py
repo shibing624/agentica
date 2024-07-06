@@ -50,7 +50,10 @@ class AnthropicLLM(LLM):
         _client_params: Dict[str, Any] = {}
         if self.api_key:
             _client_params["api_key"] = self.api_key
-        return AnthropicClient(**_client_params)
+        if self.client_params:
+            _client_params.update(self.client_params)
+        self.anthropic_client = AnthropicClient(**_client_params)
+        return self.anthropic_client
 
     @property
     def api_kwargs(self) -> Dict[str, Any]:

@@ -53,5 +53,5 @@ class AzureOpenAILLM(OpenAILLM):
             _client_params["http_client"] = self.http_client
         if self.client_params:
             _client_params.update(self.client_params)
-
-        return AzureOpenAIClient(**_client_params)
+        self.client = AzureOpenAIClient(**_client_params)
+        return self.client
