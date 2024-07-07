@@ -25,6 +25,7 @@ Trump = Assistant(
 )
 
 debate = Assistant(
+    llm=OpenAILLM(model="gpt-4o"),
     name="Debate",
     team=[Biden, Trump],
     instructions=[

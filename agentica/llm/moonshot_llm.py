@@ -215,4 +215,7 @@ class MoonshotLLM(LLM):
         return "Something went wrong, please try again."
 
     def response_stream(self, messages: List[Message]) -> Iterator[str]:
-        raise ValueError("Moonshot function call does not support streaming responses")
+        logger.debug("MoonshotLLM tool use not support stream, use response instead.")
+        r = self.response(messages)
+        for i in r:
+            yield i
