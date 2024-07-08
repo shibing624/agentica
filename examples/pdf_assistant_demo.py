@@ -5,8 +5,7 @@ import typer
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
-from agentica.llm.ollama_llm import OllamaLLM
-from agentica.knowledge_base import KnowledgeBase
+from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb  # noqa
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.sqlite_storage import SqliteStorage

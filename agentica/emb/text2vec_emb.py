@@ -38,3 +38,7 @@ class Text2VecEmb(Emb):
     def get_embedding(self, text: str) -> List[float]:
         # Calculate emb of the text
         return self.get_client.encode([text])[0]
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        # Calculate emb of the texts
+        return self.get_client.encode(texts).tolist()  # type: ignore

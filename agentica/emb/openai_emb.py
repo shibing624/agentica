@@ -71,3 +71,6 @@ class OpenAIEmb(Emb):
         embedding = response.data[0].embedding
         usage = response.usage
         return embedding, usage.model_dump()
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return [self.get_embedding(text) for text in texts]

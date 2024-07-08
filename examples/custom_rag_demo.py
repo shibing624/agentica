@@ -27,7 +27,7 @@ from typing import Optional
 
 sys.path.append('..')
 from agentica import Assistant
-from agentica.knowledge_base import KnowledgeBase
+from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.pgvector import PgVector
 from agentica.emb.text2vec_emb import Text2VecEmb
 

@@ -37,3 +37,9 @@ class Word2VecEmb(Emb):
     def get_embedding(self, text: str) -> List[float]:
         # Calculate emb of the text
         return self.get_client.encode([text])[0]
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        # Calculate emb of the texts
+        ndarr = self.get_client.encode(texts)
+        # convert numpy array to list
+        return ndarr.tolist()  # type: ignore

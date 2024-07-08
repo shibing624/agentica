@@ -29,7 +29,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 
 from agentica.document import Document
-from agentica.knowledge_base import KnowledgeBase
+from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.llm.base import LLM
 from agentica.memory import AssistantMemory, Memory
 from agentica.message import Message

@@ -15,7 +15,7 @@ from rank_bm25 import BM25Okapi
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
-from agentica.knowledge_base import KnowledgeBase
+from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 

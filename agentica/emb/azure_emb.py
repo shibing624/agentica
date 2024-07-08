@@ -85,3 +85,9 @@ class AzureOpenAIEmb(Emb):
         embedding = response.data[0].embedding
         usage = response.usage
         return embedding, usage.model_dump()
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        embeddings = []
+        for text in texts:
+            embeddings.append(self.get_embedding(text))
+        return embeddings

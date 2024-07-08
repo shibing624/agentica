@@ -20,3 +20,6 @@ class HashEmb(Emb):
         hash_list = list(hash_object.digest())
         float_list = [float(x) / 255.0 for x in hash_list]
         return float_list
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        return [self.get_embedding(text) for text in texts]
