@@ -7,8 +7,11 @@ Jina 有2个功能：
 2）Jina Search, 输出查询query，结合Reader的检索结果，输出markdown格式的检索网页内容，用于LLM做RAG。
     如：苹果的最新产品是啥？ -> ## 苹果的最新产品是Apple Intelligence，iOS 18。
 """
+import hashlib
+import os
 from os import getenv
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -21,14 +24,16 @@ class JinaTool(Toolkit):
             self,
             api_key: Optional[str] = None,
             jina_reader: bool = True,
-            jina_search: bool = False,
+            jina_search: bool = True,
+            max_content_length: int = 8000,
+            work_dir: str = None,
     ):
         super().__init__(name="jina_tool")
 
         self.api_key = api_key or getenv("JINA_API_KEY")
-        if not self.api_key:
-            logger.warning("No JINA_API_KEY key provided, faster if you have one.")
-        else:
+        self.max_content_length = max_content_length
+        self.work_dir = work_dir or os.path.curdir
+        if self.api_key:
             logger.debug(f"Use JINA_API_KEY: {'*' * 10 + self.api_key[-4:]}")
 
         if jina_reader:
@@ -36,76 +41,94 @@ class JinaTool(Toolkit):
         if jina_search:
             self.register(self.jina_search)
 
-    def jina_url_reader(self, url: str, timeout: int = 60, save_file: str = None) -> str:
-        """
-        Crawls a website using Jina's website-content-crawler actor.
+    def _get_headers(self) -> dict:
+        headers = {'X-Return-Format': 'text'}
+
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _trim_content(self, content: str) -> str:
+        """Trim to the maximum allowed length."""
+        if len(content) > self.max_content_length:
+            truncated = content[: self.max_content_length]
+            return truncated + "... (content truncated)"
+        return content
+
+    @staticmethod
+    def _generate_file_name_from_url(url: str, max_length=255) -> str:
+        url_bytes = url.encode("utf-8")
+        hash = hashlib.blake2b(url_bytes).hexdigest()
+        parsed_url = urlparse(url)
+        file_name = os.path.basename(url)
+        prefix = f"{parsed_url.netloc}_{file_name}"
+        end = hash[:min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]
+        file_name = f"{prefix}_{end}"
+        return file_name
+
+    def jina_url_reader(self, url: str) -> str:
+        """Reads a URL and returns the truncated content using Jina Reader API.
 
         :param url: str, The URL to crawl.
-        :param timeout: int, The timeout for the crawling.
-        :param save_file: str, The file name to save the crawled Markdown content to, ending in .md.
-
         :return: str, The result of the crawling, Markdown format.
         """
-        if url is None:
-            return "No URLs provided"
+        logger.debug(f"Reading URL: {url}")
 
-        logger.debug(f"Crawling URL: {url}")
-
-        result: str = ""
-        headers = {'X-Return-Format': 'markdown', 'X-Timeout': f'{timeout}'}
-        if self.api_key:
-            headers['Authorization'] = f'Bearer {self.api_key}'
         try:
-            response = requests.get(f'https://r.jina.ai/{url}', headers=headers)
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch URL. HTTP status code: {response.status_code}")
-            else:
-                result = response.text
+            response = requests.get(f'https://r.jina.ai/{url}', headers=self._get_headers())
+            response.raise_for_status()
+            content = response.text
+            result = self._trim_content(content)
         except Exception as e:
-            logger.error(f"Failed to fetch URL. Error: {e}")
+            msg = f"Error reading URL: {str(e)}"
+            logger.error(msg)
+            result = msg
+            content = ''
 
-        if save_file and result:
-            with open(save_file, 'w', encoding='utf-8') as f:
-                f.write(result)
+        if content:
+            filename = self._generate_file_name_from_url(url)
+            save_path = os.path.realpath(os.path.join(self.work_dir, filename))
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            logger.info(f"Url: {url}, saved content to: {save_path}")
         return result
 
-    def jina_search(self, query: str, save_file: str = None) -> str:
-        """
-        Search using Jina's web-search actor.
+    def jina_search(self, query: str) -> str:
+        """Performs a web search using Jina Reader API and returns the truncated results.
 
         :param query: str, The query to search for.
-        :param save_file: str, The file name to save the crawled Markdown content to, ending in .md.
-
         :return: The results of the search.
         """
-        if query is None:
-            return "No query provided"
         query = query.strip()
         logger.debug(f"Search query: {query}")
-        result: str = ""
-        headers = {'X-Return-Format': 'markdown'}
-        if self.api_key:
-            headers['Authorization'] = f'Bearer {self.api_key}'
+        url = f'https://s.jina.ai/{query}'
         try:
-            response = requests.get(f'https://s.jina.ai/{query}', headers=headers)
-            if response.status_code != 200:
-                logger.error(f"Failed to fetch URL. HTTP status code: {response.status_code}")
-            else:
-                result = response.text
+            response = requests.get(url, headers=self._get_headers())
+            response.raise_for_status()
+            content = response.text
+            result = self._trim_content(content)
         except Exception as e:
-            logger.error(f"Failed to fetch URL. Error: {e}")
-        if save_file and result:
-            with open(save_file, 'w', encoding='utf-8') as f:
-                f.write(result)
+            msg = f"Error performing search: {str(e)}"
+            logger.error(msg)
+            result = msg
+            content = ''
 
+        if content:
+            filename = self._generate_file_name_from_url(url)
+            save_path = os.path.realpath(os.path.join(self.work_dir, filename))
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            logger.info(f"Query: {query}, saved content to: {save_path}")
         return result
 
 
 if __name__ == '__main__':
     m = JinaTool(jina_reader=True, jina_search=True)
-    text = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
-    r = m.jina_url_reader(text)
-    print(text, '\n\n', r)
+    url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+    r = m.jina_url_reader(url)
+    print(url, '\n\n', r)
 
     query = "苹果的最新产品是啥？"
     r = m.jina_search(query)

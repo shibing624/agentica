@@ -1,9 +1,8 @@
 loguru
-beautifulsoup4
+markdownify
 openai
 python-dotenv
 pydantic
 requests
 sqlalchemy
-markdownify
 tqdm

@@ -31,17 +31,22 @@ class UrlCrawlerTool(Toolkit):
         hash = hashlib.blake2b(url_bytes).hexdigest()
         parsed_url = urlparse(url)
         file_name = os.path.basename(url)
-        file_name = f"{parsed_url.netloc}_{file_name}_{hash[:min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]}"
+        prefix = f"{parsed_url.netloc}_{file_name}"
+        end = hash[:min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]
+        file_name = f"{prefix}_{end}"
         return file_name
 
     @staticmethod
     def parse_html_to_markdown(html: str, url: str = None) -> str:
         """Parse HTML to markdown."""
         soup = BeautifulSoup(html, "html.parser")
-        title = soup.title.string
-        # Remove javascript and style blocks
-        for script in soup(["script", "style"]):
-            script.extract()
+        title = soup.title.string if soup.title else "No Title"
+        # Remove javascript, style blocks, and hyperlinks
+        for element in soup(["script", "style", "a"]):
+            element.extract()
+        # Remove other common irrelevant elements, e.g., nav, footer, etc.
+        for element in soup.find_all(["nav", "footer", "aside", "form", "figure"]):
+            element.extract()
 
         # Convert to markdown -- Wikipedia gets special attention to get a clean version of the page
         if isinstance(url, str) and "wikipedia.org" in url:
@@ -50,7 +55,7 @@ class UrlCrawlerTool(Toolkit):
 
             if body_elm:
                 # What's the title
-                main_title = soup.title.string
+                main_title = title
                 if title_elm and len(title_elm) > 0:
                     main_title = title_elm.string
                 webpage_text = "# " + main_title + "\n\n" + markdownify.MarkdownConverter().convert_soup(body_elm)
@@ -119,6 +124,6 @@ class UrlCrawlerTool(Toolkit):
 
 if __name__ == '__main__':
     m = UrlCrawlerTool()
-    url = "https://www.jpmorgan.com/insights/business/business-planning/409a-valuations-a-guide-for-startups"
+    url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
     r = m.url_crawl(url)
     print(url, '\n\n', r)
