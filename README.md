@@ -133,6 +133,9 @@ streamlit run llm_os_demo.py
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
 
+<img src="https://github.com/shibing624/agentica/blob/main/docs/wechat_group.jpg" width="200" />
+
+
 ## Citation
 
 如果你在研究中使用了`agentica`，请按如下格式引用：
