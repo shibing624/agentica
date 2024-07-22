@@ -881,7 +881,7 @@ class Assistant(BaseModel):
             self.memory.add_chat_message(message=user_message)
             # Update the memory with the user message if needed
             if self.create_memories and self.update_memory_after_run:
-                self.memory.update_memory(input=user_message.get_content_string())
+                self.memory.update_memory(input_text=user_message.get_content_string())
 
         # Build the LLM response message to add to the memory - this is added to the chat_history
         llm_response_message = Message(role="assistant", content=llm_response)
@@ -1070,7 +1070,7 @@ class Assistant(BaseModel):
             self.memory.add_chat_message(message=user_message)
             # Update the memory with the user message if needed
             if self.update_memory_after_run:
-                self.memory.update_memory(input=user_message.get_content_string())
+                self.memory.update_memory(input_text=user_message.get_content_string())
 
         # Build the LLM response message to add to the memory - this is added to the chat_history
         llm_response_message = Message(role="assistant", content=llm_response)
@@ -1315,7 +1315,7 @@ class Assistant(BaseModel):
             str: A string indicating the status of the task.
         """
         try:
-            return self.memory.update_memory(input=task, force=True)
+            return self.memory.update_memory(input_text=task, force=True)
         except Exception as e:
             return f"Failed to update memory: {e}"
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
@@ -15,6 +16,7 @@ from typing import Dict, List, Any, Optional, cast, Tuple
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from agentica.config import AGENTICA_HOME
 from agentica.llm.base import LLM
 from agentica.llm.openai_llm import OpenAILLM
 from agentica.message import Message
@@ -103,18 +105,21 @@ class MemoryDb(ABC):
 
 
 class CsvMemoryDb(MemoryDb):
-    def __init__(self, file_path: str):
-        self.file_path = file_path
+    def __init__(self, file_path: str = None):
+        self.file_path = file_path if file_path else os.path.join(AGENTICA_HOME, "memory.csv")
+        self.memories = []
+        self.create_table()
 
     def create_table(self) -> None:
         # In the context of a CSV file, creating a table means creating a new file
-        with open(self.file_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
+        with open(self.file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
             writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
+        self.memories = []
 
     def memory_exists(self, memory: MemoryRow) -> bool:
-        with open(self.file_path, 'r', newline='') as csvfile:
-            reader = csv.reader(csvfile)
+        with open(self.file_path, 'r', newline='') as f:
+            reader = csv.reader(f)
             for row in reader:
                 if row[0] == memory.id:
                     return True
@@ -124,8 +129,8 @@ class CsvMemoryDb(MemoryDb):
             self, user_id: Optional[str] = None, limit: Optional[int] = None, sort: Optional[str] = None
     ) -> List[MemoryRow]:
         memories = []
-        with open(self.file_path, 'r', newline='') as csvfile:
-            reader = csv.reader(csvfile)
+        with open(self.file_path, 'r', newline='') as f:
+            reader = csv.reader(f)
             next(reader)  # Skip the header row
             for row in reader:
                 if user_id is not None and row[1] != user_id:
@@ -140,16 +145,17 @@ class CsvMemoryDb(MemoryDb):
                 memories.append(memory)
                 if limit is not None and len(memories) >= limit:
                     break
+        self.memories = memories
         return memories
 
-    def upsert_memory(self, memory: MemoryRow) -> None:
+    def upsert_memory(self, memory: MemoryRow) -> Optional[MemoryRow]:
         memories = self.read_memories()
         for i, m in enumerate(memories):
             if m.id == memory.id:
                 memories[i] = memory
                 break
-        else:
-            memories.append(memory)
+            else:
+                memories.append(memory)
         with open(self.file_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
@@ -157,6 +163,8 @@ class CsvMemoryDb(MemoryDb):
                 writer.writerow([
                     memory.id, memory.user_id, memory.memory, memory.created_at, memory.updated_at
                 ])
+        self.memories = memories
+        return memory
 
     def delete_memory(self, id: str) -> None:
         memories = self.read_memories()
@@ -171,11 +179,9 @@ class CsvMemoryDb(MemoryDb):
 
     def delete_table(self) -> None:
         # In the context of a CSV file, deleting a table means deleting the file
-        import os
         os.remove(self.file_path)
 
     def table_exists(self) -> bool:
-        import os
         return os.path.exists(self.file_path)
 
     def clear_table(self) -> bool:
@@ -183,6 +189,62 @@ class CsvMemoryDb(MemoryDb):
         with open(self.file_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
+        return True
+
+
+class InMemoryDb(MemoryDb):
+    def __init__(self):
+        self.memories = []
+
+    def create_table(self) -> None:
+        # Memory initialization
+        self.memories = []
+
+    def memory_exists(self, memory: MemoryRow) -> bool:
+        for m in self.memories:
+            if m.id == memory.id:
+                return True
+        return False
+
+    def read_memories(
+            self, user_id: Optional[str] = None, limit: Optional[int] = None, sort: Optional[str] = None
+    ) -> List[MemoryRow]:
+        results = []
+        for memory in self.memories:
+            if user_id and memory.user_id == user_id:
+                results.append(memory)
+
+        # Sort results if needed
+        if sort == "asc":
+            results = sorted(results, key=lambda x: x.created_at)
+        elif sort == "desc":
+            results = sorted(results, key=lambda x: x.created_at, reverse=True)
+
+        if limit:
+            results = results[:limit]
+
+        return results
+
+    def upsert_memory(self, memory: MemoryRow) -> Optional[MemoryRow]:
+        if self.memory_exists(memory):
+            self.delete_memory(memory.id)
+        self.memories.append(memory)
+        return memory
+
+    def delete_memory(self, id: str) -> None:
+        for i, memory in enumerate(self.memories):
+            if memory.id == id:
+                del self.memories[i]
+                break
+
+    def delete_table(self) -> None:
+        self.create_table()
+
+    def table_exists(self) -> bool:
+        return True
+
+    def clear_table(self) -> bool:
+        self.create_table()
         return True
 
 
@@ -428,6 +490,7 @@ class MemoryRetrieval(str, Enum):
     last_n = "last_n"
     first_n = "first_n"
     semantic = "semantic"
+    only_user = "only_user"
 
 
 class AssistantMemory(BaseModel):
@@ -565,8 +628,15 @@ class AssistantMemory(BaseModel):
                     limit=self.num_memories,
                     sort="asc" if self.retrieval == MemoryRetrieval.first_n else "desc",
                 )
+            elif self.retrieval == MemoryRetrieval.only_user:
+                memory_rows = self.db.read_memories(
+                    user_id=self.user_id,
+                    limit=self.num_memories,
+                    sort="desc",
+                )
+                memory_rows = [row for row in memory_rows if row.user_id == self.user_id]
             else:
-                raise NotImplementedError("Semantic retrieval not yet supported.")
+                raise NotImplementedError(f"{self.retrieval} retrieval method is not supported.")
         except Exception as e:
             logger.debug(f"Error reading memory: {e}")
             return
@@ -585,22 +655,22 @@ class AssistantMemory(BaseModel):
                 logger.warning(f"Error loading memory: {e}")
                 continue
 
-    def should_update_memory(self, input: str) -> bool:
+    def should_update_memory(self, input_text: str) -> bool:
         """Determines if a message should be added to the memory db."""
 
         if self.classifier is None:
             self.classifier = MemoryClassifier()
 
         self.classifier.existing_memories = self.memories
-        classifier_response = self.classifier.run(input)
+        classifier_response = self.classifier.run(input_text)
         if classifier_response == "yes":
             return True
         return False
 
-    def update_memory(self, input: str, force: bool = False) -> str:
+    def update_memory(self, input_text: str, force: bool = False) -> str:
         """Creates a memory from a message and adds it to the memory db."""
 
-        if input is None or not isinstance(input, str):
+        if input_text is None or not isinstance(input_text, str):
             return "Invalid message content"
 
         if self.db is None:
@@ -610,7 +680,7 @@ class AssistantMemory(BaseModel):
         self.updating = True
 
         # Check if this user message should be added to long term memory
-        should_update_memory = force or self.should_update_memory(input=input)
+        should_update_memory = force or self.should_update_memory(input_text=input_text)
         logger.debug(f"Update memory: {should_update_memory}")
 
         if not should_update_memory:
@@ -620,8 +690,9 @@ class AssistantMemory(BaseModel):
         if self.manager is None:
             self.manager = MemoryManager(user_id=self.user_id, db=self.db)
 
-        response = self.manager.run(input)
+        response = self.manager.run(input_text)
         self.load_memory()
+
         return response
 
     def get_memories_for_system_prompt(self) -> Optional[str]:

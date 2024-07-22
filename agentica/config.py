@@ -19,10 +19,11 @@ try:
 except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
-AGENTICA_HOME = os.environ.get("AGENTICA_HOME", os.path.realpath(os.path.curdir))
+AGENTICA_HOME = os.environ.get("AGENTICA_HOME", os.path.expanduser("~/.agentica"))
 current_date = datetime.now()
 formatted_date = current_date.strftime("%Y%m%d")
 LOG_FILE = os.environ.get("LOG_FILE", f"{AGENTICA_HOME}/logs/{formatted_date}.log")
+logger.debug(f"LOG_FILE: {LOG_FILE}")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 SMART_LLM = os.environ.get("SMART_LLM")
 FAST_LLM = os.environ.get("FAST_LLM")

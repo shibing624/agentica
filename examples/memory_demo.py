@@ -5,14 +5,20 @@ from rich.pretty import pprint
 sys.path.append('..')
 from agentica.assistant import Assistant, AssistantMemory
 from agentica import AzureOpenAILLM
+from agentica.memory import CsvMemoryDb
 
 llm = AzureOpenAILLM()
-assistant = Assistant(llm=llm)
+assistant = Assistant(
+    llm=llm,
+    memory=AssistantMemory(db=CsvMemoryDb(), user_id="test"),
+    add_chat_history_to_messages=True,
+    debug_mode=True
+)
 
 # -*- Print a response
-r = assistant.run("Share a 5 word horror story.")
+r = assistant.run("一句话介绍北京")
 print(r, "".join(r))
-r = assistant.run("What's the weather like today?")
+r = assistant.run("大多数时候天气如何?")
 print("".join(r))
 r = assistant.run("我前面问了些啥")
 print("".join(r))
