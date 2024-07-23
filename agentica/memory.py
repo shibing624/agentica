@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from enum import Enum
 from hashlib import md5
+import uuid
 from typing import Dict, List, Any, Optional, cast, Tuple
 
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -30,29 +31,31 @@ class Memory(BaseModel):
     memory: str
     id: Optional[str] = None
     topic: Optional[str] = None
-    input: Optional[str] = None
+    input_text: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True)
+
+    def to_str(self) -> str:
+        attributes = self.model_dump(exclude_none=True)
+        attributes_str = ";".join(f"{key}: {value}" for key, value in attributes.items())
+        return attributes_str
 
 
 class MemoryRow(BaseModel):
     """Memory Row that is stored in the database"""
 
-    memory: Dict[str, Any]
+    memory: str
     user_id: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     # id for this memory, auto-generated from the memory
     id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
     def serializable_dict(self) -> Dict[str, Any]:
-        _dict = self.model_dump(exclude={"created_at", "updated_at"})
-        _dict["created_at"] = self.created_at.isoformat() if self.created_at else None
-        _dict["updated_at"] = self.updated_at.isoformat() if self.updated_at else None
-        return _dict
+        return self.model_dump()
 
     def to_dict(self) -> Dict[str, Any]:
         return self.serializable_dict()
@@ -60,9 +63,17 @@ class MemoryRow(BaseModel):
     @model_validator(mode="after")
     def generate_id(self) -> "MemoryRow":
         if self.id is None:
-            memory_str = json.dumps(self.memory, sort_keys=True)
+            memory_str = self.memory
             cleaned_memory = memory_str.replace(" ", "").replace("\n", "").replace("\t", "")
             self.id = md5(cleaned_memory.encode()).hexdigest()
+        return self
+
+    @model_validator(mode="after")
+    def generate_timestamps(self) -> "MemoryRow":
+        if self.created_at is None:
+            self.created_at = datetime.now().isoformat()
+        if self.updated_at is None:
+            self.updated_at = datetime.now().isoformat()
         return self
 
 
@@ -106,9 +117,8 @@ class MemoryDb(ABC):
 
 class CsvMemoryDb(MemoryDb):
     def __init__(self, file_path: str = None):
-        self.file_path = file_path if file_path else os.path.join(AGENTICA_HOME, "memory.csv")
+        self.file_path = file_path if file_path else os.path.join(AGENTICA_HOME, f"memory_{uuid.uuid4()}.csv")
         self.memories = []
-        self.create_table()
 
     def create_table(self) -> None:
         # In the context of a CSV file, creating a table means creating a new file
@@ -129,6 +139,8 @@ class CsvMemoryDb(MemoryDb):
             self, user_id: Optional[str] = None, limit: Optional[int] = None, sort: Optional[str] = None
     ) -> List[MemoryRow]:
         memories = []
+        if not os.path.exists(self.file_path):
+            return memories
         with open(self.file_path, 'r', newline='') as f:
             reader = csv.reader(f)
             next(reader)  # Skip the header row
@@ -150,19 +162,21 @@ class CsvMemoryDb(MemoryDb):
 
     def upsert_memory(self, memory: MemoryRow) -> Optional[MemoryRow]:
         memories = self.read_memories()
-        for i, m in enumerate(memories):
-            if m.id == memory.id:
-                memories[i] = memory
-                break
-            else:
-                memories.append(memory)
-        with open(self.file_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
+        if memories:
+            for i, m in enumerate(memories):
+                if m and m.id == memory.id:
+                    memories[i] = memory
+                    break
+        else:
+            memories.append(memory)
+        with open(self.file_path, 'w', newline='') as f:
+            writer = csv.writer(f)
             writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
             for memory in memories:
                 writer.writerow([
                     memory.id, memory.user_id, memory.memory, memory.created_at, memory.updated_at
                 ])
+            logger.debug(f"Memory {memory.id} upserted, memories size: {len(memories)}, saved: {self.file_path}")
         self.memories = memories
         return memory
 
@@ -176,10 +190,13 @@ class CsvMemoryDb(MemoryDb):
                 writer.writerow([
                     memory.id, memory.user_id, memory.memory, memory.created_at, memory.updated_at
                 ])
+            logger.debug(f"Memory {id} deleted, memories size: {len(memories)}, saved: {self.file_path}")
+        self.memories = memories
 
     def delete_table(self) -> None:
         # In the context of a CSV file, deleting a table means deleting the file
         os.remove(self.file_path)
+        self.memories = []
 
     def table_exists(self) -> bool:
         return os.path.exists(self.file_path)
@@ -189,6 +206,7 @@ class CsvMemoryDb(MemoryDb):
         with open(self.file_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
+        self.memories = []
         return True
 
 
@@ -288,7 +306,7 @@ class MemoryManager(BaseModel):
                 self.db.upsert_memory(
                     MemoryRow(
                         user_id=self.user_id,
-                        memory=Memory(memory=memory, input=self.input_message).to_dict()
+                        memory=Memory(memory=memory, input_text=self.input_message).to_str()
                     )
                 )
             return "Memory added successfully"
@@ -325,7 +343,7 @@ class MemoryManager(BaseModel):
                     MemoryRow(
                         id=id,
                         user_id=self.user_id,
-                        memory=Memory(memory=memory, input=self.input_message).to_dict()
+                        memory=Memory(memory=memory, input_text=self.input_message).to_str()
                     )
                 )
             return "Memory updated successfully"
@@ -650,7 +668,10 @@ class AssistantMemory(BaseModel):
 
         for row in memory_rows:
             try:
-                self.memories.append(Memory.model_validate(row.memory))
+                id = getattr(row, 'id', None)
+                topic = getattr(row, 'topic', None)
+                input_text = getattr(row, 'input_text', None)
+                self.memories.append(Memory(memory=row.memory, id=id, topic=topic, input_text=input_text))
             except Exception as e:
                 logger.warning(f"Error loading memory: {e}")
                 continue
@@ -663,7 +684,8 @@ class AssistantMemory(BaseModel):
 
         self.classifier.existing_memories = self.memories
         classifier_response = self.classifier.run(input_text)
-        if classifier_response == "yes":
+        classifier_response = classifier_response.strip().lower()
+        if classifier_response == "yes" or classifier_response == "是":
             return True
         return False
 
