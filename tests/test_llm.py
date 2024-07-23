@@ -134,3 +134,48 @@ def test_use_kimi_tool_and_resp():
     )
 
     print(completion.choices[0].message)
+
+
+def test_kimi_team_delegate():
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.moonshot.cn/v1",
+    )
+    completion = client.chat.completions.create(
+        model="moonshot-v1-8k",
+        messages=[
+            {"role": "system",
+             "content": "You must follow these instructions carefully:\n<instructions>\n1. you should closely respond to your opponent's latest argument, state your position, defend your arguments, and attack your opponent's arguments, craft a strong and emotional response in 80 words\n2. The current time is 2024-07-23 16:48:20.271048\n</instructions>\n\nYou can delegate tasks to the following assistants:\n<assistants>\nAssistant 1:\nName: Biden\n\nAssistant 2:\nName: Trump\n</assistants>"},
+            {"role": "user",
+             "content": "Trump and Biden are in a debate, Biden speak first, and then Trump speak, and then Biden speak, and so on, in 3 turns.\n    Now begin. 请调用delegate_task_to_biden发起对话"},
+
+        ],
+        tools=[
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'delegate_task_to_biden',
+                    'description': 'Use this function to delegate a task to biden\n        Args:\n            task_description (str): A clear and concise description of the task the assistant should achieve.\n        Returns:\n            str: The result of the delegated task.\n',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'task_description': {'type': 'string'}}}
+                }
+            },
+            {
+                'type': 'function',
+                'function': {
+                    'name': 'delegate_task_to_trump',
+                    'description': 'Use this function to delegate a task to trump\n        Args:\n            task_description (str): A clear and concise description of the task the assistant should achieve.\n        Returns:\n            str: The result of the delegated task.\n',
+                    'parameters': {
+                        'type': 'object',
+                        'properties': {
+                            'task_description': {'type': 'string'}}}
+                }
+            }
+        ],
+        tool_choice='auto',
+        temperature=0.3,
+    )
+
+    print(completion.choices[0].message)
