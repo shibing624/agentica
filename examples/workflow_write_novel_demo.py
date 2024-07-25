@@ -133,32 +133,8 @@ writer = Assistant(
         ## context
         You need to write detailed content for the novel named 'xxx', based on the generated outlines.
 
-        ## format example
-        [CONTENT]
-        {
-            "chapters": [
-                {
-                    "name": "Chapter 1",
-                    "content": "..."
-                },
-                {
-                    "name": "Chapter 2",
-                    "content": "..."
-                },
-                {
-                    "name": "Chapter 3",
-                    "content": "..."
-                }
-            ]
-        }
-        [/CONTENT]
-
-        ## nodes: "<node>: <type>  # <instruction>"
-        - chapters: typing.List[__main__.Chapter]  # Detailed chapters of the novel.
-
-        ## constraint
-        Language: The output should be in the same language as this prompt.
-        Format: Ensure the output is wrapped inside [CONTENT][/CONTENT] tags like the format example above.
+        ## output format example
+        输出markdown格式的小说，章节内容结构清晰。不用给```markdown```标记，直接输出md格式的内容。
 
         ## action
         Write the detailed novel chapters and ensure they follow the formatting guidelines.
