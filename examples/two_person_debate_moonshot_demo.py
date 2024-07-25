@@ -13,18 +13,12 @@ Biden = Assistant(
     llm=llm,
     name="Biden",
     description="Suppose you are Biden, you are in a debate with Trump.",
-    show_tool_calls=True,
-    add_chat_history_to_messages=True,
-    debug_mode=True,
 )
 
 Trump = Assistant(
     llm=llm,
     name="Trump",
     description="Suppose you are Trump, you are in a debate with Biden.",
-    show_tool_calls=True,
-    add_chat_history_to_messages=True,
-    debug_mode=True,
 )
 
 debate = Assistant(
