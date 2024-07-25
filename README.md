@@ -108,6 +108,8 @@ print(r)
 | [examples/remove_image_background_demo.py](https://github.com/shibing624/agentica/blob/main/examples/remove_image_background_demo.py) | 实现了自动去除图片背景功能，包括自动通过pip安装库，调用库实现去除图片背景                                                                                          |
 | [examples/text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/text_classification_demo.py)         | 实现了自动训练分类模型的工作流：读取训练集文件并理解格式 - 谷歌搜索pytextclassifier库 - 爬取github页面了解pytextclassifier的调用方法 - 写代码并执行fasttext模型训练 - check训练好的模型预测结果 |
 | [examples/llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/llm_os_demo.py)                                   | 实现了LLM OS的初步设计，基于LLM设计操作系统，可以通过LLM调用RAG、代码执行器、Shell等工具，并协同代码解释器、研究助手、投资助手等来解决问题。                                                |
+| [examples/workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_write_novel_demo.py)        | 实现了写小说的工作流：定小说提纲 - 搜索谷歌反思提纲 - 撰写小说内容 - 保存为md文件                                                                                  |
+| [examples/workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_write_tutorial_demo.py)  | 实现了写技术教程的工作流：定教程目录 - 反思目录内容 - 撰写教程内容 - 保存为md文件                                                                                  |
 
 
 ### LLM OS
@@ -123,6 +125,25 @@ streamlit run llm_os_demo.py
 ```
 
 ![llm_os](https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png)
+
+## Web UI
+
+[shibing624/ChatPilot](https://github.com/shibing624/ChatPilot) 兼容`agentica`，可以通过Web UI进行交互。
+
+Web Demo: https://chat.mulanai.com
+
+![](https://github.com/shibing624/ChatPilot/blob/main/docs/shot.png)
+
+```shell
+git clone https://github.com/shibing624/ChatPilot.git
+cd ChatPilot
+pip install -r requirements.txt
+
+cp .env.example .env
+
+bash start.sh
+```
+
 
 ## Contact
 
