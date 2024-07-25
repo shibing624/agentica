@@ -18,9 +18,9 @@
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 
-**agentica**: A Human-Centric Framework for Large Language Model Agent Building.
+**Agentica**: A Human-Centric Framework for Large Language Model Agent Building.
 
-**agentica**: 构建你自己的Agent
+**Agentica**: 构建你自己的Agent
 
 ## Overview
 
@@ -31,7 +31,7 @@
 - **记忆（Memory）**：短期记忆（prompt实现）、长期记忆（RAG实现）
 - **工具使用（Tool use）**：function call能力，调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
 
-#### agentica架构
+#### Agentica架构
 ![agentica_arch](https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png)
 
 - **Planner**：负责让LLM生成一个多步计划来完成复杂任务，生成相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
@@ -39,7 +39,7 @@
 - **Solver**：求解器将所有这些输出整合为最终答案
 
 ## Features
-`agentica`是一个Agent构建工具，功能：
+`Agentica`是一个Agent构建工具，功能：
 
 - 简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Multi-Role、Workflow等功能
 - Agent支持prompt自定义，支持多种工具调用（tool_calls）
