@@ -88,5 +88,5 @@ flow = Workflow(
 )
 
 # 执行工作流
-r = flow.run("Write a tutorial about mysql")
+r = flow.run("Write a tutorial about redis")
 print("".join(r))
