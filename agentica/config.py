@@ -50,6 +50,6 @@ MODEL_TOKEN_LIMIT = {
     "moonshot-v1-8k": 8000,
     "moonshot-v1-32k": 32000,
     "moonshot-v1-128k": 128000,
-    "deepseek-chat": 32768,
-    "deepseek-coder": 16384,
+    "deepseek-chat": 128000,
+    "deepseek-coder": 128000,
 }
