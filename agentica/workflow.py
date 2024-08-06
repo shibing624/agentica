@@ -142,15 +142,20 @@ class Workflow(BaseModel):
             user: str = "User",
             emoji: str = ":sunglasses:",
             stream: bool = True,
-            print_output: bool = False,
+            print_output: bool = True,
             exit_on: Optional[List[str]] = None,
+            **kwargs: Any,
     ) -> None:
         from rich.prompt import Prompt
-
         _exit_on = exit_on or ["exit", "quit", "bye"]
+        logger.debug(f"Enable cli, exit with {_exit_on[0]}")
         while True:
             message = Prompt.ask(f"[bold] {emoji} {user} [/bold]")
             if message in _exit_on:
                 break
 
-            self.run(message=message, stream=stream, print_output=print_output)
+            r = self.run(message=message, stream=stream, print_output=print_output, **kwargs)
+            if stream:
+                print("".join(r))
+            else:
+                print(r)

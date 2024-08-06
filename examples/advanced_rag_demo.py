@@ -49,7 +49,7 @@ def merge_references_function(query: str, **kwargs) -> str:
     print('keyword_relevant_docs:', keyword_relevant_docs)
     # 合并两路召回结果
     relevant_docs = emb_relevant_docs + keyword_relevant_docs
-    # 召回排序, todo: rerank
+    # 召回排序, todo: reranker
 
     if len(relevant_docs) == 0:
         return ""

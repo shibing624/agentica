@@ -19,7 +19,7 @@ output_dir = "outputs"
 db_file = f"{output_dir}/medical_corpus.db"
 table_name = 'medical_corpus'
 knowledge_base = KnowledgeBase(
-    data_path="data/medical_corpus.txt",
+    data_path=["data/medical_corpus.txt", "data/paper_sample.pdf"],  # PDF files also works
     vector_db=LanceDb(
         embedder=emb,
         uri=f"{output_dir}/medical_corpus.lancedb",
@@ -59,7 +59,7 @@ def pdf_assistant(new: bool = False, user: str = "user"):
         print(f"Started Run: {run_id}\n")
     else:
         print(f"Continuing Run: {run_id}\n")
-    assistant.cli(markdown=True)
+    assistant.cli()
 
 
 if __name__ == "__main__":
