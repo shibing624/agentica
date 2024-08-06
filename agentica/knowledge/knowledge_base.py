@@ -37,7 +37,7 @@ class KnowledgeBase(BaseModel):
     # Number of documents to optimize the vector db on
     optimize_on: Optional[int] = 2000
 
-    chunk_size: int = 1000
+    chunk_size: int = 4000
     chunk: bool = True
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -61,7 +61,7 @@ class KnowledgeBase(BaseModel):
 
         return cleaned_text
 
-    def chunk_document(self, document: Document, chunk_size: int = 1000) -> List[Document]:
+    def chunk_document(self, document: Document, chunk_size: int = 4000) -> List[Document]:
         """Chunk the document content into smaller documents"""
         content = document.content
         cleaned_content = self._clean_text(content)

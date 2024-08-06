@@ -155,7 +155,7 @@ class Assistant(BaseModel):
     limit_tool_access: bool = False
     # If True, add the current datetime to the prompt to give the assistant a sense of time
     # This allows for relative times like "tomorrow" to be used in the prompt
-    add_datetime_to_instructions: bool = True
+    add_datetime_to_instructions: bool = False
     # If markdown=true, add instructions to format the output using markdown
     markdown: bool = False
 
