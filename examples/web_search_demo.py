@@ -20,7 +20,7 @@ m = Assistant(
 )
 r = m.run("一句话介绍林黛玉")
 print(r, "".join(r))
-r = m.run("北京最近的新闻", stream=True, print_output=True)
+r = m.run("上海今天适合穿什么衣服", stream=True, print_output=True)
 print(r, "".join(r))
 r = m.run("总结前面的问答", stream=False, print_output=False)
 print(r)
