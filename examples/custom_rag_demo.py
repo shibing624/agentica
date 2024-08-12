@@ -61,4 +61,4 @@ assistant = Assistant(
     debug_mode=False,
 )
 r = assistant.run("How to make Thai curry?")
-print(r, "".join(r))
+print("".join(r))
