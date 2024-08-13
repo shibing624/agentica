@@ -29,7 +29,7 @@ class KnowledgeBase(BaseModel):
     """LLM knowledge base, which is a collection of documents."""
 
     # Input knowledge base file path, which can be a file or a directory or a URL
-    data_path: Union[str, List[str]] = None
+    data_path: Union[str, List[str]] = []
     # Embeddings db to store the knowledge base
     vector_db: Optional[VectorDb] = None
     # Number of relevant documents to return on search
@@ -254,8 +254,8 @@ class KnowledgeBase(BaseModel):
             logger.info("Deleting collection")
             self.vector_db.delete()
 
-        logger.info("Creating collection")
-        self.vector_db.create()
+            logger.info("Creating collection")
+            self.vector_db.create()
 
         logger.info("Loading knowledge base")
         num_documents = 0
@@ -293,9 +293,6 @@ class KnowledgeBase(BaseModel):
         if self.vector_db is None:
             logger.warning("No vector db provided")
             return
-
-        logger.debug("Creating collection")
-        self.vector_db.create()
 
         # Upsert documents if upsert is True
         if upsert and self.vector_db.upsert_available():
