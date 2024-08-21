@@ -42,7 +42,7 @@ class JinaTool(Toolkit):
             self.register(self.jina_search)
 
     def _get_headers(self) -> dict:
-        headers = {'X-Return-Format': 'text'}
+        headers = {}
 
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -75,7 +75,8 @@ class JinaTool(Toolkit):
         logger.debug(f"Reading URL: {url}")
 
         try:
-            response = requests.get(f'https://r.jina.ai/{url}', headers=self._get_headers())
+            data = {'url': url}
+            response = requests.post('https://r.jina.ai/', data=data)
             response.raise_for_status()
             content = response.text
             result = self._trim_content(content)
@@ -87,7 +88,7 @@ class JinaTool(Toolkit):
 
         if content:
             filename = self._generate_file_name_from_url(url)
-            save_path = os.path.realpath(os.path.join(self.work_dir, filename))
+            save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -116,7 +117,7 @@ class JinaTool(Toolkit):
 
         if content:
             filename = self._generate_file_name_from_url(url)
-            save_path = os.path.realpath(os.path.join(self.work_dir, filename))
+            save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -125,6 +126,16 @@ class JinaTool(Toolkit):
 
 
 if __name__ == '__main__':
+    import requests
+
+    url = 'https://r.jina.ai/'
+    data = {
+        'url': 'https://channels.weixin.qq.com/shop/learning-center/detail.html?pf=shoplogin&contentId=Article_1714298241_SAIZLPKN&contentType=content&from=#/pages/p-poac/p-pgaj/tab_pages/p-usat/'}
+
+    response = requests.post(url, data=data)
+
+    print(response.text)
+
     m = JinaTool(jina_reader=True, jina_search=True)
     url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
     r = m.jina_url_reader(url)
