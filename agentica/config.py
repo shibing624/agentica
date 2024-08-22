@@ -20,6 +20,7 @@ except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
 AGENTICA_HOME = os.environ.get("AGENTICA_HOME", os.path.expanduser("~/.agentica"))
+DATA_DIR = os.environ.get("DATA_DIR", f"{AGENTICA_HOME}/data")
 current_date = datetime.now()
 formatted_date = current_date.strftime("%Y%m%d")
 LOG_FILE = os.environ.get("LOG_FILE", f"{AGENTICA_HOME}/logs/{formatted_date}.log")

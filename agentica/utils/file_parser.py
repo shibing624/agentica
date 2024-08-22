@@ -3,6 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
+import os
 import csv
 import json
 import ssl
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-
+from agentica.config import DATA_DIR
 from agentica.utils.log import logger
 
 
@@ -111,8 +112,15 @@ def read_docx_file(path: Path) -> str:
     def get_hyperlink_target(doc, r_id):
         """获取超链接目标URL或者路径."""
         if r_id in doc.part.rels:
-            return doc.part.rels[r_id].target
+            rel = doc.part.rels[r_id]
+            if hasattr(rel, 'target_ref'):
+                return rel.target_ref
         return None
+
+    def is_image_url(url):
+        image_extensions = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
+        _, ext = os.path.splitext(url)
+        return ext.lower() in image_extensions
 
     try:
         logger.info(f"Reading: {path}")
@@ -129,21 +137,46 @@ def read_docx_file(path: Path) -> str:
                     r_id = el.get(qn("r:id"))
                     if r_id:
                         hyperlink = get_hyperlink_target(doc, r_id)
-                        text = "".join(node.text for node in el.findall(".//w:t", namespaces=run._r.nsmap))
                         if hyperlink:
-                            run_text = run_text.replace(text, f'{text} ({hyperlink})')
+                            text = "".join(node.text for node in el.findall(".//w:t", namespaces=run._r.nsmap))
+                            md_url = f"![{text}]({hyperlink})" if is_image_url(hyperlink) else f"[{text}]({hyperlink})"
+                            if text in run_text:
+                                run_text = run_text.replace(text, md_url)
+                            else:
+                                run_text += md_url
                 para_text += run_text
 
-            # 查找段落中的超链接（如果有独立的情况）
+            # 查找段落中的超链接
             hyperlink_elements = paragraph._element.findall(".//w:hyperlink", namespaces=paragraph._element.nsmap)
             for el in hyperlink_elements:
                 r_id = el.get(qn("r:id"))
                 if r_id:
                     hyperlink = get_hyperlink_target(doc, r_id)
-                    text = "".join(node.text for node in el.findall(".//w:t", namespaces=paragraph._element.nsmap))
                     if hyperlink:
-                        para_text = para_text.replace(text, f'{text} ({hyperlink})')
+                        text = "".join(node.text for node in el.findall(".//w:t", namespaces=paragraph._element.nsmap))
+                        md_url = f"![{text}]({hyperlink})" if is_image_url(hyperlink) else f"[{text}]({hyperlink})"
+                        if text in para_text:
+                            para_text = para_text.replace(text, md_url)
+                        else:
+                            para_text += md_url
             doc_content += para_text + "\n"
+
+        # 处理插入的图片
+        # for rel in doc.part.rels.values():
+        #     if "image" in rel.target_ref and is_image_url(rel.target_ref):
+        #         img_id = rel.rId
+        #         img_part = doc.part.related_parts[img_id]
+        #         img_data = img_part.blob
+        #         # 生成保存图片的文件名
+        #         os.makedirs(DATA_DIR, exist_ok=True)
+        #         img_filename = os.path.join(DATA_DIR, f'image_{img_id}.png')
+        #         # 保存图片数据到本地
+        #         with open(img_filename, 'wb') as img_file:
+        #             img_file.write(img_data)
+        #         logger.debug(f"Image found: {rel.target_ref}, size: {len(img_data)} bytes")
+        #         img_info = f"![Image]({img_filename})"
+        #         doc_content += img_info + "\n"
+
         return doc_content
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
