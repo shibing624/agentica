@@ -125,7 +125,7 @@ class KnowledgeBase(BaseModel):
                 file_contents = read_json_file(path)
             elif path.suffix in [".csv"]:
                 file_contents = read_csv_file(path)
-            elif path.suffix in [".txt"]:
+            elif path.suffix in [".txt", ".md"]:
                 file_contents = read_txt_file(path)
             elif path.suffix in [".pdf"]:
                 file_contents = read_pdf_file(path)
@@ -136,7 +136,9 @@ class KnowledgeBase(BaseModel):
             elif path.suffix in [".xls", ".xlsx"]:
                 file_contents = read_excel_file(path)
             else:
-                raise ValueError(f"Unsupported file format: {path.suffix}")
+                logger.warning(f"Unknown file format: {path.suffix}, reading as text")
+                file_contents = read_txt_file(path)
+
             documents = [
                 Document(
                     name=file_name,
