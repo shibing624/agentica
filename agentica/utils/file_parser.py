@@ -103,6 +103,7 @@ def read_pdf_url(url: str) -> str:
 
 
 def read_docx_file(path: Path) -> str:
+    logger.info(f"Reading: {path}")
     try:
         from docx import Document
         from docx.oxml.ns import qn
@@ -123,7 +124,6 @@ def read_docx_file(path: Path) -> str:
         return ext.lower() in image_extensions
 
     try:
-        logger.info(f"Reading: {path}")
         doc = Document(str(path))
         doc_content = ""
         for paragraph in doc.paragraphs:
@@ -185,10 +185,29 @@ def read_docx_file(path: Path) -> str:
 
 def read_excel_file(path: Path) -> str:
     try:
-        logger.info(f"Reading: {path}")
-        data = pd.read_excel(path)
-        data_dict = data.to_dict(orient="records")
-        return json.dumps(data_dict, ensure_ascii=False)
+        from openpyxl import load_workbook
+    except ImportError:
+        raise ImportError("`openpyxl` not installed, please install using `pip install openpyxl`")
+
+    try:
+        # 使用openpyxl读取Excel文件
+        wb = load_workbook(str(path))
+        sheet = wb.active
+        logger.debug(f"Reading: {path}, load active Sheet: {sheet.title}")
+
+        data = []
+        for row in sheet.iter_rows(values_only=False):
+            row_data = {}
+            for idx, cell in enumerate(row):
+                cell_name = sheet.cell(row=1, column=idx + 1).value
+                if hasattr(cell, 'hyperlink') and cell.hyperlink:
+                    row_val = f"[{cell.value}]({cell.hyperlink.target})"
+                    row_data[cell_name] = row_val
+                else:
+                    row_data[cell_name] = cell.value
+            data.append(row_data)
+
+        return json.dumps(data, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
         return ""
