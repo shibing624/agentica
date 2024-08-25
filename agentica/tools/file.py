@@ -42,7 +42,7 @@ class FileTool(Toolkit):
         if read_files:
             self.register(self.read_files)
 
-    def save_file(self, contents: str, file_name: str, overwrite: bool = True, save_dir: str = None) -> str:
+    def save_file(self, contents: str, file_name: str, overwrite: bool = True, save_dir: str = "") -> str:
         """Saves the contents to a file called `file_name` and returns the file name if successful.
 
         :param contents: The contents to save.
@@ -108,7 +108,7 @@ class FileTool(Toolkit):
             logger.error(f"Error reading file: {e}")
             return f"Error reading file: {e}"
 
-    def list_files(self, dir_path: str = None) -> str:
+    def list_files(self, dir_path: str = "") -> str:
         """Returns a list of files in the base directory
 
         :param dir_path: The directory to list files from, defaults to the base directory.
@@ -126,7 +126,7 @@ class FileTool(Toolkit):
             logger.error(f"Error reading files: {e}")
             return f"Error reading files: {e}"
 
-    def read_files(self, dir_path: str = None) -> str:
+    def read_files(self, dir_path: str = "") -> str:
         """Reads the contents of all files in the base directory and returns the contents.
 
         :param dir_path: The directory to read files from, defaults to the base directory.

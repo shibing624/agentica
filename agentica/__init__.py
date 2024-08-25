@@ -12,6 +12,7 @@ from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.llm.openai_llm import OpenAILLM
 from agentica.llm.azure_llm import AzureOpenAILLM
 from agentica.llm.together_llm import TogetherLLM
+from agentica.llm.deepseek_llm import DeepseekLLM
 from agentica.llm.moonshot_llm import MoonshotLLM
 from agentica.task import Task
 from agentica.workflow import Workflow
