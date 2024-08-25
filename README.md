@@ -43,7 +43,7 @@
 
 - 简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Multi-Role、Workflow等功能
 - Agent支持prompt自定义，支持多种工具调用（tool_calls）
-- 支持OpenAI/Azure/Claude/Ollama/Together API调用
+- 支持OpenAI/Azure/Deepseek/Moonshot/Claude/Ollama/Together API调用
 
 ## Installation
 
@@ -61,18 +61,18 @@ pip install .
 
 ## Getting Started
 
-1. 复制[example.env](https://github.com/shibing624/agentica/blob/main/example.env)文件为`.env`，并粘贴OpenAI API key或者Moonshoot API key。
+1. 复制[example.env](https://github.com/shibing624/agentica/blob/main/example.env)文件为`.env`，并粘贴DEEPSEEK_API_KEY(可选配OpenAI API key、Moonshoot API key等第三方LLM)。
 
 2. 使用`agentica`构建Agent，拆解任务并执行：
 
-自动调用google搜索工具，示例[examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
+自动调用google搜索工具，示例[examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
 
 ```python
-from agentica import Assistant, OpenAILLM, AzureOpenAILLM
+from agentica import Assistant, DeepseekLLM
 from agentica.tools.search_serper import SearchSerperTool
 
 m = Assistant(
-  llm=AzureOpenAILLM(),
+  llm=DeepseekLLM(),
   description="You are a helpful ai assistant.",
   show_tool_calls=True,
   # Enable the assistant to search the knowledge base
@@ -85,7 +85,7 @@ m = Assistant(
 
 r = m.run("一句话介绍林黛玉")
 print(r, "".join(r))
-r = m.run("北京最近的新闻", stream=True, print_output=True)
+r = m.run("北京最近的新闻top3", stream=True, print_output=True)
 print(r, "".join(r))
 r = m.run("总结前面的问答", stream=False, print_output=False)
 print(r)
