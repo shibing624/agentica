@@ -10,7 +10,6 @@ from agentica.message import Message
 from agentica import Assistant, MoonshotLLM
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.tools.file import FileTool
-from agentica.tools.ocr import OcrTool
 
 llm = MoonshotLLM()
 
@@ -21,7 +20,7 @@ print(llm_r)
 
 m = Assistant(
     llm=llm,
-    tools=[SearchSerperTool(), FileTool(), OcrTool()],
+    tools=[SearchSerperTool(), FileTool()],
     add_datetime_to_instructions=True,
     show_tool_calls=True,
     read_chat_history=True,
@@ -32,7 +31,5 @@ r = m.run("北京最近的top3新闻")
 print(r, "".join(r))
 r = m.run("一句话介绍北京")
 print(r, "".join(r))
-r = m.run("对图片`data/chinese.jpg`进行OCR识别，给出完整结果。", stream=False, print_output=False)
-print(r)
 r = m.run("总结我们的对话。", stream=False, print_output=False)
 print(r)
