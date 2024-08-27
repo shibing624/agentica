@@ -1,6 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description:
+"""
+from __future__ import annotations
 import csv
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict
 
 from agentica.file.base import File
 from agentica.utils.log import logger
@@ -9,7 +15,7 @@ from agentica.utils.log import logger
 class CsvFile(File):
     type: str = "CSV"
 
-    def get_metadata(self) -> dict[str, Any]:
+    def get_metadata(self) -> Dict[str, Any]:
         if self.name is None:
             self.name = Path(self.data_path).name
 

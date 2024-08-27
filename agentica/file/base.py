@@ -1,4 +1,9 @@
-from typing import List, Optional, Any
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description:
+"""
+from typing import List, Optional, Any, Dict
 
 from pydantic import BaseModel
 
@@ -10,5 +15,5 @@ class File(BaseModel):
     data_path: Optional[str] = None
     type: str = "FILE"
 
-    def get_metadata(self) -> dict[str, Any]:
+    def get_metadata(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True)
