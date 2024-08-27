@@ -5,19 +5,16 @@
 """
 import os
 from datetime import datetime
+from dotenv import load_dotenv  # noqa
+from loguru import logger  # noqa, need to import logger here to avoid circular import
 
 AGENTICA_HOME = os.environ.get("AGENTICA_HOME", os.path.expanduser("~/.agentica"))
 
 # Load environment variables from .env file
 AGENTICA_DOTENV_PATH = os.environ.get("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env")
-try:
-    from dotenv import load_dotenv  # noqa
-    from loguru import logger  # noqa, need to import logger here to avoid circular import
 
-    if load_dotenv(AGENTICA_DOTENV_PATH, override=True):
-        logger.info(f"Loaded AGENTICA_DOTENV_PATH: {AGENTICA_DOTENV_PATH}")
-except ImportError:
-    logger.debug("dotenv not installed, skipping...")
+if load_dotenv(AGENTICA_DOTENV_PATH, override=True):
+    logger.info(f"Loaded AGENTICA_DOTENV_PATH: {AGENTICA_DOTENV_PATH}")
 
 AGENTICA_DATA_DIR = os.environ.get("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
 AGENTICA_LOG_LEVEL = os.environ.get("AGENTICA_LOG_LEVEL", "INFO")
