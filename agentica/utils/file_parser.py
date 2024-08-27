@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from agentica.config import DATA_DIR
+from agentica.config import AGENTICA_DATA_DIR
 from agentica.utils.log import logger
 
 

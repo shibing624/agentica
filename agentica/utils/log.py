@@ -7,7 +7,7 @@ import sys
 
 from loguru import logger as _logger
 
-from agentica.config import LOG_FILE, LOG_LEVEL
+from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
 
 
 def get_logger(log_level: str = "INFO", log_file: str = None):
@@ -33,7 +33,7 @@ def get_logger(log_level: str = "INFO", log_file: str = None):
     return _logger
 
 
-logger = get_logger(log_level=LOG_LEVEL, log_file=LOG_FILE)
+logger = get_logger(log_level=AGENTICA_LOG_LEVEL, log_file=AGENTICA_LOG_FILE)
 
 
 def set_log_level_to_debug():
@@ -45,9 +45,9 @@ def set_log_level_to_debug():
         backtrace=True,
         diagnose=True,
     )
-    if LOG_FILE:
+    if AGENTICA_LOG_FILE:
         logger.add(
-            sink=LOG_FILE,
+            sink=AGENTICA_LOG_FILE,
             level="DEBUG",
             enqueue=True,
             backtrace=True,

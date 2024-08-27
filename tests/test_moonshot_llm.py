@@ -12,7 +12,7 @@ import httpx
 from loguru import logger
 from openai import OpenAI
 
-from agentica.config import DOTENV_PATH  # noqa
+from agentica.config import AGENTICA_DOTENV_PATH  # noqa
 
 api_key = os.getenv("MOONSHOT_API_KEY")
 

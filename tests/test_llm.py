@@ -8,7 +8,7 @@ This module contains tests for the LLM class.
 import os
 from unittest.mock import MagicMock, patch
 
-from agentica.config import DOTENV_PATH  # noqa
+from agentica.config import AGENTICA_DOTENV_PATH  # noqa
 from agentica.message import Message
 
 api_key = os.getenv("MOONSHOT_API_KEY")

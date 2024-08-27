@@ -4,7 +4,7 @@
 @description: 
 """
 from agentica.version import __version__  # noqa, isort: skip
-from agentica.config import DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, isort: skip
+from agentica.config import AGENTICA_DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, isort: skip
 # document
 from agentica.document import Document
 # vectordb
