@@ -39,14 +39,14 @@ setup(
     keywords='Agentica,Agent Tool,action,agent,agentica',
     install_requires=[
         "loguru",
-        "fire",
+        "markdownify",
         "openai",
         "python-dotenv",
         "pydantic",
         "requests",
         "sqlalchemy",
-        "markdownify",
         "tqdm",
+        "rich",
     ],
     packages=find_packages(),
 )
