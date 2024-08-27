@@ -71,9 +71,9 @@ cp ../.env.example .env
 python web_search_deepseek_demo.py
 ```
 
-1. 复制[example.env](https://github.com/shibing624/agentica/blob/main/example.env)文件为`.env`，并粘贴DEEPSEEK_API_KEY(可选配OpenAI API key、Moonshoot API key等第三方LLM)。
+1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件到运行目录下`.env`，并填写LLM api key(选填DEEPSEEK_API_KEY、MOONSHOT_API_KEY、OPENAI_API_KEY等任一个即可)。
 
-2. 使用`agentica`构建Agent，拆解任务并执行：
+2. 使用`agentica`构建Agent并执行：
 
 自动调用google搜索工具，示例[examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
 
