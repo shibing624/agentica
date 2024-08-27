@@ -5,24 +5,23 @@
 """
 import os
 from datetime import datetime
-pwd_path = os.path.abspath(os.path.dirname(__file__))
 
 # Load environment variables from .env file
-env_path = os.path.realpath(os.path.join(pwd_path, "../.env"))
-DOTENV_PATH = os.environ.get("DOTENV_PATH", env_path)
+DOTENV_PATH = os.environ.get("DOTENV_PATH", os.path.join(os.getcwd(), ".env"))
 try:
     from dotenv import load_dotenv  # noqa
     from loguru import logger  # noqa, need to import logger here to avoid circular import
 
     if load_dotenv(DOTENV_PATH, override=True):
         logger.info(f"Loaded environment variables from {DOTENV_PATH}")
+    else:
+        logger.debug(f"No .env file found at {DOTENV_PATH}, skipping...")
 except ImportError:
     logger.debug("dotenv not installed, skipping...")
 
 AGENTICA_HOME = os.environ.get("AGENTICA_HOME", os.path.expanduser("~/.agentica"))
 DATA_DIR = os.environ.get("DATA_DIR", f"{AGENTICA_HOME}/data")
-current_date = datetime.now()
-formatted_date = current_date.strftime("%Y%m%d")
+formatted_date = datetime.now().strftime("%Y%m%d")
 LOG_FILE = os.environ.get("LOG_FILE", f"{AGENTICA_HOME}/logs/{formatted_date}.log")
 logger.debug(f"LOG_FILE: {LOG_FILE}")
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")

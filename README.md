@@ -61,6 +61,16 @@ pip install .
 
 ## Getting Started
 
+### 运行示例
+
+```shell
+git clone https://github.com/shibing624/agentica.git
+cd agentica
+cd examples
+cp ../.env.example .env
+python web_search_deepseek_demo.py
+```
+
 1. 复制[example.env](https://github.com/shibing624/agentica/blob/main/example.env)文件为`.env`，并粘贴DEEPSEEK_API_KEY(可选配OpenAI API key、Moonshoot API key等第三方LLM)。
 
 2. 使用`agentica`构建Agent，拆解任务并执行：
@@ -121,6 +131,7 @@ The LLM OS design:
 
 ```shell
 cd examples
+cp ../.env.example .env
 streamlit run llm_os_demo.py
 ```
 
