@@ -45,6 +45,7 @@ setup(
         "pydantic",
         "requests",
         "sqlalchemy",
+        "scikit-learn",
         "tqdm",
         "rich",
     ],

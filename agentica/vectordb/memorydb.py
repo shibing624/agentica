@@ -8,7 +8,6 @@ from hashlib import md5
 from typing import List
 
 import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
 from agentica.document import Document
 from agentica.emb.base import Emb
@@ -59,7 +58,12 @@ class MemoryDb(VectorDb):
         query_embedding = self.embedder.get_embedding(query)
         if query_embedding is None:
             return []
-
+        try:
+            from sklearn.metrics.pairwise import cosine_similarity
+        except ImportError:
+            raise ImportError(
+                "The 'scikit-learn' library is required, please install it via 'pip install scikit-learn'."
+            )
         similarities = cosine_similarity(
             [query_embedding], [doc.embedding for doc in self.documents]
         )[0]
