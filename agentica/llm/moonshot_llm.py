@@ -13,7 +13,7 @@ from agentica.llm.openai_llm import OpenAILLM
 
 class MoonshotLLM(OpenAILLM):
     name: str = "Moonshot"
-    model: str = "moonshot-v1-8k"
+    model: str = "moonshot-v1-auto"
     api_key: Optional[str] = getenv("MOONSHOT_API_KEY")
     base_url: str = "https://api.moonshot.cn/v1"
     temperature: Optional[float] = None

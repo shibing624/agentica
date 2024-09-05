@@ -55,7 +55,7 @@ class SerperWrapper(BaseModel):
             data = json.loads(data.decode("utf-8"))
             res = self._process_response(data, as_string=as_string)
         except Exception as e:
-            logger.error(f"Failed to search {query} due to {e}")
+            logger.error(f"Failed to search `{query}` due to {e}")
             res = ""
         return res
 
@@ -73,7 +73,10 @@ class SerperWrapper(BaseModel):
             return {i: j for i, j in x.items() if i in focus}
 
         if "error" in res.keys():
-            raise ValueError(f"Got error from SerpAPI: {res['error']}")
+            raise ValueError(f"Got error from https://serper.dev/: {res['error']}")
+        elif "message" in res.keys() and "Unauthorized" in res["message"]:
+            raise ValueError(f"Unauthorized access to https://serper.dev/. Check your API key.")
+
         if "answer_box" in res.keys() and "answer" in res["answer_box"].keys():
             toret = res["answer_box"]["answer"]
         elif "answer_box" in res.keys() and "snippet" in res["answer_box"].keys():
@@ -84,7 +87,7 @@ class SerperWrapper(BaseModel):
             toret = res["sports_results"]["game_spotlight"]
         elif "knowledge_graph" in res.keys() and "description" in res["knowledge_graph"].keys():
             toret = res["knowledge_graph"]["description"]
-        elif "snippet" in res["organic"][0].keys():
+        elif "organic" in res and "snippet" in res["organic"][0].keys():
             toret = res["organic"][0]["snippet"]
         else:
             toret = "No good search result found"
