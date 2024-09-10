@@ -5,11 +5,10 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 from os import getenv
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List, Tuple, Any, Literal
 
 from openai import AzureOpenAI as AzureOpenAIClient
 from openai.types.create_embedding_response import CreateEmbeddingResponse
-from typing_extensions import Literal
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
