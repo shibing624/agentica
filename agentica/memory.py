@@ -507,7 +507,6 @@ class MemoryClassifier(BaseModel):
 class MemoryRetrieval(str, Enum):
     last_n = "last_n"
     first_n = "first_n"
-    semantic = "semantic"
     only_user = "only_user"
 
 

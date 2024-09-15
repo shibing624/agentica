@@ -5,6 +5,7 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 import json
+import os
 from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any
 
@@ -38,6 +39,7 @@ class AnthropicLLM(LLM):
     request_params: Optional[Dict[str, Any]] = None
     # -*- Client parameters
     api_key: Optional[str] = None
+    base_url: Optional[str] = os.getenv("ANTHROPIC_BASE_URL")
     client_params: Optional[Dict[str, Any]] = None
     # -*- Provide the client manually
     anthropic_client: Optional[AnthropicClient] = None
@@ -50,6 +52,8 @@ class AnthropicLLM(LLM):
         _client_params: Dict[str, Any] = {}
         if self.api_key:
             _client_params["api_key"] = self.api_key
+        if self.base_url:
+            _client_params["base_url"] = self.base_url
         if self.client_params:
             _client_params.update(self.client_params)
         self.anthropic_client = AnthropicClient(**_client_params)

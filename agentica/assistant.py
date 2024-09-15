@@ -271,7 +271,7 @@ class Assistant(BaseModel):
         if self.llm is None:
             logger.debug("LLM not set. Using OpenAILLM")
             self.llm = OpenAILLM()
-        logger.debug(f"Using LLM: {self.llm}")
+            logger.debug(f"Using LLM: {self.llm}")
 
         # Set response_format if it is not set on the llm
         if self.output_model is not None and self.llm.response_format is None:
