@@ -17,10 +17,7 @@ python_assistant = PythonAssistant(
             data_path="https://phidata-public.s3.amazonaws.com/demo_data/IMDB-Movie-Data.csv",
             description="Contains information about movies from IMDB.",
         )
-    ],
-    show_tool_calls=True,
-    markdown=True,
-    debug_mode=True,
+    ]
 )
 
 r = python_assistant.run("What is the min rating of movies?")
