@@ -29,7 +29,7 @@ class KnowledgeBase(BaseModel):
     """LLM knowledge base, which is a collection of documents."""
 
     # Input knowledge base file path, which can be a file or a directory or a URL
-    data_path: Union[str, List[str]] = []
+    data_path: Optional[Union[str, List[str]]] = None
     # Embeddings db to store the knowledge base
     vector_db: Optional[VectorDb] = None
     # Number of relevant documents to return on search
@@ -207,6 +207,8 @@ class KnowledgeBase(BaseModel):
         """Iterator that yields lists of documents in the knowledge base
         Each object yielded by the iterator is a list of documents.
         """
+        if self.data_path is None:
+            self.data_path = []
         if isinstance(self.data_path, str):
             self.data_path = [self.data_path]
         for path in self.data_path:
