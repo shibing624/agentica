@@ -34,7 +34,7 @@ from agentica.utils.timer import Timer
 
 class OpenAILLM(LLM):
     name: str = "OpenAILLM"
-    model: str = FAST_LLM or "gpt-4o"
+    model: str = FAST_LLM or "gpt-4o-mini"
     # -*- Request parameters
     frequency_penalty: Optional[float] = None
     logit_bias: Optional[Any] = None

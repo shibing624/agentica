@@ -13,7 +13,7 @@ from datetime import datetime
 from enum import Enum
 from hashlib import md5
 import uuid
-from typing import Dict, List, Any, Optional, cast, Tuple
+from typing import Dict, List, Any, Optional, cast, Tuple, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -267,6 +267,12 @@ class InMemoryDb(MemoryDb):
 
 
 class MemoryManager(BaseModel):
+    """
+    MemoryManager class to manage the memories for the user,
+        including adding, updating, deleting, and clearing memories.
+    """
+
+    mode: Literal["llm", "rule"] = "rule"
     llm: Optional[LLM] = None
     user_id: Optional[str] = None
 
@@ -283,6 +289,7 @@ class MemoryManager(BaseModel):
     def update_llm(self) -> None:
         if self.llm is None:
             self.llm = OpenAILLM()
+            logger.debug(f"Using LLM: {self.llm}")
         self.llm.add_tool(self.add_memory)
         self.llm.add_tool(self.update_memory)
         self.llm.add_tool(self.delete_memory)
@@ -401,27 +408,41 @@ class MemoryManager(BaseModel):
     ) -> str:
         logger.debug("*********** MemoryManager Start ***********")
 
-        # Update the LLM (set defaults, add logit etc.)
-        self.update_llm()
+        if self.mode == "rule":
+            exist_id = None
+            existing_memories = self.get_existing_memories()
+            if existing_memories and len(existing_memories) > 0:
+                for m in existing_memories:
+                    if message in m.memory:
+                        exist_id = m.id
+                        break
+            if exist_id:
+                self.update_memory(id=exist_id, memory=message)
+                response = f"Memory updated successfully, id: {exist_id}, memory: {message}"
+            else:
+                self.add_memory(memory=message)
+                response = f"Memory added successfully, memory: {message}"
+            logger.debug(f"MemoryManager mode: {self.mode}, response: {response}")
+        else:
+            # Update the LLM (set defaults, add logit etc.)
+            self.update_llm()
 
-        # -*- Prepare the List of messages sent to the LLM
-        llm_messages: List[Message] = []
+            # -*- Prepare the List of messages sent to the LLM
+            llm_messages: List[Message] = []
 
-        # Create the system prompt message
-        system_prompt_message = Message(role="system", content=self.get_system_prompt())
-        llm_messages.append(system_prompt_message)
+            # Create the system prompt message
+            system_prompt_message = Message(role="system", content=self.get_system_prompt())
+            llm_messages.append(system_prompt_message)
+            # Set input message added with the memory
+            self.input_message = message
+            # Create the user prompt message
+            user_prompt_message = Message(role="user", content=message, **kwargs) if message else None
+            if user_prompt_message is not None:
+                llm_messages += [user_prompt_message]
 
-        # Create the user prompt message
-        user_prompt_message = Message(role="user", content=message, **kwargs) if message else None
-        if user_prompt_message is not None:
-            llm_messages += [user_prompt_message]
-
-        # Set input message added with the memory
-        self.input_message = message
-
-        # -*- Generate a response from the llm (includes running function calls)
-        self.llm = cast(LLM, self.llm)
-        response = self.llm.response(messages=llm_messages)
+            # -*- Generate a response from the llm (includes running function calls)
+            self.llm = cast(LLM, self.llm)
+            response = self.llm.response(messages=llm_messages)
         logger.debug("*********** MemoryManager End ***********")
         return response
 
@@ -437,6 +458,7 @@ class MemoryClassifier(BaseModel):
     def update_llm(self) -> None:
         if self.llm is None:
             self.llm = OpenAILLM()
+            logger.debug(f"Using LLM: {self.llm}")
 
     def get_system_prompt(self) -> Optional[str]:
         # If the system_prompt is provided, use it
@@ -447,6 +469,9 @@ class MemoryClassifier(BaseModel):
         system_prompt_lines = [
             "Your task is to identify if the user's message contains information that is worth remembering for future conversations.",
             "This includes details that could personalize ongoing interactions with the user, such as:\n"
+            "  - Personal facts: name, age, occupation, location, interests, preferences, etc.\n"
+            "  - User shared code snippets\n"
+            "  - Valuable questions asked by the user, and the reply answer.\n"
             "  - Personal facts: name, age, occupation, location, interests, preferences, etc.\n"
             "  - Significant life events or experiences shared by the user\n"
             "  - Important context about the user's current situation, challenges or goals\n"
@@ -621,7 +646,12 @@ class AssistantMemory(BaseModel):
         return all_chats
 
     def get_tool_calls(self, num_calls: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Returns a list of tool calls from the llm_messages."""
+        """Returns a list of tool calls from the llm_messages.
+
+        Example:
+            - To get the last tool call, use num_calls=1.
+            - To get all tool calls, use num_calls=-1.
+        """
 
         tool_calls = []
         for llm_message in self.llm_messages[::-1]:
@@ -693,13 +723,10 @@ class AssistantMemory(BaseModel):
 
         if input_text is None or not isinstance(input_text, str):
             return "Invalid message content"
-
         if self.db is None:
             logger.warning("MemoryDb not provided.")
             return "Please provide a db to store memories"
-
         self.updating = True
-
         # Check if this user message should be added to long term memory
         should_update_memory = force or self.should_update_memory(input_text=input_text)
         logger.debug(f"Update memory: {should_update_memory}")

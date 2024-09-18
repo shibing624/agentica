@@ -9,7 +9,7 @@ from agentica.config import AGENTICA_DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, i
 from agentica.document import Document
 # vectordb
 from agentica.vectordb.base import VectorDb
-from agentica.vectordb.memorydb import MemoryDb
+from agentica.vectordb.memory_vectordb import MemoryVectorDb
 # emb
 from agentica.emb.base import Emb
 from agentica.emb.openai_emb import OpenAIEmb

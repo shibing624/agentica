@@ -16,15 +16,15 @@ import sys
 sys.path.append('..')
 from agentica import Assistant
 from agentica.knowledge.knowledge_base import KnowledgeBase
-from agentica.vectordb.memorydb import MemoryDb
+from agentica.vectordb.memory_vectordb import MemoryVectorDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 
 knowledge_base = KnowledgeBase(
     data_path=["https://phi-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],
-    vector_db=MemoryDb(embedder=Text2VecEmb()),
+    vector_db=MemoryVectorDb(embedder=Text2VecEmb()),
 )
 # Comment after first run
-knowledge_base.load(recreate=True)
+knowledge_base.load()
 
 assistant = Assistant(
     knowledge_base=knowledge_base,

@@ -80,6 +80,8 @@ class Assistant(BaseModel):
     create_memories: bool = False
     # Update memory after each run
     update_memory_after_run: bool = True
+    # Force update memory after each run
+    force_update_memory_after_run: bool = False
 
     # -*- Assistant Knowledge Base
     knowledge_base: Optional[KnowledgeBase] = None
@@ -271,13 +273,15 @@ class Assistant(BaseModel):
         if self.llm is None:
             logger.debug("LLM not set. Using OpenAILLM")
             self.llm = OpenAILLM()
-            logger.debug(f"Using LLM: {self.llm}")
+            logger.info(f"Using LLM: {self.llm}")
 
         # Set response_format if it is not set on the llm
         if self.output_model is not None and self.llm.response_format is None:
             self.llm.response_format = {"type": "json_object"}
 
         # Add default tools to the LLM
+        if self.search_knowledge:
+            self.use_tools = True
         if self.use_tools:
             self.read_chat_history = True
             self.search_knowledge = True
@@ -289,7 +293,10 @@ class Assistant(BaseModel):
                 self.llm.add_tool(self.get_tool_call_history)
             if self.create_memories:
                 self.llm.add_tool(self.update_memory)
+        if self.force_update_memory_after_run:
+            self.update_memory_after_run = True
         if self.knowledge_base is not None:
+            self.add_references_to_prompt = True
             if self.search_knowledge:
                 self.llm.add_tool(self.search_knowledge_base)
             if self.update_knowledge:
@@ -875,8 +882,12 @@ class Assistant(BaseModel):
         if user_message is not None:
             self.memory.add_chat_message(message=user_message)
             # Update the memory with the user message if needed
+            memory_content = f"user:{user_message.get_content_string()}\nassistant:{llm_response}"
             if self.create_memories and self.update_memory_after_run:
-                self.memory.update_memory(input_text=user_message.get_content_string())
+                if self.force_update_memory_after_run:
+                    self.memory.update_memory(input_text=memory_content, force=True)
+                else:
+                    self.memory.update_memory(input_text=memory_content)
 
         # Build the LLM response message to add to the memory - this is added to the chat_history
         llm_response_message = Message(role="assistant", content=llm_response)
@@ -1064,8 +1075,12 @@ class Assistant(BaseModel):
         if user_message is not None:
             self.memory.add_chat_message(message=user_message)
             # Update the memory with the user message if needed
+            memory_content = f"user:{user_message.get_content_string()}\nassistant:{llm_response}"
             if self.update_memory_after_run:
-                self.memory.update_memory(input_text=user_message.get_content_string())
+                if self.force_update_memory_after_run:
+                    self.memory.update_memory(input_text=memory_content, force=True)
+                else:
+                    self.memory.update_memory(input_text=memory_content)
 
         # Build the LLM response message to add to the memory - this is added to the chat_history
         llm_response_message = Message(role="assistant", content=llm_response)

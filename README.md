@@ -61,13 +61,16 @@ pip install .
 
 ## Getting Started
 
-### 运行示例
+#### 1. Install requirements
 
 ```shell
 git clone https://github.com/shibing624/agentica.git
 cd agentica
 pip install -r requirements.txt
+```
 
+#### 2. Run the example
+```shell
 # Copying required .env file, and fill in the LLM api key
 cp .env.example ~/.agentica/.env
 
@@ -167,9 +170,6 @@ bash start.sh
 - 微信我： 加我*微信号：xuming624, 备注：姓名-公司-NLP* 进NLP交流群。
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
-
-<img src="https://github.com/shibing624/agentica/blob/main/docs/wechat_group.jpg" width="200" />
-
 
 ## Citation
 

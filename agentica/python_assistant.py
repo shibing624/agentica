@@ -28,7 +28,6 @@ class PythonAssistant(Assistant):
     run_code: bool = True
     pip_install: bool = False
     safe_globals: Optional[dict] = None
-
     _python_tool: Optional[RunPythonCodeTool] = None
 
     @model_validator(mode="after")
@@ -227,8 +226,6 @@ class PythonAssistant(Assistant):
                 the `get_tool_call_history(num_calls=3)` function.
             2. Was the result okay, would you like me to fix any problems? If the user says yes, 
                 get the previous code using the `get_tool_call_history(num_calls=3)` function and fix the problems.
-            3. Shall I add this result to the knowledge base? If the user says yes, add the result to the knowledge 
-                base using the `add_to_knowledge_base` function.
             Let the user choose using number or text or continue the conversation.
             """
             )

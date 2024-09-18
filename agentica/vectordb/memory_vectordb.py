@@ -15,7 +15,7 @@ from agentica.emb.openai_emb import OpenAIEmb
 from agentica.vectordb.base import VectorDb, Distance
 
 
-class MemoryDb(VectorDb):
+class MemoryVectorDb(VectorDb):
     def __init__(
             self,
             embedder: Emb = OpenAIEmb(),
