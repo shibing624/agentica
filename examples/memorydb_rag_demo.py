@@ -17,6 +17,7 @@ sys.path.append('..')
 from agentica import Assistant
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
+from agentica.storage.sqlite_storage import SqliteStorage
 from agentica.emb.text2vec_emb import Text2VecEmb
 
 knowledge_base = KnowledgeBase(
@@ -26,12 +27,17 @@ knowledge_base = KnowledgeBase(
 # Comment after first run
 knowledge_base.load()
 
+# Create a SQL storage for the assistant's data
+storage = SqliteStorage(table_name="ThaiRecipes", db_file="outputs/ThaiRecipes.db")
+storage.create()
+
 assistant = Assistant(
     knowledge_base=knowledge_base,
-    # Adds references to the prompt.
-    add_references_to_prompt=True,
+    storage=storage,
+    add_references_to_prompt=True,  # Use RAG
     description="中文回答",
-    debug_mode=False,
+    debug_mode=True,
 )
 r = assistant.run("如何做泰国咖喱")
 print(r, "".join(r))
+assistant.storage.export("outputs/ThaiRecipes_storage.csv")

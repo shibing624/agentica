@@ -11,7 +11,7 @@ try:
 except ImportError:
     raise ImportError("The `easyocr` package is not installed. Please install it via `pip install easyocr`.")
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 # Ignore SSL certificate verification for HTTPS requests (not recommended for production)

@@ -2,7 +2,7 @@ import sys
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
-from agentica.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqliteStorage
 
 if __name__ == '__main__':
     llm = AzureOpenAILLM()

@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 # Create a default context for HTTPS requests (not recommended for production)

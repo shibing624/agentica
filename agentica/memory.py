@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import os
 from abc import ABC, abstractmethod
 from datetime import datetime

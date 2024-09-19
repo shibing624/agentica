@@ -10,7 +10,7 @@ import os
 from typing import Optional, cast
 
 from agentica.llm import LLM, OpenAILLM
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 

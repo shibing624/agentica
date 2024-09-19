@@ -44,10 +44,11 @@ from agentica.memory import (
 from agentica.references import References
 from agentica.run_record import RunRecord
 # storage
-from agentica.pg_storage import PgStorage
-from agentica.sqlite_storage import SqliteStorage
+from agentica.storage.base import AssistantStorage
+from agentica.storage.pg_storage import PgStorage
+from agentica.storage.sqlite_storage import SqliteStorage
 # tool
-from agentica.tool import Tool, Toolkit, Function, FunctionCall
+from agentica.tools.base import Tool, Toolkit, Function, FunctionCall
 # assistant
 from agentica.assistant import Assistant
 from agentica.python_assistant import PythonAssistant

@@ -5,6 +5,7 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 import os
+import csv
 from sqlite3 import OperationalError
 from typing import Optional, Any, List
 
@@ -18,11 +19,12 @@ from sqlalchemy.sql.expression import select
 from sqlalchemy.types import String, JSON, DateTime
 
 from agentica.run_record import RunRecord
+from agentica.storage.base import AssistantStorage
 from agentica.utils.misc import current_datetime
 from agentica.utils.log import logger
 
 
-class SqliteStorage:
+class SqliteStorage(AssistantStorage):
     def __init__(
             self,
             table_name: str,
@@ -44,7 +46,7 @@ class SqliteStorage:
         :param db_file: The database file to connect to.
         :param db_engine: The database engine to use.
         """
-        _engine: Optional[Engine] = db_engine
+        _engine = db_engine
         if _engine is None and db_url is not None:
             _engine = create_engine(db_url)
         elif _engine is None and db_file is not None:
@@ -235,3 +237,27 @@ class SqliteStorage:
         if self.table_exists():
             logger.debug(f"Deleting table: {self.table_name}")
             self.table.drop(self.db_engine)
+
+    def export(self, csv_file_path: str, user_id: Optional[str] = None) -> None:
+        try:
+            with self.Session() as sess:
+                # get all runs for this user
+                stmt = select(self.table)
+                if user_id is not None:
+                    stmt = stmt.where(self.table.c.user_id == user_id)
+                # order by created_at desc
+                stmt = stmt.order_by(self.table.c.created_at.desc())
+                # execute query
+                rows = sess.execute(stmt).fetchall()
+                with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
+                    writer = csv.writer(file)
+                    # Write the header
+                    writer.writerow([column.name for column in self.table.columns])
+                    # Write the data
+                    for row in rows:
+                        writer.writerow([getattr(row, column.name) for column in self.table.columns])
+                logger.info(f"Exported table: {self.table_name} to file: {csv_file_path}")
+        except OperationalError:
+            logger.debug(f"Table does not exist: {self.table.name}")
+        except Exception as e:
+            logger.warning(f"Error: {e}")

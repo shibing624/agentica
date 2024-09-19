@@ -5,6 +5,7 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 from typing import Optional, Any, List
+import csv
 
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import create_engine, Engine
@@ -16,10 +17,11 @@ from sqlalchemy.sql.expression import text, select
 from sqlalchemy.types import DateTime, String
 
 from agentica.run_record import RunRecord
+from agentica.storage.base import AssistantStorage
 from agentica.utils.log import logger
 
 
-class PgStorage:
+class PgStorage(AssistantStorage):
     def __init__(
             self,
             table_name: str,
@@ -208,3 +210,25 @@ class PgStorage:
         if self.table_exists():
             logger.debug(f"Deleting table: {self.table_name}")
             self.table.drop(self.db_engine)
+
+    def export(self, csv_file_path: str, user_id: Optional[str] = None) -> None:
+        try:
+            with self.Session() as sess:
+                # get all runs for this user
+                stmt = select(self.table)
+                if user_id is not None:
+                    stmt = stmt.where(self.table.c.user_id == user_id)
+                # order by created_at desc
+                stmt = stmt.order_by(self.table.c.created_at.desc())
+                # execute query
+                rows = sess.execute(stmt).fetchall()
+                with open(csv_file_path, mode='w', newline='', encoding='utf-8') as file:
+                    writer = csv.writer(file)
+                    # Write the header
+                    writer.writerow([column.name for column in self.table.columns])
+                    # Write the data
+                    for row in rows:
+                        writer.writerow([getattr(row, column.name) for column in self.table.columns])
+                logger.info(f"Exported table: {self.table_name} to file: {csv_file_path}")
+        except Exception as e:
+            logger.warning(f"Error during export: {e}")

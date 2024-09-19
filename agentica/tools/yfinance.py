@@ -6,7 +6,7 @@ part of the code is from phidata
 """
 import json
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 
 try:
     import yfinance as yf

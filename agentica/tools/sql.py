@@ -11,7 +11,7 @@ from sqlalchemy import create_engine, Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.inspection import inspect
 from sqlalchemy.sql.expression import text
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 

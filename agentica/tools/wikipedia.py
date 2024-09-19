@@ -14,7 +14,7 @@ except ImportError:
         "The `wikipedia` package is not installed. " "Please install it via `pip install wikipedia`."
     )
 from agentica.document import Document
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 # Create a default context for HTTPS requests (not recommended for production)

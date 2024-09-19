@@ -9,7 +9,7 @@ from typing import Optional, Union
 
 from agentica.utils.log import logger
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 
 
 class AirflowTool(Toolkit):

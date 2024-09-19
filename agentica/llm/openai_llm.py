@@ -27,7 +27,7 @@ from openai.types.completion_usage import CompletionUsage
 from agentica.config import FAST_LLM
 from agentica.llm.base import LLM
 from agentica.message import Message
-from agentica.tool import FunctionCall, get_function_call, get_function_call_for_tool_call
+from agentica.tools.base import FunctionCall, get_function_call, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 

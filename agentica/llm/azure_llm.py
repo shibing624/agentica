@@ -5,14 +5,16 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 from os import getenv
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List, Iterator
 
 try:
     from openai import AzureOpenAI as AzureOpenAIClient
+    from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 except ImportError:
     raise ImportError("`openai` not installed, please run `pip install openai`")
 from agentica.config import FAST_LLM
 from agentica.llm.openai_llm import OpenAILLM
+from agentica.message import Message
 
 
 class AzureOpenAILLM(OpenAILLM):
@@ -53,5 +55,12 @@ class AzureOpenAILLM(OpenAILLM):
             _client_params["http_client"] = self.http_client
         if self.client_params:
             _client_params.update(self.client_params)
-        self.client = AzureOpenAIClient(**_client_params)
-        return self.client
+        return AzureOpenAIClient(**_client_params)
+
+    def invoke_stream(self, messages: List[Message]) -> Iterator[ChatCompletionChunk]:
+        yield from self.get_client().chat.completions.create(
+            model=self.model,
+            messages=[m.to_dict() for m in messages],  # type: ignore
+            stream=True,
+            **self.api_kwargs,
+        )  # type: ignore

@@ -9,14 +9,11 @@ import os.path
 import sys
 
 sys.path.append('..')
-from agentica.python_assistant import PythonAssistant
-from agentica import AzureOpenAILLM
+from agentica import PythonAssistant, AzureOpenAILLM, SqliteStorage
 from agentica.tools.search_serper import SearchSerperTool
-from agentica import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica import AssistantMemory
-from agentica.memory import CsvMemoryDb
+from agentica import KnowledgeBase, AssistantMemory, CsvMemoryDb
 
 
 def main():
@@ -32,6 +29,7 @@ def main():
         show_tool_calls=True,
         debug_mode=True,
         knowledge_base=knowledge_base,
+        storage=SqliteStorage(table_name="person1", db_file="outputs/person1.db"),
         update_knowledge=True,
         search_knowledge=True,
         memory=AssistantMemory(db=CsvMemoryDb(memory_file)),
@@ -43,6 +41,7 @@ def main():
         "请在进行计算时使用维基百科页面上的最小近地点值。将结果用中文回答"
     )
     print("".join(r))
+    m.storage.export("outputs/person1_storage.csv")
 
 
 if __name__ == '__main__':

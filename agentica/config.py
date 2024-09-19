@@ -25,5 +25,5 @@ if AGENTICA_LOG_LEVEL.upper() == "DEBUG":
     AGENTICA_LOG_FILE = os.environ.get("AGENTICA_LOG_FILE", default_log_file)
     logger.debug(f"AGENTICA_LOG_LEVEL: DEBUG, AGENTICA_LOG_FILE: {AGENTICA_LOG_FILE}")
 
-SMART_LLM = os.environ.get("SMART_LLM")
-FAST_LLM = os.environ.get("FAST_LLM")
+SMART_LLM = os.environ.get("SMART_LLM", "gpt-4o")
+FAST_LLM = os.environ.get("FAST_LLM", "gpt-4o-mini")

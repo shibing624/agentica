@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from agentica.run_record import RunRecord
-from agentica.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqliteStorage
 
 
 # Mock current_datetime function

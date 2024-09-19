@@ -9,18 +9,21 @@ assistant = Assistant(
 )
 
 # Single Image
-assistant.run(
+r = assistant.run(
     [
         {"type": "text", "text": "描述图片"},
         {
             "type": "image_url",
-            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "image_url": {
+                "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+            },
         },
     ]
 )
+print(r, "".join(r))
 
 # Multiple Images
-assistant.run(
+r = assistant.run(
     [
         {
             "type": "text",
@@ -28,11 +31,16 @@ assistant.run(
         },
         {
             "type": "image_url",
-            "image_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
+            "image_url": {
+                "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+            },
         },
         {
             "type": "image_url",
-            "image_url": "https://img-blog.csdnimg.cn/img_convert/0ab31bdb17bebbab9c8f4185f3655b6d.jpeg",
+            "image_url": {
+                "url": "https://img-blog.csdnimg.cn/img_convert/0ab31bdb17bebbab9c8f4185f3655b6d.jpeg"
+            },
         },
     ],
 )
+print(r, "".join(r))

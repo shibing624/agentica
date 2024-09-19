@@ -13,7 +13,7 @@ import markdownify
 import requests
 from bs4 import BeautifulSoup
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 

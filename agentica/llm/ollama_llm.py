@@ -7,8 +7,7 @@ part of the code from https://github.com/phidatahq/phidata
 import json
 from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any, Mapping, Union
-
-from pydantic import BaseModel
+from dataclasses import dataclass
 
 try:
     from ollama import Client as OllamaClient
@@ -17,14 +16,15 @@ except ImportError:
 
 from agentica.llm.base import LLM
 from agentica.message import Message
-from agentica.tool import FunctionCall, get_function_call_for_tool_call
+from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
 
-class MessageToolCallExtractionResult(BaseModel):
-    tool_calls: Optional[list] = None
-    invalid_json_format: bool = False
+@dataclass
+class MessageToolCallExtractionResult:
+    tool_calls: Optional[list]
+    invalid_json_format: bool
 
 
 def extract_json(s: str):
@@ -89,18 +89,18 @@ def extract_json(s: str):
 def extract_tool_calls(assistant_msg_content: str) -> MessageToolCallExtractionResult:
     json_obj = extract_json(assistant_msg_content)
     if json_obj is None:
-        return MessageToolCallExtractionResult()
+        return MessageToolCallExtractionResult(tool_calls=None, invalid_json_format=False)
 
     if json_obj is False or not isinstance(json_obj, dict):
-        return MessageToolCallExtractionResult(invalid_json_format=True)
-
-    tool_calls: Optional[list] = json_obj.get("tool_calls")
+        return MessageToolCallExtractionResult(tool_calls=None, invalid_json_format=True)
 
     # Not tool call json object
+    tool_calls: Optional[list] = json_obj.get("tool_calls")
     if not isinstance(tool_calls, list):
-        return MessageToolCallExtractionResult(invalid_json_format=True)
+        return MessageToolCallExtractionResult(tool_calls=None, invalid_json_format=False)
 
-    return MessageToolCallExtractionResult(tool_calls=tool_calls)
+    return MessageToolCallExtractionResult(tool_calls=tool_calls, invalid_json_format=False)
+
 
 
 class OllamaLLM(LLM):
@@ -219,31 +219,33 @@ class OllamaLLM(LLM):
         try:
             if response_content is not None:
                 _tool_call_content = response_content.strip()
-                assistant_tool_calls = extract_tool_calls(_tool_call_content)
+                tool_calls_result: MessageToolCallExtractionResult = extract_tool_calls(_tool_call_content)
 
-                if assistant_tool_calls.invalid_json_format:
-                    assistant_message.tool_call_error = True
+                # it is a tool call?
+                if tool_calls_result.tool_calls is None and not tool_calls_result.invalid_json_format:
+                    if tool_calls_result.invalid_json_format:
+                        assistant_message.tool_call_error = True
 
-                if assistant_tool_calls.tool_calls is not None:
-                    # Build tool calls
-                    tool_calls: List[Dict[str, Any]] = []
-                    logger.debug(f"Building tool calls from {assistant_tool_calls}")
-                    for tool_call in assistant_tool_calls.tool_calls:
-                        tool_call_name = tool_call.get("name")
-                        tool_call_args = tool_call.get("arguments")
-                        _function_def = {"name": tool_call_name}
-                        if tool_call_args is not None:
-                            _function_def["arguments"] = json.dumps(tool_call_args)
-                        tool_calls.append(
-                            {
-                                "type": "function",
-                                "function": _function_def,
-                            }
-                        )
+                    if tool_calls_result.tool_calls is not None:
+                        # Build tool calls
+                        tool_calls: List[Dict[str, Any]] = []
+                        logger.debug(f"Building tool calls from {tool_calls_result}")
+                        for tool_call in tool_calls_result.tool_calls:
+                            tool_call_name = tool_call.get("name")
+                            tool_call_args = tool_call.get("arguments")
+                            _function_def = {"name": tool_call_name}
+                            if tool_call_args is not None:
+                                _function_def["arguments"] = json.dumps(tool_call_args)
+                            tool_calls.append(
+                                {
+                                    "type": "function",
+                                    "function": _function_def,
+                                }
+                            )
 
-                    # Add tool calls to assistant message
-                    assistant_message.tool_calls = tool_calls
-                    assistant_message.role = "assistant"
+                        # Add tool calls to assistant message
+                        assistant_message.tool_calls = tool_calls
+                        assistant_message.role = "assistant"
         except Exception:
             logger.warning(f"Could not parse tool calls from response: {response_content}")
             assistant_message.tool_call_error = True
@@ -371,7 +373,7 @@ class OllamaLLM(LLM):
             # Strip out tool calls from the response
             extract_tool_calls_result = extract_tool_calls(assistant_message_content)
             if not response_is_tool_call and (
-                    extract_tool_calls_result.tool_calls is not None or extract_tool_calls_result.invalid_json_format
+                extract_tool_calls_result.tool_calls is not None or extract_tool_calls_result.invalid_json_format
             ):
                 response_is_tool_call = True
 
@@ -418,30 +420,32 @@ class OllamaLLM(LLM):
         try:
             if response_is_tool_call and assistant_message_content != "":
                 _tool_call_content = assistant_message_content.strip()
-                assistant_tool_calls = extract_tool_calls(_tool_call_content)
+                tool_calls_result: MessageToolCallExtractionResult = extract_tool_calls(_tool_call_content)
 
-                if assistant_tool_calls.invalid_json_format:
-                    assistant_message.tool_call_error = True
+                # it is a tool call?
+                if tool_calls_result.tool_calls is None and not tool_calls_result.invalid_json_format:
+                    if tool_calls_result.invalid_json_format:
+                        assistant_message.tool_call_error = True
 
-                if not assistant_message.tool_call_error and assistant_tool_calls.tool_calls is not None:
-                    # Build tool calls
-                    tool_calls: List[Dict[str, Any]] = []
-                    logger.debug(f"Building tool calls from {assistant_tool_calls.tool_calls}")
-                    for tool_call in assistant_tool_calls.tool_calls:
-                        tool_call_name = tool_call.get("name")
-                        tool_call_args = tool_call.get("arguments")
-                        _function_def = {"name": tool_call_name}
-                        if tool_call_args is not None:
-                            _function_def["arguments"] = json.dumps(tool_call_args)
-                        tool_calls.append(
-                            {
-                                "type": "function",
-                                "function": _function_def,
-                            }
-                        )
+                    if not assistant_message.tool_call_error and tool_calls_result.tool_calls is not None:
+                        # Build tool calls
+                        tool_calls: List[Dict[str, Any]] = []
+                        logger.debug(f"Building tool calls from {tool_calls_result.tool_calls}")
+                        for tool_call in tool_calls_result.tool_calls:
+                            tool_call_name = tool_call.get("name")
+                            tool_call_args = tool_call.get("arguments")
+                            _function_def = {"name": tool_call_name}
+                            if tool_call_args is not None:
+                                _function_def["arguments"] = json.dumps(tool_call_args)
+                            tool_calls.append(
+                                {
+                                    "type": "function",
+                                    "function": _function_def,
+                                }
+                            )
 
-                    # Add tool calls to assistant message
-                    assistant_message.tool_calls = tool_calls
+                        # Add tool calls to assistant message
+                        assistant_message.tool_calls = tool_calls
         except Exception:
             logger.warning(f"Could not parse tool calls from response: {assistant_message_content}")
             assistant_message.tool_call_error = True

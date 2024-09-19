@@ -12,12 +12,11 @@ from agentica.utils.file_parser import (
     read_csv_file,
     read_txt_file,
     read_pdf_file,
-    read_pdf_url,
     read_docx_file,
     read_excel_file
 )
 from agentica.utils.log import logger
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 
 
 class FileTool(Toolkit):

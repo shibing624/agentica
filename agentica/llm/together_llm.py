@@ -10,7 +10,7 @@ from typing import Optional, List, Iterator, Dict, Any
 
 from agentica.llm.openai_llm import OpenAILLM
 from agentica.message import Message
-from agentica.tool import FunctionCall, get_function_call_for_tool_call
+from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 

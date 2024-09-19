@@ -23,7 +23,7 @@ from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.tools.search_exa import SearchExaTool
 from agentica.tools.yfinance import YFinanceTool
-from agentica.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqliteStorage
 from agentica.document import Document
 
 

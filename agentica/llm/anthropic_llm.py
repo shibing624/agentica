@@ -17,7 +17,7 @@ except ImportError:
 
 from agentica.llm.base import LLM
 from agentica.message import Message
-from agentica.tool import (
+from agentica.tools.base import (
     FunctionCall,
     get_function_call_for_tool_call,
     extract_tool_from_xml,
@@ -84,32 +84,44 @@ class AnthropicLLM(LLM):
     def invoke(self, messages: List[Message]) -> AnthropicMessage:
         api_kwargs: Dict[str, Any] = self.api_kwargs
         api_messages: List[dict] = []
+        system_messages: List[str] = []
 
-        for m in messages:
-            if m.role == "system":
-                api_kwargs["system"] = m.content
+        for idx, message in enumerate(messages):
+            if message.role == "system" or (message.role != "user" and idx in [0, 1]):
+                system_messages.append(message.content)  # type: ignore
             else:
-                api_messages.append({"role": m.role, "content": m.content or ""})
+                api_messages.append({"role": message.role, "content": message.content or ""})
+
+        api_kwargs["system"] = " ".join(system_messages)
+
+        if self.tools:
+            api_kwargs["tools"] = self.get_tools()
 
         return self.client.messages.create(
             model=self.model,
-            messages=api_messages,
+            messages=api_messages,  # type: ignore
             **api_kwargs,
         )
 
     def invoke_stream(self, messages: List[Message]) -> Any:
         api_kwargs: Dict[str, Any] = self.api_kwargs
         api_messages: List[dict] = []
+        system_messages: List[str] = []
 
-        for m in messages:
-            if m.role == "system":
-                api_kwargs["system"] = m.content
+        for idx, message in enumerate(messages):
+            if message.role == "system" or (message.role != "user" and idx in [0, 1]):
+                system_messages.append(message.content)  # type: ignore
             else:
-                api_messages.append({"role": m.role, "content": m.content or ""})
+                api_messages.append({"role": message.role, "content": message.content or ""})
+
+        api_kwargs["system"] = " ".join(system_messages)
+
+        if self.tools:
+            api_kwargs["tools"] = self.get_tools()
 
         return self.client.messages.stream(
             model=self.model,
-            messages=api_messages,
+            messages=api_messages,  # type: ignore
             **api_kwargs,
         )
 

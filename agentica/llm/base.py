@@ -9,7 +9,7 @@ from typing import List, Iterator, Optional, Dict, Any, Callable, Union
 from pydantic import BaseModel, ConfigDict
 
 from agentica.message import Message
-from agentica.tool import Function, FunctionCall, Tool, Toolkit
+from agentica.tools.base import Function, FunctionCall, Tool, Toolkit
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 

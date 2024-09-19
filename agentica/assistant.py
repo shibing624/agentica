@@ -25,7 +25,7 @@ from typing import (
     AsyncIterator,
 )
 from uuid import uuid4
-
+from pathlib import Path
 from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 
 from agentica.document import Document
@@ -36,8 +36,8 @@ from agentica.memory import AssistantMemory, Memory
 from agentica.message import Message
 from agentica.references import References
 from agentica.run_record import RunRecord
-from agentica.sqlite_storage import SqliteStorage
-from agentica.tool import Tool, Toolkit, Function
+from agentica.storage.base import AssistantStorage
+from agentica.tools.base import Tool, Toolkit, Function
 from agentica.utils.log import logger, set_log_level_to_debug, print_llm_stream
 from agentica.utils.misc import merge_dictionaries, remove_indent
 from agentica.utils.timer import Timer
@@ -89,7 +89,7 @@ class Assistant(BaseModel):
     add_references_to_prompt: bool = False
 
     # -*- Assistant Storage
-    storage: Optional[SqliteStorage] = None
+    storage: Optional[AssistantStorage] = None
     # RunRecord from the database: DO NOT SET MANUALLY
     db_row: Optional[RunRecord] = None
     # -*- Assistant Tools
@@ -149,7 +149,7 @@ class Assistant(BaseModel):
     add_to_system_prompt: Optional[str] = None
     # If True, add instructions for using the knowledge base to the system prompt if knowledge base is provided
     add_knowledge_base_instructions: bool = True
-    # If True, add instructions to return "I dont know" when the assistant does not know the answer.
+    # If True, add instructions to return "I don't know" when the assistant does not know the answer.
     prevent_hallucinations: bool = False
     # If True, add instructions to prevent prompt injection attacks
     prevent_prompt_injection: bool = False
@@ -189,6 +189,8 @@ class Assistant(BaseModel):
     output: Optional[Any] = None
     # Save the output to output_dir
     output_dir: Optional[str] = "outputs"
+    # Save llm messages to output_dir
+    save_llm_messages: bool = False
     # Save the output to a file with this name, if provided save the output to a file
     output_file_name: Optional[str] = None
 
@@ -280,8 +282,6 @@ class Assistant(BaseModel):
             self.llm.response_format = {"type": "json_object"}
 
         # Add default tools to the LLM
-        if self.search_knowledge:
-            self.use_tools = True
         if self.use_tools:
             self.read_chat_history = True
             self.search_knowledge = True
@@ -906,24 +906,28 @@ class Assistant(BaseModel):
         self.write_to_storage()
 
         # Save llm_messages to file
-        try:
-            os.makedirs(self.output_dir, exist_ok=True)
-            save_file = os.path.join(self.output_dir, f"output_{self.run_id}.json")
-            messages_str = json.dumps(
-                [i.dict() for i in self.memory.llm_messages], indent=2, ensure_ascii=False
-            )
-            with open(save_file, "w", encoding='utf-8') as f:
-                f.write(messages_str)
-            logger.info(f"Saved messages to file: {save_file}")
-        except Exception as e:
-            logger.warning(f"Failed to save output to file: {e}")
+        if self.save_llm_messages:
+            try:
+                os.makedirs(self.output_dir, exist_ok=True)
+                save_file = os.path.join(self.output_dir, f"output_{self.run_id}.json")
+                messages_str = json.dumps(
+                    [i.dict() for i in self.memory.llm_messages], indent=2, ensure_ascii=False
+                )
+                with open(save_file, "w", encoding='utf-8') as f:
+                    f.write(messages_str)
+                logger.info(f"Saved messages to file: {save_file}")
+            except Exception as e:
+                logger.warning(f"Failed to save output to file: {e}")
 
         # Save output_file_name file
         if self.output_file_name:
             try:
+                os.makedirs(self.output_dir, exist_ok=True)
                 save_file = os.path.join(self.output_dir, self.output_file_name)
-                with open(save_file, "w", encoding='utf-8') as f:
-                    f.write(self.output)
+                fn_path = Path(save_file)
+                if not fn_path.parent.exists():
+                    fn_path.parent.mkdir(parents=True, exist_ok=True)
+                fn_path.write_text(self.output)
                 logger.info(f"Saved output to file: {save_file}")
             except Exception as e:
                 logger.warning(f"Failed to save output to file: {e}")

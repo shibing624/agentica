@@ -9,7 +9,7 @@ import ssl
 from os import getenv
 from typing import Optional, Dict, Any, List
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 try:

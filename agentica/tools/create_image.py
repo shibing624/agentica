@@ -13,7 +13,7 @@ from typing import Optional, cast
 import requests
 
 from agentica.llm import LLM, OpenAILLM
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 
 
 class CreateImageTool(Toolkit):

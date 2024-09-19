@@ -6,7 +6,7 @@ part of the code is from phidata
 """
 from pathlib import Path
 from typing import List, Optional, Union
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 

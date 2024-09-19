@@ -8,7 +8,7 @@ from agentica import Assistant, AzureOpenAILLM
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb  # noqa
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqliteStorage
 
 llm = AzureOpenAILLM()
 # llm = OllamaLLM(model="qwen:0.5b")

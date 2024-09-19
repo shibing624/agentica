@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from agentica.utils.log import logger
 
-from agentica.tool import Toolkit
+from agentica.tools.base import Toolkit
 
 try:
     from apify_client import ApifyClient
