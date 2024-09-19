@@ -4,7 +4,7 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any,Tuple
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
@@ -58,3 +58,4 @@ class OllamaEmb(Emb):
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         return [self.get_embedding(text) for text in texts]
+

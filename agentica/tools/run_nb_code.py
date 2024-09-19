@@ -11,11 +11,15 @@ import re
 import time
 from typing import Literal, Tuple
 
-import nbformat
-from nbclient import NotebookClient
-from nbclient.exceptions import CellTimeoutError, DeadKernelError
-from nbformat import NotebookNode
-from nbformat.v4 import new_code_cell, new_markdown_cell, new_output
+try:
+    from nbclient import NotebookClient
+    from nbclient.exceptions import CellTimeoutError, DeadKernelError
+    import nbformat
+    from nbformat import NotebookNode
+    from nbformat.v4 import new_code_cell, new_markdown_cell, new_output
+except ImportError:
+    raise ImportError("The `nbclient` package is not installed. Please install it via `pip install nbclient nbformat`.")
+
 from rich.box import MINIMAL
 from rich.console import Console, Group
 from rich.live import Live

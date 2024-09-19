@@ -6,7 +6,7 @@ pip install yfinance agentica
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Assistant, AzureOpenAIChat
 from agentica.workflow import Workflow, Task
 from agentica.tools.yfinance import YFinanceTool
 
@@ -16,7 +16,7 @@ investment_report = "investment_report.md"
 
 stock_analyst = Assistant(
     name="Stock Analyst",
-    llm=AzureOpenAILLM(model="gpt-4o"),
+    llm=AzureOpenAIChat(model="gpt-4o"),
     tools=[YFinanceTool(company_info=True, analyst_recommendations=True, company_news=True)],
     description="You are a Senior Investment Analyst for Goldman Sachs tasked with producing a research report for a very important client.",
     instructions=[
@@ -30,7 +30,7 @@ stock_analyst = Assistant(
 )
 research_analyst = Assistant(
     name="Research Analyst",
-    llm=AzureOpenAILLM(model="gpt-4o"),
+    llm=AzureOpenAIChat(model="gpt-4o"),
     description="You are a Senior Investment Analyst for Goldman Sachs tasked with producing a ranked list of companies based on their investment potential.",
     instructions=[
         "You will write a research report based on the information provided by the Stock Analyst.",
@@ -45,7 +45,7 @@ research_analyst = Assistant(
 
 investment_lead = Assistant(
     name="Investment Lead",
-    llm=AzureOpenAILLM(model="gpt-4o"),
+    llm=AzureOpenAIChat(model="gpt-4o"),
     description="You are a Senior Investment Analyst for Goldman Sachs tasked with producing a research report for a very important client.",
     instructions=[
         "Review the report provided and produce a final client-worth report",

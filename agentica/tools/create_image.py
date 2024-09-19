@@ -12,7 +12,7 @@ from typing import Optional, cast
 
 import requests
 
-from agentica.llm import LLM, OpenAILLM
+from agentica.llm import LLM, OpenAIChat
 from agentica.tools.base import Toolkit
 
 
@@ -36,7 +36,7 @@ class CreateImageTool(Toolkit):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAILLM()
+            self.llm = OpenAIChat()
 
     def create_delle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
         """

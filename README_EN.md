@@ -68,11 +68,11 @@ pip install .
 自动调用google搜索工具，示例[examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
 
 ```python
-from agentica import Assistant, OpenAILLM, AzureOpenAILLM
+from agentica import Assistant, OpenAIChat, AzureOpenAIChat
 from agentica.tools.search_serper import SearchSerperTool
 
 m = Assistant(
-  llm=AzureOpenAILLM(),
+  llm=AzureOpenAIChat(),
   description="You are a helpful ai assistant.",
   show_tool_calls=True,
   # Enable the assistant to search the knowledge base

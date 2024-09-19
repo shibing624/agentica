@@ -20,7 +20,7 @@ except ImportError:
 from agentica.document import Document
 from agentica.emb.base import Emb
 from agentica.vectordb.base import VectorDb, Distance
-from agentica.emb.openai_emb import OpenAIEmb
+from agentica.emb.openai import OpenAIEmb
 from agentica.utils.log import logger
 
 
@@ -30,7 +30,7 @@ class LanceDb(VectorDb):
             embedder: Emb = OpenAIEmb(),
             distance: Distance = Distance.cosine,
             connection: Optional[lancedb.db.LanceTable] = None,
-            uri: Optional[str] = "/tmp/agentica_lance.db",
+            uri: Optional[str] = "tmp/lancedb",
             table_name: Optional[str] = "agentica",
             nprobes: Optional[int] = 20,
             **kwargs,

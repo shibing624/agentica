@@ -8,14 +8,14 @@ import json
 from os import getenv
 from typing import Optional, List, Iterator, Dict, Any
 
-from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.openai_chat import OpenAIChat
 from agentica.message import Message
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
 
-class TogetherLLM(OpenAILLM):
+class Together(OpenAIChat):
     name: str = "Together"
     model: str = "mistralai/Mixtral-8x7B-Instruct-v0.1"
     api_key: Optional[str] = getenv("TOGETHER_API_KEY")

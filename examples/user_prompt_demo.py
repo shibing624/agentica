@@ -2,10 +2,10 @@ import sys
 
 sys.path.append('..')
 from agentica import Assistant
-from agentica.llm.moonshot_llm import MoonshotLLM
+from agentica.llm.moonshot import Moonshot
 
 assistant = Assistant(
-    llm=MoonshotLLM(),
+    llm=Moonshot(),
     system_prompt="分享一个两句话的故事。",
     user_prompt="12000年的爱。",
     debug_mode=True,

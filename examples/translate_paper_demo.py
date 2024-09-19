@@ -10,7 +10,7 @@ import sys
 from loguru import logger
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Assistant, AzureOpenAIChat
 from agentica.knowledge.knowledge_base import KnowledgeBase
 
 knowledge_base = KnowledgeBase(
@@ -27,7 +27,7 @@ for document_list in knowledge_base.document_lists:
 logger.info(f'docs size: {len(docs)}, top3: {docs[:3]}')
 
 assistant = Assistant(
-    llm=AzureOpenAILLM(model='gpt-4o'),
+    llm=AzureOpenAIChat(model='gpt-4o'),
     description="""现在你要解释一篇专业的技术文章成简体中文给大学生阅读。
 
 规则：

@@ -12,21 +12,21 @@ from agentica.vectordb.base import VectorDb
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
 # emb
 from agentica.emb.base import Emb
-from agentica.emb.openai_emb import OpenAIEmb
-from agentica.emb.azure_emb import AzureOpenAIEmb
+from agentica.emb.openai import OpenAIEmb
+from agentica.emb.azure_openai import AzureOpenAIEmb
 from agentica.emb.hash_emb import HashEmb
-from agentica.emb.together_emb import TogetherEmb
+from agentica.emb.together import TogetherEmb
 from agentica.file.base import File
 from agentica.file.csv import CsvFile
 from agentica.file.txt import TextFile
 
 from agentica.knowledge.knowledge_base import KnowledgeBase
 # llm
-from agentica.llm.openai_llm import OpenAILLM
-from agentica.llm.azure_llm import AzureOpenAILLM
-from agentica.llm.together_llm import TogetherLLM
-from agentica.llm.deepseek_llm import DeepseekLLM
-from agentica.llm.moonshot_llm import MoonshotLLM
+from agentica.llm.openai_chat import OpenAIChat
+from agentica.llm.azure_openai import AzureOpenAIChat
+from agentica.llm.together import Together
+from agentica.llm.deepseek import Deepseek
+from agentica.llm.moonshot import Moonshot
 from agentica.task import Task
 from agentica.message import Message
 from agentica.memory import (

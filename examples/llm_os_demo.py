@@ -13,14 +13,14 @@ from typing import List, Optional
 import streamlit as st
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM, PythonAssistant
+from agentica import Assistant, AzureOpenAIChat, PythonAssistant
 from agentica.tools.file import FileTool
 from agentica.utils.log import logger
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.tools.shell import ShellTool
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
-from agentica.emb.text2vec_emb import Text2VecEmb
+from agentica.emb.text2vec import Text2VecEmb
 from agentica.tools.search_exa import SearchExaTool
 from agentica.tools.yfinance import YFinanceTool
 from agentica.storage.sqlite_storage import SqliteStorage
@@ -369,7 +369,7 @@ def main():
     llm_os: Assistant
     if "llm_os" not in st.session_state or st.session_state["llm_os"] is None:
         logger.info(f"---*--- Creating {llm_id} LLM OS ---*---")
-        llm = AzureOpenAILLM(model=llm_id)
+        llm = AzureOpenAIChat(model=llm_id)
         llm_os = get_llm_os(
             llm=llm,
             google_search=google_search_enabled,
@@ -494,7 +494,7 @@ def main():
         new_llm_os_run_id = st.sidebar.selectbox("Run ID", options=llm_os_run_ids)
         if st.session_state["llm_os_run_id"] != new_llm_os_run_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_llm_os_run_id} ---*---")
-            llm = AzureOpenAILLM(model=llm_id)
+            llm = AzureOpenAIChat(model=llm_id)
             st.session_state["llm_os"] = get_llm_os(
                 llm=llm,
                 google_search=google_search_enabled,

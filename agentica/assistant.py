@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 from agentica.document import Document
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.llm.base import LLM
-from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.openai_chat import OpenAIChat
 from agentica.memory import AssistantMemory, Memory
 from agentica.message import Message
 from agentica.references import References
@@ -40,6 +40,7 @@ from agentica.storage.base import AssistantStorage
 from agentica.tools.base import Tool, Toolkit, Function
 from agentica.utils.log import logger, set_log_level_to_debug, print_llm_stream
 from agentica.utils.misc import merge_dictionaries, remove_indent
+from agentica.template import PromptTemplate
 from agentica.utils.timer import Timer
 
 
@@ -132,6 +133,8 @@ class Assistant(BaseModel):
     #
     # -*- System prompt: provide the system prompt as a string
     system_prompt: Optional[str] = None
+    # -*- System prompt template: provide the system prompt as a PromptTemplate
+    system_prompt_template: Optional[PromptTemplate] = None
     # If True, build a default system prompt using instructions and extra_instructions
     build_default_system_prompt: bool = True
     # -*- Settings for building the default system prompt
@@ -164,6 +167,8 @@ class Assistant(BaseModel):
     # -*- User prompt: provide the user prompt as a string
     # Note: this will ignore the message sent to the run function
     user_prompt: Optional[Union[List, Dict, str]] = None
+    # -*- User prompt template: provide the user prompt as a PromptTemplate
+    user_prompt_template: Optional[PromptTemplate] = None
     # If True, build a default user prompt using references and chat history
     build_default_user_prompt: bool = True
     # Function to get references for the user_prompt
@@ -274,8 +279,10 @@ class Assistant(BaseModel):
     def update_llm(self) -> None:
         if self.llm is None:
             logger.debug("LLM not set. Using OpenAILLM")
-            self.llm = OpenAILLM()
+            self.llm = OpenAIChat()
             logger.info(f"Using LLM: {self.llm}")
+        else:
+            logger.debug(f"Using LLM: {self.llm}")
 
         # Set response_format if it is not set on the llm
         if self.output_model is not None and self.llm.response_format is None:
@@ -562,7 +569,13 @@ class Assistant(BaseModel):
                 sys_prompt += f"\n{self.get_json_output_prompt()}"
                 return sys_prompt
             return self.system_prompt
-
+        # If the system_prompt_template is set, build the system_prompt using the template
+        if self.system_prompt_template is not None:
+            system_prompt_kwargs = {"assistant": self}
+            system_prompt_from_template = self.system_prompt_template.get_prompt(**system_prompt_kwargs)
+            if system_prompt_from_template is not None and self.output_model is not None:
+                system_prompt_from_template += f"\n{self.get_json_output_prompt()}"
+            return system_prompt_from_template
         # If build_default_system_prompt is False, return None
         if not self.build_default_system_prompt:
             return None
@@ -571,7 +584,7 @@ class Assistant(BaseModel):
             raise Exception("LLM not set")
 
         # -*- Build a list of instructions for the Assistant
-        instructions = self.instructions.copy() if self.instructions is not None else []
+        instructions = self.instructions.copy() if self.instructions is not None else None
         # Add default instructions
         if instructions is None:
             instructions = []
@@ -723,12 +736,12 @@ class Assistant(BaseModel):
 
         if self.chat_history_function is not None:
             chat_history_kwargs = {"conversation": self}
-            return self.chat_history_function(**chat_history_kwargs)
+            return remove_indent(self.chat_history_function(**chat_history_kwargs))
 
         formatted_history = self.memory.get_formatted_chat_history(num_messages=self.num_history_messages)
         if formatted_history == "":
             return None
-        return formatted_history
+        return remove_indent(formatted_history)
 
     def get_user_prompt(
             self,
@@ -742,6 +755,16 @@ class Assistant(BaseModel):
         # Note: this ignores the message provided to the run function
         if self.user_prompt is not None:
             return self.user_prompt
+        # If the user_prompt_template is set, return the user_prompt from the template
+        if self.user_prompt_template is not None:
+            user_prompt_kwargs = {
+                "assistant": self,
+                "message": message,
+                "references": references,
+                "chat_history": chat_history,
+            }
+            _user_prompt_from_template = self.user_prompt_template.get_prompt(**user_prompt_kwargs)
+            return _user_prompt_from_template
 
         if message is None:
             return None

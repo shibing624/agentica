@@ -4,13 +4,13 @@ from typing import Optional, List
 import typer
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Assistant, AzureOpenAIChat
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb  # noqa
-from agentica.emb.text2vec_emb import Text2VecEmb
+from agentica.emb.text2vec import Text2VecEmb
 from agentica.storage.sqlite_storage import SqliteStorage
 
-llm = AzureOpenAILLM()
+llm = AzureOpenAIChat()
 # llm = OllamaLLM(model="qwen:0.5b")
 print(llm)
 emb = Text2VecEmb()

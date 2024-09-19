@@ -13,12 +13,12 @@ try:
 except ImportError:
     raise ImportError("`openai` not installed, please run `pip install openai`")
 from agentica.config import FAST_LLM
-from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.openai_chat import OpenAIChat
 from agentica.message import Message
 
 
-class AzureOpenAILLM(OpenAILLM):
-    name: str = "AzureOpenAILLM"
+class AzureOpenAIChat(OpenAIChat):
+    name: str = "AzureOpenAIChat"
     model: str = FAST_LLM or "gpt-4o"
     api_key: Optional[str] = getenv("AZURE_OPENAI_API_KEY")
     api_version: str = getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
@@ -55,7 +55,8 @@ class AzureOpenAILLM(OpenAILLM):
             _client_params["http_client"] = self.http_client
         if self.client_params:
             _client_params.update(self.client_params)
-        return AzureOpenAIClient(**_client_params)
+        self.client = AzureOpenAIClient(**_client_params)
+        return self.client
 
     def invoke_stream(self, messages: List[Message]) -> Iterator[ChatCompletionChunk]:
         yield from self.get_client().chat.completions.create(

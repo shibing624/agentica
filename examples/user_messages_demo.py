@@ -1,10 +1,10 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, OpenAILLM
+from agentica import Assistant, OpenAIChat
 
 Assistant(
-    llm=OpenAILLM(model="gpt-3.5-turbo", stop="</answer>"),
+    llm=OpenAIChat(model="gpt-3.5-turbo", stop="</answer>"),
     debug_mode=True,
 ).run(
     messages=[

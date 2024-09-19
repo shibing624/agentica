@@ -9,10 +9,10 @@ import os.path
 import sys
 
 sys.path.append('..')
-from agentica import PythonAssistant, AzureOpenAILLM, SqliteStorage
+from agentica import PythonAssistant, AzureOpenAIChat, SqliteStorage
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.vectordb.lancedb import LanceDb
-from agentica.emb.text2vec_emb import Text2VecEmb
+from agentica.emb.text2vec import Text2VecEmb
 from agentica import KnowledgeBase, AssistantMemory, CsvMemoryDb
 
 
@@ -24,7 +24,7 @@ def main():
     )
     knowledge_base.load()
     m = PythonAssistant(
-        llm=AzureOpenAILLM(model='gpt-4o'),
+        llm=AzureOpenAIChat(model='gpt-4o'),
         tools=[SearchSerperTool()],
         show_tool_calls=True,
         debug_mode=True,

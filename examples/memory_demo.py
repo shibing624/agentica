@@ -4,10 +4,10 @@ from rich.pretty import pprint
 
 sys.path.append('..')
 from agentica.assistant import Assistant, AssistantMemory
-from agentica import AzureOpenAILLM
+from agentica import AzureOpenAIChat
 from agentica.memory import CsvMemoryDb
 
-llm = AzureOpenAILLM()
+llm = AzureOpenAIChat()
 assistant = Assistant(
     llm=llm,
     memory=AssistantMemory(db=CsvMemoryDb(), user_id="李四"),

@@ -8,11 +8,11 @@ from textwrap import dedent
 
 sys.path.append('..')
 from agentica import Assistant
-from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.openai_chat import OpenAIChat
 from agentica.tools.search_serper import SearchSerperTool
 
 m = Assistant(
-    llm=OpenAILLM(model='gpt-4o'),
+    llm=OpenAIChat(model='gpt-4o'),
     tools=[SearchSerperTool()],
     description="You are a senior NYT researcher writing an article on a topic.中文撰写报告",
     instructions=[

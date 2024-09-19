@@ -17,7 +17,7 @@ from agentica.emb.base import Emb
 class Text2VecEmb(Emb):
     """Text2Vec embedding model(SBert), using the `text2vec` library"""
     model: str = "shibing624/text2vec-base-multilingual"
-    dimensions: int = 384
+    dimensions: Optional[int] = 384
     client: SentenceModel = None
     client_params: Optional[Dict[str, Any]] = None
 
@@ -33,12 +33,15 @@ class Text2VecEmb(Emb):
             _client_params.update(self.client_params)
 
         self.client = SentenceModel(**_client_params)
+        dim = self.client.get_sentence_embedding_dimension()
+        if dim:
+            self.dimensions = dim
         return self.client
 
-    def get_embedding(self, text: str) -> List[float]:
+    def get_embedding(self, text: str, normalize_embeddings: bool = True) -> List[float]:
         # Calculate emb of the text
-        return self.get_client.encode([text])[0]
+        return self.get_client.encode([text], normalize_embeddings=normalize_embeddings)[0]
 
-    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def get_embeddings(self, texts: List[str], normalize_embeddings: bool = True) -> List[List[float]]:
         # Calculate emb of the texts
-        return self.get_client.encode(texts).tolist()  # type: ignore
+        return self.get_client.encode(texts, normalize_embeddings=normalize_embeddings).tolist()

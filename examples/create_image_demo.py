@@ -1,7 +1,7 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, OpenAILLM
+from agentica import Assistant, OpenAIChat
 from agentica.tools.create_image import CreateImageTool
 
 

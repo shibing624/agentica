@@ -56,10 +56,10 @@ from typing import Optional, Dict, Any
 
 from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
 
-from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.openai_chat import OpenAIChat
 
 
-class DeepseekLLM(OpenAILLM):
+class Deepseek(OpenAIChat):
     name: str = "Deepseek"
     model: str = "deepseek-coder"
     api_key: Optional[str] = getenv("DEEPSEEK_API_KEY")

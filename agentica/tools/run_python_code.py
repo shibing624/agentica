@@ -33,7 +33,7 @@ class RunPythonCodeTool(Toolkit):
             safe_globals: Optional[dict] = None
     ):
         super().__init__(name="run_python_code_tool")
-        self.data_dir: str = data_dir or os.path.curdir
+        self.data_dir: str = data_dir if data_dir else os.path.curdir
         # Restricted global and local scope
         self.safe_globals: dict = safe_globals or globals()
         if run_code:

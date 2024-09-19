@@ -40,7 +40,8 @@ class OpenAIEmb(Emb):
             _client_params["base_url"] = self.base_url
         if self.client_params:
             _client_params.update(self.client_params)
-        return OpenAIClient(**_client_params)
+        self.openai_client = OpenAIClient(**_client_params)
+        return self.openai_client
 
     def _response(self, text: str) -> CreateEmbeddingResponse:
         _request_params: Dict[str, Any] = {

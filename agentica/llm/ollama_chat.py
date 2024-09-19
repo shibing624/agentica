@@ -102,9 +102,8 @@ def extract_tool_calls(assistant_msg_content: str) -> MessageToolCallExtractionR
     return MessageToolCallExtractionResult(tool_calls=tool_calls, invalid_json_format=False)
 
 
-
-class OllamaLLM(LLM):
-    name: str = "Ollama"
+class OllamaChat(LLM):
+    name: str = "OllamaChat"
     model: str = "openhermes"  # or "qwen:0.5b" for test
     host: Optional[str] = None
     timeout: Optional[Any] = None
@@ -373,7 +372,7 @@ class OllamaLLM(LLM):
             # Strip out tool calls from the response
             extract_tool_calls_result = extract_tool_calls(assistant_message_content)
             if not response_is_tool_call and (
-                extract_tool_calls_result.tool_calls is not None or extract_tool_calls_result.invalid_json_format
+                    extract_tool_calls_result.tool_calls is not None or extract_tool_calls_result.invalid_json_format
             ):
                 response_is_tool_call = True
 

@@ -3,6 +3,6 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
-from .azure_llm import AzureOpenAILLM
+from .azure_openai import AzureOpenAIChat
 from .base import LLM
-from .openai_llm import OpenAILLM
+from .openai_chat import OpenAIChat

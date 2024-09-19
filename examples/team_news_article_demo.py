@@ -11,7 +11,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Assistant, AzureOpenAIChat
 from agentica.tools.search_exa import SearchExaTool
 
 
@@ -23,7 +23,7 @@ class NewsArticle(BaseModel):
 
 output_dir = "outputs"
 researcher = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4o"),
+    llm=AzureOpenAIChat(model="gpt-4o"),
     name="Article Researcher",
     tools=[SearchExaTool()],
     description="Given a topic, search for 15 articles and return the 7 most relevant articles.",
@@ -32,7 +32,7 @@ researcher = Assistant(
 )
 
 writer = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4o"),
+    llm=AzureOpenAIChat(model="gpt-4o"),
     name="Article Writer",
     output_dir=output_dir,
     output_file_name="article.md",

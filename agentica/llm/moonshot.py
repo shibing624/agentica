@@ -8,10 +8,10 @@ from typing import Optional, Dict, Any
 
 from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
 
-from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.openai_chat import OpenAIChat
 
 
-class MoonshotLLM(OpenAILLM):
+class Moonshot(OpenAIChat):
     name: str = "Moonshot"
     model: str = "moonshot-v1-auto"
     api_key: Optional[str] = getenv("MOONSHOT_API_KEY")
