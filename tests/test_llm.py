@@ -14,7 +14,7 @@ from agentica.message import Message
 api_key = os.getenv("MOONSHOT_API_KEY")
 
 
-@patch("agentica.llm.openai_llm.OpenAILLM")
+@patch("agentica.llm.openai_chat.OpenAIChat")
 def test_respond(mock_llm_class):
     """
     Tests the response method of the LLM class.
