@@ -6,13 +6,13 @@ pip install agentica
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAIChat
+from agentica import Assistant, AzureOpenAILLM
 from agentica.workflow import Workflow, Task
 from agentica.tools.file import FileTool
 
 idea_assistant = Assistant(
     name="企业家",
-    llm=AzureOpenAIChat(model="gpt-4o"),
+    llm=AzureOpenAILLM(model="gpt-4o"),
     description="你是一位杰出的企业家。你擅长于产生新的商业创意并将其营销推广。",
     tools=[FileTool(data_dir="outputs")],
     output_dir="outputs",

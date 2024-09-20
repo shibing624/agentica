@@ -1,10 +1,10 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAIChat
+from agentica import Assistant, AzureOpenAILLM
 
 assistant = Assistant(
-    llm=AzureOpenAIChat(model="gpt-4-turbo", max_tokens=4096),
+    llm=AzureOpenAILLM(model="gpt-4-turbo", max_tokens=4096),
     debug_mode=True,
 )
 

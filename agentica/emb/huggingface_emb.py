@@ -14,7 +14,7 @@ except ImportError:
     raise ImportError("`huggingface-hub` not installed, please run `pip install huggingface-hub`")
 
 
-class HuggingfaceCustomEmb(Emb):
+class HuggingfaceEmb(Emb):
     """Huggingface Custom Embedder"""
 
     model: str = "jinaai/jina-embeddings-v2-base-code"
@@ -42,12 +42,12 @@ class HuggingfaceCustomEmb(Emb):
         return self.client.post(**_request_params)
 
     def get_embedding(self, text: str) -> List[float]:
-        response = self._response(text=text)
+        resp = []
         try:
-            return response
+            resp = self._response(text=text)
         except Exception as e:
             logger.warning(e)
-            return []
+        return resp
 
     def get_embedding_and_usage(self, text: str) -> Tuple[List[float], Optional[Dict]]:
         return super().get_embedding_and_usage(text)

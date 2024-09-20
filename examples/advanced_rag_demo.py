@@ -14,10 +14,10 @@ import jieba
 from similarities import BM25Similarity
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAIChat
+from agentica import Assistant, AzureOpenAILLM
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
-from agentica.emb.text2vec import Text2VecEmb
+from agentica.emb.text2vec_emb import Text2VecEmb
 
 knowledge_base = KnowledgeBase(
     data_path="data/paper_sample.pdf",
@@ -59,7 +59,7 @@ def merge_references_function(query: str, **kwargs) -> str:
 
 
 assistant = Assistant(
-    llm=AzureOpenAIChat(model='gpt-4o'),
+    llm=AzureOpenAILLM(model='gpt-4o'),
     knowledge_base=knowledge_base,
     references_function=merge_references_function,
     # The add_references_to_prompt will update the prompt with references from the knowledge base.

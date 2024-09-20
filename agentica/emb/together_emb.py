@@ -7,7 +7,7 @@ part of the code from https://github.com/phidatahq/phidata
 from os import getenv
 from typing import Optional
 
-from agentica.emb.openai import OpenAIEmb
+from agentica.emb.openai_emb import OpenAIEmb
 
 
 class TogetherEmb(OpenAIEmb):

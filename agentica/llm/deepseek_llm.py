@@ -56,11 +56,11 @@ from typing import Optional, Dict, Any
 
 from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
 
-from agentica.llm.openai_chat import OpenAIChat
+from agentica.llm.openai_llm import OpenAILLM
 
 
-class Deepseek(OpenAIChat):
-    name: str = "Deepseek"
+class DeepseekLLM(OpenAILLM):
+    name: str = "DeepseekLLM"
     model: str = "deepseek-coder"
     api_key: Optional[str] = getenv("DEEPSEEK_API_KEY")
     base_url: str = "https://api.deepseek.com/v1"

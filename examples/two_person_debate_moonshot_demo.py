@@ -6,9 +6,9 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, Moonshot
+from agentica import Assistant, MoonshotLLM
 
-llm = Moonshot(model='moonshot-v1-32k')
+llm = MoonshotLLM(model='moonshot-v1-32k')
 Biden = Assistant(
     llm=llm,
     name="Biden",

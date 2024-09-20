@@ -32,7 +32,7 @@ def remove_tool_calls_from_string(text: str, start_tag: str = "<tool_call>", end
     return text
 
 
-class OllamaTools(LLM):
+class OllamaToolsLLM(LLM):
     name: str = "OllamaTools"
     model: str = "llama3"
     host: Optional[str] = None

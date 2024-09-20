@@ -9,11 +9,11 @@ pip install easyocr agentica
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAIChat
+from agentica import Assistant, AzureOpenAILLM
 from agentica.tools.ocr import OcrTool
 
 m = Assistant(
-    llm=AzureOpenAIChat(),
+    llm=AzureOpenAILLM(),
     tools=[OcrTool()],
 )
 prompt = """

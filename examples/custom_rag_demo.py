@@ -29,7 +29,7 @@ sys.path.append('..')
 from agentica import Assistant
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.pgvector import PgVector
-from agentica.emb.text2vec import Text2VecEmb
+from agentica.emb.text2vec_emb import Text2VecEmb
 
 db_url = "postgresql+psycopg://ai:ai@localhost:5532/ai"
 

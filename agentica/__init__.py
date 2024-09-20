@@ -7,14 +7,14 @@ from agentica.version import __version__  # noqa, isort: skip
 from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, isort: skip
 
 # llm
-from agentica.llm.openai_chat import OpenAIChat
-from agentica.llm.azure_openai import AzureOpenAIChat
-from agentica.llm.together import Together
-from agentica.llm.deepseek import Deepseek
-from agentica.llm.moonshot import Moonshot
-from agentica.llm.ollama_chat import OllamaChat
-from agentica.llm.ollama_tools import OllamaTools
-from agentica.llm.claude import Claude
+from agentica.llm.openai_llm import OpenAILLM
+from agentica.llm.azure_openai_llm import AzureOpenAILLM
+from agentica.llm.togetherllm import TogetherLLM
+from agentica.llm.deepseek_llm import DeepseekLLM
+from agentica.llm.moonshot_llm import MoonshotLLM
+from agentica.llm.ollama_llm import OllamaLLM
+from agentica.llm.ollama_tools_llm import OllamaToolsLLM
+from agentica.llm.claude_llm import ClaudeLLM
 
 # memory
 from agentica.message import Message
@@ -40,13 +40,14 @@ from agentica.vectordb.base import VectorDb
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
 # emb
 from agentica.emb.base import Emb
-from agentica.emb.openai import OpenAIEmb
-from agentica.emb.azure_openai import AzureOpenAIEmb
+from agentica.emb.openai_emb import OpenAIEmb
+from agentica.emb.azure_openai_emb import AzureOpenAIEmb
 from agentica.emb.hash_emb import HashEmb
-from agentica.emb.together import TogetherEmb
-from agentica.emb.fireworks import FireworksEmb
-from agentica.emb.text2vec import Text2VecEmb
-from agentica.emb.word2vec import Word2VecEmb
+from agentica.emb.ollama_emb import OllamaEmb
+from agentica.emb.together_emb import TogetherEmb
+from agentica.emb.fireworks_emb import FireworksEmb
+from agentica.emb.text2vec_emb import Text2VecEmb
+from agentica.emb.word2vec_emb import Word2VecEmb
 
 # file
 from agentica.file.base import File

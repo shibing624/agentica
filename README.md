@@ -85,11 +85,11 @@ python web_search_deepseek_demo.py
 自动调用google搜索工具，示例[examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
 
 ```python
-from agentica import Assistant, Deepseek
+from agentica import Assistant, DeepseekLLM
 from agentica.tools.search_serper import SearchSerperTool
 
 m = Assistant(
-  llm=Deepseek(),
+  llm=DeepseekLLM(),
   description="You are a helpful ai assistant.",
   show_tool_calls=True,
   # Enable the assistant to search the knowledge base

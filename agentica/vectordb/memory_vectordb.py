@@ -11,7 +11,7 @@ import numpy as np
 
 from agentica.document import Document
 from agentica.emb.base import Emb
-from agentica.emb.openai import OpenAIEmb
+from agentica.emb.openai_emb import OpenAIEmb
 from agentica.vectordb.base import VectorDb, Distance
 
 

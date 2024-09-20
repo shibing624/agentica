@@ -30,8 +30,8 @@ except ImportError:
     anthropic_installed = False
 
 
-class Claude(LLM):
-    name: str = "Claude"
+class ClaudeLLM(LLM):
+    name: str = "ClaudeLLM"
     model: str = "claude-3-opus-20240229"
     # -*- Request parameters
     max_tokens: Optional[int] = 1024

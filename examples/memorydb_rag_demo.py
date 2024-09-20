@@ -18,7 +18,7 @@ from agentica import Assistant
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
 from agentica.storage.sqlite_storage import SqlAssistantStorage
-from agentica.emb.text2vec import Text2VecEmb
+from agentica.emb.text2vec_emb import Text2VecEmb
 
 knowledge_base = KnowledgeBase(
     data_path=["https://phi-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],

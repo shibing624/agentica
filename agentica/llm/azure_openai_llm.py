@@ -10,12 +10,12 @@ from typing import Optional, Dict, Any, List, Iterator
 from openai import AzureOpenAI as AzureOpenAIClient
 from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from agentica.config import FAST_LLM
-from agentica.llm.openai_chat import OpenAIChat
+from agentica.llm.openai_llm import OpenAILLM
 from agentica.message import Message
 
 
-class AzureOpenAIChat(OpenAIChat):
-    name: str = "AzureOpenAIChat"
+class AzureOpenAILLM(OpenAILLM):
+    name: str = "AzureOpenAILLM"
     model: str = FAST_LLM or "gpt-4o"
     api_key: Optional[str] = getenv("AZURE_OPENAI_API_KEY")
     api_version: str = getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")

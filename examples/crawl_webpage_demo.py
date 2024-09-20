@@ -6,7 +6,7 @@
 import sys
 
 sys.path.append('..')
-from agentica import AzureOpenAIChat, Assistant
+from agentica import AzureOpenAILLM, Assistant
 from agentica.tools.jina import JinaTool
 from agentica.tools.file import FileTool
 

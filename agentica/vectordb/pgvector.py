@@ -19,7 +19,7 @@ except ImportError:
 from agentica.document import Document
 from agentica.emb.base import Emb
 from agentica.vectordb.base import VectorDb, Distance
-from agentica.emb.openai import OpenAIEmb
+from agentica.emb.openai_emb import OpenAIEmb
 from agentica.utils.log import logger
 
 

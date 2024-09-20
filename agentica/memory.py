@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from agentica.config import AGENTICA_HOME
 from agentica.llm.base import LLM
-from agentica.llm.openai_chat import OpenAIChat
+from agentica.llm.openai_llm import OpenAILLM
 from agentica.message import Message
 from agentica.references import References
 from agentica.utils.log import logger
@@ -287,7 +287,7 @@ class MemoryManager(BaseModel):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAIChat()
+            self.llm = OpenAILLM()
             logger.debug(f"Using LLM: {self.llm}")
         self.llm.add_tool(self.add_memory)
         self.llm.add_tool(self.update_memory)
@@ -456,7 +456,7 @@ class MemoryClassifier(BaseModel):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAIChat()
+            self.llm = OpenAILLM()
             logger.debug(f"Using LLM: {self.llm}")
 
     def get_system_prompt(self) -> Optional[str]:

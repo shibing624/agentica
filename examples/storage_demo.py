@@ -1,11 +1,11 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAIChat
+from agentica import Assistant, AzureOpenAILLM
 from agentica.storage.sqlite_storage import SqlAssistantStorage
 
 if __name__ == '__main__':
-    llm = AzureOpenAIChat()
+    llm = AzureOpenAILLM()
     print(llm)
     assistant = Assistant(
         llm=llm,

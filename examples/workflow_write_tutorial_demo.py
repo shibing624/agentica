@@ -8,7 +8,7 @@ import sys
 from textwrap import dedent
 
 sys.path.append('..')
-from agentica import Assistant, OpenAIChat
+from agentica import Assistant, OpenAILLM
 from agentica.workflow import Workflow, Task
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.tools.search_exa import SearchExaTool
@@ -17,7 +17,7 @@ from agentica.tools.wikipedia import WikipediaTool
 output_dir = "outputs/tutorial_v1/"
 # 首次生成目录的任务助手
 topic = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Initial Topic Generator",
     description="You are a seasoned technical professional, your goal is to generate a detailed and well-structured technical tutorial outline in Chinese.",
     output_dir=output_dir,
@@ -33,7 +33,7 @@ topic = Assistant(
 
 # 反思任务助手
 reflector = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Reflective Topic Generator",
     tools=[SearchSerperTool(), WikipediaTool(), SearchExaTool()],
     description="You are an internet field expert, reflect on the initial tutorial directory based on Google search results and generate an optimized directory.",
@@ -50,7 +50,7 @@ reflector = Assistant(
 
 # 编写教程任务助手
 writer = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Tutorial Writer",
     output_dir=output_dir,
     output_file_name="tutorial.md",

@@ -8,14 +8,14 @@ import sys
 from textwrap import dedent
 
 sys.path.append('..')
-from agentica import Assistant, OpenAIChat
+from agentica import Assistant, OpenAILLM
 from agentica.workflow import Workflow, Task
 from agentica.tools.search_serper import SearchSerperTool
 
 output_dir = "outputs/novel_v1/"
 # 生成初始大纲的 Assistant
 outlines = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Initial Outlines Generator",
     description="You are a creative assistant specialized in generating novel outlines.",
     output_dir=output_dir,
@@ -69,7 +69,7 @@ outlines = Assistant(
 
 # 反思和重新梳理大纲的 Assistant
 reflection = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Outline Reflector",
     output_dir=output_dir,
     description="You are a thoughtful assistant who evaluates and refines novel outlines based on additional research.",
@@ -123,7 +123,7 @@ reflection = Assistant(
 )
 # 写详细章节内容的 Assistant
 writer = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Detailed Novel Writer",
     output_dir=output_dir,
     output_file_name="novel_content.md",

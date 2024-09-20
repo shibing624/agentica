@@ -7,11 +7,11 @@ import sys
 
 sys.path.append('..')
 from agentica.message import Message
-from agentica import Assistant, Deepseek
+from agentica import Assistant, DeepseekLLM
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.tools.file import FileTool
 
-llm = Deepseek()
+llm = DeepseekLLM()
 
 print('llm:', llm)
 messages = [Message(role="user", content="一句话介绍林黛玉")]

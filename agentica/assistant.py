@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, ValidationError
 from agentica.document import Document
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.llm.base import LLM
-from agentica.llm.openai_chat import OpenAIChat
+from agentica.llm.openai_llm import OpenAILLM
 from agentica.memory import AssistantMemory, Memory
 from agentica.message import Message
 from agentica.references import References
@@ -279,7 +279,7 @@ class Assistant(BaseModel):
     def update_llm(self) -> None:
         if self.llm is None:
             logger.debug("LLM not set. Using OpenAILLM")
-            self.llm = OpenAIChat()
+            self.llm = OpenAILLM()
             logger.info(f"Using LLM: {self.llm}")
         else:
             logger.debug(f"Using LLM: {self.llm}")

@@ -6,11 +6,11 @@
 import sys
 
 sys.path.append('..')
-from agentica import PythonAssistant, AzureOpenAIChat
+from agentica import PythonAssistant, AzureOpenAILLM
 from agentica.tools.jina import JinaTool
 
 m = PythonAssistant(
-    llm=AzureOpenAIChat(),
+    llm=AzureOpenAILLM(),
     description="You are a helpful ai assistant.",
     show_tool_calls=True,
     tools=[JinaTool()],

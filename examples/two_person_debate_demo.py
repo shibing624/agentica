@@ -6,10 +6,10 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, OpenAIChat
+from agentica import Assistant, OpenAILLM
 
 Biden = Assistant(
-    llm=OpenAIChat(model="gpt-3.5-turbo-1106"),
+    llm=OpenAILLM(model="gpt-3.5-turbo-1106"),
     name="Biden",
     description="Suppose you are Biden, you are in a debate with Trump.",
     show_tool_calls=True,
@@ -17,7 +17,7 @@ Biden = Assistant(
 )
 
 Trump = Assistant(
-    llm=OpenAIChat(model="gpt-3.5-turbo-1106"),
+    llm=OpenAILLM(model="gpt-3.5-turbo-1106"),
     name="Trump",
     description="Suppose you are Trump, you are in a debate with Biden.",
     show_tool_calls=True,
@@ -25,7 +25,7 @@ Trump = Assistant(
 )
 
 debate = Assistant(
-    llm=OpenAIChat(model="gpt-4o-mini"),
+    llm=OpenAILLM(model="gpt-4o-mini"),
     name="Debate",
     team=[Biden, Trump],
     instructions=[

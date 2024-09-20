@@ -7,10 +7,10 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAIChat
+from agentica import Assistant, AzureOpenAILLM
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
-from agentica.emb.text2vec import Text2VecEmb
+from agentica.emb.text2vec_emb import Text2VecEmb
 
 knowledge_base = KnowledgeBase(
     data_path="data/medical_corpus.txt",
@@ -24,7 +24,7 @@ knowledge_base = KnowledgeBase(
 knowledge_base.load(recreate=True)
 
 assistant = Assistant(
-    llm=AzureOpenAIChat(),
+    llm=AzureOpenAILLM(),
     knowledge_base=knowledge_base,
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
     add_references_to_prompt=True,

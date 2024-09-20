@@ -97,7 +97,7 @@ def extract_tool_calls(assistant_msg_content: str) -> MessageToolCallExtractionR
     return MessageToolCallExtractionResult(tool_calls=tool_calls, invalid_json_format=False)
 
 
-class OllamaChat(LLM):
+class OllamaLLM(LLM):
     name: str = "OllamaChat"
     model: str = "openhermes"  # or "qwen:0.5b" for test
     host: Optional[str] = None
