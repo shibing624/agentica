@@ -35,6 +35,7 @@ class Document(BaseModel):
             self.embedding, self.usage = _embedder.get_embedding_and_usage(self.content)
         else:
             self.embedding = _embedder.get_embedding(self.content)
+            self.usage = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Returns a dictionary representation of the document"""

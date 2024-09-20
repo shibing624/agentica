@@ -9,6 +9,7 @@ Jina 有2个功能：
 """
 import hashlib
 import os
+import requests
 from os import getenv
 from typing import Optional
 from urllib.parse import urlparse
@@ -124,11 +125,10 @@ class JinaTool(Toolkit):
 
 
 if __name__ == '__main__':
-    import requests
-
     url = 'https://r.jina.ai/'
     data = {
-        'url': 'https://channels.weixin.qq.com/shop/learning-center/detail.html?pf=shoplogin&contentId=Article_1714298241_SAIZLPKN&contentType=content&from=#/pages/p-poac/p-pgaj/tab_pages/p-usat/'}
+        'url': 'https://channels.weixin.qq.com/shop/learning-center/detail.html?pf=shoplogin&contentId=Article_1714298241_SAIZLPKN&contentType=content&from=#/pages/p-poac/p-pgaj/tab_pages/p-usat/'
+    }
 
     response = requests.post(url, data=data)
 

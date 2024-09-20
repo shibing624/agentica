@@ -9,11 +9,6 @@ from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any, Mapping, Union
 from dataclasses import dataclass
 
-try:
-    from ollama import Client as OllamaClient
-except ImportError:
-    raise ImportError("`ollama` not installed, please run `pip install ollama`")
-
 from agentica.llm.base import LLM
 from agentica.message import Message
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
@@ -111,7 +106,7 @@ class OllamaChat(LLM):
     options: Optional[Any] = None
     keep_alive: Optional[Union[float, str]] = None
     client_kwargs: Optional[Dict[str, Any]] = None
-    ollama_client: Optional[OllamaClient] = None
+    ollama_client: Optional[Any] = None
     # Maximum number of function calls allowed across all iterations.
     function_call_limit: int = 10
     # Deactivate tool calls after 1 tool call
@@ -120,7 +115,12 @@ class OllamaChat(LLM):
     add_user_message_after_tool_call: bool = True
 
     @property
-    def client(self) -> OllamaClient:
+    def client(self):
+        try:
+            from ollama import Client as OllamaClient
+        except ImportError:
+            raise ImportError("`ollama` not installed, please run `pip install ollama`")
+
         if self.ollama_client:
             return self.ollama_client
 
@@ -327,13 +327,10 @@ class OllamaChat(LLM):
             # -*- Yield new response using results of tool calls
             final_response += self.response(messages=messages)
             return final_response
-
         logger.debug("---------- Ollama Response End ----------")
-
         # -*- Return content if no function calls are present
         if assistant_message.content is not None:
             return assistant_message.get_content_string()
-
         return "Something went wrong, please try again."
 
     def response_stream(self, messages: List[Message]) -> Iterator[str]:
@@ -537,7 +534,6 @@ class OllamaChat(LLM):
 
             # -*- Yield new response using results of tool calls
             yield from self.response_stream(messages=messages)
-
         logger.debug("---------- Ollama Response End ----------")
 
     def add_original_user_message(self, messages: List[Message]) -> List[Message]:

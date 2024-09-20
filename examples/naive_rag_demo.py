@@ -15,6 +15,8 @@ from agentica.emb.text2vec import Text2VecEmb
 knowledge_base = KnowledgeBase(
     data_path="data/medical_corpus.txt",
     vector_db=LanceDb(
+        uri="tmp/lancedb",
+        table_name="medical",
         embedder=Text2VecEmb(),
     ),
 )
@@ -26,6 +28,7 @@ assistant = Assistant(
     knowledge_base=knowledge_base,
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
     add_references_to_prompt=True,
+    debug_mode=True
 )
 r = assistant.run("肛门病变可能是什么疾病的症状?", stream=True)
 print("".join(r))

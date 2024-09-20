@@ -3,7 +3,11 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 
+install:
 pip install streamlit agentica text2vec sqlalchemy lancedb pyarrow yfinance
+
+run:
+streamlit run llm_os_demo.py
 """
 import os
 import sys

@@ -11,8 +11,6 @@ from agentica.tools.jina import JinaTool
 from agentica.tools.file import FileTool
 
 m = Assistant(
-    llm=AzureOpenAIChat(),
-    description="You are a helpful ai assistant.",
     tools=[JinaTool(), FileTool()],
     debug_mode=True,
 )

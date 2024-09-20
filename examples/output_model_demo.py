@@ -24,4 +24,4 @@ movie_assistant = Assistant(
     # debug_mode=True,
 )
 r = movie_assistant.run("Write a movie script.")
-pprint("".join(r))
+pprint(list(r))

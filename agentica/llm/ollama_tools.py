@@ -8,11 +8,6 @@ import json
 from textwrap import dedent
 from typing import Optional, List, Iterator, Dict, Any, Mapping, Union
 
-try:
-    from ollama import Client as OllamaClient
-except ImportError:
-    raise ImportError("`ollama` not installed, please run `pip install ollama`")
-
 from agentica.llm.base import LLM
 from agentica.message import Message
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
@@ -46,14 +41,19 @@ class OllamaTools(LLM):
     options: Optional[Any] = None
     keep_alive: Optional[Union[float, str]] = None
     client_kwargs: Optional[Dict[str, Any]] = None
-    ollama_client: Optional[OllamaClient] = None
+    ollama_client: Optional[Any] = None
     # Maximum number of function calls allowed across all iterations.
     function_call_limit: int = 5
     # After a tool call is run, add the user message as a reminder to the LLM
     add_user_message_after_tool_call: bool = True
 
     @property
-    def client(self) -> OllamaClient:
+    def client(self):
+        try:
+            from ollama import Client as OllamaClient
+        except ImportError:
+            raise ImportError("`ollama` not installed, please run `pip install ollama`")
+
         if self.ollama_client:
             return self.ollama_client
 

@@ -6,18 +6,6 @@ part of the code from https://github.com/phidatahq/phidata
 """
 import json
 from typing import Optional, List, Iterator, Dict, Any, Union
-
-try:
-    from anthropic import Anthropic as AnthropicClient
-    from anthropic.types import Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta
-    from anthropic.lib.streaming._types import (
-        MessageStopEvent,
-        RawContentBlockDeltaEvent,
-        ContentBlockStopEvent,
-    )
-except ImportError:
-    raise ImportError("`anthropic` not installed, please install it using `pip install anthropic`.")
-
 from agentica.llm.base import LLM
 from agentica.message import Message
 from agentica.tools.base import (
@@ -26,6 +14,20 @@ from agentica.tools.base import (
 )
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
+
+anthropic_installed = False
+try:
+    from anthropic import Anthropic as AnthropicClient
+    from anthropic.types import Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta
+    from anthropic.lib.streaming._types import (
+        MessageStopEvent,
+        RawContentBlockDeltaEvent,
+        ContentBlockStopEvent,
+    )
+
+    anthropic_installed = True
+except ImportError:
+    anthropic_installed = False
 
 
 class Claude(LLM):
@@ -42,10 +44,12 @@ class Claude(LLM):
     api_key: Optional[str] = None
     client_params: Optional[Dict[str, Any]] = None
     # -*- Provide the client manually
-    anthropic_client: Optional[AnthropicClient] = None
+    anthropic_client: Optional[Any] = None
 
     @property
-    def client(self) -> AnthropicClient:
+    def client(self) -> Any:
+        if not anthropic_installed:
+            raise ImportError("Anthropic is not installed. Please install it using `pip install anthropic`.")
         if self.anthropic_client:
             return self.anthropic_client
 

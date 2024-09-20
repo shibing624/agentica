@@ -45,7 +45,6 @@ class DuckDuckGoTool(Toolkit):
         """
         Search with ddgs and return the contexts.
         """
-        from duckduckgo_search import DDGS
         contexts = []
         search_results = []
         with DDGS() as ddgs:

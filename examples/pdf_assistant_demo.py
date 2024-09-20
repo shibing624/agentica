@@ -11,7 +11,7 @@ from agentica.emb.text2vec import Text2VecEmb
 from agentica.storage.sqlite_storage import SqliteStorage
 
 llm = AzureOpenAIChat()
-# llm = OllamaLLM(model="qwen:0.5b")
+# llm = OllamaChat(model="qwen:0.5b")
 print(llm)
 emb = Text2VecEmb()
 print(emb)

@@ -11,14 +11,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Optional
 
-import pandas as pd
-from agentica.config import AGENTICA_DATA_DIR
 from agentica.utils.log import logger
 
 
 def read_json_file(path: Path) -> str:
     try:
-        logger.info(f"Reading: {path}")
         json_contents = json.loads(path.read_text("utf-8"))
 
         if isinstance(json_contents, dict):
@@ -33,7 +30,6 @@ def read_json_file(path: Path) -> str:
 
 def read_csv_file(path: Path, row_limit: Optional[int] = None) -> str:
     try:
-        logger.info(f"Reading: {path}")
         with open(path, newline="") as csvfile:
             reader = csv.DictReader(csvfile)
             if row_limit is not None:
@@ -48,7 +44,6 @@ def read_csv_file(path: Path, row_limit: Optional[int] = None) -> str:
 
 def read_txt_file(path: Path) -> str:
     try:
-        logger.info(f"Reading: {path}")
         return path.read_text("utf-8")
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
@@ -57,7 +52,6 @@ def read_txt_file(path: Path) -> str:
 
 def read_pdf_file(path: Path) -> str:
     try:
-        logger.info(f"Reading: {path}")
         try:
             import pypdf
         except ImportError:

@@ -7,11 +7,8 @@ part of the code from https://github.com/phidatahq/phidata
 from os import getenv
 from typing import Optional, Dict, Any, List, Iterator
 
-try:
-    from openai import AzureOpenAI as AzureOpenAIClient
-    from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-except ImportError:
-    raise ImportError("`openai` not installed, please run `pip install openai`")
+from openai import AzureOpenAI as AzureOpenAIClient
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 from agentica.config import FAST_LLM
 from agentica.llm.openai_chat import OpenAIChat
 from agentica.message import Message

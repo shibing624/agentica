@@ -56,13 +56,12 @@ class FileTool(Toolkit):
             else:
                 save_dir = self.data_dir
             file_path = save_dir.joinpath(file_name)
-            logger.debug(f"Saving contents to {file_path}")
             if not file_path.parent.exists():
                 file_path.parent.mkdir(parents=True, exist_ok=True)
             if file_path.exists() and not overwrite:
                 return f"File {file_name} already exists"
             file_path.write_text(contents)
-            logger.info(f"Saved: {file_path}")
+            logger.info(f"Saved contents to file: {file_path}")
             return str(file_name)
         except Exception as e:
             logger.error(f"Error saving to file: {e}")

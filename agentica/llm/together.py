@@ -35,8 +35,8 @@ class Together(OpenAIChat):
         assistant_message_content = ""
         response_is_tool_call = False
         completion_tokens = 0
-        t = Timer()
-        t.start()
+        response_timer = Timer()
+        response_timer.start()
         for response in self.invoke_stream(messages=messages):
             # logger.debug(f"Together response type: {type(response)}")
             logger.debug(f"Together response: {response}")
@@ -64,8 +64,8 @@ class Together(OpenAIChat):
                 if not response_is_tool_call:
                     yield response_content
 
-        t.stop()
-        logger.debug(f"Time to generate response: {t.elapsed:.4f}s")
+        response_timer.stop()
+        logger.debug(f"Time to generate response: {response_timer.elapsed:.4f}s")
 
         # -*- Create assistant message
         assistant_message = Message(
@@ -100,10 +100,10 @@ class Together(OpenAIChat):
 
         # -*- Update usage metrics
         # Add response time to metrics
-        assistant_message.metrics["time"] = t.elapsed
+        assistant_message.metrics["time"] = response_timer.elapsed
         if "response_times" not in self.metrics:
             self.metrics["response_times"] = []
-        self.metrics["response_times"].append(t.elapsed)
+        self.metrics["response_times"].append(response_timer.elapsed)
 
         # Add token usage to metrics
         logger.debug(f"Estimated completion tokens: {completion_tokens}")
@@ -125,18 +125,14 @@ class Together(OpenAIChat):
                 _function_call = get_function_call_for_tool_call(tool_call, self.functions)
                 if _function_call is None:
                     messages.append(
-                        Message(
-                            role="tool",
-                            tool_call_id=_tool_call_id,
-                            content="Could not find function to call."
-                        )
+                        Message(role="tool", tool_call_id=_tool_call_id, content="Could not find function to call.")
                     )
                     continue
                 if _function_call.error is not None:
-                    messages.append(Message(
-                        role="tool",
-                        tool_call_id=_tool_call_id,
-                        content=_function_call.error)
+                    messages.append(
+                        Message(
+                            role="tool", tool_call_id=_tool_call_id, tool_call_error=True, content=_function_call.error
+                        )
                     )
                     continue
                 function_calls_to_run.append(_function_call)

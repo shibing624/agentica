@@ -43,4 +43,4 @@ assistant = Assistant(knowledge_base=knowledge_base, search_knowledge=True, debu
 
 # Use the assistant to ask a question and print a response.
 r = assistant.run("2023年全国田径锦标赛在哪里举办的?")
-print("".join(r))
+print(r, "".join(r))

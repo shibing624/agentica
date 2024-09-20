@@ -25,7 +25,11 @@ def get_char_len(text: str) -> str:
     return str(len(text))
 
 
-assistant = Assistant(llm=AzureOpenAIChat(), tools=[multiply, add, exponentiate, get_char_len], debug_mode=True)
+assistant = Assistant(
+    llm=AzureOpenAIChat(model='gpt-4o'),
+    tools=[multiply, add, exponentiate, get_char_len],
+    debug_mode=True
+)
 r = assistant.run("3乘以10000005是啥?")
 print(r, "".join(r))
 r = assistant.run("将3的五次方乘以(12和3的和). step by step to show the result. 最后统计一下结果的字符长度。")

@@ -584,10 +584,10 @@ class OpenAIChat(LLM):
                 assistant_message_tool_calls.extend(response_tool_calls)
             if response.usage:
                 response_usage: Optional[CompletionUsage] = response.usage
-                if response_usage:
-                    response_prompt_tokens = response_usage.prompt_tokens
-                    response_completion_tokens = response_usage.completion_tokens
-                    response_total_tokens = response_usage.total_tokens
+                response_prompt_tokens = response_usage.prompt_tokens
+                response_completion_tokens = response_usage.completion_tokens
+                response_total_tokens = response_usage.total_tokens
+
         t.stop()
         if completion_tokens > 0:
             logger.debug(f"Time to first token: {time_to_first_token:.4f}s, "

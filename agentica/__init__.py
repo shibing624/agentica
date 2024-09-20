@@ -4,7 +4,36 @@
 @description: 
 """
 from agentica.version import __version__  # noqa, isort: skip
-from agentica.config import AGENTICA_DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, isort: skip
+from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, isort: skip
+
+# llm
+from agentica.llm.openai_chat import OpenAIChat
+from agentica.llm.azure_openai import AzureOpenAIChat
+from agentica.llm.together import Together
+from agentica.llm.deepseek import Deepseek
+from agentica.llm.moonshot import Moonshot
+from agentica.llm.ollama_chat import OllamaChat
+from agentica.llm.ollama_tools import OllamaTools
+from agentica.llm.claude import Claude
+
+# task
+from agentica.task import Task
+from agentica.message import Message
+from agentica.memory import (
+    Memory,
+    MemoryRow,
+    MemoryDb,
+    CsvMemoryDb,
+    InMemoryDb,
+    MemoryRetrieval,
+    AssistantMemory,
+    MemoryClassifier,
+    MemoryManager
+)
+# rag
+from agentica.knowledge.knowledge_base import KnowledgeBase
+from agentica.references import References
+from agentica.run_record import RunRecord
 # document
 from agentica.document import Document
 # vectordb
@@ -20,29 +49,6 @@ from agentica.file.base import File
 from agentica.file.csv import CsvFile
 from agentica.file.txt import TextFile
 
-from agentica.knowledge.knowledge_base import KnowledgeBase
-# llm
-from agentica.llm.openai_chat import OpenAIChat
-from agentica.llm.azure_openai import AzureOpenAIChat
-from agentica.llm.together import Together
-from agentica.llm.deepseek import Deepseek
-from agentica.llm.moonshot import Moonshot
-from agentica.task import Task
-from agentica.message import Message
-from agentica.memory import (
-    Memory,
-    MemoryRow,
-    MemoryDb,
-    CsvMemoryDb,
-    InMemoryDb,
-    MemoryRetrieval,
-    AssistantMemory,
-    MemoryClassifier,
-    MemoryManager
-)
-
-from agentica.references import References
-from agentica.run_record import RunRecord
 # storage
 from agentica.storage.base import AssistantStorage
 from agentica.storage.pg_storage import PgStorage
