@@ -9,7 +9,7 @@ import os.path
 import sys
 
 sys.path.append('..')
-from agentica import PythonAssistant, AzureOpenAIChat, SqliteStorage
+from agentica import PythonAssistant, AzureOpenAIChat, SqlAssistantStorage
 from agentica.tools.search_serper import SearchSerperTool
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec import Text2VecEmb
@@ -29,7 +29,7 @@ def main():
         show_tool_calls=True,
         debug_mode=True,
         knowledge_base=knowledge_base,
-        storage=SqliteStorage(table_name="person1", db_file="outputs/person1.db"),
+        storage=SqlAssistantStorage(table_name="person1", db_file="outputs/person1.db"),
         update_knowledge=True,
         search_knowledge=True,
         memory=AssistantMemory(db=CsvMemoryDb(memory_file)),

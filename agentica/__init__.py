@@ -16,8 +16,7 @@ from agentica.llm.ollama_chat import OllamaChat
 from agentica.llm.ollama_tools import OllamaTools
 from agentica.llm.claude import Claude
 
-# task
-from agentica.task import Task
+# memory
 from agentica.message import Message
 from agentica.memory import (
     Memory,
@@ -30,11 +29,11 @@ from agentica.memory import (
     MemoryClassifier,
     MemoryManager
 )
+from agentica.template import PromptTemplate
 # rag
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.references import References
 from agentica.run_record import RunRecord
-# document
 from agentica.document import Document
 # vectordb
 from agentica.vectordb.base import VectorDb
@@ -45,14 +44,19 @@ from agentica.emb.openai import OpenAIEmb
 from agentica.emb.azure_openai import AzureOpenAIEmb
 from agentica.emb.hash_emb import HashEmb
 from agentica.emb.together import TogetherEmb
+from agentica.emb.fireworks import FireworksEmb
+from agentica.emb.text2vec import Text2VecEmb
+from agentica.emb.word2vec import Word2VecEmb
+
+# file
 from agentica.file.base import File
 from agentica.file.csv import CsvFile
 from agentica.file.txt import TextFile
 
 # storage
 from agentica.storage.base import AssistantStorage
-from agentica.storage.pg_storage import PgStorage
-from agentica.storage.sqlite_storage import SqliteStorage
+from agentica.storage.pg_storage import PgAssistantStorage
+from agentica.storage.sqlite_storage import SqlAssistantStorage
 # tool
 from agentica.tools.base import Tool, Toolkit, Function, FunctionCall
 # assistant

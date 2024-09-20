@@ -21,7 +21,7 @@ from agentica.storage.base import AssistantStorage
 from agentica.utils.log import logger
 
 
-class PgStorage(AssistantStorage):
+class PgAssistantStorage(AssistantStorage):
     def __init__(
             self,
             table_name: str,

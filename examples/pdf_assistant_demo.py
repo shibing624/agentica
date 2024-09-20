@@ -8,7 +8,7 @@ from agentica import Assistant, AzureOpenAIChat
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb  # noqa
 from agentica.emb.text2vec import Text2VecEmb
-from agentica.storage.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqlAssistantStorage
 
 llm = AzureOpenAIChat()
 # llm = OllamaChat(model="qwen:0.5b")
@@ -28,7 +28,7 @@ knowledge_base = KnowledgeBase(
 # Comment out after first run
 knowledge_base.load(recreate=True)
 
-storage = SqliteStorage(table_name=table_name, db_file=db_file)
+storage = SqlAssistantStorage(table_name=table_name, db_file=db_file)
 
 
 def pdf_assistant(new: bool = False, user: str = "user"):

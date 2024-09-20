@@ -4,10 +4,9 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from typing import Optional, Dict, List, Tuple, Any, Literal, Union
+from typing import Optional, Dict, List, Tuple, Any
 
 from agentica.emb.base import Emb
-from agentica.utils.log import logger
 import numpy as np
 import platform
 

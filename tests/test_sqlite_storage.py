@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 
 from agentica.run_record import RunRecord
-from agentica.storage.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqlAssistantStorage
 
 
 # Mock current_datetime function
@@ -21,7 +21,7 @@ def mock_current_datetime():
 def sqlite_storage():
     # 创建内存数据库
     engine = create_engine("sqlite:///:memory:")
-    storage = SqliteStorage(table_name="runs", db_engine=engine)
+    storage = SqlAssistantStorage(table_name="runs", db_engine=engine)
     yield storage
     # 测试结束后不需要清理，因为是内存数据库
 

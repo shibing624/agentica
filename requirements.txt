@@ -7,5 +7,6 @@ pydantic
 requests
 sqlalchemy
 scikit-learn
+text2vec
 tqdm
 rich

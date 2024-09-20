@@ -17,7 +17,7 @@ sys.path.append('..')
 from agentica import Assistant
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
-from agentica.storage.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqlAssistantStorage
 from agentica.emb.text2vec import Text2VecEmb
 
 knowledge_base = KnowledgeBase(
@@ -28,7 +28,7 @@ knowledge_base = KnowledgeBase(
 knowledge_base.load()
 
 # Create a SQL storage for the assistant's data
-storage = SqliteStorage(table_name="ThaiRecipes", db_file="outputs/ThaiRecipes.db")
+storage = SqlAssistantStorage(table_name="ThaiRecipes", db_file="outputs/ThaiRecipes.db")
 storage.create()
 
 assistant = Assistant(

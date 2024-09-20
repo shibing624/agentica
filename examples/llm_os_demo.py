@@ -27,7 +27,7 @@ from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec import Text2VecEmb
 from agentica.tools.search_exa import SearchExaTool
 from agentica.tools.yfinance import YFinanceTool
-from agentica.storage.sqlite_storage import SqliteStorage
+from agentica.storage.sqlite_storage import SqlAssistantStorage
 from agentica.document import Document
 
 
@@ -228,7 +228,7 @@ def get_llm_os(
         ],
         extra_instructions=extra_instructions,
         # Add long-term memory to the LLM OS backed by a PostgreSQL database
-        storage=SqliteStorage(table_name="llm_os", db_file="outputs/llm_os.db"),
+        storage=SqlAssistantStorage(table_name="llm_os", db_file="outputs/llm_os.db"),
         # Add a knowledge base to the LLM OS
         knowledge_base=knowledge_base if knowledge_base else KnowledgeBase(vector_db=lance_db),
         # Add selected tools to the LLM OS

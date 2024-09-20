@@ -24,7 +24,7 @@ from agentica.utils.misc import current_datetime
 from agentica.utils.log import logger
 
 
-class SqliteStorage(AssistantStorage):
+class SqlAssistantStorage(AssistantStorage):
     def __init__(
             self,
             table_name: str,
