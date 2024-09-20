@@ -15,7 +15,6 @@ from agentica.tools.base import (
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
-anthropic_installed = False
 try:
     from anthropic import Anthropic as AnthropicClient
     from anthropic.types import Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta
@@ -24,10 +23,8 @@ try:
         RawContentBlockDeltaEvent,
         ContentBlockStopEvent,
     )
-
-    anthropic_installed = True
 except ImportError:
-    anthropic_installed = False
+    raise ImportError("Anthropic is not installed. Please install it using `pip install anthropic`.")
 
 
 class ClaudeLLM(LLM):
@@ -44,12 +41,10 @@ class ClaudeLLM(LLM):
     api_key: Optional[str] = None
     client_params: Optional[Dict[str, Any]] = None
     # -*- Provide the client manually
-    anthropic_client: Optional[Any] = None
+    anthropic_client: Optional[AnthropicClient] = None
 
     @property
-    def client(self) -> Any:
-        if not anthropic_installed:
-            raise ImportError("Anthropic is not installed. Please install it using `pip install anthropic`.")
+    def client(self) -> AnthropicClient:
         if self.anthropic_client:
             return self.anthropic_client
 

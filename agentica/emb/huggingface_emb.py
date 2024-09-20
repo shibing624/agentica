@@ -51,3 +51,12 @@ class HuggingfaceEmb(Emb):
 
     def get_embedding_and_usage(self, text: str) -> Tuple[List[float], Optional[Dict]]:
         return super().get_embedding_and_usage(text)
+
+
+if __name__ == '__main__':
+    emb = HuggingfaceEmb(api_key="hf_xxx")
+    text = "I love you"
+    r = emb.get_embedding(text)
+    print(r)
+    r = emb.get_embedding_and_usage(text)
+    print(r)

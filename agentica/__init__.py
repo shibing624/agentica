@@ -14,7 +14,6 @@ from agentica.llm.deepseek_llm import DeepseekLLM
 from agentica.llm.moonshot_llm import MoonshotLLM
 from agentica.llm.ollama_llm import OllamaLLM
 from agentica.llm.ollama_tools_llm import OllamaToolsLLM
-from agentica.llm.claude_llm import ClaudeLLM
 
 # memory
 from agentica.message import Message
