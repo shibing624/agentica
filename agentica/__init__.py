@@ -4,8 +4,15 @@
 @description: 
 """
 from agentica.version import __version__  # noqa, isort: skip
-from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH, SMART_LLM, FAST_LLM  # noqa, isort: skip
-
+from agentica.config import (
+    AGENTICA_HOME,
+    AGENTICA_DOTENV_PATH,
+    AGENTICA_LOG_LEVEL,
+    AGENTICA_LOG_FILE,
+    SMART_LLM,
+    FAST_LLM
+)  # noqa, isort: skip
+from agentica.utils.log import set_log_level_to_debug
 # llm
 from agentica.llm.openai_llm import OpenAILLM
 from agentica.llm.azure_openai_llm import AzureOpenAILLM
