@@ -141,21 +141,19 @@ def read_docx_file(path: Path) -> str:
                     numbering_dict[num_id][ilvl] = 1
                 else:
                     numbering_dict[num_id][ilvl] += 1
-                para_text += f"{numbering_dict[num_id][ilvl]}. "
+                para_text += f"- "
 
             for run in paragraph.runs:
                 run_text = run.text
 
                 # 查找 Run 中的超链接
                 hyperlink_elements = run._r.findall(".//w:hyperlink", namespaces=run._r.nsmap)
-                # hyperlink_elements = run._r.xpath(".//w:hyperlink")
                 for el in hyperlink_elements:
                     r_id = el.get(qn("r:id"))
                     if r_id:
                         hyperlink = get_hyperlink_target(doc, r_id)
                         if hyperlink:
                             text = "".join(node.text for node in el.findall(".//w:t", namespaces=run._r.nsmap))
-                            # text = "".join(node.text for node in el.xpath(".//w:t"))
                             md_url = f"![{text}]({hyperlink})" if is_image_url(hyperlink) else f"[{text}]({hyperlink})"
                             if text in run_text:
                                 run_text = run_text.replace(text, md_url)
@@ -165,14 +163,12 @@ def read_docx_file(path: Path) -> str:
 
             # 查找段落中的超链接
             hyperlink_elements = paragraph._element.findall(".//w:hyperlink", namespaces=paragraph._element.nsmap)
-            # hyperlink_elements = paragraph._element.xpath(".//w:hyperlink")
             for el in hyperlink_elements:
                 r_id = el.get(qn("r:id"))
                 if r_id:
                     hyperlink = get_hyperlink_target(doc, r_id)
                     if hyperlink:
                         text = "".join(node.text for node in el.findall(".//w:t", namespaces=paragraph._element.nsmap))
-                        # text = "".join(node.text for node in el.xpath(".//w:t"))
                         md_url = f"![{text}]({hyperlink})" if is_image_url(hyperlink) else f"[{text}]({hyperlink})"
                         if text in para_text:
                             para_text = para_text.replace(text, md_url)
