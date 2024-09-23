@@ -97,7 +97,6 @@ def read_pdf_url(url: str) -> str:
 
 
 def read_docx_file(path: Path) -> str:
-    logger.info(f"Reading: {path}")
     try:
         from docx import Document
         from docx.oxml.ns import qn
@@ -117,22 +116,46 @@ def read_docx_file(path: Path) -> str:
         _, ext = os.path.splitext(url)
         return ext.lower() in image_extensions
 
+    def get_numbering(paragraph):
+        """获取段落的编号信息."""
+        numbering = paragraph._element.xpath('.//w:numPr')
+        if (numbering and len(numbering) > 0 and
+                numbering[0].xpath('.//w:numId') and numbering[0].xpath('.//w:ilvl')):
+            num_id = numbering[0].xpath('.//w:numId')[0].get(qn('w:val'))
+            ilvl = numbering[0].xpath('.//w:ilvl')[0].get(qn('w:val'))
+            return num_id, ilvl
+        return None, None
+
     try:
         doc = Document(str(path))
         doc_content = ""
+        numbering_dict = {}
+
         for paragraph in doc.paragraphs:
             para_text = ""
+            num_id, ilvl = get_numbering(paragraph)
+            if num_id and ilvl:
+                if num_id not in numbering_dict:
+                    numbering_dict[num_id] = {}
+                if ilvl not in numbering_dict[num_id]:
+                    numbering_dict[num_id][ilvl] = 1
+                else:
+                    numbering_dict[num_id][ilvl] += 1
+                para_text += f"{numbering_dict[num_id][ilvl]}. "
+
             for run in paragraph.runs:
                 run_text = run.text
 
                 # 查找 Run 中的超链接
                 hyperlink_elements = run._r.findall(".//w:hyperlink", namespaces=run._r.nsmap)
+                # hyperlink_elements = run._r.xpath(".//w:hyperlink")
                 for el in hyperlink_elements:
                     r_id = el.get(qn("r:id"))
                     if r_id:
                         hyperlink = get_hyperlink_target(doc, r_id)
                         if hyperlink:
                             text = "".join(node.text for node in el.findall(".//w:t", namespaces=run._r.nsmap))
+                            # text = "".join(node.text for node in el.xpath(".//w:t"))
                             md_url = f"![{text}]({hyperlink})" if is_image_url(hyperlink) else f"[{text}]({hyperlink})"
                             if text in run_text:
                                 run_text = run_text.replace(text, md_url)
@@ -142,12 +165,14 @@ def read_docx_file(path: Path) -> str:
 
             # 查找段落中的超链接
             hyperlink_elements = paragraph._element.findall(".//w:hyperlink", namespaces=paragraph._element.nsmap)
+            # hyperlink_elements = paragraph._element.xpath(".//w:hyperlink")
             for el in hyperlink_elements:
                 r_id = el.get(qn("r:id"))
                 if r_id:
                     hyperlink = get_hyperlink_target(doc, r_id)
                     if hyperlink:
                         text = "".join(node.text for node in el.findall(".//w:t", namespaces=paragraph._element.nsmap))
+                        # text = "".join(node.text for node in el.xpath(".//w:t"))
                         md_url = f"![{text}]({hyperlink})" if is_image_url(hyperlink) else f"[{text}]({hyperlink})"
                         if text in para_text:
                             para_text = para_text.replace(text, md_url)
