@@ -23,14 +23,14 @@
 ## Overview
 
 #### LLM Agent
-![llm_agnet](https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png)
+<img src="https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png" width="800" />
 
 - **Planning**: Task decomposition, plan generation, reflection
 - **Memory**: Short-term memory (prompt implementation), long-term memory (RAG implementation)
 - **Tool use**: Function call capability, calling external APIs to obtain external information, including current date, calendar, code execution capability, access to specialized information sources, etc.
 
 #### Agentica Assistant Architecture  
-![agentica_arch](https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png)
+<img src="https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png" width="800" />
 
 - **Planner**: Responsible for having the LLM generate a multi-step plan to complete complex tasks, generating interdependent "chain plans," defining the output of each step that depends on the previous step
 - **Worker**: Accepts the "chain plan," iterates through each subtask in the plan, and calls tools to complete the task, can automatically reflect and correct errors to complete the task
@@ -114,7 +114,7 @@ print(r)
 
 Web Demo: https://chat.mulanai.com
 
-![](https://github.com/shibing624/ChatPilot/blob/main/docs/shot.png)
+<img src="https://github.com/shibing624/ChatPilot/blob/main/docs/shot.png" width="800" />
 
 ```shell
 git clone https://github.com/shibing624/ChatPilot.git
@@ -151,7 +151,7 @@ bash start.sh
 ### LLM OS
 The LLM OS design:
 
-<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="600" />
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="800" />
 
 #### Run the LLM OS App
 
