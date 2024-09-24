@@ -18,32 +18,31 @@
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 
-**agentica**: A Human-Centric Framework for Large Language Model Agent Workflows, build your agent workflows quickly
-
-**agentica**: 快速构建你自己的Agent
+**Agentica**: A Human-Centric Framework for Large Language Model Agent Building. Quickly build your own Agent.
 
 ## Overview
 
 #### LLM Agent
-![llm_agnet](https://github.com/shibing624/agentica/blob/main/docs/llm_agent.png)
+![llm_agnet](https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png)
 
-- **规划（Planning）**：任务拆解、生成计划、反思
-- **记忆（Memory）**：短期记忆（prompt实现）、长期记忆（RAG实现）
-- **工具使用（Tool use）**：function call能力，调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
+- **Planning**: Task decomposition, plan generation, reflection
+- **Memory**: Short-term memory (prompt implementation), long-term memory (RAG implementation)
+- **Tool use**: Function call capability, calling external APIs to obtain external information, including current date, calendar, code execution capability, access to specialized information sources, etc.
 
-#### agentica架构
+#### Agentica Assistant Architecture  
 ![agentica_arch](https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png)
 
-- **Planner**：负责让LLM生成一个多步计划来完成复杂任务，生成相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
-- **Worker**：接受“链式计划”，循环遍历计划中的每个子任务，并调用工具完成任务，可以自动反思纠错以完成任务
-- **Solver**：求解器将所有这些输出整合为最终答案
+- **Planner**: Responsible for having the LLM generate a multi-step plan to complete complex tasks, generating interdependent "chain plans," defining the output of each step that depends on the previous step
+- **Worker**: Accepts the "chain plan," iterates through each subtask in the plan, and calls tools to complete the task, can automatically reflect and correct errors to complete the task
+- **Solver**: Integrates all these outputs into the final answer
+
 
 ## Features
-`agentica`是一个Agent工作流构建工具，功能：
+`Agentica` is an Agent building tool with features:
 
-- 简单代码快速编排复杂工作流
-- 工作流的编排不仅支持prompt命令，还支持工具调用（tool_calls）
-- 支持OpenAI API和Moonshot API(kimi)调用
+- Quickly orchestrate Agents with simple code, supporting Reflection, Plan and Solve, RAG, Agent, Multi-Agent, Multi-Role, Workflow, etc.
+- Agents support custom prompts and various tool calls
+- Supports OpenAI/Azure/Deepseek/Moonshot/Claude/Ollama/Together API calls
 
 ## Installation
 
@@ -61,18 +60,35 @@ pip install .
 
 ## Getting Started
 
-1. 复制[example.env](https://github.com/shibing624/agentica/blob/main/example.env)文件为`.env`，并粘贴OpenAI API key或者Moonshoot API key。
+#### 1. Install requirements
 
-2. 使用`agentica`构建Agent，拆解任务并执行：
+```shell
+git clone https://github.com/shibing624/agentica.git
+cd agentica
+pip install -r requirements.txt
+```
 
-自动调用google搜索工具，示例[examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
+#### 2. Run the example
+```shell
+# Copying required .env file, and fill in the LLM api key
+cp .env.example ~/.agentica/.env
+
+cd examples
+python web_search_deepseek_demo.py
+```
+
+1. Copy the [.env.example](https://github.com/shibing624/agentica/blob/main/.env.example) file to `~/.agentica/.env` and fill in the LLM API key (optional DEEPSEEK_API_KEY, MOONSHOT_API_KEY, OPENAI_API_KEY, etc.).
+
+2. Build and run an Agent using `agentica`:
+
+Automatically call the Google search tool, example [examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
 
 ```python
-from agentica import Assistant, OpenAILLM, AzureOpenAILLM
+from agentica import Assistant, DeepseekLLM
 from agentica.tools.search_serper import SearchSerperTool
 
 m = Assistant(
-  llm=AzureOpenAILLM(),
+  llm=DeepseekLLM(),
   description="You are a helpful ai assistant.",
   show_tool_calls=True,
   # Enable the assistant to search the knowledge base
@@ -82,40 +98,105 @@ m = Assistant(
   read_chat_history=True,
   debug_mode=True,
 )
-m.run("一句话介绍林黛玉")
-m.run("北京最近的新闻", stream=True, print_output=True)
-m.run("总结前面的问答")
+
+r = m.run("Introduce Lin Daiyu in one sentence")
+print(r, "".join(r))
+r = m.run("Top 3 recent news in Beijing", stream=True, print_output=True)
+print(r, "".join(r))
+r = m.run("Summarize the previous Q&A", stream=False, print_output=False)
+print(r)
+```
+
+
+## Web UI
+
+[shibing624/ChatPilot](https://github.com/shibing624/ChatPilot) is compatible with `agentica` and can be interacted with through a Web UI.
+
+Web Demo: https://chat.mulanai.com
+
+![](https://github.com/shibing624/ChatPilot/blob/main/docs/shot.png)
+
+```shell
+git clone https://github.com/shibing624/ChatPilot.git
+cd ChatPilot
+pip install -r requirements.txt
+
+cp .env.example .env
+
+bash start.sh
 ```
 
 
 ## Examples
 
-| 示例                                                                                                                                  | 描述                                                                                                                              |
-|-------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| [examples/naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/naive_rag_demo.py)                         | 实现了基础版RAG，基于Txt文档回答问题                                                                                                           |
-| [examples/advanced_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/advanced_rag_demo.py)                   | 实现了高级版RAG，基于PDF文档回答问题，新增功能：pdf文件解析、query改写，字面+语义多路召回，召回排序（rerank）                                                               |
-| [examples/python_assistant_demo.py](https://github.com/shibing624/agentica/blob/main/examples/python_assistant_demo.py)           | 实现了Code Interpreter功能，自动生成python代码，并执行                                                                                          |
-| [examples/research_demo.py](https://github.com/shibing624/agentica/blob/main/examples/research_demo.py)                           | 实现了Research功能，自动调用搜索工具，汇总信息后撰写科技报告                                                                                              |
-| [examples/run_flow_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/run_flow_news_article_demo.py) | 实现了写新闻稿的工作流，multi-agent的实现，定义了多个Assistant和Task，多次调用搜索工具，并生成高级排版的新闻文章                                                            |
-| [examples/run_flow_investment_demo.py](https://github.com/shibing624/agentica/blob/main/examples/run_flow_investment_demo.py)     | 实现了投资研究的工作流：股票信息收集 - 股票分析 - 撰写分析报告 - 复查报告等多个Task                                                                                |
-| [examples/crawl_webpage.py](https://github.com/shibing624/agentica/blob/main/examples/crawl_webpage.py)                           | 实现了网页分析工作流：从Url爬取融资快讯 - 分析网页内容和格式 - 提取核心信息 - 汇总保存为md文件                                                                          |
-| [examples/find_paper_from_arxiv.py](https://github.com/shibing624/agentica/blob/main/examples/find_paper_from_arxiv.py)           | 实现了论文推荐工作流：自动从arxiv搜索多组论文 - 相似论文去重 - 提取核心论文信息 - 保存为csv文件                                                                        |
-| [examples/remove_image_background.py](https://github.com/shibing624/agentica/blob/main/examples/remove_image_background.py)       | 实现了自动去除图片背景功能，包括自动通过pip安装库，调用库实现去除图片背景                                                                                          |
-| [examples/text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/text_classification_demo.py)     | 实现了自动训练分类模型的工作流：读取训练集文件并理解格式 - 谷歌搜索pytextclassifier库 - 爬取github页面了解pytextclassifier的调用方法 - 写代码并执行fasttext模型训练 - check训练好的模型预测结果 |
+| Example                                                                                                                                    | Description                                                                                                                              |
+|---------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
+| [examples/naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/naive_rag_demo.py)                             | Implements a basic RAG, answering questions based on a Txt document                                                                                                           |
+| [examples/advanced_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/advanced_rag_demo.py)                       | Implements an advanced RAG, answering questions based on a PDF document, with new features: PDF file parsing, query rewriting, lexical + semantic multi-path retrieval, retrieval ranking (rerank)                                                               |
+| [examples/python_assistant_demo.py](https://github.com/shibing624/agentica/blob/main/examples/python_assistant_demo.py)               | Implements Code Interpreter functionality, automatically generating and executing Python code                                                                                          |
+| [examples/research_demo.py](https://github.com/shibing624/agentica/blob/main/examples/research_demo.py)                               | Implements Research functionality, automatically calling search tools, summarizing information, and writing scientific reports                                                                                              |
+| [examples/team_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/team_news_article_demo.py)             | Implements team collaboration for writing news articles, multi-role implementation, delegating different roles to complete their respective tasks: researchers retrieve and analyze articles, writers write articles based on the layout, summarizing multi-role results                                                       |
+| [examples/workflow_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_news_article_demo.py)     | Implements a workflow for writing news articles, multi-agent implementation, defining multiple Assistants and Tasks, calling search tools multiple times, and generating advanced layout news articles                                                            |
+| [examples/workflow_investment_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_investment_demo.py)         | Implements an investment research workflow: stock information collection - stock analysis - writing analysis reports - reviewing reports, etc.                                                                                |
+| [examples/crawl_webpage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/crawl_webpage_demo.py)                     | Implements a webpage analysis workflow: crawling financing news from URLs - analyzing webpage content and format - extracting core information - summarizing and saving as md files                                                                          |
+| [examples/find_paper_from_arxiv_demo.py](https://github.com/shibing624/agentica/blob/main/examples/find_paper_from_arxiv_demo.py)     | Implements a paper recommendation workflow: automatically searching multiple groups of papers from arxiv - deduplicating similar papers - extracting core paper information - saving as csv files                                                                        |
+| [examples/remove_image_background_demo.py](https://github.com/shibing624/agentica/blob/main/examples/remove_image_background_demo.py) | Implements automatic image background removal functionality, including automatic library installation via pip, calling libraries to remove image backgrounds                                                                                          |
+| [examples/text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/text_classification_demo.py)         | Implements an automatic training classification model workflow: reading training set files and understanding the format - Google searching for pytextclassifier library - crawling GitHub pages to understand how to call pytextclassifier - writing code and executing fasttext model training - checking the trained model prediction results |
+| [examples/llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/llm_os_demo.py)                                   | Implements the initial design of LLM OS, designing an operating system based on LLM, which can call RAG, code executors, Shell, etc. through LLM, and collaborate with code interpreters, research assistants, investment assistants, etc. to solve problems.                                                |
+| [examples/workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_write_novel_demo.py)       | Implements a workflow for writing novels: setting the novel outline - Google searching and reflecting on the outline - writing novel content - saving as md files                                                                                  |
+| [examples/workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_write_tutorial_demo.py) | Implements a workflow for writing technical tutorials: setting the tutorial directory - reflecting on the directory content - writing tutorial content - saving as md files                                                                                  |
+| [examples/self_evolving_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/self_evolving_agent_demo.py)         | Implements a self-evolving agent based on long-term memory, which can adjust decisions based on historical Q&A information                                                                                              |
+
+
+### LLM OS
+The LLM OS design:
+
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="600" />
+
+#### Run the LLM OS App
+
+```shell
+cd examples
+streamlit run llm_os_demo.py
+```
+
+![llm_os](https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png)
+
+### Self-evolving Agent
+The self-evolving agent design:
+
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/sage_arch.png" width="600" />
+
+#### Feature
+
+Self-evolving Agents with Reflective and Memory-augmented Abilities (SAGE)
+
+Implement:
+1. Use `PythonAssistant` as the SAGE agent and `AzureOpenAILLM` as the LLM, with code-interpreter functionality to execute Python code and automatically correct errors.
+2. Use `CsvMemoryDb` as the memory for the SAGE agent to store user questions and answers, so that similar questions can be directly answered next time.
+
+#### Run Self-evolving Agent App
+
+```shell
+cd examples
+streamlit run self_evolving_agent_demo.py
+```
+
+![sage](https://github.com/shibing624/agentica/blob/main/docs/sage_snap.png)
 
 
 ## Contact
 
-- Issue(建议)
+- Issue (suggestions)
   ：[![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
-- 邮件我：xuming: xuming624@qq.com
-- 微信我： 加我*微信号：xuming624, 备注：姓名-公司-NLP* 进NLP交流群。
+- Email me: xuming: xuming624@qq.com
+- WeChat me: Add my *WeChat ID: xuming624, note: Name-Company-NLP* to join the NLP group.
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
 
 ## Citation
 
-如果你在研究中使用了`agentica`，请按如下格式引用：
+If you use `agentica` in your research, please cite it as follows:
 
 APA:
 
@@ -136,15 +217,15 @@ BibTeX:
 
 ## License
 
-授权协议为 [The Apache License 2.0](/LICENSE)，可免费用做商业用途。请在产品说明中附加`agentica`的链接和授权协议。
+The license is [The Apache License 2.0](/LICENSE), free for commercial use. Please include a link to `agentica` and the license in the product description.
 ## Contribute
 
-项目代码还很粗糙，如果大家对代码有所改进，欢迎提交回本项目，在提交之前，注意以下两点：
+The project code is still rough, if you have any improvements to the code, you are welcome to submit them back to this project. Before submitting, please note the following two points:
 
-- 在`tests`添加相应的单元测试
-- 使用`python -m pytest`来运行所有单元测试，确保所有单测都是通过的
+- Add corresponding unit tests in `tests`
+- Use `python -m pytest` to run all unit tests and ensure all tests pass
 
-之后即可提交PR。
+Then you can submit a PR.
 
 ## Acknowledgements 
 
