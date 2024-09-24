@@ -160,12 +160,12 @@ cd examples
 streamlit run llm_os_demo.py
 ```
 
-![llm_os](https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png)
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png" width="800" />
 
 ### Self-evolving Agent
 The self-evolving agent design:
 
-<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/sage_arch.png" width="600" />
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/sage_arch.png" width="800" />
 
 #### Feature
 
@@ -183,7 +183,7 @@ cd examples
 streamlit run self_evolving_agent_demo.py
 ```
 
-![sage](https://github.com/shibing624/agentica/blob/main/docs/sage_snap.png)
+<img alt="sage_snap" src="https://github.com/shibing624/agentica/blob/main/docs/sage_snap.png" width="800" />
 
 
 ## Contact
