@@ -84,26 +84,15 @@ python web_search_deepseek_demo.py
 自动调用google搜索工具，示例[examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
 
 ```python
-from agentica import Assistant, DeepseekLLM
-from agentica.tools.search_serper import SearchSerperTool
+from agentica import Assistant, DeepseekLLM, SearchSerperTool
 
-m = Assistant(
-  llm=DeepseekLLM(),
-  description="You are a helpful ai assistant.",
-  show_tool_calls=True,
-  # Enable the assistant to search the knowledge base
-  search_knowledge=False,
-  tools=[SearchSerperTool()],
-  # Enable the assistant to read the chat history
-  read_chat_history=True,
-  debug_mode=True,
-)
+m = Assistant(llm=DeepseekLLM(), tools=[SearchSerperTool()])
 
 r = m.run("一句话介绍林黛玉")
 print(r, "".join(r))
-r = m.run("北京最近的新闻top3", stream=True, print_output=True)
+r = m.run("北京最近的新闻top3", stream=True)
 print(r, "".join(r))
-r = m.run("总结前面的问答", stream=False, print_output=False)
+r = m.run("总结前面的问答", stream=False)
 print(r)
 ```
 

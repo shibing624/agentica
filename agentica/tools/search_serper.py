@@ -6,16 +6,13 @@
 import http.client
 import json
 import os
-import ssl
+
 from typing import Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
-
-# Create a default context for HTTPS requests (not recommended for production)
-ssl._create_default_https_context = ssl._create_unverified_context
 
 
 class SerperWrapper(BaseModel):
@@ -41,6 +38,10 @@ class SerperWrapper(BaseModel):
 
     def run(self, query: str, max_results: int = 8, as_string: bool = True):
         """Run query through Serper and parse result"""
+        import ssl
+        # Create a default context for HTTPS requests (not recommended for production)
+        ssl._create_default_https_context = ssl._create_unverified_context
+
         headers = self.get_headers()
 
         conn = http.client.HTTPSConnection("google.serper.dev")
