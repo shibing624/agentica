@@ -36,6 +36,7 @@ class OpenAILLM(LLM):
     name: str = "OpenAILLM"
     model: str = FAST_LLM or "gpt-4o-mini"
     # -*- Request parameters
+    store: Optional[bool] = None
     frequency_penalty: Optional[float] = None
     logit_bias: Optional[Any] = None
     logprobs: Optional[bool] = None
@@ -128,6 +129,8 @@ class OpenAILLM(LLM):
     @property
     def api_kwargs(self) -> Dict[str, Any]:
         _request_params: Dict[str, Any] = {}
+        if self.store:
+            _request_params["store"] = self.store
         if self.frequency_penalty:
             _request_params["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias:
@@ -140,11 +143,11 @@ class OpenAILLM(LLM):
             _request_params["presence_penalty"] = self.presence_penalty
         if self.response_format:
             _request_params["response_format"] = self.response_format
-        if self.seed:
+        if self.seed is not None:
             _request_params["seed"] = self.seed
         if self.stop:
             _request_params["stop"] = self.stop
-        if self.temperature:
+        if self.temperature is not None:
             _request_params["temperature"] = self.temperature
         if self.top_logprobs:
             _request_params["top_logprobs"] = self.top_logprobs
@@ -168,6 +171,8 @@ class OpenAILLM(LLM):
 
     def to_dict(self) -> Dict[str, Any]:
         _dict = super().to_dict()
+        if self.store:
+            _dict["store"] = self.store
         if self.frequency_penalty:
             _dict["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias:
@@ -180,11 +185,11 @@ class OpenAILLM(LLM):
             _dict["presence_penalty"] = self.presence_penalty
         if self.response_format:
             _dict["response_format"] = self.response_format
-        if self.seed:
+        if self.seed is not None:
             _dict["seed"] = self.seed
         if self.stop:
             _dict["stop"] = self.stop
-        if self.temperature:
+        if self.temperature is not None:
             _dict["temperature"] = self.temperature
         if self.top_logprobs:
             _dict["top_logprobs"] = self.top_logprobs
@@ -248,10 +253,6 @@ class OpenAILLM(LLM):
                 arguments=_function_arguments_str,
                 functions=self.functions,
             )
-            logger.debug(
-                f"run_function: {_function_name}, \n_function_name: {_function_name}, \narguments: {_function_arguments_str}"
-                f"\nfunctions: {self.functions}")
-
             if _function_call is None:
                 return Message(role="function", content="Could not find function to call."), None
             if _function_call.error is not None:
@@ -748,12 +749,6 @@ class OpenAILLM(LLM):
                 function_call_results = self.run_function_calls(function_calls_to_run)
                 if len(function_call_results) > 0:
                     messages.extend(function_call_results)
-                    # Code to show function call results
-                    # for f in function_call_results:
-                    #     yield "\n"
-                    #     yield f.get_content_string()
-                    #     yield "\n"
-                # -*- Yield new response using results of tool calls
                 yield from self.response_stream(messages=messages)
         logger.debug("---------- OpenAI Response End ----------")
 

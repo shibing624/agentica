@@ -501,16 +501,16 @@ class Assistant(BaseModel):
         return self.run_id
 
     def get_json_output_prompt(self) -> str:
-        json_output_prompt = "\nProvide your output as a JSON containing the following fields:"
+        output_prompt = "\nProvide your output as a JSON containing the following fields:"
         if self.output_model is not None:
             if isinstance(self.output_model, str):
-                json_output_prompt += "\n<json_fields>"
-                json_output_prompt += f"\n{self.output_model}"
-                json_output_prompt += "\n</json_fields>"
+                output_prompt += "\n<json_fields>"
+                output_prompt += f"\n{self.output_model}"
+                output_prompt += "\n</json_fields>"
             elif isinstance(self.output_model, list):
-                json_output_prompt += "\n<json_fields>"
-                json_output_prompt += f"\n{json.dumps(self.output_model)}"
-                json_output_prompt += "\n</json_fields>"
+                output_prompt += "\n<json_fields>"
+                output_prompt += f"\n{json.dumps(self.output_model)}"
+                output_prompt += "\n</json_fields>"
             elif issubclass(self.output_model, BaseModel):
                 json_schema = self.output_model.model_json_schema()
                 if json_schema is not None:
@@ -542,22 +542,23 @@ class Assistant(BaseModel):
                                 output_model_properties["$defs"][def_name] = formatted_def_properties
 
                     if len(output_model_properties) > 0:
-                        json_output_prompt += "\n<json_fields>"
-                        json_output_prompt += f"\n{json.dumps(list(output_model_properties.keys()))}"
-                        json_output_prompt += "\n</json_fields>"
-                        json_output_prompt += "\nHere are the properties for each field:"
-                        json_output_prompt += "\n<json_field_properties>"
-                        json_output_prompt += f"\n{json.dumps(output_model_properties, indent=2)}"
-                        json_output_prompt += "\n</json_field_properties>"
+                        json_fields = json.dumps([key for key in output_model_properties.keys() if key != '$defs'])
+                        output_prompt += "\n<json_fields>"
+                        output_prompt += f"\n{json_fields}"
+                        output_prompt += "\n</json_fields>"
+                        output_prompt += "\nHere are the properties for each field:"
+                        output_prompt += "\n<json_field_properties>"
+                        output_prompt += f"\n{json.dumps(output_model_properties, indent=2)}"
+                        output_prompt += "\n</json_field_properties>"
             else:
                 logger.warning(f"Could not build json schema for {self.output_model}")
         else:
-            json_output_prompt += "Provide the output as JSON."
+            output_prompt += "Provide the output as JSON."
 
-        json_output_prompt += "\nStart your response with `{` and end it with `}`."
-        json_output_prompt += "\nYour output will be passed to json.loads() to convert it to a Python object."
-        json_output_prompt += "\nMake sure it only contains valid JSON."
-        return json_output_prompt
+        output_prompt += "\nStart your response with `{` and end it with `}`."
+        output_prompt += "\nYour output will be passed to json.loads() to convert it to a Python object."
+        output_prompt += "\nMake sure it only contains valid JSON."
+        return output_prompt
 
     def get_system_prompt(self) -> Optional[str]:
         """Return the system prompt"""

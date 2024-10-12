@@ -67,7 +67,7 @@ def get_llm_os(
     embedder = Text2VecEmb()
     lance_db = LanceDb(
         uri="outputs/llm_os_lancedb",
-        collection="llm_os_documents",
+        table_name="llm_os_documents",
         embedder=embedder,
     )
     knowledge_base = None

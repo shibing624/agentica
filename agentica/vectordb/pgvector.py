@@ -236,6 +236,7 @@ class PgVector(VectorDb):
                         embedding=stmt.excluded.embedding,
                         usage=stmt.excluded.usage,
                         content_hash=stmt.excluded.content_hash,
+                        updated_at=text("now()"),
                     ),
                 )
                 sess.execute(stmt)

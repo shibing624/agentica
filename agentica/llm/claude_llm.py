@@ -28,8 +28,8 @@ except ImportError:
 
 
 class ClaudeLLM(LLM):
-    name: str = "ClaudeLLM"
-    model: str = "claude-3-opus-20240229"
+    name: str = "claude"
+    model: str = "claude-3-5-sonnet-20240620"
     # -*- Request parameters
     max_tokens: Optional[int] = 1024
     temperature: Optional[float] = None
@@ -37,6 +37,7 @@ class ClaudeLLM(LLM):
     top_p: Optional[float] = None
     top_k: Optional[int] = None
     request_params: Optional[Dict[str, Any]] = None
+    cache_system_prompt: bool = False
     # -*- Client parameters
     api_key: Optional[str] = None
     client_params: Optional[Dict[str, Any]] = None
@@ -51,8 +52,7 @@ class ClaudeLLM(LLM):
         _client_params: Dict[str, Any] = {}
         if self.api_key:
             _client_params["api_key"] = self.api_key
-        self.anthropic_client = AnthropicClient(**_client_params)
-        return self.anthropic_client
+        return AnthropicClient(**_client_params)
 
     @property
     def api_kwargs(self) -> Dict[str, Any]:
@@ -123,7 +123,13 @@ class ClaudeLLM(LLM):
             else:
                 api_messages.append({"role": message.role, "content": message.content or ""})
 
-        api_kwargs["system"] = " ".join(system_messages)
+        if self.cache_system_prompt:
+            api_kwargs["system"] = [
+                {"type": "text", "text": " ".join(system_messages), "cache_control": {"type": "ephemeral"}}
+            ]
+            api_kwargs["extra_headers"] = {"anthropic-beta": "prompt-caching-2024-07-31"}
+        else:
+            api_kwargs["system"] = " ".join(system_messages)
 
         if self.tools:
             api_kwargs["tools"] = self.get_tools()
@@ -145,7 +151,13 @@ class ClaudeLLM(LLM):
             else:
                 api_messages.append({"role": message.role, "content": message.content or ""})
 
-        api_kwargs["system"] = " ".join(system_messages)
+        if self.cache_system_prompt:
+            api_kwargs["system"] = [
+                {"type": "text", "text": " ".join(system_messages), "cache_control": {"type": "ephemeral"}}
+            ]
+            api_kwargs["extra_headers"] = {"anthropic-beta": "prompt-caching-2024-07-31"}
+        else:
+            api_kwargs["system"] = " ".join(system_messages)
 
         if self.tools:
             api_kwargs["tools"] = self.get_tools()
@@ -169,15 +181,19 @@ class ClaudeLLM(LLM):
         logger.debug(f"Time to generate response: {response_timer.elapsed:.4f}s")
 
         # -*- Parse response
-        response_content: TextBlock = response.content[0].text  # type: ignore
+        response_content: str = ""
+        response_block: Union[TextBlock, ToolUseBlock] = response.content[0]
+        if isinstance(response_block, TextBlock):
+            response_content = response_block.text
+        elif isinstance(response_block, ToolUseBlock):
+            tool_block = cast(dict[str, Any], response_block.input)
+            response_content = tool_block.get("query", "")
 
         # -*- Create assistant message
         assistant_message = Message(
             role=response.role or "assistant",
             content=response_content,
         )
-
-        logger.debug(f"Response: {response}")
 
         # Check if the response contains a tool call
         if response.stop_reason == "tool_use":
@@ -216,6 +232,22 @@ class ClaudeLLM(LLM):
         if response_usage:
             input_tokens = response_usage.input_tokens
             output_tokens = response_usage.output_tokens
+
+            try:
+                cache_creation_tokens = 0
+                cache_read_tokens = 0
+                if self.cache_system_prompt:
+                    cache_creation_tokens = response_usage.cache_creation_input_tokens  # type: ignore
+                    cache_read_tokens = response_usage.cache_read_input_tokens  # type: ignore
+
+                    assistant_message.metrics["cache_creation_tokens"] = cache_creation_tokens
+                    assistant_message.metrics["cache_read_tokens"] = cache_read_tokens
+                    self.metrics["cache_creation_tokens"] = (
+                            self.metrics.get("cache_creation_tokens", 0) + cache_creation_tokens
+                    )
+                    self.metrics["cache_read_tokens"] = self.metrics.get("cache_read_tokens", 0) + cache_read_tokens
+            except Exception:
+                logger.debug("Prompt caching metrics not available")
 
             if input_tokens is not None:
                 assistant_message.metrics["input_tokens"] = input_tokens
@@ -350,6 +382,22 @@ class ClaudeLLM(LLM):
         if response_usage:
             input_tokens = response_usage.input_tokens
             output_tokens = response_usage.output_tokens
+
+            try:
+                cache_creation_tokens = 0
+                cache_read_tokens = 0
+                if self.cache_system_prompt:
+                    cache_creation_tokens = response_usage.cache_creation_input_tokens  # type: ignore
+                    cache_read_tokens = response_usage.cache_read_input_tokens  # type: ignore
+
+                    assistant_message.metrics["cache_creation_tokens"] = cache_creation_tokens
+                    assistant_message.metrics["cache_read_tokens"] = cache_read_tokens
+                    self.metrics["cache_creation_tokens"] = (
+                            self.metrics.get("cache_creation_tokens", 0) + cache_creation_tokens
+                    )
+                    self.metrics["cache_read_tokens"] = self.metrics.get("cache_read_tokens", 0) + cache_read_tokens
+            except Exception:
+                logger.debug("Prompt caching metrics not available")
 
             if input_tokens is not None:
                 assistant_message.metrics["input_tokens"] = input_tokens

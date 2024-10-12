@@ -15,7 +15,6 @@ from agentica.emb.text2vec_emb import Text2VecEmb
 knowledge_base = KnowledgeBase(
     data_path="data/medical_corpus.txt",
     vector_db=LanceDb(
-        uri="tmp/lancedb",
         table_name="medical",
         embedder=Text2VecEmb(),
     ),

@@ -64,12 +64,3 @@ class DeepseekLLM(OpenAILLM):
     model: str = "deepseek-coder"
     api_key: Optional[str] = getenv("DEEPSEEK_API_KEY")
     base_url: str = "https://api.deepseek.com/v1"
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
-    top_k: Optional[int] = None
-    max_tokens: Optional[int] = None
-    request_params: Optional[Dict[str, Any]] = None
-    client_params: Optional[Dict[str, Any]] = None
-    # -*- Provide the client manually
-    client: Optional[OpenAIClient] = None
-    async_client: Optional[AsyncOpenAIClient] = None

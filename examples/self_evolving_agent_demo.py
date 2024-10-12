@@ -56,7 +56,7 @@ def get_sage(
     embedder = Text2VecEmb()
     lance_db = LanceDb(
         uri="outputs/sage_lancedb",
-        collection="sage_documents",
+        table_name="sage_documents",
         embedder=embedder,
     )
     memory_file = "outputs/sage_memory.csv"
