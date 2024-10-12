@@ -43,3 +43,13 @@ class Word2VecEmb(Emb):
         ndarr = self.get_client.encode(texts)
         # convert numpy array to list
         return ndarr.tolist()  # type: ignore
+
+
+if __name__ == '__main__':
+    emb = Word2VecEmb()
+    text = "I love you"
+    r = emb.get_embedding(text)
+    print(r)
+    texts = ["I love you", "我喜欢你"]
+    r = emb.get_embeddings(texts)
+    print(r)

@@ -45,3 +45,13 @@ class Text2VecEmb(Emb):
     def get_embeddings(self, texts: List[str], normalize_embeddings: bool = True) -> List[List[float]]:
         # Calculate emb of the texts
         return self.get_client.encode(texts, normalize_embeddings=normalize_embeddings).tolist()
+
+
+if __name__ == '__main__':
+    emb = Text2VecEmb()
+    text = "I love you"
+    r = emb.get_embedding(text)
+    print(r)
+    texts = ["I love you", "我喜欢你"]
+    r = emb.get_embeddings(texts)
+    print(r)

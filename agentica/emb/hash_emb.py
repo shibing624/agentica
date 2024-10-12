@@ -23,3 +23,13 @@ class HashEmb(Emb):
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         return [self.get_embedding(text) for text in texts]
+
+
+if __name__ == '__main__':
+    emb = HashEmb()
+    text = "I love you"
+    r = emb.get_embedding(text)
+    print(r)
+    texts = ["I love you", "我喜欢你"]
+    r = emb.get_embeddings(texts)
+    print(r)
