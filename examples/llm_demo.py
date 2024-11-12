@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Web search demo, using SearchSerperTool(google) to search the web.
+@description: llm demo
 """
 
 import sys
