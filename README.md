@@ -60,15 +60,7 @@ pip install .
 
 ## Getting Started
 
-#### 1. Install requirements
-
-```shell
-git clone https://github.com/shibing624/agentica.git
-cd agentica
-pip install -r requirements.txt
-```
-
-#### 2. Run the example
+#### Run the example
 ```shell
 # Copying required .env file, and fill in the LLM api key
 cp .env.example ~/.agentica/.env
