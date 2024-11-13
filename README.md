@@ -84,10 +84,11 @@ python web_search_deepseek_demo.py
 自动调用google搜索工具，示例[examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
 
 ```python
+import os
+os.environ["DEEPSEEK_API_KEY"] = "your_deepseek_api_key"
+os.environ["SERPER_API_KEY"] = "your_serper_api_key"
 from agentica import Assistant, DeepseekLLM, SearchSerperTool
-
 m = Assistant(llm=DeepseekLLM(), tools=[SearchSerperTool()])
-
 r = m.run("一句话介绍林黛玉")
 print(r, "".join(r))
 r = m.run("北京最近的新闻top3", stream=True)

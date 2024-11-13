@@ -49,13 +49,9 @@ messages.append(message)
 messages.append({"role": "tool", "tool_call_id": tool.id, "content": "24℃"})
 message = send_messages(messages)
 print(f"Model>\t {message.content}")
-
 """
 from os import getenv
-from typing import Optional, Dict, Any
-
-from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
-
+from typing import Optional
 from agentica.llm.openai_llm import OpenAILLM
 
 
