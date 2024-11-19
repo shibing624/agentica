@@ -3,7 +3,7 @@ import sys
 sys.path.append('..')
 from agentica import Assistant, OpenAILLM
 
-Assistant(
+r = Assistant(
     llm=OpenAILLM(model="gpt-3.5-turbo", stop="</answer>"),
     debug_mode=True,
 ).run(
@@ -12,3 +12,4 @@ Assistant(
         {"role": "assistant", "content": "<answer>"},
     ],
 )
+print(r, "".join(r))
