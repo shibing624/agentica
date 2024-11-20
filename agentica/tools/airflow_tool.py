@@ -29,12 +29,24 @@ class AirflowTool(Toolkit):
             self.register(self.read_dag_file)
 
     def save_dag_file(self, contents: str, dag_file: str) -> str:
-        """Saves python code for an Airflow DAG to a file called `dag_file` and returns the file path if successful.
+        """Saves Python code for an Airflow DAG to a file called `dag_file` and returns the file path if successful.
 
-        :param contents: The contents of the DAG.
-        :param dag_file: The name of the file to save to.
-        :return: The file path if successful, otherwise returns an error message.
+        Args:
+            `contents` (str): The contents of the DAG.
+            `dag_file` (str): The name of the file to save to.
+
+        Example:
+            ```python
+            from agentica.tools.airflow_tool import AirflowTool
+            m = AirflowTool()
+            result = m.save_dag_file(contents="DAG code here", dag_file="example_dag.py")
+            print(result)
+            ```
+
+        Returns:
+            str: The file path if successful, otherwise returns an error message.
         """
+
         try:
             file_path = self.dags_dir.joinpath(dag_file)
             logger.debug(f"Saving contents to {file_path}")
@@ -50,9 +62,21 @@ class AirflowTool(Toolkit):
     def read_dag_file(self, dag_file: str) -> str:
         """Reads an Airflow DAG file `dag_file` and returns the contents if successful.
 
-        :param dag_file: The name of the file to read
-        :return: The contents of the file if successful, otherwise returns an error message.
+        Args:
+            `dag_file` (str): The name of the file to read.
+
+        Example:
+            ```python
+            from agentica.tools.airflow_tool import AirflowTool
+            m = AirflowTool()
+            contents = m.read_dag_file(dag_file="example_dag.py")
+            print(contents)
+            ```
+
+        Returns:
+            str: The contents of the file if successful, otherwise returns an error message.
         """
+
         try:
             logger.info(f"Reading file: {dag_file}")
             file_path = self.dags_dir.joinpath(dag_file)

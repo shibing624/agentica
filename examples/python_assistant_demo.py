@@ -10,7 +10,7 @@ import sys
 
 sys.path.append('..')
 from agentica import PythonAssistant, AzureOpenAILLM, SqlAssistantStorage
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica import KnowledgeBase, AssistantMemory, CsvMemoryDb

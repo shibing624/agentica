@@ -61,14 +61,20 @@ class DuckDuckGoTool(Toolkit):
         return contexts
 
     def duckduckgo_search(self, query: str, max_results: int = 5) -> str:
-        """Use this function to search DuckDuckGo for a query.
+        """Search DuckDuckGo for a query.
 
         Args:
             query(str): The query to search for.
             max_results (optional, default=5): The maximum number of results to return.
 
+        Example:
+            from agentica.tools.duckduckgo_tool import DuckDuckGoTool
+            m = DuckDuckGoTool()
+            search_results = m.duckduckgo_search("Python")
+            print(search_results)
+
         Returns:
-            The result from DuckDuckGo.
+            The result from DuckDuckGo, in JSON format. The result includes the title, URL, and snippet.
         """
         logger.debug(f"Searching DDG for: {query}")
         gen_res = self.ddgs.text(query, backend="lite", timelimit="d, w, m, y")
@@ -76,11 +82,17 @@ class DuckDuckGoTool(Toolkit):
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     def duckduckgo_news(self, query: str, max_results: int = 5) -> str:
-        """Use this function to get the latest news from DuckDuckGo.
+        """Get the latest news from DuckDuckGo.
 
         Args:
             query(str): The query to search for.
             max_results (optional, default=5): The maximum number of results to return.
+
+        Example:
+            from agentica.tools.duckduckgo_tool import DuckDuckGoTool
+            m = DuckDuckGoTool()
+            news_results = m.duckduckgo_news("Python")
+            print(news_results)
 
         Returns:
             The latest news from DuckDuckGo.
@@ -92,6 +104,7 @@ class DuckDuckGoTool(Toolkit):
 
 
 if __name__ == '__main__':
-    ddg = DuckDuckGoTool()
-    print(ddg.duckduckgo_search("Python"))
-    print(ddg.duckduckgo_news("Python"))
+    # from agentica.tools.duckduckgo_tool import DuckDuckGoTool
+    m = DuckDuckGoTool()
+    print(m.duckduckgo_search("Python"))
+    print(m.duckduckgo_news("Python"))

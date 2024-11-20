@@ -33,7 +33,7 @@ import streamlit as st
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM, PythonAssistant
 from agentica.utils.log import logger
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb

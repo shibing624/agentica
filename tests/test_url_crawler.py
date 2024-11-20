@@ -9,7 +9,7 @@ from unittest.mock import patch, Mock
 import shutil
 import pytest
 
-from agentica.tools.url_crawler import UrlCrawlerTool
+from agentica.tools.url_crawler_tool import UrlCrawlerTool
 
 
 @pytest.fixture

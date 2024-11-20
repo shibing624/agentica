@@ -7,8 +7,8 @@ import sys
 
 sys.path.append('..')
 from agentica import AzureOpenAILLM, Assistant
-from agentica.tools.jina import JinaTool
-from agentica.tools.file import FileTool
+from agentica.tools.jina_tool import JinaTool
+from agentica.tools.file_tool import FileTool
 
 m = Assistant(
     tools=[JinaTool(), FileTool()],

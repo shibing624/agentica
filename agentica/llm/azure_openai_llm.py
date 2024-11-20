@@ -52,8 +52,8 @@ class AzureOpenAILLM(OpenAILLM):
             _client_params["http_client"] = self.http_client
         if self.client_params:
             _client_params.update(self.client_params)
-        self.client = AzureOpenAIClient(**_client_params)
-        return self.client
+        # Use a new client instance for each request to avoid request failures due to cached client instances
+        return AzureOpenAIClient(**_client_params)
 
     def invoke_stream(self, messages: List[Message]) -> Iterator[ChatCompletionChunk]:
         yield from self.get_client().chat.completions.create(

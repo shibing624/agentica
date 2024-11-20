@@ -85,18 +85,18 @@ Automatically call the Google search tool, example [examples/web_search_deepseek
 
 ```python
 from agentica import Assistant, DeepseekLLM
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = Assistant(
-  llm=DeepseekLLM(),
-  description="You are a helpful ai assistant.",
-  show_tool_calls=True,
-  # Enable the assistant to search the knowledge base
-  search_knowledge=False,
-  tools=[SearchSerperTool()],
-  # Enable the assistant to read the chat history
-  read_chat_history=True,
-  debug_mode=True,
+    llm=DeepseekLLM(),
+    description="You are a helpful ai assistant.",
+    show_tool_calls=True,
+    # Enable the assistant to search the knowledge base
+    search_knowledge=False,
+    tools=[SearchSerperTool()],
+    # Enable the assistant to read the chat history
+    read_chat_history=True,
+    debug_mode=True,
 )
 
 r = m.run("Introduce Lin Daiyu in one sentence")

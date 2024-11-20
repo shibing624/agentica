@@ -121,7 +121,7 @@ class SearchSerperTool(Toolkit):
     def search_google(
             self,
             query: str,
-            max_results: int = 5,
+            max_results: int = 8,
             as_string: bool = True,
     ) -> str:
         """
@@ -131,6 +131,12 @@ class SearchSerperTool(Toolkit):
             query: The search query.
             max_results: The maximum number of results to return. Defaults to 8.
             as_string: Whether to return the results as a string or a list of dictionaries. Defaults to True.
+
+        Example:
+            from agentica.tools.search_serper_tool import SearchSerperTool
+            m = SearchSerperTool()
+            r = m.search_google("北京的新闻top3")
+            print(r)
 
         Returns:
             The search results as a string or a list of dictionaries.

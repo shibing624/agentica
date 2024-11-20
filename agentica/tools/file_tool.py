@@ -25,9 +25,8 @@ class FileTool(Toolkit):
             data_dir: Optional[str] = None,
             save_file: bool = True,
             read_file: bool = True,
-            list_files: bool = True,
-            read_files: bool = True,
-
+            list_files: bool = False,
+            read_files: bool = False,
     ):
         super().__init__(name="file_tool")
 
@@ -44,11 +43,19 @@ class FileTool(Toolkit):
     def save_file(self, contents: str, file_name: str, overwrite: bool = True, save_dir: str = "") -> str:
         """Saves the contents to a file called `file_name` and returns the file name if successful.
 
-        :param contents: The contents to save.
-        :param file_name: The name of the file to save to.
-        :param overwrite: Overwrite the file if it already exists.
-        :param save_dir: The directory to save the file to, defaults to the base directory.
-        :return: The file name if successful, otherwise returns an error message.
+        Args:
+            contents (str): The contents to save.
+            file_name (str): The name of the file to save to.
+            overwrite (bool): Overwrite the file if it already exists.
+            save_dir (str): The directory to save the file to, defaults to the base directory.
+
+        Example:
+            from agentica.tools.file_tool import FileTool
+            m = FileTool()
+            print(m.save_file(contents="Hello, world!", file_name="hello.txt"))
+
+        Returns:
+            str: The file name if successful, otherwise returns an error message.
         """
         try:
             if save_dir:
@@ -70,8 +77,16 @@ class FileTool(Toolkit):
     def read_file(self, file_name: str) -> str:
         """Reads the contents of the file `file_name` and returns the contents if successful.
 
-        :param file_name: The name of the file to read.
-        :return: The contents of the file if successful, otherwise returns an error message.
+        Args:
+            file_name (str): The name of the file to read.
+
+        Example:
+            from agentica.tools.file_tool import FileTool
+            m = FileTool()
+            print(m.read_file(file_name="hello.txt"))
+
+        Returns:
+            str: The contents of the file if successful, otherwise returns an error message.
         """
         try:
             if os.path.exists(file_name):
@@ -109,8 +124,16 @@ class FileTool(Toolkit):
     def list_files(self, dir_path: str = "") -> str:
         """Returns a list of files in the base directory
 
-        :param dir_path: The directory to list files from, defaults to the base directory.
-        :return: The contents of the file if successful, otherwise returns an error message.
+        Args:
+            dir_path (str): The directory to list files from, defaults to the base directory.
+
+        Example:
+            from agentica.tools.file_tool import FileTool
+            m = FileTool()
+            print(m.list_files('/home/user/data'))
+
+        Returns:
+            str: The contents of the file if successful, otherwise returns an error message.
         """
         try:
             if dir_path:
@@ -127,8 +150,16 @@ class FileTool(Toolkit):
     def read_files(self, dir_path: str = "") -> str:
         """Reads the contents of all files in the base directory and returns the contents.
 
-        :param dir_path: The directory to read files from, defaults to the base directory.
-        :return: The contents of all files if successful, otherwise returns an error message.
+        Args:
+            dir_path (str): The directory to read files from, defaults to the base directory.
+
+        Example:
+            from agentica.tools.file_tool import FileTool
+            m = FileTool()
+            print(m.read_files(dir_path="/home/user/data"))
+
+        Returns:
+            str: The contents of all files if successful, otherwise returns an error message.
         """
         try:
             if dir_path:
@@ -146,3 +177,14 @@ class FileTool(Toolkit):
         except Exception as e:
             logger.error(f"Error reading files: {e}")
             return f"Error reading files: {e}"
+
+
+if __name__ == '__main__':
+    m = FileTool()
+    print(m.save_file(contents="Hello, world!", file_name="hello.txt"))
+    print(m.read_file(file_name="hello.txt"))
+    print(m.list_files())
+    print(m.read_files())
+    print(m.read_files(dir_path="."))
+    if os.path.exists("hello.txt"):
+        os.remove("hello.txt")

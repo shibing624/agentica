@@ -69,6 +69,13 @@ class SearchExaTool(Toolkit):
             query (str): The query to search for.
             num_results (int): Number of results to return. Defaults to 5.
 
+        Example:
+            from agentica.tools.search_exa_tool import SearchExaTool
+            m = SearchExaTool()
+            query = "苹果的最新产品是啥？"
+            r = m.search_exa(query)
+            print(r)
+
         Returns:
             str: The search results in JSON format.
         """
@@ -122,3 +129,10 @@ class SearchExaTool(Toolkit):
         except Exception as e:
             logger.error(f"Failed to search exa {e}")
             return f"Error: {e}"
+
+
+if __name__ == '__main__':
+    m = SearchExaTool()
+    query = "苹果的最新产品是啥？"
+    r = m.search_exa(query)
+    print(query, '\n\n', r)

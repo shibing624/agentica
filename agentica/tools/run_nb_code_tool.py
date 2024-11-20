@@ -255,8 +255,17 @@ class RunNbCodeTool(Toolkit):
     def execute_nb_code(self, code: str) -> str:
         """Execute a code block in a Jupyter Notebook and return the result.
 
-        :param code: str, The code to execute.
-        :return: str, The result of the code execution.
+        Args:
+            code: str, The code to execute.
+
+        Example:
+            from agentica.tools.run_nb_code_tool import RunNbCodeTool
+            m = RunNbCodeTool()
+            r = m.execute_nb_code("import math\nprint(math.sqrt(79192201))")
+            print(r)
+
+        Returns:
+            str, The result of the code execution.
         """
         try:
             outputs, success = self.executor.run(code)

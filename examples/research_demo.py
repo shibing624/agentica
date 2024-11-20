@@ -9,7 +9,7 @@ from textwrap import dedent
 sys.path.append('..')
 from agentica import Assistant
 from agentica.llm.openai_llm import OpenAILLM
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = Assistant(
     llm=OpenAILLM(model='gpt-4o'),

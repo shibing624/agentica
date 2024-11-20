@@ -66,10 +66,20 @@ class JinaTool(Toolkit):
         return file_name
 
     def jina_url_reader(self, url: str) -> str:
-        """Reads a URL and returns the truncated content using Jina Reader API.
+        """Reads a URL and returns the html text content using Jina Reader API.
 
-        :param url: str, The URL to crawl.
-        :return: str, The result of the crawling, Markdown format.
+        Args:
+            url: str, The URL to read.
+
+        Example:
+            from agentica.tools.jina_tool import JinaTool
+            m = JinaTool(jina_reader=True, jina_search=True)
+            url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+            r = m.jina_url_reader(url)
+            print(url, '\n\n', r)
+
+        Returns:
+            str, The result of the crawling html text content, Markdown format.
         """
         logger.debug(f"Reading URL: {url}")
 
@@ -84,7 +94,6 @@ class JinaTool(Toolkit):
             logger.error(msg)
             result = msg
             content = ''
-
         if content:
             filename = self._generate_file_name_from_url(url)
             save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
@@ -95,10 +104,20 @@ class JinaTool(Toolkit):
         return result
 
     def jina_search(self, query: str) -> str:
-        """Performs a web search using Jina Reader API and returns the truncated results.
+        """Performs a web search using Jina Reader API and returns the search content.
 
-        :param query: str, The query to search for.
-        :return: The results of the search.
+        Args:
+            query (str): The query to search for.
+
+        Example:
+            from agentica.tools.jina_tool import JinaTool
+            m = JinaTool(jina_reader=True, jina_search=True)
+            query = "苹果的最新产品是啥？"
+            r = m.jina_search(query)
+            print(query, '\n\n', r)
+
+        Returns:
+            str: The results of the search.
         """
         query = query.strip()
         logger.debug(f"Search query: {query}")
@@ -109,11 +128,10 @@ class JinaTool(Toolkit):
             content = response.text
             result = self._trim_content(content)
         except Exception as e:
+            content = ''
             msg = f"Error performing search: {str(e)}"
             logger.error(msg)
             result = msg
-            content = ''
-
         if content:
             filename = self._generate_file_name_from_url(url)
             save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
@@ -131,7 +149,6 @@ if __name__ == '__main__':
     }
 
     response = requests.post(url, data=data)
-
     print(response.text)
 
     m = JinaTool(jina_reader=True, jina_search=True)

@@ -44,15 +44,28 @@ class RunPythonCodeTool(Toolkit):
     def save_and_run_python_code(
             self, file_name: str, code: str, variable_to_return: Optional[str] = None, overwrite: bool = True
     ) -> str:
-        """
-        Saves Python code to a specified file, then runs the file.
+        """Saves Python code to a specified file, then runs the file.
 
-        :param file_name: The name of the file to save and run, e.g., "test_script.py", required.
-        :param code: The code to save and run, e.g., "a = 5\nb = 110\nc = a + b\nprint(c)", required.
-        :param variable_to_return: Optional[str], The variable to return the value of after execution, default is None.
-        :param overwrite: Whether to overwrite the file if it already exists, default is True.
-        :return: The value of `variable_to_return` if provided and available, otherwise a success message or error message.
+        Args:
+            file_name (str): The name of the file to save and run, e.g., "test_script.py", required.
+            code (str): The code to save and run, e.g., "a = 5\nb = 110\nc = a + b\nprint(c)", required.
+            variable_to_return (Optional[str]): The variable to return the value of after execution, default is None.
+            overwrite (bool): Whether to overwrite the file if it already exists, default is True.
+
+        Example:
+            from agentica.tools.run_python_code_tool import RunPythonCodeTool
+            m = RunPythonCodeTool()
+            result = m.save_and_run_python_code(
+                file_name="calc_add.py",
+                code="a = 5\nb = 110\nc = a + b\nprint(c)",
+                variable_to_return="c"
+            )
+            print(result)
+
+        Returns:
+            str: The value of `variable_to_return` if provided and available, otherwise a success message or error message.
         """
+
         try:
             warn()
 
@@ -103,7 +116,7 @@ if __name__ == '__main__':
     tool = RunPythonCodeTool()
 
     result = tool.save_and_run_python_code(
-        file_name="test_script.py",
+        file_name="calc_add.py",
         code="a = 5\nb = 110\nc = a + b\nprint(c)",
         variable_to_return="c"
     )

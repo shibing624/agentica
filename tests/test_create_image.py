@@ -8,7 +8,7 @@ This module contains a test for the CreateImage class in the agentica.functions.
 import shutil
 from unittest.mock import MagicMock, patch
 
-from agentica.tools.create_image import CreateImageTool
+from agentica.tools.create_image_tool import CreateImageTool
 
 
 @patch("openai.Image.create")
@@ -26,7 +26,7 @@ def test_execute(mock_get, mock_create):
     mock_get.return_value = mock_response
 
     create_image = CreateImageTool(data_dir="test_data")
-    image_path = create_image.create_delle_image("a white siamese cat", 1, "1024x1024")
+    image_path = create_image.create_dalle_image("a white siamese cat", 1, "1024x1024")
 
     # Check that the returned image name is a valid SHA-256 hash followed by ".png"
     image_file_name = image_path.split("/")[-1]

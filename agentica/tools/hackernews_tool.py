@@ -10,7 +10,7 @@ from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
 
-class HackerNews(Toolkit):
+class HackerNewsTool(Toolkit):
     def __init__(
         self,
         get_top_stories: bool = True,
@@ -25,10 +25,16 @@ class HackerNews(Toolkit):
             self.register(self.get_user_details)
 
     def get_top_hackernews_stories(self, num_stories: int = 10) -> str:
-        """Use this function to get top stories from Hacker News.
+        """Get top stories from Hacker News.
 
         Args:
             num_stories (int): Number of stories to return. Defaults to 10.
+
+        Example:
+            from agentica.tools.hackernews_tool import HackerNewsTool
+            m = HackerNewsTool()
+            top_stories = m.get_top_hackernews_stories(3)
+            print(top_stories)
 
         Returns:
             str: JSON string of top stories.
@@ -46,13 +52,19 @@ class HackerNews(Toolkit):
             story = story_response.json()
             story["username"] = story["by"]
             stories.append(story)
-        return json.dumps(stories)
+        return json.dumps(stories, indent=2, ensure_ascii=False)
 
     def get_user_details(self, username: str) -> str:
-        """Use this function to get the details of a Hacker News user using their username.
+        """Get the details of a Hacker News user using their username.
 
         Args:
             username (str): Username of the user to get details for.
+
+        Example:
+            from agentica.tools.hackernews_tool import HackerNewsTool
+            m = HackerNewsTool()
+            user_details = m.get_user_details('tomthe')
+            print(user_details)
 
         Returns:
             str: JSON string of the user details.
@@ -67,14 +79,14 @@ class HackerNews(Toolkit):
                 "about": user.get("about"),
                 "total_items_submitted": len(user.get("submitted", [])),
             }
-            return json.dumps(user_details)
+            return json.dumps(user_details, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.exception(e)
             return f"Error getting user details: {e}"
 
 
 if __name__ == '__main__':
-    m = HackerNews()
+    m = HackerNewsTool()
     r = m.get_top_hackernews_stories(3)
     print(r)
     r = m.get_user_details('tomthe')

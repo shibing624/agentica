@@ -31,30 +31,31 @@ class CreateImageTool(Toolkit):
         super().__init__(name="create_image_tool")
         self.data_dir: str = data_dir or "outputs"
         self.llm = llm
-
-        self.register(self.create_delle_image)
+        self.register(self.create_dalle_image)
 
     def update_llm(self) -> None:
         if self.llm is None:
             self.llm = OpenAILLM()
 
-    def create_delle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
-        """
-        Creates an image from a description using OpenAI's API, generates a unique image name based on the prompt
-            and the current time, downloads the image, and saves it to a specified output path.
+    def create_dalle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
+        """Creates an image from a description using dalle API, generates a unique image name based on the prompt,
+        downloads the image, and saves it to a specified output path.
 
-        :param prompt: The prompt that describes the image.
-        :type prompt: str
-        :param n: The number of images to generate. Defaults to 1. Currently, only 1 is supported.
-        :type n: int, optional
-        :param size: The size of the image. Defaults to "1024x1024". Currently, only "1024x1024" is supported.
-        :type size: str, optional
-        :param model: The model to use for image generation, can be dall-e-2 or dall-e-3, Defaults to 'dall-e-3'.
-        :return: The path to the image.
-        :rtype: str
-        """
+        Args:
+            prompt (str): The prompt that describes the image.
+            n (int, optional): The number of images to generate. Defaults to 1. Currently, only 1 is supported.
+            size (str, optional): The size of the image. Defaults to "1024x1024". only 1024x1024 is supported.
+            model (str, optional): The model use for image generation, can be dall-e-2 or dall-e-3. Defaults 'dall-e-3'.
 
-        # Update the LLM (set defaults, add logit etc.)
+        Example:
+            from agentica.tools.create_image_tool import CreateImageTool
+            tool = CreateImageTool()
+            image_path = tool.create_dalle_image("A painting of a beautiful sunset over the ocean.")
+            print(image_path)
+
+        Returns:
+            str: The path to the image.
+        """
         self.update_llm()
 
         image_name = self._generate_image_name(prompt)
@@ -111,3 +112,11 @@ class CreateImageTool(Toolkit):
         os.makedirs(os.path.dirname(image_path), exist_ok=True)
         with open(image_path, "wb") as f:
             f.write(image_data)
+
+
+if __name__ == '__main__':
+    # from agentica.tools.create_image import CreateImageTool
+    m = CreateImageTool()
+    prompt = "A painting of a beautiful sunset over the ocean."
+    r = m.create_dalle_image(prompt)
+    print(r)

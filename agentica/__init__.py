@@ -67,7 +67,8 @@ from agentica.storage.pg_storage import PgAssistantStorage
 from agentica.storage.sqlite_storage import SqlAssistantStorage
 # tool
 from agentica.tools.base import Tool, Toolkit, Function, FunctionCall
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
+
 # assistant
 from agentica.assistant import Assistant
 from agentica.python_assistant import PythonAssistant

@@ -102,19 +102,25 @@ class SQLTool(Toolkit):
         Args:
             query (str): The query to run.
             limit (int, optional): The number of rows to return. Defaults to 10. Use `None` to show all results.
+
+        Example:
+            from agentica.tools.sql_tool import SQLTool
+            m = SQLTool(db_url="sqlite:///agentica.db")
+            query = "SELECT * FROM table_name"
+            result = m.run_sql_query(query)
+            print(result)
+
         Returns:
-            str: Result of the SQL query.
-        Notes:
-            - The result may be empty if the query does not return any data.
+            str: Result of the SQL query. The result may be empty if the query does not return any data.
         """
 
         try:
-            return json.dumps(self.run_sql(sql=query, limit=limit), default=str)
+            return json.dumps(self._run_sql(sql=query, limit=limit), default=str, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error running query: {e}")
             return f"Error running query: {e}"
 
-    def run_sql(self, sql: str, limit: Optional[int] = None) -> List[dict]:
+    def _run_sql(self, sql: str, limit: Optional[int] = None) -> List[dict]:
         """Internal function to run a sql query.
 
         Args:
@@ -139,3 +145,13 @@ class SQLTool(Toolkit):
             except Exception as e:
                 logger.error(f"Error while executing SQL: {e}")
                 return []
+
+
+if __name__ == '__main__':
+    m = SQLTool(
+        db_url="sqlite:///agentica.db",
+        list_tables=True,
+        describe_table=True,
+        run_sql_query=True
+    )
+    print(m.list_tables())

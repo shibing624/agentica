@@ -8,8 +8,8 @@ import sys
 sys.path.append('..')
 from agentica.message import Message
 from agentica import Assistant, DeepseekLLM
-from agentica.tools.search_serper import SearchSerperTool
-from agentica.tools.file import FileTool
+from agentica.tools.search_serper_tool import SearchSerperTool
+from agentica.tools.file_tool import FileTool
 
 llm = DeepseekLLM()
 

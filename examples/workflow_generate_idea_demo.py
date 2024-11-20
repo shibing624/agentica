@@ -8,7 +8,7 @@ import sys
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
 from agentica.workflow import Workflow, Task
-from agentica.tools.file import FileTool
+from agentica.tools.file_tool import FileTool
 
 idea_assistant = Assistant(
     name="企业家",

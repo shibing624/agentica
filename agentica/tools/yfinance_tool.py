@@ -54,12 +54,17 @@ class YFinanceTool(Toolkit):
         Args:
             symbol (str): The stock symbol.
 
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_current_stock_price("AAPL"))
+
         Returns:
             str: The current stock price or error message.
         """
         try:
             stock = yf.Ticker(symbol)
-            # Use "regularMarketPrice" for regular market hours, or "currentPrice" for pre/post market
+            # Use "regularMarketPrice" for regular market hours, or "currentPrice" for post market
             current_price = stock.info.get("regularMarketPrice", stock.info.get("currentPrice"))
             return f"{current_price:.4f}" if current_price else f"Could not fetch current price for {symbol}"
         except Exception as e:
@@ -70,6 +75,11 @@ class YFinanceTool(Toolkit):
 
         Args:
             symbol (str): The stock symbol.
+
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_company_info("AAPL"))
 
         Returns:
             str: JSON containing company profile and overview.
@@ -124,6 +134,11 @@ class YFinanceTool(Toolkit):
             interval (str): The interval between data points. Defaults to "1d".
                         Valid intervals: 1d,5d,1wk,1mo,3mo
 
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_historical_stock_prices("AAPL"))
+
         Returns:
           str: The current stock price or error message.
         """
@@ -140,6 +155,11 @@ class YFinanceTool(Toolkit):
         Args:
             symbol (str): The stock symbol.
 
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_stock_fundamentals("AAPL"))
+
         Returns:
             str: A JSON string containing fundamental data or an error message.
                 Keys:
@@ -153,8 +173,8 @@ class YFinanceTool(Toolkit):
                     - 'dividend_yield': The dividend yield.
                     - 'eps': The trailing earnings per share.
                     - 'beta': The beta value of the stock.
-                    - '52_week_high': The 52-week high price of the stock.
-                    - '52_week_low': The 52-week low price of the stock.
+                    - '52_week_high': The 52-week-high price of the stock.
+                    - '52_week_low': The 52-week-low price of the stock.
         """
         try:
             stock = yf.Ticker(symbol)
@@ -181,10 +201,15 @@ class YFinanceTool(Toolkit):
         """Use this function to get income statements for a given stock symbol.
 
         Args:
-        symbol (str): The stock symbol.
+            symbol (str): The stock symbol.
+
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_income_statement("AAPL"))
 
         Returns:
-        dict: JSON containing income statements or an empty dictionary.
+            dict: JSON containing income statements or an empty dictionary.
         """
         try:
             stock = yf.Ticker(symbol)
@@ -197,10 +222,15 @@ class YFinanceTool(Toolkit):
         """Use this function to get key financial ratios for a given stock symbol.
 
         Args:
-        symbol (str): The stock symbol.
+            symbol (str): The stock symbol.
+
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_key_financial_ratios("AAPL"))
 
         Returns:
-        dict: JSON containing key financial ratios.
+            dict: JSON containing key financial ratios.
         """
         try:
             stock = yf.Ticker(symbol)
@@ -213,10 +243,15 @@ class YFinanceTool(Toolkit):
         """Use this function to get analyst recommendations for a given stock symbol.
 
         Args:
-        symbol (str): The stock symbol.
+            symbol (str): The stock symbol.
+
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_analyst_recommendations("AAPL"))
 
         Returns:
-        str: JSON containing analyst recommendations.
+            str: JSON containing analyst recommendations.
         """
         try:
             stock = yf.Ticker(symbol)
@@ -229,11 +264,16 @@ class YFinanceTool(Toolkit):
         """Use this function to get company news and press releases for a given stock symbol.
 
         Args:
-        symbol (str): The stock symbol.
-        num_stories (int): The number of news stories to return. Defaults to 3.
+            symbol (str): The stock symbol.
+            num_stories (int): The number of news stories to return. Defaults to 3.
+
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_company_news("AAPL"))
 
         Returns:
-        str: JSON containing company news and press releases.
+            str: JSON containing company news and press releases.
         """
         try:
             news = yf.Ticker(symbol).news
@@ -245,15 +285,42 @@ class YFinanceTool(Toolkit):
         """Use this function to get technical indicators for a given stock symbol.
 
         Args:
-        symbol (str): The stock symbol.
-        period (str): The time period for which to retrieve technical indicators.
-            Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max. Defaults to 3mo.
+            symbol (str): The stock symbol.
+            period (str): The time period for which to retrieve technical indicators.
+                Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max. Defaults to 3mo.
+
+        Example:
+            from agentica.tools.yfinance_tool import YFinanceTool
+            m = YFinanceTool()
+            print(m.get_technical_indicators("AAPL"))
 
         Returns:
-        str: JSON containing technical indicators.
+            str: JSON containing technical indicators.
         """
         try:
             indicators = yf.Ticker(symbol).history(period=period)
             return indicators.to_json(orient="index")
         except Exception as e:
             return f"Error fetching technical indicators for {symbol}: {e}"
+
+
+if __name__ == '__main__':
+    m = YFinanceTool()
+    r = m.get_current_stock_price("AAPL")
+    print(r)
+    r = m.get_company_info("AAPL")
+    print(r)
+    r = m.get_historical_stock_prices("AAPL")
+    print(r)
+    r = m.get_stock_fundamentals("AAPL")
+    print(r)
+    r = m.get_income_statements("AAPL")
+    print(r)
+    r = m.get_key_financial_ratios("AAPL")
+    print(r)
+    r = m.get_analyst_recommendations("AAPL")
+    print(r)
+    r = m.get_company_news("AAPL")
+    print(r)
+    r = m.get_technical_indicators("AAPL")
+    print(r)

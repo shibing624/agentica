@@ -1,6 +1,6 @@
 import pytest
 
-from agentica.tools.run_nb_code import RunNbCodeWrapper
+from agentica.tools.run_nb_code_tool import RunNbCodeWrapper
 
 
 def test_code_running():

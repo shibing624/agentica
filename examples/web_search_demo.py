@@ -7,7 +7,7 @@ import sys
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = Assistant(
     llm=AzureOpenAILLM(model="gpt-4o"),

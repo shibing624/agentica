@@ -93,8 +93,8 @@ class OpenAILLM(LLM):
             _client_params["http_client"] = self.http_client
         if self.client_params:
             _client_params.update(self.client_params)
-        self.client = OpenAIClient(**_client_params)
-        return self.client
+        # Use a new client instance for each request to avoid request failures due to cached client instances
+        return OpenAIClient(**_client_params)
 
     def get_async_client(self) -> AsyncOpenAIClient:
         if self.async_client:

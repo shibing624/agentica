@@ -8,7 +8,7 @@ from unittest.mock import patch, Mock
 
 import pytest
 
-from agentica.tools.jina import JinaTool
+from agentica.tools.jina_tool import JinaTool
 
 
 @pytest.fixture

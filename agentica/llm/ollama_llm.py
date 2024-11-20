@@ -131,8 +131,7 @@ class OllamaLLM(LLM):
             _ollama_params["timeout"] = self.timeout
         if self.client_kwargs:
             _ollama_params.update(self.client_kwargs)
-        self.ollama_client = OllamaClient(**_ollama_params)
-        return self.ollama_client
+        return OllamaClient(**_ollama_params)
 
     @property
     def api_kwargs(self) -> Dict[str, Any]:

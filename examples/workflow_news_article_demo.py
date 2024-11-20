@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
 from agentica.workflow import Workflow, Task
-from agentica.tools.search_exa import SearchExaTool
+from agentica.tools.search_exa_tool import SearchExaTool
 
 
 class NewsArticle(BaseModel):

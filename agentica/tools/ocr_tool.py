@@ -3,7 +3,6 @@
 @author:XuMing(xuming624@qq.com)
 @description: Use EasyOCR to extract text from images.
 """
-
 import ssl
 import json
 try:
@@ -28,16 +27,24 @@ class OcrTool(Toolkit):
         """
         super().__init__(name="ocr_tool")
         self.reader = easyocr.Reader(languages, gpu=use_gpu)
-        logger.debug(f"Initialized easyocr tool with languages: {languages} and GPU: {use_gpu}")
+        logger.debug(f"Initialized easyocr tool with languages: {languages} and use GPU: {use_gpu}")
         self.register(self.read_text)
 
     def read_text(self, image_path: str, detail: int = 0) -> str:
-        """
-        Reads text from an image.
+        """Reads text from an image.
 
-        :param image_path: Path to the image file.
-        :param detail: Whether to return detailed information (1 for yes, 0 for no).
-        :return: str, the recognized text.
+        Args:
+            image_path (str): Path to the image file.
+            detail (int): Whether to return detailed information (1 for yes, 0 for no).
+
+        Example:
+            from agentica.tools.ocr_tool import OcrTool
+            ocr_tool = OcrTool()
+            text = ocr_tool.read_text('../../examples/data/chinese.jpg')
+            print('Text:', text)
+
+        Returns:
+            str: The recognized text.
         """
         try:
             result = self.reader.readtext(image_path, detail=detail)

@@ -40,13 +40,21 @@ class AnalyzeImageTool(Toolkit):
             self.llm = OpenAILLM()
 
     def analyze_image_content(self, image_path_or_url: str) -> str:
-        """
-        Reads and understands the content of an image using OpenAI's API.
+        """Reads and understands the content of an image using image understand model API.
 
-        :param image_path_or_url: The path to the image or the URL of the image.
-        :type image_path_or_url: str
-        :return: The description of the image content.
-        :rtype: str
+        Args:
+            image_path_or_url (str): The path to the image or the URL of the image.
+
+        Example:
+            ```python
+            from agentica.tools.analyze_image_tool import AnalyzeImageTool
+            tool = AnalyzeImageTool()
+            image_description = tool.analyze_image_content("../../examples/data/chinese.jpg")
+            print(image_description)
+            ```
+
+        Returns:
+            str: The description of the image content.
         """
 
         # Update the LLM (set defaults, add logit etc.)
@@ -130,7 +138,6 @@ class AnalyzeImageTool(Toolkit):
         return response.choices[0].message.content
 
 
-# Example usage:
 if __name__ == "__main__":
     tool = AnalyzeImageTool()
     image_description = tool.analyze_image_content("../../examples/data/chinese.jpg")

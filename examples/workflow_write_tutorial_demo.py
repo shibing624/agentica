@@ -10,9 +10,9 @@ from textwrap import dedent
 sys.path.append('..')
 from agentica import Assistant, OpenAILLM
 from agentica.workflow import Workflow, Task
-from agentica.tools.search_serper import SearchSerperTool
-from agentica.tools.search_exa import SearchExaTool
-from agentica.tools.wikipedia import WikipediaTool
+from agentica.tools.search_serper_tool import SearchSerperTool
+from agentica.tools.search_exa_tool import SearchExaTool
+from agentica.tools.wikipedia_tool import WikipediaTool
 
 output_dir = "outputs/tutorial_v1/"
 # 首次生成目录的任务助手

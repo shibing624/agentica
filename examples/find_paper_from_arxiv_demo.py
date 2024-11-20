@@ -7,7 +7,7 @@ import sys
 
 sys.path.append('..')
 from agentica import PythonAssistant, AzureOpenAILLM
-from agentica.tools.jina import JinaTool
+from agentica.tools.jina_tool import JinaTool
 
 m = PythonAssistant(
     llm=AzureOpenAILLM(),

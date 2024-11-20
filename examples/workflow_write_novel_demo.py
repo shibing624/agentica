@@ -10,7 +10,7 @@ from textwrap import dedent
 sys.path.append('..')
 from agentica import Assistant, OpenAILLM
 from agentica.workflow import Workflow, Task
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 
 output_dir = "outputs/novel_v1/"
 # 生成初始大纲的 Assistant

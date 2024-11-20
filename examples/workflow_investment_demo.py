@@ -8,7 +8,7 @@ import sys
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
 from agentica.workflow import Workflow, Task
-from agentica.tools.yfinance import YFinanceTool
+from agentica.tools.yfinance_tool import YFinanceTool
 
 stock_analyst_report = "stock_analyst_report.md"
 research_analyst_report = "research_analyst_report.md"

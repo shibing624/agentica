@@ -69,7 +69,7 @@ pip install .
 
 ```python
 from agentica import Assistant, OpenAILLM, AzureOpenAILLM
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = Assistant(
   llm=AzureOpenAILLM(),

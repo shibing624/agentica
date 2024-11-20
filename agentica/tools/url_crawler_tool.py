@@ -70,9 +70,21 @@ class UrlCrawlerTool(Toolkit):
         webpage_text = "# " + title + "\n\n" + webpage_text
         return webpage_text
 
-    def crawl_url_to_file(self, url: str):
-        """
-        Crawls a website and saves the content to a file.
+    def url_crawl(self, url: str) -> str:
+        """Crawl a website and return the content of the website as a json string.
+
+        Args:
+            url (str): The URL of the website to read.
+
+        Example:
+            from agentica.tools.url_crawler_tool import UrlCrawlerTool
+            m = UrlCrawlerTool()
+            url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+            r = m.url_crawl(url)
+            print(url, '\n\n', r)
+
+        Returns:
+            str: The content of the website as a json string.
         """
         filename = self._generate_file_name_from_url(url)
         save_path = os.path.realpath(os.path.join(self.work_dir, filename))
@@ -102,17 +114,6 @@ class UrlCrawlerTool(Toolkit):
             logger.debug(f"Successfully crawled: {url}, saved to: {save_path}")
         except Exception as e:
             logger.debug(f"Failed to crawl: {url}: {e}")
-
-        return content, save_path
-
-    def url_crawl(self, url: str) -> str:
-        """
-        Crawl a website and return the content of the website as a json string.
-
-        :param url: The URL of the website to read.
-        :return: str
-        """
-        content, save_path = self.crawl_url_to_file(url)
         crawler_result = {
             "url": url,
             "content": content,

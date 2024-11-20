@@ -10,7 +10,7 @@ import sys
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM
-from agentica.tools.ocr import OcrTool
+from agentica.tools.ocr_tool import OcrTool
 
 m = Assistant(
     llm=AzureOpenAILLM(),

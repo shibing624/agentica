@@ -18,15 +18,15 @@ import streamlit as st
 
 sys.path.append('..')
 from agentica import Assistant, AzureOpenAILLM, PythonAssistant
-from agentica.tools.file import FileTool
+from agentica.tools.file_tool import FileTool
 from agentica.utils.log import logger
-from agentica.tools.search_serper import SearchSerperTool
-from agentica.tools.shell import ShellTool
+from agentica.tools.search_serper_tool import SearchSerperTool
+from agentica.tools.shell_tool import ShellTool
 from agentica.knowledge.knowledge_base import KnowledgeBase
 from agentica.vectordb.lancedb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica.tools.search_exa import SearchExaTool
-from agentica.tools.yfinance import YFinanceTool
+from agentica.tools.search_exa_tool import SearchExaTool
+from agentica.tools.yfinance_tool import YFinanceTool
 from agentica.storage.sqlite_storage import SqlAssistantStorage
 from agentica.document import Document
 

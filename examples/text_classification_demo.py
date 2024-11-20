@@ -10,9 +10,9 @@ import sys
 
 sys.path.append('..')
 from agentica import PythonAssistant, AzureOpenAILLM
-from agentica.tools.jina import JinaTool
-from agentica.tools.url_crawler import UrlCrawlerTool
-from agentica.tools.search_serper import SearchSerperTool
+from agentica.tools.jina_tool import JinaTool
+from agentica.tools.url_crawler_tool import UrlCrawlerTool
+from agentica.tools.search_serper_tool import SearchSerperTool
 m = PythonAssistant(
     llm=AzureOpenAILLM(),
     description="You are a helpful ai assistant.",
