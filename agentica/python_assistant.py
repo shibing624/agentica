@@ -82,6 +82,8 @@ class PythonAssistant(Assistant):
             "Determine if you can answer the question directly or if you need to run python code to "
             "accomplish the task.",
             "If you need to run code, **FIRST THINK** how you will accomplish the task and then write the code.",
+            # 优先使用agentcia.tools下面的工具，如果没有再自己写代码
+            "Use `agentica.tools` to accomplish the task if possible, if the tools do not exist, write the code.",
         ]
 
         if self.files is not None:
