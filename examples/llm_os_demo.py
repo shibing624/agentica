@@ -17,17 +17,17 @@ from typing import List, Optional
 import streamlit as st
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM, PythonAssistant
+from agentica import Agent, AzureOpenAIChat, PythonAgent
 from agentica.tools.file_tool import FileTool
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.shell_tool import ShellTool
-from agentica.knowledge.knowledge_base import KnowledgeBase
-from agentica.vectordb.lancedb import LanceDb
+from agentica.knowledge.base import Knowledge
+from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.tools.search_exa_tool import SearchExaTool
 from agentica.tools.yfinance_tool import YFinanceTool
-from agentica.storage.sqlite_storage import SqlAssistantStorage
+from agentica.storage.agent.sqlite import SqlAgentStorage
 from agentica.document import Document
 
 
@@ -42,7 +42,7 @@ def get_llm_os(
         user_id: Optional[str] = None,
         run_id: Optional[str] = None,
         debug_mode: bool = True,
-) -> Assistant:
+) -> Agent:
     llm_model_name = llm.model
     logger.info(f"-*- Creating {llm_model_name} LLM OS -*-")
 
@@ -63,7 +63,7 @@ def get_llm_os(
         )
 
     # Add team members available to the LLM OS
-    team: List[Assistant] = []
+    team: List[Agent] = []
     embedder = Text2VecEmb()
     lance_db = LanceDb(
         uri="outputs/llm_os_lancedb",
@@ -72,7 +72,7 @@ def get_llm_os(
     )
     knowledge_base = None
     if python_assistant:
-        _python_assistant = PythonAssistant(
+        _python_assistant = PythonAgent(
             name="Python Assistant",
             role="Write and run python code",
             pip_install=True,
@@ -81,7 +81,7 @@ def get_llm_os(
         team.append(_python_assistant)
         extra_instructions.append("To write and run python code, delegate the task to the `Python Assistant`.")
     if research_assistant:
-        _research_assistant = Assistant(
+        _research_assistant = Agent(
             name="Research Assistant",
             role="Write a research report on a given topic",
             llm=llm,
@@ -131,7 +131,7 @@ def get_llm_os(
             "Return the report in the <report_format> to the user as is, without any additional text like 'here is the report'."
         )
     if investment_assistant:
-        _investment_assistant = Assistant(
+        _investment_assistant = Agent(
             name="Investment Assistant",
             role="Write a investment report on a given company (stock) symbol",
             llm=llm,
@@ -199,7 +199,7 @@ def get_llm_os(
         )
 
     # Create the LLM OS Assistant
-    llm_os = Assistant(
+    llm_os = Agent(
         name="llm_os",
         run_id=run_id,
         user_id=user_id,
@@ -228,9 +228,9 @@ def get_llm_os(
         ],
         extra_instructions=extra_instructions,
         # Add long-term memory to the LLM OS backed by a PostgreSQL database
-        storage=SqlAssistantStorage(table_name="llm_os", db_file="outputs/llm_os.db"),
+        storage=SqlAgentStorage(table_name="llm_os", db_file="outputs/llm_os.db"),
         # Add a knowledge base to the LLM OS
-        knowledge_base=knowledge_base if knowledge_base else KnowledgeBase(vector_db=lance_db),
+        knowledge_base=knowledge_base if knowledge_base else Knowledge(vector_db=lance_db),
         # Add selected tools to the LLM OS
         tools=tools,
         # Add selected team members to the LLM OS
@@ -370,10 +370,10 @@ def main():
         restart_assistant()
 
     # Get the assistant
-    llm_os: Assistant
+    llm_os: Agent
     if "llm_os" not in st.session_state or st.session_state["llm_os"] is None:
         logger.info(f"---*--- Creating {llm_id} LLM OS ---*---")
-        llm = AzureOpenAILLM(model=llm_id)
+        llm = AzureOpenAIChat(model=llm_id)
         llm_os = get_llm_os(
             llm=llm,
             google_search=google_search_enabled,
@@ -494,11 +494,11 @@ def main():
                         _team_member_memory_container.json(team_member.memory.get_llm_messages())
 
     if llm_os.storage:
-        llm_os_run_ids: List[str] = llm_os.storage.get_all_run_ids()
+        llm_os_run_ids: List[str] = llm_os.storage.get_all_session_ids()
         new_llm_os_run_id = st.sidebar.selectbox("Run ID", options=llm_os_run_ids)
         if st.session_state["llm_os_run_id"] != new_llm_os_run_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_llm_os_run_id} ---*---")
-            llm = AzureOpenAILLM(model=llm_id)
+            llm = AzureOpenAIChat(model=llm_id)
             st.session_state["llm_os"] = get_llm_os(
                 llm=llm,
                 google_search=google_search_enabled,

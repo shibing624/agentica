@@ -1,15 +1,15 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Agent, AzureOpenAIChat
 
-assistant = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4-turbo", max_tokens=4096),
+m = Agent(
+    llm=AzureOpenAIChat(model="gpt-4-turbo", max_tokens=4096),
     debug_mode=True,
 )
 
 # Single Image
-r = assistant.run(
+r = m.run(
     [
         {"type": "text", "text": "描述图片"},
         {
@@ -20,10 +20,10 @@ r = assistant.run(
         },
     ]
 )
-print(r, "".join(r))
+print(r)
 
 # Multiple Images
-r = assistant.run(
+r = m.run(
     [
         {
             "type": "text",
@@ -43,4 +43,4 @@ r = assistant.run(
         },
     ],
 )
-print(r, "".join(r))
+print(r)

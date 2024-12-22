@@ -18,11 +18,11 @@ from agentica.utils.log import logger
 
 
 class UrlCrawlerTool(Toolkit):
-    work_dir: str = os.path.curdir
+    base_dir: str = os.path.curdir
 
-    def __init__(self, work_dir: str = None):
+    def __init__(self, base_dir: str = None):
         super().__init__(name="url_crawler_tool")
-        self.work_dir = work_dir if work_dir is not None else self.work_dir
+        self.base_dir = base_dir or self.base_dir
         self.register(self.url_crawl)
 
     @staticmethod
@@ -70,7 +70,7 @@ class UrlCrawlerTool(Toolkit):
         webpage_text = "# " + title + "\n\n" + webpage_text
         return webpage_text
 
-    def url_crawl(self, url: str) -> str:
+    def url_crawl(self, url: str) -> dict:
         """Crawl a website and return the content of the website as a json string.
 
         Args:
@@ -84,10 +84,10 @@ class UrlCrawlerTool(Toolkit):
             print(url, '\n\n', r)
 
         Returns:
-            str: The content of the website as a json string.
+            dict: The dict of url, content, save_path
         """
         filename = self._generate_file_name_from_url(url)
-        save_path = os.path.realpath(os.path.join(self.work_dir, filename))
+        save_path = os.path.realpath(os.path.join(self.base_dir, filename))
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         content = ""
         try:
@@ -119,8 +119,7 @@ class UrlCrawlerTool(Toolkit):
             "content": content,
             "save_path": save_path,
         }
-        result = json.dumps(crawler_result, indent=2, ensure_ascii=False)
-        return result
+        return crawler_result
 
 
 if __name__ == '__main__':

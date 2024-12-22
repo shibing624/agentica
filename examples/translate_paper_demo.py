@@ -10,10 +10,10 @@ import sys
 from loguru import logger
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
-from agentica.knowledge.knowledge_base import KnowledgeBase
+from agentica import Agent, AzureOpenAIChat
+from agentica.knowledge import Knowledge
 
-knowledge_base = KnowledgeBase(
+knowledge_base = Knowledge(
     # data_path=["https://phi-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],
     data_path=["data/paper_sample.pdf"],
 )
@@ -23,11 +23,11 @@ knowledge_base.load(recreate=True)
 docs = []
 for document_list in knowledge_base.document_lists:
     docs.extend(document_list)
-
+docs = docs[:1]
 logger.info(f'docs size: {len(docs)}, top3: {docs[:3]}')
 
-assistant = Assistant(
-    llm=AzureOpenAILLM(model='gpt-4o'),
+assistant = Agent(
+    llm=AzureOpenAIChat(model='gpt-4o'),
     description="""现在你要解释一篇专业的技术文章成简体中文给大学生阅读。
 
 规则：
@@ -62,9 +62,8 @@ Step 2：扮演中文老师，精通中文，擅长写通俗易懂的科普文�
 full_translated = ""
 for doc in docs:
     q = doc.content
-
-    o = assistant.run(q)
-    r = "".join(o)
+    res = assistant.run(q)
+    r = res.content
     r = r.split("Step 2: 中文老师翻译")[-1]
     logger.info(f"input: {q}")
     logger.info(f"output: {r}")

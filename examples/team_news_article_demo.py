@@ -11,7 +11,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Agent, AzureOpenAIChat
 from agentica.tools.search_exa_tool import SearchExaTool
 
 
@@ -22,8 +22,8 @@ class NewsArticle(BaseModel):
 
 
 output_dir = "outputs"
-researcher = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4o"),
+researcher = Agent(
+    llm=AzureOpenAIChat(model="gpt-4o"),
     name="Article Researcher",
     tools=[SearchExaTool()],
     description="Given a topic, search for 15 articles and return the 7 most relevant articles.",
@@ -31,8 +31,8 @@ researcher = Assistant(
     output_dir=output_dir,
 )
 
-writer = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4o"),
+writer = Agent(
+    llm=AzureOpenAIChat(model="gpt-4o"),
     name="Article Writer",
     output_dir=output_dir,
     output_file_name="article.md",
@@ -75,7 +75,7 @@ writer = Assistant(
     ),
 )
 
-team = Assistant(
+team = Agent(
     name="write Article",
     team=[researcher, writer],
     show_tool_calls=True,
@@ -87,4 +87,4 @@ r = team.run(
     Read each article and and write a NYT worthy news article. 用中文写。
     """
 )
-print("".join(r))
+print(r)

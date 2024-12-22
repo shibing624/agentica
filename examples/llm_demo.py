@@ -7,11 +7,18 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM, DeepseekLLM, YiLLM, MoonshotLLM
+from agentica import Message, YiChat, AzureOpenAIChat, DeepSeekChat, OpenAIChat, MoonshotChat
 
-m = Assistant(
-    llm=YiLLM(api_key='your_yi_api_key'),
-    debug_mode=True,
-)
-r = m.run("一句话介绍林黛玉")
-print(r, "".join(r))
+query = "一句话介绍林黛玉"
+model = AzureOpenAIChat()
+print(model)
+messages = [Message(role="user", content=query)]
+r = model.response(messages)
+print(r)
+model = OpenAIChat()
+print(model)
+print(model.response(messages=messages))
+model = DeepSeekChat()
+print(model)
+print(model.response(messages=messages))
+

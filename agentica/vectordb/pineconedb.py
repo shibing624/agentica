@@ -1,13 +1,11 @@
 from typing import Optional, Dict, Union, List, Any
 
 try:
-    from pinecone import Pinecone
+    from pinecone import Pinecone, ServerlessSpec, PodSpec
     from pinecone.config import Config
-    from pinecone.models import ServerlessSpec, PodSpec
-    from pinecone.core.openapi.data.model.vector import Vector
 except ImportError:
     raise ImportError(
-        "The `pinecone-client` package is not installed, please install using `pip install pinecone-client`."
+        "The `pinecone` package is not installed, please install using `pip install pinecone`."
     )
 
 from agentica.document import Document
@@ -15,6 +13,7 @@ from agentica.emb.base import Emb
 from agentica.emb.openai_emb import OpenAIEmb
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
+from agentica.reranker.base import Reranker
 
 
 class PineconeDB(VectorDb):
@@ -32,6 +31,9 @@ class PineconeDB(VectorDb):
         api_key (Optional[str], optional): The Pinecone API key. Defaults to None.
         host (Optional[str], optional): The Pinecone host. Defaults to None.
         config (Optional[Config], optional): The Pinecone config. Defaults to None.
+        use_hybrid_search (bool): Whether to use hybrid search combining dense and sparse embeddings.
+        hybrid_alpha (float): The weight for the dense embedding in hybrid search, between 0 and 1.
+        reranker (Optional[Reranker]): An optional reranker to refine search results.
         **kwargs: Additional keyword arguments.
 
     Attributes:
@@ -66,6 +68,9 @@ class PineconeDB(VectorDb):
             api_key: Optional[str] = None,
             host: Optional[str] = None,
             config: Optional[Config] = None,
+            use_hybrid_search: bool = False,
+            hybrid_alpha: float = 0.5,
+            reranker: Optional[Reranker] = None,
             **kwargs,
     ):
         self.embedder: Emb = embedder
@@ -84,6 +89,24 @@ class PineconeDB(VectorDb):
         self.metric: Optional[str] = metric
         self.timeout: Optional[int] = timeout
         self.kwargs: Optional[Dict[str, str]] = kwargs
+        self.use_hybrid_search: bool = use_hybrid_search
+        self.hybrid_alpha: float = hybrid_alpha
+        if self.use_hybrid_search:
+            try:
+                from pinecone_text.sparse import BM25Encoder
+            except ImportError:
+                raise ImportError(
+                    "The `pinecone_text` package is not installed, please install using `pip install pinecone-text`."
+                )
+
+            self.sparse_encoder = BM25Encoder().default()
+
+        # Embedder for embedding the document contents
+        _embedder = embedder
+        if _embedder is None:
+            _embedder = OpenAIEmb()
+        self.embedder: Emb = _embedder
+        self.reranker: Optional[Reranker] = reranker
 
     @property
     def client(self) -> Pinecone:
@@ -133,6 +156,10 @@ class PineconeDB(VectorDb):
         """Create the index if it does not exist."""
         if not self.exists():
             logger.debug(f"Creating index: {self.name}")
+
+            if self.use_hybrid_search:
+                self.metric = "dotproduct"
+
             self.client.create_index(
                 name=self.name,
                 dimension=self.dimension,
@@ -141,7 +168,7 @@ class PineconeDB(VectorDb):
                 timeout=self.timeout,
             )
 
-    def delete(self) -> None:
+    def drop(self) -> None:
         """Delete the index if it exists."""
         if self.exists():
             logger.debug(f"Deleting index: {self.name}")
@@ -179,6 +206,7 @@ class PineconeDB(VectorDb):
     def upsert(
             self,
             documents: List[Document],
+            filters: Optional[Dict[str, Any]] = None,
             namespace: Optional[str] = None,
             batch_size: Optional[int] = None,
             show_progress: bool = False,
@@ -187,23 +215,25 @@ class PineconeDB(VectorDb):
 
         Args:
             documents (List[Document]): The documents to upsert.
+            filters (Optional[Dict[str, Any]], optional): The filters for the upsert. Defaults to None.
             namespace (Optional[str], optional): The namespace for the documents. Defaults to None.
             batch_size (Optional[int], optional): The batch size for upsert. Defaults to None.
             show_progress (bool, optional): Whether to show progress during upsert. Defaults to False.
 
         """
-
         vectors = []
         for document in documents:
             document.embed(embedder=self.embedder)
             document.meta_data["text"] = document.content
-            vectors.append(
-                Vector(
-                    id=document.id,
-                    values=document.embedding,
-                    metadata=document.meta_data,
-                )
-            )
+            data_to_upsert = {
+                "id": document.id,
+                "values": document.embedding,
+                "metadata": document.meta_data,
+            }
+            if self.use_hybrid_search:
+                data_to_upsert["sparse_values"] = self.sparse_encoder.encode_documents(document.content)
+            vectors.append(data_to_upsert)
+
         self.index.upsert(
             vectors=vectors,
             namespace=namespace,
@@ -220,13 +250,14 @@ class PineconeDB(VectorDb):
         """
         return True
 
-    def insert(self, documents: List[Document]) -> None:
+    def insert(self, documents: List[Document], filters: Optional[Dict[str, Any]] = None) -> None:
         """Insert documents into the index.
 
         This method is not supported by Pinecone. Use `upsert` instead.
 
         Args:
             documents (List[Document]): The documents to insert.
+            filters (Optional[Dict[str, Any]], optional): The filters for the insert. Defaults to None.
 
         Raises:
             NotImplementedError: This method is not supported by Pinecone.
@@ -234,12 +265,30 @@ class PineconeDB(VectorDb):
         """
         raise NotImplementedError("Pinecone does not support insert operations. Use upsert instead.")
 
+    def _hybrid_scale(self, dense: List[float], sparse: Dict[str, Any], alpha: float):
+        """Hybrid vector scaling using a convex combination
+        1 is pure semantic search, 0 is pure keyword search
+        alpha * dense + (1 - alpha) * sparse
+
+        Args:
+            dense: Array of floats representing
+            sparse: a dict of `indices` and `values`
+            alpha: float between 0 and 1 where 0 == sparse only
+                and 1 == dense only
+        """
+        if alpha < 0 or alpha > 1:
+            raise ValueError("Alpha must be between 0 and 1")
+        # scale sparse and dense vectors to create hybrid search vecs
+        hsparse = {"indices": sparse["indices"], "values": [v * (1 - alpha) for v in sparse["values"]]}
+        hdense = [v * alpha for v in dense]
+        return hdense, hsparse
+
     def search(
             self,
             query: str,
             limit: int = 5,
+            filters: Optional[Dict[str, Union[str, float, int, bool, List, dict]]] = None,
             namespace: Optional[str] = None,
-            filter: Optional[Dict[str, Union[str, float, int, bool, List, dict]]] = None,
             include_values: Optional[bool] = None,
     ) -> List[Document]:
         """Search for similar documents in the index.
@@ -247,30 +296,45 @@ class PineconeDB(VectorDb):
         Args:
             query (str): The query to search for.
             limit (int, optional): The maximum number of results to return. Defaults to 5.
+            filters (Optional[Dict[str, Union[str, float, int, bool, List, dict]]], optional): The filter for the search. Defaults to None.
             namespace (Optional[str], optional): The namespace to search in. Defaults to None.
-            filter (Optional[Dict[str, Union[str, float, int, bool, List, dict]]], optional): The filter for the search. Defaults to None.
             include_values (Optional[bool], optional): Whether to include values in the search results. Defaults to None.
-            include_metadata (Optional[bool], optional): Whether to include metadata in the search results. Defaults to None.
 
         Returns:
             List[Document]: The list of matching documents.
 
         """
-        query_embedding = self.embedder.get_embedding(query)
+        dense_embedding = self.embedder.get_embedding(query)
+        sparse_embedding = None
+        if self.use_hybrid_search:
+            sparse_embedding = self.sparse_encoder.encode_queries(query)
 
-        if query_embedding is None:
+        if dense_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []
 
-        response = self.index.query(
-            vector=query_embedding,
-            top_k=limit,
-            namespace=namespace,
-            filter=filter,
-            include_values=include_values,
-            include_metadata=True,
-        )
-        return [
+        if self.use_hybrid_search:
+            hdense, hsparse = self._hybrid_scale(dense_embedding, sparse_embedding, alpha=self.hybrid_alpha)
+            response = self.index.query(
+                vector=hdense,
+                sparse_vector=hsparse,
+                top_k=limit,
+                namespace=namespace,
+                filter=filters,
+                include_values=include_values,
+                include_metadata=True,
+            )
+        else:
+            response = self.index.query(
+                vector=dense_embedding,
+                top_k=limit,
+                namespace=namespace,
+                filter=filters,
+                include_values=include_values,
+                include_metadata=True,
+            )
+
+        search_results = [
             Document(
                 content=(result.metadata.get("text", "") if result.metadata is not None else ""),
                 id=result.id,
@@ -280,18 +344,24 @@ class PineconeDB(VectorDb):
             for result in response.matches
         ]
 
+        if self.reranker:
+            search_results = self.reranker.rerank(query=query, documents=search_results)
+        return search_results
+
     def optimize(self) -> None:
         """Optimize the index.
 
         This method can be left empty as Pinecone automatically optimizes indexes.
+
         """
         pass
 
-    def clear(self, namespace: Optional[str] = None) -> bool:
+    def delete(self, namespace: Optional[str] = None) -> bool:
         """Clear the index.
 
         Args:
             namespace (Optional[str], optional): The namespace to clear. Defaults to None.
+
         """
         try:
             self.index.delete(delete_all=True, namespace=namespace)

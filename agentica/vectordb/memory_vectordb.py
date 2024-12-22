@@ -5,14 +5,15 @@
 """
 
 from hashlib import md5
-from typing import List
-
+from typing import List, Dict, Any, Optional
 import numpy as np
 
 from agentica.document import Document
 from agentica.emb.base import Emb
 from agentica.emb.openai_emb import OpenAIEmb
 from agentica.vectordb.base import VectorDb, Distance
+from agentica.utils.log import logger
+from agentica.reranker.base import Reranker
 
 
 class MemoryVectorDb(VectorDb):
@@ -20,10 +21,15 @@ class MemoryVectorDb(VectorDb):
             self,
             embedder: Emb = OpenAIEmb(),
             distance: Distance = Distance.cosine,
+            reranker: Optional[Reranker] = None,
+            **kwargs,
     ):
         self.embedder = embedder
         self.distance = distance
         self.documents = []
+        self.reranker: Optional[Reranker] = reranker
+
+        self.kwargs = kwargs
 
     def create(self) -> None:
         """Create an in-memory storage."""
@@ -36,14 +42,14 @@ class MemoryVectorDb(VectorDb):
     def name_exists(self, name: str) -> bool:
         return any(doc for doc in self.documents if doc.name == name)
 
-    def insert(self, documents: List[Document]) -> None:
+    def insert(self, documents: List[Document], filters: Optional[Dict[str, Any]] = None) -> None:
         """Insert documents into the in-memory storage."""
         for document in documents:
             document.embed(self.embedder)
             if not self.doc_exists(document):
                 self.documents.append(document)
 
-    def upsert(self, documents: List[Document]) -> None:
+    def upsert(self, documents: List[Document], filters: Optional[Dict[str, Any]] = None) -> None:
         """Upsert documents into the in-memory storage."""
         for document in documents:
             existing_doc_idx = self._get_doc_idx(document)
@@ -53,10 +59,11 @@ class MemoryVectorDb(VectorDb):
                 document.embed(self.embedder)
                 self.documents.append(document)
 
-    def search(self, query: str, limit: int = 5) -> List[Document]:
+    def search(self, query: str, limit: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[Document]:
         """Search for documents that are most similar to the query."""
         query_embedding = self.embedder.get_embedding(query)
         if query_embedding is None:
+            logger.error(f"Error getting embedding for Query: {query}")
             return []
         try:
             from sklearn.metrics.pairwise import cosine_similarity
@@ -70,9 +77,13 @@ class MemoryVectorDb(VectorDb):
 
         # Get the indices of the documents with the highest similarity scores
         sorted_indices = np.argsort(similarities)[::-1][:limit]
-        return [self.documents[idx] for idx in sorted_indices]
+        search_results = [self.documents[idx] for idx in sorted_indices]
+        if self.reranker:
+            search_results = self.reranker.rerank(query=query, documents=search_results)
 
-    def delete(self) -> None:
+        return search_results
+
+    def drop(self) -> None:
         """Delete all documents in the in-memory storage."""
         self.create()
 
@@ -84,9 +95,9 @@ class MemoryVectorDb(VectorDb):
         """No optimization needed for in-memory storage."""
         pass
 
-    def clear(self) -> bool:
+    def delete(self) -> bool:
         """Clear the in-memory storage."""
-        self.delete()
+        self.drop()
         return True
 
     def _generate_doc_id(self, content: str) -> str:

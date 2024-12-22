@@ -7,8 +7,8 @@ import sys
 
 sys.path.append('..')
 from agentica.file.csv import CsvFile
-from agentica.python_assistant import PythonAssistant
-python_assistant = PythonAssistant(
+from agentica import PythonAgent
+m = PythonAgent(
     files=[
         CsvFile(
             data_path="https://phidata-public.s3.amazonaws.com/demo_data/IMDB-Movie-Data.csv",
@@ -17,5 +17,5 @@ python_assistant = PythonAssistant(
     ]
 )
 
-r = python_assistant.run("What is the min rating of movies?")
-print("".join(r))
+r = m.run("What is the min rating of movies?")
+print(r)

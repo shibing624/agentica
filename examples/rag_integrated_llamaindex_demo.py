@@ -9,9 +9,9 @@ pip install llamaindex
 import sys
 
 sys.path.append('..')
-from agentica import Assistant
+from agentica import Agent
 
-from agentica.knowledge.llamaindex import LlamaIndexKnowledgeBase
+from agentica.knowledge.llamaindex_knowledge import LlamaIndexKnowledge
 from llama_index.core import (
     SimpleDirectoryReader,
     StorageContext,
@@ -36,11 +36,11 @@ index = VectorStoreIndex(nodes=nodes, storage_context=storage_context)
 retriever = VectorIndexRetriever(index)
 
 # Create a knowledge base from the vector store
-knowledge_base = LlamaIndexKnowledgeBase(retriever=retriever)
+knowledge = LlamaIndexKnowledge(retriever=retriever)
 
 # Create an assistant with the knowledge base
-assistant = Assistant(knowledge_base=knowledge_base, search_knowledge=True, debug_mode=True, show_tool_calls=True)
+assistant = Agent(knowledge_base=knowledge, search_knowledge=True, debug_mode=True, show_tool_calls=True)
 
 # Use the assistant to ask a question and print a response.
 r = assistant.run("2023年全国田径锦标赛在哪里举办的?")
-print(r, "".join(r))
+print(r)

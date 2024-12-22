@@ -36,33 +36,32 @@ class SerperWrapper(BaseModel):
             )
         return values
 
+    def get_headers(self) -> Dict[str, str]:
+        headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
+        return headers
+
     def run(self, query: str, max_results: int = 8, as_string: bool = True):
         """Run query through Serper and parse result"""
-        import ssl
-        # Create a default context for HTTPS requests (not recommended for production)
-        ssl._create_default_https_context = ssl._create_unverified_context
-
         headers = self.get_headers()
 
         conn = http.client.HTTPSConnection("google.serper.dev")
-        payload = json.dumps({
-            "q": query,
-            "num": max_results,
-        })
+        payload = json.dumps({"q": query, "num": max_results})
         try:
             conn.request("POST", "/search", payload, headers)
             res = conn.getresponse()
-            data = res.read()
-            data = json.loads(data.decode("utf-8"))
+            res_data = res.read()
+            data = json.loads(res_data.decode("utf-8"))
+            # Check for specific error messages
+            if "error" in data:
+                raise ValueError(f"Error from Serper API: {data['error']}")
+            if "message" in data and "Unauthorized" in data["message"]:
+                raise ValueError("Unauthorized access to Serper API. Check your API key.")
+
             res = self._process_response(data, as_string=as_string)
         except Exception as e:
             logger.error(f"Failed to search `{query}` due to {e}")
             res = ""
         return res
-
-    def get_headers(self) -> Dict[str, str]:
-        headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
-        return headers
 
     @staticmethod
     def _process_response(res: dict, as_string: bool = False) -> str:
@@ -99,7 +98,7 @@ class SerperWrapper(BaseModel):
         if res.get("organic"):
             toret_l += [get_focused(i) for i in res.get("organic")]
 
-        return str(toret) + "\n" + str(toret_l) if as_string else toret_l
+        return f"{toret}\n{toret_l}" if as_string else toret_l
 
 
 class SearchSerperTool(Toolkit):

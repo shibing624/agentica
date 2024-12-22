@@ -1,31 +1,31 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
-from agentica.storage.sqlite_storage import SqlAssistantStorage
+from agentica import Agent, AzureOpenAIChat
+from agentica import SqlAgentStorage
 
 if __name__ == '__main__':
-    llm = AzureOpenAILLM()
+    llm = AzureOpenAIChat()
     print(llm)
-    assistant = Assistant(
+    m = Agent(
         llm=llm,
         add_chat_history_to_messages=True,
-        storage=SqlAssistantStorage(table_name="assistant_runs", db_file="outputs/assistant_runs.db"),
+        storage=SqlAgentStorage(table_name="assistant_runs", db_file="outputs/assistant_runs.db"),
         output_dir="outputs"
     )
-    r = assistant.run("How many people live in Canada?")
-    print("".join(r))
-    r = assistant.run("What is their national anthem called?")
-    print("".join(r))
+    r = m.run("How many people live in Canada?")
+    print(r)
+    r = m.run("What is their national anthem called?")
+    print(r)
 
 
     # Function to print all stored runs
     def print_all_runs(storage):
-        runs = storage.get_all_runs()
+        runs = storage.get_all_sessions()
         print(f"Total runs: {len(runs)}")
         for run in runs:
             print(run)
 
 
     # Print all stored runs
-    print_all_runs(assistant.storage)
+    print_all_runs(m.storage)

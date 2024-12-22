@@ -1,10 +1,10 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, OpenAILLM
+from agentica import Agent, OpenAIChat
 
-r = Assistant(
-    llm=OpenAILLM(model="gpt-3.5-turbo", stop="</answer>"),
+r = Agent(
+    llm=OpenAIChat(model="gpt-3.5-turbo", stop="</answer>"),
     debug_mode=True,
 ).run(
     messages=[
@@ -12,4 +12,4 @@ r = Assistant(
         {"role": "assistant", "content": "<answer>"},
     ],
 )
-print(r, "".join(r))
+print(r)

@@ -7,12 +7,12 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
-from agentica.knowledge.knowledge_base import KnowledgeBase
-from agentica.vectordb.lancedb import LanceDb
+from agentica import Agent, AzureOpenAIChat
+from agentica.knowledge import Knowledge
+from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 
-knowledge_base = KnowledgeBase(
+knowledge_base = Knowledge(
     data_path="data/medical_corpus.txt",
     vector_db=LanceDb(
         table_name="medical",
@@ -22,12 +22,11 @@ knowledge_base = KnowledgeBase(
 # Load the knowledge base
 knowledge_base.load(recreate=True)
 
-assistant = Assistant(
-    llm=AzureOpenAILLM(),
+m = Agent(
+    model=AzureOpenAIChat(),
     knowledge_base=knowledge_base,
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
-    add_references_to_prompt=True,
+    add_references=True,
     debug_mode=True
 )
-r = assistant.run("肛门病变可能是什么疾病的症状?", stream=True)
-print("".join(r))
+m.print_response("肛门病变可能是什么疾病的症状?", stream=True)

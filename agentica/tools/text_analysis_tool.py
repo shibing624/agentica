@@ -5,20 +5,21 @@
 """
 from typing import Optional
 
-from agentica.message import Message
-from agentica.llm import LLM, OpenAILLM
+from agentica.model.message import Message
+from agentica.model.base import Model
+from agentica.model.openai import OpenAIChat
 from agentica.tools.base import Toolkit
 
 
 class TextAnalysisTool(Toolkit):
-    def __init__(self, llm: Optional[LLM] = None):
+    def __init__(self, llm: Optional[Model] = None):
         super().__init__(name="text_analysis_tool")
         self.llm = llm
         self.register(self.text_analysis_use_llm)
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAILLM()
+            self.llm = OpenAIChat()
 
     def text_analysis_use_llm(self, prompt: str) -> str:
         """Use LLM to analyze text, including sentiment analysis, entity recognition, text summarization,
@@ -40,7 +41,7 @@ class TextAnalysisTool(Toolkit):
         """
         self.update_llm()
         llm_messages = [Message.model_validate({"role": "user", "content": prompt})]
-        return self.llm.response(llm_messages)
+        return self.llm.response(llm_messages).content
 
 
 if __name__ == '__main__':

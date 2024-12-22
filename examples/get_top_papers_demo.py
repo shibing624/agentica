@@ -6,14 +6,14 @@
 import sys
 
 sys.path.append('..')
-from agentica import AzureOpenAILLM, Assistant, PythonAssistant
+from agentica import AzureOpenAIChat, Agent, PythonAgent
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.file_tool import FileTool
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.text_analysis_tool import TextAnalysisTool
 
-m = Assistant(
-    llm=AzureOpenAILLM(model='gpt-4o'),
+m = Agent(
+    llm=AzureOpenAIChat(model='gpt-4o'),
     description="You are a helpful ai assistant.",
     tools=[JinaTool(), SearchSerperTool(), FileTool(), TextAnalysisTool()],
     debug_mode=True,
@@ -39,4 +39,4 @@ https://huggingface.co/papers?date=2024-11-15 解析该网页，理解内容，�
 
 """
 r = m.run(query)
-print(r, "".join(r))
+print(r)

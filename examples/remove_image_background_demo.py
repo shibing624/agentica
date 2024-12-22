@@ -11,10 +11,10 @@ pip install rembg agentica
 import sys
 
 sys.path.append('..')
-from agentica import PythonAssistant, AzureOpenAILLM
+from agentica import PythonAgent, AzureOpenAIChat
 
-m = PythonAssistant(
-    llm=AzureOpenAILLM(),
+m = PythonAgent(
+    llm=AzureOpenAIChat(),
     pip_install=True,
     debug_mode=True,
 )
@@ -23,4 +23,4 @@ This is a image, you need to use python toolkit rembg to remove the background o
 image path: data/chinese.jpg ; save path: chinese_remove_bg.png
 """
 r = m.run(prompt)
-print("".join(r))
+print(r)

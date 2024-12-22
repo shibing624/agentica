@@ -68,23 +68,18 @@ pip install .
 自動的にGoogle検索ツールを呼び出す例：[examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
 
 ```python
-from agentica import Assistant, OpenAILLM, AzureOpenAILLM
-from agentica.tools.search_serper_tool import SearchSerperTool
+import os
+os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
+os.environ["SERPER_API_KEY"] = "your_serper_api_key"
+from agentica import Agent, OpenAIChat, SearchSerperTool
 
-m = Assistant(
-  llm=AzureOpenAILLM(),
-  description="You are a helpful ai assistant.",
-  show_tool_calls=True,
-  # Enable the assistant to search the knowledge base
-  search_knowledge=False,
-  tools=[SearchSerperTool()],
-  # Enable the assistant to read the chat history
-  read_chat_history=True,
-  debug_mode=True,
-)
-m.run("一句话介绍林黛玉")
-m.run("北京最近的新闻", stream=True, print_output=True)
-m.run("总结前面的问答")
+m = Agent(model=OpenAIChat(id='gpt-4o'), tools=[SearchSerperTool()])
+r = m.run("一句话介绍林黛玉")
+print(r)
+r = m.run("北京最近的新闻top3")
+print(r)
+r = m.run("总结前面的问答")
+print(r)
 ```
 
 

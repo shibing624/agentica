@@ -48,7 +48,7 @@ class SentenceTransformerEmb(Emb):
 
     def get_embedding(self, text: str, normalize_embeddings: bool = True) -> List[float]:
         # Calculate emb of the text
-        return self.get_client.encode([text], normalize_embeddings=normalize_embeddings)[0]
+        return self.get_client.encode([text], normalize_embeddings=normalize_embeddings).tolist()[0]
 
     def get_embeddings(self, texts: List[str], normalize_embeddings: bool = True) -> List[List[float]]:
         # Calculate emb of the texts

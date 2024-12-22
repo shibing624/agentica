@@ -6,11 +6,11 @@
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Agent, AzureOpenAIChat
 from agentica.tools.search_serper_tool import SearchSerperTool
 
-m = Assistant(
-    llm=AzureOpenAILLM(model="gpt-4o"),
+m = Agent(
+    llm=AzureOpenAIChat(model="gpt-4o"),
     tools=[SearchSerperTool()],
     add_datetime_to_instructions=True,
     show_tool_calls=True,
@@ -19,8 +19,8 @@ m = Assistant(
     debug_mode=True,
 )
 r = m.run("一句话介绍林黛玉")
-print(r, "".join(r))
-r = m.run("上海今天适合穿什么衣服", stream=True, print_output=True)
-print(r, "".join(r))
-r = m.run("总结前面的问答", stream=False, print_output=False)
+print(r)
+r = m.run("上海今天适合穿什么衣服")
+print(r)
+r = m.run("总结前面的问答")
 print(r)

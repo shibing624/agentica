@@ -73,19 +73,20 @@ python web_search_deepseek_demo.py
 
 2. 使用`agentica`构建Agent并执行：
 
-自动调用google搜索工具，示例[examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
+自动调用google搜索工具，示例[examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
 
 ```python
 import os
-os.environ["DEEPSEEK_API_KEY"] = "your_deepseek_api_key"
+os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
 os.environ["SERPER_API_KEY"] = "your_serper_api_key"
-from agentica import Assistant, DeepseekLLM, SearchSerperTool
-m = Assistant(llm=DeepseekLLM(), tools=[SearchSerperTool()])
+from agentica import Agent, OpenAIChat, SearchSerperTool
+
+m = Agent(model=OpenAIChat(id='gpt-4o'), tools=[SearchSerperTool()])
 r = m.run("一句话介绍林黛玉")
-print(r, "".join(r))
-r = m.run("北京最近的新闻top3", stream=True)
-print(r, "".join(r))
-r = m.run("总结前面的问答", stream=False)
+print(r)
+r = m.run("北京最近的新闻top3")
+print(r)
+r = m.run("总结前面的问答")
 print(r)
 ```
 
@@ -155,7 +156,7 @@ The self-evolving agent design:
 
 实现方法:
 
-1. 使用PythonAssistant作为SAGE智能体，使用AzureOpenAILLM作为LLM, 具备code-interpreter功能，可以执行Python代码，并自动纠错。
+1. 使用PythonAgent作为SAGE智能体，使用AzureOpenAIChat作为LLM, 具备code-interpreter功能，可以执行Python代码，并自动纠错。
 2. 使用CsvMemoryDb作为SAGE智能体的记忆，用于存储用户的问题和答案，下次遇到相似的问题时，可以直接返回答案。
 
 #### Run Self-evolving Agent App

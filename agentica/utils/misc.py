@@ -5,9 +5,49 @@
 """
 import hashlib
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Union
 
-from rich.console import Console
+from agentica.model.message import Message
+
+
+def get_text_from_message(message: Union[List, Dict, str, Message]) -> str:
+    """Return the user texts from the message"""
+
+    if isinstance(message, str):
+        return message
+    if isinstance(message, list):
+        text_messages = []
+        if len(message) == 0:
+            return ""
+
+        if "type" in message[0]:
+            for m in message:
+                m_type = m.get("type")
+                if m_type is not None and isinstance(m_type, str):
+                    m_value = m.get(m_type)
+                    if m_value is not None and isinstance(m_value, str):
+                        if m_type == "text":
+                            text_messages.append(m_value)
+                        # if m_type == "image_url":
+                        #     text_messages.append(f"Image: {m_value}")
+                        # else:
+                        #     text_messages.append(f"{m_type}: {m_value}")
+        elif "role" in message[0]:
+            for m in message:
+                m_role = m.get("role")
+                if m_role is not None and isinstance(m_role, str):
+                    m_content = m.get("content")
+                    if m_content is not None and isinstance(m_content, str):
+                        if m_role == "user":
+                            text_messages.append(m_content)
+        if len(text_messages) > 0:
+            return "\n".join(text_messages)
+    if isinstance(message, dict):
+        if "content" in message:
+            return get_text_from_message(message["content"])
+    if isinstance(message, Message) and message.content is not None:
+        return get_text_from_message(message.content)
+    return ""
 
 
 def remove_indent(s: Optional[str]) -> Optional[str]:
@@ -54,39 +94,6 @@ def current_datetime_utc() -> datetime:
 
 def current_datetime_utc_str() -> str:
     return current_datetime_utc().strftime("%Y-%m-%dT%H:%M:%S")
-
-
-console = Console()
-
-
-def confirm_yes_no(question, default: str = "yes") -> bool:
-    """Ask a yes/no question via raw_input().
-
-    "question" is a string that is presented to the user.
-    "default" is the presumed answer if the user just hits <Enter>.
-            It must be "yes" (the default), "no" or None (meaning
-            an answer is required of the user).
-
-    The "answer" return value is True for "yes" or False for "no".
-    """
-    inp_to_result_map = {"yes": True, "y": True, "ye": True, "no": False, "n": False}
-    if default is None:
-        prompt = " [y/n]: "
-    elif default == "yes":
-        prompt = " [Y/n]: "
-    elif default == "no":
-        prompt = " [y/N]: "
-    else:
-        raise ValueError(f"Invalid default answer: {default}")
-
-    choice = console.input(prompt=(question + prompt)).lower()
-    if default is not None and choice == "":
-        return inp_to_result_map[default]
-    elif choice in inp_to_result_map:
-        return inp_to_result_map[choice]
-    else:
-        print(f"{choice} invalid")
-        return False
 
 
 def calculate_sha256(file):

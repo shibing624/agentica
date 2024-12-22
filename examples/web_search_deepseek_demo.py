@@ -6,30 +6,21 @@
 import sys
 
 sys.path.append('..')
-from agentica.message import Message
-from agentica import Assistant, DeepseekLLM
+from agentica import Message
+from agentica import Agent, DeepSeekChat
 from agentica.tools.search_serper_tool import SearchSerperTool
-from agentica.tools.file_tool import FileTool
 
-llm = DeepseekLLM()
-
-print('llm:', llm)
+model = DeepSeekChat()
 messages = [Message(role="user", content="一句话介绍林黛玉")]
-llm_r = llm.response(messages)
-print(llm_r)
+r = model.response(messages)
+print('model:', model)
+print(r)
 
-m = Assistant(
-    llm=llm,
-    tools=[SearchSerperTool(), FileTool()],
+m = Agent(
+    model=model,
+    tools=[SearchSerperTool()],
     add_datetime_to_instructions=True,
-    show_tool_calls=True,
-    read_chat_history=True,
-    debug_mode=True,
 )
 
-r = m.run("北京最近的top3新闻")
-print(r, "".join(r))
-r = m.run("搜索下今天北京温度是多少度？")
-print(r, "".join(r))
-r = m.run("总结我们的对话。", stream=False, print_output=False)
+r = m.run("下一届奥运会在哪里举办")
 print(r)

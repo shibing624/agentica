@@ -15,14 +15,14 @@ from loguru import logger
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
-from agentica.knowledge.knowledge_base import KnowledgeBase
-from agentica.vectordb.lancedb import LanceDb
+from agentica import Agent, AzureOpenAIChat
+from agentica.knowledge.base import Knowledge
+from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-knowledge_base = KnowledgeBase(
+knowledge_base = Knowledge(
     data_path="data/paper_sample.pdf",
     vector_db=LanceDb(embedder=Text2VecEmb())
 )
@@ -88,13 +88,12 @@ def merge_references_function(query: str, **kwargs) -> str:
     return content
 
 
-assistant = Assistant(
-    llm=AzureOpenAILLM(model='gpt-4o'),
+m = Agent(
+    model=AzureOpenAIChat(model='gpt-4o'),
     knowledge_base=knowledge_base,
     references_function=merge_references_function,
     # The add_references_to_prompt will update the prompt with references from the knowledge base.
     add_references_to_prompt=True,
     debug_mode=True,
 )
-r = assistant.run("Finetune LLM有啥好处?")
-print(r, "".join(r))
+m.print_response("Finetune LLM有啥好处?", stream=True)

@@ -9,9 +9,9 @@ pip install langchain
 import sys
 
 sys.path.append('..')
-from agentica import Assistant
+from agentica import Agent
 
-from agentica.knowledge.langchain import LangChainKnowledgeBase
+from agentica.knowledge.langchain_knowledge import LangChainKnowledge
 from langchain.document_loaders import TextLoader
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
@@ -40,11 +40,11 @@ db = Chroma(embedding_function=OpenAIEmbeddings(), persist_directory=chroma_db_d
 retriever = db.as_retriever()
 
 # Create a knowledge base from the vector store
-knowledge_base = LangChainKnowledgeBase(retriever=retriever)
+knowledge_base = LangChainKnowledge(retriever=retriever)
 
 # Create an assistant with the knowledge base
-assistant = Assistant(knowledge_base=knowledge_base, add_references_to_prompt=True)
+assistant = Agent(knowledge_base=knowledge_base, add_references_to_prompt=True)
 
 # Use the assistant to ask a question and print a response.
 r = assistant.run("2023年全国田径锦标赛在哪里举办的?")
-print("".join(r))
+print(r)

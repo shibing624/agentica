@@ -14,7 +14,7 @@ Key Points
 - SAGE框架可以扩展到其他大型语言模型，并在AgentBench等基准测试和长文本任务上取得了最先进的结果。
 
 本项目的简化实现：
-1. 使用PythonAssistant作为SAGE智能体，使用AzureOpenAILLM作为LLM, 具备code-interpreter功能，可以执行Python代码，并自动纠错。
+1. 使用PythonAgent作为SAGE智能体，使用AzureOpenAIChat作为LLM, 具备code-interpreter功能，可以执行Python代码，并自动纠错。
 2. 使用CsvMemoryDb作为SAGE智能体的记忆，用于存储用户的问题和答案，下次遇到相似的问题时，可以直接返回答案。
 
 install:
@@ -31,23 +31,23 @@ from typing import List, Optional
 import streamlit as st
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM, PythonAssistant
+from agentica import Agent, AzureOpenAIChat, PythonAgent
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool
-from agentica.knowledge.knowledge_base import KnowledgeBase
-from agentica.vectordb.lancedb import LanceDb
+from agentica.knowledge import Knowledge
+from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica import AssistantMemory, CsvMemoryDb
-from agentica.storage.sqlite_storage import SqlAssistantStorage
+from agentica import AgentMemory, CsvMemoryDb
+from agentica import SqlAgentStorage
 
 
 def get_sage(
         llm,
         user_id: Optional[str] = None,
-        run_id: Optional[str] = None,
+        session_id: Optional[str] = None,
         debug_mode: bool = True,
-) -> Assistant:
-    llm_model_name = llm.model
+) -> Agent:
+    llm_model_name = llm.id
     logger.info(f"-*- Creating {llm_model_name} SAGE agent -*-")
 
     # Add tools available to the SAGE agent
@@ -60,18 +60,18 @@ def get_sage(
         embedder=embedder,
     )
     memory_file = "outputs/sage_memory.csv"
-    knowledge_base = KnowledgeBase(
+    knowledge_base = Knowledge(
         data_path=memory_file if os.path.exists(memory_file) else [],
         vector_db=lance_db
     )
     knowledge_base.load()
 
     # Create the SAGE agent Assistant
-    sage = PythonAssistant(
+    sage = PythonAgent(
         name="sage",
-        run_id=run_id,
+        session_id=session_id,
         user_id=user_id,
-        llm=llm,
+        model=llm,
         description=dedent(
             """
         You are the most advanced AI system in the world called `具有反思和增强记忆能力的自我进化智能体(SAGE)`.
@@ -79,9 +79,9 @@ def get_sage(
         """
         ),
         # Add long-term memory to the SAGE agent backed by a Sqlite database
-        storage=SqlAssistantStorage(table_name="sage", db_file="outputs/sage.db"),
+        storage=SqlAgentStorage(table_name="sage", db_file="outputs/sage.db"),
         # Add a knowledge base to the SAGE agent
-        knowledge_base=knowledge_base,
+        knowledge=knowledge_base,
         # Add selected tools to the SAGE agent
         tools=tools,
         # Show tool calls in the chat
@@ -92,13 +92,13 @@ def get_sage(
         # This setting gives the LLM a tool to get chat history
         read_chat_history=True,
         # This setting adds chat history to the messages
-        add_chat_history_to_messages=True,
+        add_history_to_messages=True,
         # This setting tells the LLM to format messages in markdown
         markdown=True,
         # This setting adds the current datetime to the instructions
         add_datetime_to_instructions=True,
-        memory=AssistantMemory(db=CsvMemoryDb(memory_file)),
-        create_memories=True,
+        memory=AgentMemory(db=CsvMemoryDb(memory_file)),
+        create_umemories=True,
         force_update_memory_after_run=True,
         debug_mode=debug_mode,
     )
@@ -124,10 +124,10 @@ def main():
         restart_assistant()
 
     # Get the assistant
-    sage: Assistant
+    sage: Agent
     if "sage" not in st.session_state or st.session_state["sage"] is None:
         logger.info(f"---*--- Creating {llm_id} SAGE agent ---*---")
-        llm = AzureOpenAILLM(model=llm_id)
+        llm = AzureOpenAIChat(model=llm_id)
         sage = get_sage(
             llm=llm,
         )
@@ -182,14 +182,14 @@ def main():
             st.sidebar.success("Memory cleared")
 
     if sage.storage:
-        sage_run_ids: List[str] = sage.storage.get_all_run_ids()
+        sage_run_ids: List[str] = sage.storage.get_all_session_ids()
         new_sage_run_id = st.sidebar.selectbox("Run ID", options=sage_run_ids)
         if st.session_state["sage_run_id"] != new_sage_run_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_sage_run_id} ---*---")
-            llm = AzureOpenAILLM(model=llm_id)
+            llm = AzureOpenAIChat(model=llm_id)
             st.session_state["sage"] = get_sage(
                 llm=llm,
-                run_id=new_sage_run_id,
+                session_id=new_sage_run_id,
             )
             st.rerun()
 

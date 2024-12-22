@@ -9,7 +9,7 @@ import base64
 import os
 from typing import Optional, cast
 
-from agentica.llm import LLM, OpenAILLM
+from agentica.llm import LLM, OpenAIChat
 from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
@@ -37,7 +37,7 @@ class AnalyzeImageTool(Toolkit):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAILLM()
+            self.llm = OpenAIChat()
 
     def analyze_image_content(self, image_path_or_url: str) -> str:
         """Reads and understands the content of an image using image understand model API.

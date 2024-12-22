@@ -4,10 +4,11 @@
 @description:
 This module contains a test for the CreateImage class in the agentica.functions.create_image module. It uses the unittest.mock library to mock the OpenAI and requests APIs, and checks that the image creation process works correctly.
 """
-
+import os.path
 import shutil
 from unittest.mock import MagicMock, patch
-
+import sys
+sys.path.append('..')
 from agentica.tools.create_image_tool import CreateImageTool
 
 
@@ -38,4 +39,5 @@ def test_execute(mock_get, mock_create):
         assert f.read() == b"mock image content"
 
     # Clean up the test environment by removing the created file and directory
-    shutil.rmtree(create_image.data_dir)
+    if os.path.exists(create_image.data_dir):
+        shutil.rmtree(create_image.data_dir)

@@ -7,6 +7,7 @@ import os
 import csv
 import json
 import ssl
+import numpy as np
 from io import BytesIO
 from pathlib import Path
 from typing import Optional
@@ -16,11 +17,15 @@ from agentica.utils.log import logger
 
 def read_json_file(path: Path) -> str:
     try:
-        json_contents = json.loads(path.read_text("utf-8"))
-
+        if path.suffix == ".jsonl":
+            with path.open("r", encoding="utf-8") as f:
+                json_contents = [json.loads(line) for line in f]
+        elif path.suffix == ".json":
+            json_contents = json.loads(path.read_text("utf-8"))
+        else:
+            raise ValueError(f"Unsupported file format: {path.suffix}")
         if isinstance(json_contents, dict):
             json_contents = [json_contents]
-
         data = [json.dumps(content, ensure_ascii=False) for content in json_contents]
         return "\n".join(data)
     except Exception as e:
@@ -52,45 +57,77 @@ def read_txt_file(path: Path) -> str:
 
 def read_pdf_file(path: Path) -> str:
     try:
-        try:
-            import pypdf
-        except ImportError:
-            raise ImportError("pypdf is required to read PDF files: `pip install pypdf`")
-        with open(path, "rb") as fp:
-            # Create a PDF object
-            pdf = pypdf.PdfReader(fp)
-            # Get the number of pages in the PDF document
-            num_pages = len(pdf.pages)
-            # This block returns a whole PDF as a single Document
-            text = ""
-            for page in range(num_pages):
-                # Extract the text from the page
-                page_text = pdf.pages[page].extract_text()
-                text += page_text
-        return text
+        import pypdf
+    except ImportError:
+        raise ImportError("pypdf is required to read PDF files: `pip install pypdf`")
+
+    try:
+        import imgocr
+    except ImportError:
+        raise ImportError("use `pip install imgocr`")
+    text = ""
+    try:
+        # Read PDF text
+        reader = pypdf.PdfReader(str(path))
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+
+        # Read images and perform OCR
+        ocr = imgocr.ImgOcr()
+        for page in reader.pages:
+            for image in page.images:
+                if image is None or not image:  # Check if the image data is valid
+                    logger.warning(f"Invalid image data: {image}")
+                    continue
+                img_array = np.array(image)
+                if img_array.ndim == 3 and img_array.shape[-1] == 4:  # Check if the image has an alpha channel
+                    img_array = img_array[:, :, :3]  # Remove the alpha channel
+                elif img_array.ndim != 3 or img_array.shape[-1] not in [3, 4]:
+                    logger.warning(f"Unexpected image shape: {img_array.shape}")
+                    continue
+                ocr_result = ocr.ocr(img_array)
+                for result in ocr_result:
+                    text += result["text"] + "\n"
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
-        return ""
+    return text
 
 
 def read_pdf_url(url: str) -> str:
     try:
-        try:
-            import httpx
-        except ImportError:
-            raise ImportError("`httpx` not installed")
-
-        try:
-            from pypdf import PdfReader
-        except ImportError:
-            raise ImportError("`pypdf` not installed")
+        import httpx
+    except ImportError:
+        raise ImportError("`httpx` not installed, use `pip install httpx`")
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise ImportError("`pypdf` not installed, use `pip install pypdf`")
+    try:
+        import imgocr
+    except ImportError:
+        raise ImportError("use `pip install imgocr`")
+    try:
         logger.info(f"Reading: {url}")
         # Create a default context for HTTPS requests (not recommended for production)
         ssl._create_default_https_context = ssl._create_unverified_context
         response = httpx.get(url)
         doc_reader = PdfReader(BytesIO(response.content))
-        content_list = [page.extract_text() for page in doc_reader.pages]
-        return "\n".join(content_list)
+        ocr_model = imgocr.ImgOcr()
+        text_content = ""
+        for num, page in enumerate(doc_reader.pages):
+            page_text = page.extract_text() or ""
+            image_text_list = []
+            for img_obj in page.images:
+                img_data = img_obj.data
+                # Perform OCR
+                ocr_result = ocr_model.ocr(img_data)
+                if ocr_result:
+                    image_text_list += [i.get('text') for i in ocr_result]
+
+            images_text = "\n".join(image_text_list)
+            content = page_text + "\n" + images_text
+            text_content += content
+        return text_content
     except Exception as e:
         logger.error(f"Error reading: {url}: {e}")
         return ""
@@ -98,7 +135,7 @@ def read_pdf_url(url: str) -> str:
 
 def read_docx_file(path: Path) -> str:
     try:
-        from docx import Document
+        from docx import Document as DocxDocument
         from docx.oxml.ns import qn
     except ImportError:
         raise ImportError("`python-docx` not installed, please install using `pip install python-docx`")
@@ -127,7 +164,7 @@ def read_docx_file(path: Path) -> str:
         return None, None
 
     try:
-        doc = Document(str(path))
+        doc = DocxDocument(str(path))
         doc_content = ""
         numbering_dict = {}
 
@@ -226,3 +263,9 @@ def read_excel_file(path: Path) -> str:
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
         return ""
+
+
+if __name__ == '__main__':
+    url = "https://arxiv.org/pdf/2412.15166"
+    result = read_pdf_url(url)
+    print(result[:300])

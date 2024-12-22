@@ -81,29 +81,20 @@ python web_search_deepseek_demo.py
 
 2. Build and run an Agent using `agentica`:
 
-Automatically call the Google search tool, example [examples/web_search_deepseek_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_deepseek_demo.py)
+Automatically call the Google search tool, example [examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
 
 ```python
-from agentica import Assistant, DeepseekLLM
-from agentica.tools.search_serper_tool import SearchSerperTool
+import os
+os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
+os.environ["SERPER_API_KEY"] = "your_serper_api_key"
+from agentica import Agent, OpenAIChat, SearchSerperTool
 
-m = Assistant(
-    llm=DeepseekLLM(),
-    description="You are a helpful ai assistant.",
-    show_tool_calls=True,
-    # Enable the assistant to search the knowledge base
-    search_knowledge=False,
-    tools=[SearchSerperTool()],
-    # Enable the assistant to read the chat history
-    read_chat_history=True,
-    debug_mode=True,
-)
-
-r = m.run("Introduce Lin Daiyu in one sentence")
-print(r, "".join(r))
-r = m.run("Top 3 recent news in Beijing", stream=True, print_output=True)
-print(r, "".join(r))
-r = m.run("Summarize the previous Q&A", stream=False, print_output=False)
+m = Agent(model=OpenAIChat(id='gpt-4o'), tools=[SearchSerperTool()])
+r = m.run("一句话介绍林黛玉")
+print(r)
+r = m.run("北京最近的新闻top3")
+print(r)
+r = m.run("总结前面的问答")
 print(r)
 ```
 
@@ -172,7 +163,7 @@ The self-evolving agent design:
 Self-evolving Agents with Reflective and Memory-augmented Abilities (SAGE)
 
 Implement:
-1. Use `PythonAssistant` as the SAGE agent and `AzureOpenAILLM` as the LLM, with code-interpreter functionality to execute Python code and automatically correct errors.
+1. Use `PythonAgent` as the SAGE agent and `AzureOpenAIChat` as the LLM, with code-interpreter functionality to execute Python code and automatically correct errors.
 2. Use `CsvMemoryDb` as the memory for the SAGE agent to store user questions and answers, so that similar questions can be directly answered next time.
 
 #### Run Self-evolving Agent App

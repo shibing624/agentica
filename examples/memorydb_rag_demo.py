@@ -14,13 +14,13 @@ python memorydb_rag_demo.py
 import sys
 
 sys.path.append('..')
-from agentica import Assistant
-from agentica.knowledge.knowledge_base import KnowledgeBase
+from agentica import Agent
+from agentica.knowledge.base import Knowledge
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
-from agentica.storage.sqlite_storage import SqlAssistantStorage
+from agentica import SqlAgentStorage
 from agentica.emb.text2vec_emb import Text2VecEmb
 
-knowledge_base = KnowledgeBase(
+knowledge_base = Knowledge(
     data_path=["https://phi-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],
     vector_db=MemoryVectorDb(embedder=Text2VecEmb()),
 )
@@ -28,16 +28,14 @@ knowledge_base = KnowledgeBase(
 knowledge_base.load()
 
 # Create a SQL storage for the assistant's data
-storage = SqlAssistantStorage(table_name="ThaiRecipes", db_file="outputs/ThaiRecipes.db")
+storage = SqlAgentStorage(table_name="ThaiRecipes", db_file="outputs/ThaiRecipes.db")
 storage.create()
 
-assistant = Assistant(
+m = Agent(
     knowledge_base=knowledge_base,
     storage=storage,
-    add_references_to_prompt=True,  # Use RAG
+    add_references=True,  # Use RAG
     description="中文回答",
-    debug_mode=True,
+    debug_mode=False,
 )
-r = assistant.run("如何做泰国咖喱")
-print(r, "".join(r))
-assistant.storage.export("outputs/ThaiRecipes_storage.csv")
+m.print_response("如何做泰国咖喱")

@@ -6,11 +6,11 @@
 import sys
 
 sys.path.append('..')
-from agentica import AzureOpenAILLM, Assistant
+from agentica import AzureOpenAIChat, Agent
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.file_tool import FileTool
 
-m = Assistant(
+m = Agent(
     tools=[JinaTool(), FileTool()],
     debug_mode=True,
 )
@@ -22,4 +22,4 @@ query = """
 - 将全部结果存在本地md中
 """
 r = m.run(query)
-print(r, "".join(r))
+print(r)

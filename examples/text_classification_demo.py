@@ -9,12 +9,13 @@ pip install pytextclassifier agentica
 import sys
 
 sys.path.append('..')
-from agentica import PythonAssistant, AzureOpenAILLM
+from agentica import PythonAgent, AzureOpenAIChat
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 from agentica.tools.search_serper_tool import SearchSerperTool
-m = PythonAssistant(
-    llm=AzureOpenAILLM(),
+
+m = PythonAgent(
+    llm=AzureOpenAIChat(),
     description="You are a helpful ai assistant.",
     tools=[JinaTool(), SearchSerperTool(), UrlCrawlerTool()],
     debug_mode=True,
@@ -29,4 +30,4 @@ prompt = """
 训练5个epochs就可以了，训练模型后，试着跑下`data/thucnews_train_1k.txt`文件中前10条记录的分类结果，输出预测标签结果和原标签，方便我check对比效果。
 """
 r = m.run(prompt)
-print("".join(r))
+print(r)

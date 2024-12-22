@@ -7,11 +7,13 @@ This module contains tests for the LLM class.
 
 import os
 from unittest.mock import MagicMock, patch
+import sys
 
-from agentica.message import Message
+sys.path.append('..')
+from agentica import Message
 
 
-@patch("agentica.llm.openai_llm.OpenAILLM")
+@patch("agentica.model.openai.chat.OpenAIChat")
 def test_respond(mock_llm_class):
     """
     Tests the response method of the LLM class.

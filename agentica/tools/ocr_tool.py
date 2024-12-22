@@ -3,22 +3,17 @@
 @author:XuMing(xuming624@qq.com)
 @description: Use EasyOCR to extract text from images.
 """
-import ssl
-import json
 try:
-    import easyocr
+    from imgocr import ImgOcr
 except ImportError:
-    raise ImportError("The `easyocr` package is not installed. Please install it via `pip install easyocr`.")
+    raise ImportError("The `imgocr` package is not installed. Please install it via `pip install imgocr`.")
 
 from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
-# Ignore SSL certificate verification for HTTPS requests (not recommended for production)
-ssl._create_default_https_context = ssl._create_unverified_context
-
 
 class OcrTool(Toolkit):
-    def __init__(self, languages: list = ['ch_sim', 'en'], use_gpu: bool = False):
+    def __init__(self, use_gpu: bool = False):
         """
         Initializes the OCR tool with the specified languages and GPU setting.
 
@@ -26,16 +21,15 @@ class OcrTool(Toolkit):
         :param use_gpu: Whether to use GPU for OCR processing.
         """
         super().__init__(name="ocr_tool")
-        self.reader = easyocr.Reader(languages, gpu=use_gpu)
-        logger.debug(f"Initialized easyocr tool with languages: {languages} and use GPU: {use_gpu}")
+        self.ocr = ImgOcr(use_gpu=use_gpu)
+        logger.debug(f"Initialized imgocr tool, use GPU: {use_gpu}")
         self.register(self.read_text)
 
-    def read_text(self, image_path: str, detail: int = 0) -> str:
+    def read_text(self, image_path: str) -> str:
         """Reads text from an image.
 
         Args:
             image_path (str): Path to the image file.
-            detail (int): Whether to return detailed information (1 for yes, 0 for no).
 
         Example:
             from agentica.tools.ocr_tool import OcrTool
@@ -47,13 +41,9 @@ class OcrTool(Toolkit):
             str: The recognized text.
         """
         try:
-            result = self.reader.readtext(image_path, detail=detail)
-            logger.debug(f"Recognized text: {result}, from image: {image_path}")
-            if detail == 0:
-                result_str = " ".join([text for text in result])
-            else:
-                result = [dict(text=str(text), box=str(box), prob=str(prob)) for box, text, prob in result]
-                result_str = json.dumps(result, ensure_ascii=False)
+            result = self.ocr.ocr(image_path)[0]
+            result_str = " ".join([i[-1][0] for i in result])
+            logger.info(f"Ocr image: {image_path}, result: {result_str}")
             return result_str
         except Exception as e:
             logger.error(f"An error occurred while reading the text: {e}")
@@ -63,11 +53,5 @@ class OcrTool(Toolkit):
 if __name__ == '__main__':
     # Initialize the OCR tool
     ocr_tool = OcrTool()
-
-    # Example usage
-    # Recognize text in a Chinese image
     chinese_text = ocr_tool.read_text('../../examples/data/chinese.jpg')
-    print('Chinese text:', chinese_text)
-
-    chinese_text = ocr_tool.read_text('../../examples/data/chinese.jpg', detail=1)
     print('Chinese text:', chinese_text)

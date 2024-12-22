@@ -3,7 +3,8 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 This module contains a class for creating an image from a description using OpenAI's API.
-It generates a unique image name based on the prompt and the current time, downloads the image, and saves it to a specified output path.
+It generates a unique image name based on the prompt and the current time, downloads the image,
+and saves it to a specified output path.
 """
 import hashlib
 import os
@@ -12,7 +13,8 @@ from typing import Optional, cast
 
 import requests
 
-from agentica.llm import LLM, OpenAILLM
+from agentica.model.base import Model
+from agentica.model.openai import OpenAIChat
 from agentica.tools.base import Toolkit
 
 
@@ -25,17 +27,17 @@ class CreateImageTool(Toolkit):
     def __init__(
             self,
             data_dir: Optional[str] = None,
-            llm: Optional[LLM] = None
+            model: Optional[Model] = None
 
     ):
         super().__init__(name="create_image_tool")
         self.data_dir: str = data_dir or "outputs"
-        self.llm = llm
+        self.model = model
         self.register(self.create_dalle_image)
 
     def update_llm(self) -> None:
-        if self.llm is None:
-            self.llm = OpenAILLM()
+        if self.model is None:
+            self.model = OpenAIChat()
 
     def create_dalle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
         """Creates an image from a description using dalle API, generates a unique image name based on the prompt,
@@ -94,9 +96,9 @@ class CreateImageTool(Toolkit):
         """
 
         # -*- generate_a_response_from_the_llm (includes_running_function_calls)
-        self.llm = cast(LLM, self.llm)
+        self.model = cast(Model, self.model)
 
-        response = self.llm.get_client().images.generate(prompt=prompt, n=n, size=size, model=model)
+        response = self.model.get_client().images.generate(prompt=prompt, n=n, size=size, model=model)
         return response.data[0].url
 
     def _download_and_save_image(self, image_url: str, image_path: str) -> None:

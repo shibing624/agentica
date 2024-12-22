@@ -12,20 +12,46 @@ from datetime import datetime
 from enum import Enum
 from hashlib import md5
 import uuid
+from textwrap import dedent
+import json
 from typing import Dict, List, Any, Optional, cast, Tuple, Literal
-
-from pydantic import BaseModel, ConfigDict, model_validator
+from copy import deepcopy
+from pydantic import BaseModel, ConfigDict, model_validator, Field, ValidationError
 
 from agentica.config import AGENTICA_HOME
-from agentica.llm.base import LLM
-from agentica.llm.openai_llm import OpenAILLM
-from agentica.message import Message
-from agentica.references import References
+from agentica.model.openai import OpenAIChat
+from agentica.model.base import Model
+from agentica.model.message import Message, MessageReferences
 from agentica.utils.log import logger
+from agentica.run_response import RunResponse
+
+
+class AgentRun(BaseModel):
+    message: Optional[Message] = None
+    messages: Optional[List[Message]] = None
+    response: Optional[RunResponse] = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class SessionSummary(BaseModel):
+    """Model for Session Summary."""
+
+    summary: str = Field(
+        ...,
+        description="Summary of the session. Be concise and focus on only important information. Do not make anything up.",
+    )
+    topics: Optional[List[str]] = Field(None, description="Topics discussed in the session.")
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump(exclude_none=True)
+
+    def to_json(self) -> str:
+        return self.model_dump_json(exclude_none=True, indent=2)
 
 
 class Memory(BaseModel):
-    """Model for LLM memories"""
+    """Model for Model memories"""
 
     memory: str
     id: Optional[str] = None
@@ -46,15 +72,18 @@ class MemoryRow(BaseModel):
 
     memory: str
     user_id: Optional[str] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     # id for this memory, auto-generated from the memory
     id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
 
     def serializable_dict(self) -> Dict[str, Any]:
-        return self.model_dump()
+        _dict = self.model_dump(exclude={"created_at", "updated_at"})
+        _dict["created_at"] = self.created_at.isoformat() if self.created_at else None
+        _dict["updated_at"] = self.updated_at.isoformat() if self.updated_at else None
+        return _dict
 
     def to_dict(self) -> Dict[str, Any]:
         return self.serializable_dict()
@@ -62,17 +91,9 @@ class MemoryRow(BaseModel):
     @model_validator(mode="after")
     def generate_id(self) -> "MemoryRow":
         if self.id is None:
-            memory_str = self.memory
+            memory_str = json.dumps(self.memory, sort_keys=True, ensure_ascii=False)
             cleaned_memory = memory_str.replace(" ", "").replace("\n", "").replace("\t", "")
             self.id = md5(cleaned_memory.encode()).hexdigest()
-        return self
-
-    @model_validator(mode="after")
-    def generate_timestamps(self) -> "MemoryRow":
-        if self.created_at is None:
-            self.created_at = datetime.now().isoformat()
-        if self.updated_at is None:
-            self.updated_at = datetime.now().isoformat()
         return self
 
 
@@ -272,7 +293,7 @@ class MemoryManager(BaseModel):
     """
 
     mode: Literal["llm", "rule"] = "rule"
-    llm: Optional[LLM] = None
+    llm: Optional[Model] = None
     user_id: Optional[str] = None
 
     # Provide the system prompt for the manager as a string
@@ -287,8 +308,8 @@ class MemoryManager(BaseModel):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAILLM()
-            logger.debug(f"Using LLM: {self.llm}")
+            self.llm = OpenAIChat()
+            logger.debug(f"Using Model: {self.llm}")
         self.llm.add_tool(self.add_memory)
         self.llm.add_tool(self.update_memory)
         self.llm.add_tool(self.delete_memory)
@@ -423,10 +444,10 @@ class MemoryManager(BaseModel):
                 response = f"Memory added successfully, memory: {message}"
             logger.debug(f"MemoryManager mode: {self.mode}, response: {response}")
         else:
-            # Update the LLM (set defaults, add logit etc.)
+            # Update the Model (set defaults, add logit etc.)
             self.update_llm()
 
-            # -*- Prepare the List of messages sent to the LLM
+            # -*- Prepare the List of messages sent to the Model
             llm_messages: List[Message] = []
 
             # Create the system prompt message
@@ -440,14 +461,14 @@ class MemoryManager(BaseModel):
                 llm_messages += [user_prompt_message]
 
             # -*- Generate a response from the llm (includes running function calls)
-            self.llm = cast(LLM, self.llm)
+            self.llm = cast(Model, self.llm)
             response = self.llm.response(messages=llm_messages)
         logger.debug("*********** MemoryManager End ***********")
         return response
 
 
 class MemoryClassifier(BaseModel):
-    llm: Optional[LLM] = None
+    llm: Optional[Model] = None
 
     # Provide the system prompt for the classifier as a string
     system_prompt: Optional[str] = None
@@ -456,8 +477,8 @@ class MemoryClassifier(BaseModel):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAILLM()
-            logger.debug(f"Using LLM: {self.llm}")
+            self.llm = OpenAIChat()
+            logger.debug(f"Using Model: {self.llm}")
 
     def get_system_prompt(self) -> Optional[str]:
         # If the system_prompt is provided, use it
@@ -502,10 +523,10 @@ class MemoryClassifier(BaseModel):
     ) -> str:
         logger.debug("*********** MemoryClassifier Start ***********")
 
-        # Update the LLM (set defaults, add logit etc.)
+        # Update the Model (set defaults, add logit etc.)
         self.update_llm()
 
-        # -*- Prepare the List of messages sent to the LLM
+        # -*- Prepare the List of messages sent to the Model
         llm_messages: List[Message] = []
 
         # Get the System prompt
@@ -522,7 +543,7 @@ class MemoryClassifier(BaseModel):
             llm_messages += [user_prompt_message]
 
         # -*- generate_a_response_from_the_llm (includes_running_function_calls)
-        self.llm = cast(LLM, self.llm)
+        self.llm = cast(Model, self.llm)
         classification_response = self.llm.response(messages=llm_messages)
         logger.debug("*********** MemoryClassifier End ***********")
         return classification_response
@@ -534,136 +555,361 @@ class MemoryRetrieval(str, Enum):
     only_user = "only_user"
 
 
-class AssistantMemory(BaseModel):
-    # Messages between the user and the Assistant.
-    # Note: the llm prompts are stored in the llm_messages
-    chat_history: List[Message] = []
-    # Prompts sent to the LLM and the LLM responses.
-    llm_messages: List[Message] = []
-    # References from the vector database.
-    references: List[References] = []
 
-    # Create personalized memories for this user
+
+class MemorySummarizer(BaseModel):
+    model: Optional[Model] = None
+    use_structured_outputs: bool = False
+
+    def update_model(self) -> None:
+        if self.model is None:
+            self.model = OpenAIChat()
+
+        # Set response_format if it is not set on the Model
+        if self.use_structured_outputs:
+            self.model.response_format = SessionSummary
+            self.model.structured_outputs = True
+        else:
+            self.model.response_format = {"type": "json_object"}
+
+    def get_system_message(self, messages_for_summarization: List[Dict[str, str]]) -> Message:
+        # -*- Return a system message for summarization
+        system_prompt = dedent("""\
+        Analyze the following conversation between a user and an assistant, and extract the following details:
+          - Summary (str): Provide a concise summary of the session, focusing on important information that would be helpful for future interactions.
+          - Topics (Optional[List[str]]): List the topics discussed in the session.
+        Please ignore any frivolous information.
+
+        Conversation:
+        """)
+        conversation = []
+        for message_pair in messages_for_summarization:
+            conversation.append(f"User: {message_pair['user']}")
+            if "assistant" in message_pair:
+                conversation.append(f"Assistant: {message_pair['assistant']}")
+            elif "model" in message_pair:
+                conversation.append(f"Assistant: {message_pair['model']}")
+
+        system_prompt += "\n".join(conversation)
+
+        if not self.use_structured_outputs:
+            system_prompt += "\n\nProvide your output as a JSON containing the following fields:"
+            json_schema = SessionSummary.model_json_schema()
+            response_model_properties = {}
+            json_schema_properties = json_schema.get("properties")
+            if json_schema_properties is not None:
+                for field_name, field_properties in json_schema_properties.items():
+                    formatted_field_properties = {
+                        prop_name: prop_value
+                        for prop_name, prop_value in field_properties.items()
+                        if prop_name != "title"
+                    }
+                    response_model_properties[field_name] = formatted_field_properties
+
+            if len(response_model_properties) > 0:
+                system_prompt += "\n<json_fields>"
+                system_prompt += f"\n{json.dumps([key for key in response_model_properties.keys() if key != '$defs'])}"
+                system_prompt += "\n</json_fields>"
+                system_prompt += "\nHere are the properties for each field:"
+                system_prompt += "\n<json_field_properties>"
+                system_prompt += f"\n{json.dumps(response_model_properties, indent=2, ensure_ascii=False)}"
+                system_prompt += "\n</json_field_properties>"
+
+            system_prompt += "\nStart your response with `{` and end it with `}`."
+            system_prompt += "\nYour output will be passed to json.loads() to convert it to a Python object."
+            system_prompt += "\nMake sure it only contains valid JSON."
+        return Message(role="system", content=system_prompt)
+
+    def run(
+            self,
+            message_pairs: List[Tuple[Message, Message]],
+            **kwargs: Any,
+    ) -> Optional[SessionSummary]:
+        logger.debug("*********** MemorySummarizer Start ***********")
+
+        if message_pairs is None or len(message_pairs) == 0:
+            logger.info("No message pairs provided for summarization.")
+            return None
+
+        # Update the Model (set defaults, add logit etc.)
+        self.update_model()
+
+        # Convert the message pairs to a list of dictionaries
+        messages_for_summarization: List[Dict[str, str]] = []
+        for message_pair in message_pairs:
+            user_message, assistant_message = message_pair
+            messages_for_summarization.append(
+                {
+                    user_message.role: user_message.get_content_string(),
+                    assistant_message.role: assistant_message.get_content_string(),
+                }
+            )
+
+        # Prepare the List of messages to send to the Model
+        messages_for_model: List[Message] = [self.get_system_message(messages_for_summarization)]
+        # Generate a response from the Model (includes running function calls)
+        self.model = cast(Model, self.model)
+        response = self.model.response(messages=messages_for_model)
+        logger.debug("*********** MemorySummarizer End ***********")
+
+        # If the model natively supports structured outputs, the parsed value is already in the structured format
+        if self.use_structured_outputs and response.parsed is not None and isinstance(response.parsed, SessionSummary):
+            return response.parsed
+
+        # Otherwise convert the response to the structured format
+        if isinstance(response.content, str):
+            try:
+                session_summary = None
+                try:
+                    session_summary = SessionSummary.model_validate_json(response.content)
+                except ValidationError:
+                    # Check if response starts with ```json
+                    if response.content.startswith("```json"):
+                        response.content = response.content.replace("```json\n", "").replace("\n```", "")
+                        try:
+                            session_summary = SessionSummary.model_validate_json(response.content)
+                        except ValidationError as exc:
+                            logger.warning(f"Failed to validate session_summary response: {exc}")
+                return session_summary
+            except Exception as e:
+                logger.warning(f"Failed to convert response to session_summary: {e}")
+        return None
+
+    async def arun(
+            self,
+            message_pairs: List[Tuple[Message, Message]],
+            **kwargs: Any,
+    ) -> Optional[SessionSummary]:
+        logger.debug("*********** Async MemorySummarizer Start ***********")
+
+        if message_pairs is None or len(message_pairs) == 0:
+            logger.info("No message pairs provided for summarization.")
+            return None
+
+        # Update the Model (set defaults, add logit etc.)
+        self.update_model()
+
+        # Convert the message pairs to a list of dictionaries
+        messages_for_summarization: List[Dict[str, str]] = []
+        for message_pair in message_pairs:
+            user_message, assistant_message = message_pair
+            messages_for_summarization.append(
+                {
+                    user_message.role: user_message.get_content_string(),
+                    assistant_message.role: assistant_message.get_content_string(),
+                }
+            )
+
+        # Prepare the List of messages to send to the Model
+        messages_for_model: List[Message] = [self.get_system_message(messages_for_summarization)]
+        # Generate a response from the Model (includes running function calls)
+        self.model = cast(Model, self.model)
+        response = await self.model.aresponse(messages=messages_for_model)
+        logger.debug("*********** Async MemorySummarizer End ***********")
+
+        # If the model natively supports structured outputs, the parsed value is already in the structured format
+        if self.use_structured_outputs and response.parsed is not None and isinstance(response.parsed, SessionSummary):
+            return response.parsed
+
+        # Otherwise convert the response to the structured format
+        if isinstance(response.content, str):
+            try:
+                session_summary = None
+                try:
+                    session_summary = SessionSummary.model_validate_json(response.content)
+                except ValidationError:
+                    # Check if response starts with ```json
+                    if response.content.startswith("```json"):
+                        response.content = response.content.replace("```json\n", "").replace("\n```", "")
+                        try:
+                            session_summary = SessionSummary.model_validate_json(response.content)
+                        except ValidationError as exc:
+                            logger.warning(f"Failed to validate session_summary response: {exc}")
+                return session_summary
+            except Exception as e:
+                logger.warning(f"Failed to convert response to session_summary: {e}")
+        return None
+
+
+class AgentMemory(BaseModel):
+    # Runs between the user and agent
+    runs: List[AgentRun] = []
+    # List of messages sent to the model
+    messages: List[Message] = []
+    update_system_message_on_change: bool = False
+
+    # Create and store session summaries
+    create_session_summary: bool = False
+    # Update session summaries after each run
+    update_session_summary_after_run: bool = True
+    # Summary of the session
+    summary: Optional[SessionSummary] = None
+    # Summarizer to generate session summaries
+    summarizer: Optional[MemorySummarizer] = None
+
+    # Create and store personalized memories for this user
+    create_user_memories: bool = False
+    # Update memories for the user after each run
+    update_user_memories_after_run: bool = True
+
+    # MemoryDb to store personalized memories
     db: Optional[MemoryDb] = None
+    # User ID for the personalized memories
     user_id: Optional[str] = None
     retrieval: MemoryRetrieval = MemoryRetrieval.last_n
     memories: Optional[List[Memory]] = None
     num_memories: Optional[int] = None
     classifier: Optional[MemoryClassifier] = None
     manager: Optional[MemoryManager] = None
-    updating: bool = False
+
+    # True when memory is being updated, auto record for memory status
+    updating_memory: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     def to_dict(self) -> Dict[str, Any]:
         _memory_dict = self.model_dump(
-            exclude_none=True, exclude={"db", "updating", "memories", "classifier", "manager"}
+            exclude_none=True,
+            exclude={
+                "summary",
+                "summarizer",
+                "db",
+                "updating_memory",
+                "memories",
+                "classifier",
+                "manager",
+                "retrieval",
+            },
         )
+        if self.summary:
+            _memory_dict["summary"] = self.summary.to_dict()
         if self.memories:
             _memory_dict["memories"] = [memory.to_dict() for memory in self.memories]
         return _memory_dict
 
-    def add_chat_message(self, message: Message) -> None:
-        """Adds a Message to the chat_history."""
-        self.chat_history.append(message)
+    def add_run(self, agent_run: AgentRun) -> None:
+        """Adds an AgentRun to the runs list."""
+        self.runs.append(agent_run)
+        logger.debug("Added AgentRun to AgentMemory")
 
-    def add_llm_message(self, message: Message) -> None:
-        """Adds a Message to the llm_messages."""
-        self.llm_messages.append(message)
+    def add_system_message(self, message: Message, system_message_role: str = "system") -> None:
+        """Add the system messages to the messages list"""
+        # If this is the first run in the session, add the system message to the messages list
+        if len(self.messages) == 0:
+            if message is not None:
+                self.messages.append(message)
+        # If there are messages in the memory, check if the system message is already in the memory
+        # If it is not, add the system message to the messages list
+        # If it is, update the system message if content has changed and update_system_message_on_change is True
+        else:
+            system_message_index = next((i for i, m in enumerate(self.messages) if m.role == system_message_role), None)
+            # Update the system message in memory if content has changed
+            if system_message_index is not None:
+                if (
+                        self.messages[system_message_index].content != message.content
+                        and self.update_system_message_on_change
+                ):
+                    logger.info("Updating system message in memory with new content")
+                    self.messages[system_message_index] = message
+            else:
+                # Add the system message to the messages list
+                self.messages.insert(0, message)
 
-    def add_chat_messages(self, messages: List[Message]) -> None:
-        """Adds a list of messages to the chat_history."""
-        self.chat_history.extend(messages)
+    def add_message(self, message: Message) -> None:
+        """Add a Message to the messages list."""
+        self.messages.append(message)
+        logger.debug("Added Message to AgentMemory")
 
-    def add_llm_messages(self, messages: List[Message]) -> None:
-        """Adds a list of messages to the llm_messages."""
-        self.llm_messages.extend(messages)
+    def add_messages(self, messages: List[Message]) -> None:
+        """Add a list of messages to the messages list."""
+        self.messages.extend(messages)
+        logger.debug(f"Added {len(messages)} Messages to AgentMemory")
 
-    def add_references(self, references: References) -> None:
-        """Adds references to the references list."""
-        self.references.append(references)
+    def get_messages(self) -> List[Dict[str, Any]]:
+        """Returns the messages list as a list of dictionaries."""
+        return [message.model_dump(exclude_none=True) for message in self.messages]
 
-    def get_chat_history(self) -> List[Dict[str, Any]]:
-        """Returns the chat_history as a list of dictionaries.
+    def get_messages_from_last_n_runs(
+            self, last_n: Optional[int] = None, skip_role: Optional[str] = None
+    ) -> List[Message]:
+        """Returns the messages from the last_n runs
 
-        :return: A list of dictionaries representing the chat_history.
+        Args:
+            last_n: The number of runs to return from the end of the conversation.
+            skip_role: Skip messages with this role.
+
+        Returns:
+            A list of Messages in the last_n runs.
         """
-        return [message.model_dump(exclude_none=True) for message in self.chat_history]
+        if last_n is None:
+            logger.debug("Getting messages from all previous runs")
+            messages_from_all_history = []
+            for prev_run in self.runs:
+                if prev_run.response and prev_run.response.messages:
+                    if skip_role:
+                        prev_run_messages = [m for m in prev_run.response.messages if m.role != skip_role]
+                    else:
+                        prev_run_messages = prev_run.response.messages
+                    messages_from_all_history.extend(prev_run_messages)
+            logger.debug(f"Messages from previous runs: {len(messages_from_all_history)}")
+            return messages_from_all_history
 
-    def get_last_n_messages(self, last_n: Optional[int] = None) -> List[Message]:
-        """Returns the last n messages in the chat_history.
+        logger.debug(f"Getting messages from last {last_n} runs")
+        messages_from_last_n_history = []
+        for prev_run in self.runs[-last_n:]:
+            if prev_run.response and prev_run.response.messages:
+                if skip_role:
+                    prev_run_messages = [m for m in prev_run.response.messages if m.role != skip_role]
+                else:
+                    prev_run_messages = prev_run.response.messages
+                messages_from_last_n_history.extend(prev_run_messages)
+        logger.debug(f"Messages from last {last_n} runs: {len(messages_from_last_n_history)}")
+        return messages_from_last_n_history
 
-        :param last_n: The number of messages to return from the end of the conversation.
-            If None, returns all messages.
-        :return: A list of Messages in the chat_history.
-        """
-        return self.chat_history[-last_n:] if last_n else self.chat_history
+    def get_message_pairs(
+            self, user_role: str = "user", assistant_role: Optional[List[str]] = None
+    ) -> List[Tuple[Message, Message]]:
+        """Returns a list of tuples of (user message, assistant response)."""
 
-    def get_llm_messages(self) -> List[Dict[str, Any]]:
-        """Returns the llm_messages as a list of dictionaries."""
-        return [message.model_dump(exclude_none=True) for message in self.llm_messages]
+        if assistant_role is None:
+            assistant_role = ["assistant", "model", "CHATBOT"]
 
-    def get_formatted_chat_history(self, num_messages: Optional[int] = None) -> str:
-        """Returns the chat_history as a formatted string."""
+        runs_as_message_pairs: List[Tuple[Message, Message]] = []
+        for run in self.runs:
+            if run.response and run.response.messages:
+                user_messages_from_run = None
+                assistant_messages_from_run = None
 
-        messages = self.get_last_n_messages(num_messages)
-        if len(messages) == 0:
-            return ""
+                # Start from the beginning to look for the user message
+                for message in run.response.messages:
+                    if message.role == user_role:
+                        user_messages_from_run = message
+                        break
 
-        history = ""
-        for message in self.get_last_n_messages(num_messages):
-            if message.role == "user":
-                history += "\n---\n"
-            history += f"{message.role.upper()}: {message.content}\n"
-        return history
+                # Start from the end to look for the assistant response
+                for message in run.response.messages[::-1]:
+                    if message.role in assistant_role:
+                        assistant_messages_from_run = message
+                        break
 
-    def get_chats(self) -> List[Tuple[Message, Message]]:
-        """Returns a list of tuples of user messages and LLM responses."""
-
-        all_chats: List[Tuple[Message, Message]] = []
-        current_chat: List[Message] = []
-
-        # Make a copy of the chat_history and remove all system messages from the beginning.
-        chat_history = self.chat_history.copy()
-        while len(chat_history) > 0 and chat_history[0].role in ("system", "assistant"):
-            chat_history = chat_history[1:]
-
-        for m in chat_history:
-            if m.role == "system":
-                continue
-            if m.role == "user":
-                # This is a new chat record
-                if len(current_chat) == 2:
-                    all_chats.append((current_chat[0], current_chat[1]))
-                    current_chat = []
-                current_chat.append(m)
-            if m.role == "assistant":
-                current_chat.append(m)
-
-        if len(current_chat) >= 1:
-            all_chats.append((current_chat[0], current_chat[1]))
-        return all_chats
+                if user_messages_from_run and assistant_messages_from_run:
+                    runs_as_message_pairs.append((user_messages_from_run, assistant_messages_from_run))
+        return runs_as_message_pairs
 
     def get_tool_calls(self, num_calls: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Returns a list of tool calls from the llm_messages.
-
-        Example:
-            - To get the last tool call, use num_calls=1.
-            - To get all tool calls, use num_calls=-1.
-        """
+        """Returns a list of tool calls from the messages"""
 
         tool_calls = []
-        for llm_message in self.llm_messages[::-1]:
-            if llm_message.tool_calls:
-                for tool_call in llm_message.tool_calls:
+        for message in self.messages[::-1]:
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
                     tool_calls.append(tool_call)
-
-        if num_calls and num_calls > 0:
-            return tool_calls[:num_calls]
+                    if num_calls and len(tool_calls) >= num_calls:
+                        return tool_calls
         return tool_calls
 
-    def load_memory(self) -> None:
-        """Load the memory from memory db for this user."""
+    def load_user_memories(self) -> None:
+        """Load memories from memory db for this user."""
         if self.db is None:
             return
 
@@ -674,15 +920,8 @@ class AssistantMemory(BaseModel):
                     limit=self.num_memories,
                     sort="asc" if self.retrieval == MemoryRetrieval.first_n else "desc",
                 )
-            elif self.retrieval == MemoryRetrieval.only_user:
-                memory_rows = self.db.read_memories(
-                    user_id=self.user_id,
-                    limit=self.num_memories,
-                    sort="desc",
-                )
-                memory_rows = [row for row in memory_rows if row.user_id == self.user_id]
             else:
-                raise NotImplementedError(f"{self.retrieval} retrieval method is not supported.")
+                raise NotImplementedError("Semantic retrieval not yet supported.")
         except Exception as e:
             logger.debug(f"Error reading memory: {e}")
             return
@@ -696,38 +935,49 @@ class AssistantMemory(BaseModel):
 
         for row in memory_rows:
             try:
-                id = getattr(row, 'id', None)
-                topic = getattr(row, 'topic', None)
-                input_text = getattr(row, 'input_text', None)
-                self.memories.append(Memory(memory=row.memory, id=id, topic=topic, input_text=input_text))
+                self.memories.append(Memory.model_validate(row.memory))
             except Exception as e:
                 logger.warning(f"Error loading memory: {e}")
                 continue
 
-    def should_update_memory(self, input_text: str) -> bool:
+    def should_update_memory(self, input: str) -> bool:
         """Determines if a message should be added to the memory db."""
 
         if self.classifier is None:
             self.classifier = MemoryClassifier()
 
         self.classifier.existing_memories = self.memories
-        classifier_response = self.classifier.run(input_text)
-        classifier_response = classifier_response.strip().lower()
-        if classifier_response == "yes" or classifier_response == "是":
+        classifier_response = self.classifier.run(input)
+        if classifier_response == "yes":
             return True
         return False
 
-    def update_memory(self, input_text: str, force: bool = False) -> str:
+    async def ashould_update_memory(self, input: str) -> bool:
+        """Determines if a message should be added to the memory db."""
+
+        if self.classifier is None:
+            self.classifier = MemoryClassifier()
+
+        self.classifier.existing_memories = self.memories
+        classifier_response = await self.classifier.arun(input)
+        if classifier_response == "yes":
+            return True
+        return False
+
+    def update_memory(self, input: str, force: bool = False) -> Optional[str]:
         """Creates a memory from a message and adds it to the memory db."""
 
-        if input_text is None or not isinstance(input_text, str):
+        if input is None or not isinstance(input, str):
             return "Invalid message content"
+
         if self.db is None:
             logger.warning("MemoryDb not provided.")
             return "Please provide a db to store memories"
-        self.updating = True
+
+        self.updating_memory = True
+
         # Check if this user message should be added to long term memory
-        should_update_memory = force or self.should_update_memory(input_text=input_text)
+        should_update_memory = force or self.should_update_memory(input=input)
         logger.debug(f"Update memory: {should_update_memory}")
 
         if not should_update_memory:
@@ -737,16 +987,127 @@ class AssistantMemory(BaseModel):
         if self.manager is None:
             self.manager = MemoryManager(user_id=self.user_id, db=self.db)
 
-        response = self.manager.run(input_text)
-        self.load_memory()
+        else:
+            self.manager.db = self.db
+            self.manager.user_id = self.user_id
 
+        response = self.manager.run(input)
+        self.load_user_memories()
+        self.updating_memory = False
         return response
 
-    def get_memories_for_system_prompt(self) -> Optional[str]:
-        if self.memories is None or len(self.memories) == 0:
-            return None
-        memory_str = "<memory_from_previous_interactions>\n"
-        memory_str += "\n".join([f"- {memory.memory}" for memory in self.memories])
-        memory_str += "\n</memory_from_previous_interactions>"
+    async def aupdate_memory(self, input: str, force: bool = False) -> Optional[str]:
+        """Creates a memory from a message and adds it to the memory db."""
 
-        return memory_str
+        if input is None or not isinstance(input, str):
+            return "Invalid message content"
+
+        if self.db is None:
+            logger.warning("MemoryDb not provided.")
+            return "Please provide a db to store memories"
+
+        self.updating_memory = True
+
+        # Check if this user message should be added to long term memory
+        should_update_memory = force or await self.ashould_update_memory(input=input)
+        logger.debug(f"Async update memory: {should_update_memory}")
+
+        if not should_update_memory:
+            logger.debug("Memory update not required")
+            return "Memory update not required"
+
+        if self.manager is None:
+            self.manager = MemoryManager(user_id=self.user_id, db=self.db)
+
+        else:
+            self.manager.db = self.db
+            self.manager.user_id = self.user_id
+
+        response = await self.manager.arun(input)
+        self.load_user_memories()
+        self.updating_memory = False
+        return response
+
+    def update_summary(self) -> Optional[SessionSummary]:
+        """Creates a summary of the session"""
+
+        self.updating_memory = True
+
+        if self.summarizer is None:
+            self.summarizer = MemorySummarizer()
+
+        self.summary = self.summarizer.run(self.get_message_pairs())
+        self.updating_memory = False
+        return self.summary
+
+    async def aupdate_summary(self) -> Optional[SessionSummary]:
+        """Creates a summary of the session"""
+
+        self.updating_memory = True
+
+        if self.summarizer is None:
+            self.summarizer = MemorySummarizer()
+
+        self.summary = await self.summarizer.arun(self.get_message_pairs())
+        self.updating_memory = False
+        return self.summary
+
+    def clear(self) -> None:
+        """Clear the AgentMemory"""
+
+        self.runs = []
+        self.messages = []
+        self.summary = None
+        self.memories = None
+
+    def deep_copy(self):
+        # Create a shallow copy of the object
+        copied_obj = self.__class__(**self.model_dump())
+
+        # Manually deepcopy fields that are known to be safe
+        for field_name, field_value in self.__dict__.items():
+            if field_name not in ["db", "classifier", "manager", "summarizer"]:
+                try:
+                    setattr(copied_obj, field_name, deepcopy(field_value))
+                except Exception as e:
+                    logger.warning(f"Failed to deepcopy field: {field_name} - {e}")
+                    setattr(copied_obj, field_name, field_value)
+
+        copied_obj.db = self.db
+        copied_obj.classifier = self.classifier
+        copied_obj.manager = self.manager
+        copied_obj.summarizer = self.summarizer
+
+        return copied_obj
+
+
+class WorkflowRun(BaseModel):
+    input: Optional[Dict[str, Any]] = None
+    response: Optional[RunResponse] = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class WorkflowMemory(BaseModel):
+    runs: List[WorkflowRun] = []
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return self.model_dump(exclude_none=True)
+
+    def add_run(self, workflow_run: WorkflowRun) -> None:
+        """Adds a WorkflowRun to the runs list."""
+        self.runs.append(workflow_run)
+        logger.debug("Added WorkflowRun to WorkflowMemory")
+
+    def clear(self) -> None:
+        """Clear the WorkflowMemory"""
+
+        self.runs = []
+
+    def deep_copy(self, *, update: Optional[Dict[str, Any]] = None) -> "WorkflowMemory":
+        new_memory = self.model_copy(deep=True, update=update)
+        # clear the new memory to remove any references to the old memory
+        new_memory.clear()
+        return new_memory

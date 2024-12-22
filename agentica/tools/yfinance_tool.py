@@ -120,7 +120,7 @@ class YFinanceTool(Toolkit):
                 "Gross Margins": company_info_full.get("grossMargins"),
                 "Ebitda Margins": company_info_full.get("ebitdaMargins"),
             }
-            return json.dumps(company_info_cleaned, indent=2)
+            return json.dumps(company_info_cleaned, indent=2, ensure_ascii=False)
         except Exception as e:
             return f"Error fetching company profile for {symbol}: {e}"
 
@@ -193,7 +193,7 @@ class YFinanceTool(Toolkit):
                 "52_week_high": info.get("fiftyTwoWeekHigh", "N/A"),
                 "52_week_low": info.get("fiftyTwoWeekLow", "N/A"),
             }
-            return json.dumps(fundamentals, indent=2)
+            return json.dumps(fundamentals, indent=2, ensure_ascii=False)
         except Exception as e:
             return f"Error getting fundamentals for {symbol}: {e}"
 
@@ -235,7 +235,7 @@ class YFinanceTool(Toolkit):
         try:
             stock = yf.Ticker(symbol)
             key_ratios = stock.info
-            return json.dumps(key_ratios, indent=2)
+            return json.dumps(key_ratios, indent=2, ensure_ascii=False)
         except Exception as e:
             return f"Error fetching key financial ratios for {symbol}: {e}"
 
@@ -277,7 +277,7 @@ class YFinanceTool(Toolkit):
         """
         try:
             news = yf.Ticker(symbol).news
-            return json.dumps(news[:num_stories], indent=2)
+            return json.dumps(news[:num_stories], indent=2, ensure_ascii=False)
         except Exception as e:
             return f"Error fetching company news for {symbol}: {e}"
 

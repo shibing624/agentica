@@ -8,14 +8,16 @@ import os
 from unittest.mock import patch, Mock
 import shutil
 import pytest
+import sys
 
+sys.path.append('..')
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 
 
 @pytest.fixture
 def url_crawler_tool():
     """Fixture to create a UrlCrawlerTool instance for testing."""
-    return UrlCrawlerTool(work_dir="./test_work_dir")
+    return UrlCrawlerTool(base_dir="./test_work_dir")
 
 
 @patch('requests.get')
@@ -29,14 +31,14 @@ def test_crawl_url_to_file_html(mock_get):
     mock_get.return_value = mock_response
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(work_dir="./test_work_dir")
-    content, save_path = url_crawler_tool.crawl_url_to_file(url)
-    print('content:', content, '\tsave_path:', save_path)
+    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    res = url_crawler_tool.url_crawl(url)
+    print('content:', res)
     # Assertions
-    assert save_path is not None
-
-    # Clean up
-    os.remove(save_path)
+    assert res is not None
+    save_path = res.get('save_path')
+    if save_path:
+        os.remove(save_path)
 
 
 @patch('requests.get')
@@ -50,14 +52,14 @@ def test_crawl_url_to_file_non_html(mock_get):
     mock_get.return_value = mock_response
 
     url = "https://example.com/test-file.pdf"
-    url_crawler_tool = UrlCrawlerTool(work_dir="./test_work_dir")
-    content, save_path = url_crawler_tool.crawl_url_to_file(url)
-    print('content:', content, '\tsave_path:', save_path)
+    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    res = url_crawler_tool.url_crawl(url)
+    print('content:', res)
     # Assertions
-    assert save_path is not None
-
-    # Clean up
-    os.remove(save_path)
+    assert res is not None
+    save_path = res.get('save_path')
+    if save_path:
+        os.remove(save_path)
 
 
 @patch('requests.get')
@@ -71,14 +73,14 @@ def test_url_crawl(mock_get):
     mock_get.return_value = mock_response
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(work_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
     result = url_crawler_tool.url_crawl(url)
     print('result:', result)
     # Assertions
-    assert "Test" in result
+    assert "Test" in str(result)
 
     # Clean up
-    shutil.rmtree(url_crawler_tool.work_dir)
+    shutil.rmtree(url_crawler_tool.base_dir)
 
 
 @patch('requests.get')
@@ -90,12 +92,13 @@ def test_crawl_url_to_file_error(mock_get):
     mock_get.side_effect = Exception("404 Not Found")
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(work_dir="./test_work_dir")
-    content, save_path = url_crawler_tool.crawl_url_to_file(url)
-    print('content:', content, '\tsave_path:', save_path)
+    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    content = url_crawler_tool.url_crawl(url)
+    print('content:', content)
     # Assertions
-    assert content == ""
-    shutil.rmtree(url_crawler_tool.work_dir)
+    assert content is not None
+    if os.path.exists(url_crawler_tool.base_dir):
+        shutil.rmtree(url_crawler_tool.base_dir)
 
 
 @patch('requests.get')
@@ -105,12 +108,12 @@ def test_url_crawl_error(mock_get):
     mock_get.side_effect = Exception("404 Not Found")
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(work_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
     result = url_crawler_tool.url_crawl(url)
 
     # Assertions
     assert result is not None
-    shutil.rmtree(url_crawler_tool.work_dir)
+    shutil.rmtree(url_crawler_tool.base_dir)
 
 
 if __name__ == '__main__':

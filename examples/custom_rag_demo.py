@@ -26,16 +26,16 @@ import sys
 from typing import Optional
 
 sys.path.append('..')
-from agentica import Assistant
-from agentica.knowledge.knowledge_base import KnowledgeBase
-from agentica.vectordb.pgvector import PgVector
+from agentica import Agent
+from agentica.knowledge.base import Knowledge
+from agentica.vectordb.pgvectordb import PgVectorDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 
 db_url = "postgresql+psycopg://ai:ai@localhost:5532/ai"
 
-knowledge_base = KnowledgeBase(
+knowledge_base = Knowledge(
     data_path=["https://phi-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],
-    vector_db=PgVector(collection="ThaiRecipes", db_url=db_url, embedder=Text2VecEmb()),
+    vector_db=PgVectorDb(collection="ThaiRecipes", db_url=db_url, embedder=Text2VecEmb()),
 )
 # Comment after first run
 knowledge_base.load(recreate=True)
@@ -52,13 +52,13 @@ def custom_references_function(query: str, **kwargs) -> Optional[str]:
     return content
 
 
-assistant = Assistant(
+m = Agent(
     knowledge_base=knowledge_base,
     # Generate references using a custom function.
     references_function=custom_references_function,
     # Adds references to the prompt.
-    add_references_to_prompt=True,
+    add_references=True,
     debug_mode=False,
 )
-r = assistant.run("How to make Thai curry?")
-print("".join(r))
+r = m.run("How to make Thai curry?")
+print(r)

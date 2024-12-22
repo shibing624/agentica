@@ -9,15 +9,15 @@ pip install easyocr agentica
 import sys
 
 sys.path.append('..')
-from agentica import Assistant, AzureOpenAILLM
+from agentica import Agent, AzureOpenAIChat
 from agentica.tools.ocr_tool import OcrTool
 
-m = Assistant(
-    llm=AzureOpenAILLM(),
+m = Agent(
+    llm=AzureOpenAIChat(),
     tools=[OcrTool()],
 )
 prompt = """
 对图片`data/chinese.jpg`进行OCR识别，只给出ocr文字就可以。
 """
 r = m.run(prompt)
-print("".join(r))
+print(r)

@@ -1,5 +1,7 @@
 import pytest
+import sys
 
+sys.path.append('..')
 from agentica.tools.run_nb_code_tool import RunNbCodeWrapper
 
 

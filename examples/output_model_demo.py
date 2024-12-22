@@ -4,7 +4,7 @@ from rich.pretty import pprint
 import sys
 
 sys.path.append('..')
-from agentica import Assistant
+from agentica import Agent
 
 
 class MovieScript(BaseModel):
@@ -18,10 +18,9 @@ class MovieScript(BaseModel):
     storyline: str = Field(..., description="3 sentence storyline for the movie. Make it exciting!")
 
 
-movie_assistant = Assistant(
+m = Agent(
     description="You help write movie scripts.",
-    output_model=MovieScript,
-    # debug_mode=True,
+    response_model=MovieScript,
 )
-r = movie_assistant.run("Write a movie script.")
-pprint(list(r))
+r = m.run("Write a movie script.")
+pprint(r)

@@ -22,6 +22,7 @@ class Document(BaseModel):
     embedder: Optional[Emb] = None
     embedding: Optional[List[float]] = None
     usage: Optional[Dict[str, Any]] = None
+    reranking_score: Optional[float] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
