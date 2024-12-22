@@ -97,9 +97,7 @@ def get_sage(
         markdown=True,
         # This setting adds the current datetime to the instructions
         add_datetime_to_instructions=True,
-        memory=AgentMemory(db=CsvMemoryDb(memory_file)),
-        create_umemories=True,
-        force_update_memory_after_run=True,
+        memory=AgentMemory(db=CsvMemoryDb(memory_file), create_user_memories=True),
         debug_mode=debug_mode,
     )
     return sage
@@ -121,7 +119,7 @@ def main():
     # Restart the assistant if llm_id changes
     elif st.session_state["llm_id"] != llm_id:
         st.session_state["llm_id"] = llm_id
-        restart_assistant()
+        restart_agent()
 
     # Get the assistant
     sage: Agent
@@ -194,10 +192,10 @@ def main():
             st.rerun()
 
     if st.sidebar.button("New Run"):
-        restart_assistant()
+        restart_agent()
 
 
-def restart_assistant():
+def restart_agent():
     logger.debug("---*--- Restarting Assistant ---*---")
     st.session_state["sage"] = None
     st.session_state["sage_run_id"] = None

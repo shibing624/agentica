@@ -28,13 +28,11 @@ def main():
         tools=[SearchSerperTool()],
         show_tool_calls=True,
         debug_mode=True,
-        knowledge_base=knowledge_base,
+        knowledge=knowledge_base,
         storage=SqlAgentStorage(table_name="person1", db_file="outputs/person1.db"),
         update_knowledge=True,
         search_knowledge=True,
-        memory=AgentMemory(db=CsvMemoryDb(memory_file)),
-        create_memories=True,
-        force_update_memory_after_run=True,
+        memory=AgentMemory(db=CsvMemoryDb(memory_file), create_user_memories=True),
     )
     r = m.run(
         "如果Eliud Kipchoge能够无限期地保持他创造记录的马拉松速度，那么他需要多少小时才能跑完地球和月球在最近接时之间的距离？"

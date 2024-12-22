@@ -9,7 +9,7 @@ if __name__ == '__main__':
     print(llm)
     m = Agent(
         llm=llm,
-        add_chat_history_to_messages=True,
+        add_history_to_messages=True,
         storage=SqlAgentStorage(table_name="assistant_runs", db_file="outputs/assistant_runs.db"),
         output_dir="outputs"
     )

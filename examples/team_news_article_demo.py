@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
-
+import os
 import sys
 from textwrap import dedent
 from typing import Optional
@@ -21,21 +21,18 @@ class NewsArticle(BaseModel):
     summary: Optional[str] = Field(..., description="Summary of the article if available.")
 
 
-output_dir = "outputs"
 researcher = Agent(
     llm=AzureOpenAIChat(model="gpt-4o"),
     name="Article Researcher",
     tools=[SearchExaTool()],
     description="Given a topic, search for 15 articles and return the 7 most relevant articles.",
     output_model=NewsArticle,
-    output_dir=output_dir,
 )
 
 writer = Agent(
     llm=AzureOpenAIChat(model="gpt-4o"),
     name="Article Writer",
-    output_dir=output_dir,
-    output_file_name="article.md",
+    save_response_to_file="outputs/article.md",
     description="You are a Senior NYT Editor and your task is to write a NYT cover story worthy article due tomorrow.",
     instructions=[
         "You will be provided with news articles and their links.",
