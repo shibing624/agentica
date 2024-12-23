@@ -11,13 +11,12 @@ from agentica.config import (
     AGENTICA_LOG_FILE,
 )  # noqa, isort: skip
 from agentica.utils.log import set_log_level_to_debug, logger
-
+from agentica.utils.io import write_audio_to_file
 # model
 from agentica.model.openai.chat import OpenAIChat
 from agentica.model.azure.openai_chat import AzureOpenAIChat
-from agentica.model.anthropic import Claude
 from agentica.model.moonshot import MoonshotChat
-from agentica.model.deepseek.deepseek import DeepSeekChat
+from agentica.model.deepseek.chat import DeepSeekChat
 from agentica.model.yi.chat import YiChat
 
 # memory
@@ -45,7 +44,7 @@ from agentica.run_response import (
 from agentica.knowledge.base import Knowledge
 from agentica.document import Document
 # vectordb
-from agentica.vectordb.base import VectorDb
+from agentica.vectordb.base import SearchType, Distance, VectorDb
 from agentica.vectordb.memory_vectordb import MemoryVectorDb
 # emb
 from agentica.emb.base import Emb
@@ -55,8 +54,6 @@ from agentica.emb.hash_emb import HashEmb
 from agentica.emb.ollama_emb import OllamaEmb
 from agentica.emb.together_emb import TogetherEmb
 from agentica.emb.fireworks_emb import FireworksEmb
-from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica.emb.word2vec_emb import Word2VecEmb
 
 # file
 from agentica.file.base import File

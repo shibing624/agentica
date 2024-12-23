@@ -16,7 +16,7 @@ class MoonshotChat(OpenAILike):
     - base_url: str: The base URL for the model. Default: "https://api.moonshot.cn/v1".
     """
 
-    id: str = "moonshot-chat"
+    id: str = "moonshot-v1-8k"
     name: str = "MoonshotChat"
     provider: str = "MoonShot"
 

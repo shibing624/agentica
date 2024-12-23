@@ -23,19 +23,8 @@ class LlamaIndexKnowledge(Knowledge):
     retriever: BaseRetriever
     loader: Optional[Callable] = None
 
-    def search(self, query: str, num_documents: Optional[int] = None) -> List[Document]:
-        """
-        Returns relevant documents matching the query.
-
-        Args:
-            query (str): The query string to search for.
-            num_documents (Optional[int]): The maximum number of documents to return. Defaults to None.
-
-        Returns:
-            List[Document]: A list of relevant documents matching the query.
-        Raises:
-            ValueError: If the retriever is not of type BaseRetriever.
-        """
+    def search(self, query: str, num_documents: Optional[int] = None, filters=None) -> List[Document]:
+        """Returns relevant documents matching the query."""
         if not isinstance(self.retriever, BaseRetriever):
             raise ValueError(f"Retriever is not of type BaseRetriever: {self.retriever}")
 
@@ -52,7 +41,7 @@ class LlamaIndexKnowledge(Knowledge):
             )
         return documents
 
-    def load(self, recreate: bool = False, upsert: bool = True, skip_existing: bool = True) -> None:
+    def load(self, recreate: bool = False, upsert: bool = True, skip_existing: bool = True, filters=None) -> None:
         if self.loader is None:
             logger.error("No loader provided for LlamaIndexKnowledgeBase")
             return

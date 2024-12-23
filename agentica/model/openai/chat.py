@@ -134,13 +134,13 @@ class OpenAIChat(Model):
         self.api_key = self.api_key or getenv("OPENAI_API_KEY")
         if not self.api_key:
             logger.error("OPENAI_API_KEY not set. Please set the OPENAI_API_KEY environment variable.")
-
+        self.base_url = self.base_url or getenv("OPENAI_BASE_URL")
         if self.api_key is not None:
             client_params["api_key"] = self.api_key
         if self.organization is not None:
             client_params["organization"] = self.organization
         if self.base_url is not None:
-            client_params["base_url"] = self.base_url or getenv("OPENAI_BASE_URL")
+            client_params["base_url"] = self.base_url
         if self.timeout is not None:
             client_params["timeout"] = self.timeout
         if self.max_retries is not None:

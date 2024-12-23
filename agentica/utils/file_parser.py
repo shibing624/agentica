@@ -7,6 +7,7 @@ import os
 import csv
 import json
 import ssl
+import httpx
 import numpy as np
 from io import BytesIO
 from pathlib import Path
@@ -55,16 +56,18 @@ def read_txt_file(path: Path) -> str:
         return ""
 
 
-def read_pdf_file(path: Path) -> str:
+def read_pdf_file(path: Path, enable_image_ocr: bool = False) -> str:
     try:
         import pypdf
     except ImportError:
         raise ImportError("pypdf is required to read PDF files: `pip install pypdf`")
 
-    try:
-        import imgocr
-    except ImportError:
-        raise ImportError("use `pip install imgocr`")
+    if enable_image_ocr:
+        try:
+            import imgocr
+        except ImportError:
+            raise ImportError("use `pip install imgocr`")
+
     text = ""
     try:
         # Read PDF text
@@ -72,58 +75,56 @@ def read_pdf_file(path: Path) -> str:
         for page in reader.pages:
             text += page.extract_text() + "\n"
 
-        # Read images and perform OCR
-        ocr = imgocr.ImgOcr()
-        for page in reader.pages:
-            for image in page.images:
-                if image is None or not image:  # Check if the image data is valid
-                    logger.warning(f"Invalid image data: {image}")
-                    continue
-                img_array = np.array(image)
-                if img_array.ndim == 3 and img_array.shape[-1] == 4:  # Check if the image has an alpha channel
-                    img_array = img_array[:, :, :3]  # Remove the alpha channel
-                elif img_array.ndim != 3 or img_array.shape[-1] not in [3, 4]:
-                    logger.warning(f"Unexpected image shape: {img_array.shape}")
-                    continue
-                ocr_result = ocr.ocr(img_array)
-                for result in ocr_result:
-                    text += result["text"] + "\n"
+        if enable_image_ocr:
+            # Read images and perform OCR
+            ocr = imgocr.ImgOcr()
+            for page in reader.pages:
+                for image in page.images:
+                    if image is None or not image:  # Check if the image data is valid
+                        logger.warning(f"Invalid image data: {image}")
+                        continue
+                    img_array = np.array(image)
+                    if img_array.ndim == 3 and img_array.shape[-1] == 4:  # Check if the image has an alpha channel
+                        img_array = img_array[:, :, :3]  # Remove the alpha channel
+                    elif img_array.ndim != 3 or img_array.shape[-1] not in [3, 4]:
+                        logger.warning(f"Unexpected image shape: {img_array.shape}")
+                        continue
+                    ocr_result = ocr.ocr(img_array)
+                    for result in ocr_result:
+                        text += result["text"] + "\n"
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
     return text
 
 
-def read_pdf_url(url: str) -> str:
-    try:
-        import httpx
-    except ImportError:
-        raise ImportError("`httpx` not installed, use `pip install httpx`")
+def read_pdf_url(url: str, enable_image_ocr: bool = False) -> str:
     try:
         from pypdf import PdfReader
     except ImportError:
         raise ImportError("`pypdf` not installed, use `pip install pypdf`")
-    try:
-        import imgocr
-    except ImportError:
-        raise ImportError("use `pip install imgocr`")
+    if enable_image_ocr:
+        try:
+            import imgocr
+        except ImportError:
+            raise ImportError("use `pip install imgocr`")
     try:
         logger.info(f"Reading: {url}")
         # Create a default context for HTTPS requests (not recommended for production)
         ssl._create_default_https_context = ssl._create_unverified_context
         response = httpx.get(url)
         doc_reader = PdfReader(BytesIO(response.content))
-        ocr_model = imgocr.ImgOcr()
+        ocr_model = imgocr.ImgOcr() if enable_image_ocr else None
         text_content = ""
         for num, page in enumerate(doc_reader.pages):
             page_text = page.extract_text() or ""
             image_text_list = []
-            for img_obj in page.images:
-                img_data = img_obj.data
-                # Perform OCR
-                ocr_result = ocr_model.ocr(img_data)
-                if ocr_result:
-                    image_text_list += [i.get('text') for i in ocr_result]
-
+            if enable_image_ocr:
+                for img_obj in page.images:
+                    img_data = img_obj.data
+                    # Perform OCR
+                    ocr_result = ocr_model.ocr(img_data)
+                    if ocr_result:
+                        image_text_list += [i.get('text') for i in ocr_result]
             images_text = "\n".join(image_text_list)
             content = page_text + "\n" + images_text
             text_content += content

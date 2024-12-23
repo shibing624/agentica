@@ -74,27 +74,24 @@ pip install -r requirements.txt
 cp .env.example ~/.agentica/.env
 
 cd examples
-python web_search_deepseek_demo.py
+python web_search_moonshot_demo.py
 ```
 
-1. Copy the [.env.example](https://github.com/shibing624/agentica/blob/main/.env.example) file to `~/.agentica/.env` and fill in the LLM API key (optional DEEPSEEK_API_KEY, MOONSHOT_API_KEY, OPENAI_API_KEY, etc.).
+1. Copy the [.env.example](https://github.com/shibing624/agentica/blob/main/.env.example) file to `~/.agentica/.env` and fill in the LLM API key (optional DEEPSEEK_API_KEY, MOONSHOT_API_KEY, OPENAI_API_KEY, etc.). Or you can set the environment variable directly.
+    ```shell
+    export MOONSHOT_API_KEY=your_moonshot_api_key
+    export SERPER_API_KEY=your_serper_api_key
+    ```
 
 2. Build and run an Agent using `agentica`:
 
-Automatically call the Google search tool, example [examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
+Automatically call the Google search tool, example [examples/web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_moonshot_demo.py)
 
 ```python
-import os
-os.environ["OPENAI_API_KEY"] = "your_openai_api_key"
-os.environ["SERPER_API_KEY"] = "your_serper_api_key"
-from agentica import Agent, OpenAIChat, SearchSerperTool
+from agentica import Agent, MoonshotChat, SearchSerperTool
 
-m = Agent(model=OpenAIChat(id='gpt-4o'), tools=[SearchSerperTool()])
-r = m.run("一句话介绍林黛玉")
-print(r)
-r = m.run("北京最近的新闻top3")
-print(r)
-r = m.run("总结前面的问答")
+m = Agent(model=MoonshotChat(), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
+r = m.run("Where will the next Olympics be held?")
 print(r)
 ```
 

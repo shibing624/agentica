@@ -19,7 +19,7 @@ class LangChainKnowledge(Knowledge):
 
     retriever: Optional[Any] = None
 
-    def search(self, query: str, num_documents: Optional[int] = None) -> List[Document]:
+    def search(self, query: str, num_documents: Optional[int] = None, filters=None) -> List[Document]:
         """Returns relevant documents matching the query"""
 
         try:
@@ -56,7 +56,7 @@ class LangChainKnowledge(Knowledge):
             )
         return documents
 
-    def load(self, recreate: bool = False, upsert: bool = True, skip_existing: bool = True) -> None:
+    def load(self, recreate: bool = False, upsert: bool = True, skip_existing: bool = True, filters=None) -> None:
         if self.loader is None:
             logger.error("No loader provided for LangChainKnowledgeBase")
             return

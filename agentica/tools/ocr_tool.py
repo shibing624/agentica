@@ -21,7 +21,7 @@ class OcrTool(Toolkit):
         :param use_gpu: Whether to use GPU for OCR processing.
         """
         super().__init__(name="ocr_tool")
-        self.ocr = ImgOcr(use_gpu=use_gpu)
+        self.ocr_model = ImgOcr(use_gpu=use_gpu)
         logger.debug(f"Initialized imgocr tool, use GPU: {use_gpu}")
         self.register(self.read_text)
 
@@ -41,8 +41,8 @@ class OcrTool(Toolkit):
             str: The recognized text.
         """
         try:
-            result = self.ocr.ocr(image_path)[0]
-            result_str = " ".join([i[-1][0] for i in result])
+            result = self.ocr_model.ocr(image_path)
+            result_str = " ".join([i['text'] for i in result])
             logger.info(f"Ocr image: {image_path}, result: {result_str}")
             return result_str
         except Exception as e:

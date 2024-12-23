@@ -2,16 +2,13 @@ import time
 from pathlib import Path
 from typing import Optional, List
 
-try:
-    from sqlalchemy.dialects import sqlite
-    from sqlalchemy.engine import create_engine, Engine
-    from sqlalchemy.inspection import inspect
-    from sqlalchemy.orm import Session, sessionmaker
-    from sqlalchemy.schema import MetaData, Table, Column
-    from sqlalchemy.sql.expression import select
-    from sqlalchemy.types import String
-except ImportError:
-    raise ImportError("`sqlalchemy` not installed. Please install it using `pip install sqlalchemy`")
+from sqlalchemy.dialects import sqlite
+from sqlalchemy.engine import create_engine, Engine
+from sqlalchemy.inspection import inspect
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.schema import MetaData, Table, Column
+from sqlalchemy.sql.expression import select
+from sqlalchemy.types import String
 
 from agentica.storage.workflow.base import WorkflowStorage
 from agentica.workflow_session import WorkflowSession

@@ -9,4 +9,5 @@ sqlalchemy
 scikit-learn
 text2vec
 tqdm
+yaml
 rich

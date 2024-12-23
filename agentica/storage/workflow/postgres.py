@@ -1,13 +1,10 @@
 import time
 from typing import Optional, List
 
-try:
-    from sqlalchemy import create_engine, Engine, MetaData, Table, Column, String, BigInteger, inspect, Index
-    from sqlalchemy.dialects import postgresql
-    from sqlalchemy.orm import sessionmaker, scoped_session
-    from sqlalchemy.sql.expression import select, text
-except ImportError:
-    raise ImportError("`sqlalchemy` not installed. Please install it with `pip install sqlalchemy`")
+from sqlalchemy import create_engine, Engine, MetaData, Table, Column, String, BigInteger, inspect, Index
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.sql.expression import select, text
 
 from agentica.storage.workflow.base import WorkflowStorage
 from agentica.workflow_session import WorkflowSession

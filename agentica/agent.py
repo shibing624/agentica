@@ -219,7 +219,7 @@ class Agent(BaseModel):
     # Use the structured_outputs from the Model if available
     structured_outputs: bool = False
     # Save the response to a file
-    save_response_to_file: Optional[str] = None
+    save_response_to_file: Optional[str] = Field(None, alias="output_file")
 
     # -*- Agent Team
     # An Agent can have a team of agents that it can transfer tasks to.

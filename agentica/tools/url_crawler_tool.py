@@ -18,11 +18,9 @@ from agentica.utils.log import logger
 
 
 class UrlCrawlerTool(Toolkit):
-    base_dir: str = os.path.curdir
-
-    def __init__(self, base_dir: str = None):
+    def __init__(self, base_dir: str = os.path.curdir):
         super().__init__(name="url_crawler_tool")
-        self.base_dir = base_dir or self.base_dir
+        self.base_dir = base_dir
         self.register(self.url_crawl)
 
     @staticmethod
