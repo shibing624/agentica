@@ -16,7 +16,7 @@ from openai.types.chat.chat_completion_chunk import (
 )
 
 
-class Together(OpenAILike):
+class TogetherChat(OpenAILike):
     """
     A class for interacting with Together models.
 

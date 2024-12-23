@@ -1,1 +1,1 @@
-from agentica.model.together.together import Together
+from agentica.model.together.togetherchat import TogetherChat

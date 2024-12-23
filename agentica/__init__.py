@@ -17,6 +17,9 @@ from agentica.model.openai.chat import OpenAIChat
 from agentica.model.azure.openai_chat import AzureOpenAIChat
 from agentica.model.moonshot import MoonshotChat
 from agentica.model.deepseek.chat import DeepSeekChat
+from agentica.model.doubao.chat import DoubaoChat
+from agentica.model.together.togetherchat import TogetherChat
+from agentica.model.xai.grok import GrokChat
 from agentica.model.yi.chat import YiChat
 
 # memory
