@@ -13,7 +13,8 @@ from agentica import PythonAgent, AzureOpenAIChat, SqlAgentStorage
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica import Knowledge, AgentMemory, CsvMemoryDb
+from agentica import Knowledge, AgentMemory
+from agentica.memorydb import CsvMemoryDb
 
 
 def main():

@@ -79,7 +79,7 @@ python web_search_moonshot_demo.py
 
 1. Copy the [.env.example](https://github.com/shibing624/agentica/blob/main/.env.example) file to `~/.agentica/.env` and fill in the LLM API key (optional DEEPSEEK_API_KEY, MOONSHOT_API_KEY, OPENAI_API_KEY, etc.). Or you can set the environment variable directly.
     ```shell
-    export MOONSHOT_API_KEY=your_moonshot_api_key
+    export OPENAI_API_KEY=your_openai_api_key
     export SERPER_API_KEY=your_serper_api_key
     ```
 
@@ -88,9 +88,9 @@ python web_search_moonshot_demo.py
 Automatically call the Google search tool, example [examples/web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_moonshot_demo.py)
 
 ```python
-from agentica import Agent, MoonshotChat, SearchSerperTool
+from agentica import Agent, OpenAIChat, SearchSerperTool
 
-m = Agent(model=MoonshotChat(), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
+m = Agent(model=OpenAIChat(id='gpt-4o'), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
 r = m.run("Where will the next Olympics be held?")
 print(r)
 ```
@@ -117,38 +117,47 @@ bash start.sh
 
 ## Examples
 
-| Example                                                                                                                                    | Description                                                                                                                              |
-|---------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------|
-| [examples/naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/naive_rag_demo.py)                             | Implements a basic RAG, answering questions based on a Txt document                                                                                                           |
-| [examples/advanced_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/advanced_rag_demo.py)                       | Implements an advanced RAG, answering questions based on a PDF document, with new features: PDF file parsing, query rewriting, lexical + semantic multi-path retrieval, retrieval ranking (rerank)                                                               |
-| [examples/python_assistant_demo.py](https://github.com/shibing624/agentica/blob/main/examples/python_assistant_demo.py)               | Implements Code Interpreter functionality, automatically generating and executing Python code                                                                                          |
-| [examples/research_demo.py](https://github.com/shibing624/agentica/blob/main/examples/research_demo.py)                               | Implements Research functionality, automatically calling search tools, summarizing information, and writing scientific reports                                                                                              |
-| [examples/team_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/team_news_article_demo.py)             | Implements team collaboration for writing news articles, multi-role implementation, delegating different roles to complete their respective tasks: researchers retrieve and analyze articles, writers write articles based on the layout, summarizing multi-role results                                                       |
-| [examples/workflow_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_news_article_demo.py)     | Implements a workflow for writing news articles, multi-agent implementation, defining multiple Assistants and Tasks, calling search tools multiple times, and generating advanced layout news articles                                                            |
-| [examples/workflow_investment_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_investment_demo.py)         | Implements an investment research workflow: stock information collection - stock analysis - writing analysis reports - reviewing reports, etc.                                                                                |
-| [examples/crawl_webpage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/crawl_webpage_demo.py)                     | Implements a webpage analysis workflow: crawling financing news from URLs - analyzing webpage content and format - extracting core information - summarizing and saving as md files                                                                          |
-| [examples/find_paper_from_arxiv_demo.py](https://github.com/shibing624/agentica/blob/main/examples/find_paper_from_arxiv_demo.py)     | Implements a paper recommendation workflow: automatically searching multiple groups of papers from arxiv - deduplicating similar papers - extracting core paper information - saving as csv files                                                                        |
-| [examples/remove_image_background_demo.py](https://github.com/shibing624/agentica/blob/main/examples/remove_image_background_demo.py) | Implements automatic image background removal functionality, including automatic library installation via pip, calling libraries to remove image backgrounds                                                                                          |
-| [examples/text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/text_classification_demo.py)         | Implements an automatic training classification model workflow: reading training set files and understanding the format - Google searching for pytextclassifier library - crawling GitHub pages to understand how to call pytextclassifier - writing code and executing fasttext model training - checking the trained model prediction results |
-| [examples/llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/llm_os_demo.py)                                   | Implements the initial design of LLM OS, designing an operating system based on LLM, which can call RAG, code executors, Shell, etc. through LLM, and collaborate with code interpreters, research assistants, investment assistants, etc. to solve problems.                                                |
-| [examples/workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_write_novel_demo.py)       | Implements a workflow for writing novels: setting the novel outline - Google searching and reflecting on the outline - writing novel content - saving as md files                                                                                  |
-| [examples/workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/workflow_write_tutorial_demo.py) | Implements a workflow for writing technical tutorials: setting the tutorial directory - reflecting on the directory content - writing tutorial content - saving as md files                                                                                  |
-| [examples/self_evolving_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/self_evolving_agent_demo.py)         | Implements a self-evolving agent based on long-term memory, which can adjust decisions based on historical Q&A information                                                                                              |
-
-
-### LLM OS
-The LLM OS design:
-
-<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="800" />
-
-#### Run the LLM OS App
-
-```shell
-cd examples
-streamlit run llm_os_demo.py
-```
-
-<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png" width="800" />
+| Example                                                                                                                                                    | Description                                                                                                                                |
+|------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| [examples/01_llm_demo.py](https://github.com/shibing624/agentica/blob/main/examples/01_llm_demo.py)                                                         | LLM Q&A Demo                                                                                                                               |
+| [examples/02_user_prompt_demo.py](https://github.com/shibing624/agentica/blob/main/examples/02_user_prompt_demo.py)                                         | Custom user prompt Demo                                                                                                                    |
+| [examples/03_user_messages_demo.py](https://github.com/shibing624/agentica/blob/main/examples/03_user_messages_demo.py)                                     | Custom input user messages Demo                                                                                                            |
+| [examples/04_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/04_memory_demo.py)                                                   | Agent memory Demo                                                                                                                          |
+| [examples/05_response_model_demo.py](https://github.com/shibing624/agentica/blob/main/examples/05_response_model_demo.py)                                   | Demo of responding in a specified format (pydantic's BaseModel)                                                                            |
+| [examples/06_calc_with_csv_file_demo.py](https://github.com/shibing624/agentica/blob/main/examples/06_calc_with_csv_file_demo.py)                           | Demo of LLM loading CSV files and performing calculations to answer questions                                                              |
+| [examples/07_create_image_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/07_create_image_tool_demo.py)                             | Demo of creating an image tool                                                                                                             |
+| [examples/08_ocr_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/08_ocr_tool_demo.py)                                               | Demo of implementing an OCR tool                                                                                                           |
+| [examples/09_remove_image_background_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/09_remove_image_background_tool_demo.py)       | Demo of automatically removing image backgrounds, including automatic pip installation and calling the library to remove image backgrounds |
+| [examples/10_vision_demo.py](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                                   | Vision understanding Demo                                                                                                                  |
+| [examples/11_web_search_openai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_openai_demo.py)                             | Web search Demo based on OpenAI's function call                                                                                            |
+| [examples/12_web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/12_web_search_moonshot_demo.py)                         | Web search Demo based on Moonshot's function call                                                                                          |
+| [examples/13_storage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/13_storage_demo.py)                                                 | Agent storage Demo                                                                                                                         |
+| [examples/14_custom_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/14_custom_tool_demo.py)                                         | Demo of custom tools and autonomous selection and calling by large models                                                                  |
+| [examples/15_crawl_webpage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/15_crawl_webpage_demo.py)                                     | Demo of a webpage analysis workflow: crawling financing news from URLs, analyzing webpage content and format, extracting core information, and summarizing it into a markdown file |
+| [examples/16_get_top_papers_demo.py](https://github.com/shibing624/agentica/blob/main/examples/16_get_top_papers_demo.py)                                   | Demo of parsing daily papers and saving them in JSON format                                                                                |
+| [examples/17_find_paper_from_arxiv_demo.py](https://github.com/shibing624/agentica/blob/main/examples/17_find_paper_from_arxiv_demo.py)                     | Demo of paper recommendation: automatically searching multiple groups of papers from arxiv, deduplicating similar papers, extracting core paper information, and saving it as a CSV file |
+| [examples/18_agent_input_is_list.py](https://github.com/shibing624/agentica/blob/main/examples/18_agent_input_is_list.py)                                   | Demo showing that the Agent's message can be a list                                                                                        |
+| [examples/19_naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/19_naive_rag_demo.py)                                             | Basic RAG implementation, answering questions based on a text document                                                                     |
+| [examples/20_advanced_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                       | Advanced RAG implementation, answering questions based on a PDF document, with new features: PDF file parsing, query rewriting, multi-path mixed recall (literal + semantic), and recall ranking (rerank) |
+| [examples/21_memorydb_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/21_reference_in_prompt_rag_demo.py)                            | Traditional RAG approach of placing reference materials in the prompt                                                                      |
+| [examples/22_chat_pdf_app_demo.py](https://github.com/shibing624/agentica/blob/main/examples/22_chat_pdf_app_demo.py)                                       | Demo of in-depth conversation with a PDF document                                                                                          |
+| [examples/23_python_agent_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/23_python_agent_memory_demo.py)                         | Demo of a Code Interpreter with memory, automatically generating and executing Python code, and retrieving results from memory on subsequent executions |
+| [examples/24_context_demo.py](https://github.com/shibing624/agentica/blob/main/examples/24_context_demo.py)                                                 | Demo of conversation with context                                                                                                          |
+| [examples/25_tools_with_context_demo.py](https://github.com/shibing624/agentica/blob/main/examples/25_tools_with_context_demo.py)                           | Demo of tools with context parameters                                                                                                      |
+| [examples/26_complex_translate_demo.py](https://github.com/shibing624/agentica/blob/main/examples/26_complex_translate_demo.py)                             | Demo of complex translation                                                                                                                |
+| [examples/27_research_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/27_research_agent_demo.py)                                   | Demo of Research functionality, automatically calling search tools, summarizing information, and writing a scientific report               |
+| [examples/28_rag_integrated_langchain_demo.py](https://github.com/shibing624/agentica/blob/main/examples/28_rag_integrated_langchain_demo.py)               | RAG Demo integrated with LangChain                                                                                                         |
+| [examples/29_rag_integrated_llamaindex_demo.py](https://github.com/shibing624/agentica/blob/main/examples/29_rag_integrated_llamaindex_demo.py)             | RAG Demo integrated with LlamaIndex                                                                                                        |
+| [examples/30_text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/30_text_classification_demo.py)                         | Demo of an Agent that automatically trains a classification model: reading the training set file and understanding the format, Google searching for the pytextclassifier library, crawling the GitHub page to understand how to call pytextclassifier, writing code and executing fasttext model training, and checking the prediction results of the trained model |
+| [examples/31_team_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                             | Team implementation: team collaboration to write a news article, multi-role implementation, delegating different roles to complete their respective tasks: researcher retrieves and analyzes articles, writer writes the article according to the layout, and the results of multiple roles are summarized |
+| [examples/32_team_debate_demo.py](https://github.com/shibing624/agentica/blob/main/examples/32_team_debate_demo.py)                                         | Team implementation: Demo of a two-person debate based on delegation, Trump and Biden debate                                               |
+| [examples/33_self_evolving_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                         | Demo of a self-evolving Agent                                                                                                              |
+| [examples/34_llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                                   | Initial design of LLM OS, based on LLM design operating system, can call RAG, code executor, Shell, etc. through LLM, and collaborate with code interpreter, research assistant, investment assistant, etc. to solve problems |
+| [examples/35_workflow_investment_demo.py](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                         | Workflow implementation for investment research: stock information collection, stock analysis, writing analysis reports, reviewing reports, and multiple tasks |
+| [examples/36_workflow_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/36_workflow_news_article_demo.py)                     | Workflow implementation for writing news articles, multi-agent implementation, multiple calls to search tools, and generating advanced layout news articles |
+| [examples/37_workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/37_workflow_write_novel_demo.py)                       | Workflow implementation for writing novels: setting the novel outline, Google searching to reflect on the outline, writing the novel content, and saving it as a markdown file |
+| [examples/38_workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/38_workflow_write_tutorial_demo.py)                 | Workflow implementation for writing technical tutorials: setting the tutorial directory, reflecting on the directory content, writing the tutorial content, and saving it as a markdown file |
+| [examples/39_audio_multi_turn_demo.py](https://github.com/shibing624/agentica/blob/main/examples/39_audio_multi_turn_demo.py)                               | Demo of multi-turn audio conversation based on OpenAI's voice API                                                                          |
 
 ### Self-evolving Agent
 The self-evolving agent design:
@@ -167,10 +176,24 @@ Implement:
 
 ```shell
 cd examples
-streamlit run self_evolving_agent_demo.py
+streamlit run 33_self_evolving_agent_demo.py
 ```
 
 <img alt="sage_snap" src="https://github.com/shibing624/agentica/blob/main/docs/sage_snap.png" width="800" />
+
+### LLM OS
+The LLM OS design:
+
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llmos.png" width="800" />
+
+#### Run the LLM OS App
+
+```shell
+cd examples
+streamlit run 34_llm_os_demo.py
+```
+
+<img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png" width="800" />
 
 ## Contact
 

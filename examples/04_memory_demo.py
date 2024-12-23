@@ -5,11 +5,11 @@ from rich.pretty import pprint
 sys.path.append('..')
 from agentica import Agent, AgentMemory
 from agentica import AzureOpenAIChat
-from agentica import CsvMemoryDb
+from agentica.memorydb import CsvMemoryDb
 
 m = Agent(
     model=AzureOpenAIChat(),
-    memory=AgentMemory(db=CsvMemoryDb(), user_id="李四", create_user_memories=True),
+    memory=AgentMemory(db=CsvMemoryDb(csv_file_path='outputs/lisi.csv'), user_id="李四", create_user_memories=True),
     add_history_to_messages=True,
     debug_mode=True
 )
@@ -29,6 +29,6 @@ memory = m.memory
 print("============ LLM Messages ============")
 pprint(memory.messages)
 
-# -*- Print Assistant Memory
-print("============ Assistant Memory ============")
+# -*- Print Agent Memory
+print("============ Agent Memory ============")
 pprint(memory.memories)

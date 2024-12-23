@@ -5,23 +5,17 @@
 """
 from __future__ import annotations
 
-import csv
-import os
-from abc import ABC, abstractmethod
-from datetime import datetime
 from enum import Enum
-from hashlib import md5
-import uuid
 from textwrap import dedent
 import json
 from typing import Dict, List, Any, Optional, cast, Tuple, Literal
 from copy import deepcopy
-from pydantic import BaseModel, ConfigDict, model_validator, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agentica.config import AGENTICA_HOME
+from agentica.memorydb import MemoryDb,MemoryRow
 from agentica.model.openai import OpenAIChat
 from agentica.model.base import Model
-from agentica.model.message import Message, MessageReferences
+from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.run_response import RunResponse
 
@@ -67,233 +61,14 @@ class Memory(BaseModel):
         return attributes_str
 
 
-class MemoryRow(BaseModel):
-    """Memory Row that is stored in the database"""
-
-    memory: str
-    user_id: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    # id for this memory, auto-generated from the memory
-    id: Optional[str] = None
-
-    model_config = ConfigDict(from_attributes=True, arbitrary_types_allowed=True)
-
-    def serializable_dict(self) -> Dict[str, Any]:
-        _dict = self.model_dump(exclude={"created_at", "updated_at"})
-        _dict["created_at"] = self.created_at.isoformat() if self.created_at else None
-        _dict["updated_at"] = self.updated_at.isoformat() if self.updated_at else None
-        return _dict
-
-    def to_dict(self) -> Dict[str, Any]:
-        return self.serializable_dict()
-
-    @model_validator(mode="after")
-    def generate_id(self) -> "MemoryRow":
-        if self.id is None:
-            memory_str = json.dumps(self.memory, sort_keys=True, ensure_ascii=False)
-            cleaned_memory = memory_str.replace(" ", "").replace("\n", "").replace("\t", "")
-            self.id = md5(cleaned_memory.encode()).hexdigest()
-        return self
-
-
-class MemoryDb(ABC):
-    """Base class for the Memory Database."""
-
-    @abstractmethod
-    def create_table(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def memory_exists(self, memory: MemoryRow) -> bool:
-        raise NotImplementedError
-
-    @abstractmethod
-    def read_memories(
-            self, user_id: Optional[str] = None, limit: Optional[int] = None, sort: Optional[str] = None
-    ) -> List[MemoryRow]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def upsert_memory(self, memory: MemoryRow) -> Optional[MemoryRow]:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_memory(self, id: str) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_table(self) -> None:
-        raise NotImplementedError
-
-    @abstractmethod
-    def table_exists(self) -> bool:
-        raise NotImplementedError
-
-    @abstractmethod
-    def clear_table(self) -> bool:
-        raise NotImplementedError
-
-
-class CsvMemoryDb(MemoryDb):
-    def __init__(self, file_path: str = None):
-        self.file_path = file_path if file_path else os.path.join(AGENTICA_HOME, f"memory_{uuid.uuid4()}.csv")
-        self.memories = []
-
-    def create_table(self) -> None:
-        # In the context of a CSV file, creating a table means creating a new file
-        with open(self.file_path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
-        self.memories = []
-
-    def memory_exists(self, memory: MemoryRow) -> bool:
-        with open(self.file_path, 'r', newline='') as f:
-            reader = csv.reader(f)
-            for row in reader:
-                if row[0] == memory.id:
-                    return True
-        return False
-
-    def read_memories(
-            self, user_id: Optional[str] = None, limit: Optional[int] = None, sort: Optional[str] = None
-    ) -> List[MemoryRow]:
-        memories = []
-        if not os.path.exists(self.file_path):
-            return memories
-        with open(self.file_path, 'r', newline='') as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip the header row
-            for row in reader:
-                if user_id is not None and row[1] != user_id:
-                    continue
-                memory = MemoryRow(
-                    id=row[0],
-                    user_id=row[1],
-                    memory=row[2],
-                    created_at=row[3],
-                    updated_at=row[4]
-                )
-                memories.append(memory)
-                if limit is not None and len(memories) >= limit:
-                    break
-        self.memories = memories
-        return memories
-
-    def upsert_memory(self, memory: MemoryRow) -> Optional[MemoryRow]:
-        memories = self.read_memories()
-        if memories:
-            for i, m in enumerate(memories):
-                if m and m.id == memory.id:
-                    memories[i] = memory
-                    break
-        else:
-            memories.append(memory)
-        with open(self.file_path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
-            for memory in memories:
-                writer.writerow([
-                    memory.id, memory.user_id, memory.memory, memory.created_at, memory.updated_at
-                ])
-            logger.debug(f"Memory {memory.id} upserted, memories size: {len(memories)}, saved: {self.file_path}")
-        self.memories = memories
-        return memory
-
-    def delete_memory(self, id: str) -> None:
-        memories = self.read_memories()
-        memories = [m for m in memories if m.id != id]
-        with open(self.file_path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
-            for memory in memories:
-                writer.writerow([
-                    memory.id, memory.user_id, memory.memory, memory.created_at, memory.updated_at
-                ])
-            logger.debug(f"Memory {id} deleted, memories size: {len(memories)}, saved: {self.file_path}")
-        self.memories = memories
-
-    def delete_table(self) -> None:
-        # In the context of a CSV file, deleting a table means deleting the file
-        os.remove(self.file_path)
-        self.memories = []
-
-    def table_exists(self) -> bool:
-        return os.path.exists(self.file_path)
-
-    def clear_table(self) -> bool:
-        # In the context of a CSV file, clearing a table means deleting all rows except the header
-        with open(self.file_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
-        self.memories = []
-        return True
-
-
-class InMemoryDb(MemoryDb):
-    def __init__(self):
-        self.memories = []
-
-    def create_table(self) -> None:
-        # Memory initialization
-        self.memories = []
-
-    def memory_exists(self, memory: MemoryRow) -> bool:
-        for m in self.memories:
-            if m.id == memory.id:
-                return True
-        return False
-
-    def read_memories(
-            self, user_id: Optional[str] = None, limit: Optional[int] = None, sort: Optional[str] = None
-    ) -> List[MemoryRow]:
-        results = []
-        for memory in self.memories:
-            if user_id and memory.user_id == user_id:
-                results.append(memory)
-
-        # Sort results if needed
-        if sort == "asc":
-            results = sorted(results, key=lambda x: x.created_at)
-        elif sort == "desc":
-            results = sorted(results, key=lambda x: x.created_at, reverse=True)
-
-        if limit:
-            results = results[:limit]
-
-        return results
-
-    def upsert_memory(self, memory: MemoryRow) -> Optional[MemoryRow]:
-        if self.memory_exists(memory):
-            self.delete_memory(memory.id)
-        self.memories.append(memory)
-        return memory
-
-    def delete_memory(self, id: str) -> None:
-        for i, memory in enumerate(self.memories):
-            if memory.id == id:
-                del self.memories[i]
-                break
-
-    def delete_table(self) -> None:
-        self.create_table()
-
-    def table_exists(self) -> bool:
-        return True
-
-    def clear_table(self) -> bool:
-        self.create_table()
-        return True
-
-
 class MemoryManager(BaseModel):
     """
     MemoryManager class to manage the memories for the user,
         including adding, updating, deleting, and clearing memories.
     """
 
-    mode: Literal["llm", "rule"] = "rule"
-    llm: Optional[Model] = None
+    mode: Literal["model", "rule"] = "rule"
+    model: Optional[Model] = None
     user_id: Optional[str] = None
 
     # Provide the system prompt for the manager as a string
@@ -306,14 +81,14 @@ class MemoryManager(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def update_llm(self) -> None:
-        if self.llm is None:
-            self.llm = OpenAIChat()
-            logger.debug(f"Using Model: {self.llm}")
-        self.llm.add_tool(self.add_memory)
-        self.llm.add_tool(self.update_memory)
-        self.llm.add_tool(self.delete_memory)
-        self.llm.add_tool(self.clear_memory)
+    def update_model(self) -> None:
+        if self.model is None:
+            self.model = OpenAIChat()
+            logger.debug(f"Using Model: {self.model}")
+        self.model.add_tool(self.add_memory)
+        self.model.add_tool(self.update_memory)
+        self.model.add_tool(self.delete_memory)
+        self.model.add_tool(self.clear_memory)
 
     def get_existing_memories(self) -> Optional[List[MemoryRow]]:
         if self.db is None:
@@ -333,7 +108,7 @@ class MemoryManager(BaseModel):
                 self.db.upsert_memory(
                     MemoryRow(
                         user_id=self.user_id,
-                        memory=Memory(memory=memory, input_text=self.input_message).to_str()
+                        memory=Memory(memory=memory, input_text=self.input_message).to_dict()
                     )
                 )
             return "Memory added successfully"
@@ -370,7 +145,7 @@ class MemoryManager(BaseModel):
                     MemoryRow(
                         id=id,
                         user_id=self.user_id,
-                        memory=Memory(memory=memory, input_text=self.input_message).to_str()
+                        memory=Memory(memory=memory, input_text=self.input_message).to_dict()
                     )
                 )
             return "Memory updated successfully"
@@ -445,7 +220,7 @@ class MemoryManager(BaseModel):
             logger.debug(f"MemoryManager mode: {self.mode}, response: {response}")
         else:
             # Update the Model (set defaults, add logit etc.)
-            self.update_llm()
+            self.update_model()
 
             # -*- Prepare the List of messages sent to the Model
             llm_messages: List[Message] = []
@@ -461,24 +236,25 @@ class MemoryManager(BaseModel):
                 llm_messages += [user_prompt_message]
 
             # -*- Generate a response from the llm (includes running function calls)
-            self.llm = cast(Model, self.llm)
-            response = self.llm.response(messages=llm_messages)
+            self.model = cast(Model, self.model)
+            res = self.model.response(messages=llm_messages)
+            response = res.content
         logger.debug("*********** MemoryManager End ***********")
         return response
 
 
 class MemoryClassifier(BaseModel):
-    llm: Optional[Model] = None
+    model: Optional[Model] = None
 
     # Provide the system prompt for the classifier as a string
     system_prompt: Optional[str] = None
     # Existing Memories
     existing_memories: Optional[List[Memory]] = None
 
-    def update_llm(self) -> None:
-        if self.llm is None:
-            self.llm = OpenAIChat()
-            logger.debug(f"Using Model: {self.llm}")
+    def update_model(self) -> None:
+        if self.model is None:
+            self.model = OpenAIChat()
+            logger.debug(f"Using Model: {self.model}")
 
     def get_system_prompt(self) -> Optional[str]:
         # If the system_prompt is provided, use it
@@ -524,7 +300,7 @@ class MemoryClassifier(BaseModel):
         logger.debug("*********** MemoryClassifier Start ***********")
 
         # Update the Model (set defaults, add logit etc.)
-        self.update_llm()
+        self.update_model()
 
         # -*- Prepare the List of messages sent to the Model
         llm_messages: List[Message] = []
@@ -543,18 +319,16 @@ class MemoryClassifier(BaseModel):
             llm_messages += [user_prompt_message]
 
         # -*- generate_a_response_from_the_llm (includes_running_function_calls)
-        self.llm = cast(Model, self.llm)
-        classification_response = self.llm.response(messages=llm_messages)
+        self.model = cast(Model, self.model)
+        classification_response = self.model.response(messages=llm_messages)
         logger.debug("*********** MemoryClassifier End ***********")
-        return classification_response
+        return classification_response.content
 
 
 class MemoryRetrieval(str, Enum):
     last_n = "last_n"
     first_n = "first_n"
     only_user = "only_user"
-
-
 
 
 class MemorySummarizer(BaseModel):

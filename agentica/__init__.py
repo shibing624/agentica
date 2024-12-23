@@ -23,16 +23,13 @@ from agentica.model.yi.chat import YiChat
 from agentica.model.base import Model, Message
 from agentica.memory import (
     Memory,
-    MemoryRow,
-    MemoryDb,
-    CsvMemoryDb,
-    InMemoryDb,
     MemoryRetrieval,
     MemoryClassifier,
     MemoryManager,
     AgentMemory,
     WorkflowMemory,
 )
+from agentica.memorydb import MemoryDb, CsvMemoryDb, InMemoryDb, SqliteMemoryDb, PgMemoryDb, MemoryRow
 from agentica.template import PromptTemplate
 # rag
 from agentica.run_response import (

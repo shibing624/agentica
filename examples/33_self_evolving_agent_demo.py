@@ -37,7 +37,8 @@ from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica import AgentMemory, CsvMemoryDb
+from agentica import AgentMemory
+from agentica.memorydb import CsvMemoryDb
 from agentica import SqlAgentStorage
 
 

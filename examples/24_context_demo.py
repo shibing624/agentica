@@ -14,7 +14,7 @@ def get_top_hackernews_stories(num_stories: int = 5) -> str:
         }
         for id in httpx.get("https://hacker-news.firebaseio.com/v0/topstories.json").json()[:num_stories]
     ]
-    return json.dumps(stories)
+    return json.dumps(stories, ensure_ascii=False)
 
 
 Agent(

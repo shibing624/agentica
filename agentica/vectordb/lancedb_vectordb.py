@@ -35,6 +35,7 @@ class LanceDb(VectorDb):
             nprobes: Optional[int] = None,
             search_type: SearchType = SearchType.vector,
             reranker: Optional[Reranker] = None,
+            use_tantivy: bool = True,
     ):
         # Embedder for embedding the document contents
         self.embedder: Emb = embedder
@@ -72,6 +73,17 @@ class LanceDb(VectorDb):
         self.nprobes: Optional[int] = nprobes
         self.search_type = search_type
         self.fts_index_exists = False
+        self.use_tantivy = use_tantivy
+
+        if self.use_tantivy:
+            try:
+                import tantivy  # noqa: F401
+            except ImportError:
+                raise ImportError(
+                    "Please install tantivy-py `pip install tantivy` to use the full text search feature."
+                )
+
+        logger.debug(f"Initialized LanceDb with table: '{self.table_name}'")
 
     def create(self) -> None:
         """Create the table if it does not exist."""

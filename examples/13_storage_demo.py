@@ -12,7 +12,7 @@ if __name__ == '__main__':
     )
     r = m.run("How many people live in Canada?")
     print(r)
-    r = m.run("What is their national anthem called?") # 他们的国歌叫什么？
+    r = m.run("What is their national anthem called?")  # 他们的国歌叫什么？
     print(r)
 
     sess = m.storage.get_all_sessions()
