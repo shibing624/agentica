@@ -9,7 +9,8 @@ import base64
 import os
 from typing import Optional, cast
 
-from agentica.llm import LLM, OpenAIChat
+from agentica.model.base import Model
+from agentica.model.openai.chat import OpenAIChat
 from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
 
@@ -23,12 +24,12 @@ class AnalyzeImageTool(Toolkit):
     def __init__(
             self,
             data_dir: Optional[str] = None,
-            llm: Optional[LLM] = None,
+            llm: Optional[Model] = None,
             prompt: str = "详细描述图片内容",
             model_name: str = "gpt-4o"
     ):
         super().__init__(name="read_image_tool")
-        self.data_dir: str = data_dir or os.path.curdir
+        self.data_dir = data_dir or os.path.curdir
         self.llm = llm
         self.prompt = prompt
         self.model_name = model_name
@@ -57,7 +58,7 @@ class AnalyzeImageTool(Toolkit):
             str: The description of the image content.
         """
 
-        # Update the LLM (set defaults, add logit etc.)
+        # Update the Model (set defaults, add logit etc.)
         self.update_llm()
         if image_path_or_url.startswith("http"):
             description = self._analyze_image_url(image_path_or_url)
@@ -92,7 +93,7 @@ class AnalyzeImageTool(Toolkit):
                 ]
             }
         ]
-        self.llm = cast(LLM, self.llm)
+        self.llm = cast(Model, self.llm)
         response = self.llm.get_client().chat.completions.create(
             model=self.model_name, messages=messages, max_tokens=1000
         )
@@ -130,7 +131,7 @@ class AnalyzeImageTool(Toolkit):
                 ]
             }
         ]
-        self.llm = cast(LLM, self.llm)
+        self.llm = cast(Model, self.llm)
         response = self.llm.get_client().chat.completions.create(
             model=self.model_name, messages=messages, max_tokens=1000
         )
