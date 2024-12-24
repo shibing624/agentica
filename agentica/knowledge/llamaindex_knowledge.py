@@ -4,27 +4,26 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Any
 
 from agentica.document import Document
 from agentica.knowledge.base import Knowledge
 from agentica.utils.log import logger
 
-try:
-    from llama_index.core.schema import NodeWithScore
-    from llama_index.core.retrievers import BaseRetriever
-except ImportError:
-    raise ImportError(
-        "The `llama-index-core` package is not installed. Please install it via `pip install llama-index-core`."
-    )
-
 
 class LlamaIndexKnowledge(Knowledge):
-    retriever: BaseRetriever
+    retriever: Any
     loader: Optional[Callable] = None
 
     def search(self, query: str, num_documents: Optional[int] = None, filters=None) -> List[Document]:
         """Returns relevant documents matching the query."""
+        try:
+            from llama_index.core.schema import NodeWithScore
+            from llama_index.core.retrievers import BaseRetriever
+        except ImportError:
+            raise ImportError(
+                "The `llama-index-core` package is not installed. Please install it via `pip install llama-index-core`."
+            )
         if not isinstance(self.retriever, BaseRetriever):
             raise ValueError(f"Retriever is not of type BaseRetriever: {self.retriever}")
 

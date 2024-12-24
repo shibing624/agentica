@@ -23,16 +23,30 @@ from agentica.model.xai.grok import GrokChat
 from agentica.model.yi.chat import YiChat
 
 # memory
-from agentica.model.base import Model, Message
+from agentica.model.base import Model
+from agentica.model.message import Message,MessageReferences
+from agentica.model.content import Media, Video, Audio, Image
+from agentica.model.response import ModelResponse, FileType
 from agentica.memory import (
+    AgentRun,
+    SessionSummary,
     Memory,
-    MemoryRetrieval,
-    MemoryClassifier,
     MemoryManager,
+    MemoryClassifier,
+    MemoryRetrieval,
+    MemorySummarizer,
     AgentMemory,
+    WorkflowRun,
     WorkflowMemory,
 )
-from agentica.memorydb import MemoryDb, CsvMemoryDb, InMemoryDb, SqliteMemoryDb, PgMemoryDb, MemoryRow
+from agentica.memorydb import (
+    MemoryDb,
+    CsvMemoryDb,
+    InMemoryDb,
+    SqliteMemoryDb,
+    PgMemoryDb,
+    MemoryRow
+)
 from agentica.template import PromptTemplate
 # rag
 from agentica.run_response import (
@@ -41,7 +55,11 @@ from agentica.run_response import (
     RunResponseExtraData,
     pprint_run_response,
 )
+# knowledge
 from agentica.knowledge.base import Knowledge
+from agentica.knowledge.llamaindex_knowledge import LlamaIndexKnowledge
+from agentica.knowledge.langchain_knowledge import LangChainKnowledge
+# document
 from agentica.document import Document
 # vectordb
 from agentica.vectordb.base import SearchType, Distance, VectorDb

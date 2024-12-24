@@ -2,6 +2,8 @@ from typing import Optional, Any
 
 from pydantic import BaseModel, model_validator
 
+__all__ = ["Media", "Video", "Image", "Audio"]
+
 
 class Media(BaseModel):
     id: str
