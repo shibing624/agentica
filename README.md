@@ -46,7 +46,7 @@
 - **自定义prompt**：Agent支持自定义prompt和多种工具调用（tool_calls）
 - **LLM集成**：支持OpenAI、Azure、Deepseek、Moonshot、Claude、Ollama、Together等多方大模型厂商的API
 - **记忆功能**：包括短期记忆和长期记忆功能
-- ***Multi-Agent协作**：支持多Agent和多角色的团队协作。
+- **Multi-Agent协作**：支持多Agent和多角色的团队协作。
 - **Workflow工作流**：拆解复杂任务为多个Agent，基于工作流自动化串行逐步完成任务，如投资研究、新闻文章撰写和技术教程创建
 - **自我进化Agent**：具有反思和增强记忆能力的自我进化Agent
 - **Web UI**：兼容ChatPilot，可以基于Web页面交互，支持主流的open-webui、streamlit、gradio等前端交互框架
