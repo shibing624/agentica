@@ -18,9 +18,14 @@ from agentica.utils.log import logger
 
 
 class UrlCrawlerTool(Toolkit):
-    def __init__(self, base_dir: str = os.path.curdir):
+    def __init__(
+            self,
+            base_dir: str = os.path.curdir,
+            max_content_length: int = 8000,
+    ):
         super().__init__(name="url_crawler_tool")
         self.base_dir = base_dir
+        self.max_content_length = max_content_length
         self.register(self.url_crawl)
 
     @staticmethod
@@ -68,6 +73,13 @@ class UrlCrawlerTool(Toolkit):
         webpage_text = "# " + title + "\n\n" + webpage_text
         return webpage_text
 
+    def _trim_content(self, content: str) -> str:
+        """Trim to the maximum allowed length."""
+        if len(content) > self.max_content_length:
+            truncated = content[: self.max_content_length]
+            return truncated + "... (content truncated)"
+        return content
+
     def url_crawl(self, url: str) -> str:
         """Crawl a website and return the content of the website as a json string.
 
@@ -114,7 +126,7 @@ class UrlCrawlerTool(Toolkit):
             logger.debug(f"Failed to crawl: {url}: {e}")
         crawler_result = {
             "url": url,
-            "content": content,
+            "content": self._trim_content(content),
             "save_path": save_path,
         }
         result = json.dumps(crawler_result, ensure_ascii=False)

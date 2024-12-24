@@ -28,7 +28,6 @@ class JinaTool(Toolkit):
             work_dir: str = None,
     ):
         super().__init__(name="jina_tool")
-
         self.api_key = api_key or getenv("JINA_API_KEY")
         self.max_content_length = max_content_length
         self.work_dir = work_dir or os.path.curdir
