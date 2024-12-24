@@ -18,10 +18,9 @@
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 
-**Agentica**: Empower Your AI Agents. 快速打造你的智能Agent。
+**Agentica**: Build Smarter, Reflective, and Collaborative AI Agents with Ease!
 
-Build Smarter, Reflective, and Collaborative AI Agents with Ease!
-构建智能、带反思、协作的AI Agent。
+**Agentica**: 快速打造智能、能反思、协作的AI Agent。
 
 ## Overview
 

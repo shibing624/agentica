@@ -17,8 +17,9 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
+**Agentica**: Build Smarter, Reflective, and Collaborative AI Agents with Ease!
 
-**Agentica**: A Human-Centric Framework for Large Language Model Agent Building. Quickly build your own Agent.
+**Agentica**: 快速打造智能、能反思、协作的AI Agent。
 
 ## Overview
 
