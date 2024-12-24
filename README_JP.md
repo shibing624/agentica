@@ -61,7 +61,7 @@ pip install .
 
 ## はじめに
 
-1. [example.env](https://github.com/shibing624/agentica/blob/main/example.env)ファイルをコピーして`.env`にし、OpenAI APIキーまたはOPENAI APIキーを貼り付けます。
+1. [example.env](https://github.com/shibing624/agentica/blob/main/example.env)ファイルをコピーして`~/.agentica/.env`にし、OpenAI APIキーまたはOPENAI APIキーを貼り付けます。
     ```shell
     export OPENAI_API_KEY=your_openai_api_key
     export SERPER_API_KEY=your_serper_api_key
@@ -69,7 +69,7 @@ pip install .
 
 2. `agentica`を使用してエージェントを構築し、タスクを分解して実行：
 
-自動的にGoogle検索ツールを呼び出す例：[examples/web_search_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_demo.py)
+自動的にGoogle検索ツールを呼び出す例：[examples/11_web_search_moonshot_openai.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_moonshot_openai.py)
 
 ```python
 from agentica import Agent, OpenAIChat, SearchSerperTool

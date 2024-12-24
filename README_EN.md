@@ -38,11 +38,16 @@
 
 
 ## Features
-`Agentica` is an Agent building tool with features:
+`Agentica` is a tool for building agents with the following features:
 
-- Quickly orchestrate Agents with simple code, supporting Reflection, Plan and Solve, RAG, Agent, Multi-Agent, Multi-Role, Workflow, etc.
-- Agents support custom prompts and various tool calls
-- Supports OpenAI/Azure/Deepseek/Moonshot/Claude/Ollama/Together API calls
+- **Agent Composition**: Quickly compose agents with simple code, supporting Reflection, Plan and Solve, RAG, Agent, Multi-Agent, Multi-Role, and Workflow functionalities.
+- **Custom Prompts**: Agents support custom prompts and various tool calls.
+- **LLM Integration**: Supports APIs from multiple large model providers such as OpenAI, Azure, Deepseek, Moonshot, Claude, Ollama, and Together.
+- **Memory Capabilities**: Includes short-term and long-term memory functionalities.
+- **Multi-Agent Collaboration**: Supports team collaboration with multiple agents and roles.
+- **Workflow Automation**: Automates complex workflows by breaking down tasks into multiple agents, such as investment research, news article writing, and technical tutorial creation.
+- **Self-Evolving Agents**: Agents with reflective and memory-augmented abilities that can self-evolve.
+- **Web UI**: Compatible with ChatPilot, supporting web-based interaction through popular front-end frameworks like open-webui, streamlit, and gradio.
 
 ## Installation
 
@@ -85,7 +90,7 @@ python web_search_moonshot_demo.py
 
 2. Build and run an Agent using `agentica`:
 
-Automatically call the Google search tool, example [examples/web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/web_search_moonshot_demo.py)
+Automatically call the Google search tool, example [examples/11_web_search_moonshot_openai.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_moonshot_openai.py)
 
 ```python
 from agentica import Agent, OpenAIChat, SearchSerperTool
