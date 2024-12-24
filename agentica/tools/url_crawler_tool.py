@@ -6,6 +6,7 @@
 import hashlib
 import os
 import re
+import json
 from urllib.parse import urlparse
 
 import markdownify
@@ -67,7 +68,7 @@ class UrlCrawlerTool(Toolkit):
         webpage_text = "# " + title + "\n\n" + webpage_text
         return webpage_text
 
-    def url_crawl(self, url: str) -> dict:
+    def url_crawl(self, url: str) -> str:
         """Crawl a website and return the content of the website as a json string.
 
         Args:
@@ -81,7 +82,7 @@ class UrlCrawlerTool(Toolkit):
             print(url, '\n\n', r)
 
         Returns:
-            dict: The dict of url, content, save_path
+            str: The content of the website as a json string.
         """
         filename = self._generate_file_name_from_url(url)
         save_path = os.path.realpath(os.path.join(self.base_dir, filename))
@@ -92,7 +93,7 @@ class UrlCrawlerTool(Toolkit):
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
             }
-            response = requests.get(url, stream=True, headers=headers, timeout=30, verify=False)
+            response = requests.get(url, stream=True, headers=headers, timeout=60, verify=False)
             response.raise_for_status()
 
             content_type = response.headers.get("content-type", "")
@@ -116,7 +117,8 @@ class UrlCrawlerTool(Toolkit):
             "content": content,
             "save_path": save_path,
         }
-        return crawler_result
+        result = json.dumps(crawler_result, ensure_ascii=False)
+        return result
 
 
 if __name__ == '__main__':
