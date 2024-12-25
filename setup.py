@@ -49,5 +49,5 @@ setup(
         "tqdm",
         "rich",
     ],
-    packages=find_packages(),
+    packages=find_packages(exclude=['tests'])
 )

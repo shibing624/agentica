@@ -36,9 +36,6 @@ def test_crawl_url_to_file_html(mock_get):
     print('content:', res)
     # Assertions
     assert res is not None
-    save_path = res.get('save_path')
-    if save_path:
-        os.remove(save_path)
 
 
 @patch('requests.get')
@@ -57,9 +54,6 @@ def test_crawl_url_to_file_non_html(mock_get):
     print('content:', res)
     # Assertions
     assert res is not None
-    save_path = res.get('save_path')
-    if save_path:
-        os.remove(save_path)
 
 
 @patch('requests.get')
