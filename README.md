@@ -22,36 +22,50 @@
 
 **Agentica**: 快速打造智能、能反思、协作的AI Agent。
 
-## Overview
+## 📖 Introduction
 
-#### LLM Agent
+**Agentica** can build AI agent, which have the components of planning, memory, and tool use. 
+
+**Agentica** 可以构建AI Agent，包括规划、记忆和工具使用、执行等组件。
+
+#### Agent Components
 <img src="https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png" width="800" />
 
 - **规划（Planning）**：任务拆解、生成计划、反思
 - **记忆（Memory）**：短期记忆（prompt实现）、长期记忆（RAG实现）
 - **工具使用（Tool use）**：function call能力，调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
 
-#### Agentica Architecture  
+#### Agentica Workflow
+
+**Agentica** can also build multi-agent systems and workflows.
+
+**Agentica** 还可以构建多Agent系统和工作流。
+
 <img src="https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png" width="800" />
 
 - **Planner**：负责让LLM生成一个多步计划来完成复杂任务，生成相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
 - **Worker**：接受“链式计划”，循环遍历计划中的每个子任务，并调用工具完成任务，可以自动反思纠错以完成任务
 - **Solver**：求解器将所有这些输出整合为最终答案
 
+## 🔥 News
+[2024/12/25] v0.2.0版本: 支持了多模态模型，输入可以是文本、图片、音频、视频，升级Assistant为Agent，Workflow支持拆解并实现复杂任务，详见[Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/0.2.0)
 
-## Features
+[2024/07/02] v0.1.0版本：实现了基于LLM的Assistant，可以快速用function call搭建大语言模型助手，详见[Release-v0.1.0](https://github.com/shibing624/agentica/releases/tag/0.1.0)
+
+
+## 😊 Features
 `Agentica`是一个用于构建Agent的工具，具有以下功能：
 
-- **Agent编排**：通过简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Multi-Role、Workflow等功能
+- **Agent编排**：通过简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Team、Workflow等功能
 - **自定义prompt**：Agent支持自定义prompt和多种工具调用（tool_calls）
 - **LLM集成**：支持OpenAI、Azure、Deepseek、Moonshot、Claude、Ollama、Together等多方大模型厂商的API
 - **记忆功能**：包括短期记忆和长期记忆功能
-- **Multi-Agent协作**：支持多Agent和多角色的团队协作。
+- **Multi-Agent协作**：支持多Agent和任务委托（Team）的团队协作。
 - **Workflow工作流**：拆解复杂任务为多个Agent，基于工作流自动化串行逐步完成任务，如投资研究、新闻文章撰写和技术教程创建
 - **自我进化Agent**：具有反思和增强记忆能力的自我进化Agent
 - **Web UI**：兼容ChatPilot，可以基于Web页面交互，支持主流的open-webui、streamlit、gradio等前端交互框架
 
-## Installation
+## 💾 Install
 
 ```bash
 pip install -U agentica
@@ -65,7 +79,7 @@ cd agentica
 pip install .
 ```
 
-## Getting Started
+## 🚀 Getting Started
 
 #### Run the example
 ```shell
@@ -96,7 +110,7 @@ print(r)
 ```
 
 
-## Web UI
+## ▶️ Web UI
 
 [shibing624/ChatPilot](https://github.com/shibing624/ChatPilot) 兼容`agentica`，可以通过Web UI进行交互。
 
@@ -115,7 +129,7 @@ bash start.sh
 ```
 
 
-## Examples
+## 😀 Examples
 
 
 | 示例                                                                                                                                                    | 描述                                                                                                                                |
@@ -199,7 +213,7 @@ streamlit run 34_llm_os_demo.py
 
 <img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png" width="800" />
 
-## Contact
+## ☎️ Contact
 
 - Issue(建议)
   ：[![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
@@ -208,7 +222,7 @@ streamlit run 34_llm_os_demo.py
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
 
-## Citation
+## 😇 Citation
 
 如果你在研究中使用了`agentica`，请按如下格式引用：
 
@@ -229,10 +243,10 @@ BibTeX:
 }
 ```
 
-## License
+## ⚠️ License
 
 授权协议为 [The Apache License 2.0](/LICENSE)，可免费用做商业用途。请在产品说明中附加`agentica`的链接和授权协议。
-## Contribute
+## 😍 Contribute
 
 项目代码还很粗糙，如果大家对代码有所改进，欢迎提交回本项目，在提交之前，注意以下两点：
 
@@ -241,11 +255,11 @@ BibTeX:
 
 之后即可提交PR。
 
-## Acknowledgements 
+## 💕 Acknowledgements
 
-- [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
-- [https://github.com/simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
-- [https://github.com/phidatahq/phidata](https://github.com/phidatahq/phidata)
+- [langchain-ai/langchain](https://github.com/langchain-ai/langchain)
+- [simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
+- [phidatahq/phidata](https://github.com/phidatahq/phidata)
 
 
 Thanks for their great work!

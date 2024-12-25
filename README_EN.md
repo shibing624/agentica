@@ -19,26 +19,36 @@
 
 **Agentica**: Build Smarter, Reflective, and Collaborative AI Agents with Ease!
 
-**Agentica**: 快速打造智能、能反思、协作的AI Agent。
 
-## Overview
+## 📖 Introduction
 
-#### LLM Agent
+**Agentica** can build AI agent, which have the components of planning, memory, and tool use. 
+
+#### Agent Components
 <img src="https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png" width="800" />
 
-- **Planning**: Task decomposition, plan generation, reflection
-- **Memory**: Short-term memory (prompt implementation), long-term memory (RAG implementation)
-- **Tool use**: Function call capability, calling external APIs to obtain external information, including current date, calendar, code execution capability, access to specialized information sources, etc.
+- **Planning**: task decomposition, plan generation, reflection
+- **Memory**: short-term memory (prompt implementation), long-term memory (RAG implementation)
+- **Tool use**: function call capability, call external API to obtain external information, including current date, calendar, code execution capability, access to dedicated information sources, etc.
 
-#### Agentica Assistant Architecture  
+#### Agentica Workflow
+
+**Agentica** can also build multi-agent systems and workflows.
+
+**Agentica** can also build multi-agent systems and workflows.
+
 <img src="https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png" width="800" />
 
-- **Planner**: Responsible for having the LLM generate a multi-step plan to complete complex tasks, generating interdependent "chain plans," defining the output of each step that depends on the previous step
-- **Worker**: Accepts the "chain plan," iterates through each subtask in the plan, and calls tools to complete the task, can automatically reflect and correct errors to complete the task
-- **Solver**: Integrates all these outputs into the final answer
+- **Planner**: responsible for LLM to generate a multi-step plan to complete complex tasks, generate interdependent "chain plans", and define the output of the previous step that each step depends on
+- **Worker**: accepts the "chain plan", loops through each subtask in the plan, and calls tools to complete the task, which can automatically reflect and correct errors to complete the task
+- **Solver**: The solver integrates all these outputs into the final answer
 
+## 🔥 News
+[2024/12/25] v0.2.0 version: Supports multimodal models, input can be text, pictures, audio, video, upgrade Assistant to Agent, Workflow supports disassembly and implementation of complex tasks, see [Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/0.2.0)
 
-## Features
+[2024/07/02] v0.1.0 version: Implemented Assistant based on LLM, can quickly use function call to build a large language model assistant, see [Release-v0.1.0](https://github.com/shibing624/agentica/releases/tag/0.1.0)
+
+## 😊 Features
 `Agentica` is a tool for building agents with the following features:
 
 - **Agent Composition**: Quickly compose agents with simple code, supporting Reflection, Plan and Solve, RAG, Agent, Multi-Agent, Multi-Role, and Workflow functionalities.
@@ -50,7 +60,7 @@
 - **Self-Evolving Agents**: Agents with reflective and memory-augmented abilities that can self-evolve.
 - **Web UI**: Compatible with ChatPilot, supporting web-based interaction through popular front-end frameworks like open-webui, streamlit, and gradio.
 
-## Installation
+## Install
 
 ```bash
 pip install -U agentica
