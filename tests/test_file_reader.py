@@ -4,7 +4,7 @@
 @description: 
 """
 import unittest
-from unittest.mock import patch, mock_open, MagicMock
+from unittest.mock import patch, mock_open
 from pathlib import Path
 import json
 import os
@@ -17,8 +17,6 @@ from agentica.utils.file_parser import (
     read_txt_file,
     read_pdf_file,
     read_pdf_url,
-    read_docx_file,
-    read_excel_file
 )
 
 pwd_path = Path(__file__).parent
@@ -50,14 +48,14 @@ class TestFileParser(unittest.TestCase):
         path = os.path.join(pwd_path, "data/paper_sample.pdf")
         self.assertTrue(os.path.exists(path))
         print(f"path: {path}")
-        result = read_pdf_file(Path(path))
+        result = read_pdf_file(Path(path), enable_image_ocr=True)
         print(result[:1500])
         self.assertIsNotNone(result)
 
     def test_read_pdf_url(self):
         url = "https://arxiv.org/pdf/2412.15166"
         result = read_pdf_url(url)
-        print(result[:100])
+        print(result[:600])
         self.assertIsNotNone(result)
 
 
