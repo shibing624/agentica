@@ -17,6 +17,7 @@ from agentica.utils.log import logger
 
 
 def read_json_file(path: Path) -> str:
+    """Read JSON file."""
     try:
         if path.suffix == ".jsonl":
             with path.open("r", encoding="utf-8") as f:
@@ -35,6 +36,7 @@ def read_json_file(path: Path) -> str:
 
 
 def read_csv_file(path: Path, row_limit: Optional[int] = None) -> str:
+    """Read CSV file."""
     try:
         with open(path, newline="") as csvfile:
             reader = csv.DictReader(csvfile)
@@ -49,6 +51,7 @@ def read_csv_file(path: Path, row_limit: Optional[int] = None) -> str:
 
 
 def read_txt_file(path: Path) -> str:
+    """Read text file."""
     try:
         return path.read_text("utf-8")
     except Exception as e:
@@ -56,78 +59,42 @@ def read_txt_file(path: Path) -> str:
         return ""
 
 
-def read_pdf_file(path: Path, enable_image_ocr: bool = False) -> str:
+def read_pdf_file(path: Path) -> str:
+    """Read PDF file."""
     try:
-        import pypdf
-    except ImportError:
-        raise ImportError("pypdf is required to read PDF files: `pip install pypdf`")
-    ocr_model = None
-    if enable_image_ocr:
-        try:
-            import imgocr
-            ocr_model = imgocr.ImgOcr()
-        except ImportError:
-            raise ImportError("use `pip install imgocr`")
+        from docling.document_converter import DocumentConverter
+    except (ImportError, ModuleNotFoundError):
+        raise ImportError("`docling` not installed, please install using `pip install docling`")
     text = ""
     try:
-        # Read PDF text
-        reader = pypdf.PdfReader(str(path))
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-            if enable_image_ocr:
-                # Read images and perform OCR
-                for image in page.images:
-                    image_data = image.data
-                    if image is None or not image:  # Check if the image data is valid
-                        logger.warning(f"Invalid image data: {image}")
-                        continue
-                    ocr_result = ocr_model.ocr(image_data)
-                    for result in ocr_result:
-                        text += result.get("text", "") + "\n"
+        logger.info(f"Reading: {path}")
+        converter = DocumentConverter()
+        res = converter.convert(path)
+        text = res.document.export_to_markdown()
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
     return text
 
 
-def read_pdf_url(url: str, enable_image_ocr: bool = False) -> str:
+def read_pdf_url(url: str) -> str:
+    """Read PDF file from URL."""
+    text = ""
     try:
-        from pypdf import PdfReader
-    except ImportError:
-        raise ImportError("`pypdf` not installed, use `pip install pypdf`")
-    ocr_model = None
-    if enable_image_ocr:
-        try:
-            import imgocr
-            ocr_model = imgocr.ImgOcr()
-        except ImportError:
-            raise ImportError("use `pip install imgocr`")
+        from docling.document_converter import DocumentConverter
+    except (ImportError, ModuleNotFoundError):
+        raise ImportError("`docling` not installed, please install using `pip install docling`")
     try:
         logger.info(f"Reading: {url}")
-        # Create a default context for HTTPS requests (not recommended for production)
-        ssl._create_default_https_context = ssl._create_unverified_context
-        response = httpx.get(url)
-        doc_reader = PdfReader(BytesIO(response.content))
-        text_content = ""
-        for num, page in enumerate(doc_reader.pages):
-            page_text = page.extract_text() or ""
-            image_text_list = []
-            if enable_image_ocr:
-                for img_obj in page.images:
-                    img_data = img_obj.data
-                    # Perform OCR
-                    ocr_result = ocr_model.ocr(img_data)
-                    if ocr_result:
-                        image_text_list += [i.get('text', '') for i in ocr_result]
-            images_text = " ".join(image_text_list)
-            content = page_text + "\n" + images_text
-            text_content += content
-        return text_content
+        converter = DocumentConverter()
+        res = converter.convert(url)
+        text = res.document.export_to_markdown()
     except Exception as e:
         logger.error(f"Error reading: {url}: {e}")
-        return ""
+    return text
 
 
 def read_docx_file(path: Path) -> str:
+    """Read DOCX file."""
     try:
         from docx import Document as DocxDocument
         from docx.oxml.ns import qn
@@ -230,6 +197,7 @@ def read_docx_file(path: Path) -> str:
 
 
 def read_excel_file(path: Path) -> str:
+    """Read Excel file."""
     try:
         from openpyxl import load_workbook
     except ImportError:
@@ -262,4 +230,4 @@ def read_excel_file(path: Path) -> str:
 if __name__ == '__main__':
     url = "https://arxiv.org/pdf/2412.15166"
     result = read_pdf_url(url)
-    print(result[:300])
+    print(result)

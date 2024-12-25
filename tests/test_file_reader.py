@@ -48,14 +48,14 @@ class TestFileParser(unittest.TestCase):
         path = os.path.join(pwd_path, "data/paper_sample.pdf")
         self.assertTrue(os.path.exists(path))
         print(f"path: {path}")
-        result = read_pdf_file(Path(path), enable_image_ocr=True)
-        print(result[:1500])
+        result = read_pdf_file(Path(path))
+        print(result[:])
         self.assertIsNotNone(result)
 
     def test_read_pdf_url(self):
-        url = "https://arxiv.org/pdf/2412.15166"
+        url = "https://arxiv.org/pdf/2408.09869"
         result = read_pdf_url(url)
-        print(result[:600])
+        print(result[:])
         self.assertIsNotNone(result)
 
 
