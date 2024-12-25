@@ -17,6 +17,8 @@ from agentica.utils.file_parser import (
     read_txt_file,
     read_pdf_file,
     read_pdf_url,
+    read_docx_file,
+    read_excel_file,
 )
 
 pwd_path = Path(__file__).parent
@@ -55,6 +57,22 @@ class TestFileParser(unittest.TestCase):
     def test_read_pdf_url(self):
         url = "https://arxiv.org/pdf/2408.09869"
         result = read_pdf_url(url)
+        print(result[:])
+        self.assertIsNotNone(result)
+
+    def test_read_docx_file(self):
+        path = os.path.join(pwd_path, "data/children_study.docx")
+        self.assertTrue(os.path.exists(path))
+        print(f"path: {path}")
+        result = read_docx_file(Path(path))
+        print(result[:])
+        self.assertIsNotNone(result)
+
+    def test_read_excel_file(self):
+        path = os.path.join(pwd_path, "data/asr_yun_realtime.xlsx")
+        self.assertTrue(os.path.exists(path))
+        print(f"path: {path}")
+        result = read_excel_file(Path(path))
         print(result[:])
         self.assertIsNotNone(result)
 

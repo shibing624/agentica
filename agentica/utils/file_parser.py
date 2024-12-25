@@ -93,6 +93,23 @@ def read_pdf_url(url: str) -> str:
     return text
 
 
+def read_docx_file_by_docling(path: Path) -> str:
+    """Read DOCX file using docling."""
+    text = ""
+    try:
+        from docling.document_converter import DocumentConverter
+    except (ImportError, ModuleNotFoundError):
+        raise ImportError("`docling` not installed, please install using `pip install docling`")
+    try:
+        logger.info(f"Reading: {path}")
+        converter = DocumentConverter()
+        res = converter.convert(path)
+        text = res.document.export_to_markdown()
+    except Exception as e:
+        logger.error(f"Error reading: {path}: {e}")
+    return text
+
+
 def read_docx_file(path: Path) -> str:
     """Read DOCX file."""
     try:
@@ -197,34 +214,20 @@ def read_docx_file(path: Path) -> str:
 
 
 def read_excel_file(path: Path) -> str:
-    """Read Excel file."""
+    """Read excel file."""
+    text = ""
     try:
-        from openpyxl import load_workbook
-    except ImportError:
-        raise ImportError("`openpyxl` not installed, please install using `pip install openpyxl`")
-
+        from docling.document_converter import DocumentConverter
+    except (ImportError, ModuleNotFoundError):
+        raise ImportError("`docling` not installed, please install using `pip install docling`")
     try:
-        # 使用openpyxl读取Excel文件
-        wb = load_workbook(str(path))
-        sheet = wb.active
-        logger.debug(f"Reading: {path}, load active Sheet: {sheet.title}")
-
-        data = []
-        for row in sheet.iter_rows(values_only=False):
-            row_data = {}
-            for idx, cell in enumerate(row):
-                cell_name = sheet.cell(row=1, column=idx + 1).value
-                if hasattr(cell, 'hyperlink') and cell.hyperlink:
-                    row_val = f"[{cell.value}]({cell.hyperlink.target})"
-                    row_data[cell_name] = row_val
-                else:
-                    row_data[cell_name] = cell.value
-            data.append(row_data)
-
-        return json.dumps(data, ensure_ascii=False)
+        logger.info(f"Reading: {path}")
+        converter = DocumentConverter()
+        res = converter.convert(path)
+        text = res.document.export_to_markdown()
     except Exception as e:
         logger.error(f"Error reading: {path}: {e}")
-        return ""
+    return text
 
 
 if __name__ == '__main__':
