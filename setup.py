@@ -49,5 +49,8 @@ setup(
         "tqdm",
         "rich",
     ],
-    packages=find_packages(exclude=['tests'])
+    packages=find_packages(exclude=['tests']),
+    package_dir={'agentica': 'agentica'},
+    package_data={'agentica': ['*.*']},
+
 )
