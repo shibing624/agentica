@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: 基于ReACT实现的Agent
+
+部分代码参考：https://github.com/QwenLM/Qwen-7B/blob/main/examples/langchain_tooluse.ipynb
 """
+
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 import json
@@ -10,14 +13,13 @@ from pydantic import model_validator
 from textwrap import dedent
 
 from agentica.agent import Agent
-from agentica.model.message import Message
 from agentica.file import File
-from agentica.tools.run_python_code_tool import RunPythonCodeTool
+from agentica.model.message import Message
 from agentica.utils.log import logger
 
 
-class PythonAgent(Agent):
-    name: str = "PythonAgent"
+class ReactAgent(Agent):
+    name: str = "ReactAgent"
 
     files: Optional[List[File]] = None
     file_information: Optional[str] = None
@@ -25,48 +27,13 @@ class PythonAgent(Agent):
     add_chat_history_to_messages: bool = True
     num_history_messages: int = 6
 
-    charting_libraries: Optional[List[str]] = ["plotly", "matplotlib", "seaborn"]
-    followups: bool = False
     read_tool_call_history: bool = True
 
-    base_dir: Optional[Path] = None
-    save_and_run: bool = True
-    pip_install: bool = False
-    run_code: bool = False
-    run_file: bool = False
-    safe_globals: Optional[dict] = None
-    safe_locals: Optional[dict] = None
-
-    _python_tool: Optional[RunPythonCodeTool] = None
-
     @model_validator(mode="after")
-    def add_agent_tools(self) -> "PythonAgent":
-        """Add Agent Tools if needed"""
-
-        add_python_tools = False
-
+    def add_agent_tools(self) -> "ReactAgent":
+        # Initialize self.tools if None
         if self.tools is None:
-            add_python_tools = True
-        else:
-            if not any(isinstance(tool, RunPythonCodeTool) for tool in self.tools):
-                add_python_tools = True
-
-        if add_python_tools:
-            logger.debug("Adding RunPythonCodeTool to the PythonAgent")
-            self._python_tool = RunPythonCodeTool(
-                base_dir=self.base_dir,
-                save_and_run=self.save_and_run,
-                pip_install=self.pip_install,
-                run_code=self.run_code,
-                run_file=self.run_file,
-                safe_globals=self.safe_globals,
-                safe_locals=self.safe_locals,
-            )
-            # Initialize self.tools if None
-            if self.tools is None:
-                self.tools = []
-            self.tools.append(self._python_tool)
-
+            self.tools = []
         return self
 
     def get_file_metadata(self) -> str:
@@ -89,11 +56,6 @@ class PythonAgent(Agent):
             _model_instructions = self.model.get_instructions_for_model()
             if _model_instructions is not None:
                 _instructions += _model_instructions
-
-        _instructions += [
-            "Determine if you can answer the question directly or if you need to run python code to accomplish the task.",
-            "If you need to run code, **FIRST THINK** how you will accomplish the task and then write the code.",
-        ]
 
         if self.files is not None:
             _instructions += [
@@ -119,21 +81,6 @@ class PythonAgent(Agent):
             "If the data you need is not available in a file or publicly, stop and prompt the user to provide the missing information.",
             "Once you have all the information, write python functions to accomplishes the task.",
             "DO NOT READ THE DATA FILES DIRECTLY. Only read them in the python code you write.",
-        ]
-        if self.charting_libraries:
-            if "streamlit" in self.charting_libraries:
-                _instructions += [
-                    "ONLY use streamlit elements to display outputs like charts, dataframes, tables etc.",
-                    "USE streamlit dataframe/table elements to present data clearly.",
-                    "When you display charts print a title and a description using the st.markdown function",
-                    "DO NOT USE the `st.set_page_config()` or `st.title()` function.",
-                ]
-            else:
-                _instructions += [
-                    f"You can use the following charting libraries: {', '.join(self.charting_libraries)}",
-                ]
-
-        _instructions += [
             'After you have all the functions, create a python script that runs the functions guarded by a `if __name__ == "__main__"` block.'
         ]
 
@@ -154,13 +101,26 @@ class PythonAgent(Agent):
         # Add extra instructions provided by the user
         if self.additional_context is not None:
             _instructions.extend(self.additional_context)
-
+        _instructions += [
+            "Answer the following questions as best you can. You have access to the following APIs:",
+            "{tools_text}",
+            "Use the following format:",
+            "Question: the input question you must answer",
+            "Thought: you should always think about what to do",
+            "Action: the action to take, should be one of [{tools_name_text}]",
+            "Action Input: the input to the action",
+            "Observation: the result of the action",
+            "... (this Thought/Action/Action Input/Observation can be repeated zero or more times)",
+            "Thought: I now know the final answer",
+            "Final Answer: the final answer to the original input question",
+            "Begin!"
+        ]
         return _instructions
 
     def get_system_message(self, **kwargs) -> Optional[Message]:
-        """Return the system prompt for the python agent"""
+        """Return the system prompt for the agent"""
 
-        logger.debug("Building the system prompt for the PythonAgent.")
+        logger.debug("Building the system prompt for the ReACTAgent.")
         # -*- Build the default system prompt
         # First add the Agent description
         system_message = (
@@ -226,17 +186,6 @@ class PythonAgent(Agent):
             <files>
             {self.file_information}
             </files>
-            """
-            )
-
-        if self.followups:
-            system_message += dedent(
-                """
-            After finishing your task, ask the user relevant followup questions like:
-            1. Would you like to see the code? If the user says yes, show the code. Get it using the `get_tool_call_history(num_calls=3)` function.
-            2. Was the result okay, would you like me to fix any problems? If the user says yes, get the previous code using the `get_tool_call_history(num_calls=3)` function and fix the problems.
-            3. Shall I add this result to the knowledge base? If the user says yes, add the result to the knowledge base using the `add_to_knowledge_base` function.
-            Let the user choose using number or text or continue the conversation.
             """
             )
 
