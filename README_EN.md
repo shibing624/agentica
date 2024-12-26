@@ -17,8 +17,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
-**Agentica**: Build Smarter, Reflective, and Collaborative AI Agents with Ease!
-
+**Agentica**: Effortlessly Build Intelligent, Reflective, and Collaborative Multimodal AI Agents!
 
 ## 📖 Introduction
 

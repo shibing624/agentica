@@ -18,13 +18,10 @@
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
 
-**Agentica**: Build Smarter, Reflective, and Collaborative AI Agents with Ease!
+**Agentica**: 轻松构建智能、具备反思能力、可协作的多模态AI Agent。
 
-**Agentica**: 快速打造智能、能反思、协作的AI Agent。
 
 ## 📖 Introduction
-
-**Agentica** can build AI agent, which have the components of planning, memory, and tool use. 
 
 **Agentica** 可以构建AI Agent，包括规划、记忆和工具使用、执行等组件。
 
