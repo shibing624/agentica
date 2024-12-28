@@ -85,7 +85,8 @@ class Message(BaseModel):
         @param level: The level to log the message at. One of debug, info, warning, or error.
             Defaults to debug.
         """
-        _logger = logger.debug
+        level = level or "debug"
+        level = level.lower()
         if level == "debug":
             _logger = logger.debug
         elif level == "info":
@@ -94,6 +95,8 @@ class Message(BaseModel):
             _logger = logger.warning
         elif level == "error":
             _logger = logger.error
+        else:
+            _logger = logger.debug
 
         _logger(f"============== {self.role} ==============")
         if self.name:
@@ -120,8 +123,6 @@ class Message(BaseModel):
                     _logger("Message contains raw audio data")
             else:
                 _logger(f"Audio file added: {self.audio}")
-        # if self.model_extra and "images" in self.model_extra:
-        #     _logger("images: {}".format(self.model_extra["images"]))
 
     def content_is_valid(self) -> bool:
         """Check if the message content is valid."""

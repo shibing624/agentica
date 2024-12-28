@@ -1998,7 +1998,8 @@ class Agent(BaseModel):
                         logger.warning(f"Failed to convert response to pydantic model: {exc}")
                         # Check if response starts with ```json
                         if run_response.content.startswith("```json"):
-                            run_response.content = run_response.content.replace("```json\n", "").replace("\n```", "")
+                            run_response.content = run_response.content.replace(
+                                "```json\n", "").replace("\n```", "")
                             try:
                                 structured_output = self.response_model.model_validate_json(run_response.content)
                             except ValidationError as exc:
@@ -2307,7 +2308,8 @@ class Agent(BaseModel):
                         logger.warning(f"Failed to convert response to pydantic model: {exc}")
                         # Check if response starts with ```json
                         if run_response.content.startswith("```json"):
-                            run_response.content = run_response.content.replace("```json\n", "").replace("\n```", "")
+                            run_response.content = run_response.content.replace(
+                                "```json\n", "").replace("\n```", "")
                             try:
                                 structured_output = self.response_model.model_validate_json(run_response.content)
                             except ValidationError as exc:
