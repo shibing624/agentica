@@ -9,7 +9,7 @@ import shutil
 from unittest.mock import MagicMock, patch
 import sys
 sys.path.append('..')
-from agentica.tools.create_image_tool import CreateImageTool
+from agentica.tools.dalle_tool import DalleTool
 
 
 @patch("openai.Image.create")
@@ -26,7 +26,7 @@ def test_execute(mock_get, mock_create):
     mock_response.content = b"mock image content"
     mock_get.return_value = mock_response
 
-    create_image = CreateImageTool(data_dir="test_data")
+    create_image = DalleTool(data_dir="test_data")
     image_path = create_image.create_dalle_image("a white siamese cat", 1, "1024x1024")
 
     # Check that the returned image name is a valid SHA-256 hash followed by ".png"

@@ -21,6 +21,7 @@ from agentica.model.doubao.chat import DoubaoChat
 from agentica.model.together.togetherchat import TogetherChat
 from agentica.model.xai.grok import GrokChat
 from agentica.model.yi.chat import YiChat
+from agentica.model.zhipuai.chat import ZhipuAIChat
 
 # memory
 from agentica.model.base import Model
@@ -72,6 +73,7 @@ from agentica.emb.hash_emb import HashEmb
 from agentica.emb.ollama_emb import OllamaEmb
 from agentica.emb.together_emb import TogetherEmb
 from agentica.emb.fireworks_emb import FireworksEmb
+from agentica.emb.zhipuai_emb import ZhipuAIEmb
 
 # file
 from agentica.file.base import File
@@ -94,7 +96,7 @@ from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.run_python_code_tool import RunPythonCodeTool
 from agentica.tools.analyze_image_tool import AnalyzeImageTool
 from agentica.tools.calculator_tool import CalculatorTool
-from agentica.tools.create_image_tool import CreateImageTool
+from agentica.tools.dalle_tool import DalleTool
 from agentica.tools.file_tool import FileTool
 from agentica.tools.hackernews_tool import HackerNewsTool
 from agentica.tools.jina_tool import JinaTool

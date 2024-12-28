@@ -18,7 +18,7 @@ from agentica.model.openai import OpenAIChat
 from agentica.tools.base import Toolkit
 
 
-class CreateImageTool(Toolkit):
+class DalleTool(Toolkit):
     """
     This class inherits from the Toolkit class.
         It defines a function for creating an image from a description using OpenAI's API.
@@ -30,7 +30,7 @@ class CreateImageTool(Toolkit):
             model: Optional[Model] = None
 
     ):
-        super().__init__(name="create_image_tool")
+        super().__init__(name="create_image_from_dalle_tool")
         self.data_dir: str = data_dir or "outputs"
         self.model = model
         self.register(self.create_dalle_image)
@@ -50,8 +50,8 @@ class CreateImageTool(Toolkit):
             model (str, optional): The model use for image generation, can be dall-e-2 or dall-e-3. Defaults 'dall-e-3'.
 
         Example:
-            from agentica.tools.create_image_tool import CreateImageTool
-            tool = CreateImageTool()
+            from agentica.tools.dalle_tool import DalleTool
+            tool = DalleTool()
             image_path = tool.create_dalle_image("A painting of a beautiful sunset over the ocean.")
             print(image_path)
 
@@ -118,7 +118,7 @@ class CreateImageTool(Toolkit):
 
 if __name__ == '__main__':
     # from agentica.tools.create_image import CreateImageTool
-    m = CreateImageTool()
+    m = DalleTool()
     prompt = "A painting of a beautiful sunset over the ocean."
     r = m.create_dalle_image(prompt)
     print(r)

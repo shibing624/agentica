@@ -2,8 +2,8 @@ import sys
 
 sys.path.append('..')
 from agentica import Agent, OpenAIChat
-from agentica.tools.create_image_tool import CreateImageTool
+from agentica.tools.dalle_tool import DalleTool
 
-m = Agent(tools=[CreateImageTool()], show_tool_calls=True)
+m = Agent(tools=[DalleTool()], show_tool_calls=True)
 r = m.run("画一匹斑马在太空行走")
 print(r)
