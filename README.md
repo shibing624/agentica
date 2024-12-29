@@ -45,6 +45,8 @@
 - **Solver**：求解器将所有这些输出整合为最终答案
 
 ## 🔥 News
+[2024/12/29] v0.2.3版本: 支持了`ZhipuAI`的api调用，包括免费模型和工具使用，详见[Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/0.2.3)
+
 [2024/12/25] v0.2.0版本: 支持了多模态模型，输入可以是文本、图片、音频、视频，升级Assistant为Agent，Workflow支持拆解并实现复杂任务，详见[Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/0.2.0)
 
 [2024/07/02] v0.1.0版本：实现了基于LLM的Assistant，可以快速用function call搭建大语言模型助手，详见[Release-v0.1.0](https://github.com/shibing624/agentica/releases/tag/0.1.0)
@@ -87,7 +89,7 @@ cd examples
 python web_search_moonshot_demo.py
 ```
 
-1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填DEEPSEEK_API_KEY、MOONSHOT_API_KEY、OPENAI_API_KEY等任一个即可)。或者使用`export`命令设置环境变量：
+1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填DEEPSEEK_API_KEY、MOONSHOT_API_KEY、OPENAI_API_KEY、ZHIPUAI_API_KEY等任一个即可)。或者使用`export`命令设置环境变量：
     
     ```shell
     export MOONSHOT_API_KEY=your_moonshot_api_key
