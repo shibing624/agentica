@@ -4,14 +4,12 @@
 @description: 
 """
 import unittest
-from pathlib import Path
 import sys
 
 sys.path.append('..')
-from agentica import Agent
+from agentica.agent import Agent
 from agentica.tools.calculator_tool import CalculatorTool
-from agentica import ZhipuAIChat
-pwd_path = Path(__file__).parent
+from agentica.model.zhipuai.chat import ZhipuAIChat
 
 
 class CalcParser(unittest.TestCase):
