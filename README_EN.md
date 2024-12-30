@@ -52,7 +52,7 @@
 
 - **Agent Composition**: Quickly compose agents with simple code, supporting Reflection, Plan and Solve, RAG, Agent, Multi-Agent, Multi-Role, and Workflow functionalities.
 - **Custom Prompts**: Agents support custom prompts and various tool calls.
-- **LLM Integration**: Supports APIs from multiple large model providers such as OpenAI, Azure, Deepseek, Moonshot, Claude, Ollama, and Together.
+- **LLM Integration**: Supports APIs from multiple large model providers such as OpenAI, Azure, Deepseek, Moonshot, Anthropic, ZhipuAI, Ollama, and Together.
 - **Memory Capabilities**: Includes short-term and long-term memory functionalities.
 - **Multi-Agent Collaboration**: Supports team collaboration with multiple agents and roles.
 - **Workflow Automation**: Automates complex workflows by breaking down tasks into multiple agents, such as investment research, news article writing, and technical tutorial creation.
@@ -210,6 +210,64 @@ streamlit run 34_llm_os_demo.py
 ```
 
 <img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png" width="800" />
+
+
+
+### CLI
+
+Support CLI for quick setup and experience of Agent:
+
+code: [cli.py](https://github.com/shibing624/agentica/blob/main/agentica/cli.py)
+
+```
+> agentica -h                                    
+usage: cli.py [-h] [--query QUERY]
+              [--model_provider {openai,azure,moonshot,zhipuai,deepseek,yi}]
+              [--model_name MODEL_NAME] [--api_base API_BASE]
+              [--api_key API_KEY] [--max_tokens MAX_TOKENS]
+              [--temperature TEMPERATURE] [--verbose VERBOSE]
+              [--tools [{search_serper,file_tool,shell_tool,yfinance_tool,web_search_pro,cogview,cogvideo,jina,wikipedia} ...]]
+
+CLI for agentica
+
+options:
+  -h, --help            show this help message and exit
+  --query QUERY         Question to ask the LLM
+  --model_provider {openai,azure,moonshot,zhipuai,deepseek,yi}
+                        LLM model provider
+  --model_name MODEL_NAME
+                        LLM model name to use, can be
+                        gpt-4o/glm-4-flash/deepseek-chat/yi-lightning/...
+  --api_base API_BASE   API base URL for the LLM
+  --api_key API_KEY     API key for the LLM
+  --max_tokens MAX_TOKENS
+                        Maximum number of tokens for the LLM
+  --temperature TEMPERATURE
+                        Temperature for the LLM
+  --verbose VERBOSE     enable verbose mode
+  --tools [{search_serper,file_tool,shell_tool,yfinance_tool,web_search_pro,cogview,cogvideo,jina,wikipedia} ...]
+                        Tools to enable
+```
+
+run：
+
+```shell
+pip install agentica -U
+# single call, fill in the `--query` parameter
+agentica --query "下一届奥运会在哪里举办" --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro
+# multi-turn conversation, do not fill in the `--query` parameter
+agentica --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro cogview --verbose 1
+```
+
+output:
+```shell
+2024-12-30 21:59:15,000 - agentica - INFO - Agentica CLI
+>>> 帮我画个大象在月球上的图
+
+> 我帮你画了一张大象在月球上的图，它看起来既滑稽又可爱。大象穿着宇航服，站在月球表面，背景是广阔的星空和地球。这张图色彩明亮，细节丰富，具有卡通风格。你可以点击下面的链接查看和下载这张图片：
+
+![大象在月球上的图](https://aigc-files.bigmodel.cn/api/cogview/20241230215915cfa22f46425e4cb0_0.png)
+```
 
 ## Contact
 

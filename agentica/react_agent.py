@@ -192,4 +192,4 @@ if __name__ == '__main__':
     # Run the agent with a query that requires both tools
     response = agent.run(
         "What is the result of reversing the string '123hello111---232323k23你好，水电费不着调。。。。--23' and then calculating the length of the reversed string, 不要包括引号")
-    logger.info(response)
+    print(response)

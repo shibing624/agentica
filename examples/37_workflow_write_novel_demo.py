@@ -7,7 +7,6 @@
 import sys
 from textwrap import dedent
 from loguru import logger
-from typing import Iterator
 
 sys.path.append('..')
 from agentica import Agent, OpenAIChat, AzureOpenAIChat

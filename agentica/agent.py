@@ -7,6 +7,7 @@ part of the code from https://github.com/phidatahq/phidata
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from textwrap import dedent
 from collections import defaultdict, deque
@@ -30,6 +31,7 @@ from uuid import uuid4
 from pathlib import Path
 from pydantic import BaseModel, ConfigDict, field_validator, Field, ValidationError
 
+from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.document import Document
 from agentica.knowledge.base import Knowledge
 from agentica.model.openai import OpenAIChat
@@ -44,7 +46,6 @@ from agentica.reasoning import ReasoningStep, ReasoningSteps, NextAction
 from agentica.run_response import RunEvent, RunResponse, RunResponseExtraData
 from agentica.memory import AgentMemory, Memory, AgentRun, SessionSummary
 from agentica.storage.agent.base import AgentStorage
-from agentica.utils.log import logger, set_log_level_to_debug
 from agentica.utils.misc import get_text_from_message
 from agentica.utils.timer import Timer
 from agentica.agent_session import AgentSession
@@ -252,6 +253,15 @@ class Agent(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True, extra="allow")
 
+    @field_validator("debug_mode", mode="before")
+    def set_log_level(cls, v: bool) -> bool:
+        if v:
+            set_log_level_to_debug()
+            logger.debug("Debug logs enabled")
+        elif v is False:
+            set_log_level_to_info()
+        return v
+
     @field_validator("agent_id", mode="before")
     def set_agent_id(cls, v: Optional[str]) -> str:
         agent_id = v or str(uuid4())
@@ -263,13 +273,6 @@ class Agent(BaseModel):
         session_id = v or str(uuid4())
         logger.debug(f"*********** Session ID: {session_id} ***********")
         return session_id
-
-    @field_validator("debug_mode", mode="before")
-    def set_log_level(cls, v: bool) -> bool:
-        if v:
-            set_log_level_to_debug()
-            logger.debug("Debug logs enabled")
-        return v
 
     @property
     def is_streamable(self) -> bool:
@@ -3091,4 +3094,3 @@ class Agent(BaseModel):
                 break
 
             self.print_response(message=message, stream=stream, markdown=markdown, **kwargs)
-

@@ -55,5 +55,24 @@ def set_log_level_to_debug():
         )
 
 
+def set_log_level_to_info():
+    logger.remove()  # 移除之前的日志处理器
+    logger.add(
+        sink=sys.stdout,
+        level="INFO",
+        enqueue=True,
+        backtrace=False,
+        diagnose=False,
+    )
+    if AGENTICA_LOG_FILE:
+        logger.add(
+            sink=AGENTICA_LOG_FILE,
+            level="INFO",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
+        )
+
+
 def print_llm_stream(msg):
     print(msg, end="", flush=True)

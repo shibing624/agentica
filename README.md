@@ -57,7 +57,7 @@
 
 - **Agent编排**：通过简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Team、Workflow等功能
 - **自定义prompt**：Agent支持自定义prompt和多种工具调用（tool_calls）
-- **LLM集成**：支持OpenAI、Azure、Deepseek、Moonshot、Claude、Ollama、Together等多方大模型厂商的API
+- **LLM集成**：支持OpenAI、Azure、Deepseek、Moonshot、Anthropic、ZhipuAI、Ollama、Together等多方大模型厂商的API
 - **记忆功能**：包括短期记忆和长期记忆功能
 - **Multi-Agent协作**：支持多Agent和任务委托（Team）的团队协作。
 - **Workflow工作流**：拆解复杂任务为多个Agent，基于工作流自动化串行逐步完成任务，如投资研究、新闻文章撰写和技术教程创建
@@ -212,6 +212,63 @@ streamlit run 34_llm_os_demo.py
 ```
 
 <img alt="LLM OS" src="https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png" width="800" />
+
+
+### 命令行模式（CLI）
+
+支持终端命令行快速搭建并体验Agent
+
+code: [cli.py](https://github.com/shibing624/agentica/blob/main/agentica/cli.py)
+
+```
+> agentica -h                                    
+usage: cli.py [-h] [--query QUERY]
+              [--model_provider {openai,azure,moonshot,zhipuai,deepseek,yi}]
+              [--model_name MODEL_NAME] [--api_base API_BASE]
+              [--api_key API_KEY] [--max_tokens MAX_TOKENS]
+              [--temperature TEMPERATURE] [--verbose VERBOSE]
+              [--tools [{search_serper,file_tool,shell_tool,yfinance_tool,web_search_pro,cogview,cogvideo,jina,wikipedia} ...]]
+
+CLI for agentica
+
+options:
+  -h, --help            show this help message and exit
+  --query QUERY         Question to ask the LLM
+  --model_provider {openai,azure,moonshot,zhipuai,deepseek,yi}
+                        LLM model provider
+  --model_name MODEL_NAME
+                        LLM model name to use, can be
+                        gpt-4o/glm-4-flash/deepseek-chat/yi-lightning/...
+  --api_base API_BASE   API base URL for the LLM
+  --api_key API_KEY     API key for the LLM
+  --max_tokens MAX_TOKENS
+                        Maximum number of tokens for the LLM
+  --temperature TEMPERATURE
+                        Temperature for the LLM
+  --verbose VERBOSE     enable verbose mode
+  --tools [{search_serper,file_tool,shell_tool,yfinance_tool,web_search_pro,cogview,cogvideo,jina,wikipedia} ...]
+                        Tools to enable
+```
+
+run：
+
+```shell
+pip install agentica -U
+# 单次调用，填入`--query`参数
+agentica --query "下一届奥运会在哪里举办" --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro
+# 多次调用，多轮对话，不填`--query`参数
+agentica --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro cogview --verbose 1
+```
+
+output:
+```shell
+2024-12-30 21:59:15,000 - agentica - INFO - Agentica CLI
+>>> 帮我画个大象在月球上的图
+
+> 我帮你画了一张大象在月球上的图，它看起来既滑稽又可爱。大象穿着宇航服，站在月球表面，背景是广阔的星空和地球。这张图色彩明亮，细节丰富，具有卡通风格。你可以点击下面的链接查看和下载这张图片：
+
+![大象在月球上的图](https://aigc-files.bigmodel.cn/api/cogview/20241230215915cfa22f46425e4cb0_0.png)
+```
 
 ## ☎️ Contact
 
