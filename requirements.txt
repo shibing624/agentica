@@ -1,13 +1,14 @@
 httpx
 loguru
-markdownify
-openai
+beautifulsoup4
+openai>=1.52.0
 python-dotenv
 pydantic
 requests
 sqlalchemy
 scikit-learn
 text2vec
+markdownify
 tqdm
-yaml
 rich
+pyyaml
