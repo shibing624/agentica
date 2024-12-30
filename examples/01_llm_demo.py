@@ -6,7 +6,7 @@
 
 import sys
 import argparse
-from agentica import Message, YiChat, AzureOpenAIChat, DeepSeekChat, OpenAIChat, MoonshotChat, pprint_run_response
+from agentica import Message, YiChat, AzureOpenAIChat, DeepSeekChat, OpenAIChat, MoonshotChat, ZhipuAIChat
 
 sys.path.append('..')
 
@@ -17,7 +17,8 @@ def get_model(model_name):
         "OpenAIChat": OpenAIChat,
         "DeepSeekChat": DeepSeekChat,
         "YiChat": YiChat,
-        "MoonshotChat": MoonshotChat
+        "MoonshotChat": MoonshotChat,
+        "ZhipuAIChat": ZhipuAIChat,
         # Add more models here，eg: "Ollama": Ollama
     }
     return models.get(model_name, AzureOpenAIChat)()
