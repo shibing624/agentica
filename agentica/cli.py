@@ -6,7 +6,7 @@
 import argparse
 from rich.console import Console
 from rich.text import Text
-from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat
+from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, PythonAgent
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.file_tool import FileTool
 from agentica.tools.shell_tool import ShellTool
@@ -32,7 +32,7 @@ def parse_args():
     parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
     parser.add_argument('--tools', nargs='*',
                         choices=['search_serper', 'file_tool', 'shell_tool', 'yfinance_tool', 'web_search_pro',
-                                 'cogview', 'cogvideo', 'jina', 'wikipedia'], help='Tools to enable')
+                                 'cogview', 'cogvideo', 'jina', 'wikipedia', 'python_tool'], help='Tools to enable')
     return parser.parse_args()
 
 
@@ -100,18 +100,15 @@ def run_interactive(agent):
     while True:
         try:
             if first_prompt:
-                console.print(Text("Enter your question (end with empty line, type 'exit' to quit):", style="green"))
+                console.print(Text("Enter your question (type 'exit' to quit):", style="green"))
                 console.print(Text(">>> ", style="green"), end="")
                 first_prompt = False
             else:
                 console.print(Text(">>> ", style="green"), end="")
-            multi_line_input = []
-            while True:
-                line = console.input()
-                if line.strip() == "":
-                    break
-                multi_line_input.append(line)
-            query = "\n".join(multi_line_input).strip()
+
+            line = console.input()
+            query = line.strip()
+
             if query.lower() == 'exit':
                 break
             if query:
@@ -133,11 +130,16 @@ def main():
                       api_key=args.api_key, max_tokens=args.max_tokens)
     tools = configure_tools(args.tools) if args.tools else None
     debug_mode = args.verbose > 0
-    agent = Agent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
-                  tools=tools, debug_mode=debug_mode)
+    if args.tools and 'python_tool' in args.tools:
+        agent = PythonAgent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
+                            tools=tools, debug_mode=debug_mode)
+    else:
+        agent = Agent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
+                      tools=tools, debug_mode=debug_mode)
     if args.query:
-        result = agent.run(args.query).content
-        console.print(result)
+        response = agent.run(args.query, stream=True)
+        for chunk in response:
+            console.print(chunk.content, end="")
     else:
         run_interactive(agent)
 

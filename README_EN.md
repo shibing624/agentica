@@ -43,6 +43,8 @@
 - **Solver**: The solver integrates all these outputs into the final answer
 
 ## 🔥 News
+[2024/12/29] v0.2.3: Added support for `ZhipuAI` API calls, including free models and tool usage. See [Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/0.2.3)
+
 [2024/12/25] v0.2.0 version: Supports multimodal models, input can be text, pictures, audio, video, upgrade Assistant to Agent, Workflow supports disassembly and implementation of complex tasks, see [Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/0.2.0)
 
 [2024/07/02] v0.1.0 version: Implemented Assistant based on LLM, can quickly use function call to build a large language model assistant, see [Release-v0.1.0](https://github.com/shibing624/agentica/releases/tag/0.1.0)
