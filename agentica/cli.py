@@ -101,10 +101,10 @@ def run_interactive(agent):
         try:
             if first_prompt:
                 console.print(Text("Enter your question (type 'exit' to quit):", style="green"))
-                console.print(Text(">>> ", style="green"), end="")
+                console.print(Text("> ", style="green"), end="")
                 first_prompt = False
             else:
-                console.print(Text(">>> ", style="green"), end="")
+                console.print(Text("> ", style="green"), end="")
 
             line = console.input()
             query = line.strip()
@@ -113,7 +113,7 @@ def run_interactive(agent):
                 break
             if query:
                 response = agent.run(query, stream=True)
-                console.print(Text("> ", style="green"), end="")
+                console.print(Text("\n", style="green"), end="")
                 for chunk in response:
                     console.print(chunk.content, end="")
                 console.print("\n")
@@ -136,6 +136,8 @@ def main():
     else:
         agent = Agent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
                       tools=tools, debug_mode=debug_mode)
+    console.print(Text("Welcome to Agentica CLI!", style="bold green"))
+    console.print(Text(f"Model provider: {args.model_provider}, Model name: {args.model_name}", style="red"))
     if args.query:
         response = agent.run(args.query, stream=True)
         for chunk in response:
