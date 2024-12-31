@@ -31,8 +31,8 @@ def parse_args():
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
     parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
     parser.add_argument('--tools', nargs='*',
-                        choices=['search_serper', 'file_tool', 'shell_tool', 'yfinance_tool', 'web_search_pro',
-                                 'cogview', 'cogvideo', 'jina', 'wikipedia', 'python_tool'], help='Tools to enable')
+                        choices=['search_serper', 'file', 'shell', 'yfinance', 'web_search_pro',
+                                 'cogview', 'cogvideo', 'jina', 'wikipedia', 'python'], help='Tools to enable')
     return parser.parse_args()
 
 
@@ -72,11 +72,11 @@ def configure_tools(tool_names):
     tools = []
     if 'search_serper' in tool_names:
         tools.append(SearchSerperTool())
-    if 'file_tool' in tool_names:
+    if 'file' in tool_names:
         tools.append(FileTool())
-    if 'shell_tool' in tool_names:
+    if 'shell' in tool_names:
         tools.append(ShellTool())
-    if 'yfinance_tool' in tool_names:
+    if 'yfinance' in tool_names:
         from agentica.tools.yfinance_tool import YFinanceTool
         tools.append(YFinanceTool())
     if 'web_search_pro' in tool_names:
@@ -130,7 +130,7 @@ def main():
                       api_key=args.api_key, max_tokens=args.max_tokens)
     tools = configure_tools(args.tools) if args.tools else None
     debug_mode = args.verbose > 0
-    if args.tools and 'python_tool' in args.tools:
+    if args.tools and 'python' in args.tools:
         agent = PythonAgent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
                             tools=tools, debug_mode=debug_mode)
     else:
