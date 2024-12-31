@@ -84,7 +84,7 @@ class JinaTool(Toolkit):
 
         try:
             data = {'url': url}
-            response = requests.post('https://r.jina.ai/', data=data)
+            response = requests.post('https://r.jina.ai/', headers=self._get_headers(), json=data)
             response.raise_for_status()
             content = response.text
             result = self._trim_content(content)
@@ -142,14 +142,6 @@ class JinaTool(Toolkit):
 
 
 if __name__ == '__main__':
-    url = 'https://r.jina.ai/'
-    data = {
-        'url': 'https://channels.weixin.qq.com/shop/learning-center/detail.html?pf=shoplogin&contentId=Article_1714298241_SAIZLPKN&contentType=content&from=#/pages/p-poac/p-pgaj/tab_pages/p-usat/'
-    }
-
-    response = requests.post(url, data=data)
-    print(response.text)
-
     m = JinaTool(jina_reader=True, jina_search=True)
     url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
     r = m.jina_url_reader(url)
