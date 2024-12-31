@@ -137,7 +137,8 @@ def main():
         agent = Agent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
                       tools=tools, debug_mode=debug_mode)
     console.print(Text("Welcome to Agentica CLI!", style="bold green"))
-    console.print(Text(f"Model provider: {args.model_provider}, Model name: {args.model_name}", style="red"))
+    console.print(Text(f"Model provider: {args.model_provider}, Model name: {args.model_name}, "
+                       f"tools: {args.tools}", style="red"))
     if args.query:
         response = agent.run(args.query, stream=True)
         for chunk in response:
