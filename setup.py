@@ -51,6 +51,7 @@ setup(
         "tqdm",
         "rich",
         "pyyaml",
+        "packaging",
     ],
     packages=find_packages(exclude=['tests']),
     package_dir={'agentica': 'agentica'},
