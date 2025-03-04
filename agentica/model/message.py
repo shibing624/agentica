@@ -128,3 +128,23 @@ class Message(BaseModel):
         """Check if the message content is valid."""
 
         return self.content is not None and len(self.content) > 0
+
+
+class SystemMessage(Message):
+    """System message to the model"""
+    role: str = "system"
+
+
+class UserMessage(Message):
+    """User message to the model"""
+    role: str = "user"
+
+
+class AssistantMessage(Message):
+    """Assistant message from the model"""
+    role: str = "assistant"
+
+
+class ToolMessage(Message):
+    """Tool/Function message"""
+    role: str = "tool"
