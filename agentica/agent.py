@@ -203,9 +203,6 @@ class Agent(BaseModel):
     add_datetime_to_instructions: bool = False
 
     # -*- User Prompt Settings
-    # User prompt: provide the user prompt as a string
-    # Note: this will ignore the message sent to the run function
-    user_prompt: Optional[Union[List, Dict, str, Callable]] = None
     # User prompt template: provide the user prompt as a PromptTemplate
     user_prompt_template: Optional[PromptTemplate] = None
     # If True, build a default user prompt using references and chat history
@@ -1131,14 +1128,14 @@ class Agent(BaseModel):
     ) -> Optional[Message]:
         """Return the user message for the Agent.
 
-        1. If the user_prompt is provided, use that.
+        1. Get references.
         2. If the user_prompt_template is provided, build the user_message using the template.
         3. If the message is None, return None.
         4. 4. If use_default_user_message is False or If the message is not a string, return the message as is.
         5. If add_references is False or references is None, return the message as is.
         6. Build the default user message for the Agent
         """
-        # Get references from the knowledge base to use in the user message
+        # 1. Get references from the knowledge base to use in the user message
         references = None
         if self.add_references and message and isinstance(message, str):
             retrieval_timer = Timer()
@@ -1156,23 +1153,6 @@ class Agent(BaseModel):
                 self.run_response.extra_data.references.append(references)
             retrieval_timer.stop()
             logger.debug(f"Time to get references: {retrieval_timer.elapsed:.4f}s")
-
-        # 1. If the user_prompt is provided, use that.
-        if self.user_prompt is not None:
-            user_prompt_content = self.user_prompt
-            if callable(self.user_prompt):
-                user_prompt_kwargs = {"agent": self, "message": message, "references": references}
-                user_prompt_content = self.user_prompt(**user_prompt_kwargs)
-                if not isinstance(user_prompt_content, str):
-                    raise Exception("User prompt must return a string")
-            return Message(
-                role=self.user_message_role,
-                content=user_prompt_content,
-                audio=audio,
-                images=images,
-                videos=videos,
-                **kwargs,
-            )
 
         # 2. If the user_prompt_template is provided, build the user_message using the template.
         if self.user_prompt_template is not None:
