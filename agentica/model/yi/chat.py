@@ -4,7 +4,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class YiChat(OpenAILike):
+class Yi(OpenAILike):
     """
     A model class for YI Chat API.
 
@@ -17,7 +17,7 @@ class YiChat(OpenAILike):
     """
 
     id: str = "yi-lightning"
-    name: str = "YiChat"
+    name: str = "Yi"
     provider: str = "01.ai"
 
     api_key: Optional[str] = getenv("YI_API_KEY", None)

@@ -3,12 +3,14 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
+from dataclasses import dataclass
 import hashlib
 from typing import List
 
 from agentica.emb.base import Emb
 
 
+@dataclass
 class HashEmb(Emb):
     """A Literal Hash Embedding Function, which hashes the input text as a list of floats."""
     model: str = "literal_hash_emb"

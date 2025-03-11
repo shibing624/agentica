@@ -2,7 +2,7 @@ import json
 from time import time
 from typing import Optional, Any, Dict, List, Union, Sequence
 from pydantic import BaseModel, ConfigDict, Field
-
+from agentica.media import AudioResponse
 from agentica.utils.log import logger
 
 
@@ -39,6 +39,19 @@ class Message(BaseModel):
     images: Optional[Sequence[Any]] = None
     videos: Optional[Sequence[Any]] = None
 
+    # Output from the models
+    audio_output: Optional[AudioResponse] = None
+
+    # The thinking content from the model
+    thinking: Optional[str] = None
+    redacted_thinking: Optional[str] = None
+
+    # Data from the provider we might need on subsequent messages
+    provider_data: Optional[Dict[str, Any]] = None
+
+    # --- Data not sent to the Model API ---
+    # The reasoning content from the model
+    reasoning_content: Optional[str] = None
     # -*- Attributes not sent to the model
     # The name of the tool called
     tool_name: Optional[str] = Field(None, alias="tool_call_name")
@@ -58,14 +71,17 @@ class Message(BaseModel):
     # The Unix timestamp the message was created.
     created_at: int = Field(default_factory=lambda: int(time()))
 
-    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    model_config = ConfigDict(extra="allow", populate_by_name=True, arbitrary_types_allowed=True)
 
     def get_content_string(self) -> str:
         """Returns the content as a string."""
         if isinstance(self.content, str):
             return self.content
         if isinstance(self.content, list):
-            return json.dumps(self.content, ensure_ascii=False)
+            if len(self.content) > 0 and isinstance(self.content[0], dict) and "text" in self.content[0]:
+                return self.content[0].get("text", "")
+            else:
+                return json.dumps(self.content, ensure_ascii=False)
         return ""
 
     def to_dict(self) -> Dict[str, Any]:

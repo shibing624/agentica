@@ -1,1 +1,1 @@
-from agentica.model.xai.grok import GrokChat
+from agentica.model.xai.grok import Grok

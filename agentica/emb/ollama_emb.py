@@ -4,12 +4,14 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
+from dataclasses import dataclass
 from typing import Optional, Dict, List, Any, Tuple
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
 
 
+@dataclass
 class OllamaEmb(Emb):
     model: str = "quentinz/bge-base-zh-v1.5"
     dimensions: int = 384

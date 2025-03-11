@@ -3,6 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
+from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 
 try:
@@ -14,6 +15,7 @@ except ImportError:
 from agentica.emb.base import Emb
 
 
+@dataclass
 class Text2VecEmb(Emb):
     """Text2Vec embedding model(SBert), using the `text2vec` library"""
     model: str = "shibing624/text2vec-base-multilingual"

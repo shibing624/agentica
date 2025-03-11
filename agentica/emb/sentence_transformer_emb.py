@@ -4,6 +4,7 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
+from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any
 
 from agentica.emb.base import Emb
@@ -23,6 +24,7 @@ except ImportError:
     raise ImportError("sentence-transformers not installed, please run `pip install sentence-transformers`")
 
 
+@dataclass
 class SentenceTransformerEmb(Emb):
     model: str = "sentence-transformers/all-MiniLM-L6-v2"
     dimensions: Optional[int] = 384

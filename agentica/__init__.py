@@ -14,14 +14,30 @@ from agentica.utils.log import set_log_level_to_debug, logger
 from agentica.utils.io import write_audio_to_file
 # model
 from agentica.model.openai.chat import OpenAIChat
+from agentica.model.openai.chat import OpenAIChat as OpenAILLM
+from agentica.model.openai.like import OpenAILike
 from agentica.model.azure.openai_chat import AzureOpenAIChat
-from agentica.model.moonshot import MoonshotChat
-from agentica.model.deepseek.chat import DeepSeekChat
-from agentica.model.doubao.chat import DoubaoChat
-from agentica.model.together.togetherchat import TogetherChat
-from agentica.model.xai.grok import GrokChat
-from agentica.model.yi.chat import YiChat
-from agentica.model.zhipuai.chat import ZhipuAIChat
+from agentica.model.azure.openai_chat import AzureOpenAIChat as AzureOpenAILLM
+from agentica.model.moonshot import Moonshot
+from agentica.model.moonshot import Moonshot as MoonshotChat
+from agentica.model.moonshot import Moonshot as MoonshotLLM
+from agentica.model.deepseek.chat import DeepSeek
+from agentica.model.deepseek.chat import DeepSeek as DeepSeekChat
+from agentica.model.deepseek.chat import DeepSeek as DeepSeekLLM
+from agentica.model.doubao.chat import Doubao
+from agentica.model.doubao.chat import Doubao as DoubaoChat
+from agentica.model.together.together import Together
+from agentica.model.together.together import Together as TogetherChat
+from agentica.model.together.together import Together as TogetherLLM
+from agentica.model.xai.grok import Grok
+from agentica.model.xai.grok import Grok as GrokChat
+from agentica.model.yi.chat import Yi
+from agentica.model.yi.chat import Yi as YiChat
+from agentica.model.yi.chat import Yi as YiLLM
+from agentica.model.qwen.chat import Qwen
+from agentica.model.zhipuai.chat import ZhipuAI
+from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAIChat
+from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAILLM
 
 # memory
 from agentica.model.base import Model

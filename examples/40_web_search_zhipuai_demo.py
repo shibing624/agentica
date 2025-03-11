@@ -7,10 +7,10 @@ import sys
 
 sys.path.append('..')
 from agentica import Message
-from agentica import Agent, ZhipuAIChat
+from agentica import Agent, ZhipuAI
 from agentica.tools.web_search_pro_tool import WebSearchProTool
 
-model = ZhipuAIChat(id='glm-4-flash')
+model = ZhipuAI(id='glm-4-flash')
 messages = [Message(role="user", content="一句话介绍林黛玉")]
 r = model.response(messages)
 print('model:', model)

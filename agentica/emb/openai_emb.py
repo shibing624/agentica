@@ -5,6 +5,7 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 from os import getenv
+from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any, Literal
 
 from openai import OpenAI as OpenAIClient
@@ -14,8 +15,9 @@ from agentica.emb.base import Emb
 from agentica.utils.log import logger
 
 
+@dataclass
 class OpenAIEmb(Emb):
-    model: str = "text-embedding-ada-002"  # or text-embedding-3-small
+    model: str = "text-embedding-3-small"
     dimensions: int = 1536
     encoding_format: Literal["float", "base64"] = "float"
     user: Optional[str] = None
@@ -25,6 +27,7 @@ class OpenAIEmb(Emb):
     request_params: Optional[Dict[str, Any]] = None
     client_params: Optional[Dict[str, Any]] = None
     openai_client: Optional[OpenAIClient] = None
+
 
     @property
     def client(self) -> OpenAIClient:

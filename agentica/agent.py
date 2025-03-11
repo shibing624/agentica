@@ -46,9 +46,11 @@ from agentica.reasoning import ReasoningStep, ReasoningSteps, NextAction
 from agentica.run_response import RunEvent, RunResponse, RunResponseExtraData
 from agentica.memory import AgentMemory, Memory, AgentRun, SessionSummary
 from agentica.storage.agent.base import AgentStorage
-from agentica.utils.misc import get_text_from_message
+from agentica.utils.message import get_text_from_message
 from agentica.utils.timer import Timer
 from agentica.agent_session import AgentSession
+from agentica.media import AudioResponse
+from agentica.utils.string import parse_structured_output
 
 
 class Agent(BaseModel):
@@ -1787,6 +1789,11 @@ class Agent(BaseModel):
             model_response = ModelResponse(content="")
             for model_response_chunk in self.model.response_stream(messages=messages_for_model):
                 if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
+                    if model_response_chunk.reasoning_content is not None:
+                        model_response.content += model_response_chunk.reasoning_content
+                        self.run_response.content = model_response_chunk.reasoning_content
+                        self.run_response.created_at = model_response_chunk.created_at
+                        yield self.run_response
                     if model_response_chunk.content is not None and model_response.content is not None:
                         model_response.content += model_response_chunk.content
                         self.run_response.content = model_response_chunk.content
@@ -1994,21 +2001,9 @@ class Agent(BaseModel):
             # Otherwise convert the response to the structured format
             if isinstance(run_response.content, str):
                 try:
-                    structured_output = None
-                    try:
-                        structured_output = self.response_model.model_validate_json(run_response.content)
-                    except ValidationError as exc:
-                        logger.warning(f"Failed to convert response to pydantic model: {exc}")
-                        # Check if response starts with ```json
-                        if run_response.content.startswith("```json"):
-                            run_response.content = run_response.content.replace(
-                                "```json\n", "").replace("\n```", "")
-                            try:
-                                structured_output = self.response_model.model_validate_json(run_response.content)
-                            except ValidationError as exc:
-                                logger.warning(f"Failed to convert response to pydantic model: {exc}")
+                    structured_output = parse_structured_output(run_response.content, self.response_model)
 
-                    # -*- Update Agent response
+                    # Update RunResponse
                     if structured_output is not None:
                         run_response.content = structured_output
                         run_response.content_type = self.response_model.__name__

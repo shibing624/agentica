@@ -4,12 +4,14 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
+from dataclasses import dataclass
 from os import getenv
 from typing import Optional
 
 from agentica.emb.openai_emb import OpenAIEmb
 
 
+@dataclass
 class TogetherEmb(OpenAIEmb):
     model: str = "togethercomputer/m2-bert-80M-32k-retrieval"
     dimensions: int = 768

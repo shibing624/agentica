@@ -3,7 +3,9 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
+from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any, Union
+import json
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
@@ -14,6 +16,7 @@ except ImportError:
     raise ImportError("`huggingface-hub` not installed, please run `pip install huggingface-hub`")
 
 
+@dataclass
 class HuggingfaceEmb(Emb):
     """Huggingface Custom Embedder"""
 
@@ -35,19 +38,17 @@ class HuggingfaceEmb(Emb):
         return self.huggingface_client
 
     def _response(self, text: str):
-        _request_params: SentenceSimilarityInput = {
-            "json": {"inputs": text},
-            "model": self.model,
-        }
-        return self.client.post(**_request_params)
+        return self.client.post(json={"inputs": text}, model=self.model)
 
     def get_embedding(self, text: str) -> List[float]:
-        resp = []
+        response = self._response(text=text)
         try:
-            resp = self._response(text=text)
+            decoded_string = response.decode("utf-8")
+            return json.loads(decoded_string)
+
         except Exception as e:
             logger.warning(e)
-        return resp
+            return []
 
     def get_embedding_and_usage(self, text: str) -> Tuple[List[float], Optional[Dict]]:
         return super().get_embedding_and_usage(text)

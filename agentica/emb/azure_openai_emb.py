@@ -5,6 +5,7 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 from os import getenv
+from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any, Literal
 
 from openai import AzureOpenAI as AzureOpenAIClient
@@ -14,8 +15,9 @@ from agentica.emb.base import Emb
 from agentica.utils.log import logger
 
 
+@dataclass
 class AzureOpenAIEmb(Emb):
-    model: str = "text-embedding-ada-002"
+    model: str = "text-embedding-3-small"
     dimensions: int = 1536
     encoding_format: Literal["float", "base64"] = "float"
     user: Optional[str] = None
@@ -53,8 +55,7 @@ class AzureOpenAIEmb(Emb):
             _client_params["azure_ad_token"] = self.azure_ad_token
         if self.azure_ad_token_provider:
             _client_params["azure_ad_token_provider"] = self.azure_ad_token_provider
-        self.openai_client = AzureOpenAIClient(**_client_params)
-        return self.openai_client
+        return AzureOpenAIClient(**_client_params)
 
     def _response(self, text: str) -> CreateEmbeddingResponse:
         _request_params: Dict[str, Any] = {

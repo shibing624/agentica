@@ -3,15 +3,17 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
-from __future__ import annotations
+from dataclasses import dataclass
 import csv
 from pathlib import Path
 from typing import Any, Dict
 
 from agentica.file.base import File
 from agentica.utils.log import logger
+from agentica.utils.misc import dataclass_to_dict
 
 
+@dataclass
 class CsvFile(File):
     type: str = "CSV"
 
@@ -29,4 +31,4 @@ class CsvFile(File):
             except Exception as e:
                 logger.warning(f"Error getting columns from file: {e}")
 
-        return self.model_dump(exclude_none=True)
+        return dataclass_to_dict(self, exclude_none=True)

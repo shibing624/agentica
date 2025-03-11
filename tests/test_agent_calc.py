@@ -9,12 +9,12 @@ import sys
 sys.path.append('..')
 from agentica.agent import Agent
 from agentica.tools.calculator_tool import CalculatorTool
-from agentica.model.zhipuai.chat import ZhipuAIChat
+from agentica.model.zhipuai.chat import ZhipuAI
 
 
 class CalcParser(unittest.TestCase):
     def setUp(self):
-        llm = ZhipuAIChat()
+        llm = ZhipuAI()
         self.m = Agent(llm=llm, tools=[CalculatorTool()])
 
     def test_calc(self):

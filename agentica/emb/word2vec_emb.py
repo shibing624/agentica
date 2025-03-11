@@ -3,10 +3,11 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
+from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 
 try:
-    from text2vec import Word2Vec
+    from text2vec import SentenceModel
 except ImportError:
     raise ImportError(
         "`text2vec` not installed. Please install it with `pip install text2vec`"
@@ -14,15 +15,16 @@ except ImportError:
 from agentica.emb.base import Emb
 
 
+@dataclass
 class Word2VecEmb(Emb):
     """Word2Vec embedding model, using the `text2vec` library"""
-    model: str = "w2v-light-tencent-chinese"
+    model: str = "shibing624/text2vec-base-chinese"
     dimensions: int = 256
-    client: Word2Vec = None
+    client: SentenceModel = None
     client_params: Optional[Dict[str, Any]] = None
 
     @property
-    def get_client(self) -> Word2Vec:
+    def get_client(self) -> SentenceModel:
         if self.client:
             return self.client
 
@@ -31,7 +33,7 @@ class Word2VecEmb(Emb):
             _client_params["model_name_or_path"] = self.model
         if self.client_params:
             _client_params.update(self.client_params)
-        self.client = Word2Vec(**_client_params)
+        self.client = SentenceModel(**_client_params)
         return self.client
 
     def get_embedding(self, text: str) -> List[float]:

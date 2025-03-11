@@ -4,7 +4,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class ZhipuAIChat(OpenAILike):
+class ZhipuAI(OpenAILike):
     """
     A model class for ZhipuAI Chat API.
 
@@ -17,7 +17,7 @@ class ZhipuAIChat(OpenAILike):
     """
 
     id: str = "glm-4-flash"
-    name: str = "ZhipuAIChat"
+    name: str = "ZhipuAI"
     provider: str = "ZhipuAI"
 
     api_key: Optional[str] = getenv("ZHIPUAI_API_KEY", None)

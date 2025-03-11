@@ -3,11 +3,13 @@
 @description:
 """
 from os import getenv
+from dataclasses import dataclass
 from typing import Optional
 
 from agentica.emb.openai_emb import OpenAIEmb
 
 
+@dataclass
 class ZhipuAIEmb(OpenAIEmb):
     model: str = "embedding-3"
     dimensions: int = 2048

@@ -1,1 +1,1 @@
-from agentica.model.moonshot.chat import MoonshotChat
+from agentica.model.moonshot.chat import Moonshot

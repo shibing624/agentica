@@ -1,1 +1,1 @@
-from agentica.model.cohere.chat import CohereChat
+from agentica.model.cohere.chat import Cohere

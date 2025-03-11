@@ -6,7 +6,7 @@
 import argparse
 from rich.console import Console
 from rich.text import Text
-from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, PythonAgent
+from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, PythonAgent
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.file_tool import FileTool
 from agentica.tools.shell_tool import ShellTool
@@ -51,13 +51,13 @@ def get_model(model_provider, model_name, api_base=None, api_key=None, max_token
     elif model_provider == 'azure':
         model = AzureOpenAIChat(**params)
     elif model_provider == 'moonshot':
-        model = MoonshotChat(**params)
+        model = Moonshot(**params)
     elif model_provider == 'zhipuai':
-        model = ZhipuAIChat(**params)
+        model = ZhipuAI(**params)
     elif model_provider == 'deepseek':
-        model = DeepSeekChat(**params)
+        model = DeepSeek(**params)
     elif model_provider == 'yi':
-        model = YiChat(**params)
+        model = Yi(**params)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
     return model

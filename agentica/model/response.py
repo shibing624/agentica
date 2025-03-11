@@ -22,9 +22,11 @@ class ModelResponse:
     audio: Optional[Dict[str, Any]] = None
     tool_call: Optional[Dict[str, Any]] = None
     event: str = ModelResponseEvent.assistant_response.value
+    reasoning_content: Optional[str] = None
     created_at: int = int(time())
 
 
 class FileType(str, Enum):
     MP4 = "mp4"
     GIF = "gif"
+    MP3 = "mp3"

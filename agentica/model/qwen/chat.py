@@ -4,9 +4,9 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class Doubao(OpenAILike):
+class Qwen(OpenAILike):
     """
-    A model class for Doubao Chat API.
+    A model class for YI Chat API.
 
     Attributes:
     - id: str: The unique identifier of the model, model_name.
@@ -16,9 +16,9 @@ class Doubao(OpenAILike):
     - base_url: str: The base URL for the model.
     """
 
-    id: str = "ep-20241012172611-btlgr"
-    name: str = "Doubao"
-    provider: str = "ByteDance"
+    id: str = "qwen-max"
+    name: str = "Qwen"
+    provider: str = "Alibaba"
 
-    api_key: Optional[str] = getenv("ARK_API_KEY", None)
-    base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    api_key: Optional[str] = getenv("DASHSCOPE_API_KEY", None)
+    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"

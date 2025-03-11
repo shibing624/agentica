@@ -87,6 +87,7 @@ class OpenAIChat(Model):
 
     # Request parameters
     store: Optional[bool] = None
+    reasoning_effort: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     frequency_penalty: Optional[float] = None
     logit_bias: Optional[Any] = None
@@ -166,7 +167,8 @@ class OpenAIChat(Model):
         client_params: Dict[str, Any] = self.get_client_params()
         if self.http_client is not None:
             client_params["http_client"] = self.http_client
-        return OpenAIClient(**client_params)
+        self.client = OpenAIClient(**client_params)
+        return self.client
 
     def get_async_client(self) -> AsyncOpenAIClient:
         """
@@ -233,6 +235,8 @@ class OpenAIChat(Model):
             request_params["extra_headers"] = self.extra_headers
         if self.extra_query is not None:
             request_params["extra_query"] = self.extra_query
+        if self.metadata is not None:
+            request_params["metadata"] = self.metadata
         if self.tools is not None:
             request_params["tools"] = self.get_tools_for_api()
             if self.tool_choice is None:
@@ -295,7 +299,8 @@ class OpenAIChat(Model):
                 model_dict["tool_choice"] = "auto"
             else:
                 model_dict["tool_choice"] = self.tool_choice
-        return model_dict
+        cleaned_dict = {k: v for k, v in model_dict.items() if v is not None}
+        return cleaned_dict
 
     def format_message(self, message: Message) -> Dict[str, Any]:
         """
@@ -566,6 +571,9 @@ class OpenAIChat(Model):
                 assistant_message.audio = response_message.audio.model_dump()
             except Exception as e:
                 logger.warning(f"Error processing audio: {e}")
+
+        if hasattr(response_message, "reasoning_content") and response_message.reasoning_content is not None:
+            assistant_message.reasoning_content = response_message.reasoning_content
 
         # Update metrics
         self.update_usage_metrics(assistant_message, metrics, response_usage)
@@ -858,6 +866,10 @@ class OpenAIChat(Model):
 
                 response_delta: ChoiceDelta = response.choices[0].delta
 
+                if hasattr(response_delta, "reasoning_content") and response_delta.reasoning_content is not None:
+                    stream_data.response_content = response_delta.reasoning_content
+                    yield ModelResponse(reasoning_content=response_delta.reasoning_content)
+
                 if response_delta.content is not None:
                     stream_data.response_content += response_delta.content
                     yield ModelResponse(content=response_delta.content)
@@ -932,6 +944,10 @@ class OpenAIChat(Model):
                     metrics.time_to_first_token = metrics.response_timer.elapsed
 
                 response_delta: ChoiceDelta = response.choices[0].delta
+
+                if hasattr(response_delta, "reasoning_content") and response_delta.reasoning_content is not None:
+                    stream_data.response_content = response_delta.reasoning_content
+                    yield ModelResponse(reasoning_content=response_delta.reasoning_content)
 
                 if response_delta.content is not None:
                     stream_data.response_content += response_delta.content

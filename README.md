@@ -101,9 +101,9 @@ python web_search_moonshot_demo.py
 自动调用google搜索工具，示例[examples/12_web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/12_web_search_moonshot_demo.py)
 
 ```python
-from agentica import Agent, MoonshotChat, SearchSerperTool
+from agentica import Agent, Moonshot, SearchSerperTool
 
-m = Agent(model=MoonshotChat(), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
+m = Agent(model=Moonshot(), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
 r = m.run("下一届奥运会在哪里举办")
 print(r)
 ```

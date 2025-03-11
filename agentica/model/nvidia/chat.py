@@ -4,7 +4,7 @@ from typing import Optional
 from agentica.model.openai.like import OpenAILike
 
 
-class NvidiaChat(OpenAILike):
+class Nvidia(OpenAILike):
     """
     A class for interacting with Nvidia models.
 

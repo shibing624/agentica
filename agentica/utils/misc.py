@@ -6,48 +6,7 @@
 import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Union
-
-from agentica.model.message import Message
-
-
-def get_text_from_message(message: Union[List, Dict, str, Message]) -> str:
-    """Return the user texts from the message"""
-
-    if isinstance(message, str):
-        return message
-    if isinstance(message, list):
-        text_messages = []
-        if len(message) == 0:
-            return ""
-
-        if "type" in message[0]:
-            for m in message:
-                m_type = m.get("type")
-                if m_type is not None and isinstance(m_type, str):
-                    m_value = m.get(m_type)
-                    if m_value is not None and isinstance(m_value, str):
-                        if m_type == "text":
-                            text_messages.append(m_value)
-                        # if m_type == "image_url":
-                        #     text_messages.append(f"Image: {m_value}")
-                        # else:
-                        #     text_messages.append(f"{m_type}: {m_value}")
-        elif "role" in message[0]:
-            for m in message:
-                m_role = m.get("role")
-                if m_role is not None and isinstance(m_role, str):
-                    m_content = m.get("content")
-                    if m_content is not None and isinstance(m_content, str):
-                        if m_role == "user":
-                            text_messages.append(m_content)
-        if len(text_messages) > 0:
-            return "\n".join(text_messages)
-    if isinstance(message, dict):
-        if "content" in message:
-            return get_text_from_message(message["content"])
-    if isinstance(message, Message) and message.content is not None:
-        return get_text_from_message(message.content)
-    return ""
+from dataclasses import asdict
 
 
 def remove_indent(s: Optional[str]) -> Optional[str]:
@@ -128,3 +87,13 @@ def literal_similarity(text1, text2):
     from difflib import SequenceMatcher
     matcher = SequenceMatcher(None, text1, text2)
     return matcher.ratio()
+
+
+def dataclass_to_dict(dataclass_object, exclude: Optional[set[str]] = None, exclude_none: bool = False) -> dict:
+    final_dict = asdict(dataclass_object)
+    if exclude:
+        for key in exclude:
+            final_dict.pop(key)
+    if exclude_none:
+        final_dict = {k: v for k, v in final_dict.items() if v is not None}
+    return final_dict

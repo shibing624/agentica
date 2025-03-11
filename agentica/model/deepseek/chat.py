@@ -4,7 +4,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class DeepSeekChat(OpenAILike):
+class DeepSeek(OpenAILike):
     """
     A model class for DeepSeek Chat API.
 
@@ -17,7 +17,7 @@ class DeepSeekChat(OpenAILike):
     """
 
     id: str = "deepseek-chat"
-    name: str = "DeepSeekChat"
+    name: str = "DeepSeek"
     provider: str = "DeepSeek"
 
     api_key: Optional[str] = getenv("DEEPSEEK_API_KEY", None)

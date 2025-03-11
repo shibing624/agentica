@@ -7,14 +7,10 @@ import sys
 
 sys.path.append('..')
 from agentica import Message
-from agentica import Agent, MoonshotChat
+from agentica import Agent, Moonshot
 from agentica.tools.search_serper_tool import SearchSerperTool
 
-model = MoonshotChat()
-messages = [Message(role="user", content="一句话介绍林黛玉")]
-r = model.response(messages)
-print('model:', model)
-print(r)
+model = Moonshot()
 
 m = Agent(
     model=model,
