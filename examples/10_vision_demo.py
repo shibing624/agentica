@@ -1,9 +1,9 @@
 import sys
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 
-m = Agent(model=AzureOpenAIChat(id="gpt-4o"))
+m = Agent(model=OpenAIChat(id="gpt-4o"))
 
 # Single Image
 r = m.run(

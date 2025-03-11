@@ -6,7 +6,7 @@
 import sys
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 
 m = Agent()
 

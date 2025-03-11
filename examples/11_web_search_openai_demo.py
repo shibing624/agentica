@@ -6,11 +6,11 @@
 import sys
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = Agent(
-    model=AzureOpenAIChat(model="gpt-4o"),
+    model=OpenAIChat(model="gpt-4o"),
     tools=[SearchSerperTool()],
     add_datetime_to_instructions=True,
     show_tool_calls=True,

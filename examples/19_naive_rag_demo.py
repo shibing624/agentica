@@ -7,7 +7,7 @@
 import sys
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica import SearchType
@@ -26,7 +26,7 @@ knowledge = Knowledge(
 knowledge.load(recreate=True)
 
 m = Agent(
-    model=AzureOpenAIChat(),
+    model=OpenAIChat(),
     knowledge=knowledge,
     search_knowledge=True,  # enable agentic RAG
     show_tool_calls=True,

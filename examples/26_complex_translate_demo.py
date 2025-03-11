@@ -10,7 +10,7 @@ import sys
 from loguru import logger
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica.knowledge import Knowledge
 
 knowledge_base = Knowledge(
@@ -27,7 +27,7 @@ docs = docs[:2]
 logger.info(f'docs size: {len(docs)}, top3: {docs[:3]}')
 
 assistant = Agent(
-    model=AzureOpenAIChat(id='gpt-4o'),
+    model=OpenAIChat(id='gpt-4o'),
     description="""现在你要解释一篇专业的技术文章成简体中文给大学生阅读。
 
 规则：

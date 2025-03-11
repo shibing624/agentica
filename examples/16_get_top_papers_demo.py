@@ -6,14 +6,14 @@
 import sys
 
 sys.path.append('..')
-from agentica import AzureOpenAIChat, Agent, PythonAgent
+from agentica import OpenAIChat, Agent, PythonAgent
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.file_tool import FileTool
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.text_analysis_tool import TextAnalysisTool
 
 m = Agent(
-    model=AzureOpenAIChat(model='gpt-4o'),
+    model=OpenAIChat(model='gpt-4o'),
     description="You are a helpful ai assistant.",
     tools=[JinaTool(), SearchSerperTool(), FileTool(), TextAnalysisTool()],
     debug_mode=True,

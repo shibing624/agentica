@@ -11,10 +11,10 @@ pip install rembg agentica
 import sys
 
 sys.path.append('..')
-from agentica import PythonAgent, AzureOpenAIChat
+from agentica import PythonAgent, OpenAIChat
 
 m = PythonAgent(
-    model=AzureOpenAIChat(),
+    model=OpenAIChat(),
     pip_install=True,
     debug_mode=True,
 )

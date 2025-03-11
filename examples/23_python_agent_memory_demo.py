@@ -9,7 +9,7 @@ import os.path
 import sys
 
 sys.path.append('..')
-from agentica import PythonAgent, AzureOpenAIChat, SqlAgentStorage
+from agentica import PythonAgent, OpenAIChat, SqlAgentStorage
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
@@ -25,7 +25,7 @@ def main():
     )
     knowledge_base.load()
     m = PythonAgent(
-        model=AzureOpenAIChat(model='gpt-4o'),
+        model=OpenAIChat(model='gpt-4o'),
         tools=[SearchSerperTool()],
         show_tool_calls=True,
         debug_mode=True,

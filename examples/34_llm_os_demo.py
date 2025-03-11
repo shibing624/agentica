@@ -17,7 +17,7 @@ from typing import List, Optional
 import streamlit as st
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat, PythonAgent
+from agentica import Agent, OpenAIChat, PythonAgent
 from agentica.tools.file_tool import FileTool
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool
@@ -374,7 +374,7 @@ def main():
     if "llm_os" not in st.session_state or st.session_state["llm_os"] is None:
         logger.info(f"---*--- Creating {llm_id} LLM OS ---*---")
         llm_os = get_llm_os(
-            model=AzureOpenAIChat(id=llm_id),
+            model=OpenAIChat(id=llm_id),
             google_search=google_search_enabled,
             file_tool=file_tool_enabled,
             shell_tool=shell_tool_enabled,
@@ -498,7 +498,7 @@ def main():
         if st.session_state["llm_os_session_id"] and st.session_state["llm_os_session_id"] != new_llm_os_session_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_llm_os_session_id} ---*---")
             st.session_state["llm_os"] = get_llm_os(
-                model=AzureOpenAIChat(id=llm_id),
+                model=OpenAIChat(id=llm_id),
                 google_search=google_search_enabled,
                 file_tool=file_tool_enabled,
                 shell_tool=shell_tool_enabled,

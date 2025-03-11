@@ -9,7 +9,7 @@ from textwrap import dedent
 from loguru import logger
 
 sys.path.append('..')
-from agentica import Agent, OpenAIChat, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica import Workflow, RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response
 from agentica.tools.search_serper_tool import SearchSerperTool
 
@@ -18,7 +18,7 @@ class WriteNovelWorkflow(Workflow):
     description: str = "Generate a comprehensive novel on a given topic."
 
     outlines: Agent = Agent(
-        model=AzureOpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o"),
         instructions=[
             dedent("""
             ## context
@@ -68,7 +68,7 @@ class WriteNovelWorkflow(Workflow):
     )
 
     reflection: Agent = Agent(
-        model=AzureOpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o"),
         tools=[SearchSerperTool()],
         instructions=[
             dedent("""
@@ -119,7 +119,7 @@ class WriteNovelWorkflow(Workflow):
     )
 
     writer: Agent = Agent(
-        model=AzureOpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o"),
         instructions=[
             dedent("""
             ## context

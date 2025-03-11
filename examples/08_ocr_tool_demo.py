@@ -9,11 +9,11 @@ pip install easyocr agentica
 import sys
 from rich.pretty import pprint
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica.tools.ocr_tool import OcrTool
 
 m = Agent(
-    model=AzureOpenAIChat(),
+    model=OpenAIChat(),
     tools=[OcrTool()],
     show_tool_calls=True,
 )

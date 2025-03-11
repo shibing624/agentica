@@ -22,5 +22,4 @@ m = Agent(
     add_datetime_to_instructions=True,
 )
 
-r = m.run("最新奥斯卡奖获奖电影是啥")
-print(r)
+m.print_response("最新奥斯卡奖获奖电影是啥")

@@ -7,7 +7,7 @@ import sys
 from shutil import rmtree
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent
 from agentica.workflow import Workflow
 from agentica import logger
 from agentica import RunResponse, pprint_run_response

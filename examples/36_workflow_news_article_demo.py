@@ -12,7 +12,7 @@ from loguru import logger
 import json
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat, OpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica.workflow import Workflow
 from agentica import RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response
 from agentica.tools.newspaper_tool import NewspaperTool

@@ -11,7 +11,7 @@ from loguru import logger
 from pathlib import Path
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 from agentica.workflow import Workflow
 from agentica import RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response
 from agentica.tools.search_serper_tool import SearchSerperTool
@@ -27,7 +27,7 @@ class WriteTutorialWorkflow(Workflow):
     description: str = "Generate a comprehensive technical tutorial on a given topic."
 
     topic_generator: Agent = Agent(
-        model=AzureOpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o"),
         instructions=[
             dedent("""
             请生成一个关于xxx的技术教程目录。
@@ -39,7 +39,7 @@ class WriteTutorialWorkflow(Workflow):
     )
 
     reflector: Agent = Agent(
-        model=AzureOpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o"),
         tools=[SearchSerperTool(), WikipediaTool(), SearchExaTool()],
         instructions=[
             dedent("""
@@ -52,7 +52,7 @@ class WriteTutorialWorkflow(Workflow):
     )
 
     writer: Agent = Agent(
-        model=AzureOpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(id="gpt-4o"),
         instructions=[
             dedent("""
             请根据提供的教程目录编写详细的教程内容。

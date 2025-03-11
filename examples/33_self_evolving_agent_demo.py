@@ -31,7 +31,7 @@ from typing import List, Optional
 import streamlit as st
 
 sys.path.append('..')
-from agentica import Agent, AzureOpenAIChat, PythonAgent, SearchType
+from agentica import Agent, OpenAIChat, PythonAgent, SearchType
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.knowledge import Knowledge
@@ -127,7 +127,7 @@ def main():
     if "sage" not in st.session_state or st.session_state["sage"] is None:
         logger.info(f"---*--- Creating {llm_id} SAGE agent ---*---")
         sage = get_sage(
-            model=AzureOpenAIChat(id=llm_id),
+            model=OpenAIChat(id=llm_id),
         )
         st.session_state["sage"] = sage
     else:
@@ -185,7 +185,7 @@ def main():
         if st.session_state["sage_session_id"] and st.session_state["sage_session_id"] != new_sage_session_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_sage_session_id} ---*---")
             st.session_state["sage"] = get_sage(
-                model=AzureOpenAIChat(model=llm_id),
+                model=OpenAIChat(model=llm_id),
                 session_id=new_sage_session_id,
             )
             st.rerun()

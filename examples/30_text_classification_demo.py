@@ -9,13 +9,13 @@ pip install pytextclassifier agentica
 import sys
 
 sys.path.append('..')
-from agentica import PythonAgent, AzureOpenAIChat
+from agentica import PythonAgent, OpenAIChat
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = PythonAgent(
-    model=AzureOpenAIChat(),
+    model=OpenAIChat(),
     description="You are a helpful ai assistant.",
     tools=[JinaTool(), SearchSerperTool(), UrlCrawlerTool()],
     pip_install=True,

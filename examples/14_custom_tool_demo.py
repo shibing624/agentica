@@ -2,7 +2,7 @@ import sys
 
 sys.path.append('..')
 
-from agentica import Agent, AzureOpenAIChat
+from agentica import Agent, OpenAIChat
 
 
 def multiply(first_int: int, second_int: int) -> str:
@@ -26,7 +26,7 @@ def get_char_len(text: str) -> str:
 
 
 m = Agent(
-    model=AzureOpenAIChat(id='gpt-4o'),
+    model=OpenAIChat(id='gpt-4o'),
     tools=[multiply, add, exponentiate, get_char_len],
     debug_mode=True
 )
