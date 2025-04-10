@@ -6,7 +6,6 @@
 import sys
 
 sys.path.append('..')
-from agentica import Message
 from agentica import Agent, Moonshot
 from agentica.tools.search_serper_tool import SearchSerperTool
 

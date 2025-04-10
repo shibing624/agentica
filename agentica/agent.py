@@ -234,7 +234,7 @@ class Agent(BaseModel):
     team_response_separator: str = "\n"
 
     # debug_mode=True enables debug logs
-    debug_mode: bool = Field(False, validate_default=True)
+    debug_mode: bool = Field(False, validate_default=True, alias="debug")
     # monitoring=True logs Agent information
     monitoring: bool = False
 

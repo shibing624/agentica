@@ -7,10 +7,9 @@ import sys
 
 sys.path.append('..')
 from agentica import Message
-from agentica import Agent, ZhipuAI
-from agentica.tools.web_search_pro_tool import WebSearchProTool
+from agentica import Agent, ZhipuAI, WeatherTool
 
-model = ZhipuAI(id='glm-4-flash')
+model = ZhipuAI(id='glm-4-plus')
 messages = [Message(role="user", content="一句话介绍林黛玉")]
 r = model.response(messages)
 print('model:', model)
@@ -18,8 +17,9 @@ print(r)
 
 m = Agent(
     model=model,
-    tools=[WebSearchProTool()],
+    tools=[WeatherTool()],
     add_datetime_to_instructions=True,
+    debug_mode=True
 )
 
-m.print_response("最新奥斯卡奖获奖电影是啥")
+m.print_response("明天北京天气咋样")

@@ -118,6 +118,7 @@ from agentica.tools.hackernews_tool import HackerNewsTool
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.shell_tool import ShellTool
 from agentica.tools.text_analysis_tool import TextAnalysisTool
+from agentica.tools.weather_tool import WeatherTool
 
 # agent
 from agentica.agent import Agent

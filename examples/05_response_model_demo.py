@@ -24,3 +24,4 @@ m = Agent(
 )
 r = m.run("Write a movie script.")
 pprint(r)
+print(r.content.name)

@@ -86,7 +86,7 @@ pip install .
 cp .env.example ~/.agentica/.env
 
 cd examples
-python web_search_moonshot_demo.py
+python 12_web_search_moonshot_demo.py
 ```
 
 1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填DEEPSEEK_API_KEY、MOONSHOT_API_KEY、OPENAI_API_KEY、ZHIPUAI_API_KEY等任一个即可)。或者使用`export`命令设置环境变量：
@@ -101,13 +101,23 @@ python web_search_moonshot_demo.py
 自动调用google搜索工具，示例[examples/12_web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/12_web_search_moonshot_demo.py)
 
 ```python
-from agentica import Agent, Moonshot, SearchSerperTool
+from agentica import Agent, Moonshot, WeatherTool
 
-m = Agent(model=Moonshot(), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
-r = m.run("下一届奥运会在哪里举办")
-print(r)
+m = Agent(model=Moonshot(), tools=[WeatherTool()], add_datetime_to_instructions=True)
+m.print_response("明天北京天气咋样")
 ```
 
+output:
+```markdown
+明天北京的天气预报如下：
+
+- 早晨：晴朗，气温约18°C，风速较小，约为3 km/h。
+- 中午：晴朗，气温升至23°C，风速6-7 km/h。
+- 傍晚：晴朗，气温略降至21°C，风速较大，为35-44 km/h。
+- 夜晚：晴朗转晴，气温下降至15°C，风速32-39 km/h。
+
+全天无降水，能见度良好。请注意傍晚时分的风速较大，外出时需注意安全。
+```
 
 ## ▶️ Web UI
 
@@ -172,7 +182,7 @@ bash start.sh
 | [examples/37_workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/37_workflow_write_novel_demo.py)                 | 实现了写小说的工作流：定小说提纲 - 搜索谷歌反思提纲 - 撰写小说内容 - 保存为md文件                                                                                    |
 | [examples/38_workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/38_workflow_write_tutorial_demo.py)           | 实现了写技术教程的工作流：定教程目录 - 反思目录内容 - 撰写教程内容 - 保存为md文件                                                                                    |
 | [examples/39_audio_multi_turn_demo.py](https://github.com/shibing624/agentica/blob/main/examples/39_audio_multi_turn_demo.py)                         | 基于openai的语音api做多轮音频对话的Demo                                                                                                        |
-| [examples/40_web_search_zhipuai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/40_web_search_zhipuai_demo.py)                     | 基于智谱AI的api做网页搜索Demo，使用免费的glm-4-flash模型，和免费的web-search-pro搜索工具                                                                     |
+| [examples/40_weather_zhipuai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/40_web_search_zhipuai_demo.py)                        | 基于智谱AI的api做天气查询的Demo                                                                                                              |
 
 
 ### Self-evolving Agent

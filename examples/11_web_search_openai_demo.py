@@ -6,12 +6,12 @@
 import sys
 
 sys.path.append('..')
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, WeatherTool
 from agentica.tools.search_serper_tool import SearchSerperTool
 
 m = Agent(
     model=OpenAIChat(model="gpt-4o"),
-    tools=[SearchSerperTool()],
+    tools=[SearchSerperTool(), WeatherTool()],
     add_datetime_to_instructions=True,
     show_tool_calls=True,
     # Enable the assistant to read the chat history
