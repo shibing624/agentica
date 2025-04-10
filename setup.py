@@ -41,7 +41,7 @@ setup(
         "httpx",
         "loguru",
         "beautifulsoup4",
-        "openai>=1.52.0",
+        "openai",
         "python-dotenv",
         "pydantic",
         "requests",
