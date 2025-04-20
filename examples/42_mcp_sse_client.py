@@ -74,7 +74,7 @@ async def mcp_toolkit_with_agent_demo():
 
         async with mcp_tool:
             m = Agent(
-                model=OpenAIChat(model="gpt-4o-mini"),
+                model=OpenAIChat(model="gpt-4o"),
                 tools=[ShellTool(), mcp_tool],
                 show_tool_calls=False,
                 add_datetime_to_instructions=True,
@@ -85,11 +85,8 @@ async def mcp_toolkit_with_agent_demo():
             for i in m.get_tools():
                 print(f" - {i.name}: {list(i.functions.keys())}")
 
-            print("\nTesting weather tool with agent:")
-            await m.aprint_response("查询北京市的天气")
-
             print("\nTesting shell tool with agent:")
-            await m.aprint_response("调shell查看本地目录的路径")
+            await m.aprint_response("查询北京市今天的气温，并用温度的值乘以 314159.14=？")
     except Exception as e:
         logger.error(f"Error in MCPToolkit with agent demo: {e}")
         sys.exit(1)
@@ -100,7 +97,7 @@ async def main():
     print("MCP SSE Client Demo")
     print("===================")
 
-    await sse_server_demo()
+    # await sse_server_demo()
     await mcp_toolkit_with_agent_demo()
 
 

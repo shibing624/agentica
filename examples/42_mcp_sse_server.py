@@ -33,6 +33,43 @@ def get_current_weather(city: str) -> str:
     return res
 
 
+@mcp.tool()
+def add(a: float, b: float) -> float:
+    """
+    Add two numbers.
+    """
+    return a + b
+
+
+@mcp.tool()
+def subtract(a: float, b: float) -> float:
+    """
+    Subtract two numbers.
+    """
+    return a - b
+
+
+@mcp.tool()
+def multiply(a: float, b: float) -> float:
+    """
+    Multiply two numbers.
+    """
+    logger.info(f"multiply({a}, {b})")
+    r = a * b
+    logger.info(f"multiply({a}, {b}) = {r}")
+    return r
+
+
+@mcp.tool()
+def divide(a: float, b: float) -> float:
+    """
+    Divide two numbers.
+    """
+    if b == 0:
+        raise ValueError("Division by zero is not allowed.")
+    return a / b
+
+
 if __name__ == "__main__":
     logger.info("Starting MCP Echo Server with SSE transport on http://localhost:8081/sse")
     mcp.run(transport="sse")
