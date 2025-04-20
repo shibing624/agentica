@@ -12,6 +12,7 @@ Then run this client:
 
 import asyncio
 import sys
+
 sys.path.append('..')
 from agentica import Agent, OpenAIChat
 from agentica.mcp.server import MCPServerSse
@@ -87,6 +88,7 @@ async def mcp_toolkit_with_agent_demo():
 
             print("\nTesting shell tool with agent:")
             await m.aprint_response("查询北京市今天的气温，并用温度的值乘以 314159.14=？")
+            # 北京市今天的气温为12°C。将这个温度值乘以314159.14得到的结果是：3769909.68。
     except Exception as e:
         logger.error(f"Error in MCPToolkit with agent demo: {e}")
         sys.exit(1)
