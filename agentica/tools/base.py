@@ -72,6 +72,8 @@ class Function(BaseModel):
 
     # The function to be called.
     entrypoint: Optional[Callable] = None
+    # If True, the entrypoint processing is skipped and the Function is used as is.
+    skip_entrypoint_processing: bool = False
     # If True, the arguments are sanitized before being passed to the function.
     sanitize_arguments: bool = True
     # If True, the function call will show the result along with sending it to the model.
@@ -146,7 +148,8 @@ class Function(BaseModel):
         """Process the entrypoint and make it ready for use by an agent."""
         from inspect import getdoc, signature
         from agentica.utils.json_util import get_json_schema
-
+        if self.skip_entrypoint_processing:
+            return
         if self.entrypoint is None:
             return
 
@@ -257,14 +260,16 @@ class FunctionCall(BaseModel):
         return call_str
 
     def execute(self) -> bool:
-        """Runs the function call.
+        """Execute the function.
 
-        Returns True if the function call was successful, False otherwise.
-        The result of the function call is stored in self.result.
+        Returns:
+            bool: True if the function call was successful, False otherwise.
         """
         from inspect import signature
 
         if self.function.entrypoint is None:
+            self.error = f"No entrypoint found for function: {self.function.name}"
+            logger.warning(self.error)
             return False
 
         logger.debug(f"Running: {self.get_call_str()}")

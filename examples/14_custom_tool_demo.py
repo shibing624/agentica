@@ -2,7 +2,7 @@ import sys
 
 sys.path.append('..')
 
-from agentica import Agent, OpenAIChat, WeatherTool
+from agentica import Agent, OpenAIChat, WeatherTool, ShellTool
 
 
 def multiply(first_int: int, second_int: int) -> str:
@@ -27,7 +27,7 @@ def get_char_len(text: str) -> str:
 
 m = Agent(
     model=OpenAIChat(id='gpt-4o'),
-    tools=[multiply, add, exponentiate, get_char_len, WeatherTool()],
+    tools=[multiply, add, exponentiate, get_char_len, WeatherTool(), ShellTool()],
     debug_mode=True
 )
 m.print_response("3乘以10000005是啥?")
