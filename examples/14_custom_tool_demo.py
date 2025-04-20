@@ -30,8 +30,6 @@ m = Agent(
     tools=[multiply, add, exponentiate, get_char_len, WeatherTool()],
     debug_mode=True
 )
-r = m.run("3乘以10000005是啥?")
-print(r)
-r = m.run("将3的五次方乘以(12和3的和). step by step to show the result. 最后统计一下结果的字符长度。")
-print(r)
+m.print_response("3乘以10000005是啥?")
+m.print_response("将3的五次方乘以(12和3的和). step by step to show the result. 最后统计一下结果的字符长度。")
 m.print_response("明天北京天气多少度？温度 乘以 2333 = ？")

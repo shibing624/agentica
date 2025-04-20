@@ -26,7 +26,7 @@ def get_model(model_name):
 
 def main():
     parser = argparse.ArgumentParser(description="LLM Demo")
-    parser.add_argument('--model', type=str, default='ZhipuAI', help='Model name to use')
+    parser.add_argument('--model', type=str, default='OpenAIChat', help='Model name to use')
     parser.add_argument('--query', type=str, default='一句话介绍林黛玉', help='Query to send to the model')
     args = parser.parse_args()
 

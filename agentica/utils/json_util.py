@@ -33,11 +33,11 @@ def get_json_type_for_py_type(arg: str) -> str:
 
 
 def get_json_schema_for_arg(t: Any) -> Optional[Dict[str, Any]]:
-    # logger.info(f"Getting JSON schema for arg: {t}")
+    # log_info(f"Getting JSON schema for arg: {t}")
     type_args = get_args(t)
-    # logger.info(f"Type args: {type_args}")
+    # log_info(f"Type args: {type_args}")
     type_origin = get_origin(t)
-    # logger.info(f"Type origin: {type_origin}")
+    # log_info(f"Type origin: {type_origin}")
 
     if type_origin is not None:
         if type_origin in (list, tuple, set, frozenset):

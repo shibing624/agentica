@@ -18,7 +18,4 @@ m = Agent(
     show_tool_calls=True,
 )
 prompt = "对图片`data/chinese.jpg`进行OCR识别，只给出ocr文字就可以。"
-r = m.run(prompt, stream=True, stream_intermediate_steps=True)
-for chunk in r:
-    pprint(chunk.model_dump(exclude={"messages"}))
-    print("---" * 20)
+m.print_response(prompt, stream=True, stream_intermediate_steps=True)

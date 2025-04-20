@@ -2055,7 +2055,7 @@ class Agent(BaseModel):
         self.run_id = str(uuid4())
         self.run_response = RunResponse(run_id=self.run_id, session_id=self.session_id, agent_id=self.agent_id)
 
-        logger.debug(f"*********** Async Agent Run Start: {self.run_response.run_id} ***********")
+        logger.debug(f"*********** Agent Run Start: {self.run_response.run_id} ***********")
 
         # 1. Update the Model (set defaults, add tools, etc.)
         self.update_model()
@@ -2227,10 +2227,7 @@ class Agent(BaseModel):
         elif messages is not None:
             self.run_input = [m.to_dict() if isinstance(m, Message) else m for m in messages]
 
-        # Log Agent Run
-        await self.alog_agent_run()
-
-        logger.debug(f"*********** Async Agent Run End: {self.run_response.run_id} ***********")
+        logger.debug(f"*********** Agent Run End: {self.run_response.run_id} ***********")
         if self.stream_intermediate_steps:
             yield self.generic_run_response(
                 content=self.run_response.content,
