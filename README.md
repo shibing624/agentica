@@ -45,6 +45,8 @@
 - **Solver**：求解器将所有这些输出整合为最终答案
 
 ## 🔥 News
+[2025/04/21] v1.0.0版本：支持了`MCP`的工具调用，兼容SSE和Stdio两种MCP Server，详见[Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/1.0.0)
+
 [2024/12/29] v0.2.3版本: 支持了`ZhipuAI`的api调用，包括免费模型和工具使用，详见[Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/0.2.3)
 
 [2024/12/25] v0.2.0版本: 支持了多模态模型，输入可以是文本、图片、音频、视频，升级Assistant为Agent，Workflow支持拆解并实现复杂任务，详见[Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/0.2.0)
