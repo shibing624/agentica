@@ -39,10 +39,10 @@
 `Agentica`是一个用于构建Agent的工具，具有以下功能：
 
 - **Agent编排**：通过简单代码快速编排Agent，支持 Reflection(反思）、Plan and Solve(计划并执行)、RAG、Agent、Multi-Agent、Team、Workflow等功能
-- **自定义prompt**：Agent支持自定义prompt和多种工具调用（tool_calls）
+- **工具调用**：支持自定义工具OpenAI的function call，支持MCP Server的工具调用
 - **LLM集成**：支持OpenAI、Azure、Deepseek、Moonshot、Anthropic、ZhipuAI、Ollama、Together等多方大模型厂商的API
-- **记忆功能**：包括短期记忆和长期记忆功能
-- **Multi-Agent协作**：支持多Agent和任务委托（Team）的团队协作。
+- **记忆功能**：支持短期记忆和长期记忆功能
+- **Multi-Agent协作**：支持多Agent和任务委托（Team）的团队协作
 - **Workflow工作流**：拆解复杂任务为多个Agent，基于工作流自动化串行逐步完成任务，如投资研究、新闻文章撰写和技术教程创建
 - **自我进化Agent**：具有反思和增强记忆能力的自我进化Agent
 - **Web UI**：兼容ChatPilot，可以基于Web页面交互，支持主流的open-webui、streamlit、gradio等前端交互框架
@@ -72,10 +72,10 @@ cd examples
 python 12_web_search_moonshot_demo.py
 ```
 
-1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填DEEPSEEK_API_KEY、MOONSHOT_API_KEY、OPENAI_API_KEY、ZHIPUAI_API_KEY等任一个即可)。或者使用`export`命令设置环境变量：
+1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填OPENAI_API_KEY、ZHIPUAI_API_KEY 等任一个)。或者使用`export`命令设置环境变量：
     
     ```shell
-    export MOONSHOT_API_KEY=your_moonshot_api_key
+    export ZHIPUAI_API_KEY=your_api_key
     export SERPER_API_KEY=your_serper_api_key
     ```
 
