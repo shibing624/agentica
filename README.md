@@ -25,25 +25,6 @@
 
 **Agentica** 可以构建AI Agent，包括规划、记忆和工具使用、执行等组件。
 
-#### Agent Components
-<img src="https://github.com/shibing624/agentica/blob/main/docs/llm_agentv2.png" width="800" />
-
-- **规划（Planning）**：任务拆解、生成计划、反思
-- **记忆（Memory）**：短期记忆（prompt实现）、长期记忆（RAG实现）
-- **工具使用（Tool use）**：function call能力，调用外部API，以获取外部信息，包括当前日期、日历、代码执行能力、对专用信息源的访问等
-
-#### Agentica Workflow
-
-**Agentica** can also build multi-agent systems and workflows.
-
-**Agentica** 还可以构建多Agent系统和工作流。
-
-<img src="https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png" width="800" />
-
-- **Planner**：负责让LLM生成一个多步计划来完成复杂任务，生成相互依赖的“链式计划”，定义每一步所依赖的上一步的输出
-- **Worker**：接受“链式计划”，循环遍历计划中的每个子任务，并调用工具完成任务，可以自动反思纠错以完成任务
-- **Solver**：求解器将所有这些输出整合为最终答案
-
 ## 🔥 News
 [2025/04/21] v1.0.0版本：支持了`MCP`的工具调用，兼容SSE和Stdio两种MCP Server，详见[Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/1.0.0)
 
@@ -185,6 +166,8 @@ bash start.sh
 | [examples/38_workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/38_workflow_write_tutorial_demo.py)           | 实现了写技术教程的工作流：定教程目录 - 反思目录内容 - 撰写教程内容 - 保存为md文件                                                                                    |
 | [examples/39_audio_multi_turn_demo.py](https://github.com/shibing624/agentica/blob/main/examples/39_audio_multi_turn_demo.py)                         | 基于openai的语音api做多轮音频对话的Demo                                                                                                        |
 | [examples/40_weather_zhipuai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/40_web_search_zhipuai_demo.py)                        | 基于智谱AI的api做天气查询的Demo                                                                                                              |
+| [examples/41_mcp_stdio_demo.py](https://github.com/shibing624/agentica/blob/main/examples/41_mcp_stdio_demo.py)                                       | Stdio的MCP Server调用的Demo                                                                                                           |
+| [examples/42_mcp_sse_client.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_client.py)                                       | SSE的MCP Server调用的Demo                                                                                                             |
 
 
 ### Self-evolving Agent

@@ -3,6 +3,11 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: MCP SSE client demo
+
+start the server first:
+    python examples/42_mcp_sse_server.py
+Then run this client:
+    python examples/42_mcp_sse_client.py
 """
 
 import asyncio
