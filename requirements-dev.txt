@@ -12,6 +12,7 @@ markdownify
 tqdm
 rich
 pyyaml
+mcp
 yfinance
 nbclient
 nbformat

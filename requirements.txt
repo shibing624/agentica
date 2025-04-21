@@ -13,3 +13,4 @@ markdownify
 tqdm
 rich
 pyyaml
+mcp
