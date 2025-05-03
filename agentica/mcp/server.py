@@ -8,8 +8,10 @@ from __future__ import annotations
 import abc
 import asyncio
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, TypedDict, Union
+
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp import ClientSession, StdioServerParameters, Tool as MCPTool, stdio_client
 from mcp.client.sse import sse_client
@@ -56,7 +58,7 @@ class MCPServer(abc.ABC):
 class _MCPServerWithClientSession(MCPServer, abc.ABC):
     """Base class for MCP servers that use a `ClientSession` to communicate with the server."""
 
-    def __init__(self, cache_tools_list: bool = True):
+    def __init__(self, cache_tools_list: bool = True, client_session_timeout_seconds: float = None):
         """
         Args:
             cache_tools_list: Whether to cache the tools list. If `True`, the tools list will be
@@ -65,11 +67,14 @@ class _MCPServerWithClientSession(MCPServer, abc.ABC):
                 by calling `invalidate_tools_cache()`. You should set this to `True` if you know the
                 server will not change its tools list, because it can drastically improve latency
                 (by avoiding a round-trip to the server every time).
+
+            client_session_timeout_seconds: the read timeout passed to the MCP ClientSession.
         """
         self.session: Optional[ClientSession] = None
         self.exit_stack: AsyncExitStack = AsyncExitStack()
         self._cleanup_lock: asyncio.Lock = asyncio.Lock()
         self.cache_tools_list = cache_tools_list
+        self.client_session_timeout_seconds = client_session_timeout_seconds
 
         # The cache is always dirty at startup, so that we fetch tools at least once
         self._cache_dirty = True
@@ -103,7 +108,13 @@ class _MCPServerWithClientSession(MCPServer, abc.ABC):
         try:
             transport = await self.exit_stack.enter_async_context(self.create_streams())
             read, write = transport
-            session = await self.exit_stack.enter_async_context(ClientSession(read, write))
+            session = await self.exit_stack.enter_async_context(
+                ClientSession(read, write,
+                              timedelta(seconds=self.client_session_timeout_seconds)
+                              if self.client_session_timeout_seconds
+                              else None,
+                              )
+            )
             await session.initialize()
             self.session = session
         except Exception as e:
@@ -139,9 +150,10 @@ class _MCPServerWithClientSession(MCPServer, abc.ABC):
         async with self._cleanup_lock:
             try:
                 await self.exit_stack.aclose()
-                self.session = None
             except Exception as e:
                 logger.error(f"Error cleaning up server: {e}")
+            finally:
+                self.session = None
 
 
 class MCPServerStdioParams(TypedDict):
@@ -180,6 +192,7 @@ class MCPServerStdio(_MCPServerWithClientSession):
             params: MCPServerStdioParams,
             cache_tools_list: bool = True,
             name: Optional[str] = None,
+            client_session_timeout_seconds: float = 5,
     ):
         """Create a new MCP server based on the stdio transport.
 
@@ -197,7 +210,7 @@ class MCPServerStdio(_MCPServerWithClientSession):
             name: A readable name for the server. If not provided, we'll create one from the
                 command.
         """
-        super().__init__(cache_tools_list)
+        super().__init__(cache_tools_list, client_session_timeout_seconds)
         self.params = StdioServerParameters(
             command=params["command"],
             args=params.get("args", []),
@@ -251,6 +264,7 @@ class MCPServerSse(_MCPServerWithClientSession):
             params: MCPServerSseParams,
             cache_tools_list: bool = True,
             name: Optional[str] = None,
+            client_session_timeout_seconds: float = 5,
     ):
         """Create a new MCP server based on the HTTP with SSE transport.
 
@@ -266,8 +280,9 @@ class MCPServerSse(_MCPServerWithClientSession):
                 improve latency (by avoiding a round-trip to the server every time).
             name: A readable name for the server. If not provided, we'll create one from the
                 URL.
+            client_session_timeout_seconds: the read timeout passed to the MCP ClientSession.
         """
-        super().__init__(cache_tools_list)
+        super().__init__(cache_tools_list, client_session_timeout_seconds)
         self.params = params
         self._name = name or f"sse: {self.params['url']}"
 

@@ -65,7 +65,7 @@ class MCPClient:
 
     async def connect(self) -> None:
         """Connect to the MCP server and retrieve the list of available tools."""
-        logger.info(f"Connecting to MCP server: {self.server.name}")
+        logger.debug(f"Connecting to MCP server: {self.server.name}")
 
         try:
             await self.server.connect()
@@ -84,7 +84,7 @@ class MCPClient:
             # Create a mapping of tool names to tools
             self.tools_by_name = {tool.name: tool for tool in self.tools_list}
 
-            logger.info(f"Connected to {self.server.name} with {len(self.tools_list)} tools available")
+            logger.debug(f"Connected to {self.server.name} with {len(self.tools_list)} tools available")
             for tool in self.tools_list:
                 logger.debug(f"  - {tool.name}: {tool.description or 'No description'}")
 

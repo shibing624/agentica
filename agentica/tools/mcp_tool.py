@@ -217,16 +217,22 @@ class McpTool(Toolkit):
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit the async context manager."""
-        if self._session_context is not None:
-            await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
-            self.session = None
-            self._session_context = None
+        try:
+            if self._session_context is not None:
+                await self._session_context.__aexit__(exc_type, exc_val, exc_tb)
+                self.session = None
+                self._session_context = None
 
-        if self._transport_context is not None:
-            await self._transport_context.__aexit__(exc_type, exc_val, exc_tb)
-            self._transport_context = None
-
-        self._initialized = False
+            if self._transport_context is not None:
+                try:
+                    await self._transport_context.__aexit__(exc_type, exc_val, exc_tb)
+                except GeneratorExit:
+                    logger.warning("Error closing transport context, during stdio transport cleanup")
+                self._transport_context = None
+        except Exception as e:
+            logger.error(f"Error exiting MCP tool context: {e}")
+        finally:
+            self._initialized = False
 
     async def initialize(self) -> None:
         """Initialize the MCP toolkit by getting available tools from the MCP server"""
