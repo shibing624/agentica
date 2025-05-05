@@ -10,7 +10,7 @@ import sys
 sys.path.append('..')
 from agentica import Agent, OpenAIChat
 from agentica.tools.mcp_tool import McpTool
-from agentica import logger, ShellTool
+from agentica import ShellTool
 
 
 async def mcp_toolkit_with_agent_demo():
@@ -20,13 +20,11 @@ async def mcp_toolkit_with_agent_demo():
     This is a more advanced example that shows how to integrate MCP tools with an agent.
     The agent part is commented out as it depends on your agent implementation.
     """
-    logger.debug("\n=== Testing MCPToolkit with agent ===")
     try:
-        async with McpTool.from_config("minimax") as mcp_tool1, \
-                McpTool.from_config('weather') as mcp_tool2:
+        async with McpTool.from_config() as mcp_tool1:
             m = Agent(
                 model=OpenAIChat(model="gpt-4o"),
-                tools=[ShellTool(), mcp_tool1, mcp_tool2],
+                tools=[ShellTool(), mcp_tool1],
                 show_tool_calls=True,
                 add_datetime_to_instructions=True,
                 debug=True,
@@ -37,9 +35,9 @@ async def mcp_toolkit_with_agent_demo():
                 print(i.name, i.functions)
 
             await m.aprint_response("调天气工具 get_weather 查询合肥市天气咋样")
-            await m.aprint_response("我爱中国，转为英文，并说出来")
+            await m.aprint_response("我爱中国，转为英文，并保存音频")
     except Exception as e:
-        logger.error(f"Error in MCPToolkit with agent demo: {e}")
+        print(f"Error in MCPToolkit with agent demo: {e}")
         sys.exit(1)
 
 

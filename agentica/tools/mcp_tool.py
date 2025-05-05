@@ -8,7 +8,7 @@ import concurrent.futures
 import copy
 import threading
 from os import environ
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
@@ -385,22 +385,125 @@ class McpTool(Toolkit):
             raise
 
     @classmethod
-    def from_config(cls, server_name: str, config_path: Optional[str] = None) -> 'McpTool':
-        """Create McpTool instance from configuration file"""
+    def from_config(cls, server_names: Optional[Union[str, list[str]]] = None,
+                    config_path: Optional[str] = None):
+        """Create McpTool instance from configuration file.
+
+        Args:
+            server_names: Optional server name(s) to load. If None, loads all servers
+            config_path: Optional path to config file
+
+        Returns:
+            McpTool instance with configured servers
+
+        Raises:
+            ValueError: If specified servers not found in config
+        """
         config = MCPConfig(config_path)
-        server_config = config.get_server_config(server_name)
-        if not server_config:
-            raise ValueError(f"Server `{server_name}` not in MCP configuration: `{config.config_path}`, "
-                             f"available server name: {list(config.list_servers().keys())}")
-        if server_config.url:
-            return cls(
-                sse_server_url=server_config.url,
-                sse_headers=server_config.headers,
-                sse_timeout=server_config.timeout,
-                sse_read_timeout=server_config.read_timeout
-            )
-        else:
-            return cls(
-                stdio_command=f"{server_config.command} {' '.join(server_config.args or [])}".strip(),
-                env=server_config.env
-            )
+        all_servers = config.servers
+
+        if not all_servers:
+            raise ValueError(f"No MCP servers found in configuration: `{config.config_path}`")
+
+        # Convert single server name to list
+        if isinstance(server_names, str):
+            server_names = [server_names]
+
+        # If no servers specified, use all
+        if server_names is None:
+            server_names = list(all_servers.keys())
+
+        # Validate servers exist
+        invalid_servers = set(server_names) - set(all_servers.keys())
+        if invalid_servers:
+            raise ValueError(f"Servers not found in MCP configuration: {invalid_servers}. "
+                             f"Available servers: {list(all_servers.keys())}")
+
+        tools = []
+        for name in server_names:
+            server = all_servers[name]
+            if server.url:
+                # Create SSE tool
+                tool = cls(
+                    sse_server_url=server.url,
+                    sse_headers=server.headers,
+                    sse_timeout=server.timeout,
+                    sse_read_timeout=server.read_timeout
+                )
+            else:
+                # Create stdio tool
+                cmd = f"{server.command} {' '.join(server.args or [])}".strip()
+                tool = cls(
+                    stdio_command=cmd,
+                    env=server.env
+                )
+            tools.append(tool)
+
+        logger.info(f"Created {len(tools)} MCP tools({server_names}) from configuration: {config.config_path}")
+
+        # Return single tool or composite
+        if len(tools) == 1:
+            return tools[0]
+        return CompositeMultiMcpTool(tools)
+
+
+class CompositeMultiMcpTool(McpTool):
+    """Combines multiple McpTool instances into one."""
+
+    def __init__(self, tools: list[McpTool]):
+        super().__init__(stdio_command="dummy")  # Dummy command to satisfy parent init
+        self.tools = tools
+        self.functions = {}
+        self._initialized = False
+
+    async def _enter_tool(self, tool):
+        """Helper method to enter a single tool context."""
+        try:
+            entered_tool = await tool.__aenter__()
+            await entered_tool.initialize()
+            return entered_tool
+        except Exception as e:
+            logger.error(f"Error entering tool context: {e}")
+            raise
+
+    async def __aenter__(self):
+        """Enter context for all tools sequentially."""
+        entered_tools = []
+        try:
+            for tool in self.tools:
+                entered_tool = await self._enter_tool(tool)
+                entered_tools.append(entered_tool)
+
+            self.tools = entered_tools
+            # Merge functions from all tools
+            for tool in self.tools:
+                self.functions.update(tool.functions)
+
+            self._initialized = True
+            return self
+        except Exception as e:
+            # Clean up any tools that were entered
+            for tool in entered_tools:
+                try:
+                    await tool.__aexit__(None, None, None)
+                except Exception as cleanup_error:
+                    logger.error(f"Error during cleanup: {cleanup_error}")
+            raise e
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit context for all tools sequentially."""
+        exceptions = []
+        for tool in reversed(self.tools):  # Exit in reverse order
+            try:
+                await tool.__aexit__(exc_type, exc_val, exc_tb)
+            except Exception as e:
+                exceptions.append(e)
+                logger.error(f"Error exiting tool context: {e}")
+
+        if exceptions:
+            raise exceptions[0]
+
+    async def initialize(self):
+        """Initialize is handled during __aenter__."""
+        if self._initialized:
+            return
