@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "playwright", "start"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    },
+    "weather": {
+      "command": "uvx weather-forecast-server"
+    },
+    "minimax": {
+      "command": "uvx minimax-mcp"
+    }
+  }
+}

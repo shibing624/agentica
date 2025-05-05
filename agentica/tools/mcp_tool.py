@@ -3,20 +3,23 @@
 @author:XuMing(xuming624@qq.com)
 @description: Model Context Protocol (MCP) client implementations supporting both stdio and SSE transports
 """
-from typing import Any, Dict, List, Literal, Optional, Union
-from os import environ
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-from mcp.client.sse import sse_client
-import copy
 import asyncio
-import threading
 import concurrent.futures
-from agentica.tools.base import Toolkit, Function
-from agentica.utils.log import logger
-from agentica.mcp.server import MCPServerStdio, MCPServerSse
+import copy
+import threading
+from os import environ
+from typing import Dict, Optional
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.sse import sse_client
+from mcp.client.stdio import stdio_client
+
 from agentica.mcp.client import MCPClient
+from agentica.mcp.config import MCPConfig
+from agentica.mcp.server import MCPServerStdio, MCPServerSse
 from agentica.tools.base import Function
+from agentica.tools.base import Toolkit
+from agentica.utils.log import logger
 
 
 class McpTool(Toolkit):
@@ -31,18 +34,18 @@ class McpTool(Toolkit):
     """
 
     def __init__(
-        self,
-        stdio_command: Optional[str] = None,
-        sse_server_url: Optional[str] = None,
-        *,
-        env: Optional[dict[str, str]] = None,
-        server_params: Optional[StdioServerParameters] = None,
-        session: Optional[ClientSession] = None,
-        include_tools: Optional[list[str]] = None,
-        exclude_tools: Optional[list[str]] = None,
-        sse_headers: Optional[Dict[str, str]] = None,
-        sse_timeout: float = 5.0,
-        sse_read_timeout: float = 300.0,
+            self,
+            stdio_command: Optional[str] = None,
+            sse_server_url: Optional[str] = None,
+            *,
+            env: Optional[dict[str, str]] = None,
+            server_params: Optional[StdioServerParameters] = None,
+            session: Optional[ClientSession] = None,
+            include_tools: Optional[list[str]] = None,
+            exclude_tools: Optional[list[str]] = None,
+            sse_headers: Optional[Dict[str, str]] = None,
+            sse_timeout: float = 5.0,
+            sse_read_timeout: float = 300.0,
     ):
         """
         Initialize the MCP toolkit.
@@ -79,18 +82,18 @@ class McpTool(Toolkit):
 
         # Determine the transport type (stdio or SSE)
         self._transport_type = "stdio"  # Default to stdio
-        
+
         # Check for direct SSE URL parameter first
         self._sse_url = sse_server_url
-        
+
         # If not provided directly, check environment
         if not self._sse_url:
             self._sse_url = env.get("MCP_SERVER_URL")
-            
+
         # Configure SSE if URL is available
         if self._sse_url:
             self._transport_type = "sse"
-            
+
             # Headers provided directly take precedence
             if sse_headers is not None:
                 self._sse_headers = sse_headers
@@ -105,24 +108,24 @@ class McpTool(Toolkit):
                         self._sse_headers = {}
                 else:
                     self._sse_headers = env_headers
-            
+
             # Timeouts provided directly take precedence
             self._sse_timeout = sse_timeout
             self._sse_read_timeout = sse_read_timeout
-            
+
             # If not provided directly, try to get from environment
             if "MCP_SERVER_TIMEOUT" in env:
                 try:
                     self._sse_timeout = float(env.get("MCP_SERVER_TIMEOUT", "5"))
                 except ValueError:
                     pass
-                    
+
             if "MCP_SERVER_READ_TIMEOUT" in env:
                 try:
                     self._sse_read_timeout = float(env.get("MCP_SERVER_READ_TIMEOUT", "300"))
                 except ValueError:
                     pass
-        
+
         # Configure stdio if command is provided and we're not using SSE
         elif stdio_command is not None:
             from shlex import split
@@ -133,7 +136,7 @@ class McpTool(Toolkit):
             cmd = parts[0]
             arguments = parts[1:] if len(parts) > 1 else []
             self.server_params = StdioServerParameters(command=cmd, args=arguments, env=env)
-            
+
             # Store the original command for easier reuse and debugging
             self._stdio_command = stdio_command
             self._cmd_parts = parts
@@ -144,7 +147,7 @@ class McpTool(Toolkit):
 
         self.include_tools = include_tools
         self.exclude_tools = exclude_tools or []
-        
+
         # Store the server configuration separately for tool functions to use directly
         self._server_config = {
             "transport_type": self._transport_type,
@@ -172,7 +175,7 @@ class McpTool(Toolkit):
                 # Create an SSE client connection
                 if not self._sse_url:
                     raise ValueError("sse_server_url or MCP_SERVER_URL must be provided for SSE transport")
-                
+
                 self._transport_context = sse_client(
                     url=self._sse_url,
                     headers=self._sse_headers,
@@ -183,14 +186,14 @@ class McpTool(Toolkit):
                 # Create a stdio client connection
                 if self.server_params is None:
                     raise ValueError("server_params or stdio_command must be provided when using stdio transport")
-                
+
                 self._transport_context = stdio_client(self.server_params)
-            
+
             # Create session from transport
             read, write = await self._transport_context.__aenter__()  # type: ignore
             self._session_context = ClientSession(read, write)  # type: ignore
             self.session = await self._session_context.__aenter__()  # type: ignore
-            
+
             # Store the parameters for later use in tool functions
             if self._transport_type == "stdio" and not hasattr(self.session, "_server_params"):
                 setattr(self.session, "_server_params", self.server_params)
@@ -265,21 +268,21 @@ class McpTool(Toolkit):
                     continue
                 if self.include_tools is None or tool.name in self.include_tools:
                     filtered_tools.append(tool)
-            
+
             # Register the tools with the toolkit
             for tool in filtered_tools:
                 try:
                     # Create a custom entrypoint that matches the transport type pattern
                     tool_name = tool.name
-                    
+
                     # Define a wrapper function that creates a fresh connection each time
                     def create_tool_function(t_name):
                         """Create a function for the tool that creates a fresh connection each time"""
-                        
+
                         async def _call_mcp_tool_async(**kwargs):
                             """Async implementation that creates a fresh connection"""
                             logger.debug(f"Creating new MCP connection for tool '{t_name}'")
-                            
+
                             # Create appropriate server based on transport type
                             if self._server_config["transport_type"] == "sse":
                                 server = MCPServerSse(
@@ -300,7 +303,7 @@ class McpTool(Toolkit):
                                         "env": copy.deepcopy(self._server_config["env"])
                                     }
                                 )
-                            
+
                             try:
                                 async with MCPClient(server=server) as client:
                                     # Call the tool (with timeout)
@@ -348,7 +351,7 @@ class McpTool(Toolkit):
 
                     # Create the function for this tool
                     entrypoint = create_tool_function(tool_name)
-                    
+
                     # Create parameter schema
                     tool_params = {"type": "object", "properties": {}}
                     if hasattr(tool, 'inputSchema') and tool.inputSchema:
@@ -374,8 +377,30 @@ class McpTool(Toolkit):
                 except Exception as e:
                     logger.error(f"Failed to register tool {tool.name}: {e}")
 
-            logger.debug(f"{self.name} initialized with {len(filtered_tools)} tools using {self._transport_type} transport")
+            logger.debug(
+                f"{self.name} initialized with {len(filtered_tools)} tools using {self._transport_type} transport")
             self._initialized = True
         except Exception as e:
             logger.error(f"Failed to get MCP tools: {e}")
             raise
+
+    @classmethod
+    def from_config(cls, server_name: str, config_path: Optional[str] = None) -> 'McpTool':
+        """Create McpTool instance from configuration file"""
+        config = MCPConfig(config_path)
+        server_config = config.get_server_config(server_name)
+        if not server_config:
+            raise ValueError(f"Server `{server_name}` not in MCP configuration: `{config.config_path}`, "
+                             f"available server name: {list(config.list_servers().keys())}")
+        if server_config.url:
+            return cls(
+                sse_server_url=server_config.url,
+                sse_headers=server_config.headers,
+                sse_timeout=server_config.timeout,
+                sse_read_timeout=server_config.read_timeout
+            )
+        else:
+            return cls(
+                stdio_command=f"{server_config.command} {' '.join(server_config.args or [])}".strip(),
+                env=server_config.env
+            )
