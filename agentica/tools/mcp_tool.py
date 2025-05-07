@@ -6,6 +6,7 @@
 import asyncio
 import concurrent.futures
 import copy
+import json
 import threading
 from os import environ
 from typing import Dict, Optional, Union
@@ -35,8 +36,8 @@ class McpTool(Toolkit):
 
     def __init__(
             self,
-            stdio_command: Optional[str] = None,
-            sse_server_url: Optional[str] = None,
+            command: Optional[str] = None,
+            url: Optional[str] = None,
             *,
             env: Optional[dict[str, str]] = None,
             server_params: Optional[StdioServerParameters] = None,
@@ -51,8 +52,8 @@ class McpTool(Toolkit):
         Initialize the MCP toolkit.
 
         Args:
-            stdio_command: The command to run to start the stdio server. Should be used in conjunction with env.
-            sse_server_url: The URL of the SSE endpoint for SSE transport.
+            command: The command to run to start the stdio server. Should be used in conjunction with env.
+            url: The URL of the SSE endpoint for SSE transport.
             env: The environment variables to pass to the server. Used with stdio_command or for additional SSE config.
             server_params: StdioServerParameters for creating a new stdio session
             session: An initialized MCP ClientSession connected to an MCP server
@@ -65,7 +66,7 @@ class McpTool(Toolkit):
         super().__init__(name="McpTool")
 
         # Validate that at least one connection method is provided
-        if session is None and server_params is None and stdio_command is None and sse_server_url is None and env is None:
+        if session is None and server_params is None and command is None and url is None and env is None:
             raise ValueError("Either session, server_params, stdio_command, or sse_server_url must be provided")
 
         self.session: Optional[ClientSession] = session
@@ -84,7 +85,7 @@ class McpTool(Toolkit):
         self._transport_type = "stdio"  # Default to stdio
 
         # Check for direct SSE URL parameter first
-        self._sse_url = sse_server_url
+        self._sse_url = url
 
         # If not provided directly, check environment
         if not self._sse_url:
@@ -101,7 +102,6 @@ class McpTool(Toolkit):
                 # Try to get headers from environment
                 env_headers = env.get("MCP_SERVER_HEADERS", {})
                 if isinstance(env_headers, str):
-                    import json
                     try:
                         self._sse_headers = json.loads(env_headers)
                     except:
@@ -118,19 +118,19 @@ class McpTool(Toolkit):
                 try:
                     self._sse_timeout = float(env.get("MCP_SERVER_TIMEOUT", "5"))
                 except ValueError:
-                    pass
+                    self._sse_timeout = 5.0
 
             if "MCP_SERVER_READ_TIMEOUT" in env:
                 try:
                     self._sse_read_timeout = float(env.get("MCP_SERVER_READ_TIMEOUT", "300"))
                 except ValueError:
-                    pass
+                    self._sse_read_timeout = 300.0
 
         # Configure stdio if command is provided and we're not using SSE
-        elif stdio_command is not None:
+        elif command is not None:
             from shlex import split
 
-            parts = split(stdio_command)
+            parts = split(command)
             if not parts:
                 raise ValueError("Empty command string")
             cmd = parts[0]
@@ -138,7 +138,7 @@ class McpTool(Toolkit):
             self.server_params = StdioServerParameters(command=cmd, args=arguments, env=env)
 
             # Store the original command for easier reuse and debugging
-            self._stdio_command = stdio_command
+            self._stdio_command = command
             self._cmd_parts = parts
 
         self._transport_context = None
@@ -425,7 +425,7 @@ class McpTool(Toolkit):
             if server.url:
                 # Create SSE tool
                 tool = cls(
-                    sse_server_url=server.url,
+                    url=server.url,
                     sse_headers=server.headers,
                     sse_timeout=server.timeout,
                     sse_read_timeout=server.read_timeout
@@ -434,7 +434,7 @@ class McpTool(Toolkit):
                 # Create stdio tool
                 cmd = f"{server.command} {' '.join(server.args or [])}".strip()
                 tool = cls(
-                    stdio_command=cmd,
+                    command=cmd,
                     env=server.env
                 )
             tools.append(tool)
@@ -451,7 +451,7 @@ class CompositeMultiMcpTool(McpTool):
     """Combines multiple McpTool instances into one."""
 
     def __init__(self, tools: list[McpTool]):
-        super().__init__(stdio_command="dummy")  # Dummy command to satisfy parent init
+        super().__init__(command="dummy")  # Dummy command to satisfy parent init
         self.tools = tools
         self.functions = {}
         self._initialized = False

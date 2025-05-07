@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: MCP stdio client demo
+@description: minimax-mcp demo
+
+pip install minimax-mcp weather-forecast-server
 """
 
 import asyncio
@@ -36,6 +38,7 @@ async def mcp_toolkit_with_agent_demo():
 
             await m.aprint_response("调天气工具 get_weather 查询合肥市天气咋样")
             await m.aprint_response("我爱中国，转为英文，并保存音频")
+            await m.aprint_response("现在几点了")
     except Exception as e:
         print(f"Error in MCPToolkit with agent demo: {e}")
         sys.exit(1)

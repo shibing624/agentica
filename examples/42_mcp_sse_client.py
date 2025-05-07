@@ -58,7 +58,7 @@ async def mcp_toolkit_with_agent_demo() -> None:
         # 使用直接的sse_server_url参数而不是环境变量
         # 这展示了McpTool类中的SSE支持
         mcp_tool = McpTool(
-            sse_server_url="http://localhost:8081/sse",  # 直接使用参数而非环境变量
+            url="http://localhost:8081/sse",  # 直接使用参数而非环境变量
             sse_timeout=5.0,  # HTTP请求超时(秒)
             sse_read_timeout=300.0  # SSE连接超时(秒)
         )
