@@ -860,6 +860,9 @@ class OpenAIChat(Model):
         metrics.response_timer.start()
         for response in self.invoke_stream(messages=messages):
             if len(response.choices) > 0:
+                if metrics.completion_tokens is None:
+                    metrics.completion_tokens = 0
+                    
                 metrics.completion_tokens += 1
                 if metrics.completion_tokens == 1:
                     metrics.time_to_first_token = metrics.response_timer.elapsed
@@ -939,6 +942,9 @@ class OpenAIChat(Model):
         metrics.response_timer.start()
         async for response in self.ainvoke_stream(messages=messages):
             if response.choices and len(response.choices) > 0:
+                if metrics.completion_tokens is None:
+                    metrics.completion_tokens = 0
+                    
                 metrics.completion_tokens += 1
                 if metrics.completion_tokens == 1:
                     metrics.time_to_first_token = metrics.response_timer.elapsed
