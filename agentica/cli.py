@@ -6,14 +6,45 @@
 import argparse
 from rich.console import Console
 from rich.text import Text
+import importlib
+from typing import List, Optional
 from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, PythonAgent
-from agentica.tools.search_serper_tool import SearchSerperTool
-from agentica.tools.file_tool import FileTool
-from agentica.tools.shell_tool import ShellTool
-from agentica.tools.jina_tool import JinaTool
-from agentica.tools.wikipedia_tool import WikipediaTool
 
 console = Console()
+
+# Tool mapping dictionary - maps tool names to their import paths
+TOOL_MAP = {
+    'airflow': 'agentica.tools.airflow_tool.AirflowTool',
+    'analyze_image': 'agentica.tools.analyze_image_tool.AnalyzeImageTool',
+    'arxiv': 'agentica.tools.arxiv_tool.ArxivTool',
+    'baidu_search': 'agentica.tools.baidu_search_tool.BaiduSearchTool',
+    'calculator': 'agentica.tools.calculator_tool.CalculatorTool',
+    'code': 'agentica.tools.code_tool.CodeTool',
+    'cogview': 'agentica.tools.cogview_tool.CogViewTool',
+    'cogvideo': 'agentica.tools.cogvideo_tool.CogVideoTool',
+    'dalle': 'agentica.tools.dalle_tool.DalleTool',
+    'duckduckgo': 'agentica.tools.duckduckgo_tool.DuckDuckGoTool',
+    'edit': 'agentica.tools.edit_tool.EditTool',
+    'file': 'agentica.tools.file_tool.FileTool',
+    'hackernews': 'agentica.tools.hackernews_tool.HackerNewsTool',
+    'jina': 'agentica.tools.jina_tool.JinaTool',
+    'mcp': 'agentica.tools.mcp_tool.MCPTool',
+    'newspaper': 'agentica.tools.newspaper_tool.NewspaperTool',
+    'ocr': 'agentica.tools.ocr_tool.OcrTool',
+    'run_python_code': 'agentica.tools.run_python_code_tool.RunPythonCodeTool',
+    'search_exa': 'agentica.tools.search_exa_tool.SearchExaTool',
+    'search_serper': 'agentica.tools.search_serper_tool.SearchSerperTool',
+    'shell': 'agentica.tools.shell_tool.ShellTool',
+    'string': 'agentica.tools.string_tool.StringTool',
+    'text_analysis': 'agentica.tools.text_analysis_tool.TextAnalysisTool',
+    'url_crawler': 'agentica.tools.url_crawler_tool.UrlCrawlerTool',
+    'weather': 'agentica.tools.weather_tool.WeatherTool',
+    'web_search_pro': 'agentica.tools.web_search_pro_tool.WebSearchProTool',
+    'wikipedia': 'agentica.tools.wikipedia_tool.WikipediaTool',
+    'workspace': 'agentica.tools.workspace_tool.WorkspaceTool',
+    'yfinance': 'agentica.tools.yfinance_tool.YFinanceTool',
+
+}
 
 
 def parse_args():
@@ -31,8 +62,8 @@ def parse_args():
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
     parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
     parser.add_argument('--tools', nargs='*',
-                        choices=['search_serper', 'file', 'shell', 'yfinance', 'web_search_pro',
-                                 'cogview', 'cogvideo', 'jina', 'wikipedia', 'python'], help='Tools to enable')
+                        choices=list(TOOL_MAP.keys()),
+                        help='Tools to enable')
     return parser.parse_args()
 
 
@@ -63,35 +94,39 @@ def get_model(model_provider, model_name, api_base=None, api_key=None, max_token
     return model
 
 
-def configure_tools(tool_names):
+def configure_tools(tool_names: Optional[List[str]] = None) -> List:
     """
-    Configure tools to enable
-    :param tool_names: list of tool names
-    :return: list of tool instances
+    Configure and instantiate tools based on their names.
+    Uses dynamic import to load tools only when requested.
+
+    Args:
+        tool_names: List of tool names to enable. Must be keys in TOOL_MAP.
+
+    Returns:
+        List of instantiated tool objects.
     """
+    if not tool_names:
+        return []
+
     tools = []
-    if 'search_serper' in tool_names:
-        tools.append(SearchSerperTool())
-    if 'file' in tool_names:
-        tools.append(FileTool())
-    if 'shell' in tool_names:
-        tools.append(ShellTool())
-    if 'yfinance' in tool_names:
-        from agentica.tools.yfinance_tool import YFinanceTool
-        tools.append(YFinanceTool())
-    if 'web_search_pro' in tool_names:
-        from agentica.tools.web_search_pro_tool import WebSearchProTool
-        tools.append(WebSearchProTool())
-    if 'cogview' in tool_names:
-        from agentica.tools.cogview_tool import CogViewTool
-        tools.append(CogViewTool())
-    if 'cogvideo' in tool_names:
-        from agentica.tools.cogvideo_tool import CogVideoTool
-        tools.append(CogVideoTool())
-    if 'jina' in tool_names:
-        tools.append(JinaTool())
-    if 'wikipedia' in tool_names:
-        tools.append(WikipediaTool())
+    for name in tool_names:
+        if name not in TOOL_MAP:
+            console.print(f"[yellow]Warning: Tool '{name}' not recognized. Skipping.[/yellow]")
+            continue
+
+        try:
+            # Dynamically import and instantiate the tool
+            module_path, class_name = TOOL_MAP[name].rsplit('.', 1)
+            module = importlib.import_module(module_path)
+            tool_class = getattr(module, class_name)
+            tool_instance = tool_class()
+            tools.append(tool_instance)
+            console.print(f"[green]Successfully loaded tool: {name}[/green]")
+        except ImportError as e:
+            console.print(f"[red]Error: Could not import tool '{name}'. Missing dependencies? {str(e)}[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: Failed to initialize tool '{name}': {str(e)}[/red]")
+
     return tools
 
 
