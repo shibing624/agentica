@@ -7,8 +7,8 @@ import json
 import os
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
-from agentica.utils.log import logger
 from agentica.config import AGENTICA_HOME
+
 
 @dataclass
 class MCPServerConfig:

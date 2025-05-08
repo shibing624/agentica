@@ -2,10 +2,10 @@ import sys
 
 sys.path.append('..')
 from agentica import Agent
-from agentica import OpenAIChat
+from agentica import OpenAIChat, AzureOpenAIChat
 
 m = Agent(
-    model=OpenAIChat(),
+    model=AzureOpenAIChat(id="gpt-4.1"),
     debug_mode=True,
 )
-m.print_response(message="分享一个两句话的故事,12000年的爱。", stream=True)
+m.print_response(message="你是谁？详细介绍自己，你的知识库到哪天", stream=True)
