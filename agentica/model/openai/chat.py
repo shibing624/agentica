@@ -52,14 +52,27 @@ class Metrics:
     response_timer: Timer = field(default_factory=Timer)
 
     def log(self):
+        """Log metrics with null checks and safe calculations."""
         logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
-        logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
-        logger.debug(f"* Tokens per second:           {self.output_tokens / self.response_timer.elapsed:.4f} tokens/s")
-        logger.debug(f"* Input tokens:                {self.input_tokens or self.prompt_tokens}")
-        logger.debug(f"* Output tokens:               {self.output_tokens or self.completion_tokens}")
-        logger.debug(f"* Total tokens:                {self.total_tokens}")
+        elapsed = self.response_timer.elapsed
+        logger.debug(f"* Time to generate response:   {elapsed:.4f}s")
+        # Safe calculation of tokens per second
+        output_tokens = self.output_tokens or self.completion_tokens or 0
+        if elapsed > 0 and output_tokens > 0:
+            tokens_per_second = output_tokens / elapsed
+            logger.debug(f"* Tokens per second:           {tokens_per_second:.4f} tokens/s")
+        else:
+            logger.debug("* Tokens per second:           N/A")
+        # Use the first non-zero value for input tokens
+        input_tokens = self.input_tokens or self.prompt_tokens or 0
+        logger.debug(f"* Input tokens:                {input_tokens}")
+        # Use the first non-zero value for output tokens
+        logger.debug(f"* Output tokens:               {output_tokens}")
+        # Total tokens might be directly provided or need to be calculated
+        total = self.total_tokens or (input_tokens + output_tokens) or 0
+        logger.debug(f"* Total tokens:                {total}")
         if self.prompt_tokens_details is not None:
             logger.debug(f"* Prompt tokens details:       {self.prompt_tokens_details}")
         if self.completion_tokens_details is not None:
