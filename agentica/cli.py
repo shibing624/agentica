@@ -38,12 +38,12 @@ TOOL_MAP = {
     'string': 'agentica.tools.string_tool.StringTool',
     'text_analysis': 'agentica.tools.text_analysis_tool.TextAnalysisTool',
     'url_crawler': 'agentica.tools.url_crawler_tool.UrlCrawlerTool',
+    'volc_tts': 'agentica.tools.volc_tts_tool.VolcTtsTool',
     'weather': 'agentica.tools.weather_tool.WeatherTool',
     'web_search_pro': 'agentica.tools.web_search_pro_tool.WebSearchProTool',
     'wikipedia': 'agentica.tools.wikipedia_tool.WikipediaTool',
     'workspace': 'agentica.tools.workspace_tool.WorkspaceTool',
     'yfinance': 'agentica.tools.yfinance_tool.YFinanceTool',
-
 }
 
 
