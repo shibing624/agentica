@@ -69,7 +69,7 @@ pip install .
 
 2. `agentica`を使用してエージェントを構築し、タスクを分解して実行：
 
-自動的にGoogle検索ツールを呼び出す例：[examples/11_web_search_moonshot_openai.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_moonshot_openai.py)
+自動的にGoogle検索ツールを呼び出す例：[examples/11_web_search_openai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_openai_demo.py)
 
 ```python
 from agentica import Agent, OpenAIChat, SearchSerperTool

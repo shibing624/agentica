@@ -72,10 +72,10 @@ cd examples
 python 12_web_search_moonshot_demo.py
 ```
 
-1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填OPENAI_API_KEY、ZHIPUAI_API_KEY 等任一个)。或者使用`export`命令设置环境变量：
+1. 复制[.env.example](https://github.com/shibing624/agentica/blob/main/.env.example)文件为`~/.agentica/.env`，并填写LLM api key(选填OPENAI_API_KEY、ZHIPUAI_API_KEY、MOONSHOT_API_KEY 等任一个)。或者使用`export`命令设置环境变量：
     
     ```shell
-    export ZHIPUAI_API_KEY=your_api_key
+    export MOONSHOT_API_KEY=your_api_key
     export SERPER_API_KEY=your_serper_api_key
     ```
 

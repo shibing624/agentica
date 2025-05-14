@@ -91,18 +91,18 @@ pip install -r requirements.txt
 cp .env.example ~/.agentica/.env
 
 cd examples
-python web_search_moonshot_demo.py
+python 12_web_search_moonshot_demo.py
 ```
 
 1. Copy the [.env.example](https://github.com/shibing624/agentica/blob/main/.env.example) file to `~/.agentica/.env` and fill in the LLM API key (optional DEEPSEEK_API_KEY, MOONSHOT_API_KEY, OPENAI_API_KEY, etc.). Or you can set the environment variable directly.
     ```shell
-    export OPENAI_API_KEY=your_openai_api_key
+    export MOONSHOT_API_KEY=your_openai_api_key
     export SERPER_API_KEY=your_serper_api_key
     ```
 
 2. Build and run an Agent using `agentica`:
 
-Automatically call the Google search tool, example [examples/11_web_search_moonshot_openai.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_moonshot_openai.py)
+Automatically call the Google search tool, example [examples/11_web_search_openai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_openai_demo.py)
 
 ```python
 from agentica import Agent, OpenAIChat, SearchSerperTool
