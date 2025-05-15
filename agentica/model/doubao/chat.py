@@ -16,7 +16,7 @@ class Doubao(OpenAILike):
     - base_url: str: The base URL for the model.
     """
 
-    id: str = "ep-20241012172611-btlgr"
+    id: str = getenv("ARK_MODEL_NAME", "ep-xxxx-xxxx")
     name: str = "Doubao"
     provider: str = "ByteDance"
 

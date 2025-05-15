@@ -56,7 +56,7 @@ class Metrics:
         logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
-        elapsed = self.response_timer.elapsed
+        elapsed = self.response_timer.elapsed or 0
         logger.debug(f"* Time to generate response:   {elapsed:.4f}s")
         # Safe calculation of tokens per second
         output_tokens = self.output_tokens or self.completion_tokens or 0
