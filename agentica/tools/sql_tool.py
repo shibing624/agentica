@@ -7,7 +7,8 @@ part of the code is from phidata
 import json
 from typing import List, Optional, Dict, Any
 
-from sqlalchemy import create_engine, Engine
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.inspection import inspect
 from sqlalchemy.sql.expression import text

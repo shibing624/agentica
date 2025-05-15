@@ -14,8 +14,8 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy import (
     create_engine,
     inspect,
-    Engine,
 )
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.schema import MetaData, Table, Column

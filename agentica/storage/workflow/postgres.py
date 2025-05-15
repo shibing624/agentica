@@ -1,7 +1,8 @@
 import time
 from typing import Optional, List
 
-from sqlalchemy import create_engine, Engine, MetaData, Table, Column, String, BigInteger, inspect, Index
+from sqlalchemy import create_engine, MetaData, Table, Column, String, BigInteger, inspect, Index
+from sqlalchemy.engine import Engine
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.sql.expression import select, text
