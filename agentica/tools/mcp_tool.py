@@ -311,6 +311,9 @@ class McpTool(Toolkit):
                                         client.call_tool(t_name, kwargs),
                                         timeout=30.0
                                     )
+                                    # Check if result is a string (error message) or a CallToolResult
+                                    if isinstance(result, str):
+                                        return result  # Already an error message string
                                     return client.extract_result_text(result)
                             except Exception as e:
                                 logger.error(f"Error calling MCP tool '{t_name}': {e}")
