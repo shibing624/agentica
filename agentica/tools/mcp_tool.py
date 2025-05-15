@@ -309,7 +309,7 @@ class McpTool(Toolkit):
                                     # Call the tool (with timeout)
                                     result = await asyncio.wait_for(
                                         client.call_tool(t_name, kwargs),
-                                        timeout=30.0
+                                        timeout=self._sse_read_timeout
                                     )
                                     # Check if result is a string (error message) or a CallToolResult
                                     if isinstance(result, str):
