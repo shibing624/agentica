@@ -6,8 +6,8 @@
     "minimax": {
       "command": "uvx minimax-mcp"
     },
-    "mcp-time": {
-      "url": "https://mcp.higress.ai/mcp-time/cmadpuvko00068k018uz8y6a4/sse"
+    "mcp-ip-query": {
+      "url": "https://mcp.higress.ai/mcp-ip-query/cmadpuvko00068k018uz8y6a4/sse"
     }
   }
 }

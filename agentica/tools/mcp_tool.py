@@ -97,11 +97,14 @@ class McpTool(Toolkit):
 
         # Configure SSE or StreamableHttp if URL is available
         if self._url:
-            # Determine transport type based on URL path
-            if "/mcp" in self._url:
-                self._transport_type = "streamable-http"
-            else:
+            # Determine transport type based on URL
+            # URLs with "/sse" are treated as SSE
+            # All other URLs are treated as StreamableHttp
+            if "/sse" in self._url:
                 self._transport_type = "sse"
+            else:
+                # Default to streamable-http for all other URLs
+                self._transport_type = "streamable-http"
 
             # Headers provided directly take precedence
             if sse_headers is not None:
@@ -263,7 +266,13 @@ class McpTool(Toolkit):
                 try:
                     await self._transport_context.__aexit__(exc_type, exc_val, exc_tb)
                 except GeneratorExit:
-                    logger.warning("Error closing transport context, during stdio transport cleanup")
+                    # This is expected for streamable-http transport during cleanup
+                    if self._transport_type == "streamable-http":
+                        logger.debug("GeneratorExit during streamable-http transport cleanup (expected)")
+                    else:
+                        logger.warning("GeneratorExit during transport cleanup")
+                except Exception as e:
+                    logger.error(f"Error closing transport context: {e}")
                 self._transport_context = None
         except Exception as e:
             logger.error(f"Error exiting MCP tool context: {e}")
@@ -351,9 +360,10 @@ class McpTool(Toolkit):
                             try:
                                 async with MCPClient(server=server) as client:
                                     # Call the tool (with timeout)
+                                    read_timeout = self._server_config["read_timeout"] or 300.0
                                     result = await asyncio.wait_for(
                                         client.call_tool(t_name, kwargs),
-                                        timeout=self._read_timeout
+                                        timeout=read_timeout
                                     )
                                     # Check if result is a string (error message) or a CallToolResult
                                     if isinstance(result, str):
@@ -470,13 +480,26 @@ class McpTool(Toolkit):
         for name in server_names:
             server = all_servers[name]
             if server.url:
-                # Create SSE tool
+                # Determine transport type based on URL
+                # URLs with "/sse" are treated as SSE
+                # All other URLs are treated as StreamableHttp
+                is_streamable_http = True  # Default to streamable-http
+                transport_type = "streamable-http"
+                
+                if "/sse" in server.url:
+                    is_streamable_http = False
+                    transport_type = "sse"
+                
+                # Create tool with appropriate configuration
                 tool = cls(
                     url=server.url,
                     sse_headers=server.headers,
                     sse_timeout=server.timeout,
-                    sse_read_timeout=server.read_timeout
+                    sse_read_timeout=server.read_timeout,
+                    terminate_on_close=True if is_streamable_http else None
                 )
+                
+                logger.debug(f"Created {transport_type} tool for server '{name}' with URL: {server.url}")
             else:
                 # Create stdio tool
                 cmd = f"{server.command} {' '.join(server.args or [])}".strip()
@@ -484,6 +507,7 @@ class McpTool(Toolkit):
                     command=cmd,
                     env=server.env
                 )
+                logger.debug(f"Created stdio tool for server '{name}' with command: {cmd}")
             tools.append(tool)
 
         logger.info(f"Created {len(tools)} MCP tools({server_names}) from configuration: {config.config_path}")
@@ -511,44 +535,52 @@ class CompositeMultiMcpTool(McpTool):
             return entered_tool
         except Exception as e:
             logger.error(f"Error entering tool context: {e}")
-            raise
+            # Don't re-raise, just return None so we can continue with other tools
+            return None
 
     async def __aenter__(self):
         """Enter context for all tools sequentially."""
         entered_tools = []
-        try:
-            for tool in self.tools:
+        errors = []
+        
+        for tool in self.tools:
+            try:
                 entered_tool = await self._enter_tool(tool)
-                entered_tools.append(entered_tool)
+                if entered_tool:
+                    entered_tools.append(entered_tool)
+            except Exception as e:
+                errors.append((tool, e))
+                logger.error(f"Failed to initialize tool: {e}")
+        
+        self.tools = [t for t in entered_tools if t is not None]
+        
+        # Merge functions from all successfully initialized tools
+        for tool in self.tools:
+            self.functions.update(tool.functions)
 
-            self.tools = entered_tools
-            # Merge functions from all tools
-            for tool in self.tools:
-                self.functions.update(tool.functions)
-
-            self._initialized = True
-            return self
-        except Exception as e:
-            # Clean up any tools that were entered
-            for tool in entered_tools:
-                try:
-                    await tool.__aexit__(None, None, None)
-                except Exception as cleanup_error:
-                    logger.error(f"Error during cleanup: {cleanup_error}")
-            raise e
+        self._initialized = True
+        
+        if not self.tools:
+            if errors:
+                error_msgs = "\n".join([f"- {e}" for _, e in errors])
+                raise ValueError(f"Failed to initialize any tools. Errors:\n{error_msgs}")
+            else:
+                raise ValueError("No tools were successfully initialized")
+                
+        return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Exit context for all tools sequentially."""
-        exceptions = []
+        errors = []
         for tool in reversed(self.tools):  # Exit in reverse order
             try:
                 await tool.__aexit__(exc_type, exc_val, exc_tb)
             except Exception as e:
-                exceptions.append(e)
+                errors.append(e)
                 logger.error(f"Error exiting tool context: {e}")
 
-        if exceptions:
-            raise exceptions[0]
+        if errors and not exc_type:  # Only raise if we're not already handling an exception
+            raise errors[0]
 
     async def initialize(self):
         """Initialize is handled during __aenter__."""
