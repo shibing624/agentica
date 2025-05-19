@@ -140,7 +140,7 @@ class PythonAgent(Agent):
         if self.save_and_run:
             _instructions += [
                 "After the script is ready, save and run it using the `save_to_file_and_run` function."
-                "If the python script needs to return the answer to you, specify the `variable_to_return` parameter correctly"
+                "If the python script needs to return the answer to you, specify the `variable_to_return` parameter correctly, "
                 "Give the file a `.py` extension and share it with the user."
             ]
         if self.run_code:
