@@ -5,6 +5,8 @@ try:
         MCPServerSseParams,
         MCPServerStdio,
         MCPServerStdioParams,
+        MCPServerStreamableHttp,
+        MCPServerStreamableHttpParams,
     )
     from .client import MCPClient
 except ImportError:
@@ -16,5 +18,7 @@ __all__ = [
     "MCPServerSseParams",
     "MCPServerStdio",
     "MCPServerStdioParams",
+    "MCPServerStreamableHttp",
+    "MCPServerStreamableHttpParams",
     "MCPClient",
 ]

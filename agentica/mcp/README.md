@@ -4,7 +4,7 @@ This module provides a client implementation for the [Model Context Protocol (MC
 
 ## Features
 
-- Support for both stdio and SSE transport modes
+- Support for stdio, SSE, and StreamableHttp transport modes
 - Explicit parameter names for each transport type
 - Async context manager-based API for easy resource management
 - Tool caching for improved performance
@@ -36,6 +36,13 @@ mcp_tool = McpTool(
     sse_read_timeout=300.0
 )
 
+# For StreamableHttp transport
+mcp_tool = McpTool(
+    url="http://localhost:8000/mcp",
+    sse_timeout=5.0,
+    sse_read_timeout=300.0
+)
+
 # For stdio transport (launches a subprocess)
 mcp_tool = McpTool(
     command="python path/to/your/mcp_server.py"
@@ -58,7 +65,8 @@ For more control, you can directly use the `MCPClient` and server classes:
 ```python
 import asyncio
 from agentica.mcp.client import MCPClient
-from agentica.mcp.server import MCPServerStdio, MCPServerSse
+from agentica.mcp.server import MCPServerStdio, MCPServerSse, MCPServerStreamableHttp
+from datetime import timedelta
 
 async def stdio_example():
     """Example using stdio transport"""
@@ -99,9 +107,29 @@ async def sse_example():
         result = await client.call_tool("get_weather", {"city": "Beijing"})
         print(client.extract_result_text(result))
 
+async def streamable_http_example():
+    """Example using StreamableHttp transport"""
+    server = MCPServerStreamableHttp(
+        name="WeatherService",
+        params={
+            "url": "http://localhost:8000/mcp",
+            "headers": {"Authorization": "Bearer your-token"},  # Optional
+            "timeout": timedelta(seconds=5),  # HTTP request timeout
+            "sse_read_timeout": timedelta(seconds=300),  # Connection timeout
+            "terminate_on_close": True  # Whether to terminate on close
+        }
+    )
+    
+    async with MCPClient(server=server) as client:
+        # Use client as in other examples
+        tools = await client.list_tools()
+        result = await client.call_tool("get_weather", {"city": "Beijing"})
+        print(client.extract_result_text(result))
+
 if __name__ == "__main__":
     asyncio.run(stdio_example())
     asyncio.run(sse_example())
+    asyncio.run(streamable_http_example())
 ```
 
 ## McpTool Configuration Options
@@ -114,16 +142,18 @@ You must provide one of these to specify the transport method:
 
 - `stdio_command`: Command string to run the MCP server via stdio transport
 - `sse_server_url`: URL of the SSE endpoint for SSE transport
+- `streamable_http_url`: URL of the StreamableHttp endpoint
 - `server_params`: Directly provide `StdioServerParameters` for stdio transport
 - `session`: Directly provide an initialized `ClientSession`
 
-### SSE Configuration
+### SSE and StreamableHttp Configuration
 
-For SSE transport, you can configure:
+For SSE and StreamableHttp transports, you can configure:
 
-- `sse_headers`: HTTP headers for the SSE connection
+- `sse_headers`: HTTP headers for the connection
 - `sse_timeout`: HTTP request timeout in seconds (default: 5.0)
-- `sse_read_timeout`: SSE connection timeout in seconds (default: 300.0)
+- `sse_read_timeout`: Connection timeout in seconds (default: 300.0)
+- `terminate_on_close`: Whether to terminate on close (StreamableHttp only, default: True)
 
 ### Tool Filtering
 
@@ -144,6 +174,14 @@ from agentica.tools.mcp_tool import McpTool
 
 mcp_tool = McpTool(
     url="http://localhost:8081/sse",
+    sse_headers={"Authorization": "Bearer token123"},
+    include_tools=["get_weather", "get_forecast"],
+    exclude_tools=["admin_tool"]
+)
+
+# Create an McpTool with StreamableHttp transport
+mcp_tool = McpTool(
+    url="http://localhost:8000/mcp",
     sse_headers={"Authorization": "Bearer token123"},
     include_tools=["get_weather", "get_forecast"],
     exclude_tools=["admin_tool"]
@@ -185,7 +223,7 @@ from mcp.server.fastmcp import FastMCP
 from fastapi import FastAPI
 
 # Create server
-mcp = FastMCP("My MCP Server", host="0.0.0.0", port=8081)
+mcp = FastMCP("My MCP Server", host="0.0.0.0", port=8000)
 
 # Define a tool
 @mcp.tool()
@@ -196,8 +234,8 @@ def get_weather(city: str) -> str:
 
 # Run the server
 if __name__ == "__main__":
-    # Use 'stdio' or 'sse' transport
-    mcp.run(transport="sse")
+    # Use 'stdio', 'sse', or 'streamable-http' transport
+    mcp.run(transport="streamable-http")
 ```
 
 ## Examples
@@ -207,4 +245,6 @@ Check out the examples directory for more complete examples:
 - `examples/41_mcp_stdio_demo.py`: Demonstrates how to use MCP with stdio transport
 - `examples/42_mcp_sse_server.py`: A simple MCP server with SSE transport
 - `examples/42_mcp_sse_client.py`: Demonstrates how to connect to an MCP SSE server
+- `examples/44_mcp_streamable_http_server.py`: A simple MCP server with StreamableHttp transport
+- `examples/44_mcp_streamable_http_client.py`: Demonstrates how to connect to an MCP StreamableHttp server
  

@@ -26,7 +26,9 @@
 **Agentica** 可以构建AI Agent，包括规划、记忆和工具使用、执行等组件。
 
 ## 🔥 News
-[2025/04/21] v1.0.0版本：支持了`MCP`的工具调用，兼容SSE和Stdio两种MCP Server，详见[Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/1.0.0)
+[2025/05/19] v1.0.6版本：新增了`MCP`的`StreamableHttp`支持，兼容 StreamableHttp/SSE/Stdio 三种MCP Server，详见[Release-v1.0.6](https://github.com/shibing624/agentica/releases/tag/1.0.6)
+
+[2025/04/21] v1.0.0版本：支持了`MCP`的工具调用，兼容 SSE/Stdio 的 MCP Server，详见[Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/1.0.0)
 
 [2024/12/29] v0.2.3版本: 支持了`ZhipuAI`的api调用，包括免费模型和工具使用，详见[Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/0.2.3)
 
@@ -167,7 +169,11 @@ bash start.sh
 | [examples/39_audio_multi_turn_demo.py](https://github.com/shibing624/agentica/blob/main/examples/39_audio_multi_turn_demo.py)                         | 基于openai的语音api做多轮音频对话的Demo                                                                                                        |
 | [examples/40_weather_zhipuai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/40_web_search_zhipuai_demo.py)                        | 基于智谱AI的api做天气查询的Demo                                                                                                              |
 | [examples/41_mcp_stdio_demo.py](https://github.com/shibing624/agentica/blob/main/examples/41_mcp_stdio_demo.py)                                       | Stdio的MCP Server调用的Demo                                                                                                           |
-| [examples/42_mcp_sse_client.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_client.py)                                       | SSE的MCP Server调用的Demo                                                                                                             |
+| [examples/42_mcp_sse_server.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_server.py)                                       | SSE的MCP Server调用的Demo                                                                                                             |
+| [examples/42_mcp_sse_client.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_client.py)                                       | SSE的MCP Client调用的Demo                                                                                                             |
+| [examples/43_minimax_mcp_demo.py](https://github.com/shibing624/agentica/blob/main/examples/43_minimax_mcp_demo.py)                                   | Minimax语音生成调用的Demo                                                                                                                |
+| [examples/44_mcp_streamable_http_server.py](https://github.com/shibing624/agentica/blob/main/examples/44_mcp_streamable_http_server.py)                           | Streamable Http的MCP Server调用的Demo                                                                                                 |
+| [examples/44_mcp_streamable_http_client.py](https://github.com/shibing624/agentica/blob/main/examples/44_mcp_streamable_http_client.py)                           | Streamable Http的MCP Client调用的Demo                                                                                                 |
 
 
 ### Self-evolving Agent

@@ -13,4 +13,4 @@ markdownify
 tqdm
 rich
 pyyaml
-mcp
+mcp>=1.8.0

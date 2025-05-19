@@ -10,14 +10,16 @@ import json
 import threading
 from os import environ
 from typing import Dict, Optional, Union
+from datetime import timedelta
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamablehttp_client
 
 from agentica.mcp.client import MCPClient
 from agentica.mcp.config import MCPConfig
-from agentica.mcp.server import MCPServerStdio, MCPServerSse
+from agentica.mcp.server import MCPServerStdio, MCPServerSse, MCPServerStreamableHttp
 from agentica.tools.base import Function
 from agentica.tools.base import Toolkit
 from agentica.utils.log import logger
@@ -47,21 +49,23 @@ class McpTool(Toolkit):
             sse_headers: Optional[Dict[str, str]] = None,
             sse_timeout: float = 5.0,
             sse_read_timeout: float = 300.0,
+            terminate_on_close: bool = True,
     ):
         """
         Initialize the MCP toolkit.
 
         Args:
             command: The command to run to start the stdio server. Should be used in conjunction with env.
-            url: The URL of the SSE endpoint for SSE transport.
+            url: The URL of the SSE or StreamableHttp endpoint.
             env: The environment variables to pass to the server. Used with stdio_command or for additional SSE config.
             server_params: StdioServerParameters for creating a new stdio session
             session: An initialized MCP ClientSession connected to an MCP server
             include_tools: Optional list of tool names to include (if None, includes all)
             exclude_tools: Optional list of tool names to exclude (if None, excludes none)
-            sse_headers: Optional headers for the SSE connection
-            sse_timeout: HTTP request timeout for SSE (default: 5 seconds)
-            sse_read_timeout: SSE connection timeout (default: 300 seconds)
+            sse_headers: Optional headers for the SSE or StreamableHttp connection
+            sse_timeout: HTTP request timeout for SSE/StreamableHttp (default: 5 seconds)
+            sse_read_timeout: SSE/StreamableHttp connection timeout (default: 300 seconds)
+            terminate_on_close: Whether to terminate on close (StreamableHttp only, default: True)
         """
         super().__init__(name="McpTool")
 
@@ -84,49 +88,54 @@ class McpTool(Toolkit):
         # Determine the transport type (stdio or SSE)
         self._transport_type = "stdio"  # Default to stdio
 
-        # Check for direct SSE URL parameter first
-        self._sse_url = url
+        # Check for direct URL parameter first
+        self._url = url
 
         # If not provided directly, check environment
-        if not self._sse_url:
-            self._sse_url = env.get("MCP_SERVER_URL")
+        if not self._url:
+            self._url = env.get("MCP_SERVER_URL")
 
-        # Configure SSE if URL is available
-        if self._sse_url:
-            self._transport_type = "sse"
+        # Configure SSE or StreamableHttp if URL is available
+        if self._url:
+            # Determine transport type based on URL path
+            if "/mcp" in self._url:
+                self._transport_type = "streamable-http"
+            else:
+                self._transport_type = "sse"
 
             # Headers provided directly take precedence
             if sse_headers is not None:
-                self._sse_headers = sse_headers
+                self._headers = sse_headers
             else:
                 # Try to get headers from environment
                 env_headers = env.get("MCP_SERVER_HEADERS", {})
                 if isinstance(env_headers, str):
                     try:
-                        self._sse_headers = json.loads(env_headers)
+                        self._headers = json.loads(env_headers)
                     except:
-                        self._sse_headers = {}
+                        self._headers = {}
                 else:
-                    self._sse_headers = env_headers
+                    self._headers = env_headers
 
             # Timeouts provided directly take precedence
-            self._sse_timeout = sse_timeout
-            self._sse_read_timeout = sse_read_timeout
+            self._timeout = sse_timeout
+            self._read_timeout = sse_read_timeout
+            self._terminate_on_close = terminate_on_close
 
             # If not provided directly, try to get from environment
             if "MCP_SERVER_TIMEOUT" in env:
                 try:
-                    self._sse_timeout = float(env.get("MCP_SERVER_TIMEOUT", "5"))
+                    self._timeout = float(env.get("MCP_SERVER_TIMEOUT", "5"))
                 except ValueError:
-                    self._sse_timeout = 5.0
+                    self._timeout = 5.0
 
             if "MCP_SERVER_READ_TIMEOUT" in env:
                 try:
-                    self._sse_read_timeout = float(env.get("MCP_SERVER_READ_TIMEOUT", "300"))
+                    self._read_timeout = float(env.get("MCP_SERVER_READ_TIMEOUT", "300"))
                 except ValueError:
-                    self._sse_read_timeout = 300.0
+                    self._read_timeout = 300.0
 
-        # Configure stdio if command is provided and we're not using SSE
+        # Configure stdio if command is provided and we're not using SSE or StreamableHttp
         elif command is not None:
             from shlex import split
 
@@ -154,10 +163,11 @@ class McpTool(Toolkit):
             "command": self.server_params.command if self.server_params and self._transport_type == "stdio" else None,
             "args": self.server_params.args if self.server_params and self._transport_type == "stdio" else [],
             "env": env,
-            "sse_url": self._sse_url if self._transport_type == "sse" else None,
-            "sse_headers": self._sse_headers if self._transport_type == "sse" else None,
-            "sse_timeout": self._sse_timeout if self._transport_type == "sse" else None,
-            "sse_read_timeout": self._sse_read_timeout if self._transport_type == "sse" else None,
+            "url": self._url if self._transport_type in ["sse", "streamable-http"] else None,
+            "headers": self._headers if self._transport_type in ["sse", "streamable-http"] else None,
+            "timeout": self._timeout if self._transport_type in ["sse", "streamable-http"] else None,
+            "read_timeout": self._read_timeout if self._transport_type in ["sse", "streamable-http"] else None,
+            "terminate_on_close": self._terminate_on_close if self._transport_type == "streamable-http" else None,
         }
 
     async def __aenter__(self) -> "McpTool":
@@ -173,32 +183,55 @@ class McpTool(Toolkit):
             # Handle different transport types
             if self._transport_type == "sse":
                 # Create an SSE client connection
-                if not self._sse_url:
-                    raise ValueError("sse_server_url or MCP_SERVER_URL must be provided for SSE transport")
+                if not self._url:
+                    raise ValueError("url or MCP_SERVER_URL must be provided for SSE transport")
 
                 self._transport_context = sse_client(
-                    url=self._sse_url,
-                    headers=self._sse_headers,
-                    timeout=self._sse_timeout,
-                    sse_read_timeout=self._sse_read_timeout
+                    url=self._url,
+                    headers=self._headers,
+                    timeout=self._timeout,
+                    sse_read_timeout=self._read_timeout
                 )
+                
+                # For SSE, we get a tuple of (read, write)
+                read, write = await self._transport_context.__aenter__()
+                
+            elif self._transport_type == "streamable-http":
+                # Create a StreamableHttp client connection
+                if not self._url:
+                    raise ValueError("url or MCP_SERVER_URL must be provided for StreamableHttp transport")
+
+                self._transport_context = streamablehttp_client(
+                    url=self._url,
+                    headers=self._headers,
+                    timeout=timedelta(seconds=self._timeout),
+                    sse_read_timeout=timedelta(seconds=self._read_timeout),
+                    terminate_on_close=self._terminate_on_close
+                )
+                
+                # For StreamableHttp, we get a tuple of (read, write, get_session_id)
+                transport_result = await self._transport_context.__aenter__()
+                read, write = transport_result[0], transport_result[1]
+                
             else:
                 # Create a stdio client connection
                 if self.server_params is None:
                     raise ValueError("server_params or stdio_command must be provided when using stdio transport")
 
                 self._transport_context = stdio_client(self.server_params)
+                
+                # For stdio, we get a tuple of (read, write)
+                read, write = await self._transport_context.__aenter__()
 
             # Create session from transport
-            read, write = await self._transport_context.__aenter__()  # type: ignore
-            self._session_context = ClientSession(read, write)  # type: ignore
-            self.session = await self._session_context.__aenter__()  # type: ignore
+            self._session_context = ClientSession(read, write)
+            self.session = await self._session_context.__aenter__()
 
             # Store the parameters for later use in tool functions
             if self._transport_type == "stdio" and not hasattr(self.session, "_server_params"):
                 setattr(self.session, "_server_params", self.server_params)
-            elif self._transport_type == "sse" and not hasattr(self.session, "_sse_url"):
-                setattr(self.session, "_sse_url", self._sse_url)
+            elif self._transport_type in ["sse", "streamable-http"] and not hasattr(self.session, "_url"):
+                setattr(self.session, "_url", self._url)
 
             # Initialize with the new session
             await self.initialize()
@@ -288,10 +321,21 @@ class McpTool(Toolkit):
                                 server = MCPServerSse(
                                     name=t_name,
                                     params={
-                                        "url": self._server_config["sse_url"],
-                                        "headers": self._server_config["sse_headers"],
-                                        "timeout": self._server_config["sse_timeout"],
-                                        "sse_read_timeout": self._server_config["sse_read_timeout"]
+                                        "url": self._server_config["url"],
+                                        "headers": self._server_config["headers"],
+                                        "timeout": self._server_config["timeout"],
+                                        "sse_read_timeout": self._server_config["read_timeout"]
+                                    }
+                                )
+                            elif self._server_config["transport_type"] == "streamable-http":
+                                server = MCPServerStreamableHttp(
+                                    name=t_name,
+                                    params={
+                                        "url": self._server_config["url"],
+                                        "headers": self._server_config["headers"],
+                                        "timeout": timedelta(seconds=self._server_config["timeout"]) if self._server_config["timeout"] else None,
+                                        "sse_read_timeout": timedelta(seconds=self._server_config["read_timeout"]) if self._server_config["read_timeout"] else None,
+                                        "terminate_on_close": self._server_config["terminate_on_close"]
                                     }
                                 )
                             else:
@@ -309,7 +353,7 @@ class McpTool(Toolkit):
                                     # Call the tool (with timeout)
                                     result = await asyncio.wait_for(
                                         client.call_tool(t_name, kwargs),
-                                        timeout=self._sse_read_timeout
+                                        timeout=self._read_timeout
                                     )
                                     # Check if result is a string (error message) or a CallToolResult
                                     if isinstance(result, str):

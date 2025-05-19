@@ -41,7 +41,7 @@ from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAILLM
 
 # memory
 from agentica.model.base import Model
-from agentica.model.message import Message,MessageReferences
+from agentica.model.message import Message, MessageReferences
 from agentica.model.content import Media, Video, Audio, Image
 from agentica.model.response import ModelResponse, FileType
 from agentica.memory import (
@@ -136,5 +136,7 @@ from agentica.mcp.server import (
     MCPServerSseParams,
     MCPServerStdio,
     MCPServerStdioParams,
+    MCPServerStreamableHttp,
+    MCPServerStreamableHttpParams,
 )
 from agentica.mcp.client import MCPClient
