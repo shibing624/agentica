@@ -143,6 +143,10 @@ class JinaTool(Toolkit):
 
 if __name__ == '__main__':
     m = JinaTool(jina_reader=True, jina_search=True)
+    url = "https://raw.githubusercontent.com/shibing624/agentica/refs/heads/main/agentica/tools/base.py"
+    r = m.jina_url_reader(url)
+    print(r)
+
     url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
     r = m.jina_url_reader(url)
     print(url, '\n\n', r)
