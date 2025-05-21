@@ -94,7 +94,7 @@ class Agent(BaseModel):
     # -*- Agent Memory
     memory: AgentMemory = AgentMemory()
     # add_history_to_messages=true adds the chat history to the messages sent to the Model.
-    add_history_to_messages: bool = Field(False, alias="add_chat_history_to_messages")
+    add_history_to_messages: bool = Field(True, alias="add_chat_history_to_messages")
     # Number of historical responses to add to the messages.
     num_history_responses: int = 3
 

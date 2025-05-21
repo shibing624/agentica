@@ -119,7 +119,6 @@ from agentica.tools.jina_tool import JinaTool
 from agentica.tools.shell_tool import ShellTool
 from agentica.tools.text_analysis_tool import TextAnalysisTool
 from agentica.tools.weather_tool import WeatherTool
-from agentica.tools.mcp_tool import McpTool
 
 # agent
 from agentica.agent import Agent
@@ -130,13 +129,3 @@ from agentica.workflow_session import WorkflowSession
 
 # mcp
 from agentica.mcp.config import MCPConfig
-from agentica.mcp.server import (
-    MCPServer,
-    MCPServerSse,
-    MCPServerSseParams,
-    MCPServerStdio,
-    MCPServerStdioParams,
-    MCPServerStreamableHttp,
-    MCPServerStreamableHttpParams,
-)
-from agentica.mcp.client import MCPClient

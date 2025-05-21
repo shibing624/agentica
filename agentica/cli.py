@@ -4,13 +4,26 @@
 @description: command line interface for agentica
 """
 import argparse
+import os
+import sys
+import time
 from rich.console import Console
 from rich.text import Text
 import importlib
 from typing import List, Optional
 from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, PythonAgent
 
+
 console = Console()
+
+# Color constants
+class TermColor:
+    BRIGHT_CYAN = "\033[96m"
+    BRIGHT_GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    WHITE = "\033[97m"
+    RESET = "\033[0m"
 
 # Tool mapping dictionary - maps tool names to their import paths
 TOOL_MAP = {
@@ -130,33 +143,153 @@ def configure_tools(tool_names: Optional[List[str]] = None) -> List:
     return tools
 
 
+def print_header(model_provider: str, model_name: str, tools: Optional[List[str]] = None):
+    """Print the application header with version and model information"""
+    header_color = TermColor.BRIGHT_CYAN
+    accent_color = TermColor.BRIGHT_GREEN
+    reset = TermColor.RESET
+
+    # Create a boxed header
+    box_width = 60
+    border_top = f"{header_color}╭{'─' * (box_width - 1)}╮{reset}"
+    border_bottom = f"{header_color}╰{'─' * (box_width - 1)}╯{reset}"
+
+    # Print header
+    print(border_top)
+
+    # App name and version
+    app_name = f"{header_color}│{reset} {accent_color}Agentica CLI{reset} - Interactive AI Assistant"
+    padding = box_width - len(app_name) + len(header_color) + len(reset) + len(accent_color) + len(reset)
+    print(f"{app_name}{' ' * padding}{header_color}│{reset}")
+
+    # Model info
+    model_info = f"{header_color}│{reset} Model: {accent_color}{model_provider}/{model_name}{reset}"
+    padding = box_width - len(model_info) + len(header_color) + len(reset) + len(accent_color) + len(reset)
+    print(f"{model_info}{' ' * padding}{header_color}│{reset}")
+
+    # Tools info
+    if tools:
+        tools_str = ", ".join(tools)
+        tools_line = f"{header_color}│{reset} Tools: {accent_color}{tools_str}{reset}"
+        if len(tools_line) - len(header_color) - len(reset) - len(accent_color) - len(reset) > box_width - 4:
+            tools_str = tools_str[:(box_width - 24)] + "..."
+            tools_line = f"{header_color}│{reset} Tools: {accent_color}{tools_str}{reset}"
+        padding = box_width - len(tools_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
+        print(f"{tools_line}{' ' * padding}{header_color}│{reset}")
+
+    # Working directory
+    cwd = os.getcwd()
+    home = os.path.expanduser("~")
+    if cwd.startswith(home):
+        cwd = "~" + cwd[len(home):]
+    cwd_line = f"{header_color}│{reset} Working Directory: {cwd}"
+    if len(cwd_line) - len(header_color) - len(reset) > box_width - 4:
+        display_cwd = "..." + cwd[-(box_width - 24):]
+        cwd_line = f"{header_color}│{reset} Working Directory: {display_cwd}"
+    padding = box_width - len(cwd_line) + len(header_color) + len(reset)
+    print(f"{cwd_line}{' ' * padding}{header_color}│{reset}")
+
+    # Input instructions
+    input_line = f"{header_color}│{reset} Input with {accent_color}>{reset} prompt, press {accent_color}Enter twice{reset} to submit"
+    padding = box_width - len(input_line) + len(header_color) + len(reset) + 2 * len(accent_color) + 2 * len(reset)
+    print(f"{input_line}{' ' * padding}{header_color}│{reset}")
+
+    print(border_bottom)
+    print()
+
+
 def run_interactive(agent):
-    first_prompt = True
+    """Run the interactive CLI with multi-line input support"""
+    thinking_start_time = 0
+    loading = False
+
+    def show_thinking_indicator():
+        """Show a thinking indicator with elapsed time while waiting for a response"""
+        if loading:
+            elapsed = int(time.time() - thinking_start_time)
+            sys.stdout.write(f"\rThinking... ({elapsed}s)")
+            sys.stdout.flush()
+
+    def clear_thinking_indicator():
+        """Clear the thinking indicator from the terminal"""
+        sys.stdout.write("\r" + " " * 30 + "\r")  # Clear the line
+        sys.stdout.flush()
+
+    def get_user_input():
+        """Get multi-line user input. Input ends when user enters a single empty line."""
+        try:
+            console.print(Text("> ", style="green"), end="")
+            lines = []
+            while True:
+                try:
+                    line = input()
+                    if not line.strip():  # Empty line terminates input
+                        break
+                    lines.append(line)
+                except EOFError:
+                    return None
+
+            # If no valid input, return None
+            if not lines or not any(line.strip() for line in lines):
+                return None
+
+            user_input = '\n'.join(lines)
+            user_input = user_input.strip()
+
+            # Check if user wants to exit
+            if user_input.lower() in ['exit', 'quit', '\\q']:
+                return None
+
+            return user_input
+        except KeyboardInterrupt:
+            print("\nOperation interrupted.")
+            return None
+
     while True:
         try:
-            if first_prompt:
-                console.print(Text("Enter your question (type 'exit' to quit):", style="green"))
-                console.print(Text("> ", style="green"), end="")
-                first_prompt = False
-            else:
-                console.print(Text("> ", style="green"), end="")
-
-            line = console.input()
-            query = line.strip()
-
-            if query.lower() == 'exit':
+            query = get_user_input()
+            if query is None:
                 break
-            if query:
-                response = agent.run(query, stream=True)
-                console.print(Text("\n", style="green"), end="")
-                for chunk in response:
-                    console.print(chunk.content, end="")
-                console.print("\n")
+
+            # Set loading state and start thinking indicator
+            loading = True
+            thinking_start_time = time.time()
+
+            # Start a timer to update the thinking indicator
+            import threading
+            def update_indicator():
+                while loading:
+                    show_thinking_indicator()
+                    time.sleep(1)  # Update every second
+
+            indicator_thread = threading.Thread(target=update_indicator)
+            indicator_thread.daemon = True
+            indicator_thread.start()
+
+            # Get response from agent
+            response = agent.run(query, stream=True)
+            first_chunk = True
+
+            # Print response
+            for chunk in response:
+                if first_chunk:
+                    loading = False  # Stop the thinking indicator
+                    indicator_thread.join(timeout=0.1)  # Wait for indicator thread to finish
+                    clear_thinking_indicator()  # Clear the indicator
+                    first_chunk = False
+                console.print(chunk.content, end="")
+            console.print("\n")
+
         except KeyboardInterrupt:
-            break
+            loading = False
+            print("\nOperation interrupted.")
+            continue
         except Exception as e:
-            console.print(e)
-            break
+            loading = False
+            console.print(f"[red]Error: {str(e)}[/red]")
+            continue
+
+    console.print("\nThank you for using Agentica CLI. Goodbye!")
 
 
 def main():
@@ -171,14 +304,13 @@ def main():
     else:
         agent = Agent(model=model, add_datetime_to_instructions=True, add_history_to_messages=True,
                       tools=tools, debug_mode=debug_mode)
-    console.print(Text("Welcome to Agentica CLI!", style="bold green"))
-    console.print(Text(f"Model provider: {args.model_provider}, Model name: {args.model_name}, "
-                       f"tools: {args.tools}", style="red"))
+
     if args.query:
         response = agent.run(args.query, stream=True)
         for chunk in response:
             console.print(chunk.content, end="")
     else:
+        print_header(args.model_provider, args.model_name, args.tools)
         run_interactive(agent)
 
 
