@@ -5,16 +5,16 @@
 """
 import argparse
 import os
+import readline
 import sys
 import time
 from rich.console import Console
-from rich.text import Text
 import importlib
 from typing import List, Optional
 from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, PythonAgent
 
-
 console = Console()
+
 
 # Color constants
 class TermColor:
@@ -24,6 +24,7 @@ class TermColor:
     RED = "\033[91m"
     WHITE = "\033[97m"
     RESET = "\033[0m"
+
 
 # Tool mapping dictionary - maps tool names to their import paths
 TOOL_MAP = {
@@ -218,19 +219,37 @@ def run_interactive(agent):
     def get_user_input():
         """Get multi-line user input. Input ends when user enters a single empty line."""
         try:
-            console.print(Text("> ", style="green"), end="")
+            def pre_input(prompt):
+                readline.insert_text('')  # Ensure we're starting with empty input
+                readline.redisplay()
+                return prompt
+
+            # Store original get_line_buffer to restore later
+            original_get_line_buffer = readline.get_line_buffer
+            # Override get_line_buffer to prevent backspacing over prompt
+            readline.get_line_buffer = lambda: original_get_line_buffer() or ''
+
             lines = []
+            first_line = True
             while True:
                 try:
-                    line = input()
-                    if not line.strip():  # Empty line terminates input
-                        break
+                    if first_line:
+                        # For first line, use custom prompt handling
+                        line = input(pre_input("> "))
+                        first_line = False
+                    else:
+                        line = input()
                     lines.append(line)
                 except EOFError:
                     return None
-
+                finally:
+                    if first_line:
+                        readline.get_line_buffer = original_get_line_buffer  # Restore original function
+                if not line.strip():  # Empty line terminates input
+                    break
             # If no valid input, return None
             if not lines or not any(line.strip() for line in lines):
+                print("Empty input, please try again.")
                 return None
 
             user_input = '\n'.join(lines)
@@ -238,6 +257,7 @@ def run_interactive(agent):
 
             # Check if user wants to exit
             if user_input.lower() in ['exit', 'quit', '\\q']:
+                print("\nExiting...")
                 return None
 
             return user_input
@@ -267,6 +287,7 @@ def run_interactive(agent):
             indicator_thread.start()
 
             # Get response from agent
+            readline.add_history(query)
             response = agent.run(query, stream=True)
             first_chunk = True
 
