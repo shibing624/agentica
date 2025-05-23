@@ -230,7 +230,8 @@ def print_header(model_provider: str, model_name: str, tools: Optional[List[str]
     print(f"{cwd_line}{' ' * padding}{header_color}│{reset}")
 
     raw_input_instruction = f"Type /help for available commands. Use /m for multi-line."
-    colored_input_instruction = f"{header_color}│{reset} {raw_input_instruction.replace('/m', f"{accent_color}/m{reset}")} "
+    colored_input_instruction = f"{header_color}│{reset} {raw_input_instruction.replace(
+        '/m', f"{accent_color}/m{reset}").replace('/help', f"{accent_color}/help{reset}")} "
     visible_length = len(f"│ {raw_input_instruction} │")
     padding_needed = box_width - visible_length
     print(f"{colored_input_instruction}{' ' * padding_needed}{header_color}│{reset}")
