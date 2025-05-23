@@ -15,6 +15,7 @@ from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, 
 from agentica.config import AGENTICA_HOME
 
 console = Console()
+history_file = os.path.join(AGENTICA_HOME, "cli_history.txt")
 
 
 # Color constants
@@ -248,12 +249,10 @@ def get_user_input_revised(in_multiline_mode_flag: List[bool], multiline_buffer:
     try:
         if in_multiline_mode_flag[0]:
             console.print(Text("... ", style="blue"), end="")
-            sys.stdout.flush()
-            line = input()
         else:
             console.print(Text("> ", style="green"), end="")
-            sys.stdout.flush()
-            line = input()
+        sys.stdout.flush()
+        line = input()
 
         if in_multiline_mode_flag[0]:
             stripped_line = line.strip()
@@ -264,7 +263,7 @@ def get_user_input_revised(in_multiline_mode_flag: List[bool], multiline_buffer:
             return line, "multiline_content"
         else:  # Not in multi-line mode
             stripped_line = line.strip()
-            if stripped_line.lower() in ['exit', 'quit', '\\q']:
+            if stripped_line.lower() in ['exit', 'quit', '\\q', '/exit', '/quit']:
                 return None, "exit"
 
             if stripped_line.startswith("/"):
@@ -302,8 +301,6 @@ def run_interactive(agent_config: dict, initial_active_tool_names: List[str]):
     thinking_start_time = 0
     loading = False
     indicator_thread = None
-
-    history_file = os.path.expanduser("~/.agentica/cli_history.txt")  # Define history file path
 
     def show_thinking_indicator():
         if loading:
@@ -510,7 +507,6 @@ def run_interactive(agent_config: dict, initial_active_tool_names: List[str]):
             console.print(f"\n[bold red]An unexpected error occurred: {str(e)}[/bold red]")
             continue
 
-    # Before exiting the function, ensure history is saved one last time.
     try:
         import readline
         readline.write_history_file(history_file)
@@ -550,7 +546,6 @@ def main():
         console.print()  # final newline
     else:
         # Interactive mode
-        history_file = os.path.join(AGENTICA_HOME, "cli_history.txt")
         try:
             import readline
             os.makedirs(os.path.dirname(history_file), exist_ok=True)
