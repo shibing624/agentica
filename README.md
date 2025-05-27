@@ -71,7 +71,7 @@
 ## 系统架构
 
 <div align="center">
-    <img src="https://github.com/shibing624/agentica/blob/main/docs/agentica-architecture.png" alt="Agentica Architecture" width="800"/>
+    <img src="https://github.com/shibing624/agentica/blob/main/docs/agentica_architecture.png" alt="Agentica Architecture" width="800"/>
 </div>
 
 Agentica 采用模块化设计，主要包括以下核心组件：
