@@ -169,8 +169,7 @@ output:
 创建和使用自定义工具：
 
 ```python
-from agentica import Agent, OpenAIChat
-from agentica.tools.base import Toolkit
+from agentica import Agent, OpenAIChat, Toolkit
 
 class CalculatorTool(Toolkit):
     def __init__(self):
@@ -180,10 +179,10 @@ class CalculatorTool(Toolkit):
     def run(self, expression: str):
         try:
             result = eval(expression)
-            return {"result": result}
+            return str(result)
         except Exception as e:
-            return {"error": str(e)}
-
+            return str(e)
+        
 agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
     tools=[CalculatorTool()],
@@ -374,10 +373,11 @@ Agentica 支持多种 LLM 模型，选择取决于您的具体需求：
 
 ### 2. 如何自定义工具？
 
-Agentica 提供了灵活的工具自定义机制，您可以通过继承 `Tool` 类来创建自己的工具：
+Agentica 提供了灵活的工具自定义机制，您可以通过继承 `Toolkit` 类来创建自己的工具：
 
 ```python
 from agentica.tools.base import Toolkit
+import json
 
 class MyCustomTool(Toolkit):
     def __init(self):
@@ -387,7 +387,7 @@ class MyCustomTool(Toolkit):
     
     def run(self, **kwargs):
         # 实现工具逻辑
-        return {"result": "工具执行结果"}
+        return json.dumps({"result": "工具执行结果"})
 ```
 
 ### 3. 如何处理大型文档？
