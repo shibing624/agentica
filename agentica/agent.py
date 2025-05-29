@@ -94,7 +94,7 @@ class Agent(BaseModel):
     # -*- Agent Memory
     memory: AgentMemory = AgentMemory()
     # add_history_to_messages=true adds the chat history to the messages sent to the Model.
-    add_history_to_messages: bool = Field(True, alias="add_chat_history_to_messages")
+    add_history_to_messages: bool = Field(False, alias="add_chat_history_to_messages")
     # Number of historical responses to add to the messages.
     num_history_responses: int = 3
 
@@ -264,13 +264,13 @@ class Agent(BaseModel):
     @field_validator("agent_id", mode="before")
     def set_agent_id(cls, v: Optional[str]) -> str:
         agent_id = v or str(uuid4())
-        logger.debug(f"*********** Agent ID: {agent_id} ***********")
+        # logger.debug(f"*********** Agent ID: {agent_id} ***********")
         return agent_id
 
     @field_validator("session_id", mode="before")
     def set_session_id(cls, v: Optional[str]) -> str:
         session_id = v or str(uuid4())
-        logger.debug(f"*********** Session ID: {session_id} ***********")
+        # logger.debug(f"*********** Session ID: {session_id} ***********")
         return session_id
 
     @property
@@ -1723,8 +1723,6 @@ class Agent(BaseModel):
         self.run_id = str(uuid4())
         self.run_response = RunResponse(run_id=self.run_id, session_id=self.session_id, agent_id=self.agent_id)
 
-        logger.debug(f"*********** Agent Run Start: {self.run_response.run_id} ***********")
-
         # 1. Setup: Update the model class and resolve context
         self.update_model()
         self.run_response.model = self.model.id if self.model is not None else None
@@ -1901,7 +1899,6 @@ class Agent(BaseModel):
         elif messages is not None:
             self.run_input = [m.to_dict() if isinstance(m, Message) else m for m in messages]
 
-        logger.debug(f"*********** Agent Run End: {self.run_response.run_id} ***********")
         if self.stream_intermediate_steps:
             yield self.generic_run_response(
                 content=self.run_response.content,
@@ -2054,8 +2051,6 @@ class Agent(BaseModel):
         # Create the run_response object
         self.run_id = str(uuid4())
         self.run_response = RunResponse(run_id=self.run_id, session_id=self.session_id, agent_id=self.agent_id)
-
-        logger.debug(f"*********** Agent Run Start: {self.run_response.run_id} ***********")
 
         # 1. Update the Model (set defaults, add tools, etc.)
         self.update_model()
@@ -2227,7 +2222,6 @@ class Agent(BaseModel):
         elif messages is not None:
             self.run_input = [m.to_dict() if isinstance(m, Message) else m for m in messages]
 
-        logger.debug(f"*********** Agent Run End: {self.run_response.run_id} ***********")
         if self.stream_intermediate_steps:
             yield self.generic_run_response(
                 content=self.run_response.content,

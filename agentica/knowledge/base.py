@@ -267,7 +267,6 @@ class Knowledge(BaseModel):
             logger.info("Creating collection")
             self.vector_db.create()
 
-        logger.info("Loading knowledge base")
         num_documents = 0
         for document_list in self.document_lists:
             documents_to_load = document_list
@@ -283,7 +282,6 @@ class Knowledge(BaseModel):
                     ]
                 self.vector_db.insert(documents=documents_to_load, filters=filters)
             num_documents += len(documents_to_load)
-            logger.info(f"Added {len(documents_to_load)} documents to knowledge base")
 
     def load_documents(
             self, documents: List[Document], upsert: bool = False, skip_existing: bool = True,

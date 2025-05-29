@@ -150,7 +150,7 @@ class LanceDb(VectorDb):
                     "payload": json.dumps(payload, ensure_ascii=False),
                 }
             )
-            logger.debug(f"Inserted document: {document.name} ({document.meta_data})")
+            logger.debug(f"Inserted document: {document.name} ({document.to_dict()})")
 
         self.table.add(data)
         logger.debug(f"Upsert {len(data)} documents")

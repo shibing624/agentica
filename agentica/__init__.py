@@ -109,6 +109,7 @@ from agentica.storage.workflow.postgres import PgWorkflowStorage
 # tool
 from agentica.tools.base import Tool, Toolkit, Function, FunctionCall
 from agentica.tools.search_serper_tool import SearchSerperTool
+from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.run_python_code_tool import RunPythonCodeTool
 from agentica.tools.analyze_image_tool import AnalyzeImageTool
 from agentica.tools.calculator_tool import CalculatorTool

@@ -258,11 +258,7 @@ class Workflow(BaseModel):
         self.run_input = {"args": args, "kwargs": kwargs}
         self.run_response = RunResponse(run_id=self.run_id, session_id=self.session_id, workflow_id=self.workflow_id)
         self.read_from_storage()
-
-        logger.debug(f"*********** Workflow Run Start: {self.run_id} ***********")
         result = self._subclass_run(*args, **kwargs)
-
-        # The run_workflow() method handles both Iterator[RunResponse] and RunResponse
 
         # Case 1: The run method returns an Iterator[RunResponse]
         if isinstance(result, (GeneratorType, collections.abc.Iterator)):
@@ -288,8 +284,6 @@ class Workflow(BaseModel):
                 self.memory.add_run(WorkflowRun(input=self.run_input, response=self.run_response))
                 # Write this run to the database
                 self.write_to_storage()
-                logger.debug(f"*********** Workflow Run End: {self.run_id} ***********")
-
             return result_generator()
         # Case 2: The run method returns a RunResponse
         elif isinstance(result, RunResponse):
@@ -306,7 +300,6 @@ class Workflow(BaseModel):
             self.memory.add_run(WorkflowRun(input=self.run_input, response=self.run_response))
             # Write this run to the database
             self.write_to_storage()
-            logger.debug(f"*********** Workflow Run End: {self.run_id} ***********")
             return result
         else:
             logger.warning(f"Workflow.run() should only return RunResponse objects, got: {type(result)}")

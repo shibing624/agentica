@@ -245,7 +245,7 @@ class BaiduSearchTool(Toolkit):
         Args:
             query (str): Search keyword
             max_results (int, optional): Maximum number of results to return, default 5
-            language (str, optional): Search language, default Chinese
+            language (str, optional): Search language, default is 'zh'
 
         Returns:
             str: A JSON formatted string containing the search results.
