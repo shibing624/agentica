@@ -10,11 +10,11 @@ import base64
 from typing import Optional, Dict, Any, List
 import requests
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class VolcTtsTool(Toolkit):
+class VolcTtsTool(Tool):
     """
     Tool for text-to-speech conversion using Volcengine TTS API.
     """

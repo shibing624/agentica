@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationIn
 
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.tools.base import Tool, Toolkit, Function, FunctionCall, ToolCallException
+from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
@@ -27,7 +27,7 @@ class Model(BaseModel):
     # Tools are functions the model may generate JSON inputs for.
     # If you provide a dict, it is not called by the model.
     # Always add tools using the add_tool() method.
-    tools: Optional[List[Union[Tool, Dict]]] = None
+    tools: Optional[List[Union[ModelTool, Dict]]] = None
     # Controls which (if any) function is called by the model.
     # "none" means the model will not call a function and instead generates a message.
     # "auto" means the model can pick between generating a message or calling a function.
@@ -117,31 +117,31 @@ class Model(BaseModel):
 
         tools_for_api = []
         for tool in self.tools:
-            if isinstance(tool, Tool):
+            if isinstance(tool, ModelTool):
                 tools_for_api.append(tool.to_dict())
             elif isinstance(tool, Dict):
                 tools_for_api.append(tool)
         return tools_for_api
 
     def add_tool(
-            self, tool: Union[Tool, Toolkit, Callable, Dict, Function], strict: bool = False,
+            self, tool: Union[ModelTool, Tool, Callable, Dict, Function], strict: bool = False,
             agent: Optional[Any] = None
     ) -> None:
         if self.tools is None:
             self.tools = []
 
         # If the tool is a Tool or Dict, add it directly to the Model
-        if isinstance(tool, Tool) or isinstance(tool, Dict):
+        if isinstance(tool, ModelTool) or isinstance(tool, Dict):
             if tool not in self.tools:
                 self.tools.append(tool)
                 logger.debug(f"Added tool {tool} to model.")
 
         # If the tool is a Callable or Toolkit, process and add to the Model
-        elif callable(tool) or isinstance(tool, Toolkit) or isinstance(tool, Function):
+        elif callable(tool) or isinstance(tool, Tool) or isinstance(tool, Function):
             if self.functions is None:
                 self.functions = {}
 
-            if isinstance(tool, Toolkit):
+            if isinstance(tool, Tool):
                 # For each function in the toolkit, process entrypoint and add to self.tools
                 for name, func in tool.functions.items():
                     # If the function does not exist in self.functions, add to self.tools

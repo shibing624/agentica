@@ -1,27 +1,29 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description:
 """
 import sys
-
-from loguru import logger as _logger
+import loguru
 
 from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
 
+logger = loguru.logger
 
-def get_logger(log_level: str = "INFO", log_file: str = None):
-    """Get logger instance."""
-    _logger.remove()
-    _logger.add(
+
+def configure_logger(log_level: str = "INFO", log_file: str = None):
+    """Configure loguru logger."""
+    logger.remove()
+    logger.add(
         sink=sys.stdout,
         level=log_level,
         enqueue=True,  # 异步输出日志
         backtrace=False,  # 设置为 True 以打印回溯
         diagnose=False,  # 设置为 True 以自动显示变量
     )
+
     if log_file:
-        _logger.add(
+        logger.add(
             sink=log_file,
             level=log_level,
             rotation="1 week",
@@ -30,13 +32,16 @@ def get_logger(log_level: str = "INFO", log_file: str = None):
             backtrace=False,
             diagnose=False,
         )
-    return _logger
+
+    return logger
 
 
-logger = get_logger(log_level=AGENTICA_LOG_LEVEL, log_file=AGENTICA_LOG_FILE)
+# 初始化配置全局logger
+configure_logger(log_level=AGENTICA_LOG_LEVEL, log_file=AGENTICA_LOG_FILE)
 
 
 def set_log_level_to_debug():
+    """Set log level to DEBUG for all handlers."""
     logger.remove()  # 移除之前的日志处理器
     logger.add(
         sink=sys.stdout,
@@ -56,6 +61,7 @@ def set_log_level_to_debug():
 
 
 def set_log_level_to_info():
+    """Set log level to INFO for all handlers."""
     logger.remove()  # 移除之前的日志处理器
     logger.add(
         sink=sys.stdout,
@@ -75,4 +81,5 @@ def set_log_level_to_info():
 
 
 def print_llm_stream(msg):
+    """Print message without newline."""
     print(msg, end="", flush=True)

@@ -27,7 +27,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
@@ -244,7 +244,7 @@ def display_markdown(content: str):
         live.refresh()
 
 
-class RunNbCodeTool(Toolkit):
+class RunNbCodeTool(Tool):
     """Run notebook code block, return result to llm, and display it."""
 
     def __init__(self, timeout: int = 600):

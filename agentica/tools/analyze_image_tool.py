@@ -11,11 +11,11 @@ from typing import Optional, cast
 
 from agentica.model.base import Model
 from agentica.model.openai.chat import OpenAIChat
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class AnalyzeImageTool(Toolkit):
+class AnalyzeImageTool(Tool):
     """
     This class inherits from the Toolkit class.
     It defines a function for analyzing and understanding image content using OpenAI's API.

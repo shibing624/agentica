@@ -14,11 +14,11 @@ from os import getenv
 from typing import Optional
 from urllib.parse import urlparse
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class JinaTool(Toolkit):
+class JinaTool(Tool):
     def __init__(
             self,
             api_key: Optional[str] = None,

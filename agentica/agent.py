@@ -35,7 +35,7 @@ from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_
 from agentica.document import Document
 from agentica.knowledge.base import Knowledge
 from agentica.model.openai import OpenAIChat
-from agentica.tools.base import Tool, Toolkit, Function
+from agentica.tools.base import ModelTool, Tool, Function
 from agentica.utils.misc import merge_dictionaries
 from agentica.template import PromptTemplate
 from agentica.model.content import Image, Video
@@ -119,7 +119,7 @@ class Agent(BaseModel):
     # A list of tools provided to the Model.
     # Tools are functions the model may generate JSON inputs for.
     # If you provide a dict, it is not called by the model.
-    tools: Optional[List[Union[Tool, Toolkit, Callable, Dict, Function]]] = None
+    tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None
     # Show tool calls in Agent response.
     show_tool_calls: bool = False
     # Maximum number of tool calls allowed.
@@ -446,7 +446,7 @@ class Agent(BaseModel):
                 if agent.tools is not None:
                     _tools = []
                     for _tool in agent.tools:
-                        if isinstance(_tool, Toolkit):
+                        if isinstance(_tool, Tool):
                             _tools.extend(list(_tool.functions.keys()))
                         elif isinstance(_tool, Function):
                             _tools.append(_tool.name)
@@ -456,8 +456,8 @@ class Agent(BaseModel):
             return transfer_prompt
         return ""
 
-    def get_tools(self) -> Optional[List[Union[Tool, Toolkit, Callable, Dict, Function]]]:
-        tools: List[Union[Tool, Toolkit, Callable, Dict, Function]] = []
+    def get_tools(self) -> Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]]:
+        tools: List[Union[ModelTool, Tool, Callable, Dict, Function]] = []
 
         # Add provided tools
         if self.tools is not None:

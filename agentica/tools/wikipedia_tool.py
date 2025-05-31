@@ -6,11 +6,11 @@ part of the code is from phidata
 """
 import json
 from agentica.document import Document
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class WikipediaTool(Toolkit):
+class WikipediaTool(Tool):
     def __init__(self):
         super().__init__(name="wikipedia_tool")
         self.register(self.search_wikipedia)

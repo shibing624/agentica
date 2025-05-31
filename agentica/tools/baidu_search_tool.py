@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 import json
 from typing import Optional, List, Dict, Any
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 ABSTRACT_MAX_LENGTH = 300  # abstract max length
@@ -212,7 +212,7 @@ def parse_html(url, rank_start=0, debug=0):
         return None, None
 
 
-class BaiduSearchTool(Toolkit):
+class BaiduSearchTool(Tool):
     """
     BaiduSearch is a toolkit for searching Baidu easily.
 

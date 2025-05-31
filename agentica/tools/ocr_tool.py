@@ -8,11 +8,11 @@ try:
 except ImportError:
     raise ImportError("The `imgocr` package is not installed. Please install it via `pip install imgocr`.")
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class OcrTool(Toolkit):
+class OcrTool(Tool):
     def __init__(self, use_gpu: bool = False):
         """
         Initializes the OCR tool with the specified languages and GPU setting.

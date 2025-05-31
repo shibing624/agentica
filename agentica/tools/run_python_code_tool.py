@@ -11,7 +11,7 @@ import os
 import runpy
 from typing import Optional
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
@@ -20,7 +20,7 @@ def warn() -> None:
     logger.warning("RunPythonCode can run arbitrary code, please provide human supervision.")
 
 
-class RunPythonCodeTool(Toolkit):
+class RunPythonCodeTool(Tool):
     """impl of RunPythonCodeTool,
         which can run python code, install package by pip.
         We call it code interpreter tool.

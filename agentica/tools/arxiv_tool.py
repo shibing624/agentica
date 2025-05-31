@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 try:
@@ -16,7 +16,7 @@ except ImportError:
     raise ImportError("`pypdf` not installed. Please install using `pip install pypdf`")
 
 
-class ArxivTool(Toolkit):
+class ArxivTool(Tool):
     def __init__(
             self,
             search_arxiv: bool = True,

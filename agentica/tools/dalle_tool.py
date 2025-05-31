@@ -15,10 +15,10 @@ import requests
 
 from agentica.model.base import Model
 from agentica.model.openai import OpenAIChat
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 
 
-class DalleTool(Toolkit):
+class DalleTool(Tool):
     """
     This class inherits from the Toolkit class.
         It defines a function for creating an image from a description using OpenAI's API.

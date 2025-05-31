@@ -360,45 +360,7 @@ class FunctionCall(BaseModel):
         return function_call_success
 
 
-class Toolkit:
-    """Toolkit for managing functions."""
-
-    def __init__(self, name: str = "tool"):
-        self.name: str = name
-        self.functions: Dict[str, Function] = OrderedDict()
-
-    def register(self, function: Callable[..., Any], sanitize_arguments: bool = True):
-        """Register a function with the toolkit.
-
-        Args:
-            function: The callable to register
-
-        Returns:
-            The registered function
-        """
-        try:
-            f = Function(
-                name=function.__name__,
-                entrypoint=function,
-                sanitize_arguments=sanitize_arguments,
-            )
-            self.functions[f.name] = f
-            logger.debug(f"Function: {f.name} registered with {self.name}")
-        except Exception as e:
-            logger.warning(f"Failed to create Function for: {function.__name__}")
-            raise e
-
-    def instructions(self) -> str:
-        return ""
-
-    def __repr__(self):
-        return f"<{self.__class__.__name__} name={self.name} functions={list(self.functions.keys())}>"
-
-    def __str__(self):
-        return self.__repr__()
-
-
-class Tool(BaseModel):
+class ModelTool(BaseModel):
     """Model for Tools"""
 
     # The type of tool
@@ -609,3 +571,40 @@ def remove_function_calls_from_string(
         end_index = text.find(end_tag) + len(end_tag)
         text = text[:start_index] + text[end_index:]
     return text
+
+
+class Tool:
+    """Tool for managing functions."""
+
+    def __init__(self, name: str = "tool"):
+        self.name: str = name
+        self.functions: Dict[str, Function] = OrderedDict()
+
+    def register(self, function: Callable[..., Any], sanitize_arguments: bool = True):
+        """Register a function with the toolkit.
+
+        Args:
+            function: The callable to register
+            sanitize_arguments: If True, the arguments will be sanitized before being passed to the function.
+
+        Returns:
+            The registered function
+        """
+        try:
+            f = Function(
+                name=function.__name__,
+                description=function.__doc__ or "",
+                entrypoint=function,
+                sanitize_arguments=sanitize_arguments,
+            )
+            self.functions[f.name] = f
+            logger.debug(f"Function: {f.name} registered with {self.name}")
+        except Exception as e:
+            logger.warning(f"Failed to create Function for: {function.__name__}")
+            raise e
+
+    def __repr__(self):
+        return f"<{self.__class__.__name__} name={self.name} functions={list(self.functions.keys())}>"
+
+    def __str__(self):
+        return self.__repr__()

@@ -107,7 +107,7 @@ from agentica.storage.workflow.sqlite import SqlWorkflowStorage
 from agentica.storage.workflow.postgres import PgWorkflowStorage
 
 # tool
-from agentica.tools.base import Tool, Toolkit, Function, FunctionCall
+from agentica.tools.base import Tool, ModelTool, Function, FunctionCall
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.run_python_code_tool import RunPythonCodeTool

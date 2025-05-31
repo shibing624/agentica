@@ -40,7 +40,6 @@ class Metrics:
     response_timer: Timer = field(default_factory=Timer)
 
     def log(self):
-        logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
         logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
@@ -48,11 +47,6 @@ class Metrics:
         logger.debug(f"* Input tokens:                {self.input_tokens or self.prompt_tokens}")
         logger.debug(f"* Output tokens:               {self.output_tokens or self.completion_tokens}")
         logger.debug(f"* Total tokens:                {self.total_tokens}")
-        if self.prompt_tokens_details is not None:
-            logger.debug(f"* Prompt tokens details:       {self.prompt_tokens_details}")
-        if self.completion_tokens_details is not None:
-            logger.debug(f"* Completion tokens details:   {self.completion_tokens_details}")
-        logger.debug("**************** METRICS END ******************")
 
 
 @dataclass

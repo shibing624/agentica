@@ -53,7 +53,6 @@ class Metrics:
 
     def log(self):
         """Log metrics with null checks and safe calculations."""
-        logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
         elapsed = self.response_timer.elapsed or 0
@@ -73,11 +72,6 @@ class Metrics:
         # Total tokens might be directly provided or need to be calculated
         total = self.total_tokens or (input_tokens + output_tokens) or 0
         logger.debug(f"* Total tokens:                {total}")
-        if self.prompt_tokens_details is not None:
-            logger.debug(f"* Prompt tokens details:       {self.prompt_tokens_details}")
-        if self.completion_tokens_details is not None:
-            logger.debug(f"* Completion tokens details:   {self.completion_tokens_details}")
-        logger.debug("**************** METRICS END ******************")
 
 
 @dataclass
@@ -602,7 +596,6 @@ class OpenAIChat(Model):
         Returns:
             ModelResponse: The model response.
         """
-        logger.debug("---------- OpenAI Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -661,7 +654,6 @@ class OpenAIChat(Model):
                 is not None
         ):
             return self.handle_post_tool_call_messages(messages=messages, model_response=model_response)
-        logger.debug("---------- OpenAI Response End ----------")
         return model_response
 
     async def aresponse(self, messages: List[Message]) -> ModelResponse:
@@ -864,7 +856,6 @@ class OpenAIChat(Model):
         Returns:
             Iterator[ModelResponse]: An iterator of model responses.
         """
-        logger.debug("---------- OpenAI Response Start ----------")
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
@@ -934,7 +925,6 @@ class OpenAIChat(Model):
                 assistant_message=assistant_message, messages=messages, tool_role=tool_role
             )
             yield from self.handle_post_tool_call_messages_stream(messages=messages)
-        logger.debug("---------- OpenAI Response End ----------")
 
     async def aresponse_stream(self, messages: List[Message]) -> Any:
         """

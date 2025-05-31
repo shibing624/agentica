@@ -11,11 +11,11 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple, Union
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class CodeTool(Toolkit):
+class CodeTool(Tool):
     """
     A toolkit for code operations, including analysis, formatting, and linting.
     Essential for building code editor functionality.

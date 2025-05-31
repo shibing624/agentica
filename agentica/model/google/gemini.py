@@ -8,7 +8,7 @@ from typing import Optional, List, Iterator, Dict, Any, Union, Callable
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
-from agentica.tools.base import Function, FunctionCall, Tool, Toolkit, get_function_call_for_tool_call
+from agentica.tools.base import Function, FunctionCall, ModelTool, Tool, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
@@ -353,7 +353,7 @@ class Gemini(Model):
 
     def add_tool(
             self,
-            tool: Union["Tool", "Toolkit", Callable, dict, "Function"],
+            tool: Union["ModelTool", "Tool", Callable, dict, "Function"],
             strict: bool = False,
             agent: Optional[Any] = None,
     ) -> None:
@@ -367,15 +367,15 @@ class Gemini(Model):
             self.function_declarations = []
 
         # If the tool is a Tool or Dict, log a warning.
-        if isinstance(tool, Tool) or isinstance(tool, Dict):
+        if isinstance(tool, ModelTool) or isinstance(tool, Dict):
             logger.warning("Tool of type 'Tool' or 'dict' is not yet supported by Gemini.")
 
         # If the tool is a Callable or Toolkit, add its functions to the Model
-        elif callable(tool) or isinstance(tool, Toolkit) or isinstance(tool, Function):
+        elif callable(tool) or isinstance(tool, Tool) or isinstance(tool, Function):
             if self.functions is None:
                 self.functions = {}
 
-            if isinstance(tool, Toolkit):
+            if isinstance(tool, Tool):
                 # For each function in the toolkit, process entrypoint and add to self.tools
                 for name, func in tool.functions.items():
                     # If the function does not exist in self.functions, add to self.tools

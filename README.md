@@ -169,23 +169,25 @@ output:
 创建和使用自定义工具：
 
 ```python
-from agentica import Agent, OpenAIChat, Toolkit
+from agentica import Agent, OpenAIChat, Tool
 
-class CalculatorTool(Toolkit):
-    def __init__(self):
-        super().__init__(name="calculator")
-        self.register(self.run)
-    
-    def run(self, expression: str):
-        try:
-            result = eval(expression)
-            return str(result)
-        except Exception as e:
-            return str(e)
-        
+
+class CalculatorTool(Tool):
+   def __init__(self):
+      super().__init__(name="calculator")
+      self.register(self.calc)
+
+   def calc(self, expression: str):
+      try:
+         result = eval(expression)
+         return str(result)
+      except Exception as e:
+         return str(e)
+
+
 agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
-    tools=[CalculatorTool()],
+   model=OpenAIChat(id="gpt-4o"),
+   tools=[CalculatorTool()],
 )
 
 agent.print_response("计算 (123 + 456) * 789 的结果")
@@ -376,18 +378,19 @@ Agentica 支持多种 LLM 模型，选择取决于您的具体需求：
 Agentica 提供了灵活的工具自定义机制，您可以通过继承 `Toolkit` 类来创建自己的工具：
 
 ```python
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 import json
 
-class MyCustomTool(Toolkit):
-    def __init(self):
-        name = "my_custom_tool"
-        super().__init__(name=name)
-        self.register(self.run)
-    
-    def run(self, **kwargs):
-        # 实现工具逻辑
-        return json.dumps({"result": "工具执行结果"})
+
+class MyCustomTool(Tool):
+   def __init(self):
+      name = "my_custom_tool"
+      super().__init__(name=name)
+      self.register(self.run)
+
+   def run(self, **kwargs):
+      # 实现工具逻辑
+      return json.dumps({"result": "工具执行结果"})
 ```
 
 ### 3. 如何处理大型文档？

@@ -9,11 +9,11 @@ import difflib
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class EditTool(Toolkit):
+class EditTool(Tool):
     """
     A toolkit for editing files, particularly useful for code editing features.
     Provides functionality similar to modern code editors.

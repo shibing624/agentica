@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
@@ -101,7 +101,7 @@ class SerperWrapper(BaseModel):
         return f"{toret}\n{toret_l}" if as_string else toret_l
 
 
-class SearchSerperTool(Toolkit):
+class SearchSerperTool(Tool):
     """
     This class inherits from the BaseFunction class. It defines a function for fetching the contents of a URL.
     """

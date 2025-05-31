@@ -6,11 +6,11 @@ part of the code is from phidata
 """
 from pathlib import Path
 from typing import List, Optional, Union
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class ShellTool(Toolkit):
+class ShellTool(Tool):
     def __init__(self, data_dir: Optional[Union[Path, str]] = None):
         super().__init__(name="shell_tool")
 

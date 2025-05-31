@@ -1,7 +1,7 @@
 from os import getenv
 from typing import Optional
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 try:
@@ -10,7 +10,7 @@ except ImportError:
     raise ImportError("`resend` not installed. Please install using `pip install resend`.")
 
 
-class ResendTools(Toolkit):
+class ResendTools(Tool):
     def __init__(
             self,
             api_key: Optional[str] = None,

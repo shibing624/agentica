@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Optional, Union
 
 from agentica.utils.log import logger
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 
 
-class AirflowTool(Toolkit):
+class AirflowTool(Tool):
     def __init__(self, dags_dir: Optional[Union[Path, str]] = None, save_dag: bool = True, read_dag: bool = True):
         super().__init__(name="AirflowTool")
 

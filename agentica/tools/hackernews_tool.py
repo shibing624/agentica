@@ -6,11 +6,11 @@ part of the code is from phidata
 """
 import json
 import httpx
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class HackerNewsTool(Toolkit):
+class HackerNewsTool(Tool):
     def __init__(
         self,
         get_top_stories: bool = True,

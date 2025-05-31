@@ -9,7 +9,7 @@ import ssl
 from os import getenv
 from typing import Optional, Dict, Any, List
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 try:
@@ -21,7 +21,7 @@ except ImportError:
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-class SearchExaTool(Toolkit):
+class SearchExaTool(Tool):
     def __init__(
             self,
             text: bool = True,

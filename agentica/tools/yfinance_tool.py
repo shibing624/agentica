@@ -6,7 +6,7 @@ part of the code is from phidata
 """
 import json
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 
 try:
     import yfinance as yf
@@ -14,7 +14,7 @@ except ImportError:
     raise ImportError("`yfinance` not installed. Please install using `pip install yfinance`.")
 
 
-class YFinanceTool(Toolkit):
+class YFinanceTool(Tool):
     def __init__(
             self,
             stock_price: bool = True,

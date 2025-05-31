@@ -13,11 +13,11 @@ import markdownify
 import requests
 from bs4 import BeautifulSoup
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class UrlCrawlerTool(Toolkit):
+class UrlCrawlerTool(Tool):
     def __init__(
             self,
             base_dir: str = os.path.curdir,

@@ -21,11 +21,11 @@ try:
 except ImportError:
     raise ImportError("`zhipuai` not installed. Please install using `pip install zhipuai`.")
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class CogViewTool(Toolkit):
+class CogViewTool(Tool):
     """
     This class inherits from the Toolkit class.
         It defines a function for creating an image from a description using ZhipuAI's API.

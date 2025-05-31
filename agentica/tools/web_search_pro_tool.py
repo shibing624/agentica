@@ -15,11 +15,11 @@ try:
 except ImportError:
     raise ImportError("`zhipuai` not installed. Please install using `pip install zhipuai`.")
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class WebSearchProTool(Toolkit):
+class WebSearchProTool(Tool):
     def __init__(self, api_key: Optional[str] = None, timeout: int = 300):
         super().__init__(name="web_search_pro")
         self.api_key = api_key or getenv("ZHIPUAI_API_KEY")

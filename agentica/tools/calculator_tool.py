@@ -1,11 +1,11 @@
 import json
 import math
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class CalculatorTool(Toolkit):
+class CalculatorTool(Tool):
     def __init__(
             self,
             add: bool = True,

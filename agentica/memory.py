@@ -569,7 +569,6 @@ class AgentMemory(BaseModel):
     def add_run(self, agent_run: AgentRun) -> None:
         """Adds an AgentRun to the runs list."""
         self.runs.append(agent_run)
-        logger.debug("Added AgentRun to AgentMemory")
 
     def add_system_message(self, message: Message, system_message_role: str = "system") -> None:
         """Add the system messages to the messages list"""

@@ -5,11 +5,11 @@
 """
 import json
 import requests
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class WeatherTool(Toolkit):
+class WeatherTool(Tool):
     def __init__(self):
         super().__init__(name="get_weather_tool")
         self.register(self.get_weather)

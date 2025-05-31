@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, Optional
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 try:
@@ -10,7 +10,7 @@ except ImportError:
     raise ImportError("`newspaper4k` not installed. Please run `pip install newspaper4k lxml_html_clean`.")
 
 
-class NewspaperTool(Toolkit):
+class NewspaperTool(Tool):
     def __init__(
             self,
             read_article: bool = True,

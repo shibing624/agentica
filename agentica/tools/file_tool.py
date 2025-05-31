@@ -16,10 +16,10 @@ from agentica.utils.file_parser import (
     read_excel_file
 )
 from agentica.utils.log import logger
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 
 
-class FileTool(Toolkit):
+class FileTool(Tool):
     def __init__(
             self,
             data_dir: Optional[str] = None,
@@ -102,7 +102,7 @@ class FileTool(Toolkit):
                 file_contents = read_json_file(path)
             elif path.suffix in [".csv"]:
                 file_contents = read_csv_file(path)
-            elif path.suffix in [".txt", ".md"]:
+            elif path.suffix in [".txt", ".md", ".py", ".log", ".java", ".cpp", ".c", ".h", ".php", ".html", ".css"]:
                 file_contents = read_txt_file(path)
             elif path.suffix in [".pdf"]:
                 file_contents = read_pdf_file(path)

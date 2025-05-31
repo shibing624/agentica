@@ -18,6 +18,8 @@ r = m.run("李四住在北京，一家三口住大别墅")
 print(r)
 r = m.run("我前面问了啥")
 print(r)
+pprint(m.memory.messages)
+pprint(m.memory.memories)
 print("=====================")
 
 # add history to messages

@@ -9,11 +9,11 @@ import shutil
 from pathlib import Path
 from typing import Optional, Dict, Any
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class WorkspaceTool(Toolkit):
+class WorkspaceTool(Tool):
     """
     A toolkit for workspace management and file navigation.
     Essential for building a code editor's project management functionality.

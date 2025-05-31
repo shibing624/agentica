@@ -21,11 +21,11 @@ from agentica.mcp.client import MCPClient
 from agentica.mcp.config import MCPConfig
 from agentica.mcp.server import MCPServerStdio, MCPServerSse, MCPServerStreamableHttp
 from agentica.tools.base import Function
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class McpTool(Toolkit):
+class McpTool(Tool):
     """
     A toolkit for integrating Model Context Protocol (MCP) servers with Agno agents.
     This allows agents to access tools, resources, and prompts exposed by MCP servers.

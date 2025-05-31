@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from agentica.utils.log import logger
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 
 try:
     from apify_client import ApifyClient
@@ -17,7 +17,7 @@ except ImportError:
     raise ImportError("`apify_client` not installed. Please install using `pip install apify-client`")
 
 
-class ApifyTool(Toolkit):
+class ApifyTool(Tool):
     def __init__(
             self,
             api_key: Optional[str] = None,

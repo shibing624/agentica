@@ -125,7 +125,7 @@ class Knowledge(BaseModel):
                 file_contents = read_json_file(path)
             elif path.suffix in [".csv"]:
                 file_contents = read_csv_file(path)
-            elif path.suffix in [".txt", ".md"]:
+            elif path.suffix in [".txt", ".md", ".py", ".log", ".java", ".cpp", ".c", ".h", ".php", ".html", ".css"]:
                 file_contents = read_txt_file(path)
             elif path.suffix in [".pdf"]:
                 file_contents = read_pdf_file(path)

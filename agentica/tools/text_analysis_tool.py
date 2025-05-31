@@ -8,10 +8,10 @@ from typing import Optional
 from agentica.model.message import Message
 from agentica.model.base import Model
 from agentica.model.openai import OpenAIChat
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 
 
-class TextAnalysisTool(Toolkit):
+class TextAnalysisTool(Tool):
     def __init__(self, llm: Optional[Model] = None):
         super().__init__(name="text_analysis_tool")
         self.llm = llm

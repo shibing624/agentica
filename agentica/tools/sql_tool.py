@@ -12,11 +12,11 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.inspection import inspect
 from sqlalchemy.sql.expression import text
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class SQLTool(Toolkit):
+class SQLTool(Tool):
     def __init__(
             self,
             db_url: Optional[str] = None,

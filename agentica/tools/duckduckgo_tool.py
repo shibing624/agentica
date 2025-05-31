@@ -8,7 +8,7 @@ import json
 import ssl
 from typing import Any, Optional
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 try:
@@ -20,7 +20,7 @@ except ImportError:
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
-class DuckDuckGoTool(Toolkit):
+class DuckDuckGoTool(Tool):
     def __init__(
             self,
             search: bool = True,

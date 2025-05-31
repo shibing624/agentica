@@ -10,11 +10,11 @@ import json
 
 import requests
 
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class DblpTool(Toolkit):
+class DblpTool(Tool):
     def __init__(self):
         super().__init__(name="Dblp_tool")
         self.register(self.search_dblp_and_return_articles)

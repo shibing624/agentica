@@ -4,11 +4,11 @@
 @description: String manipulation tools
 """
 import json
-from agentica.tools.base import Toolkit
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class StringTool(Toolkit):
+class StringTool(Tool):
     def __init__(
             self,
             enable_reverse_string=True,

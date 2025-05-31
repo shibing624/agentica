@@ -2,7 +2,7 @@ import sys
 
 sys.path.append('..')
 
-from agentica import Agent, OpenAIChat, WeatherTool, ShellTool
+from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool, FileTool
 
 
 def multiply(first_int: int, second_int: int) -> str:
@@ -10,9 +10,14 @@ def multiply(first_int: int, second_int: int) -> str:
     return str(first_int * second_int)
 
 
-def add(first_int: int, second_int: int) -> str:
-    """Add two integers."""
-    return str(first_int + second_int)
+class AddTool(Tool):
+    def __init__(self):
+        super().__init__()
+        self.register(self.run_add)
+
+    def run_add(self, first_int: float, second_int: float) -> str:
+        """Add two number together."""
+        return str(first_int + second_int)
 
 
 def exponentiate(base: int, exponent: int) -> str:
@@ -27,7 +32,7 @@ def get_char_len(text: str) -> str:
 
 m = Agent(
     model=OpenAIChat(id='gpt-4o'),
-    tools=[multiply, add, exponentiate, get_char_len, WeatherTool(), ShellTool()],
+    tools=[multiply, AddTool(), exponentiate, get_char_len, WeatherTool(), ShellTool(), FileTool()],
     debug_mode=True
 )
 m.print_response("3乘以10000005是啥?")
