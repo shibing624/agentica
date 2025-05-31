@@ -14,3 +14,4 @@ tqdm
 rich
 pyyaml
 mcp>=1.8.0
+puremagic

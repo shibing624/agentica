@@ -7,14 +7,7 @@ import os
 import json
 from pathlib import Path
 from typing import Optional
-from agentica.utils.file_parser import (
-    read_json_file,
-    read_csv_file,
-    read_txt_file,
-    read_pdf_file,
-    read_docx_file,
-    read_excel_file
-)
+from agentica.utils.markdown_converter import MarkdownConverter
 from agentica.utils.log import logger
 from agentica.tools.base import Tool
 
@@ -97,26 +90,7 @@ class FileTool(Tool):
 
             if not path.exists():
                 raise FileNotFoundError(f"Could not find file: {path}")
-
-            if path.suffix in [".json", ".jsonl"]:
-                file_contents = read_json_file(path)
-            elif path.suffix in [".csv"]:
-                file_contents = read_csv_file(path)
-            elif path.suffix in [".txt", ".md", ".py", ".log", ".java", ".cpp", ".c", ".h", ".php", ".html", ".css"]:
-                file_contents = read_txt_file(path)
-            elif path.suffix in [".pdf"]:
-                file_contents = read_pdf_file(path)
-            elif path.suffix in [".doc", ".docx"]:
-                if path.suffix == ".doc":
-                    raise ValueError("Unsupported doc format. Please convert to docx.")
-                file_contents = read_docx_file(path)
-            elif path.suffix in [".xls", ".xlsx"]:
-                file_contents = read_excel_file(path)
-            else:
-                logger.warning(f"Unknown file format: {path.suffix}, reading as text")
-                file_contents = read_txt_file(path)
-
-            return str(file_contents)
+            return MarkdownConverter().convert(str(path)).text_content
         except Exception as e:
             logger.error(f"Error reading file: {e}")
             return f"Error reading file: {e}"

@@ -12,15 +12,7 @@ from pydantic import BaseModel, ConfigDict
 
 from agentica.document import Document
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
-from agentica.utils.file_parser import (
-    read_json_file,
-    read_csv_file,
-    read_txt_file,
-    read_pdf_file,
-    read_pdf_url,
-    read_docx_file,
-    read_excel_file
-)
+from agentica.utils.markdown_converter import MarkdownConverter
 from agentica.utils.log import logger
 from agentica.vectordb.base import VectorDb
 
@@ -121,23 +113,7 @@ class Knowledge(BaseModel):
 
         try:
             file_name = path.name.split("/")[-1].split(".")[0].replace("/", "_").replace(" ", "_")
-            if path.suffix in [".json", ".jsonl"]:
-                file_contents = read_json_file(path)
-            elif path.suffix in [".csv"]:
-                file_contents = read_csv_file(path)
-            elif path.suffix in [".txt", ".md", ".py", ".log", ".java", ".cpp", ".c", ".h", ".php", ".html", ".css"]:
-                file_contents = read_txt_file(path)
-            elif path.suffix in [".pdf"]:
-                file_contents = read_pdf_file(path)
-            elif path.suffix in [".doc", ".docx"]:
-                if path.suffix == ".doc":
-                    raise ValueError("Unsupported doc format. Please convert to docx.")
-                file_contents = read_docx_file(path)
-            elif path.suffix in [".xls", ".xlsx"]:
-                file_contents = read_excel_file(path)
-            else:
-                logger.warning(f"Unknown file format: {path.suffix}, reading as text")
-                file_contents = read_txt_file(path)
+            file_contents = MarkdownConverter().convert(str(path)).text_content
 
             documents = [
                 Document(
@@ -161,7 +137,7 @@ class Knowledge(BaseModel):
         Reads a pdf from a URL and returns a list of documents.
         """
         try:
-            file_contents = read_pdf_url(path)
+            file_contents = MarkdownConverter().convert(str(path)).text_content
             documents = [
                 Document(
                     name=path,
@@ -184,7 +160,8 @@ class Knowledge(BaseModel):
         Reads a website and returns a list of documents.
         """
         try:
-            content = UrlCrawlerTool().url_crawl(url)
+            content = MarkdownConverter().convert(url).text_content
+
             documents = [
                 Document(
                     name=url,
