@@ -666,7 +666,6 @@ class OpenAIChat(Model):
         Returns:
             ModelResponse: The model response from the API.
         """
-        logger.debug("---------- OpenAI Async Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -726,7 +725,6 @@ class OpenAIChat(Model):
         ):
             return await self.ahandle_post_tool_call_messages(messages=messages, model_response=model_response)
 
-        logger.debug("---------- OpenAI Async Response End ----------")
         return model_response
 
     def update_stream_metrics(self, assistant_message: Message, metrics: Metrics):
@@ -866,7 +864,7 @@ class OpenAIChat(Model):
             if len(response.choices) > 0:
                 if metrics.completion_tokens is None:
                     metrics.completion_tokens = 0
-                    
+
                 metrics.completion_tokens += 1
                 if metrics.completion_tokens == 1:
                     metrics.time_to_first_token = metrics.response_timer.elapsed
@@ -936,7 +934,6 @@ class OpenAIChat(Model):
         Returns:
             Any: An asynchronous iterator of model responses.
         """
-        logger.debug("---------- OpenAI Async Response Start ----------")
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
@@ -947,7 +944,7 @@ class OpenAIChat(Model):
             if response.choices and len(response.choices) > 0:
                 if metrics.completion_tokens is None:
                     metrics.completion_tokens = 0
-                    
+
                 metrics.completion_tokens += 1
                 if metrics.completion_tokens == 1:
                     metrics.time_to_first_token = metrics.response_timer.elapsed
@@ -1007,7 +1004,6 @@ class OpenAIChat(Model):
                 yield tool_call_response
             async for post_tool_call_response in self.ahandle_post_tool_call_messages_stream(messages=messages):
                 yield post_tool_call_response
-        logger.debug("---------- OpenAI Async Response End ----------")
 
     def build_tool_calls(self, tool_calls_data: List[ChoiceDeltaToolCall]) -> List[Dict[str, Any]]:
         """

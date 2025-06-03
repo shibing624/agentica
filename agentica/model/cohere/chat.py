@@ -128,7 +128,7 @@ class Cohere(Model):
         ]
 
     def invoke(
-        self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
+            self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
     ) -> NonStreamedChatResponse:
         """
         Invoke a non-streamed chat response from the Cohere API.
@@ -179,7 +179,7 @@ class Cohere(Model):
         return self.client.chat(message=chat_message or "", model=self.id, **api_kwargs)
 
     def invoke_stream(
-        self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
+            self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
     ) -> Iterator[StreamedChatResponse]:
         """
         Invoke a streamed chat response from the Cohere API.
@@ -282,11 +282,11 @@ class Cohere(Model):
         return function_calls_to_run, error_messages
 
     def _handle_tool_calls(
-        self,
-        assistant_message: Message,
-        messages: List[Message],
-        response_tool_calls: List[Any],
-        model_response: ModelResponse,
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            response_tool_calls: List[Any],
+            model_response: ModelResponse,
     ) -> Optional[Any]:
         """
         Handle tool calls in the assistant message.
@@ -341,7 +341,7 @@ class Cohere(Model):
         function_calls_to_run, error_messages = self._prepare_function_calls(assistant_message)
 
         for _ in self.run_function_calls(
-            function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
+                function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
         ):
             pass
 
@@ -385,7 +385,6 @@ class Cohere(Model):
         Returns:
             ModelResponse: The model response from the API.
         """
-        logger.debug("---------- Cohere Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
 
@@ -439,7 +438,6 @@ class Cohere(Model):
         if assistant_message.content:
             model_response.content = assistant_message.get_content_string()
 
-        logger.debug("---------- Cohere Response End ----------")
         return model_response
 
     def _update_stream_metrics(self, stream_data: StreamData, assistant_message: Message):
@@ -476,7 +474,7 @@ class Cohere(Model):
         assistant_message.metrics["completion_tokens"] = stream_data.response_completion_tokens
         assistant_message.metrics["output_tokens"] = stream_data.response_completion_tokens
         self.metrics["completion_tokens"] = (
-            self.metrics.get("completion_tokens", 0) + stream_data.response_completion_tokens
+                self.metrics.get("completion_tokens", 0) + stream_data.response_completion_tokens
         )
         self.metrics["output_tokens"] = self.metrics.get("output_tokens", 0) + stream_data.response_completion_tokens
 
@@ -484,9 +482,8 @@ class Cohere(Model):
         self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + stream_data.response_total_tokens
 
     def response_stream(
-        self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
+            self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
     ) -> Iterator[ModelResponse]:
-        logger.debug("---------- Cohere Response Start ----------")
         # -*- Log messages for debugging
         self._log_messages(messages)
 
@@ -614,7 +611,8 @@ class Cohere(Model):
                     yield ModelResponse(content="\n\n")
 
             for intermediate_model_response in self.run_function_calls(
-                function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
             ):
                 yield intermediate_model_response
 
@@ -633,4 +631,3 @@ class Cohere(Model):
 
             # -*- Yield new response using results of tool calls
             yield from self.response_stream(messages=messages, tool_results=tool_results)
-        logger.debug("---------- Cohere Response End ----------")

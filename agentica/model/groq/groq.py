@@ -7,7 +7,7 @@ import httpx
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
-from agentica.tools.base import FunctionCall,get_function_call_for_tool_call
+from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
@@ -35,7 +35,6 @@ class Metrics:
     response_timer: Timer = field(default_factory=Timer)
 
     def log(self):
-        logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
         logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
@@ -51,7 +50,6 @@ class Metrics:
             logger.debug(f"* Queue time:                  {self.queue_time:.4f}s")
         if self.total_time is not None:
             logger.debug(f"* Total time:                  {self.total_time:.4f}s")
-        logger.debug("**************** METRICS END ******************")
 
 
 @dataclass
@@ -337,11 +335,11 @@ class Groq(Model):
             yield chunk
 
     def handle_tool_calls(
-        self,
-        assistant_message: Message,
-        messages: List[Message],
-        model_response: ModelResponse,
-        tool_role: str = "tool",
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            model_response: ModelResponse,
+            tool_role: str = "tool",
     ) -> Optional[ModelResponse]:
         """
         Handle tool calls in the assistant message.
@@ -390,7 +388,8 @@ class Groq(Model):
                 model_response.content += "\n\n"
 
             for _ in self.run_function_calls(
-                function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
             ):
                 pass
 
@@ -401,7 +400,7 @@ class Groq(Model):
         return None
 
     def update_usage_metrics(
-        self, assistant_message: Message, metrics: Metrics, response_usage: Optional[CompletionUsage]
+            self, assistant_message: Message, metrics: Metrics, response_usage: Optional[CompletionUsage]
     ) -> None:
         """
         Update the usage metrics for the assistant message and the model.
@@ -441,7 +440,7 @@ class Groq(Model):
                 metrics.completion_time = response_usage.completion_time
                 assistant_message.metrics["completion_time"] = response_usage.completion_time
                 self.metrics["completion_time"] = (
-                    self.metrics.get("completion_time", 0) + response_usage.completion_time
+                        self.metrics.get("completion_time", 0) + response_usage.completion_time
                 )
             if response_usage.prompt_time is not None:
                 metrics.prompt_time = response_usage.prompt_time
@@ -457,10 +456,10 @@ class Groq(Model):
                 self.metrics["total_time"] = self.metrics.get("total_time", 0) + response_usage.total_time
 
     def create_assistant_message(
-        self,
-        response_message: ChatCompletionMessage,
-        metrics: Metrics,
-        response_usage: Optional[CompletionUsage],
+            self,
+            response_message: ChatCompletionMessage,
+            metrics: Metrics,
+            response_usage: Optional[CompletionUsage],
     ) -> Message:
         """
         Create an assistant message from the response.
@@ -497,7 +496,6 @@ class Groq(Model):
         Returns:
             ModelResponse: The model response.
         """
-        logger.debug("---------- Groq Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -531,16 +529,15 @@ class Groq(Model):
         # -*- Handle tool calls
         tool_role = "tool"
         if (
-            self.handle_tool_calls(
-                assistant_message=assistant_message,
-                messages=messages,
-                model_response=model_response,
-                tool_role=tool_role,
-            )
-            is not None
+                self.handle_tool_calls(
+                    assistant_message=assistant_message,
+                    messages=messages,
+                    model_response=model_response,
+                    tool_role=tool_role,
+                )
+                is not None
         ):
             return self.handle_post_tool_call_messages(messages=messages, model_response=model_response)
-        logger.debug("---------- Groq Response End ----------")
         return model_response
 
     async def aresponse(self, messages: List[Message]) -> ModelResponse:
@@ -553,7 +550,6 @@ class Groq(Model):
         Returns:
             ModelResponse: The model response from the API.
         """
-        logger.debug("---------- Groq Async Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -587,17 +583,16 @@ class Groq(Model):
         # -*- Handle tool calls
         tool_role = "tool"
         if (
-            self.handle_tool_calls(
-                assistant_message=assistant_message,
-                messages=messages,
-                model_response=model_response,
-                tool_role=tool_role,
-            )
-            is not None
+                self.handle_tool_calls(
+                    assistant_message=assistant_message,
+                    messages=messages,
+                    model_response=model_response,
+                    tool_role=tool_role,
+                )
+                is not None
         ):
             return await self.ahandle_post_tool_call_messages(messages=messages, model_response=model_response)
 
-        logger.debug("---------- Groq Async Response End ----------")
         return model_response
 
     def update_stream_metrics(self, assistant_message: Message, metrics: Metrics):
@@ -656,10 +651,10 @@ class Groq(Model):
         metrics.total_time = response_usage.total_time
 
     def handle_stream_tool_calls(
-        self,
-        assistant_message: Message,
-        messages: List[Message],
-        tool_role: str = "tool",
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            tool_role: str = "tool",
     ) -> Iterator[ModelResponse]:
         """
         Handle tool calls for response stream.
@@ -705,7 +700,8 @@ class Groq(Model):
                 yield ModelResponse(content="\n\n")
 
             for function_call_response in self.run_function_calls(
-                function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
             ):
                 yield function_call_response
 
@@ -722,7 +718,6 @@ class Groq(Model):
         Returns:
             Iterator[ModelResponse]: An iterator of model responses.
         """
-        logger.debug("---------- Groq Response Start ----------")
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
@@ -779,7 +774,6 @@ class Groq(Model):
                 assistant_message=assistant_message, messages=messages, tool_role=tool_role
             )
             yield from self.handle_post_tool_call_messages_stream(messages=messages)
-        logger.debug("---------- Groq Response End ----------")
 
     async def aresponse_stream(self, messages: List[Message]) -> Any:
         """
@@ -791,7 +785,6 @@ class Groq(Model):
         Returns:
             Any: An asynchronous iterator of model responses.
         """
-        logger.debug("---------- Groq Async Response Start ----------")
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
@@ -844,12 +837,11 @@ class Groq(Model):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             tool_role = "tool"
             for tool_call_response in self.handle_stream_tool_calls(
-                assistant_message=assistant_message, messages=messages, tool_role=tool_role
+                    assistant_message=assistant_message, messages=messages, tool_role=tool_role
             ):
                 yield tool_call_response
             async for post_tool_call_response in self.ahandle_post_tool_call_messages_stream(messages=messages):
                 yield post_tool_call_response
-        logger.debug("---------- Groq Async Response End ----------")
 
     def build_tool_calls(self, tool_calls_data: List[ChoiceDeltaToolCall]) -> List[Dict[str, Any]]:
         """

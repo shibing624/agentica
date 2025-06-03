@@ -190,7 +190,6 @@ class OllamaTools(Ollama):
         Returns:
             Iterator[ModelResponse]: An iterator of the model responses.
         """
-        logger.debug("---------- Ollama Response Start ----------")
         self._log_messages(messages)
         message_data = MessageData()
         metrics: Metrics = Metrics()
@@ -305,7 +304,6 @@ class OllamaTools(Ollama):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             yield from self.handle_stream_tool_calls(assistant_message, messages)
             yield from self.handle_post_tool_call_messages_stream(messages=messages)
-        logger.debug("---------- Ollama Response End ----------")
 
     def get_instructions_to_generate_tool_calls(self) -> List[str]:
         if self.functions is not None:

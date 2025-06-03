@@ -40,8 +40,6 @@ class Together(OpenAILike):
             yield from super().response_stream(messages)
             return
 
-        logger.debug("---------- Together Response Start ----------")
-        # -*- Log messages for debugging
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()
@@ -176,4 +174,3 @@ class Together(OpenAILike):
                 messages.extend(function_call_results)
             # -*- Yield new response using results of tool calls
             yield from self.response_stream(messages=messages)
-        logger.debug("---------- Together Response End ----------")

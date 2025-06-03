@@ -356,7 +356,6 @@ class MistralChat(Model):
         Returns:
             ModelResponse: The response from the model.
         """
-        logger.debug("---------- Mistral Response Start ----------")
         # -*- Log messages for debugging
         self._log_messages(messages)
         model_response = ModelResponse()
@@ -397,7 +396,6 @@ class MistralChat(Model):
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
 
-        logger.debug("---------- Mistral Response End ----------")
         return model_response
 
     def _update_stream_metrics(self, stream_data: StreamData, assistant_message: Message):
@@ -445,8 +443,6 @@ class MistralChat(Model):
         Returns:
             Iterator[ModelResponse]: The streamed response.
         """
-        logger.debug("---------- Mistral Response Start ----------")
-        # -*- Log messages for debugging
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()
@@ -541,4 +537,3 @@ class MistralChat(Model):
                 messages.extend(function_call_results)
 
             yield from self.response_stream(messages=messages)
-        logger.debug("---------- Mistral Response End ----------")

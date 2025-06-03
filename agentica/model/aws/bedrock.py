@@ -296,7 +296,6 @@ class AwsBedrock(Model):
         Returns:
             ModelResponse: The response from the Bedrock API.
         """
-        logger.debug("---------- Bedrock Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
 
@@ -343,7 +342,6 @@ class AwsBedrock(Model):
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
 
-        logger.debug("---------- AWS Response End ----------")
         return model_response
 
     def _create_stream_assistant_message(
@@ -476,7 +474,6 @@ class AwsBedrock(Model):
         Returns:
             Iterator[str]: The streamed response.
         """
-        logger.debug("---------- Bedrock Response Start ----------")
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()
@@ -573,5 +570,3 @@ class AwsBedrock(Model):
         if tool_calls and self.run_tools:
             yield from self._handle_stream_tool_calls(assistant_message, messages, tool_ids)
             yield from self.response_stream(messages=messages)
-
-        logger.debug("---------- Bedrock Response End ----------")

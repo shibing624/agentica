@@ -46,7 +46,6 @@ class Metrics:
     response_timer: Timer = field(default_factory=Timer)
 
     def log(self):
-        logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
         logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
@@ -54,7 +53,6 @@ class Metrics:
         logger.debug(f"* Input tokens:                {self.input_tokens}")
         logger.debug(f"* Output tokens:               {self.output_tokens}")
         logger.debug(f"* Total tokens:                {self.total_tokens}")
-        logger.debug("**************** METRICS END ******************")
 
 
 class Gemini(Model):
@@ -624,7 +622,6 @@ class Gemini(Model):
         Returns:
             ModelResponse: The model response.
         """
-        logger.debug("---------- Gemini Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -661,7 +658,6 @@ class Gemini(Model):
         # for m in messages:
         #     if hasattr(m, "parts"):
         #         m.parts = None
-        logger.debug("---------- Gemini Response End ----------")
         return model_response
 
     def handle_stream_tool_calls(self, assistant_message: Message, messages: List[Message]):
@@ -705,7 +701,6 @@ class Gemini(Model):
         Yields:
             Iterator[ModelResponse]: The model responses
         """
-        logger.debug("---------- Gemini Response Start ----------")
         self._log_messages(messages)
         message_data = MessageData()
         metrics = Metrics()
@@ -777,4 +772,3 @@ class Gemini(Model):
         # for m in messages:
         #     if hasattr(m, "parts"):
         #         m.parts = None
-        logger.debug("---------- Gemini Response End ----------")

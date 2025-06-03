@@ -123,9 +123,9 @@ class Message(BaseModel):
             if isinstance(self.content, str) or isinstance(self.content, list):
                 _logger(self.content)
             elif isinstance(self.content, dict):
-                _logger(json.dumps(self.content, indent=2, ensure_ascii=False))
+                _logger(json.dumps(self.content, ensure_ascii=False))
         if self.tool_calls:
-            _logger(f"Tool Calls: {json.dumps(self.tool_calls, indent=2, ensure_ascii=False)}")
+            _logger(f"Tool Calls: {json.dumps(self.tool_calls, ensure_ascii=False)}")
         if self.images:
             _logger(f"Images added: {len(self.images)}")
         if self.videos:

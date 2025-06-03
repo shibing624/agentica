@@ -41,7 +41,6 @@ class Metrics:
     response_timer: Timer = field(default_factory=Timer)
 
     def log(self):
-        logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
         logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
@@ -49,7 +48,6 @@ class Metrics:
         logger.debug(f"* Input tokens:                {self.input_tokens}")
         logger.debug(f"* Output tokens:               {self.output_tokens}")
         logger.debug(f"* Total tokens:                {self.total_tokens}")
-        logger.debug("**************** METRICS END ******************")
 
 
 class Claude(Model):
@@ -516,7 +514,6 @@ class Claude(Model):
         Returns:
             ModelResponse: The response from the model.
         """
-        logger.debug("---------- Claude Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -550,7 +547,6 @@ class Claude(Model):
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
 
-        logger.debug("---------- Claude Response End ----------")
         return model_response
 
     def handle_stream_tool_calls(
@@ -592,7 +588,6 @@ class Claude(Model):
             self.format_function_call_results(function_call_results, tool_ids, messages)
 
     def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
-        logger.debug("---------- Claude Response Start ----------")
         self._log_messages(messages)
         message_data = MessageData()
         metrics = Metrics()
@@ -658,7 +653,6 @@ class Claude(Model):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             yield from self.handle_stream_tool_calls(assistant_message, messages, message_data.tool_ids)
             yield from self.response_stream(messages=messages)
-        logger.debug("---------- Claude Response End ----------")
 
     def get_tool_call_prompt(self) -> Optional[str]:
         if self.functions is not None and len(self.functions) > 0:

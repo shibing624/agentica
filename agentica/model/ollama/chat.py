@@ -27,7 +27,6 @@ class Metrics:
     response_timer: Timer = field(default_factory=Timer)
 
     def log(self):
-        logger.debug("**************** METRICS START ****************")
         if self.time_to_first_token is not None:
             logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
         logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
@@ -35,7 +34,6 @@ class Metrics:
         logger.debug(f"* Input tokens:                {self.input_tokens}")
         logger.debug(f"* Output tokens:               {self.output_tokens}")
         logger.debug(f"* Total tokens:                {self.total_tokens}")
-        logger.debug("**************** METRICS END ******************")
 
 
 @dataclass
@@ -430,7 +428,6 @@ class Ollama(Model):
         Returns:
             ModelResponse: The model response.
         """
-        logger.debug("---------- Ollama Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -479,8 +476,6 @@ class Ollama(Model):
             is not None
         ):
             return self.handle_post_tool_call_messages(messages=messages, model_response=model_response)
-
-        logger.debug("---------- Ollama Response End ----------")
         return model_response
 
     async def aresponse(self, messages: List[Message]) -> ModelResponse:
@@ -493,7 +488,6 @@ class Ollama(Model):
         Returns:
             ModelResponse: The model response.
         """
-        logger.debug("---------- Ollama Async Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -543,7 +537,6 @@ class Ollama(Model):
         ):
             return await self.ahandle_post_tool_call_messages(messages=messages, model_response=model_response)
 
-        logger.debug("---------- Ollama Async Response End ----------")
         return model_response
 
     def handle_stream_tool_calls(
@@ -592,7 +585,6 @@ class Ollama(Model):
         Returns:
             Iterator[ModelResponse]: An iterator of the model responses.
         """
-        logger.debug("---------- Ollama Response Start ----------")
         self._log_messages(messages)
         message_data = MessageData()
         metrics: Metrics = Metrics()
@@ -650,7 +642,6 @@ class Ollama(Model):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             yield from self.handle_stream_tool_calls(assistant_message, messages)
             yield from self.handle_post_tool_call_messages_stream(messages=messages)
-        logger.debug("---------- Ollama Response End ----------")
 
     async def aresponse_stream(self, messages: List[Message]) -> Any:
         """
@@ -662,7 +653,6 @@ class Ollama(Model):
         Returns:
             Any: An asynchronous iterator of the model responses.
         """
-        logger.debug("---------- Ollama Async Response Start ----------")
         self._log_messages(messages)
         message_data = MessageData()
         metrics: Metrics = Metrics()
@@ -721,4 +711,3 @@ class Ollama(Model):
                 yield tool_call_response
             async for post_tool_call_response in self.ahandle_post_tool_call_messages_stream(messages=messages):
                 yield post_tool_call_response
-        logger.debug("---------- Ollama Async Response End ----------")

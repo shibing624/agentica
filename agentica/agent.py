@@ -1477,7 +1477,6 @@ class Agent(BaseModel):
         reasoning_agent.show_tool_calls = False
 
         logger.debug(f"Reasoning Agent: {reasoning_agent.agent_id} | {reasoning_agent.session_id}")
-        logger.debug("==== Starting Reasoning ====")
 
         step_count = 1
         next_action = NextAction.CONTINUE
@@ -1533,7 +1532,6 @@ class Agent(BaseModel):
                 break
 
         logger.debug(f"Total Reasoning steps: {len(all_reasoning_steps)}")
-        logger.debug("==== Reasoning finished====")
 
         # -*- Update the messages_for_model to include reasoning messages
         self._update_messages_with_reasoning(
@@ -1587,8 +1585,6 @@ class Agent(BaseModel):
         reasoning_agent.show_tool_calls = False
 
         logger.debug(f"Reasoning Agent: {reasoning_agent.agent_id} | {reasoning_agent.session_id}")
-        logger.debug("==== Starting Reasoning ====")
-
         step_count = 0
         next_action = NextAction.CONTINUE
         while next_action == NextAction.CONTINUE and step_count < self.reasoning_max_steps:
@@ -1645,7 +1641,6 @@ class Agent(BaseModel):
                 break
 
         logger.debug(f"Total Reasoning steps: {len(all_reasoning_steps)}")
-        logger.debug("==== Reasoning finished====")
 
         # -*- Update the messages_for_model to include reasoning messages
         self._update_messages_with_reasoning(

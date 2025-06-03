@@ -333,7 +333,7 @@ class HuggingFaceChat(Model):
             yield chunk
 
     def _handle_tool_calls(
-        self, assistant_message: Message, messages: List[Message], model_response: ModelResponse
+            self, assistant_message: Message, messages: List[Message], model_response: ModelResponse
     ) -> Optional[ModelResponse]:
         """
         Handle tool calls in the assistant message.
@@ -381,7 +381,8 @@ class HuggingFaceChat(Model):
                 model_response.content += "\n\n"
 
             for _ in self.run_function_calls(
-                function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
             ):
                 pass
 
@@ -392,7 +393,7 @@ class HuggingFaceChat(Model):
         return None
 
     def _update_usage_metrics(
-        self, assistant_message: Message, metrics: Metrics, response_usage: Optional[ChatCompletionOutputUsage]
+            self, assistant_message: Message, metrics: Metrics, response_usage: Optional[ChatCompletionOutputUsage]
     ) -> None:
         """
         Update the usage metrics for the assistant message and the model.
@@ -450,10 +451,10 @@ class HuggingFaceChat(Model):
                         self.metrics.get("completion_tokens_details", {}).get(k, 0) + v
 
     def _create_assistant_message(
-        self,
-        response_message: ChatCompletionOutputMessage,
-        metrics: Metrics,
-        response_usage: Optional[ChatCompletionOutputUsage],
+            self,
+            response_message: ChatCompletionOutputMessage,
+            metrics: Metrics,
+            response_usage: Optional[ChatCompletionOutputUsage],
     ) -> Message:
         """
         Create an assistant message from the response.
@@ -485,7 +486,6 @@ class HuggingFaceChat(Model):
         Returns:
             ModelResponse: The model response.
         """
-        logger.debug("---------- HuggingFace Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -524,7 +524,6 @@ class HuggingFaceChat(Model):
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
 
-        logger.debug("---------- HuggingFace Response End ----------")
         return model_response
 
     async def aresponse(self, messages: List[Message]) -> ModelResponse:
@@ -537,7 +536,6 @@ class HuggingFaceChat(Model):
         Returns:
             ModelResponse: The model response from the API.
         """
-        logger.debug("---------- HuggingFace Async Response Start ----------")
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -554,9 +552,9 @@ class HuggingFaceChat(Model):
         # -*- Parse structured outputs
         try:
             if (
-                self.response_format is not None
-                and self.structured_outputs
-                and issubclass(self.response_format, BaseModel)
+                    self.response_format is not None
+                    and self.structured_outputs
+                    and issubclass(self.response_format, BaseModel)
             ):
                 parsed_object = response_message.parsed  # type: ignore
                 if parsed_object is not None:
@@ -589,7 +587,6 @@ class HuggingFaceChat(Model):
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
 
-        logger.debug("---------- HuggingFace Async Response End ----------")
         return model_response
 
     def _update_stream_metrics(self, assistant_message: Message, metrics: Metrics):
@@ -633,9 +630,9 @@ class HuggingFaceChat(Model):
                 self.metrics.get("completion_tokens_details", {}).get(k, 0) + v
 
     def _handle_stream_tool_calls(
-        self,
-        assistant_message: Message,
-        messages: List[Message],
+            self,
+            assistant_message: Message,
+            messages: List[Message],
     ) -> Iterator[ModelResponse]:
         """
         Handle tool calls for response stream.
@@ -681,7 +678,8 @@ class HuggingFaceChat(Model):
                 yield ModelResponse(content="\n\n")
 
             for intermediate_model_response in self.run_function_calls(
-                function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
             ):
                 yield intermediate_model_response
 
@@ -698,7 +696,6 @@ class HuggingFaceChat(Model):
         Returns:
             Iterator[ModelResponse]: An iterator of model responses.
         """
-        logger.debug("---------- HuggingFace Response Start ----------")
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
 
@@ -737,7 +734,6 @@ class HuggingFaceChat(Model):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             yield from self._handle_stream_tool_calls(assistant_message, messages)
             yield from self.response_stream(messages=messages)
-        logger.debug("---------- HuggingFace Response End ----------")
 
     async def aresponse_stream(self, messages: List[Message]) -> Any:
         """
@@ -749,7 +745,6 @@ class HuggingFaceChat(Model):
         Returns:
             Any: An asynchronous iterator of model responses.
         """
-        logger.debug("---------- HuggingFace Hub Async Response Start ----------")
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
@@ -801,7 +796,6 @@ class HuggingFaceChat(Model):
                 yield model_response
             async for model_response in self.aresponse_stream(messages=messages):
                 yield model_response
-        logger.debug("---------- HuggingFace Hub Async Response End ----------")
 
     def _build_tool_calls(self, tool_calls_data: List[Any]) -> List[Dict[str, Any]]:
         """
