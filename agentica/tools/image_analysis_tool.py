@@ -15,7 +15,7 @@ from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
-class AnalyzeImageTool(Tool):
+class ImageAnalysisTool(Tool):
     """
     This class inherits from the Toolkit class.
     It defines a function for analyzing and understanding image content using OpenAI's API.
@@ -38,13 +38,14 @@ class AnalyzeImageTool(Tool):
 
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAIChat()
+            self.llm = OpenAIChat(id=self.model_name)
 
-    def analyze_image_content(self, image_path_or_url: str) -> str:
+    def analyze_image_content(self, image_path_or_url: str, prompt: str = '') -> str:
         """Reads and understands the content of an image using image understand model API.
 
         Args:
             image_path_or_url (str): The path to the image or the URL of the image.
+            prompt (str, optional): The prompt to use for the image analysis. Default is "详细描述图片内容".
 
         Example:
             ```python
@@ -61,18 +62,20 @@ class AnalyzeImageTool(Tool):
         # Update the Model (set defaults, add logit etc.)
         self.update_llm()
         if image_path_or_url.startswith("http"):
-            description = self._analyze_image_url(image_path_or_url)
+            description = self._analyze_image_url(image_path_or_url, prompt)
         else:
-            description = self._analyze_image_path(image_path_or_url)
+            description = self._analyze_image_path(image_path_or_url, prompt)
         logger.debug(f"Read Image: {image_path_or_url}, model: {self.model_name}, Result description: {description}")
         return description
 
-    def _analyze_image_url(self, image_url: str) -> str:
+    def _analyze_image_url(self, image_url: str, prompt: str = '') -> str:
         """
         Analyzes the image content using OpenAI's API.
 
         :param image_url: The URL of the image.
         :type image_url: str
+        :param prompt: The prompt to use for the image analysis.
+        :type prompt: str
         :return: The description of the image content.
         :rtype: str
         """
@@ -82,7 +85,7 @@ class AnalyzeImageTool(Tool):
                 "content": [
                     {
                         "type": "text",
-                        "text": self.prompt
+                        "text": prompt or self.prompt
                     },
                     {
                         "type": "image_url",
@@ -95,17 +98,19 @@ class AnalyzeImageTool(Tool):
         ]
         self.llm = cast(Model, self.llm)
         response = self.llm.get_client().chat.completions.create(
-            model=self.model_name, messages=messages, max_tokens=1000
+            model=self.model_name, messages=messages, max_tokens=4000
         )
 
         return response.choices[0].message.content
 
-    def _analyze_image_path(self, image_path: str) -> str:
+    def _analyze_image_path(self, image_path: str, prompt: str = '') -> str:
         """
         Analyzes the image content using OpenAI's API.
 
         :param image_path: The path to the image.
         :type image_path: str
+        :param prompt: The prompt to use for the image analysis.
+        :type prompt: str
         :return: The description of the image content.
         :rtype: str
         """
@@ -120,7 +125,7 @@ class AnalyzeImageTool(Tool):
                 "content": [
                     {
                         "type": "text",
-                        "text": self.prompt
+                        "text": prompt or self.prompt
                     },
                     {
                         "type": "image_url",
@@ -133,13 +138,13 @@ class AnalyzeImageTool(Tool):
         ]
         self.llm = cast(Model, self.llm)
         response = self.llm.get_client().chat.completions.create(
-            model=self.model_name, messages=messages, max_tokens=1000
+            model=self.model_name, messages=messages, max_tokens=4000
         )
 
         return response.choices[0].message.content
 
 
 if __name__ == "__main__":
-    tool = AnalyzeImageTool()
+    tool = ImageAnalysisTool()
     image_description = tool.analyze_image_content("../../examples/data/chinese.jpg")
     print(image_description)

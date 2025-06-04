@@ -53,7 +53,7 @@ class VoiceType(Enum):
         }
 
 
-class BaseAudio(ABC):
+class BaseAudioModel(ABC):
     r"""Base class for audio models providing Text-to-Speech (TTS) and
     Speech-to-Text (STT) functionality.
     """

@@ -17,18 +17,18 @@ from typing import Any, List, Optional, Union
 
 from openai import AsyncOpenAI, OpenAI, _legacy_response
 
-from agentica.model.base_audio import BaseAudio, AudioModelType, VoiceType
+from agentica.model.base_audio_model import BaseAudioModel, AudioModelType, VoiceType
 
 
-class OpenAIAudio(BaseAudio):
+class OpenAIAudioModel(BaseAudioModel):
     r"""Provides access to OpenAI's Text-to-Speech (TTS) and Speech_to_Text
     (STT) models."""
 
     def __init__(
-        self,
-        api_key: Optional[str] = None,
-        url: Optional[str] = None,
-        timeout: Optional[float] = None,
+            self,
+            api_key: Optional[str] = None,
+            url: Optional[str] = None,
+            timeout: Optional[float] = None,
     ) -> None:
         r"""Initialize an instance of OpenAI."""
         super().__init__(api_key, url, timeout)
@@ -49,13 +49,13 @@ class OpenAIAudio(BaseAudio):
         )
 
     def text_to_speech(
-        self,
-        input: str,
-        *,
-        model_type: AudioModelType = AudioModelType.TTS_1,
-        voice: VoiceType = VoiceType.ALLOY,
-        storage_path: Optional[str] = None,
-        **kwargs: Any,
+            self,
+            input: str,
+            *,
+            model_type: AudioModelType = AudioModelType.TTS_1,
+            voice: VoiceType = VoiceType.ALLOY,
+            storage_path: Optional[str] = None,
+            **kwargs: Any,
     ) -> Union[
         List[_legacy_response.HttpxBinaryResponseContent],
         _legacy_response.HttpxBinaryResponseContent,
@@ -150,7 +150,7 @@ class OpenAIAudio(BaseAudio):
             raise Exception("Error during TTS API call") from e
 
     def _split_audio(
-        self, audio_file_path: str, chunk_size_mb: int = 24
+            self, audio_file_path: str, chunk_size_mb: int = 24
     ) -> list:
         r"""Split the audio file into smaller chunks. Since the Whisper API
         only supports files that are less than 25 MB.
@@ -197,10 +197,10 @@ class OpenAIAudio(BaseAudio):
         return split_files
 
     def speech_to_text(
-        self,
-        audio_file_path: str,
-        translate_into_english: bool = False,
-        **kwargs: Any,
+            self,
+            audio_file_path: str,
+            translate_into_english: bool = False,
+            **kwargs: Any,
     ) -> str:
         r"""Convert speech audio to text.
 
@@ -274,11 +274,11 @@ class OpenAIAudio(BaseAudio):
             raise Exception("Error during STT API call") from e
 
     def audio_question_answering(
-        self,
-        audio_file_path: str,
-        question: str,
-        model: str = "gpt-4o-mini-audio-preview",
-        **kwargs: Any,
+            self,
+            audio_file_path: str,
+            question: str,
+            model: str = "gpt-4o-mini-audio-preview",
+            **kwargs: Any,
     ) -> str:
         r"""Answer a question directly using the audio content.
 
@@ -318,7 +318,7 @@ class OpenAIAudio(BaseAudio):
                     {
                         "role": "system",
                         "content": "You are a helpful assistant "
-                        "specializing in audio analysis.",
+                                   "specializing in audio analysis.",
                     },
                     {  # type: ignore[misc, list-item]
                         "role": "user",

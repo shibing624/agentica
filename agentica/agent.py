@@ -201,6 +201,8 @@ class Agent(BaseModel):
     # If True, add the current datetime to the instructions to give the agent a sense of time
     # This allows for relative times like "tomorrow" to be used in the prompt
     add_datetime_to_instructions: bool = False
+    # The language to use for output, e.g. "en" for English, "zh" for Chinese, etc.
+    output_language: Optional[str] = None
 
     # -*- User Prompt Settings
     # User prompt template: provide the user prompt as a PromptTemplate
@@ -802,6 +804,10 @@ class Agent(BaseModel):
         self.session_id = str(uuid4())
         self.load_session(force=True)
 
+    def reset(self) -> None:
+        """Reset the Agent to its initial state."""
+        return self.new_session()
+
     def get_json_output_prompt(self) -> str:
         """Return the JSON output prompt for the Agent.
 
@@ -950,6 +956,9 @@ class Agent(BaseModel):
         # 4.7 Add agent name if provided
         if self.name is not None and self.add_name_to_instructions:
             instructions.append(f"Your name is: {self.name}.")
+        # 4.8 Add output language if provided
+        if self.output_language is not None:
+            instructions.append(f"Regardless of the input language, you must output text in {self.output_language}.")
 
         # 5. Build the default system message for the Agent.
         system_message_lines: List[str] = []

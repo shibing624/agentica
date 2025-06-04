@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Iterator, Dict, Any, Union
 
 import httpx
+from enum import Enum, EnumMeta
 from packaging import version
 from pydantic import BaseModel, Field
 
@@ -80,6 +81,25 @@ class StreamData:
     response_audio: Optional[dict] = None
     response_tool_calls: Optional[List[ChoiceDeltaToolCall]] = None
 
+
+class OpenAIImageTypeMeta(EnumMeta):
+    def __contains__(cls, image_type: object) -> bool:
+        try:
+            cls(image_type)
+        except ValueError:
+            return False
+        return True
+
+
+class OpenAIImageType(Enum, metaclass=OpenAIImageTypeMeta):
+    r"""Image types supported by OpenAI vision model."""
+
+    # https://platform.openai.com/docs/guides/vision
+    PNG = "png"
+    JPEG = "jpeg"
+    JPG = "jpg"
+    WEBP = "webp"
+    GIF = "gif"
 
 class OpenAIChat(Model):
     """

@@ -10,6 +10,7 @@ sqlalchemy
 scikit-learn
 text2vec
 markdownify
+Pillow
 tqdm
 rich
 pyyaml

@@ -111,7 +111,7 @@ from agentica.tools.base import Tool, ModelTool, Function, FunctionCall
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.run_python_code_tool import RunPythonCodeTool
-from agentica.tools.analyze_image_tool import AnalyzeImageTool
+from agentica.tools.image_analysis_tool import ImageAnalysisTool
 from agentica.tools.calculator_tool import CalculatorTool
 from agentica.tools.dalle_tool import DalleTool
 from agentica.tools.file_tool import FileTool
