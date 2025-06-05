@@ -13,6 +13,7 @@
 # ========= Copyright 2023-2024 @ CAMEL-AI.org. All Rights Reserved. =========
 from __future__ import annotations
 import datetime
+import asyncio
 import io
 import json
 import os
@@ -34,7 +35,6 @@ from typing import (
 )
 
 from PIL import Image, ImageDraw, ImageFont
-from playwright.async_api import async_playwright
 
 from agentica.tools.video_analysis_tool import VideoAnalysisTool
 from agentica.model.base import Model
@@ -621,6 +621,8 @@ class BaseBrowser:
 
     async def init(self) -> None:
         """Initialize the browser asynchronously."""
+        from playwright.async_api import async_playwright
+
         self.playwright = await async_playwright().start()
         self.browser = await self.playwright.chromium.launch(
             headless=self.headless,
@@ -1091,7 +1093,7 @@ class BaseBrowser:
                 raise RuntimeError(f"Failed to install browser: {e.stderr}")
 
 
-class BrowserTool(Tool):
+class Browser:
     r"""A class for browsing the web and interacting with web pages.
 
     This class provides methods for browsing the web and interacting with web
@@ -1132,7 +1134,6 @@ class BrowserTool(Tool):
                 authenticated sessions without requiring manual login.
                 (default: :obj:`None`)
         """
-        super().__init__(name="BrowserTool")
         self.browser = BaseBrowser(
             headless=headless,
             cache_dir=cache_dir,
@@ -1152,8 +1153,6 @@ class BrowserTool(Tool):
         self.web_agent, self.planning_agent = self._initialize_agent(
             web_agent_model, planning_agent_model
         )
-
-        self.register(self.browse_url)
 
     def _reset(self):
         self.web_agent.reset()
@@ -1432,56 +1431,130 @@ Here is a plan about how to solve the task step-by-step which you must follow:
         return simulation_result
 
 
-if __name__ == '__main__':
-    import asyncio
-    from agentica.utils.misc import browser_toolkit_save_auth_cookie
+class BrowserTool(Tool):
+    r"""A class for browsing the web and interacting with web pages.
 
+    This class provides methods for browsing the web and interacting with web
+    pages.
+    """
 
-    async def save_cookie_async():
-        """异步保存 cookie"""
+    def __init__(
+            self,
+            headless: bool = False,
+            cache_dir: Optional[str] = None,
+            channel: Literal["chrome", "msedge", "chromium"] = "chromium",
+            history_window: int = 5,
+            web_agent_model: Optional[Model] = None,
+            planning_agent_model: Optional[Model] = None,
+            output_language: str = "en",
+            cookie_json_path: Optional[str] = None,
+    ):
+        r"""Initialize the BrowserToolkit instance.
+
+        Args:
+            headless (bool): Whether to run the browser in headless mode.
+            cache_dir (Union[str, None]): The directory to store cache files.
+            channel (Literal["chrome", "msedge", "chromium"]): The browser
+                channel to use. Must be one of "chrome", "msedge", or
+                "chromium".
+            history_window (int): The window size for storing the history of
+                actions.
+            web_agent_model (Optional[Model]): The model backend
+                for the web agent.
+            planning_agent_model (Optional[Model]): The model
+                backend for the planning agent.
+            output_language (str): The language to use for output.
+                (default: :obj:`en`)
+            cookie_json_path (Optional[str]): Path to a JSON file containing
+                authentication cookies and browser storage state. If provided
+                and the file exists, the browser will load this state to
+                maintain
+                authenticated sessions without requiring manual login.
+                (default: :obj:`None`)
+        """
+        super().__init__(name="BrowserTool")
+        self._browser = None
+        self.headless = headless
+        self.cache_dir = cache_dir
+        self.channel = channel
+        self.history_window = history_window
+        self.web_agent_model = web_agent_model
+        self.planning_agent_model = planning_agent_model
+        self.output_language = output_language
+        self.cookie_json_path = cookie_json_path
+        self._event_loop = None
+        self.register(self.browse_webpage)
+
+    async def _init_browser(self):
+        """Initialize the browser instance."""
+        if self._browser is None:
+            self._browser = Browser(
+                headless=self.headless,
+                cache_dir=self.cache_dir,
+                channel=self.channel,
+                history_window=self.history_window,
+                web_agent_model=self.web_agent_model,
+                planning_agent_model=self.planning_agent_model,
+                output_language=self.output_language,
+                cookie_json_path=self.cookie_json_path,
+            )
+            await self._browser.browser.init()
+
+    def browse_webpage(self, task: str, url: str, round_limit: int = 8) -> str:
+        """
+        Browse a webpage and perform actions based on the task.
+        Args:
+            task (str): The task to perform on the webpage.
+            url (str): The starting URL for browsing.
+            round_limit (int): The maximum number of rounds to perform
+                actions. Default is 8.
+        Returns:
+            str: The result of the browsing task.
+        """
+
+        async def _async_browse():
+            try:
+                await self._init_browser()
+                result = await self._browser.browse_url(
+                    task_prompt=task,
+                    start_url=url,
+                    round_limit=round_limit
+                )
+                return result
+            except Exception as e:
+                logger.error(f"Error during browser task: {e}")
+                raise
+            finally:
+                if self._browser and self._browser.browser:
+                    await self._browser.browser.close()
+                    self._browser = None
+
         try:
-            await asyncio.to_thread(
-                browser_toolkit_save_auth_cookie,
-                cookie_json_path="cookie.json",
-                url="https://www.jd.com/",
-                wait_time=10
-            )
-        except Exception as e:
-            logger.error(f"Failed to save cookie: {e}")
-            raise
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-
-    async def main():
         try:
-            # 保存 cookie
-            await save_cookie_async()
-
-            # 创建并初始化 BrowserTool
-            browser_tool = BrowserTool(
-                web_agent_model=OpenAIChat(),
-                planning_agent_model=OpenAIChat(),
-                cookie_json_path="cookie.json",
-            )
-            result = await browser_tool.browse_url(
-                task_prompt="""Navigate to jd.com and 确认 国家补贴在首页里面吗？并介绍首页信息.中文回答""",
-                start_url="https://www.jd.com",
-                round_limit=3
-            )
-            print(f"Task result: {result}")
-
+            return loop.run_until_complete(_async_browse())
         except Exception as e:
-            logger.error(f"Error during execution: {e}")
+            logger.error(f"Error in browse_webpage: {e}")
             raise
         finally:
-            # 确保浏览器正确关闭
-            if 'browser_tool' in locals():
-                await browser_tool.browser.close()
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
 
 
-    # 运行主函数
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\nOperation cancelled by user")
-    except Exception as e:
-        print(f"Error: {e}")
+if __name__ == '__main__':
+    m = BrowserTool(
+        web_agent_model=OpenAIChat(),
+        planning_agent_model=OpenAIChat(),
+        cookie_json_path="tmp/cookie.json",
+    )
+    result = m.browse_webpage(
+        task="访问中国天气网(http://www.weather.com.cn)，查看北京今天的天气情况，包括温度、空气质量等信息",
+        url="https://www.weather.com.cn",
+    )
+    print(f"Task result: {result}")
