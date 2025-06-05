@@ -1,5 +1,12 @@
+# -*- encoding: utf-8 -*-
+"""
+@author: orange-crow, XuMing(xuming624@qq.com)
+@description:
+part of the code is from phidata
+"""
 import collections.abc
-
+import io
+import base64
 from types import GeneratorType
 from typing import List, Iterator, Optional, Dict, Any, Callable, Union, Sequence
 
@@ -400,7 +407,6 @@ class Model(BaseModel):
             return {"type": "image_url", "image_url": {"url": image}}
 
         # Process local file image
-        import base64
         import mimetypes
         from pathlib import Path
 
@@ -414,17 +420,27 @@ class Model(BaseModel):
             image_url = f"data:{mime_type};base64,{base64_image}"
             return {"type": "image_url", "image_url": {"url": image_url}}
 
+    def _process_pil_image(self, image: 'PIL.Image.Image') -> Dict[str, Any]:
+        """Process PIL Image data."""
+        # Convert image to bytes
+        img_byte_arr = io.BytesIO()
+        image.save(img_byte_arr, format='PNG')
+        img_byte_arr = img_byte_arr.getvalue()
+
+        # Convert to base64
+        base64_image = base64.b64encode(img_byte_arr).decode('utf-8')
+        image_url = f"data:image/png;base64,{base64_image}"
+        return {"type": "image_url", "image_url": {"url": image_url}}
+
     def _process_bytes_image(self, image: bytes) -> Dict[str, Any]:
         """Process bytes image data."""
-        import base64
-
         base64_image = base64.b64encode(image).decode("utf-8")
         image_url = f"data:image/jpeg;base64,{base64_image}"
         return {"type": "image_url", "image_url": {"url": image_url}}
 
     def process_image(self, image: Any) -> Optional[Dict[str, Any]]:
         """Process an image based on the format."""
-
+        from PIL.Image import Image as PILImage
         if isinstance(image, dict):
             return {"type": "image_url", "image_url": image}
 
@@ -433,6 +449,9 @@ class Model(BaseModel):
 
         if isinstance(image, bytes):
             return self._process_bytes_image(image)
+
+        if isinstance(image, PILImage):
+            return self._process_pil_image(image)
 
         logger.warning(f"Unsupported image type: {type(image)}")
         return None
