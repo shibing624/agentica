@@ -1043,7 +1043,7 @@ class BaseBrowser:
         import sys
         from pathlib import Path
 
-        path = os.path.join(AGENTICA_HOME, "browser/browser_installed.txt")
+        path = os.path.join(AGENTICA_HOME, "browser")
         cache_dir = Path(path)
         cache_dir.mkdir(parents=True, exist_ok=True)
         cache_file = cache_dir / f"{self.channel}_installed"
