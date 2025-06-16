@@ -1777,7 +1777,7 @@ class Agent(BaseModel):
                         self.run_response.reasoning_content = model_response_chunk.reasoning_content
                         self.run_response.created_at = model_response_chunk.created_at
                         yield self.run_response
-                    if model_response_chunk.content is not None and model_response.content is not None:
+                    if model_response_chunk.content and model_response.content is not None:
                         model_response.content += model_response_chunk.content
                         self.run_response.content = model_response_chunk.content
                         self.run_response.created_at = model_response_chunk.created_at
@@ -2663,7 +2663,7 @@ class Agent(BaseModel):
                 has_reasoning_content = False
                 for resp in self.run(message=message, messages=messages, stream=True, **kwargs):
                     if isinstance(resp, RunResponse) and isinstance(resp.reasoning_content, str):
-                        if resp.event == RunEvent.run_response:
+                        if resp.reasoning_content and resp.event == RunEvent.run_response:
                             _response_reasoning_content += resp.reasoning_content
                             has_reasoning_content = True
 
@@ -2678,7 +2678,7 @@ class Agent(BaseModel):
                         reasoning_with_tags = _response_reasoning_content
                         if not reasoning_with_tags.endswith("</think>"):
                             reasoning_with_tags += "</think>"
-                        displayed_content = f"{reasoning_with_tags}\n\n{_response_content}"
+                        displayed_content = f"{reasoning_with_tags}{_response_content}"
 
                     response_content_stream = Markdown(displayed_content) if self.markdown else displayed_content
 
