@@ -1690,6 +1690,7 @@ class Agent(BaseModel):
             videos=self.run_response.videos,
             model=self.run_response.model,
             messages=self.run_response.messages,
+            reasoning_content=self.run_response.reasoning_content,
             extra_data=self.run_response.extra_data,
             event=event.value,
         )
@@ -1768,12 +1769,12 @@ class Agent(BaseModel):
         model_response: ModelResponse
         self.model = cast(Model, self.model)
         if self.stream:
-            model_response = ModelResponse(content="")
+            model_response = ModelResponse(content="", reasoning_content="")
             for model_response_chunk in self.model.response_stream(messages=messages_for_model):
                 if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
                     if model_response_chunk.reasoning_content is not None:
-                        model_response.content += model_response_chunk.reasoning_content
-                        self.run_response.content = model_response_chunk.reasoning_content
+                        model_response.reasoning_content = model_response_chunk.reasoning_content
+                        self.run_response.reasoning_content = model_response_chunk.reasoning_content
                         self.run_response.created_at = model_response_chunk.created_at
                         yield self.run_response
                     if model_response_chunk.content is not None and model_response.content is not None:
@@ -1818,6 +1819,8 @@ class Agent(BaseModel):
                 self.run_response.content = model_response.content
             if model_response.audio is not None:
                 self.run_response.audio = model_response.audio
+            if model_response.reasoning_content is not None:
+                self.run_response.reasoning_content = model_response.reasoning_content
             self.run_response.messages = messages_for_model
             self.run_response.created_at = model_response.created_at
 
@@ -2631,6 +2634,7 @@ class Agent(BaseModel):
 
         if stream:
             _response_content: str = ""
+            _response_reasoning_content: str = ""
             reasoning_steps: List[ReasoningStep] = []
             with Live(console=console) as live_log:
                 status = Status("Thinking...", spinner="aesthetic", speed=2.0, refresh_per_second=10)
@@ -2655,13 +2659,28 @@ class Agent(BaseModel):
                 if render:
                     live_log.update(Group(*panels))
 
+                _response_reasoning_content = "<think>"
+                has_reasoning_content = False
                 for resp in self.run(message=message, messages=messages, stream=True, **kwargs):
+                    if isinstance(resp, RunResponse) and isinstance(resp.reasoning_content, str):
+                        if resp.event == RunEvent.run_response:
+                            _response_reasoning_content += resp.reasoning_content
+                            has_reasoning_content = True
+
                     if isinstance(resp, RunResponse) and isinstance(resp.content, str):
                         if resp.event == RunEvent.run_response:
                             _response_content += resp.content
                         if resp.extra_data is not None and resp.extra_data.reasoning_steps is not None:
                             reasoning_steps = resp.extra_data.reasoning_steps
-                    response_content_stream = Markdown(_response_content) if self.markdown else _response_content
+
+                    displayed_content = _response_content
+                    if has_reasoning_content:
+                        reasoning_with_tags = _response_reasoning_content
+                        if not reasoning_with_tags.endswith("</think>"):
+                            reasoning_with_tags += "</think>"
+                        displayed_content = f"{reasoning_with_tags}\n\n{_response_content}"
+
+                    response_content_stream = Markdown(displayed_content) if self.markdown else displayed_content
 
                     panels = [status]
 

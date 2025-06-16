@@ -658,6 +658,9 @@ class OpenAIChat(Model):
         if assistant_message.content is not None:
             # add the content to the model response
             model_response.content = assistant_message.get_content_string()
+        if assistant_message.reasoning_content is not None:
+            # add the reasoning content to the model response
+            model_response.reasoning_content = assistant_message.reasoning_content
         if assistant_message.audio is not None:
             # add the audio to the model response
             model_response.audio = assistant_message.audio
@@ -731,6 +734,9 @@ class OpenAIChat(Model):
         if assistant_message.audio is not None:
             # add the audio to the model response
             model_response.audio = assistant_message.audio
+        if assistant_message.reasoning_content is not None:
+            # add the reasoning content to the model response
+            model_response.reasoning_content = assistant_message.reasoning_content
 
         # -*- Handle tool calls
         tool_role = "tool"

@@ -61,6 +61,7 @@ class RunResponse(BaseModel):
     videos: Optional[List[Video]] = None  # Videos attached to the response
     audio: Optional[List[Audio]] = None  # Audio attached to the response
     response_audio: Optional[Dict] = None  # Model audio response
+    reasoning_content: Optional[str] = ""
     extra_data: Optional[RunResponseExtraData] = None
     created_at: int = Field(default_factory=lambda: int(time()))
 

@@ -497,6 +497,9 @@ class Gemini(Model):
         # -*- Update model response
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
+        if assistant_message.reasoning_content is not None:
+            # add the reasoning content to the model response
+            model_response.reasoning_content = assistant_message.reasoning_content
 
         # -*- Remove tool call blocks and tool call results from messages
         for m in messages:

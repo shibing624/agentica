@@ -51,6 +51,7 @@ setup(
         "rich",
         "pyyaml",
         "mcp",
+        "puremagic",
     ],
     packages=find_packages(exclude=['tests']),
     package_dir={'agentica': 'agentica'},
