@@ -48,12 +48,12 @@
 
 ## 版本更新
 
-- **[2025/06/19] v1.0.10 版本**：支持思考过程流式输出，详见 [Release-v1.0.10](https://github.com/shibing624/agentica/releases/tag/v1.0.10)
-- **[2025/05/19] v1.0.6 版本**：新增了 MCP 的 StreamableHttp 支持，兼容 StreamableHttp/SSE/Stdio 三种 MCP Server，详见 [Release-v1.0.6](https://github.com/shibing624/agentica/releases/tag/v1.0.6)
-- **[2025/04/21] v1.0.0 版本**：支持了 MCP 的工具调用，兼容 SSE/Stdio 的 MCP Server，详见 [Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/v1.0.0)
-- **[2024/12/29] v0.2.3 版本**：支持了 ZhipuAI 的 api 调用，包括免费模型和工具使用，详见 [Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/v0.2.3)
-- **[2024/12/25] v0.2.0 版本**：支持了多模态模型，输入可以是文本、图片、音频、视频，并升级 Assistant 为 Agent，Workflow 支持拆解并实现复杂任务，详见 [Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/v0.2.0)
-- **[2024/07/02] v0.1.0 版本**：实现了基于 LLM 的 Assistant，可以快速用 function call 搭建大语言模型助手，详见 [Release-v0.1.0](https://github.com/shibing624/agentica/releases/tag/v0.1.0)
+- **[2025/06/19] v1.0.10 版本**：支持思考过程流式输出，详见 [Release-v1.0.10](https://github.com/shibing624/agentica/releases/tag/1.0.10)
+- **[2025/05/19] v1.0.6 版本**：新增了 MCP 的 StreamableHttp 支持，兼容 StreamableHttp/SSE/Stdio 三种 MCP Server，详见 [Release-v1.0.6](https://github.com/shibing624/agentica/releases/tag/1.0.6)
+- **[2025/04/21] v1.0.0 版本**：支持了 MCP 的工具调用，兼容 SSE/Stdio 的 MCP Server，详见 [Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/1.0.0)
+- **[2024/12/29] v0.2.3 版本**：支持了 ZhipuAI 的 api 调用，包括免费模型和工具使用，详见 [Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/0.2.3)
+- **[2024/12/25] v0.2.0 版本**：支持了多模态模型，输入可以是文本、图片、音频、视频，并升级 Assistant 为 Agent，Workflow 支持拆解并实现复杂任务，详见 [Release-v0.2.0](https://github.com/shibing624/agentica/releases/tag/0.2.0)
+- **[2024/07/02] v0.1.0 版本**：实现了基于 LLM 的 Assistant，可以快速用 function call 搭建大语言模型助手，详见 [Release-v0.1.0](https://github.com/shibing624/agentica/releases/tag/0.1.0)
 
 [查看所有版本](https://github.com/shibing624/agentica/releases)
 
