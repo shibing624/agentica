@@ -1772,7 +1772,11 @@ class Agent(BaseModel):
             for model_response_chunk in self.model.response_stream(messages=messages_for_model):
                 if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
                     if model_response_chunk.reasoning_content is not None:
-                        model_response.reasoning_content = model_response_chunk.reasoning_content
+                        # Accumulate reasoning content instead of overwriting
+                        if model_response.reasoning_content is None:
+                            model_response.reasoning_content = ""
+                        model_response.reasoning_content += model_response_chunk.reasoning_content
+                        # For streaming, yield only the new chunk, not the accumulated content
                         self.run_response.reasoning_content = model_response_chunk.reasoning_content
                         self.run_response.created_at = model_response_chunk.created_at
                         yield self.run_response
@@ -1833,6 +1837,9 @@ class Agent(BaseModel):
         # Update the run_response content if streaming as run_response will only contain the last chunk
         if self.stream:
             self.run_response.content = model_response.content
+            # Also update the reasoning_content with the complete accumulated content
+            if hasattr(model_response, 'reasoning_content') and model_response.reasoning_content:
+                self.run_response.reasoning_content = model_response.reasoning_content
 
         # 6. Update Memory
         if self.stream_intermediate_steps:
@@ -2660,16 +2667,17 @@ class Agent(BaseModel):
 
                 _response_reasoning_content = ""
                 has_reasoning_content = False
-                _seen_reasoning_content = set()  # Track seen content to avoid duplicates
-                for resp in self.run(message=message, messages=messages, stream=True, **kwargs):
+                # Run the agent and get the final response with complete reasoning content
+                run_generator = self.run(message=message, messages=messages, stream=True, **kwargs)
+                for resp in run_generator:
                     if isinstance(resp, RunResponse) and isinstance(resp.reasoning_content, str):
                         if resp.reasoning_content and resp.event == RunEvent.run_response:
-                            # Check if this reasoning content chunk is new
-                            content_hash = hash(resp.reasoning_content)
-                            if content_hash not in _seen_reasoning_content:
-                                _seen_reasoning_content.add(content_hash)
-                                _response_reasoning_content += resp.reasoning_content
-                                has_reasoning_content = True
+                            has_reasoning_content = True
+
+                # After streaming is complete, get the complete reasoning content from self.run_response
+                if (has_reasoning_content and hasattr(self, 'run_response') and self.run_response and
+                        hasattr(self.run_response, 'reasoning_content')):
+                    _response_reasoning_content = self.run_response.reasoning_content or ""
 
                     if isinstance(resp, RunResponse) and isinstance(resp.content, str):
                         if resp.event == RunEvent.run_response:
@@ -2678,7 +2686,7 @@ class Agent(BaseModel):
                             reasoning_steps = resp.extra_data.reasoning_steps
 
                     displayed_content = _response_content
-                    if has_reasoning_content:
+                    if has_reasoning_content and _response_reasoning_content:
                         reasoning_with_tags = f"<think>{_response_reasoning_content}</think>"
                         displayed_content = f"{reasoning_with_tags}{_response_content}"
 
