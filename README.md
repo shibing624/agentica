@@ -48,6 +48,7 @@
 
 ## 版本更新
 
+- **[2025/06/19] v1.0.10 版本**：支持思考过程流式输出，详见 [Release-v1.0.10](https://github.com/shibing624/agentica/releases/tag/v1.0.10)
 - **[2025/05/19] v1.0.6 版本**：新增了 MCP 的 StreamableHttp 支持，兼容 StreamableHttp/SSE/Stdio 三种 MCP Server，详见 [Release-v1.0.6](https://github.com/shibing624/agentica/releases/tag/v1.0.6)
 - **[2025/04/21] v1.0.0 版本**：支持了 MCP 的工具调用，兼容 SSE/Stdio 的 MCP Server，详见 [Release-v1.0.0](https://github.com/shibing624/agentica/releases/tag/v1.0.0)
 - **[2024/12/29] v0.2.3 版本**：支持了 ZhipuAI 的 api 调用，包括免费模型和工具使用，详见 [Release-v0.2.3](https://github.com/shibing624/agentica/releases/tag/v0.2.3)
