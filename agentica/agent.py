@@ -49,7 +49,6 @@ from agentica.storage.agent.base import AgentStorage
 from agentica.utils.message import get_text_from_message
 from agentica.utils.timer import Timer
 from agentica.agent_session import AgentSession
-from agentica.media import AudioResponse
 from agentica.utils.string import parse_structured_output
 
 
@@ -2659,13 +2658,18 @@ class Agent(BaseModel):
                 if render:
                     live_log.update(Group(*panels))
 
-                _response_reasoning_content = "<think>"
+                _response_reasoning_content = ""
                 has_reasoning_content = False
+                _seen_reasoning_content = set()  # Track seen content to avoid duplicates
                 for resp in self.run(message=message, messages=messages, stream=True, **kwargs):
                     if isinstance(resp, RunResponse) and isinstance(resp.reasoning_content, str):
                         if resp.reasoning_content and resp.event == RunEvent.run_response:
-                            _response_reasoning_content += resp.reasoning_content
-                            has_reasoning_content = True
+                            # Check if this reasoning content chunk is new
+                            content_hash = hash(resp.reasoning_content)
+                            if content_hash not in _seen_reasoning_content:
+                                _seen_reasoning_content.add(content_hash)
+                                _response_reasoning_content += resp.reasoning_content
+                                has_reasoning_content = True
 
                     if isinstance(resp, RunResponse) and isinstance(resp.content, str):
                         if resp.event == RunEvent.run_response:
@@ -2675,9 +2679,7 @@ class Agent(BaseModel):
 
                     displayed_content = _response_content
                     if has_reasoning_content:
-                        reasoning_with_tags = _response_reasoning_content
-                        if not reasoning_with_tags.endswith("</think>"):
-                            reasoning_with_tags += "</think>"
+                        reasoning_with_tags = f"<think>{_response_reasoning_content}</think>"
                         displayed_content = f"{reasoning_with_tags}{_response_content}"
 
                     response_content_stream = Markdown(displayed_content) if self.markdown else displayed_content
