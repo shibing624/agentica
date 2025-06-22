@@ -287,7 +287,8 @@ class MemoryClassifier(BaseModel):
     def update_model(self) -> None:
         if self.model is None:
             self.model = OpenAIChat()
-            logger.debug(f"Using Model: {self.model}")
+        logger.debug(f"MemoryClassifier, using model: {self.model}")
+
 
     def get_system_prompt(self) -> Optional[str]:
         # If the system_prompt is provided, use it
@@ -567,7 +568,7 @@ class AgentMemory(BaseModel):
 
     # Create and store session summaries
     create_session_summary: bool = False
-    # Update session summaries after each run
+    # Update session summaries after each run, effect when create_session_summary is True
     update_session_summary_after_run: bool = True
     # Summary of the session
     summary: Optional[SessionSummary] = None
@@ -576,7 +577,7 @@ class AgentMemory(BaseModel):
 
     # Create and store personalized memories for this user
     create_user_memories: bool = False
-    # Update memories for the user after each run
+    # Update memories for the user after each run, effect when create_user_memories is True
     update_user_memories_after_run: bool = True
 
     # MemoryDb to store personalized memories

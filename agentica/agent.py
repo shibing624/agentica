@@ -7,7 +7,6 @@ part of the code from https://github.com/phidatahq/phidata
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from textwrap import dedent
 from collections import defaultdict, deque
@@ -119,6 +118,8 @@ class Agent(BaseModel):
     # Tools are functions the model may generate JSON inputs for.
     # If you provide a dict, it is not called by the model.
     tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None
+    # Whether the LLM supports tool calls (function calls)
+    support_tool_calls: bool = True
     # Show tool calls in Agent response.
     show_tool_calls: bool = False
     # Maximum number of tool calls allowed.
@@ -257,7 +258,7 @@ class Agent(BaseModel):
     def set_log_level(cls, v: bool) -> bool:
         if v:
             set_log_level_to_debug()
-            logger.debug("Debug logs enabled")
+            logger.debug("Debug logs enabled for Agent")
         elif v is False:
             set_log_level_to_info()
         return v
@@ -504,7 +505,7 @@ class Agent(BaseModel):
 
         # Add tools to the Model
         agent_tools = self.get_tools()
-        if agent_tools is not None:
+        if agent_tools is not None and self.support_tool_calls:
             for tool in agent_tools:
                 if (
                         self.response_model is not None
@@ -1029,19 +1030,22 @@ class Agent(BaseModel):
                     "\nNote: this information is from previous interactions and may be updated in this conversation. "
                     "You should always prefer information from this conversation over the past memories."
                 )
-                system_message_lines.append("If you need to update the long-term memory, use the `update_memory` tool.")
+                if self.support_tool_calls:
+                    system_message_lines.append("If you need to update the long-term memory, use the `update_memory` tool.")
             else:
                 system_message_lines.append(
                     "You have the capability to retain memories from previous interactions with the user, "
                     "but have not had any interactions with the user yet."
                 )
-                system_message_lines.append(
-                    "If the user asks about previous memories, you can let them know that you dont have any memory about the user yet because you have not had any interactions with them yet, "
-                    "but can add new memories using the `update_memory` tool."
-                )
-            system_message_lines.append(
-                "If you use the `update_memory` tool, remember to pass on the response to the user.\n"
-            )
+                if self.support_tool_calls:
+                    system_message_lines.append(
+                        "If the user asks about previous memories, you can let them know that you dont have any memory "
+                        "about the user yet because you have not had any interactions with them yet, "
+                        "but can add new memories using the `update_memory` tool."
+                    )
+            if self.support_tool_calls:
+                system_message_lines.append("If you use the `update_memory` tool, "
+                                            "remember to pass on the response to the user.\n")
 
         # 5.11 Then add a summary of the interaction to the system prompt
         if self.memory.create_session_summary:
