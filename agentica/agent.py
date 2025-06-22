@@ -489,7 +489,7 @@ class Agent(BaseModel):
 
     def update_model(self) -> None:
         if self.model is None:
-            logger.info("Model not set, Using OpenAIChat as default")
+            logger.debug("Model not set, Using OpenAIChat as default")
             self.model = OpenAIChat()
         logger.debug(f"Using Model: {self.model}")
 

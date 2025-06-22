@@ -206,8 +206,6 @@ class MemoryManager(BaseModel):
             message: Optional[str] = None,
             **kwargs: Any,
     ) -> str:
-        logger.debug("*********** MemoryManager Start ***********")
-
         if self.mode == "rule":
             exist_id = None
             existing_memories = self.get_existing_memories()
@@ -244,7 +242,39 @@ class MemoryManager(BaseModel):
             self.model = cast(Model, self.model)
             res = self.model.response(messages=llm_messages)
             response = res.content
-        logger.debug("*********** MemoryManager End ***********")
+        return response
+
+    async def arun(self, message: Optional[str] = None, **kwargs: Any):
+        if self.mode == "rule":
+            exist_id = None
+            existing_memories = self.get_existing_memories()
+            if existing_memories and len(existing_memories) > 0:
+                for m in existing_memories:
+                    if message in m.memory:
+                        exist_id = m.id
+                        break
+            if exist_id:
+                self.update_memory(id=exist_id, memory=message)
+                response = f"Memory updated successfully, id: {exist_id}, memory: {message}"
+            else:
+                self.add_memory(memory=message)
+                response = f"Memory added successfully, memory: {message}"
+            logger.debug(f"MemoryManager mode: {self.mode}, response: {response}")
+        else:
+            self.update_model()
+            llm_messages: List[Message] = []
+
+            system_prompt_message = Message(role="system", content=self.get_system_prompt())
+            llm_messages.append(system_prompt_message)
+            # Set input message added with the memory
+            self.input_message = message
+            # Create the user prompt message
+            user_prompt_message = Message(role="user", content=message, **kwargs) if message else None
+            if user_prompt_message is not None:
+                llm_messages += [user_prompt_message]
+            self.model = cast(Model, self.model)
+            res = await self.model.aresponse(messages=llm_messages)
+            response = res.content
         return response
 
 
@@ -302,8 +332,6 @@ class MemoryClassifier(BaseModel):
             message: Optional[str] = None,
             **kwargs: Any,
     ) -> str:
-        logger.debug("*********** MemoryClassifier Start ***********")
-
         # Update the Model (set defaults, add logit etc.)
         self.update_model()
 
@@ -326,7 +354,31 @@ class MemoryClassifier(BaseModel):
         # -*- generate_a_response_from_the_llm (includes_running_function_calls)
         self.model = cast(Model, self.model)
         classification_response = self.model.response(messages=llm_messages)
-        logger.debug("*********** MemoryClassifier End ***********")
+        return classification_response.content
+
+    async def arun(self, message: Optional[str] = None, **kwargs: Any):
+        # Update the Model (set defaults, add logit etc.)
+        self.update_model()
+
+        # -*- Prepare the List of messages sent to the Model
+        llm_messages: List[Message] = []
+
+        # Get the System prompt
+        system_prompt = self.get_system_prompt()
+        # Create system prompt message
+        system_prompt_message = Message(role="system", content=system_prompt)
+        # Add system prompt message to the messages list
+        if system_prompt_message.content_is_valid():
+            llm_messages.append(system_prompt_message)
+
+        # Build the user prompt message
+        user_prompt_message = Message(role="user", content=message, **kwargs) if message else None
+        if user_prompt_message is not None:
+            llm_messages += [user_prompt_message]
+
+        # -*- generate_a_response_from_the_llm (includes_running_function_calls)
+        self.model = cast(Model, self.model)
+        classification_response = await self.model.aresponse(messages=llm_messages)
         return classification_response.content
 
 
@@ -404,8 +456,7 @@ class MemorySummarizer(BaseModel):
             message_pairs: List[Tuple[Message, Message]],
             **kwargs: Any,
     ) -> Optional[SessionSummary]:
-        logger.debug("*********** MemorySummarizer Start ***********")
-
+        # logger.debug("*********** MemorySummarizer Start ***********")
         if message_pairs is None or len(message_pairs) == 0:
             logger.info("No message pairs provided for summarization.")
             return None
@@ -429,7 +480,7 @@ class MemorySummarizer(BaseModel):
         # Generate a response from the Model (includes running function calls)
         self.model = cast(Model, self.model)
         response = self.model.response(messages=messages_for_model)
-        logger.debug("*********** MemorySummarizer End ***********")
+        # logger.debug("*********** MemorySummarizer End ***********")
 
         # If the model natively supports structured outputs, the parsed value is already in the structured format
         if self.use_structured_outputs and response.parsed is not None and isinstance(response.parsed, SessionSummary):
@@ -459,8 +510,7 @@ class MemorySummarizer(BaseModel):
             message_pairs: List[Tuple[Message, Message]],
             **kwargs: Any,
     ) -> Optional[SessionSummary]:
-        logger.debug("*********** Async MemorySummarizer Start ***********")
-
+        # logger.debug("*********** Async MemorySummarizer Start ***********")
         if message_pairs is None or len(message_pairs) == 0:
             logger.info("No message pairs provided for summarization.")
             return None
@@ -484,7 +534,7 @@ class MemorySummarizer(BaseModel):
         # Generate a response from the Model (includes running function calls)
         self.model = cast(Model, self.model)
         response = await self.model.aresponse(messages=messages_for_model)
-        logger.debug("*********** Async MemorySummarizer End ***********")
+        # logger.debug("*********** Async MemorySummarizer End ***********")
 
         # If the model natively supports structured outputs, the parsed value is already in the structured format
         if self.use_structured_outputs and response.parsed is not None and isinstance(response.parsed, SessionSummary):
