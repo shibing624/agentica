@@ -102,6 +102,7 @@ class OpenAIImageType(Enum, metaclass=OpenAIImageTypeMeta):
     WEBP = "webp"
     GIF = "gif"
 
+
 class OpenAIChat(Model):
     """
     A class for interacting with OpenAI models.
@@ -902,7 +903,7 @@ class OpenAIChat(Model):
                     stream_data.response_reasoning_content += response_delta.reasoning_content
                     yield ModelResponse(reasoning_content=response_delta.reasoning_content)
 
-                if response_delta.content:
+                if hasattr(response_delta, "content") and response_delta.content:
                     stream_data.response_content += response_delta.content
                     yield ModelResponse(content=response_delta.content)
 
@@ -911,7 +912,7 @@ class OpenAIChat(Model):
                     stream_data.response_audio = response_audio
                     yield ModelResponse(audio=response_audio)
 
-                if response_delta.tool_calls:
+                if hasattr(response_delta, "tool_calls") and response_delta.tool_calls:
                     if stream_data.response_tool_calls is None:
                         stream_data.response_tool_calls = []
                     stream_data.response_tool_calls.extend(response_delta.tool_calls)
@@ -985,7 +986,7 @@ class OpenAIChat(Model):
                     stream_data.response_reasoning_content += response_delta.reasoning_content
                     yield ModelResponse(reasoning_content=response_delta.reasoning_content)
 
-                if response_delta.content:
+                if hasattr(response_delta, "content") and response_delta.content:
                     stream_data.response_content += response_delta.content
                     yield ModelResponse(content=response_delta.content)
 
@@ -994,7 +995,7 @@ class OpenAIChat(Model):
                     stream_data.response_audio = response_audio
                     yield ModelResponse(audio=response_audio)
 
-                if response_delta.tool_calls:
+                if hasattr(response_delta, "tool_calls") and response_delta.tool_calls:
                     if stream_data.response_tool_calls is None:
                         stream_data.response_tool_calls = []
                     stream_data.response_tool_calls.extend(response_delta.tool_calls)
