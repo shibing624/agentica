@@ -14,5 +14,5 @@ Pillow
 tqdm
 rich
 pyyaml
-mcp>=1.8.0
+mcp>=1.9.4
 puremagic
