@@ -9,7 +9,7 @@ from hashlib import md5
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator, Field
 from sqlalchemy.dialects import postgresql
 from sqlalchemy import (
     create_engine,
@@ -68,8 +68,8 @@ class MemoryRow(BaseModel):
 
     memory: Dict[str, Any]
     user_id: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[datetime] = Field(default_factory=datetime.now)
+    updated_at: Optional[datetime] = Field(default_factory=datetime.now)
     # id for this memory, auto-generated from the memory
     id: Optional[str] = None
 

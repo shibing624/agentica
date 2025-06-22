@@ -53,8 +53,6 @@ class Memory(BaseModel):
     """Model for Model memories"""
 
     memory: str
-    id: Optional[str] = None
-    topic: Optional[str] = None
     input_text: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -166,7 +164,7 @@ class MemoryManager(BaseModel):
         """
         try:
             if self.db:
-                self.db.clear_table()
+                self.db.clear()
             return "Memory cleared successfully"
         except Exception as e:
             logger.warning(f"Error clearing memory in db: {e}")
@@ -206,6 +204,8 @@ class MemoryManager(BaseModel):
             message: Optional[str] = None,
             **kwargs: Any,
     ) -> str:
+        # Set input message added with the memory
+        self.input_message = message
         if self.mode == "rule":
             exist_id = None
             existing_memories = self.get_existing_memories()
@@ -231,8 +231,6 @@ class MemoryManager(BaseModel):
             # Create the system prompt message
             system_prompt_message = Message(role="system", content=self.get_system_prompt())
             llm_messages.append(system_prompt_message)
-            # Set input message added with the memory
-            self.input_message = message
             # Create the user prompt message
             user_prompt_message = Message(role="user", content=message, **kwargs) if message else None
             if user_prompt_message is not None:
@@ -245,6 +243,8 @@ class MemoryManager(BaseModel):
         return response
 
     async def arun(self, message: Optional[str] = None, **kwargs: Any):
+        # Set input message added with the memory
+        self.input_message = message
         if self.mode == "rule":
             exist_id = None
             existing_memories = self.get_existing_memories()
@@ -266,8 +266,6 @@ class MemoryManager(BaseModel):
 
             system_prompt_message = Message(role="system", content=self.get_system_prompt())
             llm_messages.append(system_prompt_message)
-            # Set input message added with the memory
-            self.input_message = message
             # Create the user prompt message
             user_prompt_message = Message(role="user", content=message, **kwargs) if message else None
             if user_prompt_message is not None:
@@ -846,7 +844,6 @@ class AgentMemory(BaseModel):
 
         if self.manager is None:
             self.manager = MemoryManager(user_id=self.user_id, db=self.db)
-
         else:
             self.manager.db = self.db
             self.manager.user_id = self.user_id
