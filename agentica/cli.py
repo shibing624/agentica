@@ -549,7 +549,8 @@ def main():
         # Interactive mode
         try:
             import readline
-            os.makedirs(os.path.dirname(history_file), exist_ok=True)
+            if os.path.dirname(history_file):
+                os.makedirs(os.path.dirname(history_file), exist_ok=True)
             readline.read_history_file(history_file)
             readline.parse_and_bind("tab: complete")
         except FileNotFoundError:

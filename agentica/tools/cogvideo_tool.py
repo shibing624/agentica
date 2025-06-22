@@ -137,7 +137,8 @@ class CogVideoTool(Tool):
         """
         try:
             video_data = requests.get(video_url).content
-            os.makedirs(os.path.dirname(saved_video_path), exist_ok=True)
+            if os.path.dirname(saved_video_path):
+                os.makedirs(os.path.dirname(saved_video_path), exist_ok=True)
             with open(saved_video_path, "wb") as f:
                 f.write(video_data)
             logger.info(f"Video saved to: {saved_video_path}")

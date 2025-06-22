@@ -25,7 +25,6 @@ print("=====================")
 # add history to messages
 print("=== Add history to messages ===")
 memory_file = "outputs/memory.csv"
-os.makedirs(os.path.dirname(memory_file), exist_ok=True)
 if os.path.exists(memory_file):
     os.remove(memory_file)
 m = Agent(

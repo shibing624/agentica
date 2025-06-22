@@ -114,7 +114,8 @@ class CogViewTool(Tool):
         :type image_path: str
         """
         image_data = requests.get(image_url).content
-        os.makedirs(os.path.dirname(image_path), exist_ok=True)
+        if os.path.dirname(image_path):
+            os.makedirs(os.path.dirname(image_path), exist_ok=True)
         with open(image_path, "wb") as f:
             f.write(image_data)
 

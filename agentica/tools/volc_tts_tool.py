@@ -216,7 +216,9 @@ class VolcTtsTool(Tool):
 
         try:
             # Ensure the directory exists
-            os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
+            path = os.path.abspath(output_file)
+            if os.path.dirname(path):
+                os.makedirs(os.path.dirname(path), exist_ok=True)
 
             # Decode and save the audio data
             audio_data = base64.b64decode(result["audio_data"])

@@ -84,7 +84,8 @@ async def main():
     args = parser.parse_args()
 
     # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
 
     # Setup Agent
     instructions = """You are a highly capable AI assistant evaluating questions from the GAIA benchmark. 

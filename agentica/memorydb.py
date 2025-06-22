@@ -96,7 +96,9 @@ class MemoryRow(BaseModel):
 class CsvMemoryDb(MemoryDb):
     def __init__(self, csv_file_path: str = None):
         self.file_path = csv_file_path if csv_file_path else f"memory_{datetime.now().isoformat()}.csv"
-        os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
+        dirname = os.path.dirname(self.file_path)
+        if dirname:
+            os.makedirs(dirname, exist_ok=True)
         self.memories = []
 
     def create(self) -> None:

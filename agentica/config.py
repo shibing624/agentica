@@ -9,7 +9,8 @@ from dotenv import load_dotenv  # noqa
 from loguru import logger  # noqa, need to import logger here to avoid circular import
 
 AGENTICA_HOME = os.getenv("AGENTICA_HOME", os.path.expanduser("~/.agentica"))
-os.makedirs(AGENTICA_HOME, exist_ok=True)
+if AGENTICA_HOME:
+    os.makedirs(AGENTICA_HOME, exist_ok=True)
 
 # Load environment variables from .env file
 AGENTICA_DOTENV_PATH = os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env")

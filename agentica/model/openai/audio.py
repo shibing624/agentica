@@ -176,7 +176,8 @@ class OpenAIAudioModel(BaseAudioModel):
 
         # Create a directory to store the chunks
         output_dir = os.path.splitext(audio_file_path)[0] + "_chunks"
-        os.makedirs(output_dir, exist_ok=True)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
 
         # Get audio chunk len in milliseconds
         chunk_size_milliseconds = len(audio) // (num_chunks)
