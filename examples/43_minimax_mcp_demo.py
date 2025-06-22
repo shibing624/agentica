@@ -25,7 +25,7 @@ async def mcp_toolkit_with_agent_demo():
     """
     try:
         # Use the original config file but with improved error handling
-        config_path = os.path.join(os.path.dirname(__file__), "mcp_config.json")
+        config_path = os.path.join(os.path.dirname(__file__), "mcp_config.yaml")
         print(f"Using MCP config from: {config_path}")
 
         async with McpTool.from_config(config_path=config_path) as mcp_tool1:

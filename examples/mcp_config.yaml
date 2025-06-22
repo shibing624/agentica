@@ -1,0 +1,10 @@
+# MCP服务器配置
+mcpServers:
+  weather:
+    command: "uv run weather-forecast-server"
+  minimax:
+    command: "uv run minimax-mcp"
+  edgeone-pages-mcp-server:
+    url: "https://mcp-on-edge.edgeone.site/mcp-server"
+  # mcp-ip-query:
+  #   url: "https://mcp.higress.ai/mcp-ip-query/cmadpuvko00068k018uz8y6a4/sse"

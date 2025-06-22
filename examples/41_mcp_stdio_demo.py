@@ -26,8 +26,8 @@ async def stdio_server_demo():
     server = MCPServerStdio(
         name="GetWeather",
         params={
-            "command": "uvx",
-            "args": ["weather-forecast-server"],
+            "command": "uv",
+            "args": ['run', "weather-forecast-server"],
         }
     )
     # Use the client as an async context manager
@@ -52,7 +52,7 @@ async def mcp_toolkit_with_agent_demo():
     """
     logger.debug("\n=== Testing MCPToolkit with agent ===")
     try:
-        async with McpTool("uvx weather-forecast-server") as mcp_tool:
+        async with McpTool("uv run weather-forecast-server") as mcp_tool:
             m = Agent(
                 model=OpenAIChat(model="gpt-4o-mini"),
                 tools=[ShellTool(), mcp_tool],

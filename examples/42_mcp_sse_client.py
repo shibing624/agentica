@@ -69,7 +69,7 @@ async def mcp_toolkit_with_agent_demo() -> None:
                 tools=[ShellTool(), mcp_tool],
                 show_tool_calls=False,
                 add_datetime_to_instructions=True,
-                debug_mode=True
+                debug_mode=False
             )
 
             # 显示代理可用的工具

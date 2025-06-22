@@ -9,6 +9,11 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from agentica.config import AGENTICA_HOME
 
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
 
 @dataclass
 class MCPServerConfig:
@@ -32,27 +37,44 @@ class MCPConfig:
         self._load_config()
 
     def _find_config_file(self) -> str:
-        """Find mcp_config.json in current or parent directories"""
+        """Find MCP configuration file in current or parent directories.
+        Supports JSON (.json) and YAML (.yaml, .yml) formats.
+        """
         current_dir = os.getcwd()
+        # List of supported config file names
+        config_files = ['mcp_config.json', 'mcp_config.yaml', 'mcp_config.yml']
+
         while current_dir != os.path.dirname(current_dir):
-            config_path = os.path.join(current_dir, 'mcp_config.json')
+            for config_file in config_files:
+                config_path = os.path.join(current_dir, config_file)
+                if os.path.exists(config_path):
+                    return config_path
+            current_dir = os.path.dirname(current_dir)
+
+        # Check in AGENTICA_HOME directory
+        for config_file in config_files:
+            config_path = os.path.join(AGENTICA_HOME, config_file)
             if os.path.exists(config_path):
                 return config_path
-            current_dir = os.path.dirname(current_dir)
-        config_path = os.path.join(AGENTICA_HOME, 'mcp_config.json')
-        if os.path.exists(config_path):
-            return config_path
-        else:
-            return ""
+
+        return ""
 
     def _load_config(self) -> None:
-        """Load configuration from mcp_config.json"""
-        if not os.path.exists(self.config_path):
+        """Load configuration from MCP config file.
+        Supports both JSON and YAML formats.
+        """
+        if not self.config_path or not os.path.exists(self.config_path):
             return
 
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+                # Determine file format based on extension
+                if self.config_path.lower().endswith(('.yaml', '.yml')):
+                    if yaml is None:
+                        raise ImportError("YAML support requires PyYAML. Install with 'pip install pyyaml'")
+                    config = yaml.safe_load(f)
+                else:  # Default to JSON
+                    config = json.load(f)
 
             for name, server_config in config.get('mcpServers', {}).items():
                 self.servers[name] = MCPServerConfig(
@@ -65,6 +87,8 @@ class MCPConfig:
                     timeout=server_config.get('timeout', 5.0),
                     read_timeout=server_config.get('read_timeout', 300.0)
                 )
+        except ImportError as e:
+            raise e
         except Exception as e:
             raise ValueError(f"Error loading MCP config from {self.config_path}: {e}")
 

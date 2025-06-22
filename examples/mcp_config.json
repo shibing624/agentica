@@ -1,13 +1,10 @@
 {
   "mcpServers": {
     "weather": {
-      "command": "uvx weather-forecast-server"
+      "command": "uv run weather-forecast-server"
     },
     "minimax": {
-      "command": "uvx minimax-mcp"
-    },
-    "mcp-ip-query": {
-      "url": "https://mcp.higress.ai/mcp-ip-query/cmadpuvko00068k018uz8y6a4/sse"
+      "command": "uv run minimax-mcp"
     }
   }
 }
