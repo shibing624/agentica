@@ -135,6 +135,7 @@ class OpenAIChat(Model):
     top_p: Optional[float] = None
     extra_headers: Optional[Any] = None
     extra_query: Optional[Any] = None
+    extra_body: Optional[Dict[str, Any]] = None
     request_params: Optional[Dict[str, Any]] = None
 
     # Client parameters
@@ -262,6 +263,10 @@ class OpenAIChat(Model):
             request_params["top_p"] = self.top_p
         if self.extra_headers is not None:
             request_params["extra_headers"] = self.extra_headers
+        if self.reasoning_effort is not None:
+            request_params["reasoning_effort"] = self.reasoning_effort
+        if self.extra_body is not None:
+            request_params["extra_body"] = self.extra_body
         if self.extra_query is not None:
             request_params["extra_query"] = self.extra_query
         if self.metadata is not None:
