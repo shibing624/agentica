@@ -10,7 +10,7 @@ from agentica.config import (
     AGENTICA_LOG_LEVEL,
     AGENTICA_LOG_FILE,
 )  # noqa, isort: skip
-from agentica.utils.log import set_log_level_to_debug, logger
+from agentica.utils.log import set_log_level_to_debug, logger, set_log_level_to_info
 from agentica.utils.io import write_audio_to_file
 # model
 from agentica.model.openai.chat import OpenAIChat
