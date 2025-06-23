@@ -256,10 +256,10 @@ class Agent(BaseModel):
 
     @field_validator("debug_mode", mode="before")
     def set_log_level(cls, v: bool) -> bool:
-        if v:
+        if v is True:
             set_log_level_to_debug()
-            logger.debug("Debug logs enabled for Agent")
-        elif v is False:
+            logger.debug("Set Log level: debug")
+        if v is False:
             set_log_level_to_info()
         return v
 
