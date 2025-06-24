@@ -6,6 +6,7 @@ part of the code from https://github.com/phidatahq/phidata
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from textwrap import dedent
@@ -563,6 +564,7 @@ class Agent(BaseModel):
                 logger.debug(f"Memories loaded for user: {self.user_id}")
             else:
                 logger.debug("Memories loaded")
+
 
     def get_agent_data(self) -> Dict[str, Any]:
         agent_data = self.agent_data or {}
@@ -2107,6 +2109,38 @@ class Agent(BaseModel):
             yield self.generic_run_response("Run started", RunEvent.run_started)
 
         # 5. Generate a response from the Model (includes running function calls)
+        # Start memory classification in parallel for optimization
+        memory_classification_tasks = []
+        if self.memory.create_user_memories and self.memory.update_user_memories_after_run:
+            if message is not None:
+                user_message_for_memory: Optional[Message] = None
+                if isinstance(message, str):
+                    user_message_for_memory = Message(role=self.user_message_role, content=message)
+                elif isinstance(message, Message):
+                    user_message_for_memory = message
+                if user_message_for_memory is not None:
+                    # Start memory classification in parallel with LLM response generation
+                    memory_task = asyncio.create_task(
+                        self.memory.ashould_update_memory(input=user_message_for_memory.get_content_string())
+                    )
+                    memory_classification_tasks.append((user_message_for_memory, memory_task))
+            elif messages is not None and len(messages) > 0:
+                for _m in messages:
+                    _um = None
+                    if isinstance(_m, Message):
+                        _um = _m
+                    elif isinstance(_m, dict):
+                        try:
+                            _um = Message.model_validate(_m)
+                        except Exception as e:
+                            logger.warning(f"Failed to validate message: {e}")
+                    if _um:
+                        # Start memory classification in parallel with LLM response generation
+                        memory_task = asyncio.create_task(
+                            self.memory.ashould_update_memory(input=_um.get_content_string())
+                        )
+                        memory_classification_tasks.append((_um, memory_task))
+
         model_response: ModelResponse
         self.model = cast(Model, self.model)
         if stream and self.is_streamable:
@@ -2183,6 +2217,37 @@ class Agent(BaseModel):
 
         # Create an AgentRun object to add to memory
         agent_run = AgentRun(response=self.run_response)
+
+        # Process memory classification results that were started in parallel
+        if memory_classification_tasks and self.memory.create_user_memories and self.memory.update_user_memories_after_run:
+            for user_message, memory_task in memory_classification_tasks:
+                try:
+                    # Wait for the memory classification result
+                    should_update_memory = await memory_task
+                    logger.debug(f"Parallel memory classification result: {should_update_memory}")
+
+                    if should_update_memory:
+                        # Create memory using the manager directly (skip classification since we already did it)
+                        if self.memory.manager is None:
+                            from agentica.memory import MemoryManager
+                            self.memory.manager = MemoryManager(user_id=self.memory.user_id, db=self.memory.db)
+                        else:
+                            self.memory.manager.db = self.memory.db
+                            self.memory.manager.user_id = self.memory.user_id
+
+                        # Create memory directly without re-classification
+                        await self.memory.manager.arun(user_message.get_content_string())
+                        self.memory.load_user_memories()
+                        logger.debug(f"Memory updated in parallel for: {user_message.get_content_string()[:50]}...")
+                    else:
+                        logger.debug("Memory update not required (parallel classification)")
+
+                except Exception as e:
+                    logger.warning(f"Error in parallel memory processing: {e}")
+                    # Fallback to original method
+                    await self.memory.aupdate_memory(input=user_message.get_content_string())
+
+        # Handle agent_run message assignment for non-parallel case or fallback
         if message is not None:
             user_message_for_memory: Optional[Message] = None
             if isinstance(message, str):
@@ -2191,8 +2256,8 @@ class Agent(BaseModel):
                 user_message_for_memory = message
             if user_message_for_memory is not None:
                 agent_run.message = user_message_for_memory
-                # Update the memories with the user message if needed
-                if self.memory.create_user_memories and self.memory.update_user_memories_after_run:
+                # If no parallel processing was done, use original method
+                if not memory_classification_tasks and self.memory.create_user_memories and self.memory.update_user_memories_after_run:
                     await self.memory.aupdate_memory(input=user_message_for_memory.get_content_string())
         elif messages is not None and len(messages) > 0:
             for _m in messages:
@@ -2211,7 +2276,8 @@ class Agent(BaseModel):
                     if agent_run.messages is None:
                         agent_run.messages = []
                     agent_run.messages.append(_um)
-                    if self.memory.create_user_memories and self.memory.update_user_memories_after_run:
+                    # If no parallel processing was done, use original method
+                    if not memory_classification_tasks and self.memory.create_user_memories and self.memory.update_user_memories_after_run:
                         await self.memory.aupdate_memory(input=_um.get_content_string())
                 else:
                     logger.warning("Unable to add message to memory")
