@@ -493,7 +493,7 @@ class Agent(BaseModel):
         if self.model is None:
             logger.debug("Model not set, Using OpenAIChat as default")
             self.model = OpenAIChat()
-        logger.debug(f"Using Model: {self.model}")
+        logger.debug(f"Agent, using model: {self.model}")
 
         # Set response_format if it is not set on the Model
         if self.response_model is not None and self.model.response_format is None:
@@ -2224,26 +2224,17 @@ class Agent(BaseModel):
                 try:
                     # Wait for the memory classification result
                     should_update_memory = await memory_task
-                    logger.debug(f"Parallel memory classification result: {should_update_memory}")
-
                     if should_update_memory:
-                        # Create memory using the manager directly (skip classification since we already did it)
                         if self.memory.manager is None:
                             from agentica.memory import MemoryManager
                             self.memory.manager = MemoryManager(user_id=self.memory.user_id, db=self.memory.db)
                         else:
                             self.memory.manager.db = self.memory.db
                             self.memory.manager.user_id = self.memory.user_id
-
-                        # Create memory directly without re-classification
                         await self.memory.manager.arun(user_message.get_content_string())
                         self.memory.load_user_memories()
-                        logger.debug(f"Memory updated in parallel for: {user_message.get_content_string()[:50]}...")
-                    else:
-                        logger.debug("Memory update not required (parallel classification)")
-
                 except Exception as e:
-                    logger.warning(f"Error in parallel memory processing: {e}")
+                    logger.warning(f"Error in memory processing: {e}")
                     # Fallback to original method
                     await self.memory.aupdate_memory(input=user_message.get_content_string())
 

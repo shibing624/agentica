@@ -150,16 +150,16 @@ class CsvMemoryDb(MemoryDb):
                 break
         if not memory_exists:
             memories.append(memory)
-        with open(self.file_path, 'w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
-            for memory in memories:
-                writer.writerow([
-                    memory.id, memory.user_id, json.dumps(memory.memory, ensure_ascii=False),
-                    memory.created_at.isoformat() if memory.created_at else '',
-                    memory.updated_at.isoformat() if memory.updated_at else ''
-                ])
-            logger.debug(f"Memory {memory.id} upserted, memories size: {len(memories)}, saved: {self.file_path}")
+            with open(self.file_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['id', 'user_id', 'memory', 'created_at', 'updated_at'])
+                for memory in memories:
+                    writer.writerow([
+                        memory.id, memory.user_id, json.dumps(memory.memory, ensure_ascii=False),
+                        memory.created_at.isoformat() if memory.created_at else '',
+                        memory.updated_at.isoformat() if memory.updated_at else ''
+                    ])
+                logger.debug(f"Memory {memory.id} upserted, memories size: {len(memories)}, saved: {self.file_path}")
         self.memories = memories
         return memory
 
