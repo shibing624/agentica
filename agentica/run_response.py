@@ -100,7 +100,7 @@ class RunResponse(BaseModel):
             return json.dumps(self.content, ensure_ascii=False, **kwargs)
 
     def __str__(self):
-        return self.get_content_as_string()
+        return self.__repr__()
 
     def __repr__(self):
         return f"RunResponse(run_id={self.run_id!r}, event={self.event!r}, content={self.content!r})"

@@ -900,6 +900,9 @@ class AgentMemory(BaseModel):
 
         return copied_obj
 
+    def get_memories(self) -> List[Memory]:
+        return self.memories
+
 
 class WorkflowRun(BaseModel):
     input: Optional[Dict[str, Any]] = None
