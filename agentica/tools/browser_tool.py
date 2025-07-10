@@ -1241,7 +1241,7 @@ Here is a plan about how to solve the task step-by-step which you must follow:
         return observation_result, reasoning_result, action_code
 
     async def _act(self, action_code: str) -> Tuple[bool, str]:
-        """Execute the action code asynchronously."""
+        """Execute the action code safely by using a function mapping approach."""
 
         def _check_if_with_feedback(action_code: str) -> bool:
             for action_with_feedback in ACTION_WITH_FEEDBACK_LIST:
@@ -1249,71 +1249,60 @@ Here is a plan about how to solve the task step-by-step which you must follow:
                     return True
             return False
 
-        def _fix_action_code(action_code: str) -> str:
-            match = re.match(r'(\w+)\((.*)\)', action_code)
-            if not match:
-                return action_code
+        match = re.match(r'(\w+)\((.*)\)', action_code)
+        if not match:
+            return False, f"Invalid action code format: {action_code}"
 
-            func_name, args_str = match.groups()
-            args = []
-            current_arg = ""
-            in_quotes = False
-            quote_char = None
+        func_name, args_str = match.groups()
 
-            for char in args_str:
-                if char in ['"', "'"]:
-                    if not in_quotes:
-                        in_quotes = True
-                        quote_char = char
-                        current_arg += char
-                    elif char == quote_char:
-                        in_quotes = False
-                        quote_char = None
-                        current_arg += char
-                    else:
-                        current_arg += char
-                elif char == ',' and not in_quotes:
-                    args.append(current_arg.strip())
-                    current_arg = ""
-                else:
-                    current_arg += char
+        # Allowed functions
+        allowed_functions = {
+            "fill_input_id": self.browser.fill_input_id,
+            "click_id": self.browser.click_id,
+            "hover_id": self.browser.hover_id,
+            "download_file_id": self.browser.download_file_id,
+            "scroll_to_bottom": self.browser.scroll_to_bottom,
+            "scroll_to_top": self.browser.scroll_to_top,
+            "scroll_up": self.browser.scroll_up,
+            "scroll_down": self.browser.scroll_down,
+            "back": self.browser.back,
+            "stop": lambda: None,  # Stop func
+            "get_url": self.browser.get_url,
+            "find_text_on_page": self.browser.find_text_on_page,
+            "visit_page": self.browser.visit_page,
+            "click_blank_area": self.browser.click_blank_area,
+            "ask_question_about_video": self.browser.ask_question_about_video
+        }
 
-            if current_arg:
-                args.append(current_arg.strip())
-
-            fixed_args = []
-            for arg in args:
-                if (
-                        (arg.startswith('"') and arg.endswith('"'))
-                        or (arg.startswith("'") and arg.endswith("'"))
-                        or re.match(r'^-?\d+(\.\d+)?$', arg)
-                        or re.match(r'^-?\d+\.?\d*[eE][-+]?\d+$', arg)
-                        or re.match(r'^0[xX][0-9a-fA-F]+$', arg)
-                ):
-                    fixed_args.append(arg)
-                else:
-                    fixed_args.append(f"'{arg}'")
-
-            return f"{func_name}({', '.join(fixed_args)})"
-
-        action_code = _fix_action_code(action_code)
-        prefix = "self.browser."
-        code = f"{prefix}{action_code}"
+        if func_name not in allowed_functions:
+            return False, f"Function '{func_name}' is not allowed"
 
         try:
-            if _check_if_with_feedback(action_code):
-                result = await eval(code)
-                return True, result
-            else:
-                await exec(code)
+            import ast
+            args = []
+            for arg in re.findall(r'(?:[^,"]|"(?:\\.|[^"])*")++', args_str):
+                arg = arg.strip()
+                if arg:
+                    if (arg.startswith('"') and arg.endswith('"')) or (arg.startswith("'") and arg.endswith("'")):
+                        args.append(ast.literal_eval(arg))
+                    else:
+                        try:
+                            args.append(ast.literal_eval(arg))
+                        except:
+                            args.append(arg)
+
+            if func_name == "stop":
                 return True, "Action was successful."
+
+            result = await allowed_functions[func_name](*args)
+            return True, result if _check_if_with_feedback(action_code) else "Action was successful."
 
         except Exception as e:
             return (
                 False,
                 f"Error while executing the action {action_code}: {e}. "
                 f"If timeout, please recheck whether you have provided the "
-                f"correct identifier.",
+                f"correct identifier."
             )
 
     async def _get_final_answer(self, task_prompt: str) -> str:
