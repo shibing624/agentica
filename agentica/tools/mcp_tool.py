@@ -195,10 +195,10 @@ class McpTool(Tool):
                     timeout=self._timeout,
                     sse_read_timeout=self._read_timeout
                 )
-                
+
                 # For SSE, we get a tuple of (read, write)
                 read, write = await self._transport_context.__aenter__()
-                
+
             elif self._transport_type == "streamable-http":
                 # Create a StreamableHttp client connection
                 if not self._url:
@@ -211,18 +211,18 @@ class McpTool(Tool):
                     sse_read_timeout=timedelta(seconds=self._read_timeout),
                     terminate_on_close=self._terminate_on_close
                 )
-                
+
                 # For StreamableHttp, we get a tuple of (read, write, get_session_id)
                 transport_result = await self._transport_context.__aenter__()
                 read, write = transport_result[0], transport_result[1]
-                
+
             else:
                 # Create a stdio client connection
                 if self.server_params is None:
                     raise ValueError("server_params or stdio_command must be provided when using stdio transport")
 
                 self._transport_context = stdio_client(self.server_params)
-                
+
                 # For stdio, we get a tuple of (read, write)
                 read, write = await self._transport_context.__aenter__()
 
@@ -334,7 +334,8 @@ class McpTool(Tool):
                                         "headers": self._server_config["headers"],
                                         "timeout": self._server_config["timeout"],
                                         "sse_read_timeout": self._server_config["read_timeout"]
-                                    }
+                                    },
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 10.0
                                 )
                             elif self._server_config["transport_type"] == "streamable-http":
                                 server = MCPServerStreamableHttp(
@@ -345,7 +346,8 @@ class McpTool(Tool):
                                         "timeout": timedelta(seconds=self._server_config["timeout"]) if self._server_config["timeout"] else None,
                                         "sse_read_timeout": timedelta(seconds=self._server_config["read_timeout"]) if self._server_config["read_timeout"] else None,
                                         "terminate_on_close": self._server_config["terminate_on_close"]
-                                    }
+                                    },
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 10.0
                                 )
                             else:
                                 server = MCPServerStdio(
@@ -354,7 +356,8 @@ class McpTool(Tool):
                                         "command": self._server_config["command"],
                                         "args": self._server_config["args"],
                                         "env": copy.deepcopy(self._server_config["env"])
-                                    }
+                                    },
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 10.0
                                 )
 
                             try:
@@ -485,11 +488,11 @@ class McpTool(Tool):
                 # All other URLs are treated as StreamableHttp
                 is_streamable_http = True  # Default to streamable-http
                 transport_type = "streamable-http"
-                
+
                 if "/sse" in server.url:
                     is_streamable_http = False
                     transport_type = "sse"
-                
+
                 # Create tool with appropriate configuration
                 tool = cls(
                     url=server.url,
@@ -498,7 +501,7 @@ class McpTool(Tool):
                     sse_read_timeout=server.read_timeout,
                     terminate_on_close=True if is_streamable_http else None
                 )
-                
+
                 logger.debug(f"Created {transport_type} tool for server '{name}' with URL: {server.url}")
             else:
                 # Create stdio tool
@@ -542,7 +545,7 @@ class CompositeMultiMcpTool(McpTool):
         """Enter context for all tools sequentially."""
         entered_tools = []
         errors = []
-        
+
         for tool in self.tools:
             try:
                 entered_tool = await self._enter_tool(tool)
@@ -551,22 +554,22 @@ class CompositeMultiMcpTool(McpTool):
             except Exception as e:
                 errors.append((tool, e))
                 logger.error(f"Failed to initialize tool: {e}")
-        
+
         self.tools = [t for t in entered_tools if t is not None]
-        
+
         # Merge functions from all successfully initialized tools
         for tool in self.tools:
             self.functions.update(tool.functions)
 
         self._initialized = True
-        
+
         if not self.tools:
             if errors:
                 error_msgs = "\n".join([f"- {e}" for _, e in errors])
                 raise ValueError(f"Failed to initialize any tools. Errors:\n{error_msgs}")
             else:
                 raise ValueError("No tools were successfully initialized")
-                
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
