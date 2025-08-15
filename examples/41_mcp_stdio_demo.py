@@ -82,10 +82,11 @@ async def mcp_toolkit_with_agent_demo():
     """
     logger.debug("\n=== Testing MCPToolkit with agent ===")
     try:
-        async with McpTool("uv run weather-forecast-server") as mcp_tool:
+        async with McpTool("uvx weather-forecast-server") as mcp_tool1, \
+                McpTool("uvx mcp-run-python-code") as mcp_tool2:
             m = Agent(
                 model=OpenAIChat(model="gpt-4o-mini"),
-                tools=[ShellTool(), mcp_tool],
+                tools=[ShellTool(), mcp_tool1, mcp_tool2],
                 show_tool_calls=True,
                 add_datetime_to_instructions=True,
                 debug_mode=True
