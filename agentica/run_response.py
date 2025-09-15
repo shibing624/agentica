@@ -48,14 +48,17 @@ class RunResponse(BaseModel):
 
     content: Optional[Any] = None
     content_type: str = "str"
+
     event: str = RunEvent.run_response.value
     messages: Optional[List[Message]] = None
     metrics: Optional[Dict[str, Any]] = None
+
     model: Optional[str] = None
     run_id: Optional[str] = None
     agent_id: Optional[str] = None
     session_id: Optional[str] = None
     workflow_id: Optional[str] = None
+
     tools: Optional[List[Dict[str, Any]]] = None
     images: Optional[List[Image]] = None  # Images attached to the response
     videos: Optional[List[Video]] = None  # Videos attached to the response
