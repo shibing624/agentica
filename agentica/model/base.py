@@ -536,7 +536,6 @@ class Model(BaseModel):
 
     def clear(self) -> None:
         """Clears the Model's state."""
-
         self.metrics = {}
         self.functions = None
         self.function_call_stack = None
