@@ -8,7 +8,7 @@ import sys
 sys.path.append('..')
 from agentica import Agent, OpenAIChat
 
-m = Agent()
+m = Agent(model=OpenAIChat(id='gpt-4o-mini'))
 
 # Single Image
 m.print_response(
@@ -17,7 +17,7 @@ m.print_response(
         {
             "type": "image_url",
             "image_url": {
-                "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+                "url": "https://img-blog.csdnimg.cn/img_convert/0ab31bdb17bebbab9c8f4185f3655b6d.jpeg"
             },
         },
     ],
@@ -34,7 +34,7 @@ m.print_response(
         {
             "type": "image_url",
             "image_url": {
-                "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+                "url": "https://i-blog.csdnimg.cn/blog_migrate/38e2071af527a1e864ee31bb2a5c2025.png"
             },
         },
         {
