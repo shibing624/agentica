@@ -111,12 +111,10 @@ class RunResponse(BaseModel):
 
 
 def pprint_run_response(
-    run_response: Union[RunResponse, Iterable[RunResponse]], markdown: bool = False, show_time: bool = False
+    run_response: Union[RunResponse, Iterable[RunResponse]], markdown: bool = False
 ) -> None:
     from rich.live import Live
-    from rich.table import Table
     from rich.status import Status
-    from rich.box import ROUNDED
     from rich.markdown import Markdown
     from rich.json import JSON
     from agentica.utils.console import console
@@ -139,9 +137,7 @@ def pprint_run_response(
             except Exception as e:
                 logger.warning(f"Failed to convert response to string: {e}")
 
-        table = Table(box=ROUNDED, border_style="blue", show_header=False)
-        table.add_row(single_response_content)
-        console.print(table)
+        console.print(single_response_content)
     else:
         streaming_response_content: str = ""
         with Live(console=console) as live_log:
@@ -154,10 +150,5 @@ def pprint_run_response(
                     streaming_response_content += resp.content
 
                 formatted_response = Markdown(streaming_response_content) if markdown else streaming_response_content  # type: ignore
-                table = Table(box=ROUNDED, border_style="blue", show_header=False)
-                if show_time:
-                    table.add_row(f"Response\n({response_timer.elapsed:.1f}s)", formatted_response)  # type: ignore
-                else:
-                    table.add_row(formatted_response)  # type: ignore
-                live_log.update(table)
+                live_log.update(formatted_response)
             response_timer.stop()
