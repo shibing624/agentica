@@ -2534,169 +2534,87 @@ class Agent:
     # Print Response
     ###########################################################################
 
-    def create_panel(self, content, title, border_style="blue"):
-        from rich.text import Text
-        from rich.console import Group
-
-        top_line = Text(f"━ {title} " + "━" * (76 - len(title)) + "━", style=border_style)
-        bottom_line = Text("━" * 80, style=border_style)
-        panel_content = Group(
-            top_line,
-            content,
-            bottom_line
-        )
-        return panel_content
-
     def print_response(
             self,
             message: Optional[Union[List, Dict, str, Message]] = None,
             *,
             messages: Optional[List[Union[Dict, Message]]] = None,
             stream: bool = False,
-            markdown: bool = False,
             show_message: bool = True,
             show_reasoning: bool = True,
-            console: Optional[Any] = None,
             **kwargs: Any,
     ) -> None:
-        from rich.live import Live
-        from rich.status import Status
-        from rich.markdown import Markdown
-        from rich.json import JSON
-        from rich.text import Text
-        from rich.console import Group
-
-        if markdown:
-            self.markdown = True
+        """Print the response from the Agent."""
 
         if self.response_model is not None:
-            self.markdown = False
             stream = False
 
-        if stream:
-            _response_content: str = ""
-            _response_reasoning_content: str = ""
-            with Live(console=console) as live_log:
-                status = Status("Thinking...", spinner="aesthetic", speed=2.0, refresh_per_second=10)
-                live_log.update(status)
-                response_timer = Timer()
-                response_timer.start()
-                # Flag which indicates if the panels should be rendered
-                render = False
-                # Panels to be rendered
-                panels = [status]
-                # First render the message panel if the message is not None
-                if message and show_message:
-                    render = True
-                    # Convert message to a panel
-                    message_content = get_text_from_message(message)
-                    message_panel = self.create_panel(
-                        content=Text(message_content, style="green"),
-                        title="Message",
-                        border_style="cyan",
-                    )
-                    panels.append(message_panel)
-                if render:
-                    live_log.update(Group(*panels))
+        # Show message
+        if show_message and message is not None:
+            message_content = get_text_from_message(message)
+            print("=" * 80)
+            print("📝 MESSAGE")
+            print("=" * 80)
+            print(message_content)
+            print()
 
-                _response_reasoning_content = ""
-                has_reasoning_content = False
-                # Run the agent and get the final response with complete reasoning content
-                run_generator = self.run(message=message, messages=messages, stream=True, **kwargs)
-                for resp in run_generator:
-                    if isinstance(resp, RunResponse) and isinstance(resp.reasoning_content, str):
-                        if resp.reasoning_content and resp.event == RunEvent.run_response:
-                            has_reasoning_content = True
+        # Handle streaming response
+        if stream and self.is_streamable:
+            print("=" * 80)
+            print("🤖 RESPONSE")
+            print("=" * 80)
 
-                    if isinstance(resp, RunResponse) and isinstance(resp.content, str):
-                        if resp.event == RunEvent.run_response:
-                            _response_content += resp.content
+            _response_content = ""
+            _reasoning_content = ""
+            _reasoning_displayed = False
 
-                # After streaming is complete, get the complete reasoning content from self.run_response
-                if (has_reasoning_content and hasattr(self, 'run_response') and self.run_response and
-                        hasattr(self.run_response, 'reasoning_content')):
-                    _response_reasoning_content = self.run_response.reasoning_content or ""
+            run_generator = self._run(message=message, messages=messages, stream=True, **kwargs)
 
-                displayed_content = _response_content
-                if show_reasoning and has_reasoning_content and _response_reasoning_content:
-                    reasoning_with_tags = f"<think>{_response_reasoning_content}</think>"
-                    displayed_content = f"{reasoning_with_tags}{_response_content}"
+            for run_response in run_generator:
+                # Stream reasoning content
+                if (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                        run_response.reasoning_content):
 
-                response_content_stream = Markdown(displayed_content) if self.markdown else displayed_content
+                    if not _reasoning_displayed:
+                        print("💭 THINKING")
+                        print("-" * 40)
+                        _reasoning_displayed = True
 
-                panels = [status]
+                    # print reasoning_content, add only
+                    if run_response.reasoning_content != _reasoning_content:
+                        print(run_response.reasoning_content, end='', flush=True)
+                        _reasoning_content = run_response.reasoning_content
 
-                if message and show_message:
-                    render = True
-                    # Convert message to a panel
-                    message_content = get_text_from_message(message)
-                    message_panel = self.create_panel(
-                        content=Text(message_content, style="green"),
-                        title="Message",
-                        border_style="cyan",
-                    )
-                    panels.append(message_panel)
+                # print content
+                if run_response.content and run_response.content != _response_content:
+                    if _reasoning_displayed and _response_content == "":
+                        print()
+                        print("-" * 40)
+                        print("💬 ANSWER")
+                        print("-" * 40)
 
-                # Add response panel
-                response_panel = self.create_panel(
-                    content=response_content_stream,
-                    title="Response",
-                    border_style="blue",
-                )
-                panels.append(response_panel)
-
-                if render:
-                    live_log.update(Group(*panels))
+                    print(run_response.content, end='', flush=True)
+                    _response_content = run_response.content
         else:
-            # Handle stream=False case
-            from rich.console import Console
+            # Non-streaming response
+            run_response = self.run(message=message, messages=messages, stream=False, **kwargs)
 
-            _console = console or Console()
+            print("=" * 80)
+            print("🤖 RESPONSE")
+            print("=" * 80)
 
-            # Run the agent to get response
-            response = self.run(message=message, messages=messages, stream=False, **kwargs)
+            if (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                    run_response.reasoning_content):
+                print("💭 THINKING")
+                print("-" * 40)
+                print(run_response.reasoning_content)
+                print()
+                print("-" * 40)
+                print("💬 ANSWER")
+                print("-" * 40)
 
-            # Show message if requested
-            if message and show_message:
-                message_content = get_text_from_message(message)
-                message_panel = self.create_panel(
-                    content=Text(message_content, style="green"),
-                    title="Message",
-                    border_style="cyan",
-                )
-                _console.print(message_panel)
-
-            # Prepare response content
-            displayed_content = response.content or ""
-
-            # Add reasoning content with <think> tags if available and requested
-            if show_reasoning and hasattr(response, 'reasoning_content') and response.reasoning_content:
-                reasoning_with_tags = f"<think>{response.reasoning_content}</think>"
-                displayed_content = f"{reasoning_with_tags}{displayed_content}"
-
-            # Handle different response formats
-            if self.response_model is not None:
-                # For structured output, display as JSON
-                if displayed_content:
-                    try:
-                        json_content = json.loads(displayed_content) if isinstance(displayed_content,
-                                                                                   str) else displayed_content
-                        response_content = JSON.from_data(json_content)
-                    except (json.JSONDecodeError, TypeError):
-                        response_content = Text(str(displayed_content))
-                else:
-                    response_content = Text("No response content")
-            else:
-                # For regular text/markdown response
-                response_content = Markdown(displayed_content) if self.markdown else Text(displayed_content)
-
-            # Show response
-            response_panel = self.create_panel(
-                content=response_content,
-                title="Response",
-                border_style="blue",
-            )
-            _console.print(response_panel)
+            if run_response.content:
+                print(run_response.content)
 
     async def aprint_response(
             self,
@@ -2704,169 +2622,103 @@ class Agent:
             *,
             messages: Optional[List[Union[Dict, Message]]] = None,
             stream: bool = False,
-            markdown: bool = False,
             show_message: bool = True,
             show_reasoning: bool = True,
-            console: Optional[Any] = None,
             **kwargs: Any,
     ) -> None:
-        from rich.live import Live
-        from rich.status import Status
-        from rich.markdown import Markdown
-        from rich.json import JSON
-        from rich.text import Text
-        from rich.console import Group
-
-        if markdown:
-            self.markdown = True
+        """Async print the response from the Agent."""
 
         if self.response_model is not None:
-            self.markdown = False
             stream = False
 
-        if stream:
-            _response_content: str = ""
-            _response_reasoning_content: str = ""
-            with Live(console=console) as live_log:
-                status = Status("Thinking...", spinner="aesthetic", speed=2.0, refresh_per_second=10)
-                live_log.update(status)
-                response_timer = Timer()
-                response_timer.start()
-                # Flag which indicates if the panels should be rendered
-                render = False
-                # Panels to be rendered
-                panels = [status]
-                # First render the message panel if the message is not None
-                if message and show_message:
-                    render = True
-                    # Convert message to a panel
-                    message_content = get_text_from_message(message)
-                    message_panel = self.create_panel(
-                        content=Text(message_content, style="green"),
-                        title="Message",
-                        border_style="cyan",
-                    )
-                    panels.append(message_panel)
-                if render:
-                    live_log.update(Group(*panels))
+        # Show message
+        if show_message and message is not None:
+            message_content = get_text_from_message(message)
+            print("=" * 80)
+            print("📝 MESSAGE")
+            print("=" * 80)
+            print(message_content)
+            print()
 
-                _response_reasoning_content = ""
-                has_reasoning_content = False
-                # Run the agent and get the final response with complete reasoning content
-                async for resp in self.arun(message=message, messages=messages, stream=True, **kwargs):
-                    if isinstance(resp, RunResponse) and isinstance(resp.reasoning_content, str):
-                        if resp.reasoning_content and resp.event == RunEvent.run_response:
-                            has_reasoning_content = True
+        # Handle streaming response
+        if stream and self.is_streamable:
+            print("=" * 80)
+            print("🤖 RESPONSE")
+            print("=" * 80)
 
-                    if isinstance(resp, RunResponse) and isinstance(resp.content, str):
-                        if resp.event == RunEvent.run_response:
-                            _response_content += resp.content
+            _response_content = ""
+            _reasoning_content = ""
+            _reasoning_displayed = False
 
-                # After streaming is complete, get the complete reasoning content from self.run_response
-                if (has_reasoning_content and hasattr(self, 'run_response') and self.run_response and
-                        hasattr(self.run_response, 'reasoning_content')):
-                    _response_reasoning_content = self.run_response.reasoning_content or ""
+            arun_generator = self._arun(message=message, messages=messages, stream=True, **kwargs)
 
-                displayed_content = _response_content
-                if show_reasoning and has_reasoning_content and _response_reasoning_content:
-                    reasoning_with_tags = f"<think>{_response_reasoning_content}</think>"
-                    displayed_content = f"{reasoning_with_tags}{_response_content}"
+            async for run_response in arun_generator:
+                if (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                        run_response.reasoning_content):
 
-                response_content_stream = Markdown(displayed_content) if self.markdown else displayed_content
+                    if not _reasoning_displayed:
+                        print("💭 THINKING")
+                        print("-" * 40)
+                        _reasoning_displayed = True
 
-                panels = [status]
+                    if run_response.reasoning_content != _reasoning_content:
+                        print(run_response.reasoning_content, end='', flush=True)
+                        _reasoning_content = run_response.reasoning_content
 
-                if message and show_message:
-                    render = True
-                    # Convert message to a panel
-                    message_content = get_text_from_message(message)
-                    message_panel = self.create_panel(
-                        content=Text(message_content, style="green"),
-                        title="Message",
-                        border_style="cyan",
-                    )
-                    panels.append(message_panel)
-
-                # Add response panel
-                response_panel = self.create_panel(
-                    content=response_content_stream,
-                    title="Response",
-                    border_style="blue",
-                )
-                panels.append(response_panel)
-
-                if render:
-                    live_log.update(Group(*panels))
+                if run_response.content and run_response.content != _response_content:
+                    if _reasoning_displayed and _response_content == "":
+                        print()
+                        print("-" * 40)
+                        print("💬 ANSWER")
+                        print("-" * 40)
+                    print(run_response.content, end='', flush=True)
+                    _response_content = run_response.content
         else:
-            # Handle stream=False case
-            from rich.console import Console
+            # Non-streaming response
+            run_response = await self.arun(message=message, messages=messages, stream=False, **kwargs)
 
-            _console = console or Console()
+            print("=" * 80)
+            print("🤖 RESPONSE")
+            print("=" * 80)
 
-            # Run the agent to get response
-            response = await self.arun(message=message, messages=messages, stream=False, **kwargs)
+            if (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                    run_response.reasoning_content):
+                print("💭 THINKING")
+                print("-" * 40)
+                print(run_response.reasoning_content)
+                print()
+                print("-" * 40)
+                print("💬 ANSWER")
+                print("-" * 40)
 
-            # Show message if requested
-            if message and show_message:
-                message_content = get_text_from_message(message)
-                message_panel = self.create_panel(
-                    content=Text(message_content, style="green"),
-                    title="Message",
-                    border_style="cyan",
-                )
-                _console.print(message_panel)
-
-            # Prepare response content
-            displayed_content = response.content or ""
-
-            # Add reasoning content with <think> tags if available and requested
-            if show_reasoning and hasattr(response, 'reasoning_content') and response.reasoning_content:
-                reasoning_with_tags = f"<think>{response.reasoning_content}</think>"
-                displayed_content = f"{reasoning_with_tags}{displayed_content}"
-
-            # Handle different response formats
-            if self.response_model is not None:
-                # For structured output, display as JSON
-                if displayed_content:
-                    try:
-                        json_content = json.loads(displayed_content) if isinstance(displayed_content,
-                                                                                   str) else displayed_content
-                        response_content = JSON.from_data(json_content)
-                    except (json.JSONDecodeError, TypeError):
-                        response_content = Text(str(displayed_content))
-                else:
-                    response_content = Text("No response content")
-            else:
-                # For regular text/markdown response
-                response_content = Markdown(displayed_content) if self.markdown else Text(displayed_content)
-
-            # Show response
-            response_panel = self.create_panel(
-                content=response_content,
-                title="Response",
-                border_style="blue",
-            )
-            _console.print(response_panel)
+            if run_response.content:
+                print(run_response.content)
 
     def cli_app(
             self,
             message: Optional[str] = None,
             user: str = "User",
-            emoji: str = ":sunglasses:",
+            emoji: str = "😎",
             stream: bool = False,
-            markdown: bool = False,
             exit_on: Optional[List[str]] = None,
             **kwargs: Any,
     ) -> None:
-        from rich.prompt import Prompt
+        """Command line interface for the Agent."""
 
         if message:
-            self.print_response(message=message, stream=stream, markdown=markdown, **kwargs)
+            self.print_response(message=message, stream=stream, **kwargs)
 
         _exit_on = exit_on or ["exit", "quit", "bye"]
         while True:
-            message = Prompt.ask(f"[bold] {emoji} {user} [/bold]")
-            if message in _exit_on:
+            try:
+                message = input(f"{emoji} {user}: ")
+            except (KeyboardInterrupt, EOFError):
+                print("\nGoodbye!")
                 break
 
-            self.print_response(message=message, stream=stream, markdown=markdown, **kwargs)
+            if message.strip() in _exit_on:
+                print("Goodbye!")
+                break
+
+            self.print_response(message=message, stream=stream, **kwargs)
+

@@ -40,7 +40,7 @@ async def sse_server_demo() -> None:
                 tool_names = [tool.name for tool in tools]
                 logger.debug(f"可用工具: {tool_names}")
 
-                city = "安陆市"
+                city = "北京市"
                 result = await client.call_tool("get_current_weather", {"city": city})
                 weather_result = client.extract_result_text(result)
                 logger.info(f"{city}天气 = {weather_result}")
