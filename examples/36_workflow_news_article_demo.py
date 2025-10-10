@@ -278,4 +278,4 @@ if __name__ == "__main__":
     )
 
     # Print the response
-    pprint_run_response(report_stream, markdown=True)
+    pprint_run_response(report_stream)

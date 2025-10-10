@@ -89,4 +89,4 @@ if __name__ == "__main__":
     # Execute the workflow
     tutorial_stream = write_tutorial_workflow.run(topic=topic)
     # Print the response
-    pprint_run_response(tutorial_stream, markdown=True)
+    pprint_run_response(tutorial_stream)

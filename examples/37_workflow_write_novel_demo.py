@@ -159,4 +159,4 @@ if __name__ == "__main__":
         ),
     )
     novel_stream = write_novel_workflow.run(topic=topic)
-    pprint_run_response(novel_stream, markdown=True)
+    pprint_run_response(novel_stream)

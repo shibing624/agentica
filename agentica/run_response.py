@@ -6,7 +6,7 @@
 import json
 from time import time
 from enum import Enum
-from typing import Optional, Any, Dict, List,Union, Iterable
+from typing import Optional, Any, Dict, List, Union, Iterable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -109,46 +109,84 @@ class RunResponse(BaseModel):
         return f"RunResponse(run_id={self.run_id!r}, event={self.event!r}, content={self.content!r})"
 
 
+def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse]]) -> None:
+    """
+    Pretty print run response without rich dependency.
 
-def pprint_run_response(
-    run_response: Union[RunResponse, Iterable[RunResponse]], markdown: bool = False
-) -> None:
-    from rich.live import Live
-    from rich.status import Status
-    from rich.markdown import Markdown
-    from rich.json import JSON
-    from agentica.utils.console import console
+    Args:
+        run_response: Single RunResponse or iterable of RunResponse objects
+    """
 
-    # If run_response is a single RunResponse, wrap it in a list to make it iterable
+    # Handle single RunResponse
     if isinstance(run_response, RunResponse):
-        single_response_content: Union[str, JSON, Markdown] = ""
+        print("=" * 80)
+        print("🤖 RESPONSE")
+        print("=" * 80)
+
+        # Display reasoning content if available
+        if hasattr(run_response, 'reasoning_content') and run_response.reasoning_content:
+            print("💭 THINKING")
+            print("-" * 40)
+            print(run_response.reasoning_content)
+            print()
+            print("-" * 40)
+            print("💬 ANSWER")
+            print("-" * 40)
+
+        # Display main content
         if isinstance(run_response.content, str):
-            single_response_content = (
-                Markdown(run_response.content) if markdown else run_response.get_content_as_string(indent=4)
-            )
+            print(run_response.content)
         elif isinstance(run_response.content, BaseModel):
             try:
-                single_response_content = JSON(run_response.content.model_dump_json(exclude_none=True), indent=2)
+                content_json = run_response.content.model_dump_json(exclude_none=True, indent=2)
+                print(content_json)
             except Exception as e:
-                logger.warning(f"Failed to convert response to Markdown: {e}")
+                logger.warning(f"Failed to convert BaseModel response to JSON: {e}")
+                print(str(run_response.content))
         else:
             try:
-                single_response_content = JSON(json.dumps(run_response.content), indent=4)
+                content_json = json.dumps(run_response.content, indent=2, ensure_ascii=False)
+                print(content_json)
             except Exception as e:
-                logger.warning(f"Failed to convert response to string: {e}")
+                logger.warning(f"Failed to convert response to JSON: {e}")
+                print(str(run_response.content))
 
-        console.print(single_response_content)
+        print("=" * 80)
     else:
-        streaming_response_content: str = ""
-        with Live(console=console) as live_log:
-            status = Status("Working...", spinner="dots")
-            live_log.update(status)
-            response_timer = Timer()
-            response_timer.start()
-            for resp in run_response:
-                if isinstance(resp, RunResponse) and isinstance(resp.content, str):
-                    streaming_response_content += resp.content
+        # Handle streaming responses
+        print("=" * 80)
+        print("🤖 RESPONSE")
+        print("=" * 80)
 
-                formatted_response = Markdown(streaming_response_content) if markdown else streaming_response_content  # type: ignore
-                live_log.update(formatted_response)
-            response_timer.stop()
+        streaming_content = ""
+        reasoning_content = ""
+        reasoning_displayed = False
+        response_timer = Timer()
+        response_timer.start()
+
+        for resp in run_response:
+            if isinstance(resp, RunResponse):
+                # Handle reasoning content
+                if (hasattr(resp, 'reasoning_content') and resp.reasoning_content
+                        and resp.reasoning_content != reasoning_content):
+
+                    if not reasoning_displayed:
+                        print("💭 THINKING")
+                        print("-" * 40)
+                        reasoning_displayed = True
+
+                    print(resp.reasoning_content, end='', flush=True)
+                    reasoning_content = resp.reasoning_content
+
+                # Handle main content
+                if isinstance(resp.content, str) and resp.content != streaming_content:
+                    # Add separator when transitioning from reasoning to answer
+                    if reasoning_displayed and streaming_content == "":
+                        print()
+                        print("-" * 40)
+                        print("💬 ANSWER")
+                        print("-" * 40)
+
+                    print(resp.content, end='', flush=True)
+                    streaming_content = resp.content
+        response_timer.stop()

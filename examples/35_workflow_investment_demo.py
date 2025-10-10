@@ -108,4 +108,4 @@ if __name__ == "__main__":
 
     # Execute the workflow
     report = investment_report_generator.run(companies=companies)
-    pprint_run_response(report, markdown=True)
+    pprint_run_response(report)
