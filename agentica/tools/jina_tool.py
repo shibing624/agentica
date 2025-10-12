@@ -10,12 +10,31 @@ Jina 有2个功能：
 import hashlib
 import os
 import requests
+import json
 from os import getenv
-from typing import Optional
 from urllib.parse import urlparse
+from typing import Optional, cast
 
+from agentica.model.base import Model
+from agentica.model.openai.chat import OpenAIChat
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
+
+EXTRACT_PROMPT = """Please process the following webpage content and user goal to extract relevant information:
+
+## **Webpage Content** 
+{webpage_content}
+
+## **User Goal**
+{goal}
+
+## **Task Guidelines**
+1. **Content Scanning for Rational**: Locate the **specific sections/data** directly related to the user's goal within the webpage content
+2. **Key Extraction for Evidence**: Identify and extract the **most relevant information** from the content, you never miss any important information, output the **full original context** of the content as far as possible, it can be more than three paragraphs.
+3. **Summary Output for Summary**: Organize into a concise paragraph with logical flow, prioritizing clarity and judge the contribution of the information to the goal.
+
+**Final Output Format using JSON format has "rational", "evidence", "summary" feilds**
+"""
 
 
 class JinaTool(Tool):
@@ -24,20 +43,31 @@ class JinaTool(Tool):
             api_key: Optional[str] = None,
             jina_reader: bool = True,
             jina_search: bool = True,
-            max_content_length: int = 8000,
+            jina_reader_by_goal: bool = True,
             work_dir: str = None,
+            llm: Optional[Model] = None,
+            extract_prompt: str = EXTRACT_PROMPT,
+            model_name: str = "gpt-4o-mini"
     ):
         super().__init__(name="jina_tool")
         self.api_key = api_key or getenv("JINA_API_KEY")
-        self.max_content_length = max_content_length
         self.work_dir = work_dir or os.path.curdir
+        self.llm = llm
+        self.model_name = model_name
+        self.extract_prompt = extract_prompt
         if self.api_key:
             logger.debug(f"Use JINA_API_KEY: {'*' * 10 + self.api_key[-4:]}")
 
         if jina_reader:
             self.register(self.jina_url_reader)
+        if jina_reader_by_goal:
+            self.register(self.jina_url_reader_by_goal)
         if jina_search:
             self.register(self.jina_search)
+
+    def update_llm(self) -> None:
+        if self.llm is None:
+            self.llm = OpenAIChat(id=self.model_name)
 
     def _get_headers(self) -> dict:
         headers = {}
@@ -46,10 +76,10 @@ class JinaTool(Tool):
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
 
-    def _trim_content(self, content: str) -> str:
+    def _trim_content(self, content: str, limit_len: int = 8000) -> str:
         """Trim to the maximum allowed length."""
-        if len(content) > self.max_content_length:
-            truncated = content[: self.max_content_length]
+        if len(content) > limit_len:
+            truncated = content[: limit_len]
             return truncated + "... (content truncated)"
         return content
 
@@ -64,11 +94,12 @@ class JinaTool(Tool):
         file_name = f"{prefix}_{end}"
         return file_name
 
-    def jina_url_reader(self, url: str) -> str:
+    def jina_url_reader(self, url: str, limit_len: int = 8000) -> str:
         """Reads a URL and returns the html text content using Jina Reader API.
 
         Args:
             url: str, The URL to read.
+            limit_len: int, url page content limit char length, default: 8000
 
         Example:
             from agentica.tools.jina_tool import JinaTool
@@ -87,7 +118,7 @@ class JinaTool(Tool):
             response = requests.post('https://r.jina.ai/', headers=self._get_headers(), json=data)
             response.raise_for_status()
             content = response.text
-            result = self._trim_content(content)
+            result = self._trim_content(content, limit_len)
         except Exception as e:
             msg = f"Error reading URL: {str(e)}"
             logger.error(msg)
@@ -140,8 +171,93 @@ class JinaTool(Tool):
             logger.info(f"Query: {query}, saved content to: {save_path}")
         return result
 
+    def jina_url_reader_by_goal(self, url: str, goal: str) -> str:
+        """
+        Attempt to read webpage content by alternating between jina and aidata services.
+
+        Args:
+            url: The URL to read
+            goal: The goal/purpose of reading the page
+
+        Returns:
+            str: The webpage content or error message
+        """
+        self.update_llm()
+        content = self.jina_url_reader(url, 95000)
+
+        if content and not content.startswith("Error reading URL"):
+            messages = [{"role": "user", "content": self.extract_prompt.format(webpage_content=content, goal=goal)}]
+            self.llm = cast(Model, self.llm)
+            response = self.llm.get_client().chat.completions.create(
+                model=self.model_name, messages=messages
+            )
+            raw = response.choices[0].message.content
+            summary_retries = 3
+            while len(raw) < 10 and summary_retries >= 0:
+                truncate_length = int(0.7 * len(content)) if summary_retries > 0 else 25000
+                status_msg = (
+                    f"[visit] Summary url[{url}] "
+                    f"attempt {3 - summary_retries + 1}/3, "
+                    f"content length: {len(content)}, "
+                    f"truncating to {truncate_length} chars"
+                ) if summary_retries > 0 else (
+                    f"[visit] Summary url[{url}] failed after 3 attempts, "
+                    f"final truncation to 25000 chars"
+                )
+                logger.debug(status_msg)
+                content = content[:truncate_length]
+                extraction_prompt = self.extract_prompt.format(
+                    webpage_content=content,
+                    goal=goal
+                )
+                messages = [{"role": "user", "content": extraction_prompt}]
+                response = self.llm.get_client().chat.completions.create(
+                    model=self.model_name, messages=messages
+                )
+                raw = response.choices[0].message.content
+                summary_retries -= 1
+
+            parse_retry_times = 2
+            if isinstance(raw, str):
+                raw = raw.replace("```json", "").replace("```", "").strip()
+            while parse_retry_times < 3:
+                try:
+                    raw = json.loads(raw)
+                    break
+                except:
+                    response = self.llm.get_client().chat.completions.create(
+                        model=self.model_name, messages=messages
+                    )
+                    raw = response.choices[0].message.content
+                    parse_retry_times += 1
+
+            if parse_retry_times >= 3:
+                useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
+                    url=url, goal=goal)
+                useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
+                useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
+            else:
+                useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
+                    url=url, goal=goal)
+                useful_information += "Evidence in page: \n" + str(raw["evidence"]) + "\n\n"
+                useful_information += "Summary: \n" + str(raw["summary"]) + "\n\n"
+
+            if len(useful_information) < 10 and summary_retries < 0:
+                print("[visit] Could not generate valid summary after maximum retries")
+                useful_information = "[visit] Failed to read page"
+
+            return useful_information
+        # If no valid content was obtained after all retries
+        else:
+            useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(url=url,
+                                                                                                                goal=goal)
+            useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
+            useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
+            return useful_information
+
 
 if __name__ == '__main__':
+    os.environ["JINA_API_KEY"] = ''
     m = JinaTool(jina_reader=True, jina_search=True)
     url = "https://raw.githubusercontent.com/shibing624/agentica/refs/heads/main/agentica/tools/base.py"
     r = m.jina_url_reader(url)
@@ -154,3 +270,7 @@ if __name__ == '__main__':
     query = "苹果的最新产品是啥？"
     r = m.jina_search(query)
     print(query, '\n\n', r)
+
+    url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
+    goal = "Explain the history of artificial intelligence."
+    print(m.jina_url_reader_by_goal(url, goal))
