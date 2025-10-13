@@ -34,6 +34,8 @@ EXTRACT_PROMPT = """Please process the following webpage content and user goal t
 3. **Summary Output for Summary**: Organize into a concise paragraph with logical flow, prioritizing clarity and judge the contribution of the information to the goal.
 
 **Final Output Format using JSON format has "rational", "evidence", "summary" feilds**
+
+json的value值的输出语言需要跟【Webpage Content】一致。
 """
 
 
@@ -84,14 +86,15 @@ class JinaTool(Tool):
         return content
 
     @staticmethod
-    def _generate_file_name_from_url(url: str, max_length=255) -> str:
+    def _generate_file_name_from_url(url: str, max_length=32) -> str:
+        """Get file name with hash suffix"""
         url_bytes = url.encode("utf-8")
-        hash = hashlib.blake2b(url_bytes).hexdigest()
+        hash = hashlib.blake2b(url_bytes).hexdigest()[:16]
         parsed_url = urlparse(url)
-        file_name = os.path.basename(url)
-        prefix = f"{parsed_url.netloc}_{file_name}"
-        end = hash[:min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]
-        file_name = f"{prefix}_{end}"
+        prefix = parsed_url.netloc
+        file_name = f"{prefix}_{hash}"
+        if len(file_name) > max_length:
+            file_name = file_name[:max_length]
         return file_name
 
     def jina_url_reader(self, url: str, limit_len: int = 8000) -> str:
@@ -243,9 +246,8 @@ class JinaTool(Tool):
                 useful_information += "Summary: \n" + str(raw["summary"]) + "\n\n"
 
             if len(useful_information) < 10 and summary_retries < 0:
-                print("[visit] Could not generate valid summary after maximum retries")
+                logger.warning("[visit] Could not generate valid summary after maximum retries")
                 useful_information = "[visit] Failed to read page"
-
             return useful_information
         # If no valid content was obtained after all retries
         else:
@@ -258,7 +260,7 @@ class JinaTool(Tool):
 
 if __name__ == '__main__':
     os.environ["JINA_API_KEY"] = ''
-    m = JinaTool(jina_reader=True, jina_search=True)
+    m = JinaTool()
     url = "https://raw.githubusercontent.com/shibing624/agentica/refs/heads/main/agentica/tools/base.py"
     r = m.jina_url_reader(url)
     print(r)
@@ -273,4 +275,8 @@ if __name__ == '__main__':
 
     url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
     goal = "Explain the history of artificial intelligence."
+    print(m.jina_url_reader_by_goal(url, goal))
+
+    url = 'https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0'
+    goal = "中国政府将如何应对经济增长"
     print(m.jina_url_reader_by_goal(url, goal))
