@@ -44,7 +44,7 @@ class JinaTool(Tool):
             self,
             api_key: Optional[str] = None,
             jina_reader: bool = True,
-            jina_search: bool = True,
+            jina_search: bool = False,
             jina_reader_by_goal: bool = True,
             work_dir: str = None,
             llm: Optional[Model] = None,
@@ -137,7 +137,7 @@ class JinaTool(Tool):
         return result
 
     def jina_search(self, query: str) -> str:
-        """Performs a web search using Jina Reader API and returns the search content.
+        """Performs a web search using Jina Search API and returns the search content.
 
         Args:
             query (str): The query to search for.
@@ -176,14 +176,14 @@ class JinaTool(Tool):
 
     def jina_url_reader_by_goal(self, url: str, goal: str) -> str:
         """
-        Attempt to read webpage content by alternating between jina and aidata services.
+        Read webpage content and extract information based on a user goal using LLM.
 
         Args:
-            url: The URL to read
-            goal: The goal/purpose of reading the page
+            url: The URL of the webpage to read.
+            goal: The user's goal or question for extracting information from the page.
 
         Returns:
-            str: The webpage content or error message
+            str: Extracted information or an error message.
         """
         self.update_llm()
         content = self.jina_url_reader(url, 95000)

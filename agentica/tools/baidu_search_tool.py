@@ -262,7 +262,6 @@ class BaiduSearchTool(Tool):
             except LookupError:
                 language = "zh"
 
-        logger.info(f"Searching Baidu [{language}] for: {query}")
         results = search(keyword=query, num_results=max_results, debug=self.debug)
 
         res: List[Dict[str, str]] = []
@@ -275,6 +274,7 @@ class BaiduSearchTool(Tool):
                     "rank": str(idx),
                 }
             )
+        logger.debug(f"Searching Baidu [{language}] for: {query}, result: {res}")
         return json.dumps(res, indent=2, ensure_ascii=False)
 
 
