@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from datetime import datetime
 from textwrap import dedent
 from collections import defaultdict, deque
@@ -151,6 +152,14 @@ class Agent:
     update_knowledge: bool = False
     # Add a tool that allows the Model to get the tool call history.
     read_tool_call_history: bool = False
+
+    # -*- Agent Multi-round Strategy Settings
+    # Enable multi-round strategy for better search accuracy
+    enable_multi_round: bool = False
+    # Maximum number of rounds for multi-round strategy
+    max_rounds: int = 10
+    # Maximum number of tokens to use in the model input
+    max_tokens: int = 32000
 
     # -*- Extra Messages
     # A list of extra messages added after the system message and before the user message.
@@ -301,6 +310,11 @@ class Agent:
             update_knowledge: bool = False,
             read_tool_call_history: bool = False,
 
+            # Agent Multi-round Strategy Settings
+            enable_multi_round: bool = False,
+            max_rounds: int = 10,
+            max_tokens: int = 32000,
+
             # Messages
             add_messages: Optional[List[Union[Dict, Message]]] = None,
 
@@ -416,6 +430,9 @@ class Agent:
         self.search_knowledge = search_knowledge
         self.update_knowledge = update_knowledge
         self.read_tool_call_history = read_tool_call_history
+        self.enable_multi_round = enable_multi_round
+        self.max_rounds = max_rounds
+        self.max_tokens = max_tokens
 
         self.add_messages = add_messages
 
@@ -1600,6 +1617,43 @@ class Agent:
             stream_intermediate_steps: bool = False,
             **kwargs: Any,
     ) -> Iterator[RunResponse]:
+        """Run the Agent with optional multi-round strategy."""
+
+        if self.enable_multi_round:
+            yield from self._run_multi_round(
+                message=message,
+                stream=stream,
+                audio=audio,
+                images=images,
+                videos=videos,
+                messages=messages,
+                stream_intermediate_steps=stream_intermediate_steps,
+                **kwargs
+            )
+        else:
+            yield from self._run_single_round(
+                message=message,
+                stream=stream,
+                audio=audio,
+                images=images,
+                videos=videos,
+                messages=messages,
+                stream_intermediate_steps=stream_intermediate_steps,
+                **kwargs
+            )
+
+    def _run_single_round(
+            self,
+            message: Optional[Union[str, List, Dict, Message]] = None,
+            *,
+            stream: bool = False,
+            audio: Optional[Any] = None,
+            images: Optional[Sequence[Any]] = None,
+            videos: Optional[Sequence[Any]] = None,
+            messages: Optional[Sequence[Union[Dict, Message]]] = None,
+            stream_intermediate_steps: bool = False,
+            **kwargs: Any,
+    ) -> Iterator[RunResponse]:
         """Run the Agent with a message and return the response.
 
         Steps:
@@ -1798,6 +1852,321 @@ class Agent:
             )
 
         # -*- Yield final response if not streaming so that run() can get the response
+        if not self.stream:
+            yield self.run_response
+
+    def _run_multi_round(self, message, stream, audio, images, videos, messages, stream_intermediate_steps, **kwargs):
+        """Run the Agent with a multi-round strategy for better search accuracy.
+
+        This method implements a multi-round conversation strategy where the agent
+        can perform multiple rounds of thinking and tool calls to find accurate answers.
+        """
+        # Initialize basic settings
+        self.stream = stream and self.is_streamable
+        self.stream_intermediate_steps = stream_intermediate_steps and self.stream
+        self.run_id = str(uuid4())
+        self.run_response = RunResponse(run_id=self.run_id, session_id=self.session_id, agent_id=self.agent_id)
+
+        # 1. Setup: Update model and resolve context
+        self.update_model()
+        self.run_response.model = self.model.id if self.model is not None else None
+        if self.context is not None and self.resolve_context:
+            self._resolve_context()
+
+        # 2. Read existing session from storage
+        self.read_from_storage()
+
+        # Add introduction if provided
+        if self.introduction is not None:
+            self.add_introduction(self.introduction)
+
+        # 3. Prepare initial messages for this run
+        system_message, user_messages, messages_for_model = self.get_messages_for_run(
+            message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
+        )
+
+        # Track input messages count for memory updates
+        num_input_messages = len(user_messages)
+
+        # Start multi-round execution event
+        if self.stream_intermediate_steps:
+            yield self.generic_run_response(event=RunEvent.run_started)
+
+        # 4. Multi-round execution strategy
+        current_round = 0
+        final_response = None
+        self.model = cast(Model, self.model)
+
+        while current_round < self.max_rounds:
+            current_round += 1
+            logger.debug(f"Starting round {current_round}/{self.max_rounds}")
+
+            # Check token limit before proceeding
+            try:
+                # Estimate token usage for current messages
+                total_content = " ".join([msg.content or "" for msg in messages_for_model])
+                if len(total_content) > self.max_tokens * 3:  # Rough estimation
+                    logger.warning(f"Approaching token limit, stopping at round {current_round}")
+                    break
+            except Exception as e:
+                logger.debug(f"Token estimation failed: {e}")
+
+            # Stream intermediate step info
+            if self.stream_intermediate_steps:
+                yield self.generic_run_response(
+                    f"Round {current_round}: Processing request...",
+                    RunEvent.run_response
+                )
+
+            # Generate model response with proper streaming handling
+            model_response: ModelResponse
+
+            if self.stream:
+                # Stream processing logic
+                model_response = ModelResponse(content="", reasoning_content="")
+                for model_response_chunk in self.model.response_stream(messages=messages_for_model):
+                    if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
+                        if model_response_chunk.reasoning_content is not None:
+                            # Accumulate reasoning content
+                            if model_response.reasoning_content is None:
+                                model_response.reasoning_content = ""
+                            model_response.reasoning_content += model_response_chunk.reasoning_content
+                            # For streaming, yield only the new chunk
+                            self.run_response.reasoning_content = model_response_chunk.reasoning_content
+                            self.run_response.created_at = model_response_chunk.created_at
+                            yield self.run_response
+
+                        if model_response_chunk.content and model_response.content is not None:
+                            model_response.content += model_response_chunk.content
+                            self.run_response.content = model_response_chunk.content
+                            self.run_response.created_at = model_response_chunk.created_at
+                            yield self.run_response
+
+                    elif model_response_chunk.event == ModelResponseEvent.tool_call_started.value:
+                        # Handle tool call start
+                        tool_call_dict = model_response_chunk.tool_call
+                        if tool_call_dict is not None:
+                            if self.run_response.tools is None:
+                                self.run_response.tools = []
+                            self.run_response.tools.append(tool_call_dict)
+                        if self.stream_intermediate_steps:
+                            yield self.generic_run_response(
+                                content=model_response_chunk.content,
+                                event=RunEvent.tool_call_started,
+                            )
+
+                    elif model_response_chunk.event == ModelResponseEvent.tool_call_completed.value:
+                        # Handle tool call completion
+                        tool_call_dict = model_response_chunk.tool_call
+                        if tool_call_dict is not None and self.run_response.tools:
+                            tool_call_id_to_update = tool_call_dict["tool_call_id"]
+                            # Find and update the tool call
+                            tool_call_index_map = {tc["tool_call_id"]: i for i, tc in
+                                                   enumerate(self.run_response.tools)}
+                            if tool_call_id_to_update in tool_call_index_map:
+                                self.run_response.tools[tool_call_index_map[tool_call_id_to_update]] = tool_call_dict
+                        if self.stream_intermediate_steps:
+                            yield self.generic_run_response(
+                                content=model_response_chunk.content,
+                                event=RunEvent.tool_call_completed,
+                            )
+                    # Set final accumulated values to model_response
+                    if model_response.reasoning_content:
+                        self.run_response.reasoning_content = model_response.reasoning_content
+                    if model_response.content:
+                        self.run_response.content = model_response.content
+            else:
+                # Non-streaming processing
+                model_response = self.model.response(messages=messages_for_model)
+                # Update run_response
+                if model_response.content:
+                    self.run_response.content = model_response.content
+                if model_response.reasoning_content:
+                    self.run_response.reasoning_content = model_response.reasoning_content
+
+            # Check if we have valid response content
+            if model_response.content is None:
+                logger.warning(f"No content in model response at round {current_round}")
+                continue
+
+            # Add assistant message to conversation
+            assistant_message = Message(role="assistant", content=model_response.content)
+            if model_response.reasoning_content:
+                assistant_message.reasoning_content = model_response.reasoning_content
+            messages_for_model.append(assistant_message)
+
+            logger.debug(f"Round {current_round} response: {model_response.content[:200]}...")
+
+            # Check if we found the final answer
+            if '<answer>' in model_response.content and '</answer>' in model_response.content:
+                final_response = model_response.content
+                break
+
+            # Handle tool calls - Fix: model_response.tool_call is a single dict, not a list
+            function_calls_executed = False
+            if model_response.tool_call is not None:
+                tool_call_dict = model_response.tool_call
+                try:
+                    # Extract tool call information
+                    tool_call_id = tool_call_dict.get("tool_call_id", "unknown")
+                    function_info = tool_call_dict.get("function", {})
+                    function_name = function_info.get("name", "unknown")
+
+                    logger.debug(f"Executing tool: {function_name}")
+
+                    # Stream tool execution start
+                    if self.stream_intermediate_steps:
+                        yield self.generic_run_response(
+                            content=f"Executing tool: {function_name}",
+                            event=RunEvent.tool_call_started
+                        )
+
+                    # Execute the tool call
+                    tool_result = self.model.run_tool_call(model_response.tool_call, messages_for_model)
+
+                    # Add tool result to messages
+                    messages_for_model.append(Message(
+                        role="tool",
+                        content=str(tool_result),
+                        tool_call_id=tool_call_id
+                    ))
+
+                    function_calls_executed = True
+
+                    # Stream tool execution completion
+                    if self.stream_intermediate_steps:
+                        yield self.generic_run_response(
+                            content=f"Tool {function_name} completed",
+                            event=RunEvent.tool_call_completed
+                        )
+
+                except Exception as e:
+                    logger.error(f"Tool execution failed: {e}")
+                    # Add error message to conversation
+                    messages_for_model.append(Message(
+                        role="tool",
+                        content=f"Tool execution failed: {str(e)}",
+                        tool_call_id=tool_call_dict.get("tool_call_id", "unknown")
+                    ))
+
+            # If no tools were called and no answer found, provide guidance
+            if not function_calls_executed and '<answer>' not in model_response.content:
+                if current_round < self.max_rounds:
+                    # Add guidance for next round
+                    guidance_prompts = [
+                        "Continue searching for more specific information to answer the question.",
+                        "Try different search terms or explore additional sources to find the answer.",
+                        "Analyze the information gathered so far and determine what additional details are needed.",
+                        "Consider using different tools or approaches to find the complete answer.",
+                        "Focus on finding concrete, verifiable information to provide an accurate answer."
+                    ]
+
+                    guidance = guidance_prompts[(current_round - 1) % len(guidance_prompts)]
+
+                    # Include answer format reminder
+                    final_prompt_content = f"{guidance}\n\nRemember: When you have found the complete answer, wrap it in <answer></answer> tags."
+
+                    messages_for_model.append(Message(role="user", content=final_prompt_content))
+
+                    # Stream guidance if enabled
+                    if self.stream_intermediate_steps:
+                        yield self.generic_run_response(
+                            content=f"Round {current_round} guidance: {guidance}",
+                            event=RunEvent.run_response
+                        )
+            # Brief pause between rounds to avoid rate limiting
+            if current_round < self.max_rounds:
+                time.sleep(0.1)
+
+        # Handle case where max rounds reached without final answer
+        if final_response is None:
+            logger.warning(f"Max rounds ({self.max_rounds}) reached, generating final answer")
+            try:
+                # Try to get a final answer
+                final_prompt = "Based on all the information gathered, please provide your best answer. Wrap your final answer in <answer></answer> tags."
+                messages_for_model.append(Message(role="user", content=final_prompt))
+
+                # Generate final response
+                if self.stream:
+                    model_response = ModelResponse(content="")
+                    for chunk in self.model.response_stream(messages=messages_for_model):
+                        if chunk.content:
+                            model_response.content += chunk.content
+                else:
+                    model_response = self.model.response(messages=messages_for_model)
+
+                final_response = model_response.content or "Unable to generate final answer"
+
+            except Exception as e:
+                logger.error(f"Failed to generate final answer: {e}")
+                final_response = f"Search completed but unable to generate final answer: {str(e)}"
+
+        # Extract final answer from response
+        if '<answer>' in final_response and '</answer>' in final_response:
+            import re
+            answer_match = re.search(r'<answer>(.*?)</answer>', final_response, re.DOTALL)
+            final_answer = answer_match.group(1).strip() if answer_match else final_response
+        else:
+            final_answer = final_response
+
+        # Set the run response
+        self.run_response.content = final_answer
+        if model_response.audio is not None:
+            self.run_response.audio = model_response.audio
+        if hasattr(model_response, 'reasoning_content') and model_response.reasoning_content:
+            self.run_response.reasoning_content = model_response.reasoning_content
+
+        # Build run messages (excluding system message from messages_for_model for memory)
+        run_messages = user_messages + messages_for_model[len(messages_for_model) - len(user_messages) - (
+                len(messages_for_model) - num_input_messages - len(user_messages)):]
+        if system_message is not None:
+            run_messages.insert(0, system_message)
+
+        self.run_response.messages = run_messages
+        self.run_response.metrics = self._aggregate_metrics_from_run_messages(run_messages)
+        self.run_response.created_at = model_response.created_at if hasattr(model_response, 'created_at') else None
+
+        # 6. Update Memory - same logic as single round
+        if self.stream_intermediate_steps:
+            yield self.generic_run_response("Updating memory", RunEvent.updating_memory)
+
+        # Add system message to memory
+        if system_message is not None:
+            self.memory.add_system_message(system_message, system_message_role=self.system_message_role)
+
+        # Add user messages and new assistant messages to memory
+        if user_messages and len(user_messages) > 0:
+            self.memory.add_messages(user_messages)
+
+        # Create AgentRun object for memory
+        self.memory.add_run(AgentRun(
+            run_id=self.run_id,
+            response=self.run_response,
+        ))
+
+        # Update session summary if needed
+        if self.memory.create_session_summary and self.memory.update_session_summary_after_run:
+            self.memory.update_summary()
+
+        # 7. Save session to storage
+        self.write_to_storage()
+
+        # 8. Save output to file if configured
+        self.save_run_response_to_file(message)
+
+        # 9. Set run input
+        self.run_input = message
+
+        # Final completion event
+        if self.stream_intermediate_steps:
+            yield self.generic_run_response(
+                f"Multi-round execution completed in {current_round} rounds",
+                RunEvent.run_completed
+            )
+
+        logger.info(f"Multi-round execution completed in {current_round} rounds")
+
+        # Yield final response if not streaming
         if not self.stream:
             yield self.run_response
 
@@ -2721,4 +3090,3 @@ class Agent:
                 break
 
             self.print_response(message=message, stream=stream, **kwargs)
-

@@ -282,7 +282,7 @@ class FunctionCall(BaseModel):
                 # Check if the pre-hook has and agent argument
                 if "agent" in signature(self.function.pre_hook).parameters:
                     pre_hook_args["agent"] = self.function._agent
-                # Check if the pre-hook has an fc argument
+                # Check if the pre-hook has fc argument
                 if "fc" in signature(self.function.pre_hook).parameters:
                     pre_hook_args["fc"] = self
                 self.function.pre_hook(**pre_hook_args)
