@@ -20,6 +20,8 @@ from agentica import Agent, PythonAgent, ShellTool, JinaTool, SearchSerperTool, 
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA
 
+pwd_path = os.path.abspath(os.path.dirname(__file__))
+
 
 def load_jsonl(file_path: str) -> List[Dict[str, Any]]:
     """Load JSONL file"""
@@ -157,7 +159,6 @@ async def evaluate_instance(agent, instance, dataset_name: str) -> Dict[str, Any
 
         # Create messages format
         messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": question}
         ]
 
@@ -184,7 +185,6 @@ async def evaluate_instance(agent, instance, dataset_name: str) -> Dict[str, Any
             'answer': ground_truth,
             'prediction': f"Error: {str(e)}",
             'messages': [
-                {"role": "system", "content": "You are a helpful assistant."},
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": f"Error: {str(e)}"}
             ],
@@ -197,9 +197,9 @@ async def main():
     parser.add_argument('--model', type=str, default='gpt-4o')
     parser.add_argument('--dataset', type=str, default='browsecomp_zh_small',
                         choices=['browsecomp_zh_small', 'browsecomp_zh', 'browsecomp_en',
-                                 'browsecomp_en_small', 'simple_qa', 'simple_qa_small', 'time_qa', 'gaia'])
-    parser.add_argument('--data_file', type=str, default='data/browsecomp_zh_small.jsonl')
-    parser.add_argument('--eval_n_limit', type=int, default=2)
+                                 'browsecomp_en_small', 'simple_qa', 'simple_qa_small', 'time_qa',
+                                 'gaia_2023_all_validation', ])
+    parser.add_argument('--eval_n_limit', type=int, default=3)
     parser.add_argument('--output_dir', type=str, default='outputs')
     parser.add_argument('--restore_result_path', default='summary.json', help="record result")
     args = parser.parse_args()
@@ -218,45 +218,36 @@ async def main():
     else:
         judge_prompt = JUDGE_PROMPT_GAIA
 
-    # Setup Agent
-    instructions = """You are a Web Information Seeking Master. Your task is to thoroughly seek the internet for information and provide accurate answers to questions. No matter how complex the query, you will not give up until you find the corresponding information.
-
-As you proceed, adhere to the following principles:
-
-1. **Persistent Actions for Answers**: You will engage in many interactions, delving deeply into the topic to explore all possible aspects until a satisfactory answer is found.
-
-2. **Repeated Verification**: Before presenting a Final Answer, you will cross-check and validate the information you've gathered to confirm its accuracy and reliability.
-
-3. **Attention to Detail**: You will carefully analyze each information source to ensure that all data is current, relevant, and from credible origins.
-
-Always provide your final answer within <answer> tags."""
-
     agent = Agent(
         model=OpenAIChat(id=args.model),
         tools=[
             JinaTool(jina_search=False, jina_reader_by_goal=True, jina_reader=False, work_dir='saved_html'),
-            SearchSerperTool()
+            # SearchSerperTool(),
+            BaiduSearchTool()
         ],
-        instructions=instructions,
+        enable_multi_round=True,
+        max_rounds=15,
+        max_tokens=30000,
+        debug=False
     )
 
     # Load evaluation dataset
-    logger.info(f"Loading dataset from {args.data_file}")
-    if not os.path.exists(args.data_file):
-        raise FileNotFoundError(f"Data file {args.data_file} not found")
+    data_file = os.path.join(pwd_path, 'data', args.dataset + '.jsonl')
+    logger.info(f"Loading dataset from {data_file}")
+    if not os.path.exists(data_file):
+        raise FileNotFoundError(f"Data file {data_file} not found")
 
-    test_data = load_jsonl(args.data_file)
-
+    test_data = load_jsonl(data_file)
+    logger.info(f"Total {len(test_data)} instances in the dataset")
     if args.eval_n_limit:
         test_data = test_data[:args.eval_n_limit]
-
     logger.info(f"Loaded {len(test_data)} test instances")
 
     # Run single round evaluation
-    logger.info("Starting evaluation")
+    logger.info("Starting Running")
     results = []
 
-    for instance in tqdm(test_data, desc="Evaluating"):
+    for instance in tqdm(test_data, desc="Running"):
         result = await evaluate_instance(agent, instance, args.dataset)
         results.append(result)
         await asyncio.sleep(0.1)
@@ -266,7 +257,6 @@ Always provide your final answer within <answer> tags."""
     with open(output_file, 'w', encoding='utf-8') as f:
         for result in results:
             f.write(json.dumps(result, ensure_ascii=False) + '\n')
-
     logger.info(f"Predictions saved to {output_file}")
 
     # Judge results
@@ -311,8 +301,6 @@ Always provide your final answer within <answer> tags."""
     with open(args.restore_result_path, 'w', encoding='utf-8') as f:
         json.dump(final_result, f, ensure_ascii=False, indent=4)
     logger.info(f"Final results saved to {args.restore_result_path}")
-
-
 
 
 if __name__ == "__main__":

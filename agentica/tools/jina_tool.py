@@ -13,7 +13,7 @@ import requests
 import json
 from os import getenv
 from urllib.parse import urlparse
-from typing import Optional, cast
+from typing import Optional, cast, List, Union
 
 from agentica.model.base import Model
 from agentica.model.openai.chat import OpenAIChat
@@ -174,109 +174,123 @@ class JinaTool(Tool):
             logger.info(f"Query: {query}, saved content to: {save_path}")
         return result
 
-    def jina_url_reader_by_goal(self, url: str, goal: str) -> str:
+    def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:
         """
-        Read webpage content and extract information based on a user goal using LLM.
+        Reads one or more URLs and extracts useful information based on the user's goal using Jina Reader and an LLM.
+        1. For each URL, it retrieves the webpage content using the Jina Reader API.
+        2. It then processes the content with an LLM to extract information relevant to the
+            user's specified goal, including evidence and a summary.
+        3. Finally, it combines the extracted information from all URLs into a single response.
 
         Args:
-            url: The URL of the webpage to read.
-            goal: The user's goal or question for extracting information from the page.
+            urls: List of URLs of the webpages to read.
+            goal: The user's goal or question for extracting information from the pages.
 
         Returns:
-            str: Extracted information or an error message.
+            str: Extracted information from all URLs or an error message.
         """
         self.update_llm()
-        content = self.jina_url_reader(url, 95000)
+        all_useful_information = []
+        if isinstance(urls, str):
+            urls = [urls]
 
-        if content and not content.startswith("Error reading URL"):
-            messages = [{"role": "user", "content": self.extract_prompt.format(webpage_content=content, goal=goal)}]
-            self.llm = cast(Model, self.llm)
-            response = self.llm.get_client().chat.completions.create(
-                model=self.model_name, messages=messages
-            )
-            raw = response.choices[0].message.content
-            summary_retries = 3
-            while len(raw) < 10 and summary_retries >= 0:
-                truncate_length = int(0.7 * len(content)) if summary_retries > 0 else 25000
-                status_msg = (
-                    f"[visit] Summary url[{url}] "
-                    f"attempt {3 - summary_retries + 1}/3, "
-                    f"content length: {len(content)}, "
-                    f"truncating to {truncate_length} chars"
-                ) if summary_retries > 0 else (
-                    f"[visit] Summary url[{url}] failed after 3 attempts, "
-                    f"final truncation to 25000 chars"
-                )
-                logger.debug(status_msg)
-                content = content[:truncate_length]
-                extraction_prompt = self.extract_prompt.format(
-                    webpage_content=content,
-                    goal=goal
-                )
-                messages = [{"role": "user", "content": extraction_prompt}]
+        for i, url in enumerate(urls, 1):
+            logger.debug(f"Processing URL {i}/{len(urls)}: {url}")
+            content = self.jina_url_reader(url, 95000)
+
+            if content and not content.startswith("Error reading URL"):
+                messages = [{"role": "user", "content": self.extract_prompt.format(webpage_content=content, goal=goal)}]
+                self.llm = cast(Model, self.llm)
                 response = self.llm.get_client().chat.completions.create(
                     model=self.model_name, messages=messages
                 )
                 raw = response.choices[0].message.content
-                summary_retries -= 1
-
-            parse_retry_times = 2
-            if isinstance(raw, str):
-                raw = raw.replace("```json", "").replace("```", "").strip()
-            while parse_retry_times < 3:
-                try:
-                    raw = json.loads(raw)
-                    break
-                except:
+                summary_retries = 3
+                while len(raw) < 10 and summary_retries >= 0:
+                    truncate_length = int(0.7 * len(content)) if summary_retries > 0 else 25000
+                    status_msg = (
+                        f"[visit] Summary url[{url}] "
+                        f"attempt {3 - summary_retries + 1}/3, "
+                        f"content length: {len(content)}, "
+                        f"truncating to {truncate_length} chars"
+                    ) if summary_retries > 0 else (
+                        f"[visit] Summary url[{url}] failed after 3 attempts, "
+                        f"final truncation to 25000 chars"
+                    )
+                    logger.debug(status_msg)
+                    content = content[:truncate_length]
+                    extraction_prompt = self.extract_prompt.format(
+                        webpage_content=content,
+                        goal=goal
+                    )
+                    messages = [{"role": "user", "content": extraction_prompt}]
                     response = self.llm.get_client().chat.completions.create(
                         model=self.model_name, messages=messages
                     )
                     raw = response.choices[0].message.content
-                    parse_retry_times += 1
+                    summary_retries -= 1
 
-            if parse_retry_times >= 3:
+                parse_retry_times = 2
+                if isinstance(raw, str):
+                    raw = raw.replace("```json", "").replace("```", "").strip()
+                while parse_retry_times < 3:
+                    try:
+                        raw = json.loads(raw)
+                        break
+                    except:
+                        response = self.llm.get_client().chat.completions.create(
+                            model=self.model_name, messages=messages
+                        )
+                        raw = response.choices[0].message.content
+                        parse_retry_times += 1
+
+                if parse_retry_times >= 3:
+                    useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
+                        url=url, goal=goal)
+                    useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
+                    useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
+                else:
+                    useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
+                        url=url, goal=goal)
+                    useful_information += "Evidence in page: \n" + str(raw["evidence"]) + "\n\n"
+                    useful_information += "Summary: \n" + str(raw["summary"]) + "\n\n"
+
+                if len(useful_information) < 10 and summary_retries < 0:
+                    logger.warning("[visit] Could not generate valid summary after maximum retries")
+                    useful_information = "[visit] Failed to read page"
+            else:
                 useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
                     url=url, goal=goal)
                 useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
                 useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
-            else:
-                useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
-                    url=url, goal=goal)
-                useful_information += "Evidence in page: \n" + str(raw["evidence"]) + "\n\n"
-                useful_information += "Summary: \n" + str(raw["summary"]) + "\n\n"
+            all_useful_information.append(useful_information)
 
-            if len(useful_information) < 10 and summary_retries < 0:
-                logger.warning("[visit] Could not generate valid summary after maximum retries")
-                useful_information = "[visit] Failed to read page"
-            return useful_information
-        # If no valid content was obtained after all retries
-        else:
-            useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(url=url,
-                                                                                                                goal=goal)
-            useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
-            useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
-            return useful_information
+        # 合并所有URL的信息
+        final_result = f"Combined information from {len(urls)} URLs for goal: {goal}\n\n---\n"
+        final_result += "\n".join(all_useful_information)
+        logger.debug(f"Final combined result length: {len(final_result)} characters, top 500 chars:\n{final_result[:500]}")
+        return final_result
 
 
 if __name__ == '__main__':
     os.environ["JINA_API_KEY"] = ''
     m = JinaTool()
-    url = "https://raw.githubusercontent.com/shibing624/agentica/refs/heads/main/agentica/tools/base.py"
-    r = m.jina_url_reader(url)
-    print(r)
-
-    url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
-    r = m.jina_url_reader(url)
-    print(url, '\n\n', r)
-
-    query = "苹果的最新产品是啥？"
-    r = m.jina_search(query)
-    print(query, '\n\n', r)
-
-    url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
-    goal = "Explain the history of artificial intelligence."
-    print(m.jina_url_reader_by_goal(url, goal))
+    # url = "https://raw.githubusercontent.com/shibing624/agentica/refs/heads/main/agentica/tools/base.py"
+    # r = m.jina_url_reader(url)
+    # print(r)
+    #
+    # url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+    # r = m.jina_url_reader(url)
+    # print(url, '\n\n', r)
+    #
+    # query = "苹果的最新产品是啥？"
+    # r = m.jina_search(query)
+    # print(query, '\n\n', r)
+    #
+    # url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
+    # goal = "Explain the history of artificial intelligence."
+    # print(m.jina_url_reader_by_goal(url, goal))
 
     url = 'https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0'
     goal = "中国政府将如何应对经济增长"
-    print(m.jina_url_reader_by_goal(url, goal))
+    print(m.jina_url_reader_by_goal([url], goal))
