@@ -343,7 +343,6 @@ class PgVectorDb(VectorDb):
     def optimize(self) -> None:
         from math import sqrt
 
-        logger.debug("==== Optimizing Vector DB ====")
         if self.index is None:
             return
 
@@ -401,7 +400,6 @@ class PgVectorDb(VectorDb):
                             f"WITH (m = {self.index.m}, ef_construction = {self.index.ef_construction});"
                         )
                     )
-        logger.debug("==== Optimized Vector DB ====")
 
     def delete(self) -> bool:
         from sqlalchemy import delete

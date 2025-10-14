@@ -90,6 +90,7 @@ class ReactAgent:
     def run(self, user_query, max_iterations=5):
         """Run the agent with the given user query."""
         context = []
+        response = ''
         for _ in range(max_iterations):
             messages = [
                 {"role": "system", "content": self.system_prompt.format(query=user_query)},
@@ -114,7 +115,7 @@ class ReactAgent:
             })
         return response
 
-    def execute_action(self, action_str):
+    def execute_action(self, action_str) -> str:
         """Execute an action based on the action string."""
         action_name, params = parse_action(action_str)
         if action_name in self.action_registry:
