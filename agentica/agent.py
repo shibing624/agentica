@@ -2190,8 +2190,7 @@ class Agent:
         logger.debug(f"Multi-round execution completed in {current_round} rounds")
 
         # Yield final response
-        if not self.stream:
-            yield self.run_response
+        yield self.run_response
 
     @overload
     def run(
@@ -2758,9 +2757,17 @@ class Agent:
                     model_response_stream = self.model.aresponse_stream(messages=messages_for_model)
                     async for chunk in model_response_stream:
                         if chunk.content:
-                                model_response.content += chunk.content
+                            model_response.content += chunk.content
                 else:
                     model_response = await self.model.aresponse(messages=messages_for_model)
+                    # Handle structured outputs
+                    if self.response_model is not None and self.structured_outputs and model_response.parsed is not None:
+                        self.run_response.content = model_response.parsed
+                        self.run_response.content_type = self.response_model.__name__
+                    else:
+                        self.run_response.content = model_response.content
+                    self.run_response.messages = messages_for_model
+                    self.run_response.created_at = model_response.created_at
                 final_response = model_response.content or "Unable to generate final answer"
             except Exception as e:
                 logger.error(f"Failed to generate final answer: {e}")
@@ -2775,7 +2782,6 @@ class Agent:
             final_answer = final_response
 
         # Set the run response
-        self.run_response.content = final_answer
         assistant_message = Message(role="assistant", content=final_response)
         if assistant_message not in all_run_messages:
             all_run_messages.append(assistant_message)
@@ -2790,7 +2796,7 @@ class Agent:
         self.run_response.created_at = model_response.created_at if hasattr(model_response, 'created_at') else None
 
         if self.stream:
-            self.run_response.content = model_response.content
+            self.run_response.content = final_answer
 
         # 6. Update Memory
         if self.stream_intermediate_steps:
@@ -2867,8 +2873,7 @@ class Agent:
         logger.debug(f"Multi-round execution completed in {current_round} rounds")
 
         # Yield final response if not streaming
-        if not self.stream:
-            yield self.run_response
+        yield self.run_response
 
     async def arun(
             self,
