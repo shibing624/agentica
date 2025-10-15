@@ -114,8 +114,6 @@ class JinaTool(Tool):
         Returns:
             str, The result of the crawling html text content, Markdown format.
         """
-        logger.debug(f"Reading URL: {url}")
-
         try:
             data = {'url': url}
             response = requests.post('https://r.jina.ai/', headers=self._get_headers(), json=data)
@@ -133,7 +131,7 @@ class JinaTool(Tool):
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            logger.info(f"Url: {url}, saved content to: {save_path}")
+            logger.debug(f"Url: {url}, saved content to: {save_path}")
         return result
 
     def jina_search(self, query: str) -> str:
@@ -171,7 +169,7 @@ class JinaTool(Tool):
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            logger.info(f"Query: {query}, saved content to: {save_path}")
+            logger.debug(f"Query: {query}, saved content to: {save_path}")
         return result
 
     def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:

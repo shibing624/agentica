@@ -598,7 +598,7 @@ class Tool:
                 sanitize_arguments=sanitize_arguments,
             )
             self.functions[f.name] = f
-            logger.debug(f"Function: {f.name} registered with {self.name}")
+            # logger.debug(f"Function: {f.name} registered with {self.name}")
         except Exception as e:
             logger.warning(f"Failed to create Function for: {function.__name__}")
             raise e

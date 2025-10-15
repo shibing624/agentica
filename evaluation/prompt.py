@@ -106,14 +106,14 @@ Predicted Answer: {response}
 Did the model give an answer **equivalent** to the labeled answer? Please respond with "Correct" if they are equivalent, or "Incorrect" if they are not equivalent. Do not include any other text.
 """
 
-JUDGE_PROMPT_BC = """Judge whether the following [response] to [question] is correct or not based on the precise and unambiguous [correct_answer] below.
+JUDGE_PROMPT_BC = """Judge whether the following [prediction] to [question] is correct or not based on the precise and unambiguous [correct_answer] below.
 
 [question]: {question}
-[response]: {response}
+[prediction]: {prediction}
 
 Your judgement must be in the format and criteria specified below:
 
-extracted_final_answer: The final exact answer extracted from the [response]. Put the extracted answer as ’None’ if there is no exact, final answer to extract from the response.
+extracted_final_answer: The final exact answer extracted from the [prediction]. Put the extracted answer as ’None’ if there is no exact, final answer to extract from the prediction.
 [correct_answer]: {correct_answer}
 
 reasoning: Explain why the extracted_final_answer is correct or incorrect based on [correct_answer], focusing only on if there are meaningful differences between [correct_answer] and the extracted_final_answer. Do not comment on any background to the problem, do not attempt to solve the problem, do not argue for any answer different than [correct_answer], focus only on whether the answers match.

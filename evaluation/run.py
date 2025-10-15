@@ -13,7 +13,6 @@ from typing import List, Dict, Any
 from loguru import logger
 from tqdm import tqdm
 import sys
-import tiktoken
 
 sys.path.append('../..')
 from agentica import Agent, PythonAgent, ShellTool, JinaTool, SearchSerperTool, OpenAIChat, ZhipuAIChat, Message
@@ -50,12 +49,13 @@ def call_llm_judge(item, judge_prompt, dataset):
     """Judge if predicted answer matches ground-truth"""
     question = ''
     correct_answer = ''
+    prediction = ''
     try:
         question = item["question"]
         correct_answer = item["answer"]
-        response = item["prediction"].strip()
+        prediction = item["prediction"].strip()
 
-        prompt = judge_prompt.format(question=question, correct_answer=correct_answer, response=response)
+        prompt = judge_prompt.format(question=question, correct_answer=correct_answer, prediction=prediction)
         m = ZhipuAIChat(model='glm-4-flash')
         r = m.response([Message(role="user", content=prompt)])
         response = r.content
@@ -69,6 +69,7 @@ def call_llm_judge(item, judge_prompt, dataset):
         return {
             "question": question,
             "answer": correct_answer,
+            "prediction": prediction,
             "judgement": response,
             "is_correct": response == "Correct"
         }
@@ -78,6 +79,7 @@ def call_llm_judge(item, judge_prompt, dataset):
         return {
             "question": question,
             "answer": correct_answer,
+            "prediction": prediction,
             "judgement": "Error",
             "is_correct": False,
             "error": str(e)
@@ -90,11 +92,9 @@ def single_round_statistics(results):
     tool_use_cnt, visit_tool_cnt, search_tool_cnt, other_tool_cnt = [], [], [], []
     all_ans_lengths, all_think_lengths = [], []
 
-    tokenizer = tiktoken.encoding_for_model("gpt-4o")
-
     for item in results:
-        texts = item.get("messages", [])
-        final_msg = texts[-1]["content"] if len(texts) else ""
+        tools = item.get("tool_calls", [])
+        final_msg = item.get("full_response", '')
 
         # Analyze answer
         if "<answer>" not in final_msg or "</answer>" not in final_msg:
@@ -106,25 +106,17 @@ def single_round_statistics(results):
         # Analyze tool use & thinking
         num_tool_use, num_visit_tool, num_search_tool, num_other_tool = 0, 0, 0, 0
         think_lengths = []
-        for idx in range(2, len(texts), 2):
-            response = texts[idx]["content"]
-            tool = re.findall(r"<tool_call>(.*?)</tool_call>", response, re.DOTALL)
+        for tool in tools:
+            tool_name = tool.get("function", {}).get("name", "")
 
-            if tool:
-                try:
-                    tool_name = tool[0].split("name\": \"")[1].split("\"")[0].strip()
-                except Exception:
-                    tool_name = ""
-
-                num_tool_use += 1
-                if "visit" in tool_name:
-                    num_visit_tool += 1
-                elif "search" in tool_name:
-                    num_search_tool += 1
-                else:
-                    num_other_tool += 1
-
-            think_lengths.append(len(response))
+            num_tool_use += 1
+            if "url" in tool_name:
+                num_visit_tool += 1
+            elif "search" in tool_name:
+                num_search_tool += 1
+            else:
+                num_other_tool += 1
+            think_lengths.append(0)
 
         tool_use_cnt.append(num_tool_use)
         visit_tool_cnt.append(num_visit_tool)
@@ -135,12 +127,7 @@ def single_round_statistics(results):
         think_length = sum(think_lengths) / len(think_lengths) if think_lengths else 0
         all_think_lengths.append(think_length)
 
-        # Overlength
-        if len(tokenizer.encode("".join([text["content"] for text in texts]))) > 30000:
-            num_extra += 1
-
     return {
-        "extra_length": num_extra,
         "num_invalid": num_invalid,
         "avg_action": sum(tool_use_cnt) / len(tool_use_cnt) if tool_use_cnt else 0,
         "avg_visit_action": sum(visit_tool_cnt) / len(visit_tool_cnt) if visit_tool_cnt else 0,
@@ -151,29 +138,40 @@ def single_round_statistics(results):
     }
 
 
-async def evaluate_instance(agent, instance, dataset_name: str) -> Dict[str, Any]:
+def evaluate_instance(model_name, instance) -> Dict[str, Any]:
     """Evaluate a single instance"""
     try:
         question = instance.get('Question', instance.get('question', ''))
         ground_truth = instance.get('Answer', instance.get('answer', ''))
 
-        # Create messages format
-        messages = [
-            {"role": "user", "content": question}
-        ]
-
         # Run agent
-        r = await agent.arun(question)
+        agent = Agent(
+            model=OpenAIChat(id=model_name),
+            tools=[
+                # JinaTool(jina_search=False, jina_reader_by_goal=True, jina_reader=False, work_dir='saved_html'),
+                SearchSerperTool(),
+                # BaiduSearchTool()
+            ],
+            add_history_to_messages=True,
+            enable_multi_round=True,
+            max_rounds=10,
+            max_tokens=30000,
+            debug=True
+        )
+        r = agent.run(question)
         response = r.content
-
-        # Add assistant response to messages
-        messages.append({"role": "assistant", "content": response})
+        messages = [msg.to_dict() for msg in agent.memory.messages]
+        # print('messages:', messages)
+        tool_calls_str = agent.get_tool_call_history(100)
+        # print('get_tool_call_history:', tool_calls_str)
+        tool_calls = json.loads(tool_calls_str)
 
         return {
             'question': question,
             'answer': ground_truth,
             'prediction': extract_answer(response),
             'messages': messages,
+            'tool_calls': tool_calls,
             'full_response': response
         }
     except Exception as e:
@@ -184,11 +182,9 @@ async def evaluate_instance(agent, instance, dataset_name: str) -> Dict[str, Any
             'question': question,
             'answer': ground_truth,
             'prediction': f"Error: {str(e)}",
-            'messages': [
-                {"role": "user", "content": question},
-                {"role": "assistant", "content": f"Error: {str(e)}"}
-            ],
-            'error': str(e)
+            'messages': [],
+            'tool_calls': '',
+            'full_response': '',
         }
 
 
@@ -199,7 +195,7 @@ async def main():
                         choices=['browsecomp_zh_small', 'browsecomp_zh', 'browsecomp_en',
                                  'browsecomp_en_small', 'simple_qa', 'simple_qa_small', 'time_qa',
                                  'gaia_2023_all_validation', ])
-    parser.add_argument('--eval_n_limit', type=int, default=3)
+    parser.add_argument('--eval_n_limit', type=int, default=1)
     parser.add_argument('--output_dir', type=str, default='outputs')
     parser.add_argument('--restore_result_path', default='summary.json', help="record result")
     args = parser.parse_args()
@@ -218,19 +214,6 @@ async def main():
     else:
         judge_prompt = JUDGE_PROMPT_GAIA
 
-    agent = Agent(
-        model=OpenAIChat(id=args.model),
-        tools=[
-            JinaTool(jina_search=False, jina_reader_by_goal=True, jina_reader=False, work_dir='saved_html'),
-            # SearchSerperTool(),
-            BaiduSearchTool()
-        ],
-        enable_multi_round=True,
-        max_rounds=15,
-        max_tokens=30000,
-        debug=False
-    )
-
     # Load evaluation dataset
     data_file = os.path.join(pwd_path, 'data', args.dataset + '.jsonl')
     logger.info(f"Loading dataset from {data_file}")
@@ -246,11 +229,10 @@ async def main():
     # Run single round evaluation
     logger.info("Starting Running")
     results = []
-
+    model_name = args.model
     for instance in tqdm(test_data, desc="Running"):
-        result = await evaluate_instance(agent, instance, args.dataset)
+        result = evaluate_instance(model_name, instance)
         results.append(result)
-        await asyncio.sleep(0.1)
 
     # Save prediction results
     output_file = os.path.join(args.output_dir, 'predictions.jsonl')
@@ -280,7 +262,7 @@ async def main():
     print(f"===========")
     print(f"Accuracy: {accuracy}%")
     print(f"Correct: {correct_count}/{len(judged_results)}")
-    print(f"# Invalid {statistics['num_invalid']}  # Extra Length {statistics['extra_length']}")
+    print(f"# Invalid {statistics['num_invalid']}")
     print(
         f"Avg. Action {statistics['avg_action']:.2f}  Avg. Visit Action {statistics['avg_visit_action']:.2f}  Avg. Search Action {statistics['avg_search_action']:.2f}  Avg. Other Action {statistics['avg_other_action']:.2f}")
     print(

@@ -12,10 +12,10 @@ from typing import List, Iterator, Optional, Dict, Any, Callable, Union, Sequenc
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationInfo
 
+from agentica.utils.log import logger
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException
-from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
 
