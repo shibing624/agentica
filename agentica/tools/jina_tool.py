@@ -134,7 +134,7 @@ class JinaTool(Tool):
             logger.debug(f"Url: {url}, saved content to: {save_path}")
         return result
 
-    def jina_search(self, query: str) -> str:
+    def jina_search_single_query(self, query: str) -> str:
         """Performs a web search using Jina Search API and returns the search content.
 
         Args:
@@ -151,26 +151,36 @@ class JinaTool(Tool):
             str: The results of the search.
         """
         query = query.strip()
-        logger.debug(f"Search query: {query}")
         url = f'https://s.jina.ai/{query}'
         try:
             response = requests.get(url, headers=self._get_headers())
             response.raise_for_status()
             content = response.text
             result = self._trim_content(content)
+            logger.info(f"Search query: {query}, results top300 chars:\n{result[:300]}")
         except Exception as e:
-            content = ''
             msg = f"Error performing search: {str(e)}"
             logger.error(msg)
             result = msg
-        if content:
-            filename = self._generate_file_name_from_url(url)
-            save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            logger.debug(f"Query: {query}, saved content to: {save_path}")
         return result
+
+    def jina_search(self, queries: Union[List[str], str]) -> str:
+        """
+        Performs web searches for one or more queries using Jina Search API and returns the combined search content.
+
+        Args:
+            queries: List of queries to search for.
+        Returns:
+            str: Combined results of the searches or an error message.
+        """
+        if isinstance(queries, str):
+            queries = [queries]
+
+        all_results = []
+        for i, query in enumerate(queries, 1):
+            res = self.jina_search_single_query(query)
+            all_results[query] = res
+        return json.dumps(all_results, indent=2, ensure_ascii=False)
 
     def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:
         """

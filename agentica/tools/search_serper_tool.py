@@ -7,7 +7,7 @@ import http.client
 import json
 import os
 
-from typing import Dict, Optional
+from typing import Dict, Optional, Union, List
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -59,46 +59,28 @@ class SerperWrapper(BaseModel):
 
             res = self._process_response(data, as_string=as_string)
         except Exception as e:
-            logger.error(f"Failed to search `{query}` due to {e}")
-            res = ""
+            msg = f"Failed to search `{query}` due to {e}"
+            logger.error(msg)
+            res = msg if as_string else [msg]
         return res
 
     @staticmethod
-    def _process_response(res: dict, as_string: bool = False) -> str:
+    def _process_response(res: dict, as_string: bool = False) -> Union[str, List[dict]]:
         """Process response from SerpAPI."""
         # logger.debug(res)
         focus = ["title", "snippet", "link"]
-
         def get_focused(x):
             return {i: j for i, j in x.items() if i in focus}
-
         if "error" in res.keys():
             raise ValueError(f"Got error from https://serper.dev/: {res['error']}")
         elif "message" in res.keys() and "Unauthorized" in res["message"]:
             raise ValueError(f"Unauthorized access to https://serper.dev/. Check your API key.")
-
-        if "answer_box" in res.keys() and "answer" in res["answer_box"].keys():
-            toret = res["answer_box"]["answer"]
-        elif "answer_box" in res.keys() and "snippet" in res["answer_box"].keys():
-            toret = res["answer_box"]["snippet"]
-        elif "answer_box" in res.keys() and "snippet_highlighted_words" in res["answer_box"].keys():
-            toret = res["answer_box"]["snippet_highlighted_words"][0]
-        elif "sports_results" in res.keys() and "game_spotlight" in res["sports_results"].keys():
-            toret = res["sports_results"]["game_spotlight"]
-        elif "knowledge_graph" in res.keys() and "description" in res["knowledge_graph"].keys():
-            toret = res["knowledge_graph"]["description"]
-        elif "organic" in res and "snippet" in res["organic"][0].keys():
-            toret = res["organic"][0]["snippet"]
-        else:
-            toret = "No good search result found"
-
         toret_l = []
         if "answer_box" in res.keys() and "snippet" in res["answer_box"].keys():
             toret_l += [get_focused(res["answer_box"])]
         if res.get("organic"):
             toret_l += [get_focused(i) for i in res.get("organic")]
-
-        return f"{toret}\n{toret_l}" if as_string else toret_l
+        return f"{toret_l}" if as_string else toret_l
 
 
 class SearchSerperTool(Tool):
@@ -117,7 +99,7 @@ class SearchSerperTool(Tool):
         self.api_key: Optional[str] = api_key or os.getenv("SERPER_API_KEY")
         self.register(self.search_google)
 
-    def search_google(
+    def search_google_single_query(
             self,
             query: str,
             max_results: int = 8,
@@ -140,15 +122,39 @@ class SearchSerperTool(Tool):
         Returns:
             The search results as a string or a list of dictionaries.
         """
-        try:
-            return SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
-        except Exception as e:
-            logger.error(f"Failed to search {query} due to {e}")
-            return "" if as_string else []
+        res =  SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
+        logger.info(f"Search google for query: {query}, result: {res}")
+        return res
+
+    def search_google(self, queries: Union[List[str], str], max_results: int = 8, as_string: bool = True) -> str:
+        """
+        Use this function to search google for multiple queries.
+
+        Args:
+            queries: The search queries.
+            max_results: The maximum number of results to return for each query. Defaults to 8.
+            as_string: Whether to return the results as a string or a list of dictionaries. Defaults to True.
+        Example:
+            from agentica.tools.search_serper_tool import SearchSerperTool
+            m = SearchSerperTool()
+            r = m.search_google(["北京的新闻top3", "上海的新闻top3"])
+            print(r)
+        Returns:
+            The search results as a string or a list of dictionaries.
+        """
+        if isinstance(queries, str):
+            return self.search_google_single_query(queries, max_results=max_results, as_string=as_string)
+        all_results = {}
+        for query in queries:
+            res = self.search_google_single_query(query, max_results=max_results, as_string=as_string)
+            all_results[query] = res
+        return json.dumps(all_results, indent=2, ensure_ascii=False) if as_string else all_results
 
 
 if __name__ == '__main__':
     search = SearchSerperTool()
     print(search.api_key)
-    r = search.search_google("北京的新闻top3")
+    # r = search.search_google(["北京的新闻top3"], as_string=True)
+    # print(type(r), '\n\n', r)
+    r = search.search_google(["湖北的新闻top3", "北京的娱乐新闻"], as_string=False)
     print(type(r), '\n\n', r)

@@ -7,7 +7,7 @@
 import json
 import ssl
 from os import getenv
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -17,7 +17,6 @@ try:
 except ImportError:
     raise ImportError("`exa_py` not installed. Please install using `pip install exa_py`")
 
-# 创建一个不验证 SSL 证书的上下文
 ssl._create_default_https_context = ssl._create_unverified_context
 
 
@@ -37,16 +36,12 @@ class SearchExaTool(Tool):
             type: Optional[str] = None,
             category: Optional[str] = None,
             include_domains: Optional[List[str]] = None,
-            show_results: bool = False,
     ):
         super().__init__(name="search_exa")
 
         self.api_key = api_key or getenv("EXA_API_KEY")
         if not self.api_key:
             logger.error("EXA_API_KEY not set. Please set the EXA_API_KEY environment variable.")
-
-        self.show_results = show_results
-
         self.text: bool = text
         self.text_length_limit: int = text_length_limit
         self.highlights: bool = highlights
@@ -62,7 +57,7 @@ class SearchExaTool(Tool):
 
         self.register(self.search_exa)
 
-    def search_exa(self, query: str, num_results: int = 5) -> str:
+    def search_exa_single_query(self, query: str, num_results: int = 5) -> str:
         """Use this function to search Exa (a web search engine) for a query.
 
         Args:
@@ -84,7 +79,6 @@ class SearchExaTool(Tool):
 
         try:
             exa = Exa(self.api_key)
-            logger.info(f"Searching exa for: {query}")
             search_kwargs: Dict[str, Any] = {
                 "text": self.text,
                 "highlights": self.highlights,
@@ -123,12 +117,28 @@ class SearchExaTool(Tool):
                         logger.debug(f"Failed to get highlights {e}")
                 exa_results_parsed.append(result_dict)
             parsed_results = json.dumps(exa_results_parsed, indent=2, ensure_ascii=False)
-            if self.show_results:
-                logger.info(parsed_results)
+            logger.info(f"Searching exa for: {query}, results: {parsed_results}")
             return parsed_results
         except Exception as e:
             logger.error(f"Failed to search exa {e}")
             return f"Error: {e}"
+
+    def search_exa(self, queries: Union[str, List[str]], num_results: int = 5) -> str:
+        """Search Exa for single or multiple queries.
+
+        Args:
+            queries (Union[str, List[str]]): A single query string or a list of query strings.
+            num_results (int): Number of results to return for each query. Defaults to 5.
+        Returns:
+            str: The search results in JSON format.
+        """
+        if isinstance(queries, str):
+            return self.search_exa_single_query(queries, num_results=num_results)
+        all_results = {}
+        for query in queries:
+            result = self.search_exa_single_query(query, num_results=num_results)
+            all_results[query] = result
+        return json.dumps(all_results, indent=2, ensure_ascii=False)
 
 
 if __name__ == '__main__':
@@ -136,3 +146,5 @@ if __name__ == '__main__':
     query = "苹果的最新产品是啥？"
     r = m.search_exa(query)
     print(query, '\n\n', r)
+    r = m.search_exa(["北京的新闻top3", "上海的新闻top3"], num_results=3)
+    print(r)

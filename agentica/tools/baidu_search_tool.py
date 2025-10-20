@@ -6,7 +6,7 @@
 import requests
 from bs4 import BeautifulSoup
 import json
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -217,29 +217,26 @@ class BaiduSearchTool(Tool):
     BaiduSearch is a toolkit for searching Baidu easily.
 
     Args:
-        fixed_max_results (Optional[int]): A fixed number of maximum results.
-        fixed_language (Optional[str]): A fixed language for the search results.
+        num_max_results (Optional[int]): A number of maximum results.
         headers (Optional[Any]): Headers to be used in the search request.
         debug (Optional[bool]): Enable debug output.
     """
 
     def __init__(
             self,
-            fixed_max_results: Optional[int] = 5,
-            fixed_language: Optional[str] = "zh",
+            num_max_results: Optional[int] = 5,
             headers: Optional[Any] = None,
             timeout: Optional[int] = 10,
             debug: Optional[bool] = False,
     ):
         super().__init__(name="baidusearch")
-        self.fixed_max_results = fixed_max_results
-        self.fixed_language = fixed_language
+        self.num_max_results = num_max_results
         self.headers = headers
         self.timeout = timeout
         self.debug = debug
         self.register(self.baidu_search)
 
-    def baidu_search(self, query: str, max_results: int = 5, language: str = "zh") -> str:
+    def baidu_search_single_query(self, query: str, max_results: int = 5) -> str:
         """Execute Baidu search and return results
 
         Args:
@@ -250,20 +247,8 @@ class BaiduSearchTool(Tool):
         Returns:
             str: A JSON formatted string containing the search results.
         """
-        max_results = self.fixed_max_results or max_results
-        language = self.fixed_language or language
-
-        if len(language) != 2:
-            try:
-                from pycountry import pycountry
-                language = pycountry.languages.lookup(language).alpha_2
-            except ImportError:
-                raise ImportError("`pycountry` not installed. Please install using `pip install pycountry`")
-            except LookupError:
-                language = "zh"
-
+        max_results = max_results or self.num_max_results
         results = search(keyword=query, num_results=max_results, debug=self.debug)
-
         res: List[Dict[str, str]] = []
         for idx, item in enumerate(results, 1):
             res.append(
@@ -274,8 +259,28 @@ class BaiduSearchTool(Tool):
                     "rank": str(idx),
                 }
             )
-        logger.debug(f"Searching Baidu [{language}] for: {query}, result: {res}")
+        logger.info(f"Searching Baidu for: {query}, result: {res}")
         return json.dumps(res, indent=2, ensure_ascii=False)
+
+    def baidu_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
+        """Execute Baidu search for multiple queries and return results
+
+        Args:
+            queries (Union[str, List[str]]): Search keyword(s)
+            max_results (int, optional): Maximum number of results to return for each query, default 5
+            language (str, optional): Search language, default is 'zh'
+
+        Returns:
+            str: A JSON formatted string containing the search results.
+        """
+        if isinstance(queries, str):
+            return self.baidu_search_single_query(queries, max_results=max_results)
+
+        all_results: Dict[str, Any] = {}
+        for query in queries:
+            result = self.baidu_search_single_query(query, max_results=max_results)
+            all_results[query] = json.loads(result)
+        return json.dumps(all_results, indent=2, ensure_ascii=False)
 
 
 if __name__ == '__main__':
@@ -283,5 +288,5 @@ if __name__ == '__main__':
     results = search(keyword, num_results=5)
     print(results)
     s = BaiduSearchTool()
-    r = s.baidu_search("北京的新闻top3")
+    r = s.baidu_search(["北京的新闻top3", 'CBA'], max_results=2)
     print(r)

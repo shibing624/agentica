@@ -8,7 +8,7 @@ import json
 import requests
 import uuid
 from os import getenv
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 
 try:
     from zhipuai import ZhipuAI
@@ -28,7 +28,7 @@ class WebSearchProTool(Tool):
         self.timeout = timeout
         self.register(self.search_web)
 
-    def search_web(self, query: str) -> str:
+    def search_web_single_query(self, query: str) -> str:
         """Use this function to search Exa (a web search engine) for a query.
 
         Args:
@@ -48,7 +48,6 @@ class WebSearchProTool(Tool):
             return "Please set the ZHIPUAI_API_KEY"
 
         try:
-            logger.info(f"Searching web for: {query}")
             msg = [{"role": "user", "content": query}]
             tool = "web-search-pro"
             url = "https://open.bigmodel.cn/api/paas/v4/tools"
@@ -68,10 +67,33 @@ class WebSearchProTool(Tool):
             # parse data
             results = data['choices'][0]['message']['tool_calls'][1]['search_result']
             parsed_results = json.dumps(results, indent=2, ensure_ascii=False)
+            logger.info(f"Searching web for: {query}, results: {parsed_results}")
             return parsed_results
         except Exception as e:
             logger.error(f"Failed to search exa {e}")
             return f"Error: {e}"
+
+    def search_web(self, queries: Union[List[str], str]) -> str:
+        """Use this function to search Exa (a web search engine) for a list of queries.
+
+        Args:
+            queries (Union[List[str], str]): The queries to search for.
+        Example:
+            from agentica.tools.web_search_pro_tool import WebSearchProTool
+            m = WebSearchProTool()
+            queries = ["苹果的最新产品是啥？", "微软的最新动态？"]
+            r = m.search_web(queries)
+            print(r)
+        Returns:
+            str: The search results in JSON format.
+        """
+        if isinstance(queries, str):
+            return self.search_web_single_query(queries)
+        results = {}
+        for query in queries:
+            res = self.search_web_single_query(query)
+            results[query] = res
+        return json.dumps(results, indent=2, ensure_ascii=False)
 
 
 if __name__ == '__main__':
@@ -79,3 +101,5 @@ if __name__ == '__main__':
     query = "苹果的最新产品是啥？"
     r = m.search_web(query)
     print(query, '\n\n', r)
+    r = m.search_web(["湖北的新闻top3", "北京的娱乐新闻"])
+    print(r)
