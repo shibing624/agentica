@@ -138,7 +138,7 @@ def single_round_statistics(results):
     }
 
 
-def evaluate_instance(model_name, instance) -> Dict[str, Any]:
+def evaluate_instance(model_name, instance, debug) -> Dict[str, Any]:
     """Evaluate a single instance"""
     try:
         question = instance.get('Question', instance.get('question', ''))
@@ -148,15 +148,15 @@ def evaluate_instance(model_name, instance) -> Dict[str, Any]:
         agent = Agent(
             model=OpenAIChat(id=model_name),
             tools=[
-                # JinaTool(jina_search=False, jina_reader_by_goal=True, jina_reader=False, work_dir='saved_html'),
-                SearchSerperTool(),
-                # BaiduSearchTool()
+                JinaTool(jina_search=False, jina_reader_by_goal=True, jina_reader=False, work_dir='saved_html'),
+                # SearchSerperTool(),
+                BaiduSearchTool()
             ],
             add_history_to_messages=True,
             enable_multi_round=True,
             max_rounds=10,
             max_tokens=30000,
-            debug=True
+            debug=debug
         )
         r = agent.run(question)
         response = r.content
@@ -164,7 +164,11 @@ def evaluate_instance(model_name, instance) -> Dict[str, Any]:
         # print('messages:', messages)
         tool_calls_str = agent.get_tool_call_history(100)
         # print('get_tool_call_history:', tool_calls_str)
-        tool_calls = json.loads(tool_calls_str)
+        try:
+            tool_calls = json.loads(tool_calls_str)
+        except Exception as e:
+            logger.warning(f"Error parsing tool calls: {str(e)}")
+            tool_calls = tool_calls_str
 
         return {
             'question': question,
@@ -195,9 +199,9 @@ async def main():
                         choices=['browsecomp_zh_small', 'browsecomp_zh', 'browsecomp_en',
                                  'browsecomp_en_small', 'simple_qa', 'simple_qa_small', 'time_qa',
                                  'gaia_2023_all_validation', ])
-    parser.add_argument('--eval_n_limit', type=int, default=1)
+    parser.add_argument('--eval_n_limit', type=int, default=10)
+    parser.add_argument('--debug', type=int, default=1)
     parser.add_argument('--output_dir', type=str, default='outputs')
-    parser.add_argument('--restore_result_path', default='summary.json', help="record result")
     args = parser.parse_args()
 
     # Create output directory
@@ -230,12 +234,13 @@ async def main():
     logger.info("Starting Running")
     results = []
     model_name = args.model
+    debug = True if args.debug == 1 else False
     for instance in tqdm(test_data, desc="Running"):
-        result = evaluate_instance(model_name, instance)
+        result = evaluate_instance(model_name, instance, debug)
         results.append(result)
 
     # Save prediction results
-    output_file = os.path.join(args.output_dir, 'predictions.jsonl')
+    output_file = os.path.join(args.output_dir, f'predictions-{args.dataset}.jsonl')
     with open(output_file, 'w', encoding='utf-8') as f:
         for result in results:
             f.write(json.dumps(result, ensure_ascii=False) + '\n')
@@ -280,9 +285,10 @@ async def main():
     }
 
     # save restore_result_path to json file
-    with open(args.restore_result_path, 'w', encoding='utf-8') as f:
+    restore_result_path = os.path.join(args.output_dir, f"summary-{args.dataset}.json")
+    with open(restore_result_path, 'w', encoding='utf-8') as f:
         json.dump(final_result, f, ensure_ascii=False, indent=4)
-    logger.info(f"Final results saved to {args.restore_result_path}")
+    logger.info(f"Final results saved to {restore_result_path}")
 
 
 if __name__ == "__main__":
