@@ -194,12 +194,12 @@ def evaluate_instance(model_name, instance, debug) -> Dict[str, Any]:
 
 async def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, default='gpt-4o')
+    parser.add_argument('--model', type=str, default='o3-mini')
     parser.add_argument('--dataset', type=str, default='browsecomp_zh_small',
                         choices=['browsecomp_zh_small', 'browsecomp_zh', 'browsecomp_en',
                                  'browsecomp_en_small', 'simple_qa', 'simple_qa_small', 'time_qa',
                                  'gaia_2023_all_validation', ])
-    parser.add_argument('--eval_n_limit', type=int, default=10)
+    parser.add_argument('--eval_n_limit', type=int, default=3)
     parser.add_argument('--debug', type=int, default=1)
     parser.add_argument('--output_dir', type=str, default='outputs')
     args = parser.parse_args()
