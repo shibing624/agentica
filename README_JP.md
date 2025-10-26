@@ -2,7 +2,7 @@
 
 <div align="center">
   <a href="https://github.com/shibing624/agentica">
-    <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/logo.png" height="150" alt="Logo">
+    <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/logo_new.svg" height="150" alt="Logo">
   </a>
 </div>
 
@@ -15,169 +15,198 @@
 [![python_version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](requirements.txt)
 [![MseeP.ai](https://img.shields.io/badge/mseep.ai-agentica-blue)](https://mseep.ai/app/shibing624-agentica)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
-[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
+[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#%E3%82%B3%E3%83%9F%E3%83%A5%E3%83%8B%E3%83%86%E3%82%A3%E3%81%A8%E3%82%B5%E3%83%9D%E3%83%BC%E3%83%88)
 
+**Agenticaは、自律型AIエージェントを構築、管理、展開するための軽量で強力なPythonフレームワークです。**
 
-**agentica**: 大規模言語モデルエージェントワークフローのための人間中心のフレームワーク、エージェントワークフローを迅速に構築
+シンプルなチャットボット、複雑なリサーチアシスタント、または専門エージェントの協力チームを作成する場合でも、Agenticaは目標をより速く達成するためのツールと抽象化を提供します。私たちの開発者第一のアプローチは、RAG、マルチエージェントワークフロー、長期記憶などの高度な機能を簡素化し、誰もが利用できるようにします。
 
-**agentica**: あなた自身のエージェントを迅速に構築
+## 🚀 なぜAgenticaを選ぶのか？
 
-## 概要
+*   **開発者第一のAPI**：シンプルで直感的、オブジェクト指向のインターフェースで、習得が容易で使いやすい。
+*   **モジュール式で拡張可能**：LLM、メモリバックエンド、ベクトルストアなどのコンポーネントを簡単に交換可能。
+*   **豊富な機能**：豊富な組み込みツール（Web検索、コードインタプリタ、ファイルI/O）、メモリタイプ、高度なRAG機能を標準で提供。
+*   **高度な機能を簡素化**：マルチエージェントコラボレーション（チーム）、タスク分解（ワークフロー）、自己反省などの複雑なパターンを簡単に実装。
+*   **本番環境に対応**：コマンドラインインターフェース、Web UI、またはサービスとしてエージェントを展開。**モデルコンテキストプロトコル（MCP）**による標準化されたツール統合もサポート。
+*   **中国語に最適化**：中国語ユーザー向けの専用ドキュメントと例で一流のサポートを提供。
 
-#### LLMエージェント
-![llm_agnet](https://github.com/shibing624/agentica/blob/main/docs/llm_agent.png)
+## ✨ 主な機能
 
-- **計画（Planning）**：タスクの分解、計画の生成、反省
-- **記憶（Memory）**：短期記憶（プロンプト実装）、長期記憶（RAG実装）
-- **ツール使用（Tool use）**：function call能力、外部APIの呼び出し、外部情報の取得、現在の日付、カレンダー、コード実行能力、専用情報源へのアクセスなど
+*   **🤖 コアエージェント機能**：高度な計画、反省、短期および長期記憶、堅牢なツール使用能力を持つエージェントを構築。
+*   **🧩 高度なオーケストレーション**：
+    *   **マルチエージェントチーム**：問題を解決するために協力する専門エージェントのチームを作成。
+    *   **ワークフロー**：複雑なタスクを異なるエージェントやツールが実行する一連のステップに分解。
+*   **🛠️ 豊富なツールエコシステム**：
+    *   広範な組み込みツール（Web検索、OCR、画像生成、シェルコマンド）。
+    *   独自のカスタムツールを簡単に作成。
+    *   標準化されたツール統合のための**モデルコンテキストプロトコル（MCP）**の第一級サポート。
+*   **📚 柔軟なRAGパイプライン**：
+    *   組み込みの知識ベース管理とドキュメント解析（PDF、テキスト）。
+    *   最高の精度を実現するためのハイブリッド検索戦略と結果の再ランキング。
+    *   LangChainやLlamaIndexなどの人気ライブラリとの統合。
+*   **🌌 マルチモーダルサポート**：テキスト、画像、音声、ビデオを理解し生成できるエージェントを構築。
+*   **🧠 幅広いLLM互換性**：OpenAI、Azure、Deepseek、Moonshot、Anthropic、ZhipuAI、Ollama、Togetherなどのプロバイダーからの数十のモデルと連携。
+*   **💡 自己進化エージェント**：自己反省と記憶増強能力を持ち、自己進化するエージェント。
 
-#### agenticaアーキテクチャ
-![agentica_arch](https://github.com/shibing624/agentica/blob/main/docs/agent_arch.png)
+## 🏗️ システムアーキテクチャ
 
-- **Planner**：LLMが複雑なタスクを完了するための多段階計画を生成し、相互依存する「チェーン計画」を生成し、各ステップが前のステップの出力に依存することを定義
-- **Worker**：チェーン計画を受け取り、計画内の各サブタスクをループで処理し、ツールを呼び出してタスクを完了し、自動的に反省して修正しタスクを完了
-- **Solver**：すべての出力を統合して最終的な答えを提供
+<div align="center">
+    <img src="https://github.com/shibing624/agentica/blob/main/docs/agentica_architecture.png" alt="Agentica Architecture" width="800"/>
+</div>
 
-## 特徴
-`agentica`はエージェントワークフロー構築ツールであり、以下の機能を提供：
+Agenticaのモジュール設計は、最大限の柔軟性とスケーラビリティを可能にします。その中心には `Agent`、`Model`、`Tool`、`Memory` コンポーネントがあり、これらを簡単に組み合わせて拡張することで、強力なアプリケーションを作成できます。
 
-- 簡単なコードで複雑なワークフローを迅速に編成
-- ワークフローの編成はプロンプトコマンドだけでなく、ツール呼び出し（tool_calls）もサポート
-- OpenAI APIおよびMoonshot API(kimi)の呼び出しをサポート
-
-## インストール
+## 💾 インストール
 
 ```bash
 pip install -U agentica
 ```
 
-または
-
+ソースからインストールする場合：
 ```bash
 git clone https://github.com/shibing624/agentica.git
 cd agentica
 pip install .
 ```
 
-## はじめに
+## ⚡ クイックスタート
 
-1. [example.env](https://github.com/shibing624/agentica/blob/main/example.env)ファイルをコピーして`~/.agentica/.env`にし、OpenAI APIキーまたはOPENAI APIキーを貼り付けます。
+1.  **APIキーを設定します。** `~/.agentica/.env` にファイルを作成するか、環境変数を設定します。
+
     ```shell
-    export OPENAI_API_KEY=your_openai_api_key
-    export SERPER_API_KEY=your_serper_api_key
+    # Moonshot AI用
+    export MOONSHOT_API_KEY="your-api-key"
+    # ZhipuAI用
+    export ZHIPUAI_API_KEY="your-api-key"
+    # 検索ツール用
+    export SERPER_API_KEY="your-serper-api-key"
     ```
 
-2. `agentica`を使用してエージェントを構築し、タスクを分解して実行：
-
-自動的にGoogle検索ツールを呼び出す例：[examples/11_web_search_openai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_openai_demo.py)
+2.  **最初のエージェントを実行しましょう！** この例では、天気をチェックできるエージェントを作成します。
 
 ```python
-from agentica import Agent, OpenAIChat, SearchSerperTool
+    from agentica import Agent, Moonshot, WeatherTool
 
-m = Agent(model=OpenAIChat(id='gpt-4o'), tools=[SearchSerperTool()], add_datetime_to_instructions=True)
-r = m.run("Where will the next Olympics be held?")
-print(r)
+    # モデルと天気ツールでエージェントを初期化
+    weather_agent = Agent(
+        model=Moonshot(), 
+        tools=[WeatherTool()],
+        # 「明日」のような質問のためにエージェントに時間感覚を与える
+        add_datetime_to_instructions=True  
+    )
+
+    # エージェントに質問する
+    weather_agent.print_response("明日の北京の天気はどうですか？")
+    ```
+
+    **出力：**
+    ```markdown
+    明日の北京の天気予報は以下の通りです：
+
+    - 朝：晴れ、気温約18℃、風速3km/hの弱風。
+    - 昼：晴れ、気温は23℃に上昇、風速6-7km/h。
+    - 夕方：晴れ、気温はわずかに21℃に低下、風速35-44km/hの強風。
+    - 夜：晴れ、気温は15℃に低下、風速32-39km/h。
+
+    一日を通して降水はなく、視界は良好です。夕方の強風にご注意ください。
+    ```
+
+## 📖 コアコンセプト
+
+*   **Agent**：思考し、決定を下し、行動を実行する中心的なコンポーネント。モデル、ツール、メモリを結びつけます。
+*   **Model**：エージェントの「脳」。通常はエージェントの推論能力を支える大規模言語モデル（LLM）です。
+*   **Tool**：エージェントが外部世界と対話するために使用できる機能や能力（例：Web検索、コード実行、データベースアクセス）。
+*   **Memory**：エージェントが過去の対話を記憶する（短期）および重要な情報を後で思い出すために保存する（長期）ことを可能にします。
+*   **Knowledge**：エージェントが検索拡張生成（RAG）を使用してクエリできる外部の知識源（ドキュメントのコレクションなど）。
+*   **Workflow/Team**：複雑な多段階のタスクを調整したり、複数のエージェント間の協力を管理したりするための高レベルの構成要素。
+
+## 🚀 ショーケース：構築可能なもの
+
+Agenticaで何が可能か、包括的な例をご覧ください：
+
+| 例                                                                                                                                                    | 説明                                                                                                                                |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| [**高度なRAGエージェント**](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                 | クエリ書き換え、ハイブリッド検索、再ランキング機能を備えたPDFドキュメント上の強力なQ&Aシステムを構築。                                                               |
+| [**マルチエージェントチーム**](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                       | ニュース記事の執筆に協力するためにエージェントのチーム（例：研究者とライター）を編成。                                                     |
+| [**自己進化エージェント**](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                   | 対話から学び、時間とともに知識ベースを向上させるエージェントを作成。                                                                                                                 |
+| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | LLMを搭載した対話型オペレーティングシステムを構築するという魅力的な実験。                                                  |
+| [**投資調査ワークフロー**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | データ収集と分析からレポート生成まで、投資調査プロセス全体を自動化。                                                                                                   |
+| [**ビジョンエージェント**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 画像を理解し推論できるエージェントを構築。                                                                                                                          |
+
+[➡️ **すべての例を見る**](https://github.com/shibing624/agentica/tree/main/examples)
+
+## 🖥️ 展開
+
+### コマンドラインインターフェース (CLI)
+
+ターミナルから直接エージェントと対話します。
+
+```shell
+# agenticaをインストール
+pip install -U agentica
+
+# 単一のクエリを実行
+agentica --query "次のオリンピックはどこで開催されますか？" --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro
+
+# 対話型チャットセッションを開始
+agentica --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro cogview --verbose 1
 ```
 
+### Web UI
 
-## 例
+Agenticaは[ChatPilot](https://github.com/shibing624/ChatPilot)と完全に互換性があり、エージェント用の機能豊富なGradioベースのWebインターフェースを提供します。
 
-| 例                                                                                                                                                    | 説明                                                                                                                                                                                    |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [examples/01_llm_demo.py](https://github.com/shibing624/agentica/blob/main/examples/01_llm_demo.py)                                                   | LLM Q&A デモ                                                                                                                                                                            |
-| [examples/02_user_prompt_demo.py](https://github.com/shibing624/agentica/blob/main/examples/02_user_prompt_demo.py)                                   | カスタムユーザープロンプトデモ                                                                                                                                                                       |
-| [examples/03_user_messages_demo.py](https://github.com/shibing624/agentica/blob/main/examples/03_user_messages_demo.py)                               | カスタム入力ユーザーメッセージデモ                                                                                                                                                                     |
-| [examples/04_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/04_memory_demo.py)                                             | エージェントのメモリーデモ                                                                                                                                                                         |
-| [examples/05_response_model_demo.py](https://github.com/shibing624/agentica/blob/main/examples/05_response_model_demo.py)                             | 指定された形式（pydanticのBaseModel）で応答するデモ                                                                                                                                                    |
-| [examples/06_calc_with_csv_file_demo.py](https://github.com/shibing624/agentica/blob/main/examples/06_calc_with_csv_file_demo.py)                     | LLMがCSVファイルを読み込み、計算を実行して質問に答えるデモ                                                                                                                                                      |
-| [examples/07_create_image_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/07_create_image_tool_demo.py)                       | 画像ツールを作成するデモ                                                                                                                                                                          |
-| [examples/08_ocr_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/08_ocr_tool_demo.py)                                         | OCRツー��を実装するデモ                                                                                                                                                                        |
-| [examples/09_remove_image_background_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/09_remove_image_background_tool_demo.py) | 画像の背景を自動的に削除する機能を実装するデモ。ライブラリを自動的にインストールし、画像の背景を削除するためにライブラリを呼び出す機能を含む                                                                                                                |
-| [examples/10_vision_demo.py](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | ビジョン理解デモ                                                                                                                                                                              |
-| [examples/11_web_search_openai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_openai_demo.py)                       | OpenAIのfunction callに基づくウェブ検索デモ                                                                                                                                                       |
-| [examples/12_web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/12_web_search_moonshot_demo.py)                   | Moonshotのfunction callに基づくウェブ検索デモ                                                                                                                                                     |
-| [examples/13_storage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/13_storage_demo.py)                                           | エージェントのストレージデモ                                                                                                                                                                        |
-| [examples/14_custom_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/14_custom_tool_demo.py)                                   | カスタムツールを実装し、大規模モデルが自律的に選択して呼び出すデモ                                                                                                                                                     |
-| [examples/15_crawl_webpage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/15_crawl_webpage_demo.py)                               | ウェブページ分析ワークフローを実装するデモ：URLから資金調達ニュースをクロールし、ウェブページの内容と形式を分析し、主要情報を抽出し、mdファイルとして保存する                                                                                                     |
-| [examples/16_get_top_papers_demo.py](https://github.com/shibing624/agentica/blob/main/examples/16_get_top_papers_demo.py)                             | 毎日の論文を解析し、JSON形式で保存するデモ                                                                                                                                                               |
-| [examples/17_find_paper_from_arxiv_demo.py](https://github.com/shibing624/agentica/blob/main/examples/17_find_paper_from_arxiv_demo.py)               | 論文推薦のデモ：arxivから複数の論文を自動検索し、類似論文を重複排除し、主要論文情報を抽出し、CSVファイルとして保存する                                                                                                                       |
-| [examples/18_agent_input_is_list.py](https://github.com/shibing624/agentica/blob/main/examples/18_agent_input_is_list.py)                             | エージェントのメッセージがリストであることを示すデモ                                                                                                                                                            |
-| [examples/19_naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/19_naive_rag_demo.py)                                       | 基本的なRAGを実装し、テキストドキュメントに基づいて質問に答えるデモ                                                                                                                                                   |
-| [examples/20_advanced_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                 | 高度なRAGを実装し、PDFドキュメントに基づいて質問に答えるデモ。新機能：PDFファイル解析、クエリの改訂、文字+意味の多重リコール、リコールの再ランク付け（rerank）                                                                                               |
-| [examples/21_memorydb_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/21_reference_in_prompt_rag_demo.py)                      | プロンプトに参考資料を含める従来のRAGのデモ                                                                                                                                                               |
-| [examples/22_chat_pdf_app_demo.py](https://github.com/shibing624/agentica/blob/main/examples/22_chat_pdf_app_demo.py)                                 | PDFドキュメントとの深い対話のデモ                                                                                                                                                                    |
-| [examples/23_python_agent_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/23_python_agent_memory_demo.py)                   | メモリを持つコードインタープリタ機能を実装し、Pythonコードを自動生成して実行し、次回の実行時にメモリから結果を取得するデモ                                                                                                                      |
-| [examples/24_context_demo.py](https://github.com/shibing624/agentica/blob/main/examples/24_context_demo.py)                                           | コンテキストを持つ対話のデモ                                                                                                                                                                        |
-| [examples/25_tools_with_context_demo.py](https://github.com/shibing624/agentica/blob/main/examples/25_tools_with_context_demo.py)                     | コンテキストパラメータを持つツールのデモ                                                                                                                                                                  |
-| [examples/26_complex_translate_demo.py](https://github.com/shibing624/agentica/blob/main/examples/26_complex_translate_demo.py)                       | 複雑な翻訳のデモ                                                                                                                                                                              |
-| [examples/27_research_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/27_research_agent_demo.py)                             | Research機能を実装し、検索ツールを自動的に呼��出し、情報をまとめて科学レポートを作成するデモ                                                                                                                                   |
-| [examples/28_rag_integrated_langchain_demo.py](https://github.com/shibing624/agentica/blob/main/examples/28_rag_integrated_langchain_demo.py)         | LangChainと統合されたRAGデモ                                                                                                                                                                  |
-| [examples/29_rag_integrated_llamaindex_demo.py](https://github.com/shibing624/agentica/blob/main/examples/29_rag_integrated_llamaindex_demo.py)       | LlamaIndexと統合されたRAGデモ                                                                                                                                                                 |
-| [examples/30_text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/30_text_classification_demo.py)                   | 分類モデルを自動的にトレーニングするエージェントのデモ：トレーニングセットファイルを読み取り形式を理解し、Googleでpytextclassifierライブラリを検索し、GitHubページをクロールしてpytextclassifierの呼び出し方法を理解し、コードを書いてfasttextモデルをトレーニングし、トレーニング済みモデルの予測結果をチェックす�� |
-| [examples/31_team_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                       | Team実装：ニュース記事を書くた���のチーム協力、マルチロール実装、各自のタスクを完了するために異なる役割を委任：研究��が記事を検索して分析し、ライターがレイアウトに従って記事を書き、複数の役割の成果をまとめる                                                                          |
-| [examples/32_team_debate_demo.py](https://github.com/shibing624/agentica/blob/main/examples/32_team_debate_demo.py)                                   | Team実装：委任に基づく二人の討論デモ、トランプとバイデンの討論                                                                                                                                                     |
-| [examples/33_self_evolving_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                   | 自己進化エージェントのデモ                                                                                                                                                                         |
-| [examples/34_llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | LLM OSの初期設計、LLM設計のオペレーティングシステムに基づき、LLMを通じてRAG、コードエグゼキュータ、シェルなどを呼び出し、コードインタープリタ、研究アシスタント、投資アシスタントなどと協力して問題を解決する。                                                                       |
-| [examples/35_workflow_investment_demo.py](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | 投資研究のワークフローを実装：株式情報収集、株式分析、分析レポート作成、レポートの再確認など複数のタスク                                                                                                                                  |
-| [examples/36_workflow_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/36_workflow_news_article_demo.py)               | ニュース記事を書くためのワークフローを実装、マルチエージェント実装、検索ツールを複数回呼び出し、高度なレイアウトのニュース記事を生成                                                                                                                    |
-| [examples/37_workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/37_workflow_write_novel_demo.py)                 | 小説を書くためのワークフローを実装：小説のアウトラインを設定し、Googleでアウトラインを反映し、小説の内容を書き、mdファイルとして保存する                                                                                                              |
-| [examples/38_workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/38_workflow_write_tutorial_demo.py)           | 技術チュートリアルを書くためのワークフローを実装：チュートリアルディレクトリを設定し、ディレクトリ内容を反映し、チュートリアル内容を書き、mdファイルとして保存する                                                                                                    |
-| [examples/39_audio_multi_turn_demo.py](https://github.com/shibing624/agentica/blob/main/examples/39_audio_multi_turn_demo.py)                         | OpenAIの音声APIに基づくマルチターン音声対話のデモ                                                                                                                                                         |
-| [examples/40_weather_zhipuai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/40_web_search_zhipuai_demo.py)                        | 基于智谱AI的api做天气查询的Demo                                                                                                              |
-| [examples/41_mcp_stdio_demo.py](https://github.com/shibing624/agentica/blob/main/examples/41_mcp_stdio_demo.py)                                       | Stdio的MCP Server调用的Demo                                                                                                           |
-| [examples/42_mcp_sse_server.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_server.py)                                       | SSE的MCP Server调用的Demo                                                                                                             |
-| [examples/42_mcp_sse_client.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_client.py)                                       | SSE的MCP Client调用的Demo                                                                                                             |
-| [examples/43_minimax_mcp_demo.py](https://github.com/shibing624/agentica/blob/main/examples/43_minimax_mcp_demo.py)                                   | Minimax语音生成调用的Demo                                                                                                                |
-| [examples/44_mcp_streamable_http_server.py](https://github.com/shibing624/agentica/blob/main/examples/44_mcp_streamable_http_server.py)                           | Streamable Http的MCP Server调用的Demo                                                                                                 |
-| [examples/44_mcp_streamable_http_client.py](https://github.com/shibing624/agentica/blob/main/examples/44_mcp_streamable_http_client.py)                           | Streamable Http的MCP Client调用的Demo                                                                                                 |
+<div align="center">
+    <img src="https://github.com/shibing624/ChatPilot/blob/main/docs/shot.png" width="800" />
+</div>
 
-## 連絡先
+設定手順については、[ChatPilotリポジトリ](https://github.com/shibing624/ChatPilot)をご覧ください。
 
-- Issue(提案)
-  ：[![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
-- メール：xuming: xuming624@qq.com
-- WeChat：*WeChat ID：xuming624, メモ：名前-会社-NLP* でNLPグループに参加。
+## 🤝 他のフレームワークとの比較
+
+| 機能                | Agentica                                   | LangChain                                 | AutoGen                             | CrewAI                             |
+|------------------------|--------------------------------------------|-------------------------------------------|-------------------------------------|------------------------------------|
+| **コア設計**        | エージェント中心、モジュール式、直感的      | チェーン中心、複雑なコンポーネントグラフ    | マルチエージェント対話に焦点    | 役割ベースのマルチエージェントに焦点       |
+| **使いやすさ**        | 高（シンプルさを追求）             | 中（学習曲線が急）           | 中                            | 高                               |
+| **マルチエージェント**        | ネイティブな`Team`と`Workflow`サポート         | カスタム実装が必要            | コア機能                        | コア機能                       |
+| **RAG**                | 組み込みの高度なパイプライン                | コンポーネントの手動組み立てが必要    | 外部統合が必要       | 外部統合が必要      |
+| **ツール**            | 豊富な組み込みツール + MCPサポート          | 大規模なエコシステム、複雑な場合がある         | 基本的なツールサポート                  | 基本的なツールサポート                 |
+| **マルチモーダル**        | ✅ 対応（テキスト、画像、音声、ビデオ）         | ✅ 対応（ただし統合が複雑な場合がある）  | ❌ 非対応（主にテキストベース）      | ❌ 非対応（主にテキストベース）     |
+
+
+## 💬 コミュニティとサポート
+
+*   **GitHub Issues**：質問や機能リクエストがありますか？[issueを開いてください](https://github.com/shibing624/agentica/issues)。
+*   **WeChat**：開発者コミュニティに参加しましょう！WeChatで`xuming624`を追加し、「agentica」と伝えてグループに追加してもらってください。
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
 
-## 引用
+## 📜 引用
 
-研究で`agentica`を使用した場合は、以下の形式で引用してください：
+研究でAgenticaを使用する場合は、以下の形式で引用してください：
 
-APA:
-
-```
-Xu, M. agentica: A Human-Centric Framework for Large Language Model Agent Workflows (Version 0.0.2) [Computer software]. https://github.com/shibing624/agentica
-```
-
-BibTeX:
-
-```
-@misc{Xu_agentica,
-  title={agentica: A Human-Centric Framework for Large Language Model Agent Workflows},
-  author={Xu Ming},
-  year={2024},
-  howpublished={\url{https://github.com/shibing624/agentica}},
+```bibtex
+@misc{agentica,
+  author = {Ming Xu},
+  title = {Agentica: Effortlessly Build Intelligent, Reflective, and Collaborative Multimodal AI Agents},
+  year = {2024},
+  publisher = {GitHub},
+  journal = {GitHub Repository},
+  howpublished = {\url{https://github.com/shibing624/agentica}},
 }
 ```
 
-## ライセンス
+## 📄 ライセンス
 
-ライセンスは [The Apache License 2.0](/LICENSE) であり、商用利用が無料です。製品説明に`agentica`のリンクとライセンスを追加してください。
-## 貢献
+Agenticaは[Apache License 2.0](LICENSE)の下でライセンスされています。
 
-プロジェクトのコードはまだ粗削りです。コードの改善がある場合は、このプロジェクトに戻して提出してください。提出前に以下の2点に注意してください：
+## ❤️ 貢献
 
-- `tests`に対応する単体テストを追加
-- `python -m pytest`を使用してすべての単体テストを実行し、すべてのテストが通過することを確認
+あらゆる種類の貢献を歓迎します！始めるには[貢献ガイドライン](CONTRIBUTING.md)をご覧ください。
 
-その後、PRを提出できます。
+## 🙏 謝辞
 
-## 謝辞 
-
-- [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)
-- [https://github.com/simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
-- [https://github.com/phidatahq/phidata](https://github.com/phidatahq/phidata)
-
-
-彼らの素晴らしい仕事に感謝します！
+私たちの仕事は、偉大なプロジェクトの肩の上に成り立っています。以下の素晴らしいプロジェクトのチームに感謝します：
+- [langchain-ai/langchain](https://github.com/langchain-ai/langchain)
+- [phidatahq/phidata](https://github.com/phidatahq/phidata)
+- [simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
