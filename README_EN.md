@@ -17,7 +17,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
-**Agentica is a lightweight and powerful Python framework for building, managing, and deploying autonomous AI agents.**
+**Agentica is a lightweight and powerful Python framework for building, managing, and deploying autonomous AI agent.**
 
 Whether you're creating a simple chatbot, a complex research assistant, or a collaborative team of specialized agents, Agentica provides the tools and abstractions to get you there faster. Our developer-first approach simplifies advanced features like RAG, multi-agent workflows, and long-term memory, making them accessible to everyone.
 
