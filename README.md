@@ -2,7 +2,7 @@
 
 <div align="center">
   <a href="https://github.com/shibing624/agentica">
-    <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/logo_new.svg" height="150" alt="Logo">
+    <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/logo.png" height="150" alt="Logo">
   </a>
 </div>
 
