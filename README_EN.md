@@ -8,7 +8,7 @@
 
 -----------------
 
-# Agentica: Build AI Agents
+# Agentica: Build AI Agent
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
