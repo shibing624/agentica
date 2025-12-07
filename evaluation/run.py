@@ -243,7 +243,8 @@ def evaluate_instance(
         # Run the agent
         response = agent.run(question)
         response_content = response.content if response else ""
-        logger.info(f"question: {question}, response: {response_content}")
+
+        logger.info(f"question: {question}\nresponse: {response_content}")
         
         # Collect messages and tool calls
         messages = []
@@ -258,7 +259,7 @@ def evaluate_instance(
                 tool_calls = json.loads(tool_calls_str)
             except json.JSONDecodeError:
                 tool_calls = [{"raw": tool_calls_str}]
-
+        logger.info(f"tool_calls: {tool_calls}")
         return {
             'question': question,
             'answer': ground_truth,
