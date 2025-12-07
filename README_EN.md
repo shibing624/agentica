@@ -8,7 +8,7 @@
 
 -----------------
 
-# Agentica: Build AI Agents
+# Agentica: Build AI Agent
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -17,7 +17,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#Contact)
 
-**Agentica is a lightweight and powerful Python framework for building, managing, and deploying autonomous AI agents.**
+**Agentica is a lightweight and powerful Python framework for building, managing, and deploying autonomous AI agent.**
 
 Whether you're creating a simple chatbot, a complex research assistant, or a collaborative team of specialized agents, Agentica provides the tools and abstractions to get you there faster. Our developer-first approach simplifies advanced features like RAG, multi-agent workflows, and long-term memory, making them accessible to everyone.
 
