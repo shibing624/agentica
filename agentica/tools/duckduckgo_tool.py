@@ -71,12 +71,6 @@ class DuckDuckGoTool(Tool):
             query(str): The query to search for.
             max_results (optional, default=5): The maximum number of results to return.
 
-        Example:
-            from agentica.tools.duckduckgo_tool import DuckDuckGoTool
-            m = DuckDuckGoTool()
-            search_results = m.duckduckgo_search("Python")
-            print(search_results)
-
         Returns:
             The result from DuckDuckGo, in JSON format. The result includes the title, URL, and snippet.
         """

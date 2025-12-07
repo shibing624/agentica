@@ -258,12 +258,6 @@ class RunNbCodeTool(Tool):
         Args:
             code: str, The code to execute.
 
-        Example:
-            from agentica.tools.run_nb_code_tool import RunNbCodeTool
-            m = RunNbCodeTool()
-            r = m.execute_nb_code("import math\nprint(math.sqrt(79192201))")
-            print(r)
-
         Returns:
             str, The result of the code execution.
         """

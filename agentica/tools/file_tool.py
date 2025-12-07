@@ -42,11 +42,6 @@ class FileTool(Tool):
             overwrite (bool): Overwrite the file if it already exists.
             save_dir (str): The directory to save the file to, defaults to the base directory.
 
-        Example:
-            from agentica.tools.file_tool import FileTool
-            m = FileTool()
-            print(m.save_file(contents="Hello, world!", file_name="hello.txt"))
-
         Returns:
             str: The file name if successful, otherwise returns an error message.
         """
@@ -73,11 +68,6 @@ class FileTool(Tool):
         Args:
             file_name (str): The name of the file to read.
 
-        Example:
-            from agentica.tools.file_tool import FileTool
-            m = FileTool()
-            print(m.read_file(file_name="hello.txt"))
-
         Returns:
             str: The contents of the file if successful, otherwise returns an error message.
         """
@@ -101,11 +91,6 @@ class FileTool(Tool):
         Args:
             dir_path (str): The directory to list files from, defaults to the base directory.
 
-        Example:
-            from agentica.tools.file_tool import FileTool
-            m = FileTool()
-            print(m.list_files('/home/user/data'))
-
         Returns:
             str: The contents of the file if successful, otherwise returns an error message.
         """
@@ -126,11 +111,6 @@ class FileTool(Tool):
 
         Args:
             dir_path (str): The directory to read files from, defaults to the base directory.
-
-        Example:
-            from agentica.tools.file_tool import FileTool
-            m = FileTool()
-            print(m.read_files(dir_path="/home/user/data"))
 
         Returns:
             str: The contents of all files if successful, otherwise returns an error message.

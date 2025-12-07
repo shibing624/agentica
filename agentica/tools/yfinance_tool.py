@@ -54,11 +54,6 @@ class YFinanceTool(Tool):
         Args:
             symbol (str): The stock symbol.
 
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_current_stock_price("AAPL"))
-
         Returns:
             str: The current stock price or error message.
         """
@@ -75,11 +70,6 @@ class YFinanceTool(Tool):
 
         Args:
             symbol (str): The stock symbol.
-
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_company_info("AAPL"))
 
         Returns:
             str: JSON containing company profile and overview.
@@ -134,11 +124,6 @@ class YFinanceTool(Tool):
             interval (str): The interval between data points. Defaults to "1d".
                         Valid intervals: 1d,5d,1wk,1mo,3mo
 
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_historical_stock_prices("AAPL"))
-
         Returns:
           str: The current stock price or error message.
         """
@@ -154,11 +139,6 @@ class YFinanceTool(Tool):
 
         Args:
             symbol (str): The stock symbol.
-
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_stock_fundamentals("AAPL"))
 
         Returns:
             str: A JSON string containing fundamental data or an error message.
@@ -203,11 +183,6 @@ class YFinanceTool(Tool):
         Args:
             symbol (str): The stock symbol.
 
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_income_statement("AAPL"))
-
         Returns:
             dict: JSON containing income statements or an empty dictionary.
         """
@@ -224,11 +199,6 @@ class YFinanceTool(Tool):
         Args:
             symbol (str): The stock symbol.
 
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_key_financial_ratios("AAPL"))
-
         Returns:
             dict: JSON containing key financial ratios.
         """
@@ -244,11 +214,6 @@ class YFinanceTool(Tool):
 
         Args:
             symbol (str): The stock symbol.
-
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_analyst_recommendations("AAPL"))
 
         Returns:
             str: JSON containing analyst recommendations.
@@ -267,11 +232,6 @@ class YFinanceTool(Tool):
             symbol (str): The stock symbol.
             num_stories (int): The number of news stories to return. Defaults to 3.
 
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_company_news("AAPL"))
-
         Returns:
             str: JSON containing company news and press releases.
         """
@@ -288,11 +248,6 @@ class YFinanceTool(Tool):
             symbol (str): The stock symbol.
             period (str): The time period for which to retrieve technical indicators.
                 Valid periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max. Defaults to 3mo.
-
-        Example:
-            from agentica.tools.yfinance_tool import YFinanceTool
-            m = YFinanceTool()
-            print(m.get_technical_indicators("AAPL"))
 
         Returns:
             str: JSON containing technical indicators.

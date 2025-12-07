@@ -47,12 +47,6 @@ class CalculatorTool(Tool):
 
         Returns:
             str: JSON string of the result.
-
-        Example:
-            from agentica.tools.calculator_tool import CalculatorTool
-            m = CalculatorTool()
-            r = m.add(1, 2)
-            print(r)
         """
         result = a + b
         logger.info(f"Adding {a} and {b} to get {result}")

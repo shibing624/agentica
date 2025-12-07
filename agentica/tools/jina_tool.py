@@ -104,13 +104,6 @@ class JinaTool(Tool):
             url: str, The URL to read.
             limit_len: int, url page content limit char length, default: 8000
 
-        Example:
-            from agentica.tools.jina_tool import JinaTool
-            m = JinaTool(jina_reader=True, jina_search=True)
-            url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
-            r = m.jina_url_reader(url)
-            print(url, '\n\n', r)
-
         Returns:
             str, The result of the crawling html text content, Markdown format.
         """
@@ -139,13 +132,6 @@ class JinaTool(Tool):
 
         Args:
             query (str): The query to search for.
-
-        Example:
-            from agentica.tools.jina_tool import JinaTool
-            m = JinaTool(jina_reader=True, jina_search=True)
-            query = "苹果的最新产品是啥？"
-            r = m.jina_search(query)
-            print(query, '\n\n', r)
 
         Returns:
             str: The results of the search.

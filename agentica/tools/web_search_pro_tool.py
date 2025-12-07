@@ -34,13 +34,6 @@ class WebSearchProTool(Tool):
         Args:
             query (str): The query to search for.
 
-        Example:
-            from agentica.tools.web_search_pro_tool import WebSearchProTool
-            m = WebSearchProTool()
-            query = "苹果的最新产品是啥？"
-            r = m.search_web(query)
-            print(r)
-
         Returns:
             str: The search results in JSON format.
         """
@@ -78,12 +71,7 @@ class WebSearchProTool(Tool):
 
         Args:
             queries (Union[List[str], str]): The queries to search for.
-        Example:
-            from agentica.tools.web_search_pro_tool import WebSearchProTool
-            m = WebSearchProTool()
-            queries = ["苹果的最新产品是啥？", "微软的最新动态？"]
-            r = m.search_web(queries)
-            print(r)
+        
         Returns:
             str: The search results in JSON format.
         """
@@ -93,7 +81,7 @@ class WebSearchProTool(Tool):
         for query in queries:
             res = self.search_web_single_query(query)
             results[query] = res
-        return json.dumps(results, indent=2, ensure_ascii=False)
+        return json.dumps(results, ensure_ascii=False)
 
 
 if __name__ == '__main__':

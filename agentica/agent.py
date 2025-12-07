@@ -2255,7 +2255,14 @@ class Agent:
                     stream_intermediate_steps=stream_intermediate_steps,
                     **kwargs,
                 )
-                return next(resp)
+                # For multi-round mode, consume entire generator to get final response
+                if self.enable_multi_round:
+                    final_response = None
+                    for response in resp:
+                        final_response = response
+                    return final_response
+                else:
+                    return next(resp)
 
     async def _arun(
             self,
@@ -2899,7 +2906,14 @@ class Agent:
                     stream_intermediate_steps=stream_intermediate_steps,
                     **kwargs,
                 )
-                return await resp.__anext__()
+                # For multi-round mode, consume entire generator to get final response
+                if self.enable_multi_round:
+                    final_response = None
+                    async for response in resp:
+                        final_response = response
+                    return final_response
+                else:
+                    return await resp.__anext__()
 
     def rename(self, name: str) -> None:
         """Rename the Agent and save to storage"""

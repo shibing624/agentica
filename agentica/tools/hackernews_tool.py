@@ -30,12 +30,6 @@ class HackerNewsTool(Tool):
         Args:
             num_stories (int): Number of stories to return. Defaults to 10.
 
-        Example:
-            from agentica.tools.hackernews_tool import HackerNewsTool
-            m = HackerNewsTool()
-            top_stories = m.get_top_hackernews_stories(3)
-            print(top_stories)
-
         Returns:
             str: JSON string of top stories.
         """
@@ -59,12 +53,6 @@ class HackerNewsTool(Tool):
 
         Args:
             username (str): Username of the user to get details for.
-
-        Example:
-            from agentica.tools.hackernews_tool import HackerNewsTool
-            m = HackerNewsTool()
-            user_details = m.get_user_details('tomthe')
-            print(user_details)
 
         Returns:
             str: JSON string of the user details.

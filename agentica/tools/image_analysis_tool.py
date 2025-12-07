@@ -47,14 +47,6 @@ class ImageAnalysisTool(Tool):
             image_path_or_url (str): The path to the image or the URL of the image.
             prompt (str, optional): The prompt to use for the image analysis. Default is "详细描述图片内容".
 
-        Example:
-            ```python
-            from agentica.tools.analyze_image_tool import AnalyzeImageTool
-            tool = AnalyzeImageTool()
-            image_description = tool.analyze_image_content("../../examples/data/chinese.jpg")
-            print(image_description)
-            ```
-
         Returns:
             str: The description of the image content.
         """

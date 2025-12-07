@@ -90,12 +90,6 @@ class CodeTool(Tool):
         Args:
             file_path (str): Path to the Python file to analyze.
 
-        Example:
-            from agentica.tools.code_tool import CodeTool
-            analyzer = CodeTool()
-            result = analyzer.analyze_code("example.py")
-            print(result)
-
         Returns:
             str: JSON-formatted analysis of the code including functions, classes, imports, etc.
         """
@@ -227,12 +221,6 @@ class CodeTool(Tool):
             file_path (str): Path to the file to format.
             formatter (str): Formatter to use (black, autopep8, yapf, prettier). Defaults to black.
 
-        Example:
-            from agentica.tools.code_tool import CodeTool
-            formatter = CodeTool()
-            result = formatter.format_code("example.py", formatter="black")
-            print(result)
-
         Returns:
             str: Result of the formatting operation.
         """
@@ -289,12 +277,6 @@ class CodeTool(Tool):
             args (str): Command-line arguments to pass to the program.
             timeout (int): Maximum execution time in seconds.
 
-        Example:
-            from agentica.tools.code_tool import CodeTool
-            runner = CodeTool()
-            result = runner.run_code("example.py", args="--verbose")
-            print(result)
-
         Returns:
             str: Output from running the code.
         """
@@ -347,12 +329,6 @@ class CodeTool(Tool):
         Args:
             file_path (str): Path to the file to lint.
             linter (str): Linter to use (auto, pylint, flake8, eslint). Defaults to auto.
-
-        Example:
-            from agentica.tools.code_tool import CodeTool
-            linter = CodeTool()
-            result = linter.lint_code("example.py")
-            print(result)
 
         Returns:
             str: Result of the linting operation with any issues found.
@@ -412,12 +388,6 @@ class CodeTool(Tool):
             file_path (str): Path to the file to analyze.
             symbol_type (str): Type of symbols to find (all, function, class, variable).
             pattern (str): Regular expression pattern to filter symbols by name.
-
-        Example:
-            from agentica.tools.code_tool import CodeTool
-            finder = CodeTool()
-            result = finder.find_symbols("example.py", symbol_type="function", pattern="test_")
-            print(result)
 
         Returns:
             str: JSON-formatted list of found symbols.
@@ -502,12 +472,6 @@ class CodeTool(Tool):
 
         Args:
             file_path (str): Path to the file to outline.
-
-        Example:
-            from agentica.tools.code_tool import CodeTool
-            outliner = CodeTool()
-            result = outliner.get_code_outline("example.py")
-            print(result)
 
         Returns:
             str: Markdown-formatted outline of the code structure.

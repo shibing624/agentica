@@ -63,12 +63,6 @@ class EditTool(Tool):
             target_file (str): The path of the file to edit.
             code_edit (str): The new content for the file or a patch in the format '*** Begin Patch\n...'
 
-        Example:
-            from agentica.tools.edit_tool import EditTool
-            editor = EditTool()
-            result = editor.edit_file("example.py", "print('Hello, World!')")
-            print(result)
-
         Returns:
             str: A message describing the result of the operation.
         """
@@ -102,13 +96,6 @@ class EditTool(Tool):
         Args:
             target_file (str): The path of the file to patch.
             patch_content (str): The patch content in unified diff format.
-
-        Example:
-            from agentica.tools.edit_tool import EditTool
-            editor = EditTool()
-            patch = "*** Begin Patch ***\\n@@ -1,1 +1,2 @@\\n print('Hello')\\n+print('World')\\n"
-            result = editor.apply_patch("example.py", patch)
-            print(result)
 
         Returns:
             str: A message describing the result of the operation.
@@ -211,12 +198,6 @@ class EditTool(Tool):
             file2 (str): The path to the second file.
             context_lines (int): Number of context lines to show around differences.
 
-        Example:
-            from agentica.tools.edit_tool import EditTool
-            editor = EditTool()
-            result = editor.compare_files("file1.py", "file2.py")
-            print(result)
-
         Returns:
             str: A unified diff of the two files.
         """
@@ -258,12 +239,6 @@ class EditTool(Tool):
             search_pattern (str): The text or pattern to search for.
             replacement (str): The text to replace with.
             use_regex (bool): Whether to treat search_pattern as a regular expression.
-
-        Example:
-            from agentica.tools.edit_tool import EditTool
-            editor = EditTool()
-            result = editor.search_replace("example.py", "Hello", "Hi")
-            print(result)
 
         Returns:
             str: A message describing the result of the operation.

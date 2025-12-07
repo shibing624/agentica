@@ -80,12 +80,6 @@ class CogVideoTool(Tool):
             duration (int, optional): The duration of the video in seconds. Defaults to 5.
             fps (int, optional): The frame rate of the video. Defaults to 30.
 
-        Example:
-            from agentica.tools.cogvideo_tool import CogVideoTool
-            tool = CogVideoTool()
-            image_path = tool.create_video("A painting of a beautiful sunset over the ocean.")
-            print(image_path)
-
         Returns:
             str: The json result for the video generation.
         """

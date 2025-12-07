@@ -73,14 +73,7 @@ class UrlCrawlerTool(Tool):
 
         Args:
             url (str): The URL of the website to read
-
-        Example:
-            from agentica.tools.url_crawler_tool import UrlCrawlerTool
-            m = UrlCrawlerTool()
-            url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
-            r = m.url_crawl(url)
-            print(url, '\n\n', r)
-
+            
         Returns:
             str: The content of the website as a json string.
         """

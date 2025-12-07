@@ -37,11 +37,6 @@ class DblpTool(Tool):
                 The index of the first search result to return.
             num_completion (`int`, defaults to `10`):
                 The number of completions to generate.
-        Example:
-            from agentica.tools.dblp_tool import DblpTool
-            m = DblpTool()
-            search_results = m.search_dblp_and_return_articles(question="Extreme Learning Machine")
-            print(search_results)
 
         Returns:
             str, a JSON of the articles with title, authors, venue, pages, year, type, DOI, and URL.

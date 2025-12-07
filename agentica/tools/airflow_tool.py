@@ -34,14 +34,6 @@ class AirflowTool(Tool):
             `contents` (str): The contents of the DAG.
             `dag_file` (str): The name of the file to save to.
 
-        Example:
-            ```python
-            from agentica.tools.airflow_tool import AirflowTool
-            m = AirflowTool()
-            result = m.save_dag_file(contents="DAG code here", dag_file="example_dag.py")
-            print(result)
-            ```
-
         Returns:
             str: The file path if successful, otherwise returns an error message.
         """
@@ -63,14 +55,6 @@ class AirflowTool(Tool):
 
         Args:
             `dag_file` (str): The name of the file to read.
-
-        Example:
-            ```python
-            from agentica.tools.airflow_tool import AirflowTool
-            m = AirflowTool()
-            contents = m.read_dag_file(dag_file="example_dag.py")
-            print(contents)
-            ```
 
         Returns:
             str: The contents of the file if successful, otherwise returns an error message.

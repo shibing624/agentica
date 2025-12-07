@@ -259,7 +259,7 @@ class BaiduSearchTool(Tool):
                     "rank": str(idx),
                 }
             )
-        logger.info(f"Searching Baidu for: {query}, result: {res}")
+        logger.debug(f"Searching Baidu for: {query}, result: {res}")
         return json.dumps(res, indent=2, ensure_ascii=False)
 
     def baidu_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
@@ -280,7 +280,7 @@ class BaiduSearchTool(Tool):
         for query in queries:
             result = self.baidu_search_single_query(query, max_results=max_results)
             all_results[query] = json.loads(result)
-        return json.dumps(all_results, indent=2, ensure_ascii=False)
+        return json.dumps(all_results, ensure_ascii=False)
 
 
 if __name__ == '__main__':

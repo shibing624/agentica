@@ -122,12 +122,6 @@ class WorkspaceTool(Tool):
             include_hidden (bool): Whether to include hidden files (starting with '.').
             show_details (bool): Whether to show detailed file information.
 
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.list_files(directory="src", pattern="*.py", show_details=True)
-            print(result)
-
         Returns:
             str: JSON-formatted list of files and directories.
         """
@@ -195,12 +189,6 @@ class WorkspaceTool(Tool):
             search_content (bool): Whether to search inside file contents.
             content_pattern (str): Pattern to search for in file contents.
             max_results (int): Maximum number of results to return.
-
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.find_files(pattern="*.py", search_content=True, content_pattern="import")
-            print(result)
 
         Returns:
             str: JSON-formatted search results.
@@ -296,12 +284,6 @@ class WorkspaceTool(Tool):
         Args:
             directory (str): Path of the directory to create.
 
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.create_directory("new_project/src")
-            print(result)
-
         Returns:
             str: Success or error message.
         """
@@ -328,12 +310,6 @@ class WorkspaceTool(Tool):
             source (str): Path of the file or directory to move.
             destination (str): Destination path.
             overwrite (bool): Whether to overwrite if destination exists.
-
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.move_file("old_name.py", "new_name.py")
-            print(result)
 
         Returns:
             str: Success or error message.
@@ -379,12 +355,6 @@ class WorkspaceTool(Tool):
             destination (str): Destination path.
             overwrite (bool): Whether to overwrite if destination exists.
 
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.copy_file("module.py", "backup/module.py")
-            print(result)
-
         Returns:
             str: Success or error message.
         """
@@ -428,12 +398,6 @@ class WorkspaceTool(Tool):
             path (str): Path of the file or directory to delete.
             recursive (bool): Whether to recursively delete directories.
 
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.delete_file("old_file.py")
-            print(result)
-
         Returns:
             str: Success or error message.
         """
@@ -464,12 +428,6 @@ class WorkspaceTool(Tool):
 
         Args:
             directory (str): Directory to analyze. Default is workspace root.
-
-        Example:
-            from agentica.tools.workspace_tool import WorkspaceTool
-            ws = WorkspaceTool()
-            result = ws.get_workspace_info()
-            print(result)
 
         Returns:
             str: JSON-formatted workspace information.

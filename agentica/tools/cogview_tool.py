@@ -54,12 +54,6 @@ class CogViewTool(Tool):
                 可选范围：[1024x1024,768x1344,864x1152,1344x768,1152x864,1440x720,720x1440]，默认是1024x1024。
             model (str, optional): The model use for image generation. Defaults 'cogview-3-flash'.
 
-        Example:
-            from agentica.tools.cogview_tool import CogViewTool
-            tool = CogViewTool()
-            image_path = tool.create_cogview_image("A painting of a beautiful sunset over the ocean.")
-            print(image_path)
-
         Returns:
             str: The path to the image.
         """

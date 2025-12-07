@@ -27,12 +27,6 @@ class ShellTool(Tool):
             args (List[str]): The command to run as a list of strings.
             tail (int): The number of lines to return from the output.
 
-        Example:
-            from agentica.tools.shell_tool import ShellTool
-            m = ShellTool()
-            result = m.run_shell_command(["ls", "-l", "/tmp"])
-            print(result)
-
         Returns:
             str: The output of the command.
         """

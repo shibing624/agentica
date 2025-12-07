@@ -31,12 +31,6 @@ class OcrTool(Tool):
         Args:
             image_path (str): Path to the image file.
 
-        Example:
-            from agentica.tools.ocr_tool import OcrTool
-            ocr_tool = OcrTool()
-            text = ocr_tool.read_text('../../examples/data/chinese.jpg')
-            print('Text:', text)
-
         Returns:
             str: The recognized text.
         """

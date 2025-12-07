@@ -28,14 +28,6 @@ class TextAnalysisTool(Tool):
         Args:
             prompt (str): The prompt to analyze, send to LLM.
 
-        Example:
-            ```python
-            from agentica.tools.text_analysis_tool import TextAnalysisTool
-            tool = TextAnalysisTool()
-            result = tool.text_analysis_use_llm("分析下面内容的情感：这面条好难吃啊。")
-            print(result)
-            ```
-
         Returns:
             str: The result of the analysis.
         """

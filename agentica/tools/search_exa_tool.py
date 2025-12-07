@@ -64,13 +64,6 @@ class SearchExaTool(Tool):
             query (str): The query to search for.
             num_results (int): Number of results to return. Defaults to 5.
 
-        Example:
-            from agentica.tools.search_exa_tool import SearchExaTool
-            m = SearchExaTool()
-            query = "苹果的最新产品是啥？"
-            r = m.search_exa(query)
-            print(r)
-
         Returns:
             str: The search results in JSON format.
         """
@@ -138,7 +131,7 @@ class SearchExaTool(Tool):
         for query in queries:
             result = self.search_exa_single_query(query, num_results=num_results)
             all_results[query] = result
-        return json.dumps(all_results, indent=2, ensure_ascii=False)
+        return json.dumps(all_results, ensure_ascii=False)
 
 
 if __name__ == '__main__':

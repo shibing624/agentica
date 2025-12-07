@@ -49,12 +49,6 @@ class DalleTool(Tool):
             size (str, optional): The size of the image. Defaults to "1024x1024". only 1024x1024 is supported.
             model (str, optional): The model use for image generation, can be dall-e-2 or dall-e-3. Defaults 'dall-e-3'.
 
-        Example:
-            from agentica.tools.dalle_tool import DalleTool
-            tool = DalleTool()
-            image_path = tool.create_dalle_image("A painting of a beautiful sunset over the ocean.")
-            print(image_path)
-
         Returns:
             str: The path to the image.
         """

@@ -353,18 +353,6 @@ def create_memori_search_tool(memori_toolkit: MemoriTool):
 
     Returns:
         Callable: A memory search function that can be used as an agent tool
-
-    Example:
-        ```python
-        memori_tools = MemoriTool(database_connect="sqlite:///memory.db")
-        search_tool = create_memori_search_tool(memori_tools)
-
-        agent = Agent(
-            model=OpenAIChat(),
-            tools=[search_tool],
-            description="Agent with memory search capability"
-        )
-        ```
     """
 
     def search_memory(query: str) -> str:

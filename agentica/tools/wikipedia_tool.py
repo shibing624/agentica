@@ -22,12 +22,6 @@ class WikipediaTool(Tool):
         Args:
             query (str): The query to search for.
 
-        Example:
-            from agentica.tools.wikipedia_tool import WikipediaTool
-            m = WikipediaTool()
-            result = m.search_wikipedia("beijing")
-            print(result)
-
         Returns:
             str: Relevant documents from Wikipedia.
         """
@@ -46,11 +40,6 @@ class WikipediaTool(Tool):
 
         Args:
             queries (list | str): The queries to search for.
-        Example:
-            from agentica.tools.wikipedia_tool import WikipediaTool
-            m = WikipediaTool()
-            r = m.search_wikipedia(["beijing", "shanghai"])
-            print(r)
         Returns:
             str: Relevant documents from Wikipedia for all queries.
         """

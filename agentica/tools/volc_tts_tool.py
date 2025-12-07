@@ -84,17 +84,6 @@ class VolcTtsTool(Tool):
 
         Returns:
             Dictionary containing success status, response data, and base64-encoded audio
-
-        Example:
-            from agentica.tools.volc_tts_tool import VolcTtsTool
-            
-            tts_tool = VolcTtsTool()
-            result = tts_tool.text_to_speech("Hello, how are you today?")
-            if result["success"]:
-                # Base64 encoded audio is in result["audio_data"]
-                print("TTS successful")
-            else:
-                print(f"TTS failed: {result['error']}")
         """
         if not self.appid or not self.access_token:
             return {
@@ -183,20 +172,6 @@ class VolcTtsTool(Tool):
 
         Returns:
             Dictionary containing success status and file path
-
-        Example:
-            from agentica.tools.volc_tts_tool import VolcTtsTool
-            
-            tts_tool = VolcTtsTool()
-            result = tts_tool.text_to_speech_file(
-                "Hello, this is a test.", 
-                "output.mp3"
-            )
-            
-            if result["success"]:
-                print(f"Audio saved to {result['file_path']}")
-            else:
-                print(f"Failed: {result['error']}")
         """
         result = self.text_to_speech(
             text=text,
@@ -246,14 +221,6 @@ class VolcTtsTool(Tool):
 
         Returns:
             List of dictionaries containing voice types and their descriptions
-
-        Example:
-            from agentica.tools.volc_tts_tool import VolcTtsTool
-            
-            tts_tool = VolcTtsTool()
-            voices = tts_tool.list_voice_types()
-            for voice in voices:
-                print(f"{voice['id']}: {voice['description']}")
         """
         # This is a static list of popular voice types
         # In a real implementation, this might come from an API call
@@ -304,7 +271,6 @@ class VolcTtsTool(Tool):
 
 
 if __name__ == '__main__':
-    # Example usage
     import os
 
     # Get credentials from environment variables

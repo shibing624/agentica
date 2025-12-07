@@ -113,12 +113,6 @@ class SearchSerperTool(Tool):
             max_results: The maximum number of results to return. Defaults to 8.
             as_string: Whether to return the results as a string or a list of dictionaries. Defaults to True.
 
-        Example:
-            from agentica.tools.search_serper_tool import SearchSerperTool
-            m = SearchSerperTool()
-            r = m.search_google("北京的新闻top3")
-            print(r)
-
         Returns:
             The search results as a string or a list of dictionaries.
         """
@@ -126,7 +120,7 @@ class SearchSerperTool(Tool):
         logger.debug(f"Search google for query: {query}, result: {res}")
         return res
 
-    def search_google(self, queries: Union[List[str], str], max_results: int = 8, as_string: bool = True) -> str:
+    def search_google(self, queries: Union[List[str], str], max_results: int = 8) -> str:
         """
         Search Google for information. Use this tool first to find relevant web pages before visiting them.
         This function searches google for one or more queries and returns search results with titles, snippets and URLs.
@@ -134,18 +128,17 @@ class SearchSerperTool(Tool):
         Args:
             queries: The search query string, or a list of search queries.
             max_results: The maximum number of results to return for each query. Defaults to 8.
-            as_string: Whether to return the results as a string or a list of dictionaries. Defaults to True.
 
         Returns:
             Search results containing titles, snippets and URLs that can be used to visit pages for more details.
         """
         if isinstance(queries, str):
-            return self.search_google_single_query(queries, max_results=max_results, as_string=as_string)
+            return self.search_google_single_query(queries, max_results=max_results, as_string=True)
         all_results = {}
         for query in queries:
-            res = self.search_google_single_query(query, max_results=max_results, as_string=as_string)
+            res = self.search_google_single_query(query, max_results=max_results, as_string=True)
             all_results[query] = res
-        return json.dumps(all_results, indent=2, ensure_ascii=False) if as_string else all_results
+        return json.dumps(all_results, ensure_ascii=False)
 
 
 if __name__ == '__main__':

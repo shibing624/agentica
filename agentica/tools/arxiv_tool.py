@@ -40,13 +40,6 @@ class ArxivTool(Tool):
             query (str): The query to search arXiv for, english words. e.g., "quantum computing".
             num_articles (int, optional): The number of articles to return. Defaults to 10.
 
-        Example:
-            from agentica.tools.arxiv_tool import ArxivTool
-            m = ArxivTool(search_arxiv=True, read_arxiv_papers=True)
-            query = "quantum computing"
-            r = m.search_arxiv_and_return_articles(query, num_articles=5)
-            print(r)
-
         Returns:
             str: A JSON of the articles with title, id, authors, pdf_url and summary.
         """
@@ -89,15 +82,8 @@ class ArxivTool(Tool):
             pages_to_read (int, optional): The number of pages to read from the paper.
                     None means read all pages. Defaults to None.
 
-        Example:
-            from agentica.tools.arxiv_tool import ArxivTool
-            m = ArxivTool(search_arxiv=True, read_arxiv_papers=True)
-            id_list = ["2103.03404v1", "2103.03404v2"]
-            r = m.read_arxiv_papers(id_list, pages_to_read=5)
-            print(r)
-
         Returns:
-            str: JSON of the papers.
+            str: JSON string of the papers.
         """
 
         download_dir = self.download_dir

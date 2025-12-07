@@ -104,13 +104,6 @@ class SQLTool(Tool):
             query (str): The query to run.
             limit (int, optional): The number of rows to return. Defaults to 10. Use `None` to show all results.
 
-        Example:
-            from agentica.tools.sql_tool import SQLTool
-            m = SQLTool(db_url="sqlite:///agentica.db")
-            query = "SELECT * FROM table_name"
-            result = m.run_sql_query(query)
-            print(result)
-
         Returns:
             str: Result of the SQL query. The result may be empty if the query does not return any data.
         """

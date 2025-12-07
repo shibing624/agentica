@@ -92,15 +92,6 @@ class RunPythonCodeTool(Tool):
             code (str): The code to save and run, e.g., "a = 5\nb = 110\nc = a + b\nprint(c)", required.
             overwrite (bool): Whether to overwrite the file if it already exists, default is True.
 
-        Example:
-            from agentica.tools.run_python_code_tool import RunPythonCodeTool
-            m = RunPythonCodeTool()
-            result = m.save_to_file_and_run(
-                file_name="calc_add.py",
-                code="a = 5\nb = 110\nc = a + b\nprint(c)"
-            )
-            print(result)
-
         Returns:
             str: stdout output or success message.
         """
