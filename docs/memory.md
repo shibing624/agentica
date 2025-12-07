@@ -1,146 +1,213 @@
-我来分析 `ReActAgent` 的 `long_term_memory_mode` 以及 `long_term_memory` 的实现逻辑。首先让我查看相关代码。
+# Agentica 长期记忆功能
 
+## 概述
 
-让我读取关键的实现文件：
+Agentica 支持长期记忆功能，允许 Agent 在多轮对话中记住用户的个人信息、偏好等。
 
+## 支持的存储后端
 
-现在让我查看 embedding 模型的实现，了解默认使用什么 API：
-
-
-现在我已经收集了足够的信息，让我给你详细分析：
-
----
-
-## `long_term_memory_mode="both"` 详细分析
-
-### 1. `long_term_memory_mode` 的三种模式
-
-在 `ReActAgent` 中，`long_term_memory_mode` 有三个选项：
-
-| 模式 | `_static_control` | `_agent_control` | 含义 |
-|------|------------------|------------------|------|
-| `"static_control"` | ✅ | ❌ | 开发者控制：每次 reply 开始时自动检索，结束时自动记录 |
-| `"agent_control"` | ❌ | ✅ | Agent 控制：注册工具函数让 Agent 自主决定何时检索/记录 |
-| `"both"` (默认) | ✅ | ✅ | 两者兼有 |
-
-相关代码：
-```python:148:155:src/agentscope/agent/_react_agent.py
-self._static_control = long_term_memory and long_term_memory_mode in [
-    "static_control",
-    "both",
-]
-self._agent_control = long_term_memory and long_term_memory_mode in [
-    "agent_control",
-    "both",
-]
-```
-
-### 2. 两种控制模式的具体行为
-
-**Static Control（静态控制）**：
-- **检索**：在 `reply()` 开始时调用 `_retrieve_from_long_term_memory()` 自动检索相关信息，并添加到 memory 中
-- **记录**：在 `reply()` 结束时（第 381-388 行）自动将对话记录到长期记忆
-
-**Agent Control（Agent 控制）**：
-- 注册两个工具函数给 Agent 使用：
-  - `retrieve_from_memory(keywords, limit)` - 按关键词检索
-  - `record_to_memory(thinking, content)` - 记录内容
-
-```python:160:167:src/agentscope/agent/_react_agent.py
-if self._agent_control:
-    self.toolkit.register_tool_function(
-        long_term_memory.record_to_memory,
-    )
-    self.toolkit.register_tool_function(
-        long_term_memory.retrieve_from_memory,
-    )
-```
-
----
-
-## 3. Long-Term Memory 实现：基于 mem0
-
-是的，**直接调用 mem0 库**。核心实现在 `Mem0LongTermMemory` 类中：
-
-```python:253:253:src/agentscope/memory/_mem0_long_term_memory.py
-self.long_term_working_memory = mem0.AsyncMemory(mem0_config)
-```
-
-### 存储和检索流程
-
-| 操作 | 方法 | 底层调用 |
+| 类名 | 描述 | 检索方式 |
 |------|------|---------|
-| 记录 | `record()` / `record_to_memory()` | `mem0.AsyncMemory.add()` |
-| 检索 | `retrieve()` / `retrieve_from_memory()` | `mem0.AsyncMemory.search()` |
+| `CsvMemoryDb` | CSV 文件存储 | last_n, first_n |
+| `SqliteMemoryDb` | SQLite 数据库存储 | last_n, first_n |
+| `QdrantMemoryDb` | Qdrant 向量数据库 | semantic (语义搜索), keyword (关键词回退) |
 
-### 向量存储
+## 检索模式 (MemoryRetrieval)
 
-默认使用 **Qdrant** 本地存储：
-
-```python:246:252:src/agentscope/memory/_mem0_long_term_memory.py
-on_disk = kwargs.get("on_disk", True)
-mem0_config.vector_store = (
-    mem0.vector_stores.configs.VectorStoreConfig(
-        config={"on_disk": on_disk},
-    )
-)
-```
+| 模式 | 描述 |
+|------|------|
+| `last_n` | 返回最近 N 条记忆 |
+| `first_n` | 返回最早 N 条记忆 |
+| `semantic` | 语义搜索（需要 QdrantMemoryDb + embedder） |
 
 ---
 
-## 4. Embedding API 分析
+## QdrantMemoryDb 向量数据库
 
-**AgentScope 没有指定默认的 embedding 模型**，需要用户显式传入。
+### 特性
 
-在 `Mem0LongTermMemory.__init__()` 中：
-- 如果不传 `mem0_config`，则 `embedding_model` 是**必需参数**
-- AgentScope 通过 `AgentScopeEmbedding` 包装类将自己的 embedding 模型适配到 mem0
+- **语义搜索**：使用 embedding 模型进行向量相似度搜索
+- **关键词回退**：当 embedder 不可用时，自动降级到关键词搜索
+- **本地磁盘存储**：默认使用 `~/.agentica/qdrant_memory` 存储数据
+- **兼容新旧 API**：自动适配 qdrant-client 新版 `query_points` 和旧版 `search` API
 
-```python:220:225:src/agentscope/memory/_mem0_long_term_memory.py
-if model is None or embedding_model is None:
-    raise ValueError(
-        "model and embedding_model are required if mem0_config "
-        "is not provided",
-    )
+### 初始化参数
+
+```python
+from agentica import QdrantMemoryDb, OpenAIEmb
+
+db = QdrantMemoryDb(
+    collection="agent_memory",      # 集合名称
+    embedder=OpenAIEmb(),           # Embedding 模型（可选，None 则使用关键词搜索）
+    path="~/.agentica/qdrant_memory",  # 本地存储路径
+    on_disk=True,                   # 是否使用磁盘存储
+    url=None,                       # 远程 Qdrant 服务器 URL
+    port=6333,                      # Qdrant 服务器端口
+    api_key=None,                   # Qdrant Cloud API Key
+)
 ```
 
 ### 支持的 Embedding 模型
 
-AgentScope 提供以下 embedding 实现供用户选择：
-
 | 类名 | API 提供商 |
 |------|-----------|
-| `OpenAITextEmbedding` | OpenAI |
-| `DashScopeTextEmbedding` | 阿里云 DashScope |
-| `DashScopeMultiModalEmbedding` | 阿里云 DashScope (多模态) |
-| `GeminiTextEmbedding` | Google Gemini |
-| `OllamaTextEmbedding` | Ollama (本地) |
+| `OpenAIEmb` | OpenAI |
+| `ZhipuAIEmb` | 智谱 AI |
 
-### 使用示例
+---
+
+## 使用示例
+
+### 1. QdrantMemoryDb + 语义搜索
 
 ```python
-from agentscope.embedding import OpenAITextEmbedding
-from agentscope.memory import Mem0LongTermMemory
-
-embedding_model = OpenAITextEmbedding(
-    model_name="text-embedding-3-small",
-    dimensions=1536,
+from agentica import (
+    Agent, OpenAIChat, AgentMemory, QdrantMemoryDb, OpenAIEmb,
+    MemoryClassifier, MemoryRetrieval
 )
 
-long_term_memory = Mem0LongTermMemory(
-    agent_name="my_agent",
-    model=chat_model,
-    embedding_model=embedding_model,  # 必须显式指定
+# 创建带 embedder 的 QdrantMemoryDb
+db = QdrantMemoryDb(
+    collection="my_memory",
+    embedder=OpenAIEmb(),  # 使用 OpenAI embedding
+    on_disk=True,
+)
+
+# 创建 AgentMemory
+memory = AgentMemory(
+    db=db,
+    user_id="user_123",
+    num_memories=5,
+    retrieval=MemoryRetrieval.semantic,  # 语义检索
+    create_user_memories=True,
+    update_user_memories_after_run=True,
+    classifier=MemoryClassifier(model=OpenAIChat(id='gpt-4o-mini')),
+    semantic_score_threshold=0.5,  # 相似度阈值
+)
+
+# 创建 Agent
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o-mini"),
+    memory=memory,
+)
+
+# 对话
+agent.print_response("我叫张三，是一名软件工程师")
+
+# 搜索记忆
+relevant = memory.search_memories("张三的职业是什么？")
+```
+
+### 2. QdrantMemoryDb + 关键词搜索（无 embedder）
+
+```python
+from agentica import QdrantMemoryDb, AgentMemory, MemoryRetrieval
+
+# 不传 embedder，自动使用关键词搜索
+db = QdrantMemoryDb(
+    collection="keyword_memory",
+    embedder=None,  # 无 embedder
+    on_disk=True,
+    path="~/.agentica/qdrant_keyword",  # 使用不同路径避免冲突
+)
+
+memory = AgentMemory(
+    db=db,
+    user_id="user_456",
+    num_memories=10,
+    retrieval=MemoryRetrieval.semantic,  # 会自动回退到关键词搜索
+    create_user_memories=True,
+)
+
+# 搜索（使用关键词匹配）
+results = memory.search_memories("Python 编程")
+```
+
+### 3. CsvMemoryDb（传统方式，兼容旧代码）
+
+```python
+from agentica import CsvMemoryDb, AgentMemory, MemoryRetrieval, MemoryClassifier, OpenAIChat
+
+# 使用 CsvMemoryDb（与之前完全兼容）
+db = CsvMemoryDb(csv_file_path="outputs/memory.csv")
+
+memory = AgentMemory(
+    db=db,
+    user_id="user_789",
+    num_memories=10,
+    retrieval=MemoryRetrieval.last_n,  # 返回最近 N 条
+    create_user_memories=True,
+    update_user_memories_after_run=True,
+    classifier=MemoryClassifier(model=OpenAIChat(id='gpt-4o-mini')),
 )
 ```
 
 ---
 
-## 总结
+## API 参考
 
-| 问题 | 答案 |
-|------|------|
-| `both` 模式含义 | 同时启用静态控制（自动检索/记录）和 Agent 控制（工具函数） |
-| 是否使用 mem0 | ✅ 是，直接使用 `mem0.AsyncMemory` |
-| 默认向量存储 | Qdrant（本地磁盘存储，`on_disk=True`） |
-| 默认 embedding API | **无默认**，必须用户显式传入 `embedding_model` 参数 |
+### AgentMemory 参数
+
+| 参数 | 类型 | 默认值 | 描述 |
+|------|------|--------|------|
+| `db` | `MemoryDb` | `QdrantMemoryDb()` | 存储后端 |
+| `user_id` | `str` | `None` | 用户 ID |
+| `num_memories` | `int` | `None` | 检索记忆数量 |
+| `retrieval` | `MemoryRetrieval` | `last_n` | 检索模式 |
+| `create_user_memories` | `bool` | `False` | 是否创建用户记忆 |
+| `update_user_memories_after_run` | `bool` | `True` | 运行后是否更新记忆 |
+| `classifier` | `MemoryClassifier` | `None` | 记忆分类器 |
+| `semantic_score_threshold` | `float` | `0.5` | 语义搜索相似度阈值 |
+
+### AgentMemory 方法
+
+```python
+# 搜索记忆（语义或关键词）
+memories = memory.search_memories(query="搜索内容", limit=5)
+
+# 获取格式化的相关记忆字符串
+formatted = memory.get_relevant_memories_str(query="搜索内容", limit=5)
+
+# 加载用户记忆
+memory.load_user_memories(query="可选的搜索查询")
+```
+
+### QdrantMemoryDb 方法
+
+```python
+# 搜索记忆
+results = db.search_memories(
+    query="搜索内容",
+    user_id="user_id",
+    limit=5,
+    score_threshold=0.5
+)
+
+# 获取格式化的相关记忆
+formatted = db.get_relevant_memories(
+    query="搜索内容",
+    user_id="user_id",
+    limit=5
+)
+
+# 插入/更新记忆
+db.upsert_memory(memory_row)
+
+# 读取记忆
+memories = db.read_memories(user_id="user_id", limit=10, sort="desc")
+
+# 删除记忆
+db.delete_memory(id="memory_id")
+
+# 清空记忆
+db.clear()
+```
+
+---
+
+## 注意事项
+
+1. **并发访问**：同一路径的 Qdrant 本地存储不支持并发访问，多个实例需使用不同路径
+2. **Embedding 模型**：语义搜索需要 embedding 模型，若不可用会自动降级到关键词搜索
+3. **依赖安装**：使用 QdrantMemoryDb 需安装 `pip install qdrant-client`
+4. **路径展开**：支持 `~` 路径，会自动展开为用户目录
