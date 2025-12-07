@@ -3,6 +3,7 @@
 # Created by Charles on 2018/10/10
 # Function:
 
+import re
 import requests
 from bs4 import BeautifulSoup
 import json
@@ -10,6 +11,23 @@ from typing import Optional, List, Dict, Any, Union
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
+
+
+def clean_text(text: str) -> str:
+    """Clean text by removing control characters.
+    
+    Args:
+        text: The raw text
+        
+    Returns:
+        Cleaned text without control characters
+    """
+    if not text:
+        return ""
+    # Remove control characters (ASCII 0-31 except tab, newline, carriage return)
+    # Also remove Unicode control characters like \u000b (vertical tab)
+    cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    return cleaned
 
 ABSTRACT_MAX_LENGTH = 300  # abstract max length
 
@@ -253,14 +271,14 @@ class BaiduSearchTool(Tool):
         for idx, item in enumerate(results, 1):
             res.append(
                 {
-                    "title": item.get("title", ""),
+                    "title": clean_text(item.get("title", "")),
                     "url": item.get("url", ""),
-                    "abstract": item.get("abstract", ""),
+                    "abstract": clean_text(item.get("abstract", "")),
                     "rank": str(idx),
                 }
             )
         logger.debug(f"Searching Baidu for: {query}, result: {res}")
-        return json.dumps(res, indent=2, ensure_ascii=False)
+        return json.dumps(res, ensure_ascii=False)
 
     def baidu_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
         """Execute Baidu search for multiple queries and return results

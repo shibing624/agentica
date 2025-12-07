@@ -17,6 +17,23 @@ from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 
+def clean_text(text: str) -> str:
+    """Clean text by removing control characters.
+    
+    Args:
+        text: The raw text
+        
+    Returns:
+        Cleaned text without control characters
+    """
+    if not text:
+        return ""
+    # Remove control characters (ASCII 0-31 except tab, newline, carriage return)
+    # Also remove Unicode control characters like \u000b (vertical tab)
+    cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    return cleaned
+
+
 class UrlCrawlerTool(Tool):
     def __init__(
             self,
@@ -105,6 +122,8 @@ class UrlCrawlerTool(Tool):
             text = soup.get_text(separator='\n')
             lines = (line.strip() for line in text.splitlines())
             content = '\n'.join(line for line in lines if line)
+            # Clean control characters from content
+            content = clean_text(content)
             with open(save_path, "w", encoding="utf-8") as f:
                 f.write(content)
             logger.debug(f"Successfully crawled: {url}, saved to: {save_path}, content length: {len(content)}")
