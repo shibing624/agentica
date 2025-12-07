@@ -31,6 +31,11 @@ class RunEvent(str, Enum):
     updating_memory = "UpdatingMemory"
     workflow_started = "WorkflowStarted"
     workflow_completed = "WorkflowCompleted"
+    # Multi-round events
+    multi_round_turn = "MultiRoundTurn"
+    multi_round_tool_call = "MultiRoundToolCall"
+    multi_round_tool_result = "MultiRoundToolResult"
+    multi_round_completed = "MultiRoundCompleted"
 
 
 class RunResponseExtraData(BaseModel):

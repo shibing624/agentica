@@ -160,3 +160,19 @@ cython_debug/
 .idea/
 
 examples/outputs
+*/.DS_Store
+.DS_Store
+examples/tmp/
+evaluation/outputs/
+.vscode/
+outputs/
+
+examples/01_llm_demo_test.py
+examples/43_minimax_mcp_demo1.py
+examples/46_custom_llm_demo_v2.py
+examples/46_custom_llm_demov1.py
+examples/46_custom_llm_seed-1.6-pro-thinking-auto-demo.py
+examples/character_demo.py
+examples/feishu_mcp_stdio_demo.py
+examples/mcp_config-test.json
+examples/mcp_config-test1.json

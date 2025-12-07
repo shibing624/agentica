@@ -157,7 +157,7 @@ class JinaTool(Tool):
             response.raise_for_status()
             content = response.text
             result = self._trim_content(content)
-            logger.info(f"Search query: {query}, results top300 chars:\n{result[:300]}")
+            logger.debug(f"Search query: {query}, results top300 chars:\n{result[:300]}")
         except Exception as e:
             msg = f"Error performing search: {str(e)}"
             logger.error(msg)
@@ -184,18 +184,15 @@ class JinaTool(Tool):
 
     def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:
         """
-        Reads one or more URLs and extracts useful information based on the user's goal using Jina Reader and an LLM.
-        1. For each URL, it retrieves the webpage content using the Jina Reader API.
-        2. It then processes the content with an LLM to extract information relevant to the
-            user's specified goal, including evidence and a summary.
-        3. Finally, it combines the extracted information from all URLs into a single response.
+        Visit webpage URLs and extract useful information. Use this tool after searching to get detailed content from web pages.
+        This function reads one or more URLs and extracts information relevant to your goal.
 
         Args:
-            urls: List of URLs of the webpages to read.
-            goal: The user's goal or question for extracting information from the pages.
+            urls: URL string or list of URLs to visit (from search results).
+            goal: What information you want to extract from the pages (e.g., the original question or specific facts needed).
 
         Returns:
-            str: Extracted information from all URLs or an error message.
+            Extracted evidence and summary from the webpages relevant to your goal.
         """
         self.update_llm()
         all_useful_information = []

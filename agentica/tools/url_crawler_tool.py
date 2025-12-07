@@ -7,12 +7,12 @@ import hashlib
 import os
 import re
 import json
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
-import markdownify
 import requests
 from bs4 import BeautifulSoup
-
+import sys
+sys.path.append("../..")
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
@@ -40,8 +40,10 @@ class UrlCrawlerTool(Tool):
         return file_name
 
     @staticmethod
-    def parse_html_to_markdown(html: str, url: str = None) -> str:
+    def parse_html_to_markdown(html: str) -> str:
         """Parse HTML to markdown."""
+        import markdownify
+
         soup = BeautifulSoup(html, "html.parser")
         title = soup.title.string if soup.title else "No Title"
         # Remove javascript, style blocks, and hyperlinks
@@ -51,21 +53,7 @@ class UrlCrawlerTool(Tool):
         for element in soup.find_all(["nav", "footer", "aside", "form", "figure"]):
             element.extract()
 
-        # Convert to markdown -- Wikipedia gets special attention to get a clean version of the page
-        if isinstance(url, str) and "wikipedia.org" in url:
-            body_elm = soup.find("div", {"id": "mw-content-text"})
-            title_elm = soup.find("span", {"class": "mw-page-title-main"})
-
-            if body_elm:
-                # What's the title
-                main_title = title
-                if title_elm and len(title_elm) > 0:
-                    main_title = title_elm.string
-                webpage_text = "# " + main_title + "\n\n" + markdownify.MarkdownConverter().convert_soup(body_elm)
-            else:
-                webpage_text = markdownify.MarkdownConverter().convert_soup(soup)
-        else:
-            webpage_text = markdownify.MarkdownConverter().convert_soup(soup)
+        webpage_text = markdownify.MarkdownConverter().convert_soup(soup)
 
         # Convert newlines
         webpage_text = re.sub(r"\r\n", "\n", webpage_text)
@@ -81,10 +69,10 @@ class UrlCrawlerTool(Tool):
         return content
 
     def url_crawl(self, url: str) -> str:
-        """Crawl a website and return the content of the website as a json string.
+        """Crawl a website url and return the content of the website as a json string.
 
         Args:
-            url (str): The URL of the website to read.
+            url (str): The URL of the website to read
 
         Example:
             from agentica.tools.url_crawler_tool import UrlCrawlerTool
@@ -101,27 +89,32 @@ class UrlCrawlerTool(Tool):
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         content = ""
         try:
-            logger.info(f"Crawling URL: {url}")
+            logger.debug(f"Crawling URL: {url}")
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36",
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
-            response = requests.get(url, stream=True, headers=headers, timeout=60, verify=False)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
+            response.encoding = response.apparent_encoding
 
-            content_type = response.headers.get("content-type", "")
-            if "text/html" in content_type:
-                # Get the content of the response
-                html = "".join(chunk for chunk in response.iter_content(chunk_size=8192, decode_unicode=True))
-                content = self.parse_html_to_markdown(html, url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            for script in soup(["script", "style", "noscript", "iframe", "svg"]):
+                script.extract()
 
-                with open(save_path, "w", encoding="utf-8") as f:
-                    f.write(content)
-            else:
-                with open(save_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                        content += chunk.decode("utf-8", errors="ignore")
-            logger.debug(f"Successfully crawled: {url}, saved to: {save_path}")
+            # Handle links: Convert <a> tags to Markdown format [Text](URL)
+            for a in soup.find_all('a', href=True):
+                text = a.get_text(strip=True)
+                if text:
+                    href = a['href']
+                    full_url = urljoin(url, href)
+                    a.replace_with(f" [{text}]({full_url}) ")
+
+            text = soup.get_text(separator='\n')
+            lines = (line.strip() for line in text.splitlines())
+            content = '\n'.join(line for line in lines if line)
+            with open(save_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            logger.debug(f"Successfully crawled: {url}, saved to: {save_path}, content length: {len(content)}")
         except Exception as e:
             logger.debug(f"Failed to crawl: {url}: {e}")
         crawler_result = {
@@ -135,6 +128,9 @@ class UrlCrawlerTool(Tool):
 
 if __name__ == '__main__':
     m = UrlCrawlerTool()
-    url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+    # url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
+    # r = m.url_crawl(url)
+    # print(url, '\n\n', r)
+    url = "https://baike.baidu.com/item/%E6%9D%8E%E7%91%9E"
     r = m.url_crawl(url)
     print(url, '\n\n', r)

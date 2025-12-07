@@ -64,6 +64,7 @@ from agentica.memorydb import (
     PgMemoryDb,
     MemoryRow
 )
+from agentica.qdrant_memorydb import QdrantMemoryDb
 from agentica.template import PromptTemplate
 # rag
 from agentica.run_response import (

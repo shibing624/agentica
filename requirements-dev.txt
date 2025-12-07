@@ -12,7 +12,8 @@ markdownify
 tqdm
 rich
 pyyaml
-mcp
+mcp>=1.9.4
+puremagic
 yfinance
 nbclient
 nbformat
@@ -20,3 +21,4 @@ ipython
 ipykernel~=6.27.0
 docling
 pytest
+qdrant-client

@@ -123,24 +123,21 @@ class SearchSerperTool(Tool):
             The search results as a string or a list of dictionaries.
         """
         res =  SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
-        logger.info(f"Search google for query: {query}, result: {res}")
+        logger.debug(f"Search google for query: {query}, result: {res}")
         return res
 
     def search_google(self, queries: Union[List[str], str], max_results: int = 8, as_string: bool = True) -> str:
         """
-        Use this function to search google for multiple queries.
+        Search Google for information. Use this tool first to find relevant web pages before visiting them.
+        This function searches google for one or more queries and returns search results with titles, snippets and URLs.
 
         Args:
-            queries: The search queries.
+            queries: The search query string, or a list of search queries.
             max_results: The maximum number of results to return for each query. Defaults to 8.
             as_string: Whether to return the results as a string or a list of dictionaries. Defaults to True.
-        Example:
-            from agentica.tools.search_serper_tool import SearchSerperTool
-            m = SearchSerperTool()
-            r = m.search_google(["北京的新闻top3", "上海的新闻top3"])
-            print(r)
+
         Returns:
-            The search results as a string or a list of dictionaries.
+            Search results containing titles, snippets and URLs that can be used to visit pages for more details.
         """
         if isinstance(queries, str):
             return self.search_google_single_query(queries, max_results=max_results, as_string=as_string)

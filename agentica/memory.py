@@ -18,6 +18,7 @@ from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.run_response import RunResponse
+from agentica.qdrant_memorydb import QdrantMemoryDb
 
 
 class AgentRun(BaseModel):
@@ -379,6 +380,7 @@ class MemoryRetrieval(str, Enum):
     last_n = "last_n"
     first_n = "first_n"
     only_user = "only_user"
+    semantic = "semantic"  # Semantic search (requires QdrantMemoryDb with embedder)
 
 
 class MemorySummarizer(BaseModel):
@@ -574,18 +576,24 @@ class AgentMemory(BaseModel):
     # Update memories for the user after each run, effect when create_user_memories is True
     update_user_memories_after_run: bool = True
 
-    # MemoryDb to store personalized memories
-    db: Optional[MemoryDb] = None
+    # MemoryDb to store personalized memories (supports CsvMemoryDb, SqliteMemoryDb, QdrantMemoryDb, etc.)
+    db: Optional[MemoryDb] = QdrantMemoryDb()
     # User ID for the personalized memories
     user_id: Optional[str] = None
+    # Retrieval mode: last_n, first_n, semantic (semantic requires QdrantMemoryDb)
     retrieval: MemoryRetrieval = MemoryRetrieval.last_n
     memories: Optional[List[Memory]] = None
+    # Number of memories to retrieve
     num_memories: Optional[int] = None
     classifier: Optional[MemoryClassifier] = None
     manager: Optional[MemoryManager] = None
 
     # True when memory is being updated, auto record for memory status
     updating_memory: bool = False
+
+    # Semantic search settings (only used when db is QdrantMemoryDb and retrieval is semantic)
+    # Minimum similarity score for semantic search (0-1)
+    semantic_score_threshold: float = 0.5
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -608,6 +616,92 @@ class AgentMemory(BaseModel):
         if self.memories:
             _memory_dict["memories"] = [memory.to_dict() for memory in self.memories]
         return _memory_dict
+
+    def _is_qdrant_db(self) -> bool:
+        """Check if db is QdrantMemoryDb."""
+        if self.db is None:
+            return False
+        return self.db.__class__.__name__ == "QdrantMemoryDb"
+
+    def search_memories(self, query: str, limit: Optional[int] = None) -> List[Memory]:
+        """
+        Search memories using semantic search (requires QdrantMemoryDb).
+        Falls back to keyword search if embedder is unavailable.
+        
+        Args:
+            query: Search query
+            limit: Maximum number of results (default: num_memories)
+        
+        Returns:
+            List of relevant Memory objects
+        """
+        if self.db is None:
+            return []
+        
+        limit = limit or self.num_memories or 5
+        
+        # Check if db supports semantic search
+        if self._is_qdrant_db() and hasattr(self.db, 'search_memories'):
+            try:
+                memory_rows = self.db.search_memories(
+                    query=query,
+                    user_id=self.user_id,
+                    limit=limit,
+                    score_threshold=self.semantic_score_threshold
+                )
+                
+                memories = []
+                for row in memory_rows:
+                    try:
+                        memories.append(Memory.model_validate(row.memory))
+                    except Exception as e:
+                        logger.debug(f"Error parsing memory: {e}")
+                        continue
+                
+                return memories
+            except Exception as e:
+                logger.warning(f"Error searching memories: {e}")
+                return []
+        
+        # Fallback: load all memories and return
+        self.load_user_memories()
+        return self.memories or []
+
+    def get_relevant_memories_str(self, query: str, limit: Optional[int] = None) -> str:
+        """
+        Get relevant memories as formatted string for prompt injection.
+        
+        Args:
+            query: Search query
+            limit: Maximum number of results
+        
+        Returns:
+            Formatted string of relevant memories
+        """
+        if self.db is None:
+            return ""
+        
+        # Use QdrantMemoryDb's built-in method if available
+        if self._is_qdrant_db() and hasattr(self.db, 'get_relevant_memories'):
+            try:
+                return self.db.get_relevant_memories(
+                    query=query,
+                    user_id=self.user_id,
+                    limit=limit or self.num_memories or 5
+                )
+            except Exception as e:
+                logger.warning(f"Error getting relevant memories: {e}")
+        
+        # Fallback: format memories manually
+        memories = self.search_memories(query, limit)
+        if not memories:
+            return ""
+        
+        memory_texts = [f"- {m.memory}" for m in memories if m.memory]
+        if memory_texts:
+            return "Relevant memories:\n" + "\n".join(memory_texts)
+        
+        return ""
 
     def add_run(self, agent_run: AgentRun) -> None:
         """Adds an AgentRun to the runs list."""
@@ -729,8 +823,12 @@ class AgentMemory(BaseModel):
                         return tool_calls
         return tool_calls
 
-    def load_user_memories(self) -> None:
-        """Load memories from memory db for this user."""
+    def load_user_memories(self, query: Optional[str] = None) -> None:
+        """Load memories from memory db for this user.
+        
+        Args:
+            query: Search query for semantic retrieval (only used when retrieval is semantic)
+        """
         if self.db is None:
             return
 
@@ -741,8 +839,36 @@ class AgentMemory(BaseModel):
                     limit=self.num_memories,
                     sort="asc" if self.retrieval == MemoryRetrieval.first_n else "desc",
                 )
+            elif self.retrieval == MemoryRetrieval.semantic:
+                # Semantic retrieval requires QdrantMemoryDb
+                if self._is_qdrant_db() and hasattr(self.db, 'search_memories'):
+                    if query:
+                        memory_rows = self.db.search_memories(
+                            query=query,
+                            user_id=self.user_id,
+                            limit=self.num_memories or 5,
+                            score_threshold=self.semantic_score_threshold
+                        )
+                    else:
+                        # No query provided, fall back to read_memories
+                        memory_rows = self.db.read_memories(
+                            user_id=self.user_id,
+                            limit=self.num_memories,
+                            sort="desc",
+                        )
+                else:
+                    logger.warning("Semantic retrieval requires QdrantMemoryDb, falling back to last_n")
+                    memory_rows = self.db.read_memories(
+                        user_id=self.user_id,
+                        limit=self.num_memories,
+                        sort="desc",
+                    )
             else:
-                raise NotImplementedError("Semantic retrieval not yet supported.")
+                memory_rows = self.db.read_memories(
+                    user_id=self.user_id,
+                    limit=self.num_memories,
+                    sort="desc",
+                )
         except Exception as e:
             logger.debug(f"Error reading memory: {e}")
             return

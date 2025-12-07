@@ -259,6 +259,7 @@ class Model(BaseModel):
                 function_call_output = function_call.result
                 if function_call.function.show_result:
                     yield ModelResponse(content=function_call_output)
+            # logger.debug(f"Tool {function_call.function.name} result: {function_call_output}")
 
             # -*- Stop function call timer
             function_call_timer.stop()

@@ -52,6 +52,7 @@ setup(
         "pyyaml",
         "mcp",
         "puremagic",
+        "qdrant-client",
     ],
     packages=find_packages(exclude=['tests']),
     package_dir={'agentica': 'agentica'},

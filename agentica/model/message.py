@@ -87,7 +87,7 @@ class Message(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         _dict = self.model_dump(
             exclude_none=True,
-            include={"role", "content", "audio", "name", "tool_call_id", "tool_calls"},
+            include={"role", "content", "audio", "name", "tool_call_id", "tool_calls", "reasoning_content"},
         )
         # Manually add the content field even if it is None
         if self.content is None:
@@ -114,31 +114,7 @@ class Message(BaseModel):
         else:
             _logger = logger.debug
 
-        _logger(f"============== {self.role} ==============")
-        if self.name:
-            _logger(f"Name: {self.name}")
-        if self.tool_call_id:
-            _logger(f"Tool call Id: {self.tool_call_id}")
-        if self.content:
-            if isinstance(self.content, str) or isinstance(self.content, list):
-                _logger(self.content)
-            elif isinstance(self.content, dict):
-                _logger(json.dumps(self.content, ensure_ascii=False))
-        if self.tool_calls:
-            _logger(f"Tool Calls: {json.dumps(self.tool_calls, ensure_ascii=False)}")
-        if self.images:
-            _logger(f"Images added: {len(self.images)}")
-        if self.videos:
-            _logger(f"Videos added: {len(self.videos)}")
-        if self.audio:
-            if isinstance(self.audio, dict):
-                _logger(f"Audio files added: {len(self.audio)}")
-                if "id" in self.audio:
-                    _logger(f"Audio ID: {self.audio['id']}")
-                elif "data" in self.audio:
-                    _logger("Message contains raw audio data")
-            else:
-                _logger(f"Audio file added: {self.audio}")
+        _logger(f"[{self.role}] {self.to_dict()}")
 
     def content_is_valid(self) -> bool:
         """Check if the message content is valid."""
