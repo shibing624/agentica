@@ -27,7 +27,7 @@ def clean_text(text: str) -> str:
     # Remove control characters (ASCII 0-31 except tab, newline, carriage return)
     # Also remove Unicode control characters like \u000b (vertical tab)
     cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
-    return cleaned
+    return cleaned.strip()
 
 ABSTRACT_MAX_LENGTH = 300  # abstract max length
 
@@ -296,7 +296,7 @@ class BaiduSearchTool(Tool):
 
         all_results: Dict[str, Any] = {}
         for query in queries:
-            result = self.baidu_search_single_query(query, max_results=max_results)
+            result: str = self.baidu_search_single_query(query, max_results=max_results)
             all_results[query] = json.loads(result)
         return json.dumps(all_results, ensure_ascii=False)
 
