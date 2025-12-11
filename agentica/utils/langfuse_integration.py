@@ -182,7 +182,7 @@ def langfuse_trace_context(
         user_id: User identifier
         tags: Optional list of tags for filtering
         metadata: Optional additional metadata
-        input_data: Optional input data to log with the trace (will be wrapped as {"message": ...})
+        input_data: Optional input data to log with the trace
 
     Yields:
         A LangfuseSpanWrapper object that allows setting output after execution
@@ -191,11 +191,11 @@ def langfuse_trace_context(
         with langfuse_trace_context(
             name="my-agent-run",
             session_id="session-123",
-            user_id="user-456",
-            input_data="Hello!"
+            user_id="user-456"
         ) as trace:
-            response = openai.chat.completions.create(...)
-            trace.set_output(response.choices[0].message.content)
+            response1 = openai.chat.completions.create(...)
+            response2 = openai.chat.completions.create(...)
+            trace.set_output(response2.choices[0].message.content)
     """
     if not is_langfuse_available():
         yield _DummySpanWrapper()
@@ -206,32 +206,24 @@ def langfuse_trace_context(
 
         langfuse = get_client()
 
-        # Format input as JSON structure for better display in Langfuse
-        formatted_input = {"message": input_data} if input_data is not None else None
-
         # Start a span as the root observation for this agent run
+        # The root span's input/output will automatically become the trace's input/output
         with langfuse.start_as_current_observation(
                 as_type="span",
                 name=name,
-                input=formatted_input,
+                input=input_data,
                 metadata=metadata,
         ) as span:
-            # Update trace-level attributes (session_id, user_id, tags) and input
-            trace_update_kwargs: Dict[str, Any] = {}
-            if session_id:
-                trace_update_kwargs["session_id"] = session_id
-            if user_id:
-                trace_update_kwargs["user_id"] = user_id
-            if tags:
-                trace_update_kwargs["tags"] = tags
-            if formatted_input:
-                trace_update_kwargs["input"] = formatted_input
-
-            if trace_update_kwargs:
-                span.update_trace(**trace_update_kwargs)
+            # Update trace-level attributes (session_id, user_id, tags)
+            if session_id or user_id or tags:
+                span.update_trace(
+                    session_id=session_id,
+                    user_id=user_id,
+                    tags=tags,
+                )
 
             # Create a wrapper to collect output
-            wrapper = _LangfuseSpanWrapper(span)
+            wrapper = _LangfuseSpanWrapper(span, langfuse)
 
             # Propagate session_id to all nested observations (including OpenAI generations)
             with propagate_attributes(
@@ -241,13 +233,15 @@ def langfuse_trace_context(
             ):
                 yield wrapper
 
-            # Format output as JSON structure for better display in Langfuse
+            # Update root span output before exiting context
+            # Since this is the root span, its output becomes the trace's output
             if wrapper._output is not None:
-                formatted_output = {"response": wrapper._output}
-                # Update span output
-                span.update(output=formatted_output)
-                # Update trace output (this shows in the trace list view)
-                span.update_trace(output=formatted_output)
+                span.update(output=wrapper._output)
+                # Also explicitly update the trace output using update_current_trace
+                try:
+                    langfuse.update_current_trace(output=wrapper._output)
+                except Exception:
+                    pass  # Fallback: root span output should still work
             if wrapper._metadata:
                 span.update(metadata=wrapper._metadata)
 
@@ -262,8 +256,9 @@ def langfuse_trace_context(
 class _LangfuseSpanWrapper:
     """Wrapper to collect output and update span before context exits."""
 
-    def __init__(self, span: Any):
+    def __init__(self, span: Any, langfuse_client: Any = None):
         self._span = span
+        self._langfuse = langfuse_client
         self._output: Optional[Any] = None
         self._metadata: Dict[str, Any] = {}
 
