@@ -1,22 +1,21 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: LLM OS demo, a comprehensive AI assistant with multiple tools and agents
 
-install:
 pip install streamlit agentica text2vec sqlalchemy lancedb pyarrow yfinance
 
 run:
-streamlit run llm_os_demo.py
+streamlit run 34_llm_os_demo.py
 """
-import os
 import sys
+import os
 from textwrap import dedent
 from typing import List, Optional
-
 import streamlit as st
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat, PythonAgent
 from agentica.tools.file_tool import FileTool
 from agentica.utils.log import logger

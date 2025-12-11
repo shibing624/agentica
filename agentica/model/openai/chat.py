@@ -13,31 +13,18 @@ from agentica.model.response import ModelResponse
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
+from agentica.utils.langfuse_integration import is_langfuse_available, build_langfuse_metadata, get_langfuse_openai_client
 
-try:
-    from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
-    from openai.types.completion_usage import CompletionUsage
-    from openai.types.chat.chat_completion import ChatCompletion
-    from openai.types.chat.parsed_chat_completion import ParsedChatCompletion
-    from openai.types.chat.chat_completion_chunk import (
-        ChatCompletionChunk,
-        ChoiceDelta,
-        ChoiceDeltaToolCall,
-    )
-    from openai.types.chat.chat_completion_message import ChatCompletionMessage
-
-    MIN_OPENAI_VERSION = "1.52.0"
-
-    # Check the installed openai version
-    from openai import __version__ as installed_version
-
-    if version.parse(installed_version) < version.parse(MIN_OPENAI_VERSION):
-        logger.warning(
-            f"`openai` version must be >= {MIN_OPENAI_VERSION}, but found {installed_version}. "
-            f"Please upgrade using `pip install --upgrade openai`."
-        )
-except (ModuleNotFoundError, ImportError):
-    raise ImportError("`openai` not installed. Please install using `pip install openai`")
+from openai import OpenAI as OpenAIClient, AsyncOpenAI as AsyncOpenAIClient
+from openai.types.completion_usage import CompletionUsage
+from openai.types.chat.chat_completion import ChatCompletion
+from openai.types.chat.parsed_chat_completion import ParsedChatCompletion
+from openai.types.chat.chat_completion_chunk import (
+    ChatCompletionChunk,
+    ChoiceDelta,
+    ChoiceDeltaToolCall,
+)
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 
 @dataclass
@@ -158,6 +145,10 @@ class OpenAIChat(Model):
     structured_outputs: bool = False
     # Whether the Model supports structured outputs.
     supports_structured_outputs: bool = True
+    # Langfuse tags for tracing (additional tags beyond what Agent provides)
+    langfuse_tags: Optional[List[str]] = None
+    # Langfuse trace name (defaults to model id)
+    langfuse_trace_name: Optional[str] = None
 
     def get_client_params(self) -> Dict[str, Any]:
         client_params: Dict[str, Any] = {}
@@ -188,6 +179,9 @@ class OpenAIChat(Model):
         """
         Returns an OpenAI client.
 
+        If Langfuse is configured, uses Langfuse-wrapped OpenAI client
+        for automatic tracing.
+
         Returns:
             OpenAIClient: An instance of the OpenAI client.
         """
@@ -197,12 +191,21 @@ class OpenAIChat(Model):
         client_params: Dict[str, Any] = self.get_client_params()
         if self.http_client is not None:
             client_params["http_client"] = self.http_client
-        self.client = OpenAIClient(**client_params)
+
+        # Try to use Langfuse-wrapped client if available
+        LangfuseOpenAI, _ = get_langfuse_openai_client()
+        if LangfuseOpenAI is not None:
+            self.client = LangfuseOpenAI(**client_params)
+        else:
+            self.client = OpenAIClient(**client_params)
         return self.client
 
     def get_async_client(self) -> AsyncOpenAIClient:
         """
         Returns an asynchronous OpenAI client.
+
+        If Langfuse is configured, uses Langfuse-wrapped AsyncOpenAI client
+        for automatic tracing.
 
         Returns:
             AsyncOpenAIClient: An instance of the asynchronous OpenAI client.
@@ -218,7 +221,14 @@ class OpenAIChat(Model):
             client_params["http_client"] = httpx.AsyncClient(
                 limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100)
             )
-        return AsyncOpenAIClient(**client_params)
+
+        # Try to use Langfuse-wrapped client if available
+        _, LangfuseAsyncOpenAI = get_langfuse_openai_client()
+        if LangfuseAsyncOpenAI is not None:
+            self.async_client = LangfuseAsyncOpenAI(**client_params)
+        else:
+            self.async_client = AsyncOpenAIClient(**client_params)
+        return self.async_client
 
     @property
     def request_kwargs(self) -> Dict[str, Any]:
@@ -355,6 +365,42 @@ class OpenAIChat(Model):
 
         return message.to_dict()
 
+    def _get_langfuse_extra_params(self) -> Dict[str, Any]:
+        """
+        Get extra parameters for Langfuse tracing.
+
+        Uses user_id and session_id from Model (set by Agent), plus any custom tags.
+        Langfuse uses OpenTelemetry auto-instrumentation, so these params are passed
+        via the OpenAI API's metadata field.
+
+        Returns:
+            Dict with 'name' and 'metadata' for Langfuse if available.
+        """
+        if not is_langfuse_available():
+            return {}
+
+        extra_params: Dict[str, Any] = {}
+
+        # Set trace name: custom name > agent_name-model_id > model_name-model_id
+        if self.langfuse_trace_name:
+            trace_name = self.langfuse_trace_name
+        elif self.agent_name:
+            trace_name = f"{self.agent_name}-{self.id}"
+        else:
+            trace_name = f"{self.name}-{self.id}"
+        extra_params["name"] = trace_name
+
+        # Build metadata with user_id, session_id from Model (set by Agent)
+        metadata = build_langfuse_metadata(
+            user_id=self.user_id,  # From Model base class, set by Agent
+            session_id=self.session_id,  # From Model base class, set by Agent
+            tags=self.langfuse_tags,
+        )
+        if metadata:
+            extra_params["metadata"] = metadata
+
+        return extra_params
+
     def invoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
         """
         Send a chat completion request to the OpenAI API.
@@ -365,6 +411,9 @@ class OpenAIChat(Model):
         Returns:
             ChatCompletion: The chat completion response from the API.
         """
+        # Get Langfuse extra params (name, metadata) if enabled
+        langfuse_params = self._get_langfuse_extra_params()
+
         if self.response_format is not None and self.structured_outputs:
             try:
                 if isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel):
@@ -372,6 +421,7 @@ class OpenAIChat(Model):
                         model=self.id,
                         messages=[self.format_message(m) for m in messages],  # type: ignore
                         **self.request_kwargs,
+                        **langfuse_params,
                     )
                 else:
                     raise ValueError("response_format must be a subclass of BaseModel if structured_outputs=True")
@@ -382,6 +432,7 @@ class OpenAIChat(Model):
             model=self.id,
             messages=[self.format_message(m) for m in messages],  # type: ignore
             **self.request_kwargs,
+            **langfuse_params,
         )
 
     async def ainvoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
@@ -394,6 +445,9 @@ class OpenAIChat(Model):
         Returns:
             ChatCompletion: The chat completion response from the API.
         """
+        # Get Langfuse extra params (name, metadata) if enabled
+        langfuse_params = self._get_langfuse_extra_params()
+
         if self.response_format is not None and self.structured_outputs:
             try:
                 if isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel):
@@ -401,6 +455,7 @@ class OpenAIChat(Model):
                         model=self.id,
                         messages=[self.format_message(m) for m in messages],  # type: ignore
                         **self.request_kwargs,
+                        **langfuse_params,
                     )
                 else:
                     raise ValueError("response_format must be a subclass of BaseModel if structured_outputs=True")
@@ -411,6 +466,7 @@ class OpenAIChat(Model):
             model=self.id,
             messages=[self.format_message(m) for m in messages],  # type: ignore
             **self.request_kwargs,
+            **langfuse_params,
         )
 
     def invoke_stream(self, messages: List[Message]) -> Iterator[ChatCompletionChunk]:
@@ -423,12 +479,16 @@ class OpenAIChat(Model):
         Returns:
             Iterator[ChatCompletionChunk]: An iterator of chat completion chunks.
         """
+        # Get Langfuse extra params (name, metadata) if enabled
+        langfuse_params = self._get_langfuse_extra_params()
+
         yield from self.get_client().chat.completions.create(
             model=self.id,
             messages=[self.format_message(m) for m in messages],  # type: ignore
             stream=True,
             stream_options={"include_usage": True},
             **self.request_kwargs,
+            **langfuse_params,
         )  # type: ignore
 
     async def ainvoke_stream(self, messages: List[Message]) -> Any:
@@ -441,12 +501,16 @@ class OpenAIChat(Model):
         Returns:
             Any: An asynchronous iterator of chat completion chunks.
         """
+        # Get Langfuse extra params (name, metadata) if enabled
+        langfuse_params = self._get_langfuse_extra_params()
+
         async_stream = await self.get_async_client().chat.completions.create(
             model=self.id,
             messages=[self.format_message(m) for m in messages],  # type: ignore
             stream=True,
             stream_options={"include_usage": True},
             **self.request_kwargs,
+            **langfuse_params,
         )
         async for chunk in async_stream:  # type: ignore
             yield chunk

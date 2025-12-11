@@ -1,6 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Vision demo, demonstrates how to use Agent with image inputs
+"""
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 
 m = Agent(model=OpenAIChat(id="gpt-4o"))

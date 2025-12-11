@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: agentica integrated llamaindex db demo
+@description: RAG integrated with LlamaIndex demo, demonstrates using LlamaIndex retriever
 
-pip install llamaindex
+pip install llama-index
 """
-
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent
-
 from agentica.knowledge.llamaindex_knowledge import LlamaIndexKnowledge
 from llama_index.core import (
     SimpleDirectoryReader,

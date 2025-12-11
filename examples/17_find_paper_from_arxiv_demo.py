@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description: Find paper from arXiv demo, demonstrates how to search and extract papers from arXiv
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import PythonAgent, OpenAIChat
 from agentica.tools.jina_tool import JinaTool
 

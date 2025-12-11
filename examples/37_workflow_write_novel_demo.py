@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: Workflow write novel demo, demonstrates multi-step novel generation with reflection
 """
-
 import sys
+import os
 from textwrap import dedent
 from loguru import logger
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica import Workflow, RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response
 from agentica.tools.search_serper_tool import SearchSerperTool

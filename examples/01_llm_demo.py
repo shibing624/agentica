@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: llm demo
+@description: LLM demo, demonstrates how to use different LLM models with streaming response
 """
-
 import sys
+import os
 import argparse
-from agentica import Message, Yi, AzureOpenAIChat, DeepSeek, OpenAIChat, Moonshot, ZhipuAI
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from agentica import Message, Yi, AzureOpenAIChat, DeepSeek, OpenAIChat, Moonshot, ZhipuAI
 
 
 def get_model(model_name):

@@ -17,3 +17,4 @@ pyyaml
 mcp>=1.9.4
 puremagic
 qdrant-client
+langfuse

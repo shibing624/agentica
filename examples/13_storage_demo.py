@@ -1,6 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Storage demo, demonstrates how to use SqlAgentStorage for conversation persistence
+"""
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica import SqlAgentStorage
 

@@ -63,6 +63,10 @@ class Model(BaseModel):
 
     # Session ID of the calling Agent or Workflow.
     session_id: Optional[str] = None
+    # User ID of the calling Agent.
+    user_id: Optional[str] = None
+    # Agent name for tracing.
+    agent_name: Optional[str] = None
     # Whether to use the structured outputs with this Model.
     structured_outputs: Optional[bool] = None
     # Whether the Model supports structured outputs.

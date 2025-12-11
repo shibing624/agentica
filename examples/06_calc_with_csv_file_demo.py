@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: CSV file calculation demo, demonstrates how to use PythonAgent with CSV data
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica.file.csv import CsvFile
 from agentica import PythonAgent
 

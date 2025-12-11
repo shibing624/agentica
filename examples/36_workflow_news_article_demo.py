@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: Workflow news article demo, demonstrates multi-step news report generation
 """
-
 import sys
+import os
 from textwrap import dedent
 from typing import Optional, Dict, Iterator
 from pydantic import BaseModel, Field
 from loguru import logger
 import json
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.workflow import Workflow
 from agentica import RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response

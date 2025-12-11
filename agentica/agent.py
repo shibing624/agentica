@@ -750,6 +750,14 @@ class Agent:
         if self.session_id is not None:
             self.model.session_id = self.session_id
 
+        # Add user_id to the Model for Langfuse tracing
+        if self.user_id is not None:
+            self.model.user_id = self.user_id
+
+        # Add agent name to the Model for Langfuse tracing
+        if self.name is not None:
+            self.model.agent_name = self.name
+
     def _resolve_context(self) -> None:
         from inspect import signature
 

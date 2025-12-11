@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: Team news article demo, demonstrates multi-agent collaboration for article writing
 """
-import os
 import sys
+import os
 from textwrap import dedent
 from typing import Optional
-
 from pydantic import BaseModel, Field
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, AzureOpenAIChat
 from agentica.tools.search_exa_tool import SearchExaTool
 

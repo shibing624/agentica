@@ -1,12 +1,14 @@
+# -*- coding: utf-8 -*-
 """
-The research Assistant searches for EXA for a topic
-and writes an article in Markdown format.
+@author:XuMing(xuming624@qq.com)
+@description: Research agent demo, demonstrates a NYT-style research article generator
 """
-
 import sys
+import os
 from textwrap import dedent
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent
 from agentica import OpenAIChat
 from agentica.tools.search_serper_tool import SearchSerperTool

@@ -1,14 +1,13 @@
+# -*- coding: utf-8 -*-
 """
-This is a simple example of how to use the PythonAgent class to interact with the Assistant.
-usage:
-    python python_assistant_demo.py
-
-运行两次，第一次会基于谷歌搜索回答问题，并生成一个person1.csv文件，第二次会读取这个文件（不再进行搜索），然后进行问题回答。
+@author:XuMing(xuming624@qq.com)
+@description: Python agent memory demo, demonstrates PythonAgent with knowledge base and memory
 """
-import os.path
+import os
 import sys
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import PythonAgent, OpenAIChat, SqlAgentStorage
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.search_serper_tool import SearchSerperTool

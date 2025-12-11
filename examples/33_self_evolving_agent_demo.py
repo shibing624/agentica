@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Self evolving agent demo
+@description: Self-evolving agent (SAGE) demo with reflection and enhanced memory
 
 具有反思和增强记忆能力的自我进化智能体(SAGE)，以解决大型语言模型（LLM）面临的挑战，如持续决策、缺乏长期记忆和动态环境中有限的上下文窗口。
 SAGE框架它集成了迭代反馈、反思机制和记忆优化机制，以增强智能体在处理多任务和长时间信息方面的能力。
@@ -30,7 +30,7 @@ from typing import List, Optional
 
 import streamlit as st
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica import Agent, OpenAIChat, PythonAgent, SearchType
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool

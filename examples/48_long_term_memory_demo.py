@@ -2,15 +2,11 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: Long-term memory demo with semantic search and keyword fallback
-
-Usage:
-1. QdrantMemoryDb with embedder: semantic search
-2. QdrantMemoryDb without embedder: keyword search fallback
-3. CsvMemoryDb/SqliteMemoryDb: traditional retrieval (last_n, first_n)
 """
 import sys
-sys.path.append('..')
-sys.path.append('../..')
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import (
     Agent, OpenAIChat, AgentMemory, QdrantMemoryDb, OpenAIEmb,

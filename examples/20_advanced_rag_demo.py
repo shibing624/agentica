@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Advanced RAG demo
-
-实现了高级版RAG，基于PDF文档回答问题，新增功能：pdf文件解析、query改写，字面+语义多路召回，召回排序（rerank）
+@description: Advanced RAG demo with query rewriting, hybrid search and reranking
 
 pip install similarities agentica transformers torch tantivy
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.knowledge.base import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb

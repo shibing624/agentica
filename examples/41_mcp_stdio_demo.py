@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: MCP stdio client demo
+@description: MCP stdio client demo, demonstrates using MCP with stdio-based servers
 """
-
-import asyncio
 import sys
+import os
+import asyncio
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.mcp.server import MCPServerStdio
 from agentica.mcp.client import MCPClient

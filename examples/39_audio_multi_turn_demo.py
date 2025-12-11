@@ -1,3 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Audio multi-turn demo, demonstrates multi-turn conversation with audio output
+"""
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica.utils.io import write_audio_to_file
 from agentica import Agent, OpenAIChat
 

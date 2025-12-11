@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 自动调用OCR工具
+@description: OCR tool demo, demonstrates automatic OCR recognition using OcrTool
 
 pip install easyocr agentica
 """
-
 import sys
-sys.path.append('..')
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.tools.ocr_tool import OcrTool
 

@@ -1,15 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
-Translate a paper to another language.
+@description: Complex translate demo, demonstrates multi-step translation with reflection
 """
-
 import sys
-
+import os
 from loguru import logger
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.knowledge import Knowledge
 

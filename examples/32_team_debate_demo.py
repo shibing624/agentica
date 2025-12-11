@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 模仿两个人辩论的例子，拜登和特朗普
+@description: Team debate demo, demonstrates multi-agent debate between Biden and Trump
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 
 Biden = Agent(

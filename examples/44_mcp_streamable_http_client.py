@@ -1,21 +1,19 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: MCP StreamableHttp client demo
+@description: MCP StreamableHttp client demo, demonstrates using MCP with HTTP streaming
 
-使用说明:
-1. 首先启动服务器:
-    python examples/44_mcp_streamable_http_server.py
-2. 然后运行此客户端:
-    python examples/44_mcp_streamable_http_client.py
+Usage:
+1. Start the server: python examples/44_mcp_streamable_http_server.py
+2. Run this client: python examples/44_mcp_streamable_http_client.py
 """
-
-import asyncio
 import sys
+import os
+import asyncio
 from datetime import timedelta
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat, logger, ShellTool
 from agentica.mcp.server import MCPServerStreamableHttp
 from agentica.mcp.client import MCPClient

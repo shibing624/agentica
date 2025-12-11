@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: LLM自动调用分类库训练分类模型
+@description: Text classification demo, demonstrates LLM-based text classification training
 
 pip install pytextclassifier agentica
 """
-
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import PythonAgent, OpenAIChat
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool

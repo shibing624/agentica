@@ -1,5 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Context demo, demonstrates how to use add_context with dynamic context functions
+"""
+import sys
+import os
 import json
 import httpx
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent
 
@@ -20,4 +29,4 @@ def get_top_hackernews_stories(num_stories: int = 5) -> str:
 Agent(
     add_context=True,
     context={"top_hackernews_stories": get_top_hackernews_stories},
-).print_response("Summarize the top stories on hackernews?", stream=True, markdown=True)
+).print_response("Summarize the top stories on hackernews?", stream=True)

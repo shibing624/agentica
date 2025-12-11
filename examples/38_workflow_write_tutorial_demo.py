@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: Workflow write tutorial demo, demonstrates multi-step technical tutorial generation
 """
-
 import sys
+import os
 from textwrap import dedent
 from typing import Optional, Dict, Iterator
 from loguru import logger
 from pathlib import Path
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.workflow import Workflow
 from agentica import RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response

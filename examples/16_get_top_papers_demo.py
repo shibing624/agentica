@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description: Get top papers demo, demonstrates how to extract papers from HuggingFace papers page
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import OpenAIChat, Agent, PythonAgent
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.file_tool import FileTool

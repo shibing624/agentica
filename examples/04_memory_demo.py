@@ -1,8 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Memory demo, demonstrates how to use AgentMemory with CsvMemoryDb
+"""
 import sys
 import os
 from rich.pretty import pprint
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, AgentMemory
 from agentica import OpenAIChat
 from agentica.memorydb import CsvMemoryDb

@@ -1,8 +1,7 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: MCP SSE server demo
+@description: MCP SSE server demo, demonstrates creating an MCP server with SSE transport
 """
 import requests
 from loguru import logger

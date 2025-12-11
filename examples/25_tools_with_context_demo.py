@@ -1,5 +1,14 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Tools with context demo, demonstrates how to pass context to tool functions
+"""
+import sys
+import os
 import json
 import httpx
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent
 

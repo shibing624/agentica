@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Web search demo, using SearchSerperTool(google) to search the web.
+@description: Web search demo with OpenAI, demonstrates using SearchSerperTool for Google search
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat, WeatherTool
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.edit_tool import EditTool

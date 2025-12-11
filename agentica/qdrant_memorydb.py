@@ -108,7 +108,7 @@ class QdrantMemoryDb(MemoryDb):
     def _check_embedder(self) -> bool:
         """Check if embedder is available and working."""
         if self.embedder is None:
-            logger.debug("No embedder provided, will use keyword search")
+            # logger.debug("No embedder provided, will use keyword search")
             return False
         
         try:

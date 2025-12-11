@@ -22,3 +22,4 @@ ipykernel~=6.27.0
 docling
 pytest
 qdrant-client
+langfuse

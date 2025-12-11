@@ -1,11 +1,12 @@
+# -*- coding: utf-8 -*-
 """
-Custom Tool Demo
+@author:XuMing(xuming624@qq.com)
+@description: Custom tool demo, demonstrates how to create function-based and class-based tools
+"""
+import sys
+import os
 
-This demo shows how to create custom tools for the Agent:
-1. Simple function-based tools
-2. Class-based tools inheriting from Tool
-3. Using built-in tools alongside custom tools
-"""
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool, FileTool
 
@@ -14,17 +15,17 @@ from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool, FileTool
 # Simple function-based tools
 # ============================================================================
 
-def multiply(first_int: float, second_int: float) -> str:
+def multiply(first_num: float, second_num: float) -> str:
     """Multiply two numbers together.
     
     Args:
-        first_int: The first number to multiply
-        second_int: The second number to multiply
+        first_num: The first number to multiply
+        second_num: The second number to multiply
         
     Returns:
         A string representation of the product
     """
-    return str(first_int * second_int)
+    return str(first_num * second_num)
 
 
 def exponentiate(base: float, exponent: float) -> str:
@@ -37,6 +38,9 @@ def exponentiate(base: float, exponent: float) -> str:
     Returns:
         A string representation of base raised to the power of exponent
     """
+    # Guard against extremely large exponents to prevent overflow
+    if abs(exponent) > 1000:
+        return f"Error: exponent {exponent} is too large, max allowed is 1000"
     return str(base ** exponent)
 
 
@@ -63,17 +67,17 @@ class AddTool(Tool):
         super().__init__(name="add_tool")
         self.register(self.run_add)
 
-    def run_add(self, first_int: float, second_int: float) -> str:
+    def run_add(self, first_num: float, second_num: float) -> str:
         """Add two numbers together.
         
         Args:
-            first_int: The first number to add
-            second_int: The second number to add
+            first_num: The first number to add
+            second_num: The second number to add
             
         Returns:
             A string representation of the sum
         """
-        return str(first_int + second_int)
+        return str(first_num + second_num)
 
 
 # ============================================================================

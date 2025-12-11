@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: minimax-mcp demo
+@description: Minimax MCP demo, demonstrates using MCP with config file
 
 pip install minimax-mcp weather-forecast-server
 """
-
-import asyncio
 import sys
 import os
+import asyncio
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat, logger
 from agentica.tools.mcp_tool import McpTool
 from agentica import ShellTool

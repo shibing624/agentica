@@ -1,8 +1,7 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: MCP StreamableHttp server demo
+@description: MCP StreamableHttp server demo, demonstrates creating an MCP server with HTTP streaming
 """
 import requests
 from loguru import logger

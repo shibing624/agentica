@@ -13,6 +13,7 @@ if AGENTICA_HOME:
 
 # Load environment variables from .env file
 AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
+load_dotenv()
 load_dotenv(AGENTICA_DOTENV_PATH, override=True)
 
 AGENTICA_DATA_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
@@ -31,3 +32,10 @@ elif AGENTICA_LOG_LEVEL == "DEBUG":
     AGENTICA_LOG_FILE = default_log_file
 else:
     AGENTICA_LOG_FILE = ""
+
+
+# Langfuse configuration
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_BASE_URL = os.getenv("LANGFUSE_BASE_URL")
+LANGFUSE_TIMEOUT = int(os.getenv("LANGFUSE_TIMEOUT", "300"))

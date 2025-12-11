@@ -1,12 +1,17 @@
+# -*- coding: utf-8 -*-
 """
-Please install dependencies using:
+@author:XuMing(xuming624@qq.com)
+@description: Workflow investment demo, demonstrates multi-agent investment report generation
+
 pip install yfinance agentica
 """
-from pathlib import Path
 import sys
+import os
+from pathlib import Path
 from shutil import rmtree
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent
 from agentica.workflow import Workflow
 from agentica import logger

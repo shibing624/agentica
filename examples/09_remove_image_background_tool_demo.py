@@ -1,16 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 自动去图片背景示例
+@description: Remove image background demo, demonstrates automatic background removal using rembg
 
 pip install rembg agentica
-
-自动安装rembg库，并执行去背景操作
 """
-
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import PythonAgent, OpenAIChat
 
 m = PythonAgent(

@@ -1,7 +1,13 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Browser tool demo, demonstrates web browsing with BrowserTool
+"""
 import sys
+import os
 from pathlib import Path
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent, OpenAIChat
 from agentica.tools.browser_tool import BrowserTool

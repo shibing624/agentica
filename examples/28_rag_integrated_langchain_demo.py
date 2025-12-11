@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: agentica integrated langchain db demo
+@description: RAG integrated with LangChain demo, demonstrates using LangChain vector store
 
 pip install langchain
 """
-
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent
-
 from agentica.knowledge.langchain_knowledge import LangChainKnowledge
 from langchain.document_loaders import TextLoader
 from langchain.embeddings import OpenAIEmbeddings

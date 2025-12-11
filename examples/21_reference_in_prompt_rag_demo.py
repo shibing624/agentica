@@ -1,19 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
-Use a custom function to generate references for RAG.
-
-You can use the custom_references_function to generate references for the RAG model.
-The function takes a query and returns a list of references from the knowledge base.
-
-usage:
-python memorydb_rag_demo.py
+@description: Reference in prompt RAG demo, demonstrates using add_context for RAG
 """
-
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent
 from agentica.knowledge.base import Knowledge
 from agentica.vectordb.memory_vectordb import MemoryVectorDb

@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Web search demo, using free zhipuai search to search the web.
+@description: Weather demo with ZhipuAI, demonstrates using ZhipuAI model with WeatherTool
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Message
 from agentica import Agent, ZhipuAI, WeatherTool
 

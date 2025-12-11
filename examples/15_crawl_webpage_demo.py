@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description: Crawl webpage demo, demonstrates how to crawl and extract information from web pages
 """
 import sys
+import os
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import AzureOpenAIChat, Agent
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.file_tool import FileTool

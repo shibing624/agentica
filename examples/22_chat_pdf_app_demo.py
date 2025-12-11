@@ -1,9 +1,15 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Chat PDF app demo, demonstrates a CLI-based PDF Q&A application
+"""
 import sys
+import os
 from typing import Optional, List
-
 import typer
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent, OpenAIChat
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb

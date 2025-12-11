@@ -1,9 +1,16 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Response model demo, demonstrates how to use structured output with Pydantic models
+"""
+import sys
+import os
 from typing import List
 from pydantic import BaseModel, Field
 from rich.pretty import pprint
-import sys
 
-sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica import Agent
 
 
