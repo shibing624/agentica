@@ -2241,18 +2241,20 @@ class Agent:
         if self.response_model is not None and self.parse_response:
             # Set stream=False and run the agent
             logger.debug("Setting stream=False as response_model is set")
-            run_response: RunResponse = next(
-                self._run(
-                    message=message,
-                    stream=False,
-                    audio=audio,
-                    images=images,
-                    videos=videos,
-                    messages=messages,
-                    stream_intermediate_steps=stream_intermediate_steps,
-                    **kwargs,
-                )
+            # Consume entire generator to ensure Langfuse trace context cleanup runs
+            resp = self._run(
+                message=message,
+                stream=False,
+                audio=audio,
+                images=images,
+                videos=videos,
+                messages=messages,
+                stream_intermediate_steps=stream_intermediate_steps,
+                **kwargs,
             )
+            run_response: RunResponse = None
+            for response in resp:
+                run_response = response
 
             # If the model natively supports structured outputs, the content is already in the structured format
             if self.structured_outputs:
@@ -2303,14 +2305,11 @@ class Agent:
                     stream_intermediate_steps=stream_intermediate_steps,
                     **kwargs,
                 )
-                # For multi-round mode, consume entire generator to get final response
-                if self.enable_multi_round:
-                    final_response = None
-                    for response in resp:
-                        final_response = response
-                    return final_response
-                else:
-                    return next(resp)
+                # Consume entire generator to ensure Langfuse trace context cleanup runs
+                final_response = None
+                for response in resp:
+                    final_response = response
+                return final_response
 
     async def _arun(
             self,

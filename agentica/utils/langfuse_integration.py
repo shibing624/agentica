@@ -185,7 +185,7 @@ def langfuse_trace_context(
         input_data: Optional input data to log with the trace
 
     Yields:
-        A LangfuseSpanWrapper object that allows setting output after execution
+        A LangfuseTraceWrapper object that allows setting output after execution
 
     Example:
         with langfuse_trace_context(
@@ -202,48 +202,46 @@ def langfuse_trace_context(
         return
 
     try:
-        from langfuse import get_client, propagate_attributes
+        from langfuse import get_client
 
         langfuse = get_client()
 
         # Start a span as the root observation for this agent run
-        # The root span's input/output will automatically become the trace's input/output
+        # This automatically creates a trace
+        # OpenAI calls within this context will automatically become children
         with langfuse.start_as_current_observation(
                 as_type="span",
                 name=name,
                 input=input_data,
                 metadata=metadata,
-        ) as span:
-            # Update trace-level attributes (session_id, user_id, tags)
-            if session_id or user_id or tags:
-                span.update_trace(
-                    session_id=session_id,
-                    user_id=user_id,
-                    tags=tags,
-                )
+        ) as root_span:
+            # Set trace-level attributes at the beginning
+            root_span.update_trace(
+                session_id=session_id,
+                user_id=user_id,
+                tags=tags,
+            )
 
             # Create a wrapper to collect output
-            wrapper = _LangfuseSpanWrapper(span, langfuse)
+            wrapper = _LangfuseTraceWrapper(root_span, langfuse)
 
-            # Propagate session_id to all nested observations (including OpenAI generations)
-            with propagate_attributes(
-                    session_id=session_id,
-                    user_id=user_id,
-                    tags=tags,
-            ):
-                yield wrapper
+            yield wrapper
 
-            # Update root span output before exiting context
-            # Since this is the root span, its output becomes the trace's output
+            # IMPORTANT: After all child observations are complete,
+            # update trace output as the LAST step using update_current_trace()
+            # This prevents child spans from overwriting the trace output
             if wrapper._output is not None:
-                span.update(output=wrapper._output)
-                # Also explicitly update the trace output using update_current_trace
-                try:
-                    langfuse.update_current_trace(output=wrapper._output)
-                except Exception:
-                    pass  # Fallback: root span output should still work
+                # Update root span output first
+                root_span.update(output=wrapper._output)
+                # Then use update_current_trace() as the final step
+                # This is the recommended way to set trace output when there are nested observations
+                langfuse.update_current_trace(
+                    input=input_data,
+                    output=wrapper._output,
+                )
+
             if wrapper._metadata:
-                span.update(metadata=wrapper._metadata)
+                root_span.update(metadata=wrapper._metadata)
 
     except ImportError:
         logger.debug("Langfuse context manager not available")
@@ -251,6 +249,32 @@ def langfuse_trace_context(
     except Exception as e:
         logger.warning(f"Failed to create Langfuse trace context: {e}")
         yield _DummySpanWrapper()
+
+
+class _LangfuseTraceWrapper:
+    """Wrapper to collect output and update trace."""
+
+    def __init__(self, span: Any, langfuse_client: Any):
+        self._span = span
+        self._langfuse = langfuse_client
+        self._output: Optional[Any] = None
+        self._metadata: Dict[str, Any] = {}
+
+    def set_output(self, output: Any) -> None:
+        """Set the output to be recorded when the context exits."""
+        self._output = output
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        """Add metadata to be recorded when the context exits."""
+        self._metadata[key] = value
+
+    def update(self, **kwargs) -> None:
+        """Directly update the underlying span."""
+        if self._span:
+            try:
+                self._span.update(**kwargs)
+            except Exception as e:
+                logger.debug(f"Failed to update span: {e}")
 
 
 class _LangfuseSpanWrapper:

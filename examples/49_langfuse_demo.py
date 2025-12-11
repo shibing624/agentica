@@ -32,18 +32,18 @@ if __name__ == '__main__':
     print("=" * 50)
 
     agent = Agent(
-        name="Langfuse Demo Agent",
-        user_id="user-123",  # Passed to Langfuse for user tracking
-        session_id="session-abc",  # Groups multi-turn conversations
+        name="Langfuse Demo Agent1",
+        user_id="user-1232",  # Passed to Langfuse for user tracking
+        session_id="session-abc2",  # Groups multi-turn conversations
         model=OpenAIChat(
             id="gpt-4o-mini",
-            langfuse_tags=["demo", "basic"],  # Optional tags for filtering
+            langfuse_tags=["demo1", "basic1"],  # Optional tags for filtering
         ),
         system_prompt="You are a helpful assistant.",
         debug_mode=True,
     )
 
-    response = agent.run("Tell me a short joke about programming.")
+    response = agent.run("讲个笑话")
     print(f"Response: {response.content}")
     print()
 
