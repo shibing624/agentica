@@ -14,19 +14,21 @@ from agentica.utils.log import logger
 
 
 def clean_text(text: str) -> str:
-    """Clean text by removing control characters.
+    """Clean text by removing control characters, empty lines and extra spaces.
     
     Args:
         text: The raw text
         
     Returns:
-        Cleaned text without control characters
+        Cleaned text without control characters, empty lines and extra spaces
     """
     if not text:
         return ""
     # Remove control characters (ASCII 0-31 except tab, newline, carriage return)
     # Also remove Unicode control characters like \u000b (vertical tab)
     cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    # Remove empty lines and collapse multiple spaces/newlines
+    cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned.strip()
 
 ABSTRACT_MAX_LENGTH = 300  # abstract max length

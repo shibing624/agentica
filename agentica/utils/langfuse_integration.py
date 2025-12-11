@@ -232,9 +232,12 @@ def langfuse_trace_context(
             ):
                 yield wrapper
 
-            # Update span with collected output before exiting context
+            # Update both span and trace with collected output before exiting context
             if wrapper._output is not None:
+                # Update span output
                 span.update(output=wrapper._output)
+                # Update trace output (this shows in the trace list view)
+                span.update_trace(output=wrapper._output)
             if wrapper._metadata:
                 span.update(metadata=wrapper._metadata)
 
