@@ -52,11 +52,7 @@ from agentica.utils.message import get_text_from_message
 from agentica.utils.timer import Timer
 from agentica.agent_session import AgentSession
 from agentica.utils.string import parse_structured_output
-from agentica.utils.langfuse_integration import (
-    langfuse_trace_context,
-    update_langfuse_span,
-    is_langfuse_available,
-)
+from agentica.utils.langfuse_integration import langfuse_trace_context
 
 
 @dataclass(init=False)
@@ -1664,7 +1660,7 @@ class Agent:
                 user_id=self.user_id,
                 tags=langfuse_tags,
                 input_data=trace_input,
-        ) as span:
+        ) as trace:
             final_response = None
 
             if self.enable_multi_round:
@@ -1694,19 +1690,14 @@ class Agent:
                     final_response = response
                     yield response
 
-            # Update the span with the final output
-            if span and final_response:
+            # Set output on trace before context exits
+            if final_response:
                 output_content = final_response.content
                 if isinstance(output_content, BaseModel):
                     output_content = output_content.model_dump()
-                update_langfuse_span(
-                    span,
-                    output=output_content,
-                    metadata={
-                        "run_id": final_response.run_id,
-                        "model": final_response.model,
-                    }
-                )
+                trace.set_output(output_content)
+                trace.set_metadata("run_id", final_response.run_id)
+                trace.set_metadata("model", final_response.model)
 
     def _run_single_round(
             self,

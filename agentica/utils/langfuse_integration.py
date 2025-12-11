@@ -185,20 +185,20 @@ def langfuse_trace_context(
         input_data: Optional input data to log with the trace
 
     Yields:
-        The Langfuse span object if available, None otherwise
+        A LangfuseSpanWrapper object that allows setting output after execution
 
     Example:
         with langfuse_trace_context(
             name="my-agent-run",
             session_id="session-123",
             user_id="user-456"
-        ):
-            # All OpenAI calls here will be grouped in one trace
+        ) as trace:
             response1 = openai.chat.completions.create(...)
             response2 = openai.chat.completions.create(...)
+            trace.set_output(response2.choices[0].message.content)
     """
     if not is_langfuse_available():
-        yield None
+        yield _DummySpanWrapper()
         return
 
     try:
@@ -221,20 +221,67 @@ def langfuse_trace_context(
                     tags=tags,
                 )
 
+            # Create a wrapper to collect output
+            wrapper = _LangfuseSpanWrapper(span)
+
             # Propagate session_id to all nested observations (including OpenAI generations)
             with propagate_attributes(
                     session_id=session_id,
                     user_id=user_id,
                     tags=tags,
             ):
-                yield span
+                yield wrapper
+
+            # Update span with collected output before exiting context
+            if wrapper._output is not None:
+                span.update(output=wrapper._output)
+            if wrapper._metadata:
+                span.update(metadata=wrapper._metadata)
 
     except ImportError:
         logger.debug("Langfuse context manager not available")
-        yield None
+        yield _DummySpanWrapper()
     except Exception as e:
         logger.warning(f"Failed to create Langfuse trace context: {e}")
-        yield None
+        yield _DummySpanWrapper()
+
+
+class _LangfuseSpanWrapper:
+    """Wrapper to collect output and update span before context exits."""
+
+    def __init__(self, span: Any):
+        self._span = span
+        self._output: Optional[Any] = None
+        self._metadata: Dict[str, Any] = {}
+
+    def set_output(self, output: Any) -> None:
+        """Set the output to be recorded when the context exits."""
+        self._output = output
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        """Add metadata to be recorded when the context exits."""
+        self._metadata[key] = value
+
+    def update(self, **kwargs) -> None:
+        """Directly update the underlying span."""
+        if self._span:
+            try:
+                self._span.update(**kwargs)
+            except Exception as e:
+                logger.debug(f"Failed to update span: {e}")
+
+
+class _DummySpanWrapper:
+    """Dummy wrapper when Langfuse is not available."""
+
+    def set_output(self, _output: Any) -> None:
+        pass
+
+    def set_metadata(self, _key: str, _value: Any) -> None:
+        pass
+
+    def update(self, **_kwargs) -> None:
+        pass
 
 
 @contextmanager

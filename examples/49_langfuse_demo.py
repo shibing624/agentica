@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent
 from agentica.model.openai import OpenAIChat
-from agentica.tools.search_serper_tool import SearchSerperTool
+from agentica.tools.baidu_search_tool import BaiduSearchTool
 
 if __name__ == '__main__':
     # Example 1: Basic agent with Langfuse tracing
@@ -55,15 +55,15 @@ if __name__ == '__main__':
 
     # First turn
     response1 = agent.run("What is Python?")
-    print(f"Turn 1: {response1.content[:100]}...")
+    print(f"Turn 1: {response1.content}")
 
     # Second turn - same session, will be grouped with first turn
     response2 = agent.run("What are its main features?")
-    print(f"Turn 2: {response2.content[:100]}...")
+    print(f"Turn 2: {response2.content}")
 
     # Third turn
     response3 = agent.run("Give me a simple example.")
-    print(f"Turn 3: {response3.content[:100]}...")
+    print(f"Turn 3: {response3.content}")
     print()
 
     # Example 3: Agent with tools - multiple LLM calls in one run
@@ -80,7 +80,7 @@ if __name__ == '__main__':
             id="gpt-4o-mini",
             langfuse_tags=["research", "tools"],
         ),
-        tools=[SearchSerperTool()],
+        tools=[BaiduSearchTool()],
         system_prompt="You are a research assistant. Use search tools to find information.",
         show_tool_calls=True,
         debug_mode=True,
@@ -88,8 +88,8 @@ if __name__ == '__main__':
 
     # This single run may invoke LLM multiple times (initial + after tool results)
     # All calls are grouped under one trace in Langfuse
-    response = agent_with_tools.run("What are the latest developments in AI agents in 2024?")
-    print(f"Research Response: {response.content[:200]}...")
+    response = agent_with_tools.run("What are the latest developments in AI agents in 2025? 中文回答")
+    print(f"Research Response: {response.content}")
     print()
 
     # Example 4: Different sessions for different users
