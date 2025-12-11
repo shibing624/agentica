@@ -8,14 +8,13 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import Agent, Moonshot
-from agentica.tools.search_serper_tool import SearchSerperTool
+from agentica import Agent, Moonshot, BaiduSearchTool
 
 model = Moonshot()
 
 m = Agent(
     model=model,
-    tools=[SearchSerperTool()],
+    tools=[BaiduSearchTool()],
     add_datetime_to_instructions=True,
 )
 

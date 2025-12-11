@@ -52,6 +52,11 @@ from agentica.utils.message import get_text_from_message
 from agentica.utils.timer import Timer
 from agentica.agent_session import AgentSession
 from agentica.utils.string import parse_structured_output
+from agentica.utils.langfuse_integration import (
+    langfuse_trace_context,
+    update_langfuse_span,
+    is_langfuse_available,
+)
 
 
 @dataclass(init=False)
@@ -1634,30 +1639,74 @@ class Agent:
             stream_intermediate_steps: bool = False,
             **kwargs: Any,
     ) -> Iterator[RunResponse]:
-        """Run the Agent with optional multi-round strategy."""
+        """Run the Agent with optional multi-round strategy.
 
-        if self.enable_multi_round:
-            yield from self._run_multi_round(
-                message=message,
-                stream=stream,
-                audio=audio,
-                images=images,
-                videos=videos,
-                messages=messages,
-                stream_intermediate_steps=stream_intermediate_steps,
-                **kwargs
-            )
-        else:
-            yield from self._run_single_round(
-                message=message,
-                stream=stream,
-                audio=audio,
-                images=images,
-                videos=videos,
-                messages=messages,
-                stream_intermediate_steps=stream_intermediate_steps,
-                **kwargs
-            )
+        All LLM calls within this run are grouped under a single Langfuse trace
+        when Langfuse is configured. This enables proper tracking of multi-turn
+        conversations and tool-calling sequences.
+        """
+        # Prepare input for Langfuse trace
+        trace_input = message if isinstance(message, str) else str(message) if message else None
+
+        # Get trace name: agent name or default
+        trace_name = self.name or "agent-run"
+
+        # Get tags from model if available
+        langfuse_tags = None
+        if self.model and hasattr(self.model, 'langfuse_tags'):
+            langfuse_tags = self.model.langfuse_tags
+
+        # Wrap the entire run in a Langfuse trace context
+        # This groups all LLM calls (including tool-calling iterations) under one trace
+        with langfuse_trace_context(
+                name=trace_name,
+                session_id=self.session_id,
+                user_id=self.user_id,
+                tags=langfuse_tags,
+                input_data=trace_input,
+        ) as span:
+            final_response = None
+
+            if self.enable_multi_round:
+                for response in self._run_multi_round(
+                        message=message,
+                        stream=stream,
+                        audio=audio,
+                        images=images,
+                        videos=videos,
+                        messages=messages,
+                        stream_intermediate_steps=stream_intermediate_steps,
+                        **kwargs
+                ):
+                    final_response = response
+                    yield response
+            else:
+                for response in self._run_single_round(
+                        message=message,
+                        stream=stream,
+                        audio=audio,
+                        images=images,
+                        videos=videos,
+                        messages=messages,
+                        stream_intermediate_steps=stream_intermediate_steps,
+                        **kwargs
+                ):
+                    final_response = response
+                    yield response
+
+            # Update the span with the final output
+            if span and final_response:
+                output_content = final_response.content
+                if isinstance(output_content, BaseModel):
+                    output_content = output_content.model_dump()
+                update_langfuse_span(
+                    span,
+                    output=output_content,
+                    metadata={
+                        "run_id": final_response.run_id,
+                        "model": final_response.model,
+                    }
+                )
 
     def _run_single_round(
             self,
