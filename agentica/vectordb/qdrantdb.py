@@ -1,13 +1,8 @@
 from hashlib import md5
 from typing import List, Optional, Dict, Any
 
-try:
-    from qdrant_client import QdrantClient  # noqa: F401
-    from qdrant_client.http import models
-except ImportError:
-    raise ImportError(
-        "The `qdrant-client` package is not installed. " "Please install it via `pip install qdrant-client`."
-    )
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
 
 from agentica.document import Document
 from agentica.emb.base import Emb
@@ -20,7 +15,7 @@ from agentica.reranker.base import Reranker
 class QdrantDb(VectorDb):
     def __init__(
             self,
-            collection: str,
+            collection: str = "qdrant_vec_db",
             embedder: Emb = OpenAIEmb(),
             distance: Distance = Distance.cosine,
             location: Optional[str] = None,

@@ -10,6 +10,8 @@ import os
 from datetime import datetime
 from hashlib import md5
 from typing import Optional, List, Dict, Any
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
 
 from agentica.memorydb import MemoryDb, MemoryRow
 from agentica.emb.base import Emb
@@ -28,7 +30,7 @@ class QdrantMemoryDb(MemoryDb):
     
     def __init__(
         self,
-        collection: str = "agent_memory",
+        collection: str = "qdrant_memory",
         embedder: Optional[Emb] = None,
         path: Optional[str] = None,
         on_disk: bool = True,
@@ -52,15 +54,6 @@ class QdrantMemoryDb(MemoryDb):
             api_key: API key for Qdrant Cloud
             **kwargs: Additional arguments passed to QdrantClient
         """
-        try:
-            from qdrant_client import QdrantClient
-            from qdrant_client.http import models
-        except ImportError:
-            raise ImportError(
-                "The `qdrant-client` package is not installed. "
-                "Please install it via `pip install qdrant-client`."
-            )
-        
         self.collection = collection
         self.embedder = embedder
         self.on_disk = on_disk
