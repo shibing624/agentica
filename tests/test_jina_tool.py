@@ -24,7 +24,7 @@ def jina_tool():
 def test_read_url_error(mock_post):
     mock_post.side_effect = Exception("Test error")
 
-    tools = JinaTool(api_key="test_key")
+    tools = JinaTool(api_key="test_key", work_dir="./test_work_dir")
     result = tools.jina_url_reader("https://example.com")
 
     # jina_url_reader returns JSON format
@@ -38,7 +38,7 @@ def test_read_url_error(mock_post):
 def test_search_query_error(mock_get):
     mock_get.side_effect = Exception("Test error")
 
-    tools = JinaTool(api_key="test_key")
+    tools = JinaTool(api_key="test_key", work_dir="./test_work_dir")
     result = tools.jina_search("test query")
 
     # jina_search returns JSON format: {"query": "result"}
@@ -57,7 +57,7 @@ def test_jina_url_reader(mock_post):
     mock_response.raise_for_status = Mock()
     mock_post.return_value = mock_response
 
-    jina_tool = JinaTool(api_key="test_key")
+    jina_tool = JinaTool(api_key="test_key", work_dir="./test_work_dir")
     url = "https://abc.com/test-url"
     result = jina_tool.jina_url_reader(url)
 
@@ -79,7 +79,7 @@ def test_jina_search(mock_get):
     mock_get.return_value = mock_response
 
     query = "苹果的最新产品是啥？"
-    jina_tool = JinaTool(api_key="test_key")
+    jina_tool = JinaTool(api_key="test_key", work_dir="./test_work_dir")
     result = jina_tool.jina_search(query)
 
     # jina_search returns JSON format: {"query": "result"}
@@ -109,7 +109,7 @@ def test_jina_url_reader_by_goal(mock_post, mock_openai_chat):
     mock_openai_chat_instance.get_client.return_value = mock_client
     mock_openai_chat.return_value = mock_openai_chat_instance
 
-    jina_tool = JinaTool(api_key="test_key")
+    jina_tool = JinaTool(api_key="test_key", work_dir="./test_work_dir")
     url = "https://example.com/ai-article"
     goal = "Learn about AI"
     result = jina_tool.jina_url_reader_by_goal(url, goal)

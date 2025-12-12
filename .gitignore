@@ -180,3 +180,5 @@ examples/mcp_config-test1.json
 saved_html/
 tests/__pycache__/*
 __pycache__/
+
+test_work_dir/
