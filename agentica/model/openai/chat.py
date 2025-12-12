@@ -4,7 +4,6 @@ from typing import Optional, List, Iterator, Dict, Any, Union
 
 import httpx
 from enum import Enum, EnumMeta
-from packaging import version
 from pydantic import BaseModel, Field
 
 from agentica.model.base import Model
