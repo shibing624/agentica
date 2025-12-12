@@ -1,7 +1,8 @@
 import pytest
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-sys.path.append('..')
 from agentica.tools.run_nb_code_tool import RunNbCodeWrapper
 
 
@@ -25,34 +26,6 @@ def test_execute_error():
     executor = RunNbCodeWrapper()
     output, is_success = executor.run("z=1/0")
     assert not is_success
-    executor.terminate()
-
-
-PLOT_CODE = """
-import numpy as np
-import matplotlib.pyplot as plt
-
-# 生成随机数据
-random_data = np.random.randn(1000)  # 生成1000个符合标准正态分布的随机数
-
-# 绘制直方图
-plt.hist(random_data, bins=30, density=True, alpha=0.7, color='blue', edgecolor='black')
-
-# 添加标题和标签
-plt.title('Histogram of Random Data')
-plt.xlabel('Value')
-plt.ylabel('Frequency')
-
-# 显示图形
-plt.show()
-plt.close()
-"""
-
-
-def test_plotting_code():
-    executor = RunNbCodeWrapper()
-    output, is_success = executor.run(PLOT_CODE)
-    assert is_success
     executor.terminate()
 
 

@@ -6,8 +6,9 @@
 import unittest
 from pathlib import Path
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-sys.path.append('..')
 from agentica.emb.zhipuai_emb import ZhipuAIEmb
 
 pwd_path = Path(__file__).parent
@@ -18,6 +19,6 @@ class EmbTest(unittest.TestCase):
         self.emb = ZhipuAIEmb()
 
     def test_emb(self):
-        r = self.emb.get_embedding("What is the result of 33332.22 * 212222.323 - 1222.1 =?")
+        r = self.emb.get_embedding("hi")
         print(r)
         self.assertIsNotNone(r)

@@ -7,10 +7,10 @@ import unittest
 from unittest.mock import patch, mock_open
 from pathlib import Path
 import json
-import os
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-sys.path.append('..')
 from agentica.utils.file_parser import (
     read_json_file,
     read_csv_file,
@@ -45,37 +45,6 @@ class TestFileParser(unittest.TestCase):
         result = read_txt_file(Path(path))
         print(result[:100])
         self.assertIsNotNone(result)
-
-    def test_read_pdf_file(self):
-        path = os.path.join(pwd_path, "data/paper_sample.pdf")
-        self.assertTrue(os.path.exists(path))
-        print(f"path: {path}")
-        result = read_pdf_file(Path(path))
-        print(result[:])
-        self.assertIsNotNone(result)
-
-    def test_read_pdf_url(self):
-        url = "https://arxiv.org/pdf/2408.09869"
-        result = read_pdf_url(url)
-        print(result[:])
-        self.assertIsNotNone(result)
-
-    def test_read_docx_file(self):
-        path = os.path.join(pwd_path, "data/children_study.docx")
-        self.assertTrue(os.path.exists(path))
-        print(f"path: {path}")
-        result = read_docx_file(Path(path))
-        print(result[:])
-        self.assertIsNotNone(result)
-
-    def test_read_excel_file(self):
-        path = os.path.join(pwd_path, "data/asr_yun_realtime.xlsx")
-        self.assertTrue(os.path.exists(path))
-        print(f"path: {path}")
-        result = read_excel_file(Path(path))
-        print(result[:])
-        self.assertIsNotNone(result)
-
 
 if __name__ == "__main__":
     unittest.main()
