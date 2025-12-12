@@ -24,7 +24,7 @@ jobs:
         id: pip-cache
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}-torch-cython
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
             ${{ runner.os }}-pip-
@@ -33,10 +33,6 @@ jobs:
         with:
           path: ~/.cache/huggingface
           key: ${{ runner.os }}-huggingface-
-      - name: Install torch and Cython
-        run: |
-          python -m pip install --upgrade pip
-          pip install Cython torch
       - name: Install from pypi
         run: |
           pip install -U agentica

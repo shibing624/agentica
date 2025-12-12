@@ -18,5 +18,3 @@ mcp>=1.9.4
 puremagic
 qdrant-client
 langfuse
-nbclient
-nbformat
