@@ -164,7 +164,7 @@ class RunNbCodeWrapper:
                 return True
             else:
                 return False
-        except NameError:
+        except (NameError, ModuleNotFoundError):
             return False
 
     def run_cell(self, cell: NotebookNode, cell_index: int) -> Tuple[bool, str]:
