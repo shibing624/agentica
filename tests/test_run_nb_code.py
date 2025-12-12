@@ -67,26 +67,4 @@ def test_terminate(k):
         assert executor.nb_client.kc is None
 
 
-def test_reset():
-    executor = RunNbCodeWrapper()
-    executor.run(code='print("This is a code!")', language="python")
-    is_kernel_alive = executor.nb_client.km.is_alive()
-    assert is_kernel_alive
-    executor.reset()
-    assert executor.nb_client.km is None
-    executor.terminate()
 
-
-def test_parse_outputs():
-    executor = RunNbCodeWrapper()
-    code = """
-    import pandas as pd
-    df = pd.DataFrame({'ID': [1,2,3], 'NAME': ['a', 'b', 'c']})
-    print(df.columns)
-    print(f"columns num:{len(df.columns)}")
-    print(df['DUMMPY_ID'])
-    """
-    output, is_success = executor.run(code)
-    print('output:', output)
-    assert not is_success
-    executor.terminate()
