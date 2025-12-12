@@ -105,19 +105,20 @@ class JinaTool(Tool):
             limit_len: int, url page content limit char length, default: 8000
 
         Returns:
-            str, The result of the crawling html text content, Markdown format.
+            str, JSON string with url, content (Markdown format), and save_path.
         """
+        content = ''
+        save_path = ''
+        error = ''
         try:
             data = {'url': url}
             response = requests.post('https://r.jina.ai/', headers=self._get_headers(), json=data)
             response.raise_for_status()
             content = response.text
-            result = self._trim_content(content, limit_len)
         except Exception as e:
-            msg = f"Error reading URL: {str(e)}"
-            logger.error(msg)
-            result = msg
-            content = ''
+            error = f"Error reading URL: {str(e)}"
+            logger.error(error)
+
         if content:
             filename = self._generate_file_name_from_url(url)
             save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
@@ -125,7 +126,15 @@ class JinaTool(Tool):
             with open(save_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             logger.debug(f"Url: {url}, saved content to: {save_path}")
-        return result
+
+        result = {
+            "url": url,
+            "content": self._trim_content(content, limit_len) if content else "",
+            "save_path": save_path,
+        }
+        if error:
+            result["error"] = error
+        return json.dumps(result, ensure_ascii=False)
 
     def jina_search_single_query(self, query: str) -> str:
         """Performs a web search using Jina Search API and returns the search content.
@@ -162,11 +171,11 @@ class JinaTool(Tool):
         if isinstance(queries, str):
             queries = [queries]
 
-        all_results = []
+        all_results = {}
         for i, query in enumerate(queries, 1):
             res = self.jina_search_single_query(query)
             all_results[query] = res
-        return json.dumps(all_results, indent=2, ensure_ascii=False)
+        return json.dumps(all_results, ensure_ascii=False)
 
     def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:
         """
@@ -178,18 +187,27 @@ class JinaTool(Tool):
             goal: What information you want to extract from the pages (e.g., the original question or specific facts needed).
 
         Returns:
-            Extracted evidence and summary from the webpages relevant to your goal.
+            str, JSON string with goal, urls, and extracted information for each URL.
         """
         self.update_llm()
-        all_useful_information = []
+        all_url_results = []
         if isinstance(urls, str):
             urls = [urls]
 
         for i, url in enumerate(urls, 1):
             logger.debug(f"Processing URL {i}/{len(urls)}: {url}")
-            content = self.jina_url_reader(url, 95000)
+            reader_result = self.jina_url_reader(url, 95000)
+            reader_data = json.loads(reader_result)
+            content = reader_data.get("content", "")
 
-            if content and not content.startswith("Error reading URL"):
+            url_result = {
+                "url": url,
+                "evidence": "",
+                "summary": "",
+                "error": ""
+            }
+
+            if content:
                 messages = [{"role": "user", "content": self.extract_prompt.format(webpage_content=content, goal=goal)}]
                 self.llm = cast(Model, self.llm)
                 response = self.llm.get_client().chat.completions.create(
@@ -236,29 +254,25 @@ class JinaTool(Tool):
                         parse_retry_times += 1
 
                 if parse_retry_times >= 3:
-                    useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
-                        url=url, goal=goal)
-                    useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
-                    useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
+                    url_result["error"] = "The webpage content could not be processed."
                 else:
-                    useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
-                        url=url, goal=goal)
-                    useful_information += "Evidence in page: \n" + str(raw["evidence"]) + "\n\n"
-                    useful_information += "Summary: \n" + str(raw["summary"]) + "\n\n"
+                    url_result["evidence"] = str(raw.get("evidence", ""))
+                    url_result["summary"] = str(raw.get("summary", ""))
 
-                if len(useful_information) < 10 and summary_retries < 0:
+                if len(url_result["evidence"]) < 10 and len(url_result["summary"]) < 10 and summary_retries < 0:
                     logger.warning("[visit] Could not generate valid summary after maximum retries")
-                    useful_information = "[visit] Failed to read page"
+                    url_result["error"] = "Failed to read page after maximum retries"
             else:
-                useful_information = "The useful information in {url} for user goal {goal} as follows: \n\n".format(
-                    url=url, goal=goal)
-                useful_information += "Evidence in page: \n" + "The provided webpage content could not be accessed. Please check the URL or file format." + "\n\n"
-                useful_information += "Summary: \n" + "The webpage content could not be processed, and therefore, no information is available." + "\n\n"
-            all_useful_information.append(useful_information)
+                url_result["error"] = reader_data.get("error", "The webpage content could not be accessed.")
 
-        # 合并所有URL的信息
-        final_result = f"Combined information from {len(urls)} URLs for goal: {goal}\n\n---\n"
-        final_result += "\n".join(all_useful_information)
+            all_url_results.append(url_result)
+
+        result = {
+            "goal": goal,
+            "urls": urls,
+            "results": all_url_results
+        }
+        final_result = json.dumps(result, ensure_ascii=False)
         logger.debug(f"Final combined result length: {len(final_result)} characters, top 500 chars:\n{final_result[:500]}")
         return final_result
 

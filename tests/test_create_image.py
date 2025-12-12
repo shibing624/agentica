@@ -8,18 +8,26 @@ import os.path
 import shutil
 from unittest.mock import MagicMock, patch
 import sys
-sys.path.append('..')
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica.tools.dalle_tool import DalleTool
 
 
-@patch("openai.Image.create")
-@patch("requests.get")
-def test_execute(mock_get, mock_create):
+@patch("agentica.tools.dalle_tool.requests.get")
+@patch("agentica.tools.dalle_tool.OpenAIChat")
+def test_execute(mock_openai_chat, mock_get):
     """
     Tests the execute method of the CreateImage class. It mocks the OpenAI and requests APIs, and checks that the image creation process works correctly.
     """
-    # Mock the openai.Image.create call to return a mock response with a mock image URL
-    mock_create.return_value = {"data": [{"url": "https://mockurl.com/mock_image.jpg"}]}
+    # Mock the OpenAIChat and its client's images.generate call
+    mock_client = MagicMock()
+    mock_image_response = MagicMock()
+    mock_image_response.data = [MagicMock(url="https://mockurl.com/mock_image.jpg")]
+    mock_client.images.generate.return_value = mock_image_response
+    mock_openai_chat_instance = MagicMock()
+    mock_openai_chat_instance.get_client.return_value = mock_client
+    mock_openai_chat.return_value = mock_openai_chat_instance
 
     # Mock the requests.get call to return a mock response with mock image content
     mock_response = MagicMock()

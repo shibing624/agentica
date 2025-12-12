@@ -3,13 +3,14 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
-import os
-from unittest.mock import patch, Mock
+import json
+from unittest.mock import patch, Mock, MagicMock
 
 import pytest
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-sys.path.append('..')
 from agentica.tools.jina_tool import JinaTool
 
 
@@ -19,62 +20,105 @@ def jina_tool():
     return JinaTool(api_key="test_api_key", work_dir="./test_work_dir")
 
 
-@patch("requests.get")
-def test_read_url_error(mock_get):
-    mock_get.side_effect = Exception("Test error")
+@patch("agentica.tools.jina_tool.requests.post")
+def test_read_url_error(mock_post):
+    mock_post.side_effect = Exception("Test error")
 
     tools = JinaTool(api_key="test_key")
     result = tools.jina_url_reader("https://example.com")
 
-    assert result is not None, "result is None"
+    # jina_url_reader returns JSON format
+    result_dict = json.loads(result)
+    assert result_dict["url"] == "https://example.com"
+    assert result_dict["content"] == ""
+    assert "Error reading URL" in result_dict["error"]
 
 
-@patch("requests.get")
+@patch("agentica.tools.jina_tool.requests.get")
 def test_search_query_error(mock_get):
     mock_get.side_effect = Exception("Test error")
 
     tools = JinaTool(api_key="test_key")
     result = tools.jina_search("test query")
 
-    assert result == "Error performing search: Test error"
+    # jina_search returns JSON format: {"query": "result"}
+    result_dict = json.loads(result)
+    assert "test query" in result_dict
+    assert "Error performing search: Test error" in result_dict["test query"]
 
 
-@patch('requests.get')
-def test_jina_url_reader(mock_get):
+@patch('agentica.tools.jina_tool.requests.post')
+def test_jina_url_reader(mock_post):
     """Test the jina_url_reader method."""
     # Mock response
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.text = "This is a test content from the URL."
-    mock_get.return_value = mock_response
+    mock_response.raise_for_status = Mock()
+    mock_post.return_value = mock_response
 
     jina_tool = JinaTool(api_key="test_key")
     url = "https://abc.com/test-url"
     result = jina_tool.jina_url_reader(url)
-    assert result is not None
+
+    # jina_url_reader returns JSON format
+    result_dict = json.loads(result)
+    assert result_dict["url"] == url
+    assert "This is a test content from the URL." in result_dict["content"]
+    assert "error" not in result_dict
 
 
-@patch('requests.get')
+@patch('agentica.tools.jina_tool.requests.get')
 def test_jina_search(mock_get):
     """Test the jina_search method."""
     # Mock response
     mock_response = Mock()
     mock_response.status_code = 200
     mock_response.text = "Search results for the query."
+    mock_response.raise_for_status = Mock()
     mock_get.return_value = mock_response
 
     query = "苹果的最新产品是啥？"
     jina_tool = JinaTool(api_key="test_key")
     result = jina_tool.jina_search(query)
 
-    # Assertions
-    assert result == "Search results for the query."
-    mock_get.assert_called_once_with('https://s.jina.ai/苹果的最新产品是啥？', headers=jina_tool._get_headers())
-    saved_file_path = os.path.join(jina_tool.work_dir, jina_tool._generate_file_name_from_url('https://s.jina.ai/苹果的最新产品是啥？'))
-    with open(saved_file_path, 'r', encoding='utf-8') as f:
-        saved_content = f.read()
-    assert saved_content == mock_response.text
+    # jina_search returns JSON format: {"query": "result"}
+    result_dict = json.loads(result)
+    assert query in result_dict
+    assert result_dict[query] == "Search results for the query."
 
-    # Clean up
-    if os.path.exists(saved_file_path):
-        os.remove(saved_file_path)
+
+@patch('agentica.tools.jina_tool.OpenAIChat')
+@patch('agentica.tools.jina_tool.requests.post')
+def test_jina_url_reader_by_goal(mock_post, mock_openai_chat):
+    """Test the jina_url_reader_by_goal method."""
+    # Mock requests.post response for jina_url_reader
+    mock_response = Mock()
+    mock_response.status_code = 200
+    mock_response.text = "This is test webpage content about AI."
+    mock_response.raise_for_status = Mock()
+    mock_post.return_value = mock_response
+
+    # Mock OpenAIChat and its client
+    mock_client = MagicMock()
+    mock_chat_response = MagicMock()
+    mock_chat_response.choices = [MagicMock()]
+    mock_chat_response.choices[0].message.content = '{"rational": "test", "evidence": "AI evidence", "summary": "AI summary"}'
+    mock_client.chat.completions.create.return_value = mock_chat_response
+    mock_openai_chat_instance = MagicMock()
+    mock_openai_chat_instance.get_client.return_value = mock_client
+    mock_openai_chat.return_value = mock_openai_chat_instance
+
+    jina_tool = JinaTool(api_key="test_key")
+    url = "https://example.com/ai-article"
+    goal = "Learn about AI"
+    result = jina_tool.jina_url_reader_by_goal(url, goal)
+
+    # jina_url_reader_by_goal returns JSON format
+    result_dict = json.loads(result)
+    assert result_dict["goal"] == goal
+    assert url in result_dict["urls"]
+    assert len(result_dict["results"]) == 1
+    assert result_dict["results"][0]["url"] == url
+    assert result_dict["results"][0]["evidence"] == "AI evidence"
+    assert result_dict["results"][0]["summary"] == "AI summary"
