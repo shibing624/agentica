@@ -13,8 +13,8 @@ if AGENTICA_HOME:
 
 # Load environment variables from .env file
 AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
-load_dotenv()
 load_dotenv(AGENTICA_DOTENV_PATH, override=True)
+load_dotenv()
 
 AGENTICA_DATA_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
 AGENTICA_LOG_LEVEL = os.getenv("AGENTICA_LOG_LEVEL", "INFO").upper()
