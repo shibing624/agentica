@@ -109,7 +109,7 @@ class SearchExaTool(Tool):
                     except Exception as e:
                         logger.debug(f"Failed to get highlights {e}")
                 exa_results_parsed.append(result_dict)
-            parsed_results = json.dumps(exa_results_parsed, indent=2, ensure_ascii=False)
+            parsed_results = json.dumps(exa_results_parsed, ensure_ascii=False)
             logger.info(f"Searching exa for: {query}, results: {parsed_results}")
             return parsed_results
         except Exception as e:

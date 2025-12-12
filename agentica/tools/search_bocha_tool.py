@@ -110,7 +110,7 @@ class SearchBochaTool(Tool):
 
                 parsed_results.append(result_dict)
 
-            parsed_json = json.dumps(parsed_results, indent=2, ensure_ascii=False)
+            parsed_json = json.dumps(parsed_results, ensure_ascii=False)
             logger.debug(f"Searching bocha for: {query}, results count: {len(parsed_results)}")
             return parsed_json
 
