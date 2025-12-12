@@ -171,6 +171,7 @@ examples/01_llm_demo_test.py
 examples/43_minimax_mcp_demo1.py
 examples/46_custom_llm_demo_v2.py
 examples/46_custom_llm_demov1.py
+examples/12_web_search_bocha_demo.py
 examples/46_custom_llm_seed-1.6-pro-thinking-auto-demo.py
 examples/character_demo.py
 examples/feishu_mcp_stdio_demo.py
