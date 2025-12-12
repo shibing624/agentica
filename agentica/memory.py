@@ -18,7 +18,6 @@ from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.run_response import RunResponse
-from agentica.qdrant_memorydb import QdrantMemoryDb
 
 
 class AgentRun(BaseModel):
@@ -577,7 +576,8 @@ class AgentMemory(BaseModel):
     update_user_memories_after_run: bool = True
 
     # MemoryDb to store personalized memories (supports CsvMemoryDb, SqliteMemoryDb, QdrantMemoryDb, etc.)
-    db: Optional[MemoryDb] = QdrantMemoryDb()
+    # Note: Only initialized when create_user_memories=True, default is None to avoid resource lock issues
+    db: Optional[MemoryDb] = None
     # User ID for the personalized memories
     user_id: Optional[str] = None
     # Retrieval mode: last_n, first_n, semantic (semantic requires QdrantMemoryDb)
