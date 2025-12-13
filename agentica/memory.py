@@ -597,6 +597,43 @@ class AgentMemory(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
+    @classmethod
+    def with_long_term_memory(
+            cls,
+            db: MemoryDb,
+            user_id: Optional[str] = None,
+            retrieval: MemoryRetrieval = MemoryRetrieval.last_n,
+            num_memories: Optional[int] = None,
+            **kwargs
+    ) -> "AgentMemory":
+        """Factory method to create AgentMemory with long-term memory enabled.
+        
+        This is a convenience method that automatically sets create_user_memories=True.
+        
+        Args:
+            db: MemoryDb instance (e.g., QdrantMemoryDb, SqliteMemoryDb, CsvMemoryDb)
+            user_id: Optional user ID for personalized memories
+            retrieval: Memory retrieval mode (last_n, first_n, semantic)
+            num_memories: Number of memories to retrieve
+            **kwargs: Additional arguments passed to AgentMemory
+            
+        Returns:
+            AgentMemory instance with long-term memory enabled
+            
+        Example:
+            >>> from agentica.qdrant_memorydb import QdrantMemoryDb
+            >>> memory = AgentMemory.with_long_term_memory(db=QdrantMemoryDb())
+            >>> agent = Agent(memory=memory)
+        """
+        return cls(
+            create_user_memories=True,
+            db=db,
+            user_id=user_id,
+            retrieval=retrieval,
+            num_memories=num_memories,
+            **kwargs
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         _memory_dict = self.model_dump(
             exclude_none=True,
