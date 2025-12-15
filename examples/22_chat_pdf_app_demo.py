@@ -14,7 +14,7 @@ from agentica import Agent, OpenAIChat
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
-from agentica import SqlAgentStorage
+from agentica.db.sqlite import SqliteDb
 
 llm = OpenAIChat()
 # llm = OllamaChat(model="qwen:0.5b")
@@ -23,7 +23,6 @@ emb = Text2VecEmb()
 print(emb)
 output_dir = "outputs"
 db_file = f"{output_dir}/medical_corpus.db"
-table_name = 'medical_corpus'
 knowledge_base = Knowledge(
     data_path=["data/medical_corpus.txt", "data/paper_sample.pdf"],  # PDF files also works
     vector_db=LanceDb(
@@ -34,14 +33,14 @@ knowledge_base = Knowledge(
 # Comment out after first run
 knowledge_base.load(recreate=True)
 
-storage = SqlAgentStorage(table_name=table_name, db_file=db_file)
+db = SqliteDb(db_file=db_file)
 
 
 def pdf_app(new: bool = False, user: str = "user"):
     sess_id: Optional[str] = None
 
     if not new:
-        session_ids: List[str] = storage.get_all_session_ids(user)
+        session_ids: List[str] = db.get_all_session_ids(user_id=user)
         if len(session_ids) > 0:
             sess_id = session_ids[0]
     print(f"User: {user}\nrun_id: {sess_id}\n")
@@ -50,7 +49,7 @@ def pdf_app(new: bool = False, user: str = "user"):
         session_id=sess_id,
         user_id=user,
         knowledge_base=knowledge_base,
-        storage=storage,
+        db=db,
         # Show tool calls in the response
         show_tool_calls=True,
         # Enable the assistant to search the knowledge base

@@ -10,24 +10,23 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent
 from agentica.knowledge.base import Knowledge
-from agentica.vectordb.memory_vectordb import MemoryVectorDb
-from agentica import SqlAgentStorage
+from agentica.vectordb.memory_vectordb import InMemoryVectorDb
+from agentica.db.sqlite import SqliteDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 
 knowledge = Knowledge(
     data_path=["https://phi-public.s3.amazonaws.com/recipes/ThaiRecipes.pdf"],
-    vector_db=MemoryVectorDb(embedder=Text2VecEmb()),
+    vector_db=InMemoryVectorDb(embedder=Text2VecEmb()),
 )
 # Comment after first run
 knowledge.load()
 
-# Create a SQL storage for the assistant's data
-storage = SqlAgentStorage(table_name="ThaiRecipes", db_file="outputs/ThaiRecipes.db")
-storage.create()
+# Create a SQLite database for the assistant's data
+db = SqliteDb(db_file="outputs/ThaiRecipes.db")
 
 m = Agent(
     knowledge=knowledge,
-    storage=storage,
+    db=db,
     add_context=True,  # Use RAG by adding references from the knowledge base to the user prompt.
     description="中文回答",
 )

@@ -66,7 +66,7 @@ def is_langfuse_available() -> bool:
         if _langfuse_available:
             logger.debug("Langfuse is available and configured (using OpenTelemetry auto-instrumentation)")
         else:
-            logger.warning(f"Langfuse package installed but not configured (missing env vars), LANGFUSE_PUBLIC_KEY: {LANGFUSE_PUBLIC_KEY}")
+            logger.debug(f"Langfuse package installed but not configured (missing env vars), LANGFUSE_PUBLIC_KEY: {LANGFUSE_PUBLIC_KEY}")
     except ImportError:
         _langfuse_available = False
         logger.debug("Langfuse package not installed. Install with: pip install langfuse")

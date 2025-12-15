@@ -1,6 +1,6 @@
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Union
+from typing import Optional, List, Iterator, Dict, Any, Union, Literal
 
 import httpx
 from enum import Enum, EnumMeta
@@ -103,6 +103,7 @@ class OpenAIChat(Model):
     # Request parameters
     store: Optional[bool] = None
     reasoning_effort: Optional[str] = None
+    verbosity: Optional[Literal["low", "medium", "high"]] = None
     metadata: Optional[Dict[str, Any]] = None
     frequency_penalty: Optional[float] = None
     logit_bias: Optional[Any] = None
@@ -110,7 +111,7 @@ class OpenAIChat(Model):
     top_logprobs: Optional[int] = None
     max_tokens: Optional[int] = None
     max_completion_tokens: Optional[int] = None
-    modalities: Optional[List[str]] = None
+    modalities: Optional[List[str]] = None # "text" and/or "audio"
     audio: Optional[Dict[str, Any]] = None
     presence_penalty: Optional[float] = None
     response_format: Optional[Any] = None
@@ -240,6 +241,10 @@ class OpenAIChat(Model):
         request_params: Dict[str, Any] = {}
         if self.store is not None:
             request_params["store"] = self.store
+        if self.reasoning_effort is not None:
+            request_params["reasoning_effort"] = self.reasoning_effort
+        if self.verbosity is not None:
+            request_params["verbosity"] = self.verbosity
         if self.frequency_penalty is not None:
             request_params["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias is not None:
@@ -272,8 +277,6 @@ class OpenAIChat(Model):
             request_params["top_p"] = self.top_p
         if self.extra_headers is not None:
             request_params["extra_headers"] = self.extra_headers
-        if self.reasoning_effort is not None:
-            request_params["reasoning_effort"] = self.reasoning_effort
         if self.extra_body is not None:
             request_params["extra_body"] = self.extra_body
         if self.extra_query is not None:
@@ -300,6 +303,10 @@ class OpenAIChat(Model):
         model_dict = super().to_dict()
         if self.store is not None:
             model_dict["store"] = self.store
+        if self.reasoning_effort is not None:
+            request_params["reasoning_effort"] = self.reasoning_effort
+        if self.verbosity is not None:
+            request_params["verbosity"] = self.verbosity
         if self.frequency_penalty is not None:
             model_dict["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias is not None:

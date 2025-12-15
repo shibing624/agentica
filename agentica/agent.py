@@ -47,10 +47,11 @@ from agentica.model.message import Message, MessageReferences
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.run_response import RunEvent, RunResponse, RunResponseExtraData
 from agentica.memory import AgentMemory, Memory, AgentRun, SessionSummary
-from agentica.storage.agent.base import AgentStorage
+from agentica.agent_session import AgentSession
+from agentica.compression.manager import CompressionManager
+from agentica.db.base import BaseDb, SessionRow
 from agentica.utils.message import get_text_from_message
 from agentica.utils.timer import Timer
-from agentica.agent_session import AgentSession
 from agentica.utils.string import parse_structured_output
 from agentica.utils.langfuse_integration import langfuse_trace_context
 
@@ -111,8 +112,8 @@ class Agent:
     retriever: Optional[Callable[..., Optional[list[dict]]]] = None
     references_format: Literal["json", "yaml"] = "json"
 
-    # -*- Agent Storage
-    storage: Optional[AgentStorage] = None
+    # -*- Agent Database
+    db: Optional[BaseDb] = None
     # AgentSession from the database: DO NOT SET MANUALLY
     _agent_session: Optional[AgentSession] = None
 
@@ -161,6 +162,12 @@ class Agent:
     max_rounds: int = 100
     # Maximum number of tokens to use in the model input
     max_tokens: int = 128000
+
+    # -*- Compression Settings
+    # Enable compression of tool call results to save context space
+    compress_tool_results: bool = False
+    # CompressionManager instance for managing compression
+    compression_manager: Optional[CompressionManager] = None
 
     # -*- Extra Messages
     # A list of extra messages added after the system message and before the user message.
@@ -290,8 +297,8 @@ class Agent:
             retriever: Optional[Callable[..., Optional[list[dict]]]] = None,
             references_format: Literal["json", "yaml"] = "json",
 
-            # Storage
-            storage: Optional[AgentStorage] = None,
+            # Database
+            db: Optional[BaseDb] = None,
 
             # Tools
             tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
@@ -315,6 +322,10 @@ class Agent:
             enable_multi_round: bool = False,
             max_rounds: int = 100,
             max_tokens: int = 128000,
+
+            # Compression Settings
+            compress_tool_results: bool = False,
+            compression_manager: Optional[Any] = None,
 
             # Messages
             add_messages: Optional[List[Union[Dict, Message]]] = None,
@@ -414,7 +425,7 @@ class Agent:
         self.retriever = retriever
         self.references_format = references_format
 
-        self.storage = storage
+        self.db = db
         self._agent_session = None
 
         self.tools = tools
@@ -434,6 +445,9 @@ class Agent:
         self.enable_multi_round = enable_multi_round
         self.max_rounds = max_rounds
         self.max_tokens = max_tokens
+
+        self.compress_tool_results = compress_tool_results
+        self.compression_manager = compression_manager
 
         self.add_messages = add_messages
 
@@ -493,6 +507,14 @@ class Agent:
         else:
             set_log_level_to_info()
 
+        # Initialize compression manager if compress_tool_results is enabled
+        if self.compress_tool_results and self.compression_manager is None:
+            from agentica.compression import CompressionManager
+            self.compression_manager = CompressionManager(
+                model=self.model,
+                compress_tool_results=True,
+            )
+
     @property
     def is_streamable(self) -> bool:
         """Determines if the response from the Model is streamable
@@ -541,7 +563,7 @@ class Agent:
             return field_value.deep_copy()
 
         # For compound types, attempt a deep copy
-        if isinstance(field_value, (list, dict, set, AgentStorage)):
+        if isinstance(field_value, (list, dict, set, BaseDb)):
             try:
                 return deepcopy(field_value)
             except Exception as e:
@@ -941,26 +963,48 @@ class Agent:
         logger.debug(f"-*- AgentSession loaded: {session.session_id}")
 
     def read_from_storage(self) -> Optional[AgentSession]:
-        """Load the AgentSession from storage
+        """Load the AgentSession from database
 
         Returns:
             Optional[AgentSession]: The loaded AgentSession or None if not found.
         """
-        if self.storage is not None and self.session_id is not None:
-            self._agent_session = self.storage.read(session_id=self.session_id)
-            if self._agent_session is not None:
+        if self.db is not None and self.session_id is not None:
+            session_row = self.db.read_session(session_id=self.session_id, user_id=self.user_id)
+            if session_row is not None:
+                self._agent_session = AgentSession(
+                    session_id=session_row.session_id,
+                    agent_id=session_row.agent_id,
+                    user_id=session_row.user_id,
+                    memory=session_row.memory,
+                    agent_data=session_row.agent_data,
+                    user_data=session_row.user_data,
+                    session_data=session_row.session_data,
+                    created_at=session_row.created_at,
+                    updated_at=session_row.updated_at,
+                )
                 self.from_agent_session(session=self._agent_session)
         self.load_user_memories()
         return self._agent_session
 
     def write_to_storage(self) -> Optional[AgentSession]:
-        """Save the AgentSession to storage
+        """Save the AgentSession to database
 
         Returns:
             Optional[AgentSession]: The saved AgentSession or None if not saved.
         """
-        if self.storage is not None:
-            self._agent_session = self.storage.upsert(session=self.get_agent_session())
+        if self.db is not None:
+            agent_session = self.get_agent_session()
+            session_row = SessionRow(
+                session_id=agent_session.session_id,
+                agent_id=agent_session.agent_id,
+                user_id=agent_session.user_id,
+                memory=agent_session.memory,
+                agent_data=agent_session.agent_data,
+                user_data=agent_session.user_data,
+                session_data=agent_session.session_data,
+            )
+            self.db.upsert_session(session_row)
+            self._agent_session = agent_session
         return self._agent_session
 
     def add_introduction(self, introduction: str) -> None:
@@ -991,7 +1035,7 @@ class Agent:
                 return self._agent_session.session_id
 
         # Load an existing session or create a new session
-        if self.storage is not None:
+        if self.db is not None:
             # Load existing session if session_id is provided
             logger.debug(f"Reading AgentSession: {self.session_id}")
             self.read_from_storage()
@@ -2101,6 +2145,16 @@ class Agent:
                     for tool_msg in tool_results:
                         messages_for_model.append(tool_msg)
                         all_run_messages.append(tool_msg)
+
+                    # Check if compression is needed
+                    if self.compression_manager is not None:
+                        if self.compression_manager.should_compress(
+                            messages_for_model,
+                            tools=self.model.functions if hasattr(self.model, 'functions') else None,
+                            model=self.model,
+                        ):
+                            self.compression_manager.compress(messages_for_model)
+                            logger.debug(f"Compressed tool results, stats: {self.compression_manager.get_stats()}")
                 else:
                     # No tool calls - task completed
                     logger.debug("No tool calls, task completed")
@@ -2327,12 +2381,26 @@ class Agent:
 
         if self.enable_multi_round:
             async for response in self._arun_multi_round(
-                    message, stream, audio, images, videos, messages, stream_intermediate_steps, **kwargs
+                    message,
+                    stream=stream,
+                    audio=audio,
+                    images=images,
+                    videos=videos,
+                    messages=messages,
+                    stream_intermediate_steps=stream_intermediate_steps,
+                    **kwargs
             ):
                 yield response
         else:
             async for response in self._arun_single_round(
-                    message, stream, audio, images, videos, messages, stream_intermediate_steps, **kwargs
+                    message,
+                    stream=stream,
+                    audio=audio,
+                    images=images,
+                    videos=videos,
+                    messages=messages,
+                    stream_intermediate_steps=stream_intermediate_steps,
+                    **kwargs
             ):
                 yield response
 
@@ -2757,6 +2825,16 @@ class Agent:
                     for tool_msg in tool_results:
                         messages_for_model.append(tool_msg)
                         all_run_messages.append(tool_msg)
+
+                    # Check if compression is needed
+                    if self.compression_manager is not None:
+                        if self.compression_manager.should_compress(
+                            messages_for_model,
+                            tools=self.model.functions if hasattr(self.model, 'functions') else None,
+                            model=self.model,
+                        ):
+                            self.compression_manager.compress(messages_for_model)
+                            logger.debug(f"Compressed tool results, stats: {self.compression_manager.get_stats()}")
                 else:
                     # No tool calls - task completed
                     logger.debug("No tool calls, task completed")
@@ -3034,13 +3112,11 @@ class Agent:
         self.write_to_storage()
 
     def delete_session(self, session_id: str):
-        """Delete the current session and save to storage"""
-        if self.storage is None:
+        """Delete the current session from database"""
+        if self.db is None:
             return
         # -*- Delete session
-        self.storage.delete_session(session_id=session_id)
-        # -*- Save to storage
-        self.write_to_storage()
+        self.db.delete_session(session_id=session_id)
 
     ###########################################################################
     # Handle images and videos

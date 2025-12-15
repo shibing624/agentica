@@ -28,7 +28,7 @@
 *   **豊富な機能**：豊富な組み込みツール（Web検索、コードインタプリタ、ファイルI/O）、メモリタイプ、高度なRAG機能を標準で提供。
 *   **高度な機能を簡素化**：マルチエージェントコラボレーション（チーム）、タスク分解（ワークフロー）、自己反省などの複雑なパターンを簡単に実装。
 *   **本番環境に対応**：コマンドラインインターフェース、Web UI、またはサービスとしてエージェントを展開。**モデルコンテキストプロトコル（MCP）**による標準化されたツール統合もサポート。
-*   **中国語に最適化**：中国語ユーザー向けの専用ドキュメントと例で一流のサポートを提供。
+*   **Agent Skillサポート**：プロンプトベースのスキルシステムで、スキル指示をSystem Promptに注入し、tool callingをサポートする任意のモデルで使用可能。
 
 ## ✨ 主な機能
 
@@ -36,6 +36,16 @@
 *   **🧩 高度なオーケストレーション**：
     *   **マルチエージェントチーム**：問題を解決するために協力する専門エージェントのチームを作成。
     *   **ワークフロー**：複雑なタスクを異なるエージェントやツールが実行する一連のステップに分解。
+*   **🛡️ ガードレール（Guardrails）**：
+    *   **入出力ガードレール**：エージェント処理前にユーザー入力を検証し、返却前にエージェント出力をチェック。
+    *   **ツールガードレール**：実行前にツール引数を検証し、結果から機密データをフィルタリング。
+    *   **3つの動作モード**：allow（許可）、reject_content（拒否して続行）、raise_exception（実行停止）。
+*   **🎯 Agent Skillシステム**：
+    *   **Prompt Engineering技術**：Skillはテキスト指示であり、コードレベルの能力拡張ではありません。
+    *   **実装方法**：SKILL.mdのメタデータを解析し、スキル説明をSystem Promptに注入。
+    *   **実行フロー**：LLMがスキル説明を読んだ後、基本ツール（shell、python、file viewer）を使用してタスクを実行。
+    *   **モデル非依存**：tool callingをサポートする任意のモデルがスキルを使用可能（スキルはテキスト指示のため）。
+    *   **利点**：拡張可能、モデル非依存、メンテナンスが容易（Markdownドキュメントを更新するだけ）。
 *   **🛠️ 豊富なツールエコシステム**：
     *   広範な組み込みツール（Web検索、OCR、画像生成、シェルコマンド）。
     *   独自のカスタムツールを簡単に作成。
@@ -132,6 +142,7 @@ Agenticaで何が可能か、包括的な例をご覧ください：
 | [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | LLMを搭載した対話型オペレーティングシステムを構築するという魅力的な実験。                                                  |
 | [**投資調査ワークフロー**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | データ収集と分析からレポート生成まで、投資調査プロセス全体を自動化。                                                                                                   |
 | [**ビジョンエージェント**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 画像を理解し推論できるエージェントを構築。                                                                                                                          |
+| [**ガードレール**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | 入出力ガードレールを使用してエージェントとツールのI/Oを検証し、機密データをフィルタリングする方法をデモ。                                                                                                                          |
 
 [➡️ **すべての例を見る**](https://github.com/shibing624/agentica/tree/main/examples)
 
@@ -189,7 +200,7 @@ Agenticaは[ChatPilot](https://github.com/shibing624/ChatPilot)と完全に互�
 @misc{agentica,
   author = {Ming Xu},
   title = {Agentica: Effortlessly Build Intelligent, Reflective, and Collaborative Multimodal AI Agents},
-  year = {2024},
+  year = {2025},
   publisher = {GitHub},
   journal = {GitHub Repository},
   howpublished = {\url{https://github.com/shibing624/agentica}},

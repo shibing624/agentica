@@ -53,6 +53,8 @@ setup(
         "mcp",
         "puremagic",
         "qdrant-client",
+        "langfuse",
+        "python-frontmatter",
     ],
     packages=find_packages(exclude=['tests']),
     package_dir={'agentica': 'agentica'},

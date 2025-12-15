@@ -28,7 +28,7 @@
 *   **功能完备**：开箱即用，提供丰富的内置工具（网络搜索、代码解释器、文件读写）、记忆类型和高级 RAG 功能。
 *   **高级功能，简化实现**：轻松实现多智能体协作（团队）、任务分解（工作流）和自我反思等复杂模式。
 *   **生产就绪**：通过命令行界面、Web UI 或作为服务部署您的智能体。同时支持**模型上下文协议（MCP）**，实现标准化工具集成。
-*   **中文优化**：为中文用户提供一流支持，配备专门的文档和示例。
+*   **Agent Skill 支持**：基于 Prompt Engineering 的技能系统，将技能说明注入 System Prompt，任何支持 tool calling 的模型都可使用。
 
 ## ✨ 核心特性
 
@@ -36,6 +36,16 @@
 *   **🧩 高级编排**：
     *   **多智能体团队**：创建由专业智能体组成的团队，协作解决问题。
     *   **工作流**：将复杂任务分解为一系列步骤，由不同的智能体或工具执行。
+*   **🛡️ 安全守卫（Guardrails）**：
+    *   **输入/输出守卫**：在智能体处理前验证用户输入，在返回前检查智能体输出。
+    *   **工具守卫**：在工具执行前验证参数，在返回结果前过滤敏感数据。
+    *   **三种行为模式**：允许（allow）、拒绝并继续（reject_content）、抛出异常（raise_exception）。
+*   **🎯 Agent Skill 技能系统**：
+    *   **Prompt Engineering 技术**：Skill 是一种文本指令，不是代码级别的能力扩展。
+    *   **实现方式**：解析 SKILL.md 的元数据，将技能描述注入 System Prompt。
+    *   **执行流程**：LLM 阅读技能说明后，使用基础 tools（shell、python、file viewer）执行任务。
+    *   **模型无关**：任何支持 tool calling 的模型都可以使用，因为 skill 只是文本指令。
+    *   **优势**：可扩展、模型无关、易于维护（只需更新 Markdown 文档）。
 *   **🛠️ 丰富的工具生态**：
     *   大量内置工具（网络搜索、OCR、图像生成、Shell 命令）。
     *   轻松创建您自己的自定义工具。
@@ -132,6 +142,7 @@ pip install .
 | [**LLM 操作系统**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | 一个有趣的实验，旨在构建一个由 LLM 驱动的对话式操作系统。                                                  |
 | [**投资研究工作流**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | 自动化整个投资研究流程，从数据收集和分析到报告生成。                                                                                                   |
 | [**视觉智能体**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 构建一个能够理解和推理图像的智能体。                                                                                                                          |
+| [**安全守卫 Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | 演示如何使用输入/输出守卫验证智能体和工具的输入输出，过滤敏感数据。                                                                                                                          |
 
 [➡️ **查看所有示例**](https://github.com/shibing624/agentica/tree/main/examples)
 
@@ -189,7 +200,7 @@ Agentica 与 [ChatPilot](https://github.com/shibing624/ChatPilot) 完全兼容�
 @misc{agentica,
   author = {Ming Xu},
   title = {Agentica: Effortlessly Build Intelligent, Reflective, and Collaborative Multimodal AI Agents},
-  year = {2024},
+  year = {2025},
   publisher = {GitHub},
   journal = {GitHub Repository},
   howpublished = {\url{https://github.com/shibing624/agentica}},

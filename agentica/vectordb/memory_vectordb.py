@@ -16,7 +16,7 @@ from agentica.utils.log import logger
 from agentica.reranker.base import Reranker
 
 
-class MemoryVectorDb(VectorDb):
+class InMemoryVectorDb(VectorDb):
     def __init__(
             self,
             embedder: Emb = OpenAIEmb(),
