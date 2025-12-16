@@ -15,7 +15,7 @@ with open('README.md', 'r', encoding='utf-8') as f:
 setup(
     name='agentica',
     version=__version__,
-    description='LLM agents',
+    description='AI Agent SDK',
     long_description=readme,
     long_description_content_type='text/markdown',
     author='XuMing',
