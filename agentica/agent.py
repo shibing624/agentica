@@ -99,6 +99,9 @@ class Agent:
     add_history_to_messages: bool = False
     # Number of historical responses to add to the messages.
     num_history_responses: int = 3
+    # Enable user memories: automatically creates and stores personalized memories for the user
+    # When enabled, the agent will remember user preferences and information across sessions
+    enable_user_memories: bool = False
 
     # -*- Agent Knowledge
     knowledge: Optional[Knowledge] = None
@@ -290,6 +293,7 @@ class Agent:
             memory: Optional[AgentMemory] = None,
             add_history_to_messages: bool = False,
             num_history_responses: int = 3,
+            enable_user_memories: bool = False,
 
             # Knowledge
             knowledge: Optional[Knowledge] = None,
@@ -419,6 +423,7 @@ class Agent:
         self.memory = memory or AgentMemory()
         self.add_history_to_messages = add_history_to_messages
         self.num_history_responses = num_history_responses
+        self.enable_user_memories = enable_user_memories
 
         self.knowledge = knowledge
         self.add_references = add_references
@@ -514,6 +519,17 @@ class Agent:
                 model=self.model,
                 compress_tool_results=True,
             )
+
+        # Setup user memories: sync db and user_id between Agent and AgentMemory
+        if self.enable_user_memories:
+            self.memory.create_user_memories = True
+            self.memory.update_user_memories_after_run = True
+        # Sync db from Agent to AgentMemory if not set
+        if self.db is not None and self.memory.db is None:
+            self.memory.db = self.db
+        # Sync user_id from Agent to AgentMemory if not set
+        if self.user_id is not None and self.memory.user_id is None:
+            self.memory.user_id = self.user_id
 
     @property
     def is_streamable(self) -> bool:
@@ -804,14 +820,79 @@ class Agent:
 
     def load_user_memories(self) -> None:
         if self.memory.create_user_memories:
+            # user_id is the key for querying memories, default to "default" if not set
             if self.user_id is not None:
                 self.memory.user_id = self.user_id
+            elif self.memory.user_id is None:
+                self.memory.user_id = "default"
 
             self.memory.load_user_memories()
-            if self.user_id is not None:
-                logger.debug(f"Memories loaded for user: {self.user_id}")
-            else:
-                logger.debug("Memories loaded")
+            logger.debug(f"Memories loaded for user: {self.memory.user_id}")
+
+    def get_user_memories(self, user_id: Optional[str] = None) -> List[Memory]:
+        """Get user memories from the database.
+        
+        Args:
+            user_id: Optional user ID. If not provided, uses self.user_id or self.memory.user_id.
+            
+        Returns:
+            List of Memory objects for the user.
+            
+        Example:
+            >>> memories = agent.get_user_memories(user_id="john_doe@example.com")
+            >>> for mem in memories:
+            ...     print(mem.memory)
+        """
+        from agentica.memory import Memory
+        
+        # Determine user_id
+        _user_id = user_id or self.user_id or self.memory.user_id
+        
+        if self.memory.db is None and self.db is None:
+            logger.warning("No database configured. Cannot retrieve memories.")
+            return []
+        
+        db = self.memory.db or self.db
+        
+        try:
+            memory_rows = db.read_memories(user_id=_user_id)
+            memories = []
+            for row in memory_rows:
+                try:
+                    memories.append(Memory.model_validate(row.memory))
+                except Exception as e:
+                    logger.warning(f"Error parsing memory: {e}")
+                    continue
+            return memories
+        except Exception as e:
+            logger.error(f"Error reading memories: {e}")
+            return []
+
+    def clear_user_memories(self, user_id: Optional[str] = None) -> bool:
+        """Clear all user memories from the database.
+        
+        Args:
+            user_id: Optional user ID. If not provided, uses self.user_id or self.memory.user_id.
+            
+        Returns:
+            True if successful, False otherwise.
+        """
+        _user_id = user_id or self.user_id or self.memory.user_id
+        
+        if self.memory.db is None and self.db is None:
+            logger.warning("No database configured. Cannot clear memories.")
+            return False
+        
+        db = self.memory.db or self.db
+        
+        try:
+            db.clear_memories(user_id=_user_id)
+            # Also clear in-memory memories
+            self.memory.memories = []
+            return True
+        except Exception as e:
+            logger.error(f"Error clearing memories: {e}")
+            return False
 
     def get_agent_data(self) -> Dict[str, Any]:
         agent_data = self.agent_data or {}
