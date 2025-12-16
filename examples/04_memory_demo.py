@@ -229,7 +229,3 @@ print("\n--- Clear all memories ---")
 memory_manager.clear_user_memories(user_id="user123")
 final_memories = memory_manager.get_user_memories(user_id="user123")
 print(f"Memories after clear: {len(final_memories)}")
-
-print("\n" + "=" * 60)
-print("Demo completed!")
-print("=" * 60)

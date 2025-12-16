@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: LanceDB vector database implementation.
 part of the code from https://github.com/phidatahq/phidata
 """
 
+import os
 import json
 from hashlib import md5
 from typing import List, Optional, Dict, Any
@@ -18,18 +19,28 @@ except ImportError:
 from agentica.document import Document
 from agentica.emb.base import Emb
 from agentica.vectordb.base import VectorDb, Distance, SearchType
-from agentica.emb.openai_emb import OpenAIEmb
 from agentica.reranker.base import Reranker
 from agentica.utils.log import logger
 
 
 class LanceDb(VectorDb):
+    """
+    LanceDB-based Vector Database with semantic search support.
+
+    Features:
+    - Vector-based semantic search using embeddings
+    - Local disk storage (on_disk=True by default)
+    - Hybrid search (vector + keyword)
+    - Full-text search with tantivy
+    """
+
     def __init__(
             self,
-            embedder: Emb = OpenAIEmb(),
+            embedder: Emb = None,
             distance: Distance = Distance.cosine,
             connection: Optional[lancedb.db.LanceTable] = None,
-            uri: Optional[str] = "tmp/lancedb",
+            uri: Optional[str] = None,
+            on_disk: bool = True,
             table: Optional[lancedb.db.LanceTable] = None,
             table_name: Optional[str] = "agentica",
             nprobes: Optional[int] = None,
@@ -37,15 +48,42 @@ class LanceDb(VectorDb):
             reranker: Optional[Reranker] = None,
             use_tantivy: bool = True,
     ):
-        # Embedder for embedding the document contents
+        """
+        Initialize LanceDb.
+
+        Args:
+            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            distance: Distance metric for vector similarity
+            connection: Existing LanceDB connection
+            uri: Path for LanceDB storage
+            on_disk: Whether to use local disk storage (default: True)
+            table: Existing LanceDB table
+            table_name: Name of the table
+            nprobes: Number of probes for search
+            search_type: Type of search (vector, keyword, hybrid)
+            reranker: Reranker for search results
+            use_tantivy: Whether to use tantivy for full-text search
+        """
+        # Embedder for embedding the document contents (default to OpenAIEmb)
+        if embedder is None:
+            from agentica.emb.openai_emb import OpenAIEmb
+            embedder = OpenAIEmb()
         self.embedder: Emb = embedder
         self.dimensions: int = self.embedder.dimensions
 
         # Distance metric
         self.distance: Distance = distance
 
-        # Connection to lancedb table, can also be provided to use an existing connection
+        # Setup storage path for local disk storage
+        if on_disk and uri is None and connection is None:
+            uri = os.path.join(os.path.expanduser("~"), ".agentica", "lancedb")
+        if uri:
+            uri = os.path.expanduser(uri)
+            os.makedirs(uri, exist_ok=True)
         self.uri = uri
+        self.on_disk = on_disk
+
+        # Connection to lancedb table, can also be provided to use an existing connection
         self.connection: lancedb.DBConnection = connection or lancedb.connect(uri=self.uri)
 
         # LanceDB table details
@@ -60,7 +98,7 @@ class LanceDb(VectorDb):
             self.table = table
             self.table_name = self.table.name
             self._vector_col = self.table.schema.names[0]
-            self._id = self.tbl.schema.names[1]  # type: ignore
+            self._id = self.table.schema.names[1]
         else:
             if not table_name:
                 raise ValueError("Either table or table_name should be provided.")
