@@ -18,7 +18,6 @@ load_dotenv()
 
 AGENTICA_DATA_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
 AGENTICA_LOG_LEVEL = os.getenv("AGENTICA_LOG_LEVEL", "INFO").upper()
-
 user_log_file = os.getenv("AGENTICA_LOG_FILE")
 
 if user_log_file:
@@ -32,7 +31,6 @@ elif AGENTICA_LOG_LEVEL == "DEBUG":
     AGENTICA_LOG_FILE = default_log_file
 else:
     AGENTICA_LOG_FILE = ""
-
 
 # Langfuse configuration
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")

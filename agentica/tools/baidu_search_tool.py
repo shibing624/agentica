@@ -262,7 +262,6 @@ class BaiduSearchTool(Tool):
         Args:
             query (str): Search keyword
             max_results (int, optional): Maximum number of results to return, default 5
-            language (str, optional): Search language, default is 'zh'
 
         Returns:
             str: A JSON formatted string containing the search results.
@@ -286,9 +285,8 @@ class BaiduSearchTool(Tool):
         """Execute Baidu search for multiple queries and return results
 
         Args:
-            queries (Union[str, List[str]]): Search keyword(s)
+            queries (Union[str, List[str]]): Search keyword(s), can be a single string or a list of strings
             max_results (int, optional): Maximum number of results to return for each query, default 5
-            language (str, optional): Search language, default is 'zh'
 
         Returns:
             str: A JSON formatted string containing the search results.

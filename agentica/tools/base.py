@@ -452,8 +452,8 @@ def get_function_call(
         call_id: Optional[str] = None,
         functions: Optional[Dict[str, Function]] = None,
 ) -> Optional[FunctionCall]:
-    logger.debug(f"Getting function {name}")
-    logger.debug(f"Arguments: {arguments}, Call ID: {call_id}, name: {name}, functions: {functions}")
+    # logger.debug(f"Getting function {name}")
+    # logger.debug(f"Arguments: {arguments}, Call ID: {call_id}, name: {name}, functions: {functions}")
     if functions is None:
         return None
 

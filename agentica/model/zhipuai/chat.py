@@ -1,3 +1,8 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: 
+"""
 from typing import Optional
 from os import getenv
 
@@ -16,9 +21,9 @@ class ZhipuAI(OpenAILike):
     - base_url: str: The base URL for the model.
     """
 
-    id: str = "glm-4-flash"
+    id: str = "glm-4.6v-flash"
     name: str = "ZhipuAI"
     provider: str = "ZhipuAI"
 
-    api_key: Optional[str] = getenv("ZHIPUAI_API_KEY", None)
+    api_key: Optional[str] = getenv("ZHIPUAI_API_KEY") or getenv("ZHIPU_API_KEY")
     base_url: str = "https://open.bigmodel.cn/api/paas/v4"

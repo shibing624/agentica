@@ -84,29 +84,25 @@ pip install .
 1.  **设置您的 API 密钥。** 在 `~/.agentica/.env` 路径下创建一个文件，或设置环境变量。
 
     ```shell
-    # 月之暗面 Moonshot AI
-    export MOONSHOT_API_KEY="your-api-key"
-    # 智谱AI ZhipuAI
+    # 智谱AI ZhipuAI, glm-4.6v-flash 免费用，支持工具调用，128k
     export ZHIPUAI_API_KEY="your-api-key"
-    # 搜索工具
-    export SERPER_API_KEY="your-serper-api-key"
     ```
 
 2.  **运行您的第一个智能体！** 这个例子创建了一个可以查询天气的智能体。
 
     ```python
-    from agentica import Agent, Moonshot, WeatherTool
+    from agentica import Agent, ZhipuAI, WeatherTool
 
     # 初始化一个带模型和天气工具的智能体
-    weather_agent = Agent(
-        model=Moonshot(), 
+    agent = Agent(
+        model=ZhipuAI(),
         tools=[WeatherTool()],
         # 为智能体提供时间概念，以便回答“明天”等问题
         add_datetime_to_instructions=True  
     )
 
     # 向智能体提问
-    weather_agent.print_response("明天北京天气怎么样？")
+    agent.print_response("明天北京天气怎么样？")
     ```
 
     **输出：**
@@ -157,10 +153,10 @@ pip install .
 pip install -U agentica
 
 # 运行单个查询
-agentica --query "下一届奥运会在哪里举办？" --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro
+agentica --query "下一届奥运会在哪里举办？" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
 
 # 启动交互式聊天会话
-agentica --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro cogview --verbose 1
+agentica --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search cogview --verbose 1
 ```
 
 ### Web UI

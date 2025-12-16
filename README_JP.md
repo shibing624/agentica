@@ -84,29 +84,25 @@ pip install .
 1.  **APIキーを設定します。** `~/.agentica/.env` にファイルを作成するか、環境変数を設定します。
 
     ```shell
-    # Moonshot AI用
-    export MOONSHOT_API_KEY="your-api-key"
     # ZhipuAI用
     export ZHIPUAI_API_KEY="your-api-key"
-    # 検索ツール用
-    export SERPER_API_KEY="your-serper-api-key"
     ```
 
 2.  **最初のエージェントを実行しましょう！** この例では、天気をチェックできるエージェントを作成します。
 
 ```python
-    from agentica import Agent, Moonshot, WeatherTool
+    from agentica import Agent, ZhipuAI, WeatherTool
 
     # モデルと天気ツールでエージェントを初期化
-    weather_agent = Agent(
-        model=Moonshot(), 
+    agent = Agent(
+        model=ZhipuAI(), 
         tools=[WeatherTool()],
         # 「明日」のような質問のためにエージェントに時間感覚を与える
         add_datetime_to_instructions=True  
     )
 
     # エージェントに質問する
-    weather_agent.print_response("明日の北京の天気はどうですか？")
+    agent.print_response("明日の北京の天気はどうですか？")
     ```
 
     **出力：**
@@ -157,10 +153,10 @@ Agenticaで何が可能か、包括的な例をご覧ください：
 pip install -U agentica
 
 # 単一のクエリを実行
-agentica --query "次のオリンピックはどこで開催されますか？" --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro
+agentica --query "次のオリンピックはどこで開催されますか？" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
 
 # 対話型チャットセッションを開始
-agentica --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro cogview --verbose 1
+agentica --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search cogview --verbose 1
 ```
 
 ### Web UI

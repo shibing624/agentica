@@ -84,29 +84,25 @@ pip install .
 1.  **Set up your API keys.** Create a file at `~/.agentica/.env` or set environment variables.
 
     ```shell
-    # For Moonshot AI
-    export MOONSHOT_API_KEY="your-api-key"
     # For ZhipuAI
     export ZHIPUAI_API_KEY="your-api-key"
-    # For Search tools
-    export SERPER_API_KEY="your-serper-api-key"
     ```
 
 2.  **Run your first agent!** This example creates an agent that can check the weather.
 
 ```python
-    from agentica import Agent, Moonshot, WeatherTool
+    from agentica import Agent, ZhipuAI, WeatherTool
 
     # Initialize an agent with a model and a weather tool
-    weather_agent = Agent(
-        model=Moonshot(), 
+    agent = Agent(
+        model=ZhipuAI(), 
         tools=[WeatherTool()],
         # Give the agent a sense of time for questions like "tomorrow"
         add_datetime_to_instructions=True  
     )
 
     # Ask the agent a question
-    weather_agent.print_response("What's the weather like in Beijing tomorrow?")
+    agent.print_response("What's the weather like in Beijing tomorrow?")
     ```
 
     **Output:**
@@ -157,10 +153,10 @@ Interact with your agents directly from the terminal.
 pip install -U agentica
 
 # Run a single query
-agentica --query "Where will the next Olympics be held?" --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro
+agentica --query "Where will the next Olympics be held?" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
 
 # Start an interactive chat session
-agentica --model_provider zhipuai --model_name glm-4-flash --tools web_search_pro cogview --verbose 1
+agentica --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search cogview --verbose 1
 ```
 
 ### Web UI
