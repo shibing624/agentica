@@ -5,14 +5,10 @@
 """
 import json
 import os
+import yaml
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from agentica.config import AGENTICA_HOME
-
-try:
-    import yaml
-except ImportError:
-    yaml = None
 
 
 @dataclass
@@ -70,8 +66,6 @@ class MCPConfig:
             with open(self.config_path, 'r', encoding='utf-8') as f:
                 # Determine file format based on extension
                 if self.config_path.lower().endswith(('.yaml', '.yml')):
-                    if yaml is None:
-                        raise ImportError("YAML support requires PyYAML. Install with 'pip install pyyaml'")
                     config = yaml.safe_load(f)
                 else:  # Default to JSON
                     config = json.load(f)
