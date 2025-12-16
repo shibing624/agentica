@@ -10,6 +10,7 @@ part of the code from https://github.com/phidatahq/phidata
 from __future__ import annotations
 
 import json
+import weakref
 from collections import OrderedDict
 from typing import Callable, get_type_hints, Any, Dict, Union, get_args, get_origin, Optional, Type, TypeVar, List
 from pydantic import BaseModel, Field, validate_call
@@ -88,8 +89,26 @@ class Function(BaseModel):
     post_hook: Optional[Callable] = None
 
     # --*-- FOR INTERNAL USE ONLY --*--
-    # The agent that the function is associated with
-    _agent: Optional[Any] = None
+    # Weak reference to the agent that the function is associated with.
+    # Using weakref to avoid circular references that prevent garbage collection.
+    # The reference chain Agent -> Model -> functions -> Function._agent -> Agent
+    # would cause memory leaks without weakref.
+    _agent_ref: Optional[weakref.ReferenceType] = None
+
+    @property
+    def _agent(self) -> Optional[Any]:
+        """Get the agent from weak reference. Returns None if agent was garbage collected."""
+        if self._agent_ref is not None:
+            return self._agent_ref()
+        return None
+
+    @_agent.setter
+    def _agent(self, agent: Optional[Any]) -> None:
+        """Set the agent as a weak reference to avoid circular references."""
+        if agent is not None:
+            self._agent_ref = weakref.ref(agent)
+        else:
+            self._agent_ref = None
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True, include={"name", "description", "parameters", "strict"})

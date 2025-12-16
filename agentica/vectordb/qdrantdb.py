@@ -1,3 +1,4 @@
+import os
 from hashlib import md5
 from typing import List, Optional, Dict, Any
 
@@ -13,11 +14,22 @@ from agentica.reranker.base import Reranker
 
 
 class QdrantDb(VectorDb):
+    """
+    Qdrant-based Vector Database with semantic search support.
+
+    Features:
+    - Vector-based semantic search using embeddings
+    - Local disk storage (on_disk=True by default)
+    - Support for remote Qdrant server
+    """
+
     def __init__(
             self,
             collection: str = "qdrant_vec_db",
-            embedder: Emb = OpenAIEmb(),
+            embedder: Emb = None,
             distance: Distance = Distance.cosine,
+            path: Optional[str] = None,
+            on_disk: bool = True,
             location: Optional[str] = None,
             url: Optional[str] = None,
             port: Optional[int] = 6333,
@@ -28,22 +40,54 @@ class QdrantDb(VectorDb):
             prefix: Optional[str] = None,
             timeout: Optional[float] = None,
             host: Optional[str] = None,
-            path: Optional[str] = None,
             reranker: Optional[Reranker] = None,
             **kwargs,
     ):
+        """
+        Initialize QdrantDb.
+
+        Args:
+            collection: Name of the Qdrant collection
+            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            distance: Distance metric for vector similarity
+            path: Path for local disk storage (used when on_disk=True)
+            on_disk: Whether to use local disk storage (default: True)
+            location: Qdrant server location (":memory:" for in-memory)
+            url: Qdrant server URL (for remote server)
+            port: Qdrant server port
+            grpc_port: Qdrant gRPC port
+            prefer_grpc: Whether to prefer gRPC over HTTP
+            https: Whether to use HTTPS
+            api_key: API key for Qdrant Cloud
+            prefix: URL prefix for Qdrant server
+            timeout: Request timeout
+            host: Qdrant server host
+            reranker: Reranker for search results
+            **kwargs: Additional arguments passed to QdrantClient
+        """
         # Collection attributes
         self.collection: str = collection
 
-        # Embedder for embedding the document contents
-        self.embedder: Emb = embedder
+        # Embedder for embedding the document contents (default to OpenAIEmb)
+        self.embedder: Emb = embedder if embedder is not None else OpenAIEmb()
         self.dimensions: Optional[int] = self.embedder.dimensions
 
         # Distance metric
         self.distance: Distance = distance
 
-        # Qdrant client instance
-        self._client: Optional[QdrantClient] = None
+        # Storage mode
+        self.on_disk: bool = on_disk
+
+        # Setup storage path for local disk storage
+        if on_disk and path is None and url is None and location is None:
+            path = os.path.join(os.path.expanduser("~"), ".agentica", "qdrant_db")
+        if path:
+            path = os.path.expanduser(path)
+        self.path: Optional[str] = path
+
+        # Create storage directory if needed
+        if self.path:
+            os.makedirs(self.path, exist_ok=True)
 
         # Qdrant client arguments
         self.location: Optional[str] = location
@@ -56,29 +100,39 @@ class QdrantDb(VectorDb):
         self.prefix: Optional[str] = prefix
         self.timeout: Optional[float] = timeout
         self.host: Optional[str] = host
-        self.path: Optional[str] = path
         self.reranker: Optional[Reranker] = reranker
-        # Qdrant client kwargs
         self.kwargs = kwargs
+
+        # Qdrant client instance (lazy initialization)
+        self._client: Optional[QdrantClient] = None
 
     @property
     def client(self) -> QdrantClient:
         if self._client is None:
             logger.debug("Creating Qdrant Client")
-            self._client = QdrantClient(
-                location=self.location,
-                url=self.url,
-                port=self.port,
-                grpc_port=self.grpc_port,
-                prefer_grpc=self.prefer_grpc,
-                https=self.https,
-                api_key=self.api_key,
-                prefix=self.prefix,
-                timeout=self.timeout,
-                host=self.host,
-                path=self.path,
-                **self.kwargs,
-            )
+            if self.url:
+                # Remote Qdrant server
+                self._client = QdrantClient(
+                    url=self.url,
+                    port=self.port,
+                    grpc_port=self.grpc_port,
+                    prefer_grpc=self.prefer_grpc,
+                    https=self.https,
+                    api_key=self.api_key,
+                    prefix=self.prefix,
+                    timeout=self.timeout,
+                    host=self.host,
+                    **self.kwargs,
+                )
+            elif self.on_disk and self.path:
+                # Local disk storage
+                self._client = QdrantClient(path=self.path, **self.kwargs)
+            elif self.location:
+                # Custom location (e.g., ":memory:")
+                self._client = QdrantClient(location=self.location, **self.kwargs)
+            else:
+                # In-memory storage as fallback
+                self._client = QdrantClient(location=":memory:", **self.kwargs)
         return self._client
 
     def create(self) -> None:

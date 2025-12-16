@@ -28,7 +28,7 @@ Whether you're creating a simple chatbot, a complex research assistant, or a col
 *   **Batteries-Included**: Comes with a rich set of built-in tools (Web Search, Code Interpreter, File I/O), memory types, and advanced RAG capabilities out of the box.
 *   **Advanced Features, Simplified**: Effortlessly implement complex patterns like multi-agent collaboration (Teams), task decomposition (Workflows), and self-reflection.
 *   **Production-Ready**: Deploy your agents via a command-line interface, a web UI, or as a service. Standardized tool integration with the **Model Context Protocol (MCP)** is also supported.
-*   **Optimized for Chinese**: First-class support for Chinese language users with dedicated documentation and examples.
+*   **Agent Skill Support**: A prompt-based skill system that injects skill instructions into the System Prompt, usable by any model supporting tool calling.
 
 ## ✨ Key Features
 
@@ -36,6 +36,16 @@ Whether you're creating a simple chatbot, a complex research assistant, or a col
 *   **🧩 Advanced Orchestration**:
     *   **Multi-Agent Teams**: Create teams of specialized agents that collaborate to solve problems.
     *   **Workflows**: Decompose complex tasks into a series of steps executed by different agents or tools.
+*   **🛡️ Guardrails**:
+    *   **Input/Output Guardrails**: Validate user input before agent processing and check agent output before returning.
+    *   **Tool Guardrails**: Validate tool arguments before execution and filter sensitive data from results.
+    *   **Three Behavior Modes**: allow, reject_content (reject but continue), raise_exception (halt execution).
+*   **🎯 Agent Skill System**:
+    *   **Prompt Engineering Technique**: Skills are text instructions, not code-level capability extensions.
+    *   **Implementation**: Parse SKILL.md metadata and inject skill descriptions into the System Prompt.
+    *   **Execution**: After reading skill instructions, the LLM uses basic tools (shell, python, file viewer) to execute tasks.
+    *   **Model-Agnostic**: Any model supporting tool calling can use skills, as they are just text instructions.
+    *   **Advantages**: Extensible, model-agnostic, easy to maintain (just update Markdown documents).
 *   **🛠️ Rich Tooling Ecosystem**:
     *   An extensive collection of built-in tools (Web Search, OCR, Image Generation, Shell Commands).
     *   Easily create your own custom tools.
@@ -132,6 +142,7 @@ Explore our comprehensive examples to see what's possible with Agentica:
 | [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | A fascinating experiment in building a conversational operating system powered by an LLM.                                                  |
 | [**Investment Research Workflow**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | Automate the entire investment research process, from data collection and analysis to report generation.                                                                                                   |
 | [**Vision Agent**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | Build an agent that can understand and reason about images.                                                                                                                          |
+| [**Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | Demonstrate how to use input/output guardrails to validate agent and tool I/O, and filter sensitive data.                                                                                                                          |
 
 [➡️ **See all examples**](https://github.com/shibing624/agentica/tree/main/examples)
 
@@ -189,7 +200,7 @@ If you use Agentica in your research, please cite it as follows:
 @misc{agentica,
   author = {Ming Xu},
   title = {Agentica: Effortlessly Build Intelligent, Reflective, and Collaborative Multimodal AI Agents},
-  year = {2024},
+  year = {2025},
   publisher = {GitHub},
   journal = {GitHub Repository},
   howpublished = {\url{https://github.com/shibing624/agentica}},

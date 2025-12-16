@@ -10,11 +10,14 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import PythonAgent, OpenAIChat
+from agentica import Agent, OpenAIChat, RunPythonCodeTool
 
-m = PythonAgent(
+m = Agent(
+    name="Python Agent",
     model=OpenAIChat(),
-    pip_install=True,
+    tools=[RunPythonCodeTool(save_and_run=True, pip_install=True)],
+    instructions=["You are an expert Python programmer."],
+    markdown=True,
     debug_mode=True,
 )
 prompt = """

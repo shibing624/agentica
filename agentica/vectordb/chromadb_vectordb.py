@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: ChromaDB vector database implementation.
 reference: part of the code from https://github.com/phidatahq/phidata
 """
+import os
 from hashlib import md5
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 try:
     from chromadb import Client as ChromaDbClient
@@ -15,35 +16,69 @@ try:
     from chromadb.api.types import QueryResult, GetResult
 
 except ImportError:
-    raise ImportError("The `chromadb` package is not installed. " "Please install it via `pip install chromadb`.")
+    raise ImportError("The `chromadb` package is not installed. Please install it via `pip install chromadb`.")
 
 from agentica.document import Document
 from agentica.emb.base import Emb
-from agentica.emb.openai_emb import OpenAIEmb
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
 from agentica.reranker.base import Reranker
 
 
 class ChromaDb(VectorDb):
+    """
+    ChromaDB-based Vector Database with semantic search support.
+
+    Features:
+    - Vector-based semantic search using embeddings
+    - Local disk storage (on_disk=True by default)
+    - Persistent storage support
+    """
+
     def __init__(
             self,
-            collection: str,
-            embedder: Emb = OpenAIEmb(),
+            collection: str = "chromadb_collection",
+            embedder: Emb = None,
             distance: Distance = Distance.cosine,
-            path: str = "tmp/chromadb",
-            persistent_client: bool = False,
+            path: Optional[str] = None,
+            on_disk: bool = True,
             reranker: Optional[Reranker] = None,
             **kwargs,
     ):
+        """
+        Initialize ChromaDb.
+
+        Args:
+            collection: Name of the collection
+            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            distance: Distance metric for vector similarity
+            path: Path for local disk storage
+            on_disk: Whether to use local disk storage (default: True)
+            reranker: Reranker for search results
+            **kwargs: Additional arguments passed to ChromaDB client
+        """
         # Collection attributes
         self.collection: str = collection
 
-        # Embedder for embedding the document contents
+        # Embedder for embedding the document contents (default to OpenAIEmb)
+        if embedder is None:
+            from agentica.emb.openai_emb import OpenAIEmb
+            embedder = OpenAIEmb()
         self.embedder: Emb = embedder
 
         # Distance metric
         self.distance: Distance = distance
+
+        # Storage mode
+        self.on_disk: bool = on_disk
+
+        # Setup storage path for local disk storage
+        if on_disk and path is None:
+            path = os.path.join(os.path.expanduser("~"), ".agentica", "chromadb")
+        if path:
+            path = os.path.expanduser(path)
+            os.makedirs(path, exist_ok=True)
+        self.path: Optional[str] = path
 
         # Chroma client instance
         self._client: Optional[ClientAPI] = None
@@ -51,9 +86,6 @@ class ChromaDb(VectorDb):
         # Chroma collection instance
         self._collection: Optional[Collection] = None
 
-        # Persistent Chroma client instance
-        self.persistent_client: bool = persistent_client
-        self.path: str = path
         # Reranker instance
         self.reranker: Optional[Reranker] = reranker
 
@@ -63,15 +95,17 @@ class ChromaDb(VectorDb):
     @property
     def client(self) -> ClientAPI:
         if self._client is None:
-            if not self.persistent_client:
-                logger.debug("Creating Chroma Client")
-                self._client = ChromaDbClient(
-                    **self.kwargs,
-                )
-            elif self.persistent_client:
-                logger.debug("Creating Persistent Chroma Client")
+            if self.on_disk and self.path:
+                # Local disk storage (persistent)
+                logger.debug(f"Creating Persistent Chroma Client at: {self.path}")
                 self._client = PersistentChromaDbClient(
                     path=self.path,
+                    **self.kwargs,
+                )
+            else:
+                # In-memory storage
+                logger.debug("Creating Chroma Client (in-memory)")
+                self._client = ChromaDbClient(
                     **self.kwargs,
                 )
         return self._client

@@ -8,15 +8,18 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import PythonAgent, OpenAIChat
+from agentica import Agent, OpenAIChat, RunPythonCodeTool
 from agentica.tools.jina_tool import JinaTool
 
-m = PythonAgent(
+m = Agent(
+    name="Python Agent",
     model=OpenAIChat(),
     description="You are a helpful ai assistant.",
+    tools=[JinaTool(), RunPythonCodeTool(save_and_run=True)],
+    instructions=["You are an expert Python programmer."],
     show_tool_calls=True,
-    tools=[JinaTool()],
     read_chat_history=True,
+    markdown=True,
     debug_mode=True,
 )
 

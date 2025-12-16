@@ -16,7 +16,7 @@ import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import Agent, OpenAIChat, PythonAgent
+from agentica import Agent, OpenAIChat, RunPythonCodeTool
 from agentica.tools.file_tool import FileTool
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool
@@ -26,7 +26,7 @@ from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.tools.search_exa_tool import SearchExaTool
 from agentica.tools.yfinance_tool import YFinanceTool
-from agentica.storage.agent.sqlite import SqlAgentStorage
+from agentica.db.sqlite import SqliteDb
 from agentica.document import Document
 
 
@@ -71,11 +71,12 @@ def get_llm_os(
     )
     knowledge = None
     if python_agent:
-        _python_agent = PythonAgent(
+        _python_agent = Agent(
             name="Python agent",
             role="Write and run python code",
-            pip_install=True,
-            charting_libraries=["streamlit"],
+            tools=[RunPythonCodeTool(save_and_run=True, pip_install=True)],
+            instructions=["You are an expert Python programmer.", "Use streamlit for charting."],
+            markdown=True,
         )
         team.append(_python_agent)
         extra_instructions.append("To write and run python code, delegate the task to the `Python agent`.")
@@ -226,8 +227,8 @@ def get_llm_os(
             "You can delegate tasks to an AI agent in your team depending of their role and the tools available to them.",
         ],
         additional_context='\n'.join(extra_instructions),
-        # Add long-term memory to the LLM OS backed by a PostgreSQL database
-        storage=SqlAgentStorage(table_name="llm_os", db_file="outputs/llm_os.db"),
+        # Add long-term memory to the LLM OS backed by a SQLite database
+        db=SqliteDb(db_file="outputs/llm_os.db"),
         # Add a knowledge base to the LLM OS
         knowledge=knowledge if knowledge else Knowledge(vector_db=lance_db),
         # Add selected tools to the LLM OS
@@ -491,8 +492,8 @@ def main():
                         _team_member_memory_container = st.empty()
                         _team_member_memory_container.json(team_member.memory.get_messages())
 
-    if llm_os.storage:
-        llm_os_session_ids: List[str] = llm_os.storage.get_all_session_ids()
+    if llm_os.db:
+        llm_os_session_ids: List[str] = llm_os.db.get_all_session_ids()
         new_llm_os_session_id = st.sidebar.selectbox("Session ID", options=llm_os_session_ids)
         if st.session_state["llm_os_session_id"] and st.session_state["llm_os_session_id"] != new_llm_os_session_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_llm_os_session_id} ---*---")

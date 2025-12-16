@@ -14,7 +14,7 @@ Key Points
 - SAGE框架可以扩展到其他大型语言模型，并在AgentBench等基准测试和长文本任务上取得了最先进的结果。
 
 本项目的简化实现：
-1. 使用PythonAgent作为SAGE智能体，使用AzureOpenAIChat作为LLM, 具备code-interpreter功能，可以执行Python代码，并自动纠错。
+1. 使用Agent + RunPythonCodeTool作为SAGE智能体，使用OpenAIChat作为LLM, 具备code-interpreter功能，可以执行Python代码，并自动纠错。
 2. 使用CsvMemoryDb作为SAGE智能体的记忆，用于存储用户的问题和答案，下次遇到相似的问题时，可以直接返回答案。
 
 install:
@@ -31,15 +31,14 @@ from typing import List, Optional
 import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agentica import Agent, OpenAIChat, PythonAgent, SearchType
+from agentica import Agent, OpenAIChat, RunPythonCodeTool, SearchType
 from agentica.utils.log import logger
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica import AgentMemory
-from agentica.memorydb import CsvMemoryDb
-from agentica import SqlAgentStorage
+from agentica.db.sqlite import SqliteDb
 
 
 def get_sage(
@@ -52,7 +51,7 @@ def get_sage(
     logger.info(f"-*- Creating {llm_model_name} SAGE agent -*-")
 
     # Add tools available to the SAGE agent
-    tools = [SearchSerperTool()]
+    tools = [SearchSerperTool(), RunPythonCodeTool(save_and_run=True)]
 
     lance_db = LanceDb(
         table_name='sage_documents',
@@ -60,15 +59,16 @@ def get_sage(
         search_type=SearchType.vector,
         embedder=Text2VecEmb(model="shibing624/text2vec-base-multilingual"),
     )
-    memory_file = "outputs/sage_memory.csv"
+    db = SqliteDb(db_file="outputs/sage.db")
+    
     knowledge = Knowledge(
-        data_path=memory_file if os.path.exists(memory_file) else [],
+        data_path=[],
         vector_db=lance_db
     )
     knowledge.load()
 
     # Create the SAGE agent
-    sage = PythonAgent(
+    sage = Agent(
         name="sage",
         model=model,
         session_id=session_id,
@@ -79,8 +79,9 @@ def get_sage(
         Your goal is to assist the user.
         """
         ),
+        instructions=["You are an expert Python programmer."],
         # Add long-term memory to the SAGE agent backed by a Sqlite database
-        storage=SqlAgentStorage(table_name="sage", db_file="outputs/sage.db"),
+        db=db,
         # Add a knowledge base to the SAGE agent
         knowledge=knowledge,
         # Add selected tools to the SAGE agent
@@ -98,7 +99,7 @@ def get_sage(
         markdown=True,
         # This setting adds the current datetime to the instructions
         add_datetime_to_instructions=True,
-        memory=AgentMemory(db=CsvMemoryDb(memory_file), create_user_memories=True),
+        memory=AgentMemory(db=db, create_user_memories=True),
         debug_mode=debug_mode,
     )
     return sage
@@ -179,8 +180,8 @@ def main():
             sage.knowledge.vector_db.delete()
             st.sidebar.success("Memory cleared")
 
-    if sage.storage:
-        sage_session_ids: List[str] = sage.storage.get_all_session_ids()
+    if sage.db:
+        sage_session_ids: List[str] = sage.db.get_all_session_ids()
         new_sage_session_id = st.sidebar.selectbox("Session ID", options=sage_session_ids)
         if st.session_state["sage_session_id"] and st.session_state["sage_session_id"] != new_sage_session_id:
             logger.info(f"---*--- Loading {llm_id} run: {new_sage_session_id} ---*---")

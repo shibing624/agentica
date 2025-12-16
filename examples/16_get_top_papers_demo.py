@@ -8,7 +8,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import OpenAIChat, Agent, PythonAgent
+from agentica import OpenAIChat, Agent
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.file_tool import FileTool
 from agentica.tools.search_serper_tool import SearchSerperTool

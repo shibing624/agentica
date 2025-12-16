@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: In-memory vector database for semantic search.
 """
 
 from hashlib import md5
@@ -10,25 +10,46 @@ import numpy as np
 
 from agentica.document import Document
 from agentica.emb.base import Emb
-from agentica.emb.openai_emb import OpenAIEmb
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
 from agentica.reranker.base import Reranker
 
 
-class MemoryVectorDb(VectorDb):
+class InMemoryVectorDb(VectorDb):
+    """
+    In-memory Vector Database with semantic search support.
+
+    Features:
+    - Vector-based semantic search using embeddings
+    - No persistence (data lost on restart)
+    - Fast for small datasets
+    """
+
     def __init__(
             self,
-            embedder: Emb = OpenAIEmb(),
+            embedder: Emb = None,
             distance: Distance = Distance.cosine,
             reranker: Optional[Reranker] = None,
             **kwargs,
     ):
-        self.embedder = embedder
-        self.distance = distance
-        self.documents = []
-        self.reranker: Optional[Reranker] = reranker
+        """
+        Initialize InMemoryVectorDb.
 
+        Args:
+            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            distance: Distance metric for vector similarity
+            reranker: Reranker for search results
+            **kwargs: Additional arguments
+        """
+        # Embedder for embedding the document contents (default to OpenAIEmb)
+        if embedder is None:
+            from agentica.emb.openai_emb import OpenAIEmb
+            embedder = OpenAIEmb()
+        self.embedder: Emb = embedder
+
+        self.distance: Distance = distance
+        self.documents: List[Document] = []
+        self.reranker: Optional[Reranker] = reranker
         self.kwargs = kwargs
 
     def create(self) -> None:

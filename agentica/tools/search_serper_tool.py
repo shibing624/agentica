@@ -51,17 +51,20 @@ class SerperWrapper(BaseModel):
             res = conn.getresponse()
             res_data = res.read()
             data = json.loads(res_data.decode("utf-8"))
+            logger.debug(data)
             # Check for specific error messages
             if "error" in data:
-                raise ValueError(f"Error from Serper API: {data['error']}")
+                raise ValueError(f"Error from Serper API https://serper.dev/: {data['error']}")
             if "message" in data and "Unauthorized" in data["message"]:
-                raise ValueError("Unauthorized access to Serper API. Check your API key.")
+                raise ValueError("Unauthorized access to Serper API https://serper.dev/. Check your API key.")
+            if "message" in data and "Not enough credits" in data["message"]:
+                raise ValueError("Not enough credits for Serper API.")
 
             res = self._process_response(data, as_string=as_string)
         except Exception as e:
             msg = f"Failed to search `{query}` due to {e}"
             logger.error(msg)
-            res = msg if as_string else [msg]
+            res = msg
         return res
 
     @staticmethod
@@ -71,10 +74,6 @@ class SerperWrapper(BaseModel):
         focus = ["title", "snippet", "link"]
         def get_focused(x):
             return {i: j for i, j in x.items() if i in focus}
-        if "error" in res.keys():
-            raise ValueError(f"Got error from https://serper.dev/: {res['error']}")
-        elif "message" in res.keys() and "Unauthorized" in res["message"]:
-            raise ValueError(f"Unauthorized access to https://serper.dev/. Check your API key.")
         toret_l = []
         if "answer_box" in res.keys() and "snippet" in res["answer_box"].keys():
             toret_l += [get_focused(res["answer_box"])]
@@ -144,7 +143,5 @@ class SearchSerperTool(Tool):
 if __name__ == '__main__':
     search = SearchSerperTool()
     print(search.api_key)
-    # r = search.search_google(["北京的新闻top3"], as_string=True)
-    # print(type(r), '\n\n', r)
-    r = search.search_google(["湖北的新闻top3", "北京的娱乐新闻"], as_string=False)
+    r = search.search_google(["湖北的新闻top3", "北京的娱乐新闻"])
     print(type(r), '\n\n', r)

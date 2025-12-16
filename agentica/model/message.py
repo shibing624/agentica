@@ -68,6 +68,9 @@ class Message(BaseModel):
     # The references added to the message for RAG
     references: Optional[MessageReferences] = None
 
+    # Compressed content for tool results (used by CompressionManager)
+    compressed_content: Optional[str] = None
+
     # The Unix timestamp the message was created.
     created_at: int = Field(default_factory=lambda: int(time()))
 
@@ -83,6 +86,20 @@ class Message(BaseModel):
             else:
                 return json.dumps(self.content, ensure_ascii=False)
         return ""
+
+    def get_content(self, use_compressed_content: bool = False) -> Optional[Union[List[Any], str]]:
+        """
+        Returns the content, optionally using compressed content if available.
+        
+        Args:
+            use_compressed_content: If True and compressed_content exists, return it instead
+        
+        Returns:
+            The message content (compressed if requested and available)
+        """
+        if use_compressed_content and self.compressed_content is not None:
+            return self.compressed_content
+        return self.content
 
     def to_dict(self) -> Dict[str, Any]:
         _dict = self.model_dump(

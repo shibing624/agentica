@@ -8,7 +8,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import Agent, PythonAgent, ShellTool, JinaTool, SearchSerperTool, OpenAIChat, ZhipuAIChat, Message, BaiduSearchTool, DeepSeekChat
+from agentica import Agent, BaiduSearchTool, DeepSeekChat
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 
 agent =   Agent(

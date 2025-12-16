@@ -18,7 +18,7 @@ from agentica.utils.log import logger, set_log_level_to_debug
 from agentica.agent import Agent
 from agentica.run_response import RunResponse
 from agentica.memory import WorkflowMemory, WorkflowRun
-from agentica.storage.workflow.base import WorkflowStorage
+from agentica.db.base import BaseDb, SessionRow
 from agentica.utils.misc import merge_dictionaries
 from agentica.workflow_session import WorkflowSession
 
@@ -51,8 +51,8 @@ class Workflow(BaseModel):
     # -*- Workflow Memory
     memory: WorkflowMemory = WorkflowMemory()
 
-    # -*- Workflow Storage
-    storage: Optional[WorkflowStorage] = None
+    # -*- Workflow Database
+    db: Optional[BaseDb] = None
     # WorkflowSession from the database: DO NOT SET MANUALLY
     _workflow_session: Optional[WorkflowSession] = None
 
@@ -197,25 +197,47 @@ class Workflow(BaseModel):
         logger.debug(f"-*- WorkflowSession loaded: {session.session_id}")
 
     def read_from_storage(self) -> Optional[WorkflowSession]:
-        """Load the WorkflowSession from storage.
+        """Load the WorkflowSession from database.
 
         Returns:
             Optional[WorkflowSession]: The loaded WorkflowSession or None if not found.
         """
-        if self.storage is not None and self.session_id is not None:
-            self._workflow_session = self.storage.read(session_id=self.session_id)
-            if self._workflow_session is not None:
+        if self.db is not None and self.session_id is not None:
+            session_row = self.db.read_session(session_id=self.session_id, user_id=self.user_id)
+            if session_row is not None:
+                self._workflow_session = WorkflowSession(
+                    session_id=session_row.session_id,
+                    workflow_id=session_row.agent_id,  # workflow_id stored in agent_id field
+                    user_id=session_row.user_id,
+                    memory=session_row.memory,
+                    workflow_data=session_row.agent_data,  # workflow_data stored in agent_data field
+                    user_data=session_row.user_data,
+                    session_data=session_row.session_data,
+                    created_at=session_row.created_at,
+                    updated_at=session_row.updated_at,
+                )
                 self.from_workflow_session(session=self._workflow_session)
         return self._workflow_session
 
     def write_to_storage(self) -> Optional[WorkflowSession]:
-        """Save the WorkflowSession to storage
+        """Save the WorkflowSession to database
 
         Returns:
             Optional[WorkflowSession]: The saved WorkflowSession or None if not saved.
         """
-        if self.storage is not None:
-            self._workflow_session = self.storage.upsert(session=self.get_workflow_session())
+        if self.db is not None:
+            workflow_session = self.get_workflow_session()
+            session_row = SessionRow(
+                session_id=workflow_session.session_id,
+                agent_id=workflow_session.workflow_id,  # workflow_id stored in agent_id field
+                user_id=workflow_session.user_id,
+                memory=workflow_session.memory,
+                agent_data=workflow_session.workflow_data,  # workflow_data stored in agent_data field
+                user_data=workflow_session.user_data,
+                session_data=workflow_session.session_data,
+            )
+            self.db.upsert_session(session_row)
+            self._workflow_session = workflow_session
         return self._workflow_session
 
     def load_session(self, force: bool = False) -> Optional[str]:
@@ -232,7 +254,7 @@ class Workflow(BaseModel):
                 return self._workflow_session.session_id
 
         # Load an existing session or create a new session
-        if self.storage is not None:
+        if self.db is not None:
             # Load existing session if session_id is provided
             logger.debug(f"Reading WorkflowSession: {self.session_id}")
             self.read_from_storage()
@@ -363,21 +385,21 @@ class Workflow(BaseModel):
         logger.debug(f"*********** Logging WorkflowSession: {self.session_id} ***********")
 
     def rename_session(self, session_id: str, name: str):
-        if self.storage is None:
-            raise ValueError("Storage is not set")
-        workflow_session = self.storage.read(session_id)
-        if workflow_session is None:
+        if self.db is None:
+            raise ValueError("Database is not set")
+        session_row = self.db.read_session(session_id=session_id)
+        if session_row is None:
             raise Exception(f"WorkflowSession not found: {session_id}")
-        if workflow_session.session_data is not None:
-            workflow_session.session_data["session_name"] = name
+        if session_row.session_data is not None:
+            session_row.session_data["session_name"] = name
         else:
-            workflow_session.session_data = {"session_name": name}
-        self.storage.upsert(workflow_session)
+            session_row.session_data = {"session_name": name}
+        self.db.upsert_session(session_row)
 
     def delete_session(self, session_id: str):
-        if self.storage is None:
-            raise ValueError("Storage is not set")
-        self.storage.delete_session(session_id)
+        if self.db is None:
+            raise ValueError("Database is not set")
+        self.db.delete_session(session_id=session_id)
 
     def deep_copy(self, *, update: Optional[Dict[str, Any]] = None) -> "Workflow":
         """Create and return a deep copy of this Workflow, optionally updating fields.
@@ -419,7 +441,7 @@ class Workflow(BaseModel):
             return field_value.deep_copy()
 
         # For compound types, attempt a deep copy
-        if isinstance(field_value, (list, dict, set, WorkflowStorage)):
+        if isinstance(field_value, (list, dict, set, BaseDb)):
             try:
                 return deepcopy(field_value)
             except Exception as e:

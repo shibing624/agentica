@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 import sys
-
 from setuptools import setup, find_packages
 
 # Avoids IDE errors, but actual version is read from version.py
 __version__ = ""
 exec(open('agentica/version.py').read())
 
-if sys.version_info < (3,):
-    sys.exit('Sorry, Python3 is required.')
+if sys.version_info < (3, 10):
+    sys.exit('Sorry, Python >= 3.10 is required.')
 
 with open('README.md', 'r', encoding='utf-8') as f:
     readme = f.read()
@@ -31,8 +30,12 @@ setup(
         "Intended Audience :: Developers",
         "Intended Audience :: Education",
         "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.10",
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
     keywords='Agentica,Agent Tool,action,agent,agentica',
@@ -53,9 +56,10 @@ setup(
         "mcp",
         "puremagic",
         "qdrant-client",
+        "langfuse",
+        "python-frontmatter",
     ],
-    packages=find_packages(exclude=['tests']),
+    packages=find_packages(exclude=['tests', 'tests.*', 'examples', 'examples.*', 'docs']),
     package_dir={'agentica': 'agentica'},
-    package_data={'agentica': ['*.*']},
-
+    package_data={'agentica': ['**/*.py', '**/*.md', '**/*.js']},
 )

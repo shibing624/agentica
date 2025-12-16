@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.text import Text
 import importlib
 from typing import List, Optional
-from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, PythonAgent
+from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek
 from agentica.config import AGENTICA_HOME
 
 console = Console()
@@ -158,12 +158,7 @@ def _create_agent(agent_config: dict, active_tool_names: List[str]):
     )
     configured_tools = configure_tools(active_tool_names)
 
-    # Determine agent type
-    agent_class = Agent
-    if 'run_python_code' in active_tool_names:  # or other criteria for PythonAgent
-        agent_class = PythonAgent
-
-    new_agent = agent_class(
+    new_agent = Agent(
         model=model,
         add_datetime_to_instructions=True,
         add_history_to_messages=True,
