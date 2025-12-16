@@ -651,20 +651,24 @@ class Agent:
                     yield member_agent_run_response_chunk.content  # type: ignore
             else:
                 member_agent_run_response: RunResponse = member_agent.run(member_agent_messages, stream=False)
+                response_content = None
                 if member_agent_run_response.content is None:
-                    yield "No response from the member agent."
+                    response_content = "No response from the member agent."
                 elif isinstance(member_agent_run_response.content, str):
-                    yield member_agent_run_response.content
+                    response_content = member_agent_run_response.content
                 elif issubclass(member_agent_run_response.content, BaseModel):
                     try:
-                        yield member_agent_run_response.content.model_dump_json(indent=2)
+                        response_content = member_agent_run_response.content.model_dump_json(indent=2)
                     except Exception as e:
-                        yield str(e)
+                        response_content = str(e)
                 else:
                     try:
-                        yield json.dumps(member_agent_run_response.content, indent=2, ensure_ascii=False)
+                        response_content = json.dumps(member_agent_run_response.content, indent=2, ensure_ascii=False)
                     except Exception as e:
-                        yield str(e)
+                        response_content = str(e)
+                # Log the member agent's response for visibility
+                logger.info(f"\n{'='*50}\n[{member_agent.name}] Response:\n{response_content}\n{'='*50}")
+                yield response_content
             yield self.team_response_separator
 
         # Give a name to the member agent
@@ -1467,9 +1471,6 @@ class Agent:
         Returns:
             String representation of the context, or empty string if conversion fails
         """
-        if context is None:
-            return ""
-
         try:
             return json.dumps(context, indent=2, default=str, ensure_ascii=False)
         except (TypeError, ValueError, OverflowError) as e:

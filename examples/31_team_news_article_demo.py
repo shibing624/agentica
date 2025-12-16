@@ -84,5 +84,4 @@ team.print_response(
     Read each article and and write a NYT worthy news article. 用中文写。
     """,
     stream=True,
-    markdown=True,
 )

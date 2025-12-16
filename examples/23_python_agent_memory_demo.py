@@ -21,7 +21,6 @@ def main():
     db = SqliteDb(db_file=db_file)
     
     knowledge_base = Knowledge(
-        data_path=[],
         vector_db=LanceDb(embedder=Text2VecEmb())
     )
     knowledge_base.load()

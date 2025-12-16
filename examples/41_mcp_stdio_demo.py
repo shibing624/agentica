@@ -28,8 +28,8 @@ async def get_weather_stdio_demo():
         name="GetWeather",
         client_session_timeout_seconds=30,
         params={
-            "command": "uvx",
-            "args": ["weather-forecast-server"],
+            "command": "uv",
+            "args": ["run", "weather-forecast-server"],
         }
     )
     # Use the client as an async context manager
@@ -57,8 +57,8 @@ async def run_python_code_server_demo():
         name="code-interpreter",
         client_session_timeout_seconds=30,
         params={
-            "command": "uvx",
-            "args": ["mcp-run-python-code"],
+            "command": "uv",
+            "args": ["run", "mcp-run-python-code"],
         }
     )
     # Use the client as an async context manager
@@ -83,8 +83,8 @@ async def mcp_toolkit_with_agent_demo():
     """
     logger.debug("\n=== Testing MCPToolkit with agent ===")
     try:
-        async with McpTool("uvx weather-forecast-server") as mcp_tool1, \
-                McpTool("uvx mcp-run-python-code") as mcp_tool2:
+        async with McpTool("uv run weather-forecast-server") as mcp_tool1, \
+                McpTool("uv run mcp-run-python-code") as mcp_tool2:
             m = Agent(
                 model=OpenAIChat(model="gpt-4o-mini"),
                 tools=[ShellTool(), mcp_tool1, mcp_tool2],

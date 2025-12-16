@@ -1,34 +1,69 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description: Test cases for Agent with multi-round tool calling (ReAct-style)
 """
 import unittest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.react_agent import ReactAgent
+from agentica import Agent
+from agentica.model.openai import OpenAIChat
 
 pwd_path = Path(__file__).parent
 
 
-class ReactAgentTest(unittest.TestCase):
+class AgentMultiRoundTest(unittest.TestCase):
+    """Test Agent with enable_multi_round=True (ReAct-style behavior)."""
 
-    @patch('agentica.react_agent.OpenAI')
-    def test_calc(self, mock_openai):
-        """Test ReactAgent with mocked OpenAI API."""
-        # Mock the OpenAI client and its chat.completions.create method
-        mock_client_instance = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = "Thought: 北京是中国的首都。\nAction: finish(北京是中国的首都，历史悠久，是政治、文化中心。)"
-        mock_client_instance.chat.completions.create.return_value = mock_response
-        mock_openai.return_value = mock_client_instance
+    def test_agent_multi_round_init(self):
+        """Test Agent initialization with multi-round enabled."""
+        agent = Agent(
+            enable_multi_round=True,
+            max_rounds=5,
+            add_datetime_to_instructions=True,
+        )
+        self.assertEqual(agent.max_rounds, 5)
+        self.assertTrue(agent.enable_multi_round)
+        self.assertTrue(agent.add_datetime_to_instructions)
 
-        m = ReactAgent(model_name='gpt-4o-mini')
-        r = m.run("一句话介绍北京")
-        print(r)
-        self.assertIsNotNone(r)
+    def test_agent_with_instructions(self):
+        """Test Agent with custom instructions."""
+        custom_instructions = ["Always be helpful", "Use tools when needed"]
+        agent = Agent(
+            instructions=custom_instructions,
+            enable_multi_round=True,
+            max_rounds=10,
+        )
+        self.assertEqual(agent.max_rounds, 10)
+        self.assertTrue(agent.enable_multi_round)
+        self.assertIsNotNone(agent.instructions)
+
+    @patch.object(OpenAIChat, 'response')
+    def test_agent_run(self, mock_response):
+        """Test Agent run method with mocked model response."""
+        # Mock the model response
+        mock_model_response = MagicMock()
+        mock_model_response.content = "Beijing is the capital of China."
+        mock_model_response.parsed = None
+        mock_model_response.audio = None
+        mock_model_response.reasoning_content = None
+        mock_model_response.created_at = None
+        mock_response.return_value = mock_model_response
+
+        agent = Agent(
+            model=OpenAIChat(model="gpt-4o-mini"),
+            enable_multi_round=True,
+        )
+        
+        # Run the agent
+        response = agent.run("What is the capital of China?")
+        self.assertIsNotNone(response)
+
+
+if __name__ == '__main__':
+    unittest.main()

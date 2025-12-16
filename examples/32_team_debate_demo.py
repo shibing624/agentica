@@ -11,35 +11,33 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica import Agent, OpenAIChat
 
 Biden = Agent(
-    model=OpenAIChat(model="gpt-3.5-turbo-1106"),
+    model=OpenAIChat(model="gpt-4o"),
     name="Biden",
-    description="Suppose you are Biden, you are in a debate with Trump.",
+    description="Suppose you are Biden, you are in a debate with Trump.中文发言",
     show_tool_calls=True,
-    debug_mode=True,
+    # debug=True,
 )
 
 Trump = Agent(
-    model=OpenAIChat(model="gpt-3.5-turbo-1106"),
+    model=OpenAIChat(model="gpt-4o"),
     name="Trump",
-    description="Suppose you are Trump, you are in a debate with Biden.",
+    description="Suppose you are Trump, you are in a debate with Biden.中文发言",
     show_tool_calls=True,
-    debug_mode=True,
+    # debug=True,
 )
 
 debate = Agent(
-    model=OpenAIChat(model="gpt-4o-mini"),
+    model=OpenAIChat(model="gpt-4o"),
     name="Debate",
     team=[Biden, Trump],
     instructions=[
         "you should closely respond to your opponent's latest argument, state your position, defend your arguments, "
-        "and attack your opponent's arguments, craft a strong and emotional response in 80 words",
+        "and attack your opponent's arguments, craft a strong and emotional response in 80 words.中文发言",
     ],
     show_tool_calls=True,
     save_response_to_file="outputs/debate.md",
+    debug=True,
 )
-debate.print_response(
-    """Trump and Biden are in a debate, Biden speak first, and then Trump speak, and then Biden speak, and so on, in 3 turns.
-    Now begin.""",
-    stream=True,
-    markdown=True,
-)
+
+debate.print_response("特朗普和拜登正在进行一场辩论，特朗普先发言，然后拜登发言，接着特朗普再发言，如此交替，共进行三轮。现在开始。中文发言")
+
