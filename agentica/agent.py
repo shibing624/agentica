@@ -608,6 +608,109 @@ class Agent:
     def has_team(self) -> bool:
         return self.team is not None and len(self.team) > 0
 
+    def as_tool(
+            self,
+            tool_name: Optional[str] = None,
+            tool_description: Optional[str] = None,
+            custom_output_extractor: Optional[Callable[["RunResponse"], Any]] = None,
+    ) -> Function:
+        """Convert this Agent into a Tool that can be used by other Agents.
+        
+        Unlike team transfer (which passes full context/messages), as_tool treats the Agent
+        as a simple function: it receives input, runs the Agent, and returns output.
+        
+        Args:
+            tool_name: Name for the tool. Defaults to agent name in snake_case.
+            tool_description: Description for the tool. Defaults to agent description or role.
+            custom_output_extractor: Optional function to extract custom output from RunResponse.
+                                     If not provided, returns response.content.
+        
+        Returns:
+            Function: A Function object that can be added to another Agent's tools.
+            
+        Example:
+            >>> # Define a specialist agent
+            >>> translator = Agent(
+            ...     name="Spanish Translator",
+            ...     instructions="Translate the input text to Spanish",
+            ... )
+            >>> 
+            >>> # Use it as a tool in another agent
+            >>> orchestrator = Agent(
+            ...     name="Orchestrator",
+            ...     tools=[
+            ...         translator.as_tool(
+            ...             tool_name="translate_to_spanish",
+            ...             tool_description="Translate text to Spanish",
+            ...         ),
+            ...     ],
+            ... )
+        """
+        # Generate tool name from agent name
+        _tool_name = tool_name
+        if _tool_name is None:
+            if self.name:
+                # Convert "Spanish Translator" -> "spanish_translator"
+                _tool_name = self.name.replace(" ", "_").lower()
+            else:
+                _tool_name = f"agent_{self.agent_id[:8]}"
+        
+        # Generate tool description
+        _tool_description = tool_description
+        if _tool_description is None:
+            if self.description:
+                _tool_description = self.description
+            elif self.role:
+                _tool_description = self.role
+            else:
+                _tool_description = f"Run the {self.name or 'agent'} to process the input"
+        
+        # Create the tool function
+        def _run_agent_as_tool(input_text: str) -> str:
+            """Run the agent with the given input and return the result.
+            
+            Args:
+                input_text: The input text to process.
+                
+            Returns:
+                The agent's response content.
+            """
+            response: RunResponse = self.run(input_text, stream=False)
+            
+            # Use custom extractor if provided
+            if custom_output_extractor is not None:
+                return custom_output_extractor(response)
+            
+            # Default: return content as string
+            if response.content is None:
+                return "No response from agent."
+            elif isinstance(response.content, str):
+                return response.content
+            elif isinstance(response.content, BaseModel):
+                try:
+                    return response.content.model_dump_json(indent=2)
+                except Exception:
+                    return str(response.content)
+            else:
+                try:
+                    return json.dumps(response.content, indent=2, ensure_ascii=False)
+                except Exception:
+                    return str(response.content)
+        
+        # Create Function from the callable
+        tool_function = Function.from_callable(_run_agent_as_tool)
+        tool_function.name = _tool_name
+        tool_function.description = dedent(f"""\
+        {_tool_description}
+        
+        Args:
+            input_text (str): The input text to process.
+        Returns:
+            str: The processed result from the agent.
+        """)
+        
+        return tool_function
+
     def get_transfer_function(self, member_agent: "Agent", index: int) -> Function:
         def _transfer_task_to_agent(
                 task_description: str, expected_output: str, additional_information: str
@@ -794,8 +897,8 @@ class Agent:
             self.model.session_id = self.session_id
 
         # Add user_id to the Model for Langfuse tracing
-        if self.user_id is not None:
-            self.model.user_id = self.user_id
+        # Default to "default" if not set, required for Langfuse user tracking
+        self.model.user_id = self.user_id or "default"
 
         # Add agent name to the Model for Langfuse tracing
         if self.name is not None:
