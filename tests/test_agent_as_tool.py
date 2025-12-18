@@ -31,22 +31,22 @@ class AgentAsToolTest(unittest.TestCase):
     def test_as_tool_default_name_from_agent_name(self):
         """Test that tool name defaults to snake_case of agent name."""
         agent = Agent(
-            name="Spanish Translator",
-            instructions="Translate to Spanish",
+            name="Chinese Translator",
+            instructions="Translate to Chinese",
         )
         tool = agent.as_tool()
         
-        self.assertEqual(tool.name, "spanish_translator")
+        self.assertEqual(tool.name, "chinese_translator")
     
     def test_as_tool_custom_name(self):
         """Test that custom tool name is used when provided."""
         agent = Agent(
-            name="Spanish Translator",
-            instructions="Translate to Spanish",
+            name="Chinese Translator",
+            instructions="Translate to Chinese",
         )
-        tool = agent.as_tool(tool_name="translate_es")
+        tool = agent.as_tool(tool_name="translate_zh")
         
-        self.assertEqual(tool.name, "translate_es")
+        self.assertEqual(tool.name, "translate_zh")
     
     def test_as_tool_default_description_from_agent_description(self):
         """Test that tool description defaults to agent description."""
@@ -63,12 +63,12 @@ class AgentAsToolTest(unittest.TestCase):
         """Test that tool description falls back to agent role."""
         agent = Agent(
             name="Translator",
-            role="Professional Spanish translator",
+            role="Professional Chinese translator",
             instructions="Translate text",
         )
         tool = agent.as_tool()
         
-        self.assertIn("Professional Spanish translator", tool.description)
+        self.assertIn("Professional Chinese translator", tool.description)
     
     def test_as_tool_custom_description(self):
         """Test that custom tool description is used when provided."""
@@ -105,7 +105,7 @@ class AgentAsToolTest(unittest.TestCase):
     @patch.object(Agent, 'run')
     def test_as_tool_calls_agent_run(self, mock_run):
         """Test that calling the tool invokes agent.run()."""
-        mock_response = RunResponse(content="Translated text")
+        mock_response = RunResponse(content="翻译后的文本")
         mock_run.return_value = mock_response
         
         agent = Agent(
@@ -119,7 +119,7 @@ class AgentAsToolTest(unittest.TestCase):
         
         # Verify agent.run was called with the input
         mock_run.assert_called_once_with("Hello world", stream=False)
-        self.assertEqual(result, "Translated text")
+        self.assertEqual(result, "翻译后的文本")
     
     @patch.object(Agent, 'run')
     def test_as_tool_handles_none_content(self, mock_run):
@@ -140,11 +140,11 @@ class AgentAsToolTest(unittest.TestCase):
     @patch.object(Agent, 'run')
     def test_as_tool_custom_output_extractor(self, mock_run):
         """Test that custom output extractor is used when provided."""
-        mock_response = RunResponse(content="Raw output", run_id="test-123")
+        mock_response = RunResponse(content="原始输出", run_id="test-123")
         mock_run.return_value = mock_response
         
         def custom_extractor(response: RunResponse) -> str:
-            return f"Extracted: {response.content} (run_id: {response.run_id})"
+            return f"提取结果: {response.content} (run_id: {response.run_id})"
         
         agent = Agent(
             name="Translator",
@@ -154,7 +154,7 @@ class AgentAsToolTest(unittest.TestCase):
         
         result = tool.entrypoint("Hello")
         
-        self.assertEqual(result, "Extracted: Raw output (run_id: test-123)")
+        self.assertEqual(result, "提取结果: 原始输出 (run_id: test-123)")
     
     @patch.object(Agent, 'run')
     def test_as_tool_handles_dict_content(self, mock_run):
@@ -176,41 +176,97 @@ class AgentAsToolTest(unittest.TestCase):
         self.assertIn("42", result)
 
 
-class AgentAsToolIntegrationTest(unittest.TestCase):
-    """Integration tests for Agent as Tool pattern (requires API key)."""
+class AgentAsToolMockedIntegrationTest(unittest.TestCase):
+    """Integration tests for Agent as Tool pattern with mocked LLM."""
     
-    @unittest.skipIf(
-        not os.environ.get("OPENAI_API_KEY"),
-        "OPENAI_API_KEY not set, skipping integration test"
-    )
-    def test_orchestrator_with_agent_tools(self):
-        """Test orchestrator agent using sub-agents as tools."""
-        from agentica import OpenAIChat
+    @patch.object(Agent, 'run')
+    def test_orchestrator_with_agent_tools(self, mock_run):
+        """Test orchestrator agent using sub-agents as tools (mocked)."""
+        # Mock the run method to return a predefined response
+        mock_run.return_value = RunResponse(content="你好，今天你好吗？")
         
-        # Create a simple echo agent
-        echo_agent = Agent(
-            name="Echo Agent",
-            model=OpenAIChat(id='gpt-4o-mini'),
-            instructions="Simply repeat back the input text exactly as given.",
+        # Create a simple translator agent
+        translator_agent = Agent(
+            name="Chinese Translator",
+            instructions="将输入文本翻译成中文",
         )
         
-        # Create orchestrator with echo agent as tool
+        # Create orchestrator with translator agent as tool
         orchestrator = Agent(
             name="Orchestrator",
-            model=OpenAIChat(id='gpt-4o-mini'),
-            instructions="You have an echo tool. Use it when asked to echo something.",
+            instructions="你有一个翻译工具。当被要求翻译时使用它。",
             tools=[
-                echo_agent.as_tool(
-                    tool_name="echo",
-                    tool_description="Echo back the input text",
+                translator_agent.as_tool(
+                    tool_name="translate_to_chinese",
+                    tool_description="将文本翻译成中文",
                 ),
             ],
         )
         
-        # This test just verifies the setup works without errors
-        # Actual API call would require credits
+        # Verify the setup works without errors
         self.assertIsNotNone(orchestrator.tools)
         self.assertEqual(len(orchestrator.tools), 1)
+        
+        # Verify tool properties
+        tool = orchestrator.tools[0]
+        self.assertIsInstance(tool, Function)
+        self.assertEqual(tool.name, "translate_to_chinese")
+    
+    @patch.object(Agent, 'run')
+    def test_multiple_agent_tools(self, mock_run):
+        """Test orchestrator with multiple agent tools (mocked)."""
+        mock_run.return_value = RunResponse(content="处理结果")
+        
+        # Create multiple specialist agents
+        translator = Agent(name="Translator", instructions="翻译文本")
+        summarizer = Agent(name="Summarizer", instructions="总结文本")
+        analyzer = Agent(name="Analyzer", instructions="分析文本")
+        
+        # Create orchestrator with multiple tools
+        orchestrator = Agent(
+            name="Orchestrator",
+            instructions="协调多个专家Agent",
+            tools=[
+                translator.as_tool(tool_name="translate", tool_description="翻译"),
+                summarizer.as_tool(tool_name="summarize", tool_description="总结"),
+                analyzer.as_tool(tool_name="analyze", tool_description="分析"),
+            ],
+        )
+        
+        # Verify all tools are added
+        self.assertEqual(len(orchestrator.tools), 3)
+        
+        # Verify tool names
+        tool_names = [t.name for t in orchestrator.tools]
+        self.assertIn("translate", tool_names)
+        self.assertIn("summarize", tool_names)
+        self.assertIn("analyze", tool_names)
+    
+    @patch.object(Agent, 'run')
+    def test_agent_tool_execution_chain(self, mock_run):
+        """Test chained execution of agent tools (mocked)."""
+        # Setup mock to return different values on each call
+        mock_run.side_effect = [
+            RunResponse(content="AI是机器展示的智能。"),  # First call: summarize
+            RunResponse(content="人工智能是机器展示的智能。"),  # Second call: translate
+        ]
+        
+        summarizer = Agent(name="Summarizer", instructions="总结文本")
+        translator = Agent(name="Translator", instructions="翻译文本")
+        
+        # Get tools
+        summarize_tool = summarizer.as_tool(tool_name="summarize")
+        translate_tool = translator.as_tool(tool_name="translate")
+        
+        # Execute chain: summarize then translate
+        summary = summarize_tool.entrypoint("Long text about AI...")
+        self.assertEqual(summary, "AI是机器展示的智能。")
+        
+        translation = translate_tool.entrypoint(summary)
+        self.assertEqual(translation, "人工智能是机器展示的智能。")
+        
+        # Verify both agents were called
+        self.assertEqual(mock_run.call_count, 2)
 
 
 if __name__ == "__main__":

@@ -27,12 +27,12 @@ def main():
     # Define specialist agents
     # ============================================================================
     
-    # Spanish translator agent
-    spanish_translator = Agent(
-        name="Spanish Translator",
+    # Chinese translator agent
+    chinese_translator = Agent(
+        name="Chinese Translator",
         model=OpenAIChat(id='gpt-4o-mini'),
-        instructions="You are a professional Spanish translator. Translate the input text to Spanish accurately.",
-        description="Translate text to Spanish",
+        instructions="你是一个专业的中文翻译。请将输入的文本准确翻译成中文。",
+        description="将文本翻译成中文",
     )
     
     # French translator agent
@@ -47,8 +47,8 @@ def main():
     summarizer = Agent(
         name="Text Summarizer",
         model=OpenAIChat(id='gpt-4o-mini'),
-        instructions="You are a professional text summarizer. Summarize the input text concisely in 1-2 sentences.",
-        description="Summarize text concisely",
+        instructions="你是一个专业的文本摘要专家。请用1-2句话简洁地总结输入的文本。",
+        description="简洁地总结文本",
     )
     
     # ============================================================================
@@ -59,27 +59,28 @@ def main():
         name="Orchestrator",
         model=OpenAIChat(id='gpt-4o'),
         instructions="""\
-You are an orchestrator agent that can delegate tasks to specialist agents.
-You have access to the following tools:
-- translate_to_spanish: Translate text to Spanish
-- translate_to_french: Translate text to French  
-- summarize_text: Summarize text concisely
+你是一个协调器Agent，可以将任务委派给专家Agent。
+你可以使用以下工具：
+- translate_to_chinese: 将文本翻译成中文
+- translate_to_french: 将文本翻译成法语
+- summarize_text: 简洁地总结文本
 
-When the user asks for translation or summarization, use the appropriate tool.
-You can chain multiple tools if needed (e.g., summarize then translate).
+当用户要求翻译或摘要时，请使用相应的工具。
+你可以链式调用多个工具（例如，先摘要再翻译）。
+请用中文回复用户。
 """,
         tools=[
-            spanish_translator.as_tool(
-                tool_name="translate_to_spanish",
-                tool_description="Translate the given text to Spanish",
+            chinese_translator.as_tool(
+                tool_name="translate_to_chinese",
+                tool_description="将给定的文本翻译成中文",
             ),
             french_translator.as_tool(
                 tool_name="translate_to_french",
-                tool_description="Translate the given text to French",
+                tool_description="将给定的文本翻译成法语",
             ),
             summarizer.as_tool(
                 tool_name="summarize_text",
-                tool_description="Summarize the given text concisely in 1-2 sentences",
+                tool_description="用1-2句话简洁地总结给定的文本",
             ),
         ],
         debug_mode=True,
@@ -90,17 +91,17 @@ You can chain multiple tools if needed (e.g., summarize then translate).
     # ============================================================================
     
     print("=" * 60)
-    print("Example 1: Simple translation to Spanish")
+    print("示例1: 简单翻译成中文")
     print("=" * 60)
-    orchestrator.print_response("Translate 'Hello, how are you today?' to Spanish")
+    orchestrator.print_response("请将 'Hello, how are you today?' 翻译成中文")
     
     print("\n" + "=" * 60)
-    print("Example 2: Translation to French")
+    print("示例2: 翻译成法语")
     print("=" * 60)
-    orchestrator.print_response("Translate 'The weather is beautiful today' to French")
+    orchestrator.print_response("请将 'The weather is beautiful today' 翻译成法语")
     
     print("\n" + "=" * 60)
-    print("Example 3: Summarization")
+    print("示例3: 文本摘要")
     print("=" * 60)
     long_text = """
     Artificial intelligence (AI) is intelligence demonstrated by machines, 
@@ -111,13 +112,13 @@ You can chain multiple tools if needed (e.g., summarize then translate).
     had previously been used to describe machines that mimic and display "human" 
     cognitive skills that are associated with the human mind, such as "learning" and "problem-solving".
     """
-    orchestrator.print_response(f"Please summarize the following text:\n{long_text}")
+    orchestrator.print_response(f"请总结以下文本：\n{long_text}")
     
     print("\n" + "=" * 60)
-    print("Example 4: Chained operations - Summarize then translate")
+    print("示例4: 链式操作 - 先摘要再翻译成中文")
     print("=" * 60)
     orchestrator.print_response(
-        f"First summarize this text, then translate the summary to Spanish:\n{long_text}"
+        f"请先总结这段文本，然后将摘要翻译成中文：\n{long_text}"
     )
 
 
