@@ -7,7 +7,7 @@ import hashlib
 import os
 import re
 import json
-from urllib.parse import urlparse, urljoin
+from urllib.parse import ParseResult, urlparse, urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -38,7 +38,7 @@ class UrlCrawlerTool(Tool):
     def __init__(
             self,
             base_dir: str = os.path.curdir,
-            max_content_length: int = 8000,
+            max_content_length: int = 16000,
     ):
         super().__init__(name="url_crawler_tool")
         self.base_dir = base_dir
@@ -49,7 +49,7 @@ class UrlCrawlerTool(Tool):
     def _generate_file_name_from_url(url: str, max_length=255) -> str:
         url_bytes = url.encode("utf-8")
         hash = hashlib.blake2b(url_bytes).hexdigest()
-        parsed_url = urlparse(url)
+        parsed_url: ParseResult = urlparse(url)
         file_name = os.path.basename(url)
         prefix = f"{parsed_url.netloc}_{file_name}"
         end = hash[:min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]
@@ -89,7 +89,7 @@ class UrlCrawlerTool(Tool):
         """Crawl a website url and return the content of the website as a json string.
 
         Args:
-            url (str): The URL of the website to read
+            url (str): The URL of the website to read, starting with http:// or https://
             
         Returns:
             str: The content of the website as a json string.

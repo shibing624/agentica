@@ -144,9 +144,21 @@ from agentica.utils.tokens import (
 
 # agent
 from agentica.agent import Agent
+from agentica.deep_agent import DeepAgent
 from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow
 from agentica.workflow_session import WorkflowSession
+
+# built-in tools for DeepAgent
+from agentica.deep_tools import (
+    BuiltinFileTool,
+    BuiltinExecuteTool,
+    BuiltinWebSearchTool,
+    BuiltinFetchUrlTool,
+    BuiltinTodoTool,
+    BuiltinTaskTool,
+    get_builtin_tools,
+)
 
 # guardrails
 from agentica.guardrails import (

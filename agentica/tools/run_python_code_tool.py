@@ -6,7 +6,6 @@ part of the code is from phidata
 """
 from __future__ import annotations
 
-import functools
 import io
 import os
 import runpy
@@ -17,10 +16,6 @@ from typing import Optional
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
-
-@functools.lru_cache(maxsize=None)
-def warn() -> None:
-    logger.warning("RunPythonCode can run arbitrary code, please provide human supervision.")
 
 
 class RunPythonCodeTool(Tool):
@@ -57,8 +52,7 @@ class RunPythonCodeTool(Tool):
         :param code: The code to run.
         :return: stdout output or error message.
         """
-        warn()
-        logger.debug(f"Running code:\n\n{code}\n\n")
+        logger.info(f"Running code:\n\n{code}\n\n")
         
         old_stdout = sys.stdout
         new_stdout = io.StringIO()
@@ -95,8 +89,6 @@ class RunPythonCodeTool(Tool):
         Returns:
             str: stdout output or success message.
         """
-        warn()
-        
         old_stdout = sys.stdout
         new_stdout = io.StringIO()
         sys.stdout = new_stdout
@@ -135,9 +127,7 @@ class RunPythonCodeTool(Tool):
         :return: success message if successful, otherwise returns an error message.
         """
         try:
-            warn()
-
-            logger.debug(f"Installing package {package_name}")
+            logger.info(f"Installing package {package_name}")
             import sys
             import subprocess
 
@@ -155,7 +145,6 @@ class RunPythonCodeTool(Tool):
         :param file_name: The name of the file to run.
         :return: stdout output or success message.
         """
-        warn()
         file_path = os.path.join(self.base_dir, file_name)
         
         old_stdout = sys.stdout

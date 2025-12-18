@@ -98,7 +98,7 @@ def main():
             ShellTool(),        # Built-in tool
             FileTool()          # Built-in tool
         ],
-        debug_mode=True
+        # debug_mode=True
     )
     
     # Example queries

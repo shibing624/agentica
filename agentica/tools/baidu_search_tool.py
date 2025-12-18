@@ -291,6 +291,7 @@ class BaiduSearchTool(Tool):
         Returns:
             str: A JSON formatted string containing the search results.
         """
+        logger.debug(f"Searching Baidu for: {queries}, max_results: {max_results}")
         if isinstance(queries, str):
             return self.baidu_search_single_query(queries, max_results=max_results)
 
