@@ -156,8 +156,11 @@ pip install -U agentica
 agentica --query "下一届奥运会在哪里举办？" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
 
 # 启动交互式聊天会话
-agentica --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search cogview --verbose 1
+agentica --model_provider zhipuai --model_name glm-4.6v-flash
 ```
+
+CLI show case (实现ClaudeCode效果):
+<img src="https://github.com/shibing624/agentica/blob/main/docs/cli_snap.png" width="800" />
 
 ### Web UI
 

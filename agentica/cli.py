@@ -2,20 +2,123 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: command line interface for agentica
+
+Interactive Features:
+  Enter           Submit your message
+  Alt+Enter       Insert newline for multi-line (Option+Enter or ESC then Enter)
+  Ctrl+J          Insert newline (alternative)
+  @filename       Type @ to auto-complete files and inject content
+  /command        Type / to see available commands (auto-completes)
+
+Interactive Commands:
+  /help           Show available commands and features
+  /clear          Clear screen and reset conversation
 """
 import argparse
+import importlib
+import json
 import os
 import sys
-import time
+import re
+import glob as glob_module
+from pathlib import Path
+from typing import List, Optional
+
 from rich.console import Console
 from rich.text import Text
-import importlib
-from typing import List, Optional
-from agentica import Agent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek
+
+from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek
 from agentica.config import AGENTICA_HOME
+from agentica.utils.log import suppress_console_logging
 
 console = Console()
 history_file = os.path.join(AGENTICA_HOME, "cli_history.txt")
+
+# Tool icons for CLI display
+TOOL_ICONS = {
+    # File tools
+    "ls": "📁",
+    "read_file": "📖",
+    "write_file": "✏️",
+    "edit_file": "✂️",
+    "glob": "🔍",
+    "grep": "🔎",
+    # Execution
+    "execute": "⚡",
+    # Web tools
+    "web_search": "🌐",
+    "fetch_url": "🔗",
+    # Task management
+    "write_todos": "📋",
+    "read_todos": "📋",
+    # Subagent
+    "task": "🤖",
+    # Default
+    "default": "🔧",
+}
+
+# Tool registry - maps tool names to (module_name, class_name)
+# Format: 'tool_name': ('module_name', 'ClassName')
+# Module path: agentica.tools.{module_name}_tool.{ClassName}
+TOOL_REGISTRY = {
+    # AI/ML Tools
+    'cogvideo':        ('cogvideo',        'CogVideoTool'),
+    'cogview':         ('cogview',         'CogViewTool'),
+    'dalle':           ('dalle',           'DalleTool'),
+    'image_analysis':  ('image_analysis',  'ImageAnalysisTool'),
+    'ocr':             ('ocr',             'OcrTool'),
+    'video_analysis':  ('video_analysis',  'VideoAnalysisTool'),
+    'volc_tts':        ('volc_tts',        'VolcTtsTool'),
+
+    # Search Tools
+    'arxiv':           ('arxiv',           'ArxivTool'),
+    'baidu_search':    ('baidu_search',    'BaiduSearchTool'),
+    'dblp':            ('dblp',            'DblpTool'),
+    'duckduckgo':      ('duckduckgo',      'DuckDuckGoTool'),
+    'search_bocha':    ('search_bocha',    'SearchBochaTool'),
+    'search_exa':      ('search_exa',      'SearchExaTool'),
+    'search_serper':   ('search_serper',   'SearchSerperTool'),
+    'web_search_pro':  ('web_search_pro',  'WebSearchProTool'),
+    'wikipedia':       ('wikipedia',       'WikipediaTool'),
+
+    # Web/Network Tools
+    'browser':         ('browser',         'BrowserTool'),
+    'jina':            ('jina',            'JinaTool'),
+    'newspaper':       ('newspaper',       'NewspaperTool'),
+    'url_crawler':     ('url_crawler',     'UrlCrawlerTool'),
+
+    # File/Code Tools
+    'calculator':      ('calculator',      'CalculatorTool'),
+    'code':            ('code',            'CodeTool'),
+    'edit':            ('edit',            'EditTool'),
+    'file':            ('file',            'FileTool'),
+    'run_nb_code':     ('run_nb_code',     'RunNbCodeTool'),
+    'run_python_code': ('run_python_code', 'RunPythonCodeTool'),
+    'shell':           ('shell',           'ShellTool'),
+    'string':          ('string',          'StringTool'),
+    'text_analysis':   ('text_analysis',   'TextAnalysisTool'),
+    'workspace':       ('workspace',       'WorkspaceTool'),
+
+    # Data Tools
+    'hackernews':      ('hackernews',      'HackerNewsTool'),
+    'sql':             ('sql',             'SqlTool'),
+    'weather':         ('weather',         'WeatherTool'),
+    'yfinance':        ('yfinance',        'YFinanceTool'),
+
+    # Integration Tools
+    'airflow':         ('airflow',         'AirflowTool'),
+    'apify':           ('apify',           'ApifyTool'),
+    'mcp':             ('mcp',             'MCPTool'),
+    'memori':          ('memori',          'MemoriTool'),
+    'skill':           ('skill',           'SkillTool'),
+    'video_download':  ('video_download',  'VideoDownloadTool'),
+}
+
+
+def _get_tool_import_path(tool_name: str) -> str:
+    """Get full import path for a tool."""
+    module_name, class_name = TOOL_REGISTRY[tool_name]
+    return f"agentica.tools.{module_name}_tool.{class_name}"
 
 
 # Color constants
@@ -28,38 +131,13 @@ class TermColor:
     RESET = "\033[0m"
 
 
-# Tool mapping dictionary - maps tool names to their import paths
-TOOL_MAP = {
-    'airflow': 'agentica.tools.airflow_tool.AirflowTool',
-    'analyze_image': 'agentica.tools.analyze_image_tool.AnalyzeImageTool',
-    'arxiv': 'agentica.tools.arxiv_tool.ArxivTool',
-    'baidu_search': 'agentica.tools.baidu_search_tool.BaiduSearchTool',
-    'calculator': 'agentica.tools.calculator_tool.CalculatorTool',
-    'code': 'agentica.tools.code_tool.CodeTool',
-    'cogview': 'agentica.tools.cogview_tool.CogViewTool',
-    'cogvideo': 'agentica.tools.cogvideo_tool.CogVideoTool',
-    'dalle': 'agentica.tools.dalle_tool.DalleTool',
-    'duckduckgo': 'agentica.tools.duckduckgo_tool.DuckDuckGoTool',
-    'edit': 'agentica.tools.edit_tool.EditTool',
-    'file': 'agentica.tools.file_tool.FileTool',
-    'hackernews': 'agentica.tools.hackernews_tool.HackerNewsTool',
-    'jina': 'agentica.tools.jina_tool.JinaTool',
-    'mcp': 'agentica.tools.mcp_tool.MCPTool',
-    'newspaper': 'agentica.tools.newspaper_tool.NewspaperTool',
-    'ocr': 'agentica.tools.ocr_tool.OcrTool',
-    'run_python_code': 'agentica.tools.run_python_code_tool.RunPythonCodeTool',
-    'search_exa': 'agentica.tools.search_exa_tool.SearchExaTool',
-    'search_serper': 'agentica.tools.search_serper_tool.SearchSerperTool',
-    'shell': 'agentica.tools.shell_tool.ShellTool',
-    'string': 'agentica.tools.string_tool.StringTool',
-    'text_analysis': 'agentica.tools.text_analysis_tool.TextAnalysisTool',
-    'url_crawler': 'agentica.tools.url_crawler_tool.UrlCrawlerTool',
-    'volc_tts': 'agentica.tools.volc_tts_tool.VolcTtsTool',
-    'weather': 'agentica.tools.weather_tool.WeatherTool',
-    'web_search_pro': 'agentica.tools.web_search_pro_tool.WebSearchProTool',
-    'wikipedia': 'agentica.tools.wikipedia_tool.WikipediaTool',
-    'workspace': 'agentica.tools.workspace_tool.WorkspaceTool',
-    'yfinance': 'agentica.tools.yfinance_tool.YFinanceTool',
+# Rich console color scheme
+COLORS = {
+    "user": "bright_cyan",
+    "agent": "bright_green",
+    "thinking": "yellow",
+    "tool": "cyan",
+    "error": "red",
 }
 
 
@@ -70,17 +148,52 @@ def parse_args():
                         choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
                         help='LLM model provider', default='openai')
     parser.add_argument('--model_name', type=str,
-                        help='LLM model name to use, can be gpt-4o/glm-4-flash/deepseek-chat/yi-lightning/...',
-                        default='gpt-4o-mini')
+                        help='LLM model name to use, can be gpt-5/glm-4-flash/deepseek-chat/yi-lightning/...',
+                        default='gpt-5-mini')
     parser.add_argument('--api_base', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
     parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
+    parser.add_argument('--work_dir', type=str, help='Working directory for file operations', default=None)
     parser.add_argument('--tools', nargs='*',
-                        choices=list(TOOL_MAP.keys()),
-                        help='Tools to enable')
+                        choices=list(TOOL_REGISTRY.keys()),
+                        help='Additional tools to enable (on top of DeepAgent built-in tools)')
     return parser.parse_args()
+
+
+def configure_tools(tool_names: Optional[List[str]] = None) -> List:
+    """Configure and instantiate tools based on their names.
+
+    Args:
+        tool_names: List of tool names to enable. Must be keys in TOOL_REGISTRY.
+
+    Returns:
+        List of instantiated tool objects.
+    """
+    if not tool_names:
+        return []
+
+    tools = []
+    for name in tool_names:
+        if name not in TOOL_REGISTRY:
+            console.print(f"[yellow]Warning: Tool '{name}' not recognized. Skipping.[/yellow]")
+            continue
+
+        try:
+            import_path = _get_tool_import_path(name)
+            module_path, class_name = import_path.rsplit('.', 1)
+            module = importlib.import_module(module_path)
+            tool_class = getattr(module, class_name)
+            tool_instance = tool_class()
+            tools.append(tool_instance)
+            console.print(f"[green]Loaded additional tool: {name}[/green]")
+        except ImportError as e:
+            console.print(f"[red]Error: Could not import tool '{name}'. Missing dependencies? {str(e)}[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: Failed to initialize tool '{name}': {str(e)}[/red]")
+
+    return tools
 
 
 def get_model(model_provider, model_name, api_base=None, api_key=None, max_tokens=None, temperature=None):
@@ -110,44 +223,8 @@ def get_model(model_provider, model_name, api_base=None, api_key=None, max_token
     return model
 
 
-def configure_tools(tool_names: Optional[List[str]] = None) -> List:
-    """
-    Configure and instantiate tools based on their names.
-    Uses dynamic import to load tools only when requested.
-
-    Args:
-        tool_names: List of tool names to enable. Must be keys in TOOL_MAP.
-
-    Returns:
-        List of instantiated tool objects.
-    """
-    if not tool_names:
-        return []
-
-    tools = []
-    for name in tool_names:
-        if name not in TOOL_MAP:
-            console.print(f"[yellow]Warning: Tool '{name}' not recognized. Skipping.[/yellow]")
-            continue
-
-        try:
-            # Dynamically import and instantiate the tool
-            module_path, class_name = TOOL_MAP[name].rsplit('.', 1)
-            module = importlib.import_module(module_path)
-            tool_class = getattr(module, class_name)
-            tool_instance = tool_class()
-            tools.append(tool_instance)
-            console.print(f"[green]Successfully loaded tool: {name}[/green]")
-        except ImportError as e:
-            console.print(f"[red]Error: Could not import tool '{name}'. Missing dependencies? {str(e)}[/red]")
-        except Exception as e:
-            console.print(f"[red]Error: Failed to initialize tool '{name}': {str(e)}[/red]")
-
-    return tools
-
-
-def _create_agent(agent_config: dict, active_tool_names: List[str]):
-    """Helper to create or recreate an agent with current config and tools."""
+def _create_agent(agent_config: dict, extra_tools: Optional[List] = None):
+    """Helper to create or recreate a DeepAgent with current config."""
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -156,364 +233,646 @@ def _create_agent(agent_config: dict, active_tool_names: List[str]):
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
     )
-    configured_tools = configure_tools(active_tool_names)
 
-    new_agent = Agent(
+    new_agent = DeepAgent(
         model=model,
+        work_dir=agent_config.get("work_dir"),
+        tools=extra_tools,  # Additional tools on top of built-in tools
         add_datetime_to_instructions=True,
         add_history_to_messages=True,
-        tools=configured_tools,
         debug_mode=agent_config["debug_mode"]
     )
     return new_agent
 
 
-def print_header(model_provider: str, model_name: str, tools: Optional[List[str]] = None,
-                 active_tools: Optional[List[str]] = None):
+def print_header(model_provider: str, model_name: str, work_dir: Optional[str] = None,
+                 extra_tools: Optional[List[str]] = None):
     """Print the application header with version and model information"""
     header_color = TermColor.BRIGHT_CYAN
     accent_color = TermColor.BRIGHT_GREEN
+    dim_color = TermColor.WHITE
     reset = TermColor.RESET
 
-    # Create a boxed header
-    box_width = 60
-    border_top = f"{header_color}╭{'─' * (box_width - 1)}╮{reset}"
-    border_bottom = f"{header_color}╰{'─' * (box_width - 1)}╯{reset}"
+    box_width = 70
+    border_top = f"{header_color}{'=' * box_width}{reset}"
+    border_bottom = f"{header_color}{'=' * box_width}{reset}"
 
-    # Print header
     print(border_top)
-
-    # App name and version
-    app_name = f"{header_color}│{reset} {accent_color}Agentica CLI{reset} - Interactive AI Assistant"
-    padding = box_width - len(app_name) + len(header_color) + len(reset) + len(accent_color) + len(reset)
-    print(f"{app_name}{' ' * padding}{header_color}│{reset}")
-
-    # Model info
-    model_info = f"{header_color}│{reset} Model: {accent_color}{model_provider}/{model_name}{reset}"
-    padding = box_width - len(model_info) + len(header_color) + len(reset) + len(accent_color) + len(reset)
-    print(f"{model_info}{' ' * padding}{header_color}│{reset}")
-
-    # Initial Tools info (from command line)
-    if tools:
-        tools_str = ", ".join(tools)
-        init_tools_line = f"{header_color}│{reset} Initial Tools: {accent_color}{tools_str}{reset}"
-        if len(init_tools_line) - len(header_color) - len(reset) - len(accent_color) - len(reset) > box_width - 4:
-            tools_str = tools_str[:(box_width - 30)] + "..."  # Adjusted for "Initial Tools: "
-            init_tools_line = f"{header_color}│{reset} Initial Tools: {accent_color}{tools_str}{reset}"
-        padding = box_width - len(init_tools_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
-        print(f"{init_tools_line}{' ' * padding}{header_color}│{reset}")
-
-    # Active Tools info
-    active_tools_display = ", ".join(active_tools) if active_tools else "None"
-    active_tools_line = f"{header_color}│{reset} Active Tools: {accent_color}{active_tools_display}{reset}"
-    if len(active_tools_line) - len(header_color) - len(reset) - len(accent_color) - len(reset) > box_width - 4:
-        active_tools_display = active_tools_display[:(box_width - 28)] + "..."  # Adjusted for "Active Tools: "
-        active_tools_line = f"{header_color}│{reset} Active Tools: {accent_color}{active_tools_display}{reset}"
-    padding = box_width - len(active_tools_line) + len(header_color) + len(reset) + len(accent_color) + len(reset)
-    print(f"{active_tools_line}{' ' * padding}{header_color}│{reset}")
+    print(f"{header_color}  Agentica CLI{reset} - Interactive AI Assistant with DeepAgent")
+    print(f"  Model: {accent_color}{model_provider}/{model_name}{reset}")
 
     # Working directory
-    cwd = os.getcwd()
+    cwd = work_dir or os.getcwd()
     home = os.path.expanduser("~")
     if cwd.startswith(home):
         cwd = "~" + cwd[len(home):]
-    cwd_line = f"{header_color}│{reset} Working Directory: {cwd}"
-    if len(cwd_line) - len(header_color) - len(reset) > box_width - 4:
-        display_cwd = "..." + cwd[-(box_width - 24):]
-        cwd_line = f"{header_color}│{reset} Working Directory: {display_cwd}"
-    padding = box_width - len(cwd_line) + len(header_color) + len(reset)
-    print(f"{cwd_line}{' ' * padding}{header_color}│{reset}")
+    if len(cwd) > 50:
+        cwd = "..." + cwd[-47:]
+    print(f"  Working Directory: {cwd}")
 
-    raw_input_instruction = f"Type /help for available commands. Use /m for multi-line."
-    colored_input_instruction = f"{header_color}│{reset} {raw_input_instruction.replace(
-        '/m', f"{accent_color}/m{reset}").replace('/help', f"{accent_color}/help{reset}")} "
-    visible_length = len(f"│ {raw_input_instruction} │")
-    padding_needed = box_width - visible_length
-    print(f"{colored_input_instruction}{' ' * padding_needed}{header_color}│{reset}")
+    # Built-in tools (always shown)
+    builtin_tools = ["ls", "read_file", "write_file", "edit_file", "glob", "grep",
+                     "execute", "web_search", "fetch_url", "write_todos", "read_todos", "task"]
+    print(f"  Built-in Tools: {dim_color}{', '.join(builtin_tools)}{reset}")
+
+    # Extra tools info
+    if extra_tools:
+        tools_str = ", ".join(extra_tools)
+        if len(tools_str) > 55:
+            tools_str = tools_str[:52] + "..."
+        print(f"  Extra Tools: {accent_color}{tools_str}{reset}")
 
     print(border_bottom)
     print()
+    print(f"  {accent_color}Enter{reset}       Submit your message")
+    print(f"  {accent_color}Alt+Enter{reset}   Insert newline for multi-line input")
+    print(f"  {accent_color}Ctrl+J{reset}      Insert newline (alternative)")
+    print(f"  {accent_color}@filename{reset}   Type @ to auto-complete files and inject content")
+    print(f"  {accent_color}/command{reset}    Type / to see available commands")
+    print()
 
 
-def get_user_input_revised(in_multiline_mode_flag: List[bool], multiline_buffer: List[str]):
+def parse_file_mentions(text: str) -> tuple[str, list[Path]]:
+    """Parse @file mentions and return text with mentioned files.
+    
+    Args:
+        text: User input text potentially containing @file mentions
+        
+    Returns:
+        Tuple of (processed_text, list_of_file_paths)
     """
-    Handles user input. 
-    Returns (input_string, input_type).
-    input_type can be: "query", "command", "multiline_start", "multiline_content", 
-                         "multiline_end", "exit", "interrupt"
+    pattern = r"@([\w./-]+)"
+    mentioned_files = []
+    
+    for match in re.finditer(pattern, text):
+        file_path_str = match.group(1)
+        file_path = Path(file_path_str).expanduser()
+        if not file_path.is_absolute():
+            file_path = Path.cwd() / file_path
+        if file_path.exists() and file_path.is_file():
+            mentioned_files.append(file_path)
+    
+    # Remove @ mentions from text for cleaner display
+    processed_text = re.sub(pattern, r'\1', text)
+    return processed_text, mentioned_files
+
+
+def inject_file_contents(prompt_text: str, mentioned_files: list[Path]) -> str:
+    """Inject file contents into the prompt.
+    
+    Args:
+        prompt_text: The user's prompt text
+        mentioned_files: List of file paths to inject
+        
+    Returns:
+        Final prompt with file contents injected
     """
-    try:
-        if in_multiline_mode_flag[0]:
-            console.print(Text("... ", style="blue"), end="")
+    if not mentioned_files:
+        return prompt_text
+    
+    context_parts = [prompt_text, "\n\n## Referenced Files\n"]
+    for file_path in mentioned_files:
+        try:
+            content = file_path.read_text()
+            # Limit file content to reasonable size
+            if len(content) > 20000:
+                content = content[:20000] + "\n... (file truncated)"
+            context_parts.append(
+                f"\n### {file_path.name}\nPath: `{file_path}`\n```\n{content}\n```"
+            )
+        except Exception as e:
+            context_parts.append(f"\n### {file_path.name}\n[Error reading file: {e}]")
+    
+    return "\n".join(context_parts)
+
+
+def display_user_message(text: str) -> None:
+    """Display user message with file mentions colored."""
+    pattern = r"(@[\w./-]+)"
+    parts = re.split(pattern, text)
+    rich_text = Text()
+    
+    for part in parts:
+        if part.startswith("@"):
+            rich_text.append(part, style="magenta")
         else:
-            console.print(Text("> ", style="green"), end="")
-        sys.stdout.flush()
-        line = input()
-
-        if in_multiline_mode_flag[0]:
-            stripped_line = line.strip()
-            if stripped_line.lower() in ["/em", "/endmultiline", "/end"]:
-                in_multiline_mode_flag[0] = False
-                return "", "multiline_end"  # Explicit end command
-            multiline_buffer.append(line)  # Add current line (could be empty)
-            return line, "multiline_content"
-        else:  # Not in multi-line mode
-            stripped_line = line.strip()
-            if stripped_line.lower() in ['exit', 'quit', '\\q', '/exit', '/quit']:
-                return None, "exit"
-
-            if stripped_line.startswith("/"):
-                if stripped_line.lower() == "/m":
-                    in_multiline_mode_flag[0] = True
-                    multiline_buffer.clear()  # Clear buffer when entering multi-line mode
-                    console.print("[info]Entered multi-line input mode. Type /em to submit.[/info]")
-                    return "", "multiline_start"
-                return stripped_line, "command"
-            return line, "query"
-
-    except KeyboardInterrupt:
-        if in_multiline_mode_flag[0]:
-            in_multiline_mode_flag[0] = False
-            console.print("\nMulti-line input cancelled.", style="yellow")
-            return "", "interrupt"
-        # If not in multiline, let the main loop's KeyboardInterrupt handle it
-        console.print("\nExiting...", style="yellow")  # Or handle as exit
-        return None, "exit"
-    except EOFError:
-        console.print("\nExiting...", style="yellow")
-        return None, "exit"
+            rich_text.append(part, style=COLORS["user"])
+    
+    console.print(rich_text)
 
 
-def run_interactive(agent_config: dict, initial_active_tool_names: List[str]):
-    """Run the interactive CLI with multi-line input support and command handling."""
+def get_file_completions(document_text: str) -> List[str]:
+    """Get file completions for @ mentions.
+    
+    Args:
+        document_text: Current input text
+        
+    Returns:
+        List of file path completions
+    """
+    # Find the @ mention being typed
+    match = re.search(r"@([\w./-]*)$", document_text)
+    if not match:
+        return []
+    
+    partial = match.group(1)
+    
+    if partial:
+        # Search for files matching the partial path
+        search_pattern = f"{partial}*"
+        matches = glob_module.glob(search_pattern, recursive=False)
+        # Also search in subdirectories
+        matches.extend(glob_module.glob(f"**/{partial}*", recursive=True))
+    else:
+        # Show files in current directory
+        matches = glob_module.glob("*")
+    
+    # Filter to only files (not directories) and limit results
+    completions = []
+    for m in matches[:20]:
+        if os.path.isfile(m):
+            completions.append(m)
+        elif os.path.isdir(m):
+            completions.append(m + "/")
+    
+    return completions
 
-    current_agent = _create_agent(agent_config, initial_active_tool_names)
-    active_tool_names = list(initial_active_tool_names)  # Make a mutable copy
 
-    in_multiline_mode = [False]  # Use a list for mutable closure behavior
-    multiline_buffer = []
+def show_help():
+    """Display help information."""
+    help_text = """
+Available Commands:
+  /help           Show this help message
+  /clear          Clear screen and reset conversation
+  /tools          List available additional tools
+  /exit, /quit    Exit the CLI
 
-    # For thinking indicator
-    thinking_start_time = 0
-    loading = False
-    indicator_thread = None
+Input Features:
+  Enter           Submit your message
+  Alt+Enter       Insert newline for multi-line input (Option+Enter on Mac)
+  Ctrl+J          Insert newline (alternative)
+  @filename       Reference a file - content will be injected into prompt
+  
+Tips:
+  - Type @ followed by a filename to reference files
+  - Use Alt+Enter or Ctrl+J to write multi-line messages
+  - DeepAgent has built-in tools: ls, read_file, write_file, edit_file, glob, grep,
+    execute, web_search, fetch_url, write_todos, read_todos, task
+  - Use --tools to add extra tools, e.g.: --tools calculator shell wikipedia
+"""
+    console.print(help_text, style="yellow")
 
-    def show_thinking_indicator():
-        if loading:
-            elapsed = int(time.time() - thinking_start_time)
-            sys.stdout.write(f"\rThinking... ({elapsed}s)")
-            sys.stdout.flush()
 
-    def stop_thinking_indicator():
-        nonlocal loading, indicator_thread
-        if loading:
-            loading = False  # Set loading to false FIRST
-            if indicator_thread and indicator_thread.is_alive():
-                indicator_thread.join(timeout=0.1)  # Attempt to join the thread
-            # Clear the line regardless of thread state, as it might have printed one last time
-            sys.stdout.write("\r" + " " * 40 + "\r")  # Use a slightly wider clear space
-            sys.stdout.flush()
+def _extract_filename(file_path: str) -> str:
+    """Extract filename from a file path."""
+    return Path(file_path).name
 
+
+def _format_line_range(offset: int, limit: int) -> str:
+    """Format line range as L{start}-{end}."""
+    start = offset + 1 if offset else 1
+    end = start + (limit or 500) - 1
+    return f"L{start}-{end}"
+
+
+def format_tool_display(tool_name: str, tool_args: dict) -> str:
+    """Format tool call for user-friendly display.
+    
+    Formats each tool type with appropriate display:
+    - read_file: filename L{start}-{end}
+    - write_file/edit_file: filename + content preview
+    - execute: full command (up to 300 chars)
+    - write_todos: list todo items
+    - web_search: search queries
+    - Others: key=value format
+    
+    Args:
+        tool_name: Name of the tool being called
+        tool_args: Arguments passed to the tool
+        
+    Returns:
+        Formatted string for display
+    """
+    # File reading tools - show filename and line range
+    if tool_name == "read_file":
+        file_path = tool_args.get("file_path", "")
+        filename = _extract_filename(file_path)
+        offset = tool_args.get("offset", 0)
+        limit = tool_args.get("limit", 500)
+        line_range = _format_line_range(offset, limit)
+        return f"{filename} ({line_range})"
+    
+    # File writing tools - show filename and content preview
+    if tool_name == "write_file":
+        file_path = tool_args.get("file_path", "")
+        filename = _extract_filename(file_path)
+        content = tool_args.get("content", "")
+        # Show first 60 chars of content as preview
+        preview = content[:60].replace('\n', ' ').strip()
+        if len(content) > 60:
+            preview += "..."
+        return f"{filename}: {preview}"
+    
+    # File editing tools - show filename and brief change info
+    if tool_name == "edit_file":
+        file_path = tool_args.get("file_path", "")
+        filename = _extract_filename(file_path)
+        old_str = tool_args.get("old_string", "")
+        new_str = tool_args.get("new_string", "")
+        # Show brief description of the change
+        old_preview = old_str[:30].replace('\n', ' ').strip()
+        if len(old_str) > 30:
+            old_preview += "..."
+        if new_str:
+            return f"{filename}: replace '{old_preview}'"
+        else:
+            return f"{filename}: delete '{old_preview}'"
+    
+    # Execute command - show full command (important for users)
+    if tool_name == "execute":
+        command = tool_args.get("command", "")
+        # Show up to 300 chars of command
+        if len(command) > 300:
+            return command[:297] + "..."
+        return command
+    
+    # Todo tools - list the todo items
+    if tool_name == "write_todos":
+        todos = tool_args.get("todos", [])
+        if isinstance(todos, list) and todos:
+            # Format todo items like Cursor
+            todo_lines = []
+            for todo in todos[:5]:  # Show max 5 items
+                if isinstance(todo, dict):
+                    content = todo.get("content", "")[:50]
+                    status = todo.get("status", "pending")
+                    status_icon = "✓" if status == "completed" else "○" if status == "pending" else "◐"
+                    todo_lines.append(f"{status_icon} {content}")
+                else:
+                    todo_lines.append(f"○ {str(todo)[:50]}")
+            if len(todos) > 5:
+                todo_lines.append(f"  ... and {len(todos) - 5} more")
+            return "\n    ".join(todo_lines)
+        return f"{len(todos)} items"
+    
+    # Web search - show search queries
+    if tool_name == "web_search":
+        queries = tool_args.get("queries", "")
+        if isinstance(queries, list):
+            return ", ".join(str(q)[:40] for q in queries[:3])
+        return str(queries)[:80]
+    
+    # Fetch URL - show the URL
+    if tool_name == "fetch_url":
+        url = tool_args.get("url", "")
+        # Truncate long URLs but keep domain visible
+        if len(url) > 60:
+            return url[:57] + "..."
+        return url
+    
+    # ls/glob/grep - show path/pattern
+    if tool_name == "ls":
+        directory = tool_args.get("directory", ".")
+        return _extract_filename(directory) if directory != "." else "."
+    
+    if tool_name == "glob":
+        pattern = tool_args.get("pattern", "*")
+        path = tool_args.get("path", ".")
+        return f"{pattern} in {_extract_filename(path) if path != '.' else '.'}"
+    
+    if tool_name == "grep":
+        pattern = tool_args.get("pattern", "")
+        path = tool_args.get("path", ".")
+        return f"'{pattern[:40]}' in {_extract_filename(path) if path != '.' else '.'}"
+    
+    # Task tool - show description
+    if tool_name == "task":
+        description = tool_args.get("description", "")
+        if len(description) > 80:
+            return description[:77] + "..."
+        return description
+    
+    # Default format for other tools
+    brief_args = []
+    for key, value in tool_args.items():
+        if isinstance(value, str):
+            if len(value) > 40:
+                value = value[:37] + "..."
+            brief_args.append(f"{key}={value!r}")
+        elif isinstance(value, (int, float, bool)):
+            brief_args.append(f"{key}={value}")
+        elif isinstance(value, list):
+            brief_args.append(f"{key}=[{len(value)} items]")
+        elif isinstance(value, dict):
+            brief_args.append(f"{key}={{...}}")
+    
+    args_str = ", ".join(brief_args[:3])
+    if len(brief_args) > 3:
+        args_str += ", ..."
+    
+    return args_str if args_str else ""
+
+
+def display_tool_call(tool_name: str, tool_args: dict) -> None:
+    """Display a tool call with icon and colored tool name.
+    
+    Format: {icon} {tool_name} {args_display}
+    Example: 📖 read_file test_guardrails.py (L1-400)
+    
+    Color scheme:
+    - Icon: bright (no dim)
+    - Tool name: magenta/pink bold
+    - Args: dim
+    
+    Args:
+        tool_name: Name of the tool being called
+        tool_args: Arguments passed to the tool
+    """
+    icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+    display_str = format_tool_display(tool_name, tool_args)
+    
+    # Special handling for write_todos - multi-line display
+    if tool_name == "write_todos" and "\n" in display_str:
+        # Print icon (bright) + colored tool name (magenta) + "tasks:"
+        console.print(f"  {icon} ", end="")
+        console.print(f"{tool_name}", end="", style="bold magenta")
+        console.print(" tasks:", style="dim")
+        console.print(f"    {display_str}", style="dim")
+    else:
+        # Print icon (bright) + colored tool name (magenta) + args (dim)
+        console.print(f"  {icon} ", end="")
+        console.print(f"{tool_name}", end="", style="bold magenta")
+        if display_str:
+            console.print(f" {display_str}", style="dim")
+
+
+def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None):
+    """Run the interactive CLI with prompt_toolkit support."""
+    # Suppress logger console output in CLI mode for cleaner UI
+    suppress_console_logging()
+    
+    try:
+        from prompt_toolkit import PromptSession
+        from prompt_toolkit.history import FileHistory
+        from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.completion import Completer, Completion
+        from prompt_toolkit.styles import Style
+        use_prompt_toolkit = True
+    except ImportError:
+        use_prompt_toolkit = False
+        console.print("[yellow]prompt_toolkit not installed. Using basic input mode.[/yellow]")
+        console.print("[yellow]Install with: pip install prompt_toolkit[/yellow]")
+        console.print()
+
+    # Configure extra tools
+    extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
+    current_agent = _create_agent(agent_config, extra_tools)
+    
     print_header(
         agent_config["model_provider"],
         agent_config["model_name"],
-        tools=agent_config.get("initial_tools_arg"),  # Pass original CLI tools arg for header
-        active_tools=active_tool_names
+        work_dir=agent_config.get("work_dir"),
+        extra_tools=extra_tool_names
     )
 
+    if use_prompt_toolkit:
+        # Custom completer for @ file mentions and / commands
+        class AgenticaCompleter(Completer):
+            def get_completions(self, document, complete_event):
+                text = document.text_before_cursor
+                
+                # Command completion
+                if text.startswith("/"):
+                    commands = ["/help", "/clear", "/tools", "/exit", "/quit"]
+                    for cmd in commands:
+                        if cmd.startswith(text):
+                            yield Completion(cmd, start_position=-len(text))
+                    return
+                
+                # File completion after @
+                match = re.search(r"@([\w./-]*)$", text)
+                if match:
+                    partial = match.group(1)
+                    completions = get_file_completions(text)
+                    for comp in completions:
+                        display = comp
+                        # Calculate how much to replace
+                        yield Completion(
+                            comp,
+                            start_position=-len(partial),
+                            display=display
+                        )
+
+        # Key bindings for multi-line input
+        bindings = KeyBindings()
+
+        @bindings.add('escape', 'enter')
+        def _(event):
+            """Alt+Enter to insert newline."""
+            event.current_buffer.insert_text('\n')
+
+        @bindings.add('c-j')
+        def _(event):
+            """Ctrl+J to insert newline."""
+            event.current_buffer.insert_text('\n')
+
+        # Style for prompt
+        style = Style.from_dict({
+            'prompt': 'ansicyan bold',
+        })
+
+        # Create history file directory if needed
+        history_dir = os.path.dirname(history_file)
+        if history_dir:
+            os.makedirs(history_dir, exist_ok=True)
+
+        session = PromptSession(
+            history=FileHistory(history_file),
+            auto_suggest=AutoSuggestFromHistory(),
+            completer=AgenticaCompleter(),
+            key_bindings=bindings,
+            style=style,
+            multiline=False,  # Enter submits, Alt+Enter for newline
+        )
+
+        def get_input():
+            try:
+                return session.prompt([('class:prompt', '> ')], multiline=False)
+            except KeyboardInterrupt:
+                return None
+            except EOFError:
+                return None
+    else:
+        # Fallback to basic input
+        def get_input():
+            try:
+                console.print(Text("> ", style="green"), end="")
+                sys.stdout.flush()
+                return input()
+            except KeyboardInterrupt:
+                return None
+            except EOFError:
+                return None
+
+    # Main interaction loop
     while True:
         try:
-            raw_input_line, input_type = get_user_input_revised(in_multiline_mode, multiline_buffer)
-
-            if input_type == "exit":
+            user_input = get_input()
+            
+            if user_input is None:
+                console.print("\nExiting...", style="yellow")
                 break
-
-            if input_type == "multiline_start":
-                # multiline_buffer is already cleared in get_user_input_revised
+            
+            user_input = user_input.strip()
+            if not user_input:
                 continue
-            elif input_type == "multiline_content":
-                # multiline_buffer is appended in get_user_input_revised
-                continue
-            elif input_type in ["multiline_end", "interrupt"]:
-                query_to_send = None
-                if input_type == "multiline_end" and multiline_buffer:  # Explicit /em
-                    query_to_send = "\n".join(multiline_buffer)
-
-                multiline_buffer.clear()  # Clear buffer after processing
-                in_multiline_mode[0] = False  # Ensure mode is exited
-
-                if query_to_send:
-                    pass
-                else:
-                    if input_type == "interrupt":
-                        console.print("[info]Multi-line input cancelled.[/info]")
+            
+            # Handle commands
+            if user_input.startswith("/"):
+                cmd = user_input.lower().split()[0]
+                if cmd in ["/exit", "/quit"]:
+                    break
+                elif cmd == "/help":
+                    show_help()
                     continue
-                raw_input_line = query_to_send
-                input_type = "query"
-
-            # Handle Commands or Query
-            if input_type == "command":
-                command_parts = raw_input_line.lower().split()
-                command = command_parts[0]
-
-                if command == "/help":
-                    console.print(Text(
-                        "Available commands:\n"
-                        "  /help                         Show this help message.\n"
-                        "  /m                            Enter multi-line input mode.\n"
-                        "  /em                           Exit multi-line input mode and submit.\n"
-                        "  /tools list                   List all available tools and their status.\n"
-                        "  /tools add <tool1> [t2..]     Add tool(s) to the current session.\n"
-                        "  /tools remove <tool1> [t2..]  Remove tool(s) from the current session.\n"
-                        "  /tools current                Show currently active tools.\n"
-                        "  /tools clear                  Remove all active tools.\n"
-                        "  /exit or /quit                Exit the Agentica CLI.",
-                        style="yellow"
-                    ))
-                elif command == "/tools":
-                    if len(command_parts) > 1:
-                        sub_command = command_parts[1]
-                        if sub_command == "list":
-                            console.print("Available tools (active marked with [*]):", style="cyan")
-                            all_tool_names = sorted(list(TOOL_MAP.keys()))
-                            for tool_name in all_tool_names:
-                                marker = " [*]" if tool_name in active_tool_names else ""
-                                console.print(f"  - {tool_name}{marker}")
-                        elif sub_command == "add" and len(command_parts) > 2:
-                            tools_to_process = command_parts[2:]
-                            added_any = False
-                            for tool_to_add in tools_to_process:
-                                if tool_to_add in TOOL_MAP:
-                                    if tool_to_add not in active_tool_names:
-                                        active_tool_names.append(tool_to_add)
-                                        console.print(f"Tool '{tool_to_add}' added.", style="green")
-                                        added_any = True
-                                    else:
-                                        console.print(f"Tool '{tool_to_add}' is already active.", style="yellow")
-                                else:
-                                    console.print(
-                                        f"Unknown tool: {tool_to_add}. Available: {', '.join(TOOL_MAP.keys())}",
-                                        style="red")
-                            if added_any:
-                                current_agent = _create_agent(agent_config, active_tool_names)
-                                console.print("Agent recreated with updated tools.", style="green")
-                                print_header(agent_config["model_provider"], agent_config["model_name"],
-                                             agent_config.get("initial_tools_arg"), active_tool_names)
-                        elif sub_command == "remove" and len(command_parts) > 2:
-                            tools_to_process = command_parts[2:]
-                            removed_any = False
-                            for tool_to_remove in tools_to_process:
-                                if tool_to_remove in active_tool_names:
-                                    active_tool_names.remove(tool_to_remove)
-                                    console.print(f"Tool '{tool_to_remove}' removed.", style="green")
-                                    removed_any = True
-                                else:
-                                    console.print(f"Tool '{tool_to_remove}' is not active or unknown.", style="yellow")
-                            if removed_any:
-                                current_agent = _create_agent(agent_config, active_tool_names)
-                                console.print("Agent recreated with updated tools.", style="green")
-                                print_header(agent_config["model_provider"], agent_config["model_name"],
-                                             agent_config.get("initial_tools_arg"), active_tool_names)
-                        elif sub_command == "current":
-                            if active_tool_names:
-                                console.print("Active tools: " + ", ".join(active_tool_names), style="cyan")
-                            else:
-                                console.print("No tools are currently active.", style="cyan")
-                        elif sub_command == "clear":
-                            active_tool_names = []
-                            current_agent = _create_agent(agent_config, active_tool_names)
-                            console.print("All tools cleared. Recreating agent.", style="green")
-                            print_header(agent_config["model_provider"], agent_config["model_name"],
-                                         agent_config.get("initial_tools_arg"), active_tool_names)
-                        else:
-                            console.print(f"Unknown /tools subcommand: {sub_command}. Try /help.", style="red")
-                    else:
-                        console.print("Usage: /tools [list|add|remove|current|clear]. Try /help.", style="yellow")
-                elif raw_input_line.lower() not in ["/m", "/em"]:  # Avoid processing these as unknown
-                    console.print(f"Unknown command: {raw_input_line}. Try /help.", style="red")
-                continue  # After command, loop for new input
-
-            # Process Query
-            if input_type == "query" and raw_input_line.strip():  # Ensure there's a query to send
-                query = raw_input_line  # This is now either single line or assembled multi-line
-
-                try:
-                    import readline
-                    readline.add_history(query.split('\n')[0])  # Add first line of query to history
-                except Exception as e:
-                    pass
-
-                loading = True
-                thinking_start_time = time.time()
-
-                import threading
-                indicator_thread = threading.Thread(target=show_thinking_indicator)  # Recreate thread object
-                indicator_thread.daemon = True
-
-                # Need a wrapper for show_thinking_indicator to loop
-                def _update_indicator_loop():
-                    while loading:  # Loop depends on loading flag
-                        show_thinking_indicator()
-                        time.sleep(0.2)  # Update frequently
-
-                indicator_thread = threading.Thread(target=_update_indicator_loop)
-                indicator_thread.daemon = True
-                indicator_thread.start()
-
-                try:
-                    response_stream = current_agent.run(query, stream=True)
-
-                    first_chunk = True
-                    for chunk in response_stream:
+                elif cmd == "/tools":
+                    console.print("Available additional tools:", style="cyan")
+                    for name in sorted(TOOL_REGISTRY.keys()):
+                        marker = " [active]" if extra_tool_names and name in extra_tool_names else ""
+                        console.print(f"  - {name}{marker}")
+                    console.print()
+                    console.print("Use --tools <name> when starting CLI to enable tools.", style="dim")
+                    continue
+                elif cmd == "/clear":
+                    os.system('clear' if os.name != 'nt' else 'cls')
+                    # Reset agent conversation
+                    current_agent = _create_agent(agent_config, extra_tools)
+                    print_header(
+                        agent_config["model_provider"],
+                        agent_config["model_name"],
+                        work_dir=agent_config.get("work_dir"),
+                        extra_tools=extra_tool_names
+                    )
+                    console.print("[info]Screen cleared and conversation reset.[/info]")
+                    continue
+                else:
+                    console.print(f"Unknown command: {user_input}. Type /help for available commands.", style="red")
+                    continue
+            
+            # Parse file mentions
+            prompt_text, mentioned_files = parse_file_mentions(user_input)
+            
+            # Inject file contents if any
+            final_input = inject_file_contents(prompt_text, mentioned_files)
+            
+            # Display user message
+            display_user_message(user_input)
+            
+            # Show thinking indicator
+            status = console.status(f"[bold {COLORS['thinking']}]Agent is thinking...", spinner="dots")
+            status.start()
+            spinner_active = True
+            
+            try:
+                response_stream = current_agent.run(final_input, stream=True, stream_intermediate_steps=True)
+                
+                first_chunk = True
+                response_text = ""
+                has_shown_tool = False
+                shown_tool_count = 0  # Track how many tools we've shown
+                
+                for chunk in response_stream:
+                    if chunk is None:
+                        continue
+                    
+                    # Skip RunStarted event - don't display anything
+                    if chunk.event == "RunStarted":
+                        continue
+                    
+                    # Handle tool call events
+                    if chunk.event == "ToolCallStarted":
+                        # Stop spinner before showing tool info
+                        if spinner_active:
+                            status.stop()
+                            spinner_active = False
+                        
+                        # Extract tool info from chunk - only show new tools
+                        if chunk.tools and len(chunk.tools) > shown_tool_count:
+                            # Only display newly added tools
+                            new_tools = chunk.tools[shown_tool_count:]
+                            for tool_info in new_tools:
+                                # Tool dict uses "tool_name" and "tool_args" keys
+                                tool_name = tool_info.get("tool_name") or tool_info.get("name", "unknown")
+                                tool_args = tool_info.get("tool_args") or tool_info.get("arguments", {})
+                                if isinstance(tool_args, str):
+                                    try:
+                                        tool_args = json.loads(tool_args)
+                                    except:
+                                        tool_args = {"args": tool_args}
+                                display_tool_call(tool_name, tool_args)
+                                has_shown_tool = True
+                            shown_tool_count = len(chunk.tools)
+                        
+                        # Update status with tool execution info
+                        status.update(f"[bold {COLORS['thinking']}]Executing tool...")
+                        status.start()
+                        spinner_active = True
+                        continue
+                    
+                    elif chunk.event == "ToolCallCompleted":
+                        # Tool completed - stop spinner, will restart on next event if needed
+                        if spinner_active:
+                            status.stop()
+                            spinner_active = False
+                        continue
+                    
+                    # Skip other intermediate events that don't have content
+                    if chunk.event in ("RunCompleted", "UpdatingMemory", "MultiRoundTurn", 
+                                       "MultiRoundToolCall", "MultiRoundToolResult", "MultiRoundCompleted"):
+                        continue
+                    
+                    # Handle content response - only for RunResponse event with actual content
+                    if chunk.event == "RunResponse" and chunk.content:
                         if first_chunk:
-                            stop_thinking_indicator()  # Stop and clear before first output
+                            if spinner_active:
+                                status.stop()
+                                spinner_active = False
+                            if has_shown_tool:
+                                console.print()  # Extra line after tool calls
+                            console.print()  # Newline before response
                             first_chunk = False
-                        if chunk and chunk.content:  # Ensure chunk and content exist
-                            console.print(chunk.content, end="")
-                    if not first_chunk:  # if we printed anything
-                        console.print()  # Final newline
-                    else:  # No content from agent
-                        stop_thinking_indicator()  # Ensure indicator is stopped
+                        response_text += chunk.content
+                        console.print(chunk.content, end="", style=COLORS["agent"])
+                
+                if not first_chunk:
+                    console.print()  # Final newline
+                else:
+                    if spinner_active:
+                        status.stop()
+                    if not has_shown_tool:
                         console.print("[info]Agent returned no content.[/info]")
-
-                except Exception as e:
-                    stop_thinking_indicator()
-                    console.print(f"\n[bold red]Error during agent execution: {str(e)}[/bold red]")
-                finally:
-                    stop_thinking_indicator()  # Ensure it's always stopped
-                    try:
-                        import readline
-                        readline.write_history_file(history_file)  # Save history after each query attempt
-                    except Exception as e:
-                        console.print(f"[yellow]Warning: Could not save history: {e}[/yellow]")
-                console.print()  # Add a blank line after agent response or error
-
-            elif input_type == "query" and not raw_input_line.strip():
-                # Empty single line query, just loop.
-                continue
-
+                
+            except Exception as e:
+                if spinner_active:
+                    status.stop()
+                console.print(f"\n[bold red]Error during agent execution: {str(e)}[/bold red]")
+            
+            console.print()  # Blank line after response
+            
         except KeyboardInterrupt:
-            stop_thinking_indicator()
-            console.print("\nOperation interrupted by user. Type /exit to quit.", style="yellow")
-            in_multiline_mode[0] = False  # Ensure exit from multiline mode
-            multiline_buffer = []
+            console.print("\nOperation interrupted. Type /exit to quit.", style="yellow")
             continue
         except Exception as e:
-            stop_thinking_indicator()
             console.print(f"\n[bold red]An unexpected error occurred: {str(e)}[/bold red]")
             continue
 
-    try:
-        import readline
-        readline.write_history_file(history_file)
-        console.print("[info]Session history saved.[/info]")
-    except Exception as e:
-        console.print(f"[yellow]Warning: Could not save final history: {e}[/yellow]")
     console.print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")
 
 
 def main():
     args = parse_args()
+    
     # Store agent configuration parameters
     agent_config = {
         "model_provider": args.model_provider,
@@ -523,37 +882,28 @@ def main():
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,
         "debug_mode": args.verbose > 0,
-        "initial_tools_arg": list(args.tools) if args.tools else []  # For header
+        "work_dir": args.work_dir,
     }
-    initial_active_tools = list(args.tools) if args.tools else []
+    extra_tool_names = list(args.tools) if args.tools else None
 
     if args.query:
-        # Non-interactive mode (existing logic)
+        # Non-interactive mode
         console.print(f"Running query: {args.query}", style="cyan")
+        tools_info = f", Extra Tools: {', '.join(extra_tool_names)}" if extra_tool_names else ""
         console.print(
-            f"Model: {agent_config['model_provider']}/{agent_config['model_name']}, "
-            f"Tools: {initial_active_tools if initial_active_tools else 'None'}",
+            f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}",
             style="magenta")
 
-        agent_instance = _create_agent(agent_config, initial_active_tools)
+        extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
+        agent_instance = _create_agent(agent_config, extra_tools)
         response = agent_instance.run(args.query, stream=True)
         for chunk in response:
-            console.print(chunk.content, end="")
+            if chunk and chunk.content:
+                console.print(chunk.content, end="")
         console.print()  # final newline
     else:
         # Interactive mode
-        try:
-            import readline
-            if os.path.dirname(history_file):
-                os.makedirs(os.path.dirname(history_file), exist_ok=True)
-            readline.read_history_file(history_file)
-            readline.parse_and_bind("tab: complete")
-        except FileNotFoundError:
-            console.print("[info]No history file found. A new one will be created.[/info]")
-        except Exception as e:
-            console.print(f"[yellow]Could not initialize/load readline history: {e}[/yellow]")
-
-        run_interactive(agent_config, initial_active_tools)
+        run_interactive(agent_config, extra_tool_names)
 
 
 if __name__ == "__main__":

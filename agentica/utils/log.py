@@ -108,3 +108,32 @@ def set_log_level_to_info():
 
 def print_llm_stream(msg):
     print(msg, end="", flush=True)
+
+
+def suppress_console_logging():
+    """Suppress console output for agentica logger (keep file logging).
+    
+    Use this in CLI mode to prevent logger output from interfering with
+    interactive UI elements like spinners and status displays.
+    """
+    for handler in logger.handlers[:]:
+        if isinstance(handler, logging.StreamHandler) and handler.stream == sys.stdout:
+            logger.removeHandler(handler)
+
+
+def restore_console_logging(log_level: str = "INFO"):
+    """Restore console logging for agentica logger.
+    
+    Args:
+        log_level: Log level for the console handler
+    """
+    # Check if console handler already exists
+    has_console = any(
+        isinstance(h, logging.StreamHandler) and h.stream == sys.stdout 
+        for h in logger.handlers
+    )
+    if not has_console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+        console_handler.setFormatter(LoguruStyleFormatter())
+        logger.addHandler(console_handler)

@@ -191,7 +191,7 @@ class BuiltinFileTool(Tool):
             if end_line < total_lines:
                 result += f"\n\n[Showing lines {offset + 1}-{end_line} of {total_lines} total lines]"
 
-            logger.info(f"Read file {file_path}: lines {offset + 1}-{end_line}")
+            logger.info(f"Read file {file_path}: lines {offset + 1}-{end_line}, total {total_lines} lines")
             return result
         except Exception as e:
             logger.error(f"Error reading file {file_path}: {e}")
@@ -434,7 +434,7 @@ class BuiltinFileTool(Tool):
 
             # Truncate if too long and log result
             result = truncate_if_too_long(result)
-            logger.info(f"Grep for '{pattern}': found {len(file_counts)} files, result length: {len(result)}, \npreview: {result[:300]}...")
+            logger.info(f"Grep for '{pattern}': found {len(file_counts)} files, result length: {len(result)} characters.")
             return str(result)
 
         except Exception as e:
@@ -462,7 +462,7 @@ class BuiltinExecuteTool(Tool):
         self.register(self.execute)
 
     def execute(self, command: str) -> str:
-        """Executes a given shell command.
+        """Executes a given command, capturing both stdout and stderr.
 
         Before executing the command, please follow these steps:
 
@@ -493,8 +493,9 @@ class BuiltinExecuteTool(Tool):
 
         Examples:
         Good examples:
-            - execute(command="pytest /foo/bar/tests")
             - execute(command="python /path/to/script.py")
+            - execute(command="pytest /path/to/tests/test.py")
+            - execute(command="python -c 'print(33333**2 + 332.2 / 12)'")
             - execute(command="npm install && npm test")
 
         Bad examples (avoid these):
@@ -504,7 +505,7 @@ class BuiltinExecuteTool(Tool):
             - execute(command="grep -r 'pattern' .")  # Use grep tool instead
 
         Args:
-            command: Shell command to execute
+            command: command to execute
 
         Returns:
             str: The output of the command (stdout + stderr) with exit code
@@ -547,7 +548,7 @@ class BuiltinWebSearchTool(Tool):
 
         try:
             result = self._search.baidu_search(queries, max_results=max_results)
-            logger.info(f"Web search for '{queries}', result length: {len(result)}, \npreview: {result[:300]}...")
+            logger.info(f"Web search for '{queries}', result length: {len(result)} characters.")
             return result
         except Exception as e:
             logger.error(f"Web search error: {e}")
@@ -590,7 +591,7 @@ class BuiltinFetchUrlTool(Tool):
         4. NEVER show the raw JSON to the user unless specifically requested
         """
         result = self._crawler.url_crawl(url)
-        logger.info(f"Fetched URL: {url}, result length: {len(result)}, \npreview: {result[:300]}...")
+        logger.info(f"Fetched URL: {url}, result length: {len(result)} characters.")
         return result
 
 
@@ -626,7 +627,7 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
         """Get the system prompt for todo tool usage guidance."""
         return self.WRITE_TODOS_SYSTEM_PROMPT
 
-    def write_todos(self, todos: List[Dict[str, str]]) -> str:
+    def write_todos(self, todos: Optional[List[Dict[str, str]]] = None) -> str:
         """Create and manage a structured task list.
 
         Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
@@ -635,7 +636,6 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
 
         ## When to Use This Tool
         Use this tool in these scenarios:
-
         1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
         2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
         3. User explicitly requests todo list - When the user directly asks you to use the todo list
@@ -694,12 +694,18 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
         - status: Task status ("pending", "in_progress", "completed")
 
         Args:
-            todos: Task list, each task is a dict with content and status
+            todos: Task list, each task is a dict with content and status. Required.
+            Example: [{"content": "Write a report", "status": "pending"}, {"content": "Review report", "status": "pending"}]
 
         Returns:
             Updated task list
         """
         try:
+            # Validate todos parameter
+            if todos is None:
+                return "Error: 'todos' parameter is required. Please provide a list of tasks with 'content' and 'status' fields."
+            if len(todos) == 0:
+                return "Error: 'todos' list cannot be empty. Please provide at least one task."
             valid_statuses = {"pending", "in_progress", "completed"}
             validated_todos = []
 
@@ -722,7 +728,7 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
                 })
 
             self._todos = validated_todos
-            logger.info(f"Updated todo list: {len(self._todos)} items")
+            logger.info(f"Updated todo list: {len(self._todos)} items, todos: {self._todos}")
 
             return json.dumps({
                 "message": f"Updated todo list with {len(self._todos)} items",
@@ -733,13 +739,27 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
             return f"Error updating todos: {e}"
 
     def read_todos(self) -> str:
-        """Read current task list.
+        """Read current task list status.
+
+        Use this tool to check the current state of your task list. This is useful for:
+        1. Reviewing progress before continuing work
+        2. Checking which tasks are completed, in progress, or pending
+        3. Deciding which task to work on next
+        4. Verifying task completion before reporting to user
+
+        This tool works together with write_todos:
+        - Use write_todos to create/update tasks
+        - Use read_todos to check current status
 
         Returns:
-            JSON formatted current task list
+            JSON formatted current task list with summary statistics
         """
         if not self._todos:
-            return json.dumps({"message": "No todos found", "todos": []}, ensure_ascii=False, indent=2)
+            return json.dumps({
+                "message": "No todos found. Use write_todos to create a task list.",
+                "todos": [],
+                "summary": {"pending": 0, "in_progress": 0, "completed": 0, "total": 0}
+            }, ensure_ascii=False, indent=2)
 
         # Count status statistics
         status_counts = {"pending": 0, "in_progress": 0, "completed": 0}
@@ -747,8 +767,19 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
             status = todo.get("status", "pending")
             if status in status_counts:
                 status_counts[status] += 1
-        logger.info(f"Todo list summary: {status_counts}")
-        return json.dumps({"summary": status_counts, "todos": self._todos}, ensure_ascii=False, indent=2)
+
+        total = len(self._todos)
+        progress_pct = round(status_counts["completed"] / total * 100) if total > 0 else 0
+
+        logger.info(f"Todo list: {status_counts}, progress: {progress_pct}%")
+        return json.dumps({
+            "summary": {
+                **status_counts,
+                "total": total,
+                "progress": f"{progress_pct}%"
+            },
+            "todos": self._todos
+        }, ensure_ascii=False, indent=2)
 
 
 class BuiltinTaskTool(Tool):
@@ -992,15 +1023,12 @@ When NOT to use the task tool:
             )
 
             logger.info(f"Launching subagent [{subagent_type}] for task: {description}")
-
             # Run subagent with the task description
             response = subagent.run(description)
 
             # Extract result
             result = response.content if response else "Subagent completed but returned no content."
-
-            logger.info(f"Subagent [{subagent_type}] completed task.")
-
+            # logger.info(f"Subagent [{subagent_type}] completed task.")
             return json.dumps({
                 "success": True,
                 "subagent_type": subagent_type,

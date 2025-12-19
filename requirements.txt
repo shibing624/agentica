@@ -1,6 +1,7 @@
 httpx
 loguru
 beautifulsoup4
+prompt_toolkit
 openai>=1.52.0
 python-dotenv
 pydantic

@@ -156,8 +156,10 @@ pip install -U agentica
 agentica --query "Where will the next Olympics be held?" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
 
 # Start an interactive chat session
-agentica --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search cogview --verbose 1
+agentica --model_provider zhipuai --model_name glm-4.6v-flash
 ```
+CLI show case (Like ClaudeCode):
+<img src="https://github.com/shibing624/agentica/blob/main/docs/cli_snap.png" width="800" />
 
 ### Web UI
 

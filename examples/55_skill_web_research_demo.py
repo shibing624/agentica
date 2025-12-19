@@ -28,6 +28,7 @@ async def main() -> None:
     )
 
     # Create SkillTool with custom skill directory
+    # If use standard directories, cp -rf data/skill/* ~/.agentica/skill/
     # SkillTool auto-loads skills from standard directories plus custom ones
     skill_tool = SkillTool(custom_skill_dirs=[skill_dir])
 
