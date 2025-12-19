@@ -146,10 +146,10 @@ def parse_args():
     parser.add_argument('--query', type=str, help='Question to ask the LLM', default=None)
     parser.add_argument('--model_provider', type=str,
                         choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
-                        help='LLM model provider', default='openai')
+                        help='LLM model provider', default='zhipuai')
     parser.add_argument('--model_name', type=str,
-                        help='LLM model name to use, can be gpt-5/glm-4-flash/deepseek-chat/yi-lightning/...',
-                        default='gpt-5-mini')
+                        help='LLM model name to use, can be gpt-5/glm-4.6v-flash/deepseek-chat/yi-lightning/...',
+                        default='glm-4.6v-flash')
     parser.add_argument('--api_base', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
@@ -604,6 +604,8 @@ def display_tool_call(tool_name: str, tool_args: dict) -> None:
         console.print(f"{tool_name}", end="", style="bold magenta")
         if display_str:
             console.print(f" {display_str}", style="dim")
+        else:
+            console.print()  # Ensure newline when no args to display
 
 
 def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None):
@@ -813,18 +815,11 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                                 display_tool_call(tool_name, tool_args)
                                 has_shown_tool = True
                             shown_tool_count = len(chunk.tools)
-                        
-                        # Update status with tool execution info
-                        status.update(f"[bold {COLORS['thinking']}]Executing tool...")
-                        status.start()
-                        spinner_active = True
+                        # Don't restart spinner during tool execution - keep UI clean
                         continue
                     
                     elif chunk.event == "ToolCallCompleted":
-                        # Tool completed - stop spinner, will restart on next event if needed
-                        if spinner_active:
-                            status.stop()
-                            spinner_active = False
+                        # Tool completed - spinner already stopped
                         continue
                     
                     # Skip other intermediate events that don't have content
