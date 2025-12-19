@@ -611,7 +611,7 @@ def display_tool_call(tool_name: str, tool_args: dict) -> None:
 def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None):
     """Run the interactive CLI with prompt_toolkit support."""
     # Suppress logger console output in CLI mode for cleaner UI
-    # suppress_console_logging()
+    suppress_console_logging()
     
     try:
         from prompt_toolkit import PromptSession
@@ -783,6 +783,8 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                 response_text = ""
                 has_shown_tool = False
                 shown_tool_count = 0  # Track how many tools we've shown
+                is_thinking = False  # Track if we're in thinking phase
+                thinking_displayed = False  # Track if we've shown thinking header
                 
                 for chunk in response_stream:
                     if chunk is None:
@@ -837,20 +839,41 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         # Check if this is a thinking phase (reasoning_content but no content)
                         # For thinking models like GLM, they send content=None during reasoning
                         if not chunk.content:
-                            # Still in thinking phase - update spinner text if needed
-                            if spinner_active and hasattr(chunk, 'reasoning_content') and chunk.reasoning_content:
-                                status.update(f"[bold {COLORS['thinking']}]Thinking...")
+                            # Check for reasoning content (thinking phase)
+                            if hasattr(chunk, 'reasoning_content') and chunk.reasoning_content:
+                                # Stop spinner before showing thinking content
+                                if spinner_active:
+                                    status.stop()
+                                    spinner_active = False
+                                
+                                # Show thinking header once
+                                if not thinking_displayed:
+                                    console.print()
+                                    console.print("💭 ", end="", style="dim")
+                                    thinking_displayed = True
+                                    is_thinking = True
+                                
+                                # Stream thinking content in dim style
+                                console.print(chunk.reasoning_content, end="", style="dim")
                             continue
                         
-                        # Has actual content - display it
+                        # Has actual content - transition from thinking to response
                         content = chunk.content
+                        
+                        # End thinking phase if we were thinking
+                        if is_thinking:
+                            console.print()  # End thinking line
+                            console.print()  # Blank line before response
+                            is_thinking = False
+                        
                         if first_chunk:
                             if spinner_active:
                                 status.stop()
                                 spinner_active = False
-                            if has_shown_tool:
+                            if has_shown_tool and not thinking_displayed:
                                 console.print()  # Extra line after tool calls
-                            console.print()  # Newline before response
+                            if not thinking_displayed:
+                                console.print()  # Newline before response
                             first_chunk = False
                         response_text += content
                         console.print(content, end="", style=COLORS["agent"])
