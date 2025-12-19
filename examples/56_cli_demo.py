@@ -17,7 +17,7 @@ Usage Examples:
     python 56_cli_demo.py --query "What is 2+2?"
 
     # With extra tools
-    python 56_cli_demo.py --tools calculator wikipedia
+    python 56_cli_demo.py --tools calculator wikipedia --verbose 1
 
     # With custom model
     python 56_cli_demo.py --model_provider deepseek --model_name deepseek-chat

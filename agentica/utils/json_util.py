@@ -44,21 +44,35 @@ def get_json_schema_for_arg(t: Any) -> Optional[Dict[str, Any]]:
             json_schema_for_items = get_json_schema_for_arg(type_args[0]) if type_args else {"type": "string"}
             return {"type": "array", "items": json_schema_for_items}
         elif type_origin is dict:
-            # Handle both key and value types for dictionaries
-            key_schema = get_json_schema_for_arg(type_args[0]) if type_args else {"type": "string"}
-            value_schema = get_json_schema_for_arg(type_args[1]) if len(type_args) > 1 else {"type": "string"}
-            return {"type": "object", "propertyNames": key_schema, "additionalProperties": value_schema}
+            # Handle dict types - use simple object schema for maximum API compatibility
+            # Note: additionalProperties may not be supported by some APIs
+            return {"type": "object"}
         elif type_origin is Union:
+            # Filter out NoneType from Union
+            non_none_types = [arg for arg in type_args if arg is not type(None)]
+            
+            # If only one non-None type, return its schema directly
+            if len(non_none_types) == 1:
+                return get_json_schema_for_arg(non_none_types[0])
+            
+            # For multiple types, try to use anyOf (may not be supported by all APIs)
+            # Fall back to string type for maximum compatibility
             types = []
-            for arg in type_args:
-                if arg is not type(None):
-                    try:
-                        schema = get_json_schema_for_arg(arg)
-                        if schema:
-                            types.append(schema)
-                    except Exception:
-                        continue
-            return {"anyOf": types} if types else None
+            for arg in non_none_types:
+                try:
+                    schema = get_json_schema_for_arg(arg)
+                    if schema:
+                        types.append(schema)
+                except Exception:
+                    continue
+            
+            # If we have multiple types, just use string for compatibility
+            # Many APIs don't support anyOf
+            if len(types) > 1:
+                return {"type": "string"}
+            elif len(types) == 1:
+                return types[0]
+            return None
 
     return {"type": get_json_type_for_py_type(t.__name__)}
 
@@ -88,13 +102,9 @@ def get_json_schema(type_hints: Dict[str, Any], strict: bool = False) -> Dict[st
 
             arg_json_schema = get_json_schema_for_arg(v)
             if arg_json_schema is not None:
-                if is_optional:
-                    # Handle null type for optional fields
-                    if isinstance(arg_json_schema["type"], list):
-                        arg_json_schema["type"].append("null")
-                    else:
-                        arg_json_schema["type"] = [arg_json_schema["type"], "null"]
-
+                # Note: Many APIs (Google Gemini, etc.) don't support type as array
+                # So we don't convert Optional to ["type", "null"] format
+                # Optional fields are handled by not including them in "required"
                 json_schema["properties"][k] = arg_json_schema
 
             else:

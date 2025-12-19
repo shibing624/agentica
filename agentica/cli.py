@@ -147,10 +147,10 @@ def parse_args():
     parser.add_argument('--query', type=str, help='Question to ask the LLM', default=None)
     parser.add_argument('--model_provider', type=str,
                         choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
-                        help='LLM model provider', default='zhipuai')
+                        help='LLM model provider', default='openai')
     parser.add_argument('--model_name', type=str,
                         help='LLM model name to use, can be gpt-5/glm-4.6v-flash/deepseek-chat/yi-lightning/...',
-                        default='glm-4.6v-flash')
+                        default='gpt-5-mini')
     parser.add_argument('--api_base', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
@@ -786,7 +786,6 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                 shown_tool_count = 0  # Track how many tools we've shown
                 is_thinking = False  # Track if we're in thinking phase
                 thinking_displayed = False  # Track if we've shown thinking header
-                post_tool_transition = False  # Track if we're in post-tool transition phase
                 
                 for chunk in response_stream:
                     if chunk is None:
@@ -829,8 +828,6 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     
                     elif chunk.event == "ToolCallCompleted":
                         # Tool completed - enter post-tool transition phase
-                        # GLM models may emit noise (punctuation) before actual content
-                        post_tool_transition = True
                         continue
                     
                     # Skip other intermediate events that don't have content
@@ -863,20 +860,6 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         
                         # Has actual content - transition from thinking to response
                         content = chunk.content
-                        
-                        # Filter post-tool transition noise (GLM models emit punctuation after tool calls)
-                        # Only filter if we're in transition phase and content is just punctuation/whitespace
-                        if post_tool_transition:
-                            # Check if content is meaningful (contains letters/numbers/CJK characters)
-                            has_meaningful_char = any(
-                                unicodedata.category(c)[0] in ('L', 'N')  # Letter or Number
-                                for c in content
-                            )
-                            if not has_meaningful_char:
-                                # Skip noise content (punctuation, whitespace only)
-                                continue
-                            # Got meaningful content, exit transition phase
-                            post_tool_transition = False
                         
                         # End thinking phase if we were thinking
                         if is_thinking:

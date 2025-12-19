@@ -138,7 +138,7 @@ pip install .
 | [**LLM 操作系统**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | 一个有趣的实验，旨在构建一个由 LLM 驱动的对话式操作系统。                                                  |
 | [**投资研究工作流**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | 自动化整个投资研究流程，从数据收集和分析到报告生成。                                                                                                   |
 | [**视觉智能体**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 构建一个能够理解和推理图像的智能体。                                                                                                                          |
-| [**安全守卫 Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | 演示如何使用输入/输出守卫验证智能体和工具的输入输出，过滤敏感数据。                                                                                                                          |
+| [**安全Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | 演示如何使用输入/输出守卫验证智能体和工具的输入输出，过滤敏感数据。                                                                                                                          |
 
 [➡️ **查看所有示例**](https://github.com/shibing624/agentica/tree/main/examples)
 
