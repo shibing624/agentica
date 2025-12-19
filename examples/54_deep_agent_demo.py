@@ -29,7 +29,7 @@ def basic_example():
 
     # Create DeepAgent with all built-in tools
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         name="CodingAssistant",
         description="A powerful coding assistant with file system access",
         add_datetime_to_instructions=True,
@@ -52,7 +52,7 @@ def custom_config_example():
 
     # Create DeepAgent with code execution disabled (safer)
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         name="SafeAssistant",
         description="A safe assistant without code execution",
         include_execute=False,  # Disable code execution
@@ -74,7 +74,7 @@ def with_custom_tools_example():
 
     # Create DeepAgent with additional calculator tool
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         name="MathAssistant",
         description="A math assistant with calculator",
         tools=[CalculatorTool()],  # Add extra tool
@@ -96,7 +96,7 @@ def file_operations_example():
     print("=" * 60)
 
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         name="FileManager",
         description="A file management assistant",
         work_dir=".",  # Set working directory
@@ -120,7 +120,7 @@ def todo_management_example():
     print("=" * 60)
 
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         name="TaskManager",
         description="A task management assistant",
         debug_mode=True,

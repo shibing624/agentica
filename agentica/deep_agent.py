@@ -100,6 +100,8 @@ class DeepAgent(Agent):
             include_task: bool = True,
             # User-provided custom tools
             tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
+            # Instructions from user
+            instructions: Optional[Union[str, List[str]]] = None,
             # Other parameters passed to Agent via kwargs
             **kwargs,
     ):
@@ -115,6 +117,7 @@ class DeepAgent(Agent):
             include_todos: Include task management tools (write_todos, read_todos)
             include_task: Include subagent task tool (task)
             tools: User-provided custom tools list
+            instructions: User-provided instructions (tool system prompts will be auto-appended)
             **kwargs: Other parameters passed to Agent
         """
         # Store DeepAgent specific configuration
@@ -137,19 +140,126 @@ class DeepAgent(Agent):
             include_task=include_task,
         )
 
-        # Merge user-provided tools with built-in tools
+        # Merge user-provided tools with built-in tools, handling duplicates
         all_tools = list(builtin_tools)
         if tools:
-            all_tools.extend(tools)
+            all_tools = self._merge_tools_with_dedup(all_tools, tools)
+
+        # Collect system prompts from all tools
+        tool_system_prompts = self._collect_tool_system_prompts(all_tools)
+
+        # Merge user instructions with tool system prompts
+        merged_instructions = self._merge_instructions(instructions, tool_system_prompts)
 
         custom_tool_count = len(tools) if tools else 0
         logger.debug(f"DeepAgent initialized with {len(builtin_tools)} builtin tools and {custom_tool_count} custom tools")
+        if tool_system_prompts:
+            logger.debug(f"Injected {len(tool_system_prompts)} tool system prompts into instructions")
 
-        # Call parent class init with merged tools
-        super().__init__(tools=all_tools, **kwargs)
+        # Call parent class init with merged tools and instructions
+        super().__init__(tools=all_tools, instructions=merged_instructions, **kwargs)
 
         # Set parent agent reference for task tool (so it can access model)
         self._setup_task_tool()
+
+    def _collect_tool_system_prompts(self, tools: List[Any]) -> List[str]:
+        """
+        Collect system prompts from all tools that provide them.
+
+        Args:
+            tools: List of tools to collect prompts from
+
+        Returns:
+            List of system prompt strings from tools
+        """
+        prompts = []
+        for tool in tools:
+            if isinstance(tool, Tool) and hasattr(tool, 'get_system_prompt'):
+                prompt = tool.get_system_prompt()
+                if prompt:
+                    prompts.append(prompt)
+        return prompts
+
+    def _merge_tools_with_dedup(
+            self,
+            builtin_tools: List[Any],
+            user_tools: List[Any],
+    ) -> List[Any]:
+        """
+        Merge user tools with builtin tools, removing duplicate functions.
+        
+        When both builtin and user tools have similar functions, prefer builtin:
+        - ls (builtin) over list_skill_files (SkillTool)
+        - read_file (builtin) over read_skill_file (SkillTool)
+        
+        Args:
+            builtin_tools: List of builtin tools
+            user_tools: List of user-provided tools
+            
+        Returns:
+            Merged list of tools with duplicates removed from user tools
+        """
+        # Get function names from builtin tools
+        builtin_func_names = set()
+        for tool in builtin_tools:
+            if isinstance(tool, Tool) and hasattr(tool, 'functions'):
+                for func_name in tool.functions.keys():
+                    builtin_func_names.add(func_name)
+        
+        # Define function name mappings (user_func -> builtin_func)
+        # If user tool has these functions and builtin has the mapped function, remove from user
+        func_mappings = {
+            'list_skill_files': 'ls',
+            'read_skill_file': 'read_file',
+        }
+        
+        # Check which functions should be removed from user tools
+        funcs_to_remove = set()
+        for user_func, builtin_func in func_mappings.items():
+            if builtin_func in builtin_func_names:
+                funcs_to_remove.add(user_func)
+        
+        # Process user tools and remove duplicate functions
+        result = list(builtin_tools)
+        for tool in user_tools:
+            if isinstance(tool, Tool) and hasattr(tool, 'functions') and funcs_to_remove:
+                # Remove duplicate functions from this tool
+                for func_name in list(tool.functions.keys()):
+                    if func_name in funcs_to_remove:
+                        del tool.functions[func_name]
+                        logger.debug(f"Removed duplicate function '{func_name}' from {tool.name}, using builtin instead")
+            result.append(tool)
+        
+        return result
+
+    def _merge_instructions(
+            self,
+            user_instructions: Optional[Union[str, List[str]]],
+            tool_prompts: List[str],
+    ) -> Optional[List[str]]:
+        """
+        Merge user instructions with tool system prompts.
+
+        Args:
+            user_instructions: User-provided instructions
+            tool_prompts: System prompts from tools
+
+        Returns:
+            Merged list of instructions, or None if both are empty
+        """
+        result = []
+
+        # Add user instructions first
+        if user_instructions:
+            if isinstance(user_instructions, str):
+                result.append(user_instructions)
+            else:
+                result.extend(user_instructions)
+
+        # Add tool system prompts
+        result.extend(tool_prompts)
+
+        return result if result else None
 
     def _setup_task_tool(self) -> None:
         """Set up the task tool with parent agent reference."""

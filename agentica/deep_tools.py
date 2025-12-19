@@ -10,20 +10,20 @@ Built-in tool set for DeepAgent, including:
 - edit_file: Edit file (string replacement)
 - glob: File pattern matching
 - grep: Search file content
-- execute: Execute Python code
+- execute: Execute command
 - web_search: Web search (implemented using BaiduSearch)
 - fetch_url: Fetch URL content (implemented using UrlCrawler)
 - write_todos: Create and manage task list
 - read_todos: Read current task list
 - task: Launch subagent to handle complex tasks
 """
-import os
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Literal, Callable, Union, TYPE_CHECKING
+from typing import Optional, List, Dict, Any, Literal, TYPE_CHECKING, Union
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
+from agentica.utils.string import truncate_if_too_long
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -63,10 +63,22 @@ class BuiltinFileTool(Tool):
         self.register(self.grep)
 
     def _resolve_path(self, path: str) -> Path:
-        """Resolve path, supporting both absolute and relative paths."""
+        """Resolve path, supporting both absolute and relative paths.
+        
+        If path is absolute but not under base_dir, treat it as relative to base_dir.
+        This prevents writing to system directories like root (/).
+        """
         p = Path(path)
         if p.is_absolute():
-            return p
+            # Check if the path is under base_dir
+            try:
+                p.relative_to(self.base_dir)
+                return p
+            except ValueError:
+                # Path is not under base_dir, treat the path name as relative
+                # e.g., /research_xxx -> base_dir/research_xxx
+                relative_path = str(p).lstrip("/")
+                return self.base_dir / relative_path
         return self.base_dir / p
 
     def _validate_path(self, path: str) -> str:
@@ -75,23 +87,29 @@ class BuiltinFileTool(Tool):
             raise ValueError(f"Path traversal not allowed: {path}")
         return path
 
-    def ls(self, path: str = ".") -> str:
-        """List all files and subdirectories in a directory.
+    def ls(self, directory: str = ".") -> str:
+        """Lists all files in the directory.
+
+        Usage:
+        - The directory parameter can be an absolute or relative path
+        - The ls tool will return a list of all files in the specified directory.
+        - This is very useful for exploring the file system and finding the right file to read or edit.
+        - You should almost ALWAYS use this tool before using the Read or Edit tools.
 
         Args:
-            path: Directory path to list, defaults to current directory
+            directory: Directory path to list files, defaults to current directory
 
         Returns:
-            JSON formatted file list
+            str, JSON formatted file list
         """
         try:
-            self._validate_path(path)
-            dir_path = self._resolve_path(path)
+            self._validate_path(directory)
+            dir_path = self._resolve_path(directory)
 
             if not dir_path.exists():
-                return f"Error: Directory not found: {path}"
+                return f"Error: Directory not found: {directory}"
             if not dir_path.is_dir():
-                return f"Error: Not a directory: {path}"
+                return f"Error: Not a directory: {directory}"
 
             items = []
             for item in sorted(dir_path.iterdir()):
@@ -103,7 +121,9 @@ class BuiltinFileTool(Tool):
                 })
 
             logger.info(f"Listed {len(items)} items in {dir_path}")
-            return json.dumps(items, ensure_ascii=False, indent=2)
+            result = json.dumps(items, ensure_ascii=False, indent=2)
+            result = truncate_if_too_long(result)
+            return str(result)
         except Exception as e:
             logger.error(f"Error listing directory {path}: {e}")
             return f"Error listing directory: {e}"
@@ -112,14 +132,29 @@ class BuiltinFileTool(Tool):
             self,
             file_path: str,
             offset: int = 0,
-            limit: Optional[int] = None,
+            limit: Optional[int] = 500,
     ) -> str:
-        """Read file content.
+        """Reads a file from the filesystem. You can access any file directly by using this tool.
+        Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
+
+        Usage:
+        - The file_path parameter must be an absolute path, not a relative path
+        - By default, it reads up to 500 lines starting from the beginning of the file
+        - **IMPORTANT for large files and codebase exploration**: Use pagination with offset and limit parameters to avoid context overflow
+        - First scan: read_file(path, limit=100) to see file structure
+        - Read more sections: read_file(path, offset=100, limit=200) for next 200 lines
+        - Only omit limit (read full file) when necessary for editing
+        - Specify offset and limit: read_file(path, offset=0, limit=100) reads first 100 lines
+        - Any lines longer than 2000 characters will be truncated
+        - Results are returned using cat -n format, with line numbers starting at 1
+        - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful.
+        - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.
+        - You should ALWAYS make sure a file has been read before editing it.
 
         Args:
-            file_path: File path, support md, txt, py, etc. absolute or relative path
+            file_path: File path, support md, txt, py, etc. absolute path
             offset: Starting line number (0-based)
-            limit: Maximum number of lines to read, defaults to max_read_lines
+            limit: Maximum number of lines to read, defaults to 500
 
         Returns:
             File content with line numbers
@@ -163,10 +198,16 @@ class BuiltinFileTool(Tool):
             return f"Error reading file: {e}"
 
     def write_file(self, file_path: str, content: str) -> str:
-        """Create a new file or completely overwrite an existing file.
+        """Writes to a new file in the filesystem.
 
+        Usage:
+        - The file_path parameter must be an absolute path, not a relative path
+        - The content parameter must be a string
+        - The write_file tool will create the a new file.
+        - Prefer to edit existing files over creating new ones when possible.
+        
         Args:
-            file_path: File path
+            file_path: File absolute path
             content: File content
 
         Returns:
@@ -199,8 +240,16 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Perform exact string replacement in a file.
 
+        Usage:
+        - You must use your `Read` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file.
+        - When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string.
+        - ALWAYS prefer editing existing files. NEVER write new files unless explicitly required.
+        - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
+        - The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`.
+        - Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
+
         Args:
-            file_path: File path
+            file_path: File absolute path
             old_string: Original string to replace
             new_string: New string to replace with
             replace_all: Whether to replace all occurrences, defaults to replacing only the first
@@ -247,7 +296,18 @@ class BuiltinFileTool(Tool):
             return f"Error editing file: {e}"
 
     def glob(self, pattern: str, path: str = ".") -> str:
-        """Find files matching a pattern.
+        """Find files matching a glob pattern.
+
+        Usage:
+        - The glob tool finds files by matching patterns with wildcards
+        - Supports standard glob patterns: `*` (any characters), `**` (any directories), `?` (single character)
+        - Patterns can be absolute (starting with `/`) or relative
+        - Returns a list of absolute file paths that match the pattern
+
+        Examples:
+        - `**/*.py` - Find all Python files
+        - `*.txt` - Find all text files in root
+        - `/subdir/**/*.md` - Find all markdown files under /subdir
 
         Args:
             pattern: Glob pattern, e.g., "*.py", "**/*.md"
@@ -273,7 +333,9 @@ class BuiltinFileTool(Tool):
             ]
 
             logger.info(f"Found {len(filtered)} files matching '{pattern}'")
-            return json.dumps(sorted(filtered), ensure_ascii=False, indent=2)
+            result = json.dumps(sorted(filtered), ensure_ascii=False, indent=2)
+            result = truncate_if_too_long(result)
+            return str(result)
         except Exception as e:
             logger.error(f"Error in glob {pattern}: {e}")
             return f"Error in glob: {e}"
@@ -286,7 +348,17 @@ class BuiltinFileTool(Tool):
             output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
             max_results: int = 50,
     ) -> str:
-        """Search for text pattern in files.
+        """Search for a pattern in files.
+
+        Usage:
+        - The grep tool searches for text patterns across files
+        - The pattern parameter is the text to search for (literal string, not regex)
+        - The path parameter filters which directory to search in (default is the current working directory)
+        - The glob parameter accepts a glob pattern to filter which files to search (e.g., `*.py`)
+        - The output_mode parameter controls the output format:
+        - `files_with_matches`: List only file paths containing matches (default)
+        - `content`: Show matching lines with file path and line numbers
+        - `count`: Show count of matches per file
 
         Args:
             pattern: Text to search for (literal string)
@@ -304,8 +376,6 @@ class BuiltinFileTool(Tool):
         try:
             self._validate_path(path)
             base_path = self._resolve_path(path)
-            logger.info(f"Searching for '{pattern}' in '{path}'")
-
             if not base_path.exists():
                 return f"Error: Directory not found: {path}"
 
@@ -355,76 +425,91 @@ class BuiltinFileTool(Tool):
             # Format output
             if output_mode == "count":
                 output = [f"{p}: {c}" for p, c in file_counts.items()]
-                return "\n".join(output) if output else f"No matches found for '{pattern}'"
+                result = "\n".join(output) if output else f"No matches found for '{pattern}'"
             elif output_mode == "files_with_matches":
-                return json.dumps(list(set(results)), ensure_ascii=False, indent=2)
+                result = json.dumps(list(set(results)), ensure_ascii=False, indent=2)
             else:  # content
                 output_lines = [f"{r['file']}:{r['line']}: {r['content']}" for r in results]
-                return "\n".join(output_lines) if output_lines else f"No matches found for '{pattern}'"
+                result = "\n".join(output_lines) if output_lines else f"No matches found for '{pattern}'"
+
+            # Truncate if too long and log result
+            result = truncate_if_too_long(result)
+            logger.info(f"Grep for '{pattern}': found {len(file_counts)} files, result length: {len(result)}, \npreview: {result[:300]}...")
+            return str(result)
 
         except Exception as e:
             logger.error(f"Error in grep: {e}")
             return f"Error in grep: {e}"
 
-
 class BuiltinExecuteTool(Tool):
     """
-    Built-in code execution tool using Python interpreter.
+    Built-in command execution tool that wraps ShellTool.
+    Exposed as execute function for consistent naming in DeepAgent.
     """
 
-    def __init__(self, base_dir: Optional[str] = None):
+    def __init__(self, base_dir: Optional[str] = None, timeout: int = 120):
         """
         Initialize BuiltinExecuteTool.
 
         Args:
-            base_dir: Base directory for code execution
+            base_dir: Base directory for command execution
+            timeout: Command execution timeout in seconds
         """
         super().__init__(name="builtin_execute_tool")
-        self.base_dir = base_dir or os.getcwd()
+        # Import and initialize ShellTool
+        from agentica.tools.shell_tool import ShellTool
+        self._shell = ShellTool(base_dir=base_dir, timeout=timeout)
         self.register(self.execute)
 
-    def execute(self, code: str) -> str:
-        """Execute Python code.
+    def execute(self, command: str) -> str:
+        """Executes a given shell command.
+
+        Before executing the command, please follow these steps:
+
+        1. Directory Verification:
+        - If the command will create new directories or files, first use the ls tool to verify the parent directory exists and is the correct location
+        - For example, before running "mkdir foo/bar", first use ls to check that "foo" exists and is the intended parent directory
+
+        2. Command Execution:
+        - Always quote file paths that contain spaces with double quotes (e.g., cd "path with spaces/file.txt")
+        - Examples of proper quoting:
+            - cd "/Users/name/My Documents" (correct)
+            - cd /Users/name/My Documents (incorrect - will fail)
+            - python "/path/with spaces/script.py" (correct)
+            - python /path/with spaces/script.py (incorrect - will fail)
+        - After ensuring proper quoting, execute the command
+        - Capture the output of the command
+
+        Usage notes:
+        - The command parameter is required
+        - Commands run in an isolated sandbox environment
+        - Returns combined stdout/stderr output with exit code
+        - If the output is very large, it may be truncated
+        - VERY IMPORTANT: You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. You MUST avoid read tools like cat, head, tail, and use read_file to read files.
+        - When issuing multiple commands, use the ';' or '&&' operator to separate them. DO NOT use newlines (newlines are ok in quoted strings)
+            - Use '&&' when commands depend on each other (e.g., "mkdir dir && cd dir")
+            - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
+        - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd
+
+        Examples:
+        Good examples:
+            - execute(command="pytest /foo/bar/tests")
+            - execute(command="python /path/to/script.py")
+            - execute(command="npm install && npm test")
+
+        Bad examples (avoid these):
+            - execute(command="cd /foo/bar && pytest tests")  # Use absolute path instead
+            - execute(command="cat file.txt")  # Use read_file tool instead
+            - execute(command="find . -name '*.py'")  # Use glob tool instead
+            - execute(command="grep -r 'pattern' .")  # Use grep tool instead
 
         Args:
-            code: Python code to execute
+            command: Shell command to execute
 
         Returns:
-            Execution result (stdout output or error message)
+            str: The output of the command (stdout + stderr) with exit code
         """
-        import io
-        import sys
-        import traceback
-
-        logger.info(f"Executing code:\n{code}")
-
-        old_stdout, old_stderr = sys.stdout, sys.stderr
-        new_stdout, new_stderr = io.StringIO(), io.StringIO()
-        sys.stdout, sys.stderr = new_stdout, new_stderr
-
-        try:
-            compiled_code = compile(code, '<execute>', 'exec')
-            namespace = {'__name__': '__main__'}
-            exec(compiled_code, namespace)
-
-            stdout_output = new_stdout.getvalue()
-            stderr_output = new_stderr.getvalue()
-
-            result_parts = []
-            if stdout_output:
-                result_parts.append(stdout_output.strip())
-            if stderr_output:
-                result_parts.append(f"[stderr]\n{stderr_output.strip()}")
-
-            return "\n".join(result_parts) if result_parts else "Code executed successfully (no output)"
-        except Exception as e:
-            error_traceback = traceback.format_exc()
-            logger.error(f"Execution error: {e}")
-            return f"Error: {e}\n\nTraceback:\n{error_traceback}"
-        finally:
-            sys.stdout, sys.stderr = old_stdout, old_stderr
-            new_stdout.close()
-            new_stderr.close()
+        return self._shell.execute(command)
 
 
 class BuiltinWebSearchTool(Tool):
@@ -443,19 +528,26 @@ class BuiltinWebSearchTool(Tool):
         self.register(self.web_search)
 
     def web_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
-        """Execute Baidu search for multiple queries and return results
+        """Search the web using Baidu for multiple queries and return results
 
         Args:
             queries (Union[str, List[str]]): Search keyword(s), can be a single string or a list of strings
-            max_results (int, optional): Maximum number of results to return for each query, default 5
+            max_results (int, optional): Number of results to return for each query, default 5
 
         Returns:
             str: A JSON formatted string containing the search results.
+
+        IMPORTANT: After using this tool:
+        1. Read through the 'content' field of each result
+        2. Extract relevant information that answers the user's question
+        3. Synthesize this into a clear, natural language response
+        4. Cite sources by mentioning the page titles or URLs
+        5. NEVER show the raw JSON to the user - always provide a formatted response
         """
 
         try:
             result = self._search.baidu_search(queries, max_results=max_results)
-            logger.info(f"Web search for '{queries}', result length: {len(result)}, prewiview: {result[:200]}...")
+            logger.info(f"Web search for '{queries}', result length: {len(result)}, \npreview: {result[:300]}...")
             return result
         except Exception as e:
             logger.error(f"Web search error: {e}")
@@ -479,7 +571,7 @@ class BuiltinFetchUrlTool(Tool):
         self.max_content_length = max_content_length
         # Import and initialize UrlCrawlerTool
         from agentica.tools.url_crawler_tool import UrlCrawlerTool
-        self._crawler = UrlCrawlerTool(base_dir='/tmp/', max_content_length=max_content_length)
+        self._crawler = UrlCrawlerTool(base_dir='./tmp/', max_content_length=max_content_length)
         self.register(self.fetch_url)
 
     def fetch_url(self, url: str) -> str:
@@ -489,10 +581,16 @@ class BuiltinFetchUrlTool(Tool):
             url: URL to fetch, url starts with http:// or https://
 
         Returns:
-            JSON formatted fetch result containing url, content, and save_path
+            str, JSON formatted fetch result containing url, content, and save_path
+        
+        IMPORTANT: After using this tool:
+        1. Read through the return content
+        2. Extract relevant information that answers the user's question
+        3. Synthesize this into a clear, natural language response
+        4. NEVER show the raw JSON to the user unless specifically requested
         """
         result = self._crawler.url_crawl(url)
-        logger.info(f"Fetched URL: {url}, result length: {len(result)}, preview: {result[:200]}...")
+        logger.info(f"Fetched URL: {url}, result length: {len(result)}, \npreview: {result[:300]}...")
         return result
 
 
@@ -502,6 +600,21 @@ class BuiltinTodoTool(Tool):
     Used for tracking progress of complex tasks.
     """
 
+    # System prompt for todo tool usage guidance
+    WRITE_TODOS_SYSTEM_PROMPT = """## `write_todos`
+
+You have access to the `write_todos` tool to help you manage and plan complex objectives.
+Use this tool for complex objectives to ensure that you are tracking each necessary step and giving the user visibility into your progress.
+This tool is very helpful for planning complex objectives, and for breaking down these larger complex objectives into smaller steps.
+
+It is critical that you mark todos as completed as soon as you are done with a step. Do not batch up multiple steps before marking them as completed.
+For simple objectives that only require a few steps, it is better to just complete the objective directly and NOT use this tool.
+Writing todos takes time and tokens, use it when it is helpful for managing complex many-step problems! But not for simple few-step requests.
+
+## Important To-Do List Usage Notes to Remember
+- The `write_todos` tool should never be called multiple times in parallel.
+- Don't be afraid to revise the To-Do list as you go. New information may reveal new tasks that need to be done, or old tasks that are irrelevant."""
+
     def __init__(self):
         """Initialize BuiltinTodoTool."""
         super().__init__(name="builtin_todo_tool")
@@ -509,8 +622,72 @@ class BuiltinTodoTool(Tool):
         self.register(self.write_todos)
         self.register(self.read_todos)
 
+    def get_system_prompt(self) -> Optional[str]:
+        """Get the system prompt for todo tool usage guidance."""
+        return self.WRITE_TODOS_SYSTEM_PROMPT
+
     def write_todos(self, todos: List[Dict[str, str]]) -> str:
         """Create and manage a structured task list.
+
+        Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+
+        Only use this tool if you think it will be helpful in staying organized. If the user's request is trivial and takes less than 3 steps, it is better to NOT use this tool and just do the task directly.
+
+        ## When to Use This Tool
+        Use this tool in these scenarios:
+
+        1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
+        2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
+        3. User explicitly requests todo list - When the user directly asks you to use the todo list
+        4. User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
+        5. The plan may need future revisions or updates based on results from the first few steps
+
+        ## How to Use This Tool
+        1. When you start working on a task - Mark it as in_progress BEFORE beginning work.
+        2. After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation.
+        3. You can also update future tasks, such as deleting them if they are no longer necessary, or adding new tasks that are necessary. Don't change previously completed tasks.
+        4. You can make several updates to the todo list at once. For example, when you complete a task, you can mark the next task you need to start as in_progress.
+
+        ## When NOT to Use This Tool
+        It is important to skip using this tool when:
+        1. There is only a single, straightforward task
+        2. The task is trivial and tracking it provides no benefit
+        3. The task can be completed in less than 3 trivial steps
+        4. The task is purely conversational or informational
+
+        ## Task States and Management
+
+        1. **Task States**: Use these states to track progress:
+        - pending: Task not yet started
+        - in_progress: Currently working on (you can have multiple tasks in_progress at a time if they are not related to each other and can be run in parallel)
+        - completed: Task finished successfully
+
+        2. **Task Management**:
+        - Update task status in real-time as you work
+        - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
+        - Complete current tasks before starting new ones
+        - Remove tasks that are no longer relevant from the list entirely
+        - IMPORTANT: When you write this todo list, you should mark your first task (or tasks) as in_progress immediately!.
+        - IMPORTANT: Unless all tasks are completed, you should always have at least one task in_progress to show the user that you are working on something.
+
+        3. **Task Completion Requirements**:
+        - ONLY mark a task as completed when you have FULLY accomplished it
+        - If you encounter errors, blockers, or cannot finish, keep the task as in_progress
+        - When blocked, create a new task describing what needs to be resolved
+        - Never mark a task as completed if:
+            - There are unresolved issues or errors
+            - Work is partial or incomplete
+            - You encountered blockers that prevent completion
+            - You couldn't find necessary resources or dependencies
+            - Quality standards haven't been met
+
+        4. **Task Breakdown**:
+        - Create specific, actionable items
+        - Break complex tasks into smaller, manageable steps
+        - Use clear, descriptive task names
+
+        Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully
+        Remember: If you only need to make a few tool calls to complete a task, and it is clear what you need to do, it is better to just do the task directly and NOT call this tool at all.
 
         Each task item should contain:
         - content: Task description
@@ -587,29 +764,154 @@ class BuiltinTaskTool(Tool):
 Focus on the specific task given to you and provide a clear, concise result.
 Use the available tools to accomplish your task efficiently."""
 
+    # System prompt for task tool usage guidance (injected into main agent)
+    TASK_SYSTEM_PROMPT = """## `task` (subagent spawner)
+
+You have access to a `task` tool to launch short-lived subagents that handle isolated tasks. These agents are ephemeral — they live only for the duration of the task and return a single result.
+
+When to use the task tool:
+- When a task is complex and multi-step, and can be fully delegated in isolation
+- When a task is independent of other tasks and can run in parallel
+- When a task requires focused reasoning or heavy token/context usage that would bloat the orchestrator thread
+- When sandboxing improves reliability (e.g. code execution, structured searches, data formatting)
+- When you only care about the output of the subagent, and not the intermediate steps (ex. performing a lot of research and then returned a synthesized report, performing a series of computations or lookups to achieve a concise, relevant answer.)
+
+Subagent lifecycle:
+1. **Spawn** → Provide clear role, instructions, and expected output
+2. **Run** → The subagent completes the task autonomously
+3. **Return** → The subagent provides a single structured result
+4. **Reconcile** → Incorporate or synthesize the result into the main thread
+
+When NOT to use the task tool:
+- If you need to see the intermediate reasoning or steps after the subagent has completed (the task tool hides them)
+- If the task is trivial (a few tool calls or simple lookup)
+- If delegating does not reduce token usage, complexity, or context switching
+- If splitting would add latency without benefit
+
+## Important Task Tool Usage Notes to Remember
+- Whenever possible, parallelize the work that you do. This is true for both tool_calls, and for tasks. Whenever you have independent steps to complete - make tool_calls, or kick off tasks (subagents) in parallel to accomplish them faster. This saves time for the user, which is incredibly important.
+- Remember to use the `task` tool to silo independent tasks within a multi-part objective.
+- You should use the `task` tool whenever you have a complex task that will take multiple steps, and is independent from other tasks that the agent needs to complete. These agents are highly competent and efficient."""
+
     # Task tool description for the LLM
     TASK_TOOL_DESCRIPTION = """Launch a subagent to handle complex, multi-step tasks with isolated context.
 
-## When to use this tool:
-1. Complex multi-step tasks that require focused work
-2. Tasks that can run independently without needing intermediate feedback
-3. Research or analysis tasks that would benefit from isolated context
-4. When you want to parallelize work by launching multiple subagents
+When using the Task tool, you must specify a subagent_type parameter to select which agent type to use.
 
-## When NOT to use this tool:
-1. Simple tasks that can be done in 1-2 tool calls
-2. Tasks that require continuous user interaction
-3. Tasks where you need to see intermediate steps
+## Usage notes:
+1. Launch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses
+2. When the agent is done, it will return a single message back to you. The result returned by the agent is not visible to the user. To show the user the result, you should send a text message back to the user with a concise summary of the result.
+3. Each agent invocation is stateless. You will not be able to send additional messages to the agent, nor will the agent be able to communicate with you outside of its final report. Therefore, your prompt should contain a highly detailed task description for the agent to perform autonomously and you should specify exactly what information the agent should return back to you in its final and only message to you.
+4. The agent's outputs should generally be trusted
+5. Clearly tell the agent whether you expect it to create content, perform analysis, or just do research (search, file reads, web fetches, etc.), since it is not aware of the user's intent
+6. If the agent description mentions that it should be used proactively, then you should try your best to use it without the user having to ask for it first. Use your judgement.
+7. When only the general-purpose agent is provided, you should use it for all tasks. It is great for isolating context and token usage, and completing specific, complex tasks, as it has all the same capabilities as the main agent.
 
-## Usage:
-- Provide a clear, detailed description of the task
-- Specify what information should be returned
-- The subagent will complete the task and return a single result
+### Example usage of the general-purpose agent:
 
-## Examples:
-- "Research the top 5 Python web frameworks and summarize their pros and cons"
-- "Analyze the code in src/ directory and identify potential security issues"
-- "Search for recent news about AI and create a summary report"
+<example_agent_descriptions>
+"general-purpose": use this agent for general purpose tasks, it has access to all tools as the main agent.
+</example_agent_descriptions>
+
+<example>
+User: "I want to conduct research on the accomplishments of Lebron James, Michael Jordan, and Kobe Bryant, and then compare them."
+Assistant: *Uses the task tool in parallel to conduct isolated research on each of the three players*
+Assistant: *Synthesizes the results of the three isolated research tasks and responds to the User*
+<commentary>
+Research is a complex, multi-step task in it of itself.
+The research of each individual player is not dependent on the research of the other players.
+The assistant uses the task tool to break down the complex objective into three isolated tasks.
+Each research task only needs to worry about context and tokens about one player, then returns synthesized information about each player as the Tool Result.
+This means each research task can dive deep and spend tokens and context deeply researching each player, but the final result is synthesized information, and saves us tokens in the long run when comparing the players to each other.
+</commentary>
+</example>
+
+<example>
+User: "Analyze a single large code repository for security vulnerabilities and generate a report."
+Assistant: *Launches a single `task` subagent for the repository analysis*
+Assistant: *Receives report and integrates results into final summary*
+<commentary>
+Subagent is used to isolate a large, context-heavy task, even though there is only one. This prevents the main thread from being overloaded with details.
+If the user then asks followup questions, we have a concise report to reference instead of the entire history of analysis and tool calls, which is good and saves us time and money.
+</commentary>
+</example>
+
+<example>
+User: "Schedule two meetings for me and prepare agendas for each."
+Assistant: *Calls the task tool in parallel to launch two `task` subagents (one per meeting) to prepare agendas*
+Assistant: *Returns final schedules and agendas*
+<commentary>
+Tasks are simple individually, but subagents help silo agenda preparation.
+Each subagent only needs to worry about the agenda for one meeting.
+</commentary>
+</example>
+
+<example>
+User: "I want to order a pizza from Dominos, order a burger from McDonald's, and order a salad from Subway."
+Assistant: *Calls tools directly in parallel to order a pizza from Dominos, a burger from McDonald's, and a salad from Subway*
+<commentary>
+The assistant did not use the task tool because the objective is super simple and clear and only requires a few trivial tool calls.
+It is better to just complete the task directly and NOT use the `task`tool.
+</commentary>
+</example>
+
+### Example usage with custom agents:
+
+<example_agent_descriptions>
+"content-reviewer": use this agent after you are done creating significant content or documents
+"greeting-responder": use this agent when to respond to user greetings with a friendly joke
+"research-analyst": use this agent to conduct thorough research on complex topics
+</example_agent_description>
+
+<example>
+user: "Please write a function that checks if a number is prime"
+assistant: Sure let me write a function that checks if a number is prime
+assistant: First let me use the Write tool to write a function that checks if a number is prime
+assistant: I'm going to use the Write tool to write the following code:
+<code>
+function isPrime(n) {{
+  if (n <= 1) return false
+  for (let i = 2; i * i <= n; i++) {{
+    if (n % i === 0) return false
+  }}
+  return true
+}}
+</code>
+<commentary>
+Since significant content was created and the task was completed, now use the content-reviewer agent to review the work
+</commentary>
+assistant: Now let me use the content-reviewer agent to review the code
+assistant: Uses the Task tool to launch with the content-reviewer agent
+</example>
+
+<example>
+user: "Can you help me research the environmental impact of different renewable energy sources and create a comprehensive report?"
+<commentary>
+This is a complex research task that would benefit from using the research-analyst agent to conduct thorough analysis
+</commentary>
+assistant: I'll help you research the environmental impact of renewable energy sources. Let me use the research-analyst agent to conduct comprehensive research on this topic.
+assistant: Uses the Task tool to launch with the research-analyst agent, providing detailed instructions about what research to conduct and what format the report should take
+</example>
+
+<example>
+user: "Hello"
+<commentary>
+Since the user is greeting, don't use the task tool
+</commentary>
+</example>
+
+When to use the task tool:
+- When a task is complex and multi-step, and can be fully delegated in isolation
+- When a task is independent of other tasks and can run in parallel
+- When a task requires focused reasoning or heavy token/context usage that would bloat the orchestrator thread
+- When sandboxing improves reliability (e.g. code execution, structured searches, data formatting)
+- When you only care about the output of the subagent, and not the intermediate steps (ex. performing a lot of research and then returned a synthesized report, performing a series of computations or lookups to achieve a concise, relevant answer.)
+
+When NOT to use the task tool:
+- If you need to see the intermediate reasoning or steps after the subagent has completed (the task tool hides them)
+- If the task is trivial (a few tool calls or simple lookup)
+- If delegating does not reduce token usage, complexity, or context switching
+- If splitting would add latency without benefit
 """
 
     def __init__(
@@ -636,6 +938,10 @@ Use the available tools to accomplish your task efficiently."""
         self._parent_agent: Optional["Agent"] = None
         self.register(self.task)
 
+    def get_system_prompt(self) -> Optional[str]:
+        """Get the system prompt for task tool usage guidance."""
+        return self.TASK_SYSTEM_PROMPT
+
     def set_parent_agent(self, agent: "Agent") -> None:
         """Set the parent agent reference for accessing model and tools."""
         self._parent_agent = agent
@@ -653,8 +959,6 @@ Use the available tools to accomplish your task efficiently."""
             The result from the subagent after completing the task.
         """
         try:
-            from agentica.agent import Agent
-
             # Get model from parent agent or use configured model
             model = self._model
             if model is None and self._parent_agent is not None:
@@ -673,17 +977,21 @@ Use the available tools to accomplish your task efficiently."""
                     BuiltinFetchUrlTool(),
                 ]
 
+            # Import Agent here to avoid circular imports
+            from agentica.agent import Agent
+
             # Create subagent
             subagent = Agent(
                 model=model,
                 name=f"Subagent-{subagent_type}",
-                description=f"Subagent for handling: {description[:50]}...",
+                description=f"Subagent for handling: {description[:100]}",
                 system_prompt=self._system_prompt,
+                add_datetime_to_instructions=True,
                 tools=subagent_tools,
                 markdown=True,
             )
 
-            logger.info(f"Launching subagent [{subagent_type}] for task: {description[:100]}...")
+            logger.info(f"Launching subagent [{subagent_type}] for task: {description}")
 
             # Run subagent with the task description
             response = subagent.run(description)
@@ -704,7 +1012,7 @@ Use the available tools to accomplish your task efficiently."""
             return json.dumps({
                 "success": False,
                 "error": f"Subagent task error: {e}",
-                "description": description[:200],
+                "description": description[:300],
             }, ensure_ascii=False)
 
 

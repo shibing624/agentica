@@ -6,6 +6,9 @@ from typing import Optional, Type
 from pydantic import BaseModel, ValidationError
 from agentica.utils.log import logger
 
+TOOL_RESULT_TOKEN_LIMIT = 20000  # Same threshold as eviction
+TRUNCATION_GUIDANCE = "... [results truncated, try being more specific with your parameters]"
+
 
 def hash_string_sha256(input_string):
     # Encode the input string to bytes
@@ -71,3 +74,16 @@ def parse_structured_output(content: str, response_model: Type[BaseModel]) -> Op
                 logger.warning(f"Failed to parse as Python dict: {e}")
 
     return structured_output
+
+
+def truncate_if_too_long(result: list[str] | str) -> list[str] | str:
+    """Truncate list or string result if it exceeds token limit (rough estimate: 4 chars/token)."""
+    if isinstance(result, list):
+        total_chars = sum(len(item) for item in result)
+        if total_chars > TOOL_RESULT_TOKEN_LIMIT * 4:
+            return result[: len(result) * TOOL_RESULT_TOKEN_LIMIT * 4 // total_chars] + [TRUNCATION_GUIDANCE]
+        return result
+    # string
+    if len(result) > TOOL_RESULT_TOKEN_LIMIT * 4:
+        return result[: TOOL_RESULT_TOKEN_LIMIT * 4] + "\n" + TRUNCATION_GUIDANCE
+    return result

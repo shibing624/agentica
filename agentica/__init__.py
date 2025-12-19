@@ -104,7 +104,22 @@ from agentica.file.txt import TextFile
 
 # tool
 from agentica.tools.base import Tool, ModelTool, Function, FunctionCall
-from agentica.tools.skill_tool import SkillTool
+
+# skills
+from agentica.skills import (
+    Skill,
+    SkillRegistry,
+    SkillLoader,
+    get_skill_registry,
+    reset_skill_registry,
+    load_skills,
+    get_available_skills,
+    register_skill,
+    register_skills,
+    list_skill_files,
+    read_skill_file,
+)
+
 from agentica.tools.guardrails import (
     ToolGuardrailFunctionOutput,
     ToolInputGuardrail,
@@ -127,6 +142,7 @@ from agentica.tools.file_tool import FileTool
 from agentica.tools.hackernews_tool import HackerNewsTool
 from agentica.tools.jina_tool import JinaTool
 from agentica.tools.shell_tool import ShellTool
+from agentica.tools.skill_tool import SkillTool
 from agentica.tools.text_analysis_tool import TextAnalysisTool
 from agentica.tools.weather_tool import WeatherTool
 

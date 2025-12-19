@@ -622,6 +622,17 @@ class Tool:
             logger.warning(f"Failed to create Function for: {function.__name__}")
             raise e
 
+    def get_system_prompt(self) -> Optional[str]:
+        """Get the system prompt to inject for this tool.
+
+        Override this method in subclasses to provide tool-specific system prompts
+        that guide the LLM on how to use the tool effectively.
+
+        Returns:
+            Optional[str]: The system prompt string, or None if no prompt is needed.
+        """
+        return None
+
     def __repr__(self):
         return f"<{self.__class__.__name__} name={self.name} functions={list(self.functions.keys())}>"
 

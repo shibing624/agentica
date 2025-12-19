@@ -182,3 +182,5 @@ tests/__pycache__/*
 __pycache__/
 
 test_work_dir/
+
+tmp/

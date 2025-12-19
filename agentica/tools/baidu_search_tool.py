@@ -274,7 +274,7 @@ class BaiduSearchTool(Tool):
                 {
                     "title": clean_text(item.get("title", "")),
                     "url": item.get("url", ""),
-                    "abstract": clean_text(item.get("abstract", "")),
+                    "content": clean_text(item.get("abstract", "")),
                     "rank": str(idx),
                 }
             )
