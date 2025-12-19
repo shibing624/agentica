@@ -17,6 +17,7 @@ load_dotenv(AGENTICA_DOTENV_PATH, override=True)
 load_dotenv()
 
 AGENTICA_DATA_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
+AGENTICA_SKILL_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/skill")
 AGENTICA_LOG_LEVEL = os.getenv("AGENTICA_LOG_LEVEL", "INFO").upper()
 user_log_file = os.getenv("AGENTICA_LOG_FILE")
 

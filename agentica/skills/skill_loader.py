@@ -17,6 +17,7 @@ from typing import List, Optional
 from agentica.skills.skill import Skill
 from agentica.skills.skill_registry import SkillRegistry, get_skill_registry
 from agentica.utils.string import truncate_if_too_long
+from agentica.config import AGENTICA_SKILL_DIR
 from agentica.utils.log import logger
 
 
@@ -72,11 +73,18 @@ class SkillLoader:
             project_path = self.project_root / skill_dir
             paths.append((project_path, "project"))
 
+        # add AGENTICA_SKILL_DIR from config
+        if AGENTICA_SKILL_DIR:
+            skill_dir_path = Path(AGENTICA_SKILL_DIR)
+            # skill_dir_path is dir, mkdir if not exists
+            skill_dir_path.mkdir(parents=True, exist_ok=True)
+            paths.append((skill_dir_path, "user"))
+
         # User-level paths (lower priority)
         for skill_dir in self.SKILL_DIRS:
             user_path = self.home_dir / skill_dir
             paths.append((user_path, "user"))
-
+        
         return paths
 
     def discover_skills(self, skills_dir: Path) -> List[Path]:
