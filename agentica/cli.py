@@ -21,6 +21,7 @@ import os
 import sys
 import re
 import glob as glob_module
+import unicodedata
 from pathlib import Path
 from typing import List, Optional
 
@@ -785,6 +786,7 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                 shown_tool_count = 0  # Track how many tools we've shown
                 is_thinking = False  # Track if we're in thinking phase
                 thinking_displayed = False  # Track if we've shown thinking header
+                post_tool_transition = False  # Track if we're in post-tool transition phase
                 
                 for chunk in response_stream:
                     if chunk is None:
@@ -826,7 +828,9 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         continue
                     
                     elif chunk.event == "ToolCallCompleted":
-                        # Tool completed - spinner already stopped
+                        # Tool completed - enter post-tool transition phase
+                        # GLM models may emit noise (punctuation) before actual content
+                        post_tool_transition = True
                         continue
                     
                     # Skip other intermediate events that don't have content
@@ -859,6 +863,20 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         
                         # Has actual content - transition from thinking to response
                         content = chunk.content
+                        
+                        # Filter post-tool transition noise (GLM models emit punctuation after tool calls)
+                        # Only filter if we're in transition phase and content is just punctuation/whitespace
+                        if post_tool_transition:
+                            # Check if content is meaningful (contains letters/numbers/CJK characters)
+                            has_meaningful_char = any(
+                                unicodedata.category(c)[0] in ('L', 'N')  # Letter or Number
+                                for c in content
+                            )
+                            if not has_meaningful_char:
+                                # Skip noise content (punctuation, whitespace only)
+                                continue
+                            # Got meaningful content, exit transition phase
+                            post_tool_transition = False
                         
                         # End thinking phase if we were thinking
                         if is_thinking:
