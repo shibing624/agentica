@@ -611,7 +611,7 @@ def display_tool_call(tool_name: str, tool_args: dict) -> None:
 def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None):
     """Run the interactive CLI with prompt_toolkit support."""
     # Suppress logger console output in CLI mode for cleaner UI
-    suppress_console_logging()
+    # suppress_console_logging()
     
     try:
         from prompt_toolkit import PromptSession
@@ -788,6 +788,11 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     if chunk is None:
                         continue
                     
+                    # Debug: log all events when verbose
+                    if agent_config.get("debug_mode"):
+                        content_preview = str(chunk.content)[:50] if chunk.content else "None"
+                        console.print(f"[dim]DEBUG event={chunk.event} content={content_preview!r}[/dim]")
+                    
                     # Skip RunStarted event - don't display anything
                     if chunk.event == "RunStarted":
                         continue
@@ -827,13 +832,18 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                                        "MultiRoundToolCall", "MultiRoundToolResult", "MultiRoundCompleted"):
                         continue
                     
-                    # Handle content response - only for RunResponse event with actual content
-                    if chunk.event == "RunResponse" and chunk.content:
-                        content = chunk.content
-                        # Skip chunks that are only whitespace/punctuation noise
-                        # (sometimes models emit stray dots or newlines during streaming)
-                        if content.strip() in ('', '.', '。', '..', '...'):
+                    # Handle RunResponse event
+                    if chunk.event == "RunResponse":
+                        # Check if this is a thinking phase (reasoning_content but no content)
+                        # For thinking models like GLM, they send content=None during reasoning
+                        if not chunk.content:
+                            # Still in thinking phase - update spinner text if needed
+                            if spinner_active and hasattr(chunk, 'reasoning_content') and chunk.reasoning_content:
+                                status.update(f"[bold {COLORS['thinking']}]Thinking...")
                             continue
+                        
+                        # Has actual content - display it
+                        content = chunk.content
                         if first_chunk:
                             if spinner_active:
                                 status.stop()
