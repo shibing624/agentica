@@ -829,6 +829,11 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     
                     # Handle content response - only for RunResponse event with actual content
                     if chunk.event == "RunResponse" and chunk.content:
+                        content = chunk.content
+                        # Skip chunks that are only whitespace/punctuation noise
+                        # (sometimes models emit stray dots or newlines during streaming)
+                        if content.strip() in ('', '.', '。', '..', '...'):
+                            continue
                         if first_chunk:
                             if spinner_active:
                                 status.stop()
@@ -837,8 +842,8 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                                 console.print()  # Extra line after tool calls
                             console.print()  # Newline before response
                             first_chunk = False
-                        response_text += chunk.content
-                        console.print(chunk.content, end="", style=COLORS["agent"])
+                        response_text += content
+                        console.print(content, end="", style=COLORS["agent"])
                 
                 if not first_chunk:
                     console.print()  # Final newline
