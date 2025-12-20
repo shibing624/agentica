@@ -1996,11 +1996,15 @@ class Agent:
                             model_response.reasoning_content = ""
                         model_response.reasoning_content += model_response_chunk.reasoning_content
                         # For streaming, yield only the new chunk, not the accumulated content
+                        # Clear content to avoid mixing with reasoning_content in the same yield
+                        self.run_response.content = None
                         self.run_response.reasoning_content = model_response_chunk.reasoning_content
                         self.run_response.created_at = model_response_chunk.created_at
                         yield self.run_response
                     if model_response_chunk.content and model_response.content is not None:
                         model_response.content += model_response_chunk.content
+                        # Clear reasoning_content to avoid mixing with content in the same yield
+                        self.run_response.reasoning_content = None
                         self.run_response.content = model_response_chunk.content
                         self.run_response.created_at = model_response_chunk.created_at
                         yield self.run_response

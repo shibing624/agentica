@@ -296,25 +296,31 @@ class BuiltinFileTool(Tool):
             return f"Error editing file: {e}"
 
     def glob(self, pattern: str, path: str = ".") -> str:
-        """Find files matching a glob pattern.
+        """Find files matching a glob pattern (supports recursive search with `**`).
 
         Usage:
-        - The glob tool finds files by matching patterns with wildcards
-        - Supports standard glob patterns: `*` (any characters), `**` (any directories), `?` (single character)
-        - Patterns can be absolute (starting with `/`) or relative
-        - Returns a list of absolute file paths that match the pattern
+        - This tool searches for files by matching standard glob wildcards, returns JSON formatted absolute file paths
+        - Core glob wildcards (key differences):
+        1. `*`: Matches any files in the **current specified single directory** (non-recursive, no deep subdirectories)
+        2. `**`: Matches any directories recursively (penetrates all deep subdirectories for cross-level search)
+        3. `?`: Matches any single character (e.g., "file?.txt" matches "file1.txt", "filea.txt")
+        - Patterns can be absolute (starting with `/`, e.g., "/home/user/*.py") or relative (e.g., "docs/*.md")
+        - Automatically excludes common useless directories (.git, __pycache__, etc.) to filter valid files
+        - Returns empty JSON list if no matching files are found
 
-        Examples:
-        - `**/*.py` - Find all Python files
-        - `*.txt` - Find all text files in root
-        - `/subdir/**/*.md` - Find all markdown files under /subdir
+        Examples (clear parameter correspondence and function explanation):
+        - pattern: `*.py`, path: "." - Find all Python files in the current working directory (non-recursive)
+        - pattern: `*.txt`, path: "." - Find all text files in the current working directory (non-recursive)
+        - pattern: `**/*.md`, path: "/path/to/subdir/" - Find all markdown files in all levels under /path/to/subdir/ (recursive)
+        - pattern: `subdir/*.md`, path: "." - Find all markdown files directly in the "subdir" folder (non-recursive, no deep subdirs)
 
         Args:
-            pattern: Glob pattern, e.g., "*.py", "**/*.md"
-            path: Starting directory for search
+            pattern: Valid glob search pattern, e.g., "*.py", "**/*.md", "src/?*.js"
+            path: Starting search directory (relative or absolute), defaults to current working directory (".").
 
         Returns:
-            JSON formatted list of matching files
+            JSON formatted string of sorted absolute file paths (filtered to exclude ignored directories).
+            Error message string if directory not found or other exceptions occur.
         """
         try:
             self._validate_path(path)
@@ -323,22 +329,25 @@ class BuiltinFileTool(Tool):
             if not base_path.exists():
                 return f"Error: Directory not found: {path}"
 
+            # Get all files matching the glob pattern
             matches = list(base_path.glob(pattern))
 
-            # Exclude common ignored directories
+            # Exclude common ignored directories to avoid invalid files
             ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
             filtered = [
                 str(m) for m in matches
                 if not set(m.parts).intersection(ignore_dirs)
             ]
 
-            logger.info(f"Found {len(filtered)} files matching '{pattern}'")
+            logger.info(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
+            # Convert to formatted JSON string
             result = json.dumps(sorted(filtered), ensure_ascii=False, indent=2)
+            # Truncate if content exceeds the limit to avoid excessive output
             result = truncate_if_too_long(result)
             return str(result)
         except Exception as e:
-            logger.error(f"Error in glob {pattern}: {e}")
-            return f"Error in glob: {e}"
+            logger.error(f"Exception occurred during glob search (pattern: '{pattern}', path: '{path}'): {str(e)}")
+            return f"Error in glob search: {str(e)}"
 
     def grep(
             self,

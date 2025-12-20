@@ -21,7 +21,6 @@ import os
 import sys
 import re
 import glob as glob_module
-import unicodedata
 from pathlib import Path
 from typing import List, Optional
 
@@ -611,8 +610,9 @@ def display_tool_call(tool_name: str, tool_args: dict) -> None:
 
 def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None):
     """Run the interactive CLI with prompt_toolkit support."""
-    # Suppress logger console output in CLI mode for cleaner UI
-    suppress_console_logging()
+    # Suppress logger console output in CLI mode for cleaner UI (unless verbose mode)
+    if not agent_config.get("debug_mode"):
+        suppress_console_logging()
     
     try:
         from prompt_toolkit import PromptSession
@@ -790,11 +790,6 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                 for chunk in response_stream:
                     if chunk is None:
                         continue
-                    
-                    # Debug: log all events when verbose
-                    if agent_config.get("debug_mode"):
-                        content_preview = str(chunk.content)[:50] if chunk.content else "None"
-                        console.print(f"[dim]DEBUG event={chunk.event} content={content_preview!r}[/dim]")
                     
                     # Skip RunStarted event - don't display anything
                     if chunk.event == "RunStarted":
