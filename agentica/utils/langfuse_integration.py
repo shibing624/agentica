@@ -18,7 +18,7 @@ Usage:
     2. Set environment variables:
         LANGFUSE_SECRET_KEY = "sk-lf-xxx"
         LANGFUSE_PUBLIC_KEY = "pk-lf-xxx"
-        LANGFUSE_HOST = "https://cloud.langfuse.com"  # or your self-hosted URL
+        LANGFUSE_BASE_URL = "https://cloud.langfuse.com"  # or your self-hosted URL
 
     3. Use agentica as normal - Langfuse will automatically trace all LLM calls:
         from agentica import Agent
@@ -34,11 +34,11 @@ Usage:
         response = agent.run("Hello!")
         # All LLM calls within this run are grouped in a single trace
 """
-import os
+
 import logging
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Any, Generator
-from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY
+from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, LANGFUSE_BASE_URL
 from agentica.utils.log import logger
 
 
@@ -60,6 +60,47 @@ def _suppress_opentelemetry_errors():
     logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 
 
+# Global flag to track if timeout warning has been shown
+_langfuse_timeout_warned: bool = False
+
+
+def _check_langfuse_connection() -> bool:
+    """
+    Check if Langfuse host is reachable.
+    
+    Returns:
+        True if connection is successful, False otherwise.
+    """
+    global _langfuse_timeout_warned
+    
+    langfuse_host = LANGFUSE_BASE_URL
+    
+    try:
+        import urllib.request
+        import urllib.error
+        
+        # Simple HEAD request with short timeout
+        req = urllib.request.Request(langfuse_host, method="HEAD")
+        urllib.request.urlopen(req, timeout=5)
+        return True
+    except urllib.error.URLError as e:
+        if not _langfuse_timeout_warned:
+            _langfuse_timeout_warned = True
+            logger.warning(
+                f"Langfuse host unreachable: {langfuse_host}. "
+                f"Tracing data will not be sent. Error: {e.reason}"
+            )
+        return False
+    except Exception as e:
+        if not _langfuse_timeout_warned:
+            _langfuse_timeout_warned = True
+            logger.warning(
+                f"Langfuse connection check failed: {langfuse_host}. "
+                f"Tracing may not work. Error: {e}"
+            )
+        return False
+
+
 def is_langfuse_configured() -> bool:
     """Check if Langfuse environment variables are configured."""
     return bool(LANGFUSE_SECRET_KEY and LANGFUSE_PUBLIC_KEY)
@@ -79,9 +120,15 @@ def is_langfuse_available() -> bool:
         import langfuse  # noqa: F401
         _langfuse_available = is_langfuse_configured()
         if _langfuse_available:
-            logger.debug("Langfuse is available and configured (using OpenTelemetry auto-instrumentation)")
             # Suppress OpenTelemetry exporter errors (e.g., timeout when host is unreachable)
             _suppress_opentelemetry_errors()
+            # Check connection and warn user if host is unreachable
+            if _check_langfuse_connection():
+                logger.debug("Langfuse is available and configured (using OpenTelemetry auto-instrumentation)")
+            else:
+                # Still return True to allow graceful degradation
+                # The warning has already been logged in _check_langfuse_connection
+                pass
         else:
             logger.debug(f"Langfuse package installed but not configured (missing env vars), LANGFUSE_PUBLIC_KEY: {LANGFUSE_PUBLIC_KEY}")
     except ImportError:
