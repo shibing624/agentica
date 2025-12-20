@@ -18,8 +18,7 @@ from uuid import uuid4
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import Agent, OpenAIChat
-from agentica.db.sqlite import SqliteDb
+from agentica import Agent, OpenAIChat, SqliteDb
 
 # ============================================================
 # Part 1: Basic Agent (no memory persistence)
