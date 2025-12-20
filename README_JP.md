@@ -126,6 +126,15 @@ pip install .
 *   **Knowledge**：エージェントが検索拡張生成（RAG）を使用してクエリできる外部の知識源（ドキュメントのコレクションなど）。
 *   **Workflow/Team**：複雑な多段階のタスクを調整したり、複数のエージェント間の協力を管理したりするための高レベルの構成要素。
 
+## 📚 ドキュメント
+
+| ドキュメント | 説明 |
+|-------------|------|
+| [**APIリファレンス**](https://github.com/shibing624/agentica/blob/main/docs/API_REFERENCE.md) | Agent、Model、Memory、Tools、Knowledgeなどの完全なAPIドキュメント |
+| [**ツールガイド**](https://github.com/shibing624/agentica/blob/main/docs/TOOLS_GUIDE.md) | 40以上の組み込みツールの詳細な使用ガイドと例、カスタムツール開発方法 |
+| [**ベストプラクティス**](https://github.com/shibing624/agentica/blob/main/docs/BEST_PRACTICES.md) | エージェント設計原則、プロンプトエンジニアリング、パフォーマンス最適化、本番デプロイ |
+| [**技術実装ドキュメント**](https://github.com/shibing624/agentica/blob/main/docs/TECH_IMPL.md) | コントリビューターと上級ユーザー向けのプロジェクトアーキテクチャとコード構造の詳細 |
+
 ## 🚀 ショーケース：構築可能なもの
 
 Agenticaで何が可能か、包括的な例をご覧ください：

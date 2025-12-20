@@ -287,7 +287,7 @@ class LanceDb(VectorDb):
             search_results = self.reranker.rerank(query=query, documents=search_results)
         return search_results
 
-    def _build_search_results(self, results) -> List[Document]:  # TODO: typehint pandas?
+    def _build_search_results(self, results) -> List[Document]:
         search_results: List[Document] = []
         try:
             for _, item in results.iterrows():

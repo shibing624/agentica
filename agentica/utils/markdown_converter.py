@@ -354,7 +354,7 @@ class YouTubeConverter(DocumentConverter):
                 return metadata[k]
         return default
 
-    def _findKey(self, json: Any, key: str) -> str | None:  # TODO: Fix json type
+    def _findKey(self, json: Any, key: str) -> str | None:
         if isinstance(json, list):
             for elm in json:
                 ret = self._findKey(elm, key)
@@ -730,7 +730,7 @@ class MarkdownConverter:
         elif isinstance(source, requests.Response):
             return self.convert_response(source, **kwargs)
 
-    def convert_local(self, path: str, **kwargs: Any) -> DocumentConverterResult:  # TODO: deal with kwargs
+    def convert_local(self, path: str, **kwargs: Any) -> DocumentConverterResult:
         # Prepare a list of extensions to try (in order of priority)
         ext = kwargs.get("file_extension")
         extensions = [ext] if ext is not None else []
@@ -743,7 +743,7 @@ class MarkdownConverter:
         # Convert
         return self._convert(path, extensions, **kwargs)
 
-    def convert_stream(self, stream: Any, **kwargs: Any) -> DocumentConverterResult:  # TODO: deal with kwargs
+    def convert_stream(self, stream: Any, **kwargs: Any) -> DocumentConverterResult:
         # Prepare a list of extensions to try (in order of priority)
         ext = kwargs.get("file_extension")
         extensions = [ext] if ext is not None else []
@@ -776,7 +776,7 @@ class MarkdownConverter:
 
         return result
 
-    def convert_url(self, url: str, **kwargs: Any) -> DocumentConverterResult:  # TODO: fix kwargs type
+    def convert_url(self, url: str, **kwargs: Any) -> DocumentConverterResult:
         # Send a HTTP request to the URL
         user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0"
         response = self._requests_session.get(url, stream=True, headers={"User-Agent": user_agent})

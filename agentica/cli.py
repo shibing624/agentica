@@ -146,10 +146,10 @@ def parse_args():
     parser.add_argument('--query', type=str, help='Question to ask the LLM', default=None)
     parser.add_argument('--model_provider', type=str,
                         choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
-                        help='LLM model provider', default='openai')
+                        help='LLM model provider', default='zhipuai')
     parser.add_argument('--model_name', type=str,
                         help='LLM model name to use, can be gpt-5/glm-4.6v-flash/deepseek-chat/yi-lightning/...',
-                        default='gpt-5-mini')
+                        default='glm-4.6v-flash')
     parser.add_argument('--api_base', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')

@@ -97,7 +97,7 @@ pip install .
     agent = Agent(
         model=ZhipuAI(),
         tools=[WeatherTool()],
-        # 为智能体提供时间概念，以便回答“明天”等问题
+        # 为智能体提供时间概念，以便回答"明天"等问题
         add_datetime_to_instructions=True  
     )
 
@@ -120,11 +120,20 @@ pip install .
 ## 📖 核心概念
 
 *   **Agent**：思考、决策和执行动作的核心组件。它将模型、工具和记忆连接在一起。
-*   **Model**：智能体的“大脑”。通常是一个大型语言模型（LLM），为智能体的推理能力提供动力。
+*   **Model**：智能体的"大脑"。通常是一个大型语言模型（LLM），为智能体的推理能力提供动力。
 *   **Tool**：智能体可用于与外部世界交互的功能或能力（例如，搜索网页、运行代码、访问数据库）。
 *   **Memory**：允许智能体记住过去的交互（短期记忆）并存储关键信息以供日后调用（长期记忆）。
 *   **Knowledge**：外部知识源（如文档集合），智能体可以使用检索增强生成（RAG）进行查询。
 *   **Workflow/Team**：用于编排复杂、多步骤任务或管理多个智能体之间协作的高级结构。
+
+## 📚 文档
+
+| 文档 | 描述 |
+|------|------|
+| [**API 参考文档**](https://github.com/shibing624/agentica/blob/main/docs/API_REFERENCE.md) | 完整的类和方法 API 说明，包括 Agent、Model、Memory、Tools、Knowledge 等 |
+| [**工具使用指南**](https://github.com/shibing624/agentica/blob/main/docs/TOOLS_GUIDE.md) | 40+ 内置工具的详细使用说明和示例，以及自定义工具开发方法 |
+| [**最佳实践**](https://github.com/shibing624/agentica/blob/main/docs/BEST_PRACTICES.md) | Agent 设计原则、提示词工程、性能优化、错误处理和生产部署指南 |
+| [**技术实现文档**](https://github.com/shibing624/agentica/blob/main/docs/TECH_IMPL.md) | 项目架构和代码结构详解，适合贡献者和深度用户 |
 
 ## 🚀 功能展示：您可以构建什么
 
@@ -187,7 +196,7 @@ Agentica 与 [ChatPilot](https://github.com/shibing624/ChatPilot) 完全兼容�
 ## 💬 社区与支持
 
 *   **GitHub Issues**：有任何问题或功能请求？[提交 issue](https://github.com/shibing624/agentica/issues)。
-*   **微信**：加入我们的开发者社群！添加微信号 `xuming624`，并备注“agentica”，即可加入群聊。
+*   **微信**：加入我们的开发者社群！添加微信号 `xuming624`，并备注"agentica"，即可加入群聊。
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
 

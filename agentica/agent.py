@@ -552,6 +552,9 @@ class Agent:
         Returns:
             Agent: A new Agent instance.
         """
+        # Runtime fields that should not be passed to __init__
+        # These are initialized manually in __init__ and marked as "DO NOT SET MANUALLY"
+        runtime_fields = {"run_id", "run_input", "run_response", "stream", "stream_intermediate_steps"}
 
         # Extract the fields to set for the new Agent
         fields_for_new_agent = {}
@@ -559,6 +562,9 @@ class Agent:
         # Get all dataclass fields instead of model_fields_set
         for field in fields(self):
             field_name = field.name
+            # Skip runtime fields
+            if field_name in runtime_fields:
+                continue
             field_value = getattr(self, field_name)
             if field_value is not None:
                 fields_for_new_agent[field_name] = self._deep_copy_field(field_name, field_value)

@@ -477,7 +477,6 @@ def _add_set_of_mark(
             ):
                 continue
 
-            # TODO: add scroll left and right?
             horizontal_center = (rect_item["right"] + rect_item["left"]) / 2.0
             vertical_center = (rect_item["top"] + rect_item["bottom"]) / 2.0
             is_within_horizon = 0 <= horizontal_center < base.size[0]
@@ -578,7 +577,6 @@ def _get_random_color(identifier: int) -> Tuple[int, int, int, int]:
     g_val = rnd.randint(125, 255)  # Renamed g to g_val
     b_val = rnd.randint(0, 50)  # Renamed b to b_val
     color = [r_val, g_val, b_val]
-    # TODO: check why shuffle is needed?
     rnd.shuffle(color)
     color.append(255)
     return cast(Tuple[int, int, int, int], tuple(color))

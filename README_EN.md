@@ -126,6 +126,15 @@ pip install .
 *   **Knowledge**: An external knowledge source (like a collection of documents) that the agent can query using Retrieval-Augmented Generation (RAG).
 *   **Workflow/Team**: High-level constructs for orchestrating complex, multi-step tasks or managing collaboration between multiple agents.
 
+## 📚 Documentation
+
+| Document | Description |
+|----------|-------------|
+| [**API Reference**](https://github.com/shibing624/agentica/blob/main/docs/API_REFERENCE.md) | Complete API documentation for Agent, Model, Memory, Tools, Knowledge, and more |
+| [**Tools Guide**](https://github.com/shibing624/agentica/blob/main/docs/TOOLS_GUIDE.md) | Detailed usage guide for 40+ built-in tools with examples, plus custom tool development |
+| [**Best Practices**](https://github.com/shibing624/agentica/blob/main/docs/BEST_PRACTICES.md) | Agent design principles, prompt engineering, performance optimization, and production deployment |
+| [**Technical Implementation**](https://github.com/shibing624/agentica/blob/main/docs/TECH_IMPL.md) | Project architecture and code structure details for contributors and advanced users |
+
 ## 🚀 Showcase: What You Can Build
 
 Explore our comprehensive examples to see what's possible with Agentica:
