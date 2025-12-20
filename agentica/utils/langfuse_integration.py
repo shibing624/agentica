@@ -35,6 +35,7 @@ Usage:
         # All LLM calls within this run are grouped in a single trace
 """
 import os
+import logging
 from contextlib import contextmanager
 from typing import Optional, List, Dict, Any, Generator
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY
@@ -43,6 +44,20 @@ from agentica.utils.log import logger
 
 # Global flag to track if Langfuse is available
 _langfuse_available: Optional[bool] = None
+
+
+def _suppress_opentelemetry_errors():
+    """
+    Suppress OpenTelemetry exporter errors (e.g., timeout errors when Langfuse host is unreachable).
+    
+    This is useful in internal network environments where Langfuse host may be unreachable,
+    preventing noisy error messages from being printed to the console.
+    """
+    # Suppress OpenTelemetry SDK export errors
+    logging.getLogger("opentelemetry.sdk._shared_internal").setLevel(logging.CRITICAL)
+    logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").setLevel(logging.CRITICAL)
+    # Also suppress requests library connection errors related to OTLP
+    logging.getLogger("urllib3.connectionpool").setLevel(logging.WARNING)
 
 
 def is_langfuse_configured() -> bool:
@@ -65,6 +80,8 @@ def is_langfuse_available() -> bool:
         _langfuse_available = is_langfuse_configured()
         if _langfuse_available:
             logger.debug("Langfuse is available and configured (using OpenTelemetry auto-instrumentation)")
+            # Suppress OpenTelemetry exporter errors (e.g., timeout when host is unreachable)
+            _suppress_opentelemetry_errors()
         else:
             logger.debug(f"Langfuse package installed but not configured (missing env vars), LANGFUSE_PUBLIC_KEY: {LANGFUSE_PUBLIC_KEY}")
     except ImportError:
