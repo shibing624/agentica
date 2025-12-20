@@ -87,7 +87,7 @@ class AddTool(Tool):
 def main():
     """Main function to create and run the agent with custom tools."""
     # Create agent with custom and built-in tools
-    agent = DeepAgent(
+    agent = Agent(
         # model=OpenAIChat(id='gpt-4o'),
         model=ZhipuAI(),
         tools=[
@@ -103,13 +103,13 @@ def main():
     )
     
     # Example queries
-    # agent.print_response("3乘以10000005是啥?")
+    agent.print_response("3乘以10000005是啥?")
     agent.print_response(
         "将3的五次方乘以(12和3的和). step by step to show the result. "
         "最后统计一下结果的字符长度。"
     )
-    # agent.print_response("明天北京天气多少度？温度 乘以 2333 = ？")
-    agent.print_response("查询本地目录最大的py文件")
+    agent.print_response("明天北京天气多少度？温度 乘以 2333 = ？")
+    agent.print_response("查询当前目录最大的py文件")
 
 
 if __name__ == "__main__":
