@@ -61,7 +61,7 @@
 ## 🏗️ システムアーキテクチャ
 
 <div align="center">
-    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.png" alt="Agentica Architecture" width="800"/>
+    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.jpg" alt="Agentica Architecture" width="800"/>
 </div>
 
 Agenticaのモジュール設計は、最大限の柔軟性とスケーラビリティを可能にします。その中心には `Agent`、`Model`、`Tool`、`Memory` コンポーネントがあり、これらを簡単に組み合わせて拡張することで、強力なアプリケーションを作成できます。

@@ -61,7 +61,7 @@ Whether you're creating a simple chatbot, a complex research assistant, or a col
 ## 🏗️ System Architecture
 
 <div align="center">
-    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.png" alt="Agentica Architecture" width="800"/>
+    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.jpg" alt="Agentica Architecture" width="800"/>
 </div>
 
 Agentica's modular design allows for maximum flexibility and scalability. At its core are the `Agent`, `Model`, `Tool`, and `Memory` components, which can be easily combined and extended to create powerful applications.

@@ -61,7 +61,7 @@
 ## 🏗️ 系统架构
 
 <div align="center">
-    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.png" alt="Agentica Architecture" width="800"/>
+    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.jpg" alt="Agentica Architecture" width="800"/>
 </div>
 
 Agentica 的模块化设计实现了最大的灵活性和可扩展性。其核心是 `Agent`、`Model`、`Tool` 和 `Memory` 组件，这些组件可以轻松组合和扩展，以创建强大的应用程序。
