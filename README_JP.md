@@ -139,15 +139,17 @@ pip install .
 
 Agenticaで何が可能か、包括的な例をご覧ください：
 
-| 例                                                                                                                                                    | 説明                                                                                                                                |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| [**高度なRAGエージェント**](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                 | クエリ書き換え、ハイブリッド検索、再ランキング機能を備えたPDFドキュメント上の強力なQ&Aシステムを構築。                                                               |
-| [**マルチエージェントチーム**](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                       | ニュース記事の執筆に協力するためにエージェントのチーム（例：研究者とライター）を編成。                                                     |
-| [**自己進化エージェント**](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                   | 対話から学び、時間とともに知識ベースを向上させるエージェントを作成。                                                                                                                 |
-| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | LLMを搭載した対話型オペレーティングシステムを構築するという魅力的な実験。                                                  |
-| [**投資調査ワークフロー**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | データ収集と分析からレポート生成まで、投資調査プロセス全体を自動化。                                                                                                   |
-| [**ビジョンエージェント**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 画像を理解し推論できるエージェントを構築。                                                                                                                          |
-| [**ガードレール**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | 入出力ガードレールを使用してエージェントとツールのI/Oを検証し、機密データをフィルタリングする方法をデモ。                                                                                                                          |
+| 例 | 説明 |
+|----|------|
+| [**Hello World**](https://github.com/shibing624/agentica/blob/main/examples/basic/01_hello_world.py) | 最もシンプルなAgent入門例 |
+| [**カスタムツール**](https://github.com/shibing624/agentica/blob/main/examples/tools/01_custom_tool.py) | Agentにカスタムツールを追加する方法 |
+| [**高度なRAG**](https://github.com/shibing624/agentica/blob/main/examples/rag/02_advanced_rag.py) | ハイブリッド検索と再ランキングを備えたQ&Aシステム |
+| [**チームコラボレーション**](https://github.com/shibing624/agentica/blob/main/examples/agent_patterns/03_team_collaboration.py) | 専門エージェントのチームを編成して協力 |
+| [**ガードレール**](https://github.com/shibing624/agentica/blob/main/examples/guardrails/01_input_guardrail.py) | 入出力検証とセキュリティチェック |
+| [**ワークフロー**](https://github.com/shibing624/agentica/blob/main/examples/workflow/02_investment.py) | 投資調査ワークフローの自動化 |
+| [**ビジョン**](https://github.com/shibing624/agentica/blob/main/examples/basic/06_vision.py) | 画像を理解するエージェントを構築 |
+| [**MCPプロトコル**](https://github.com/shibing624/agentica/blob/main/examples/mcp/01_stdio.py) | Model Context Protocol統合例 |
+| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/applications/llm_os/main.py) | LLMを搭載した対話型オペレーティングシステム |
 
 [➡️ **すべての例を見る**](https://github.com/shibing624/agentica/tree/main/examples)
 

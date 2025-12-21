@@ -15,6 +15,7 @@ except ImportError:
 
 from agentica.agent import Agent
 from agentica.model.content import Image
+from agentica.model.openai import OpenAIChat
 from agentica.utils.log import logger
 
 
@@ -71,6 +72,11 @@ async def run_agent_activity(input: AgentActivityInput) -> AgentActivityOutput:
     agent_kwargs: Dict[str, Any] = input.agent_config.copy() if input.agent_config else {}
     if input.agent_name:
         agent_kwargs["name"] = input.agent_name
+    
+    # Convert model_id to model object if provided
+    if "model_id" in agent_kwargs:
+        model_id = agent_kwargs.pop("model_id")
+        agent_kwargs["model"] = OpenAIChat(id=model_id)
     
     agent = Agent(**agent_kwargs)
     

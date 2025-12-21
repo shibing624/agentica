@@ -42,7 +42,7 @@ from agentica.model.litellm import LiteLLM
 
 # memory
 from agentica.model.base import Model
-from agentica.model.message import Message, MessageReferences
+from agentica.model.message import Message, MessageReferences, UserMessage, AssistantMessage, SystemMessage, ToolMessage
 from agentica.model.content import Media, Video, Audio, Image
 from agentica.model.response import ModelResponse, FileType
 from agentica.memory import (

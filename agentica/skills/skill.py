@@ -79,7 +79,7 @@ class Skill:
             return None
 
         content = skill_md_path.read_text(encoding='utf-8')
-        frontmatter, body = cls._parse_frontmatter(content)
+        frontmatter, body = cls._parse_frontmatter(content.strip())
 
         if not frontmatter:
             return None

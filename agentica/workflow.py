@@ -58,11 +58,6 @@ class Workflow(BaseModel):
 
     # debug_mode=True enables debug logs
     debug_mode: bool = Field(False, validate_default=True)
-    # monitoring=True logs workflow information to phidata.com
-    monitoring: bool = getenv("PHI_MONITORING", "false").lower() == "true"
-    # telemetry=True logs minimal telemetry for analytics
-    # This helps us improve the Agent and provide better support
-    telemetry: bool = getenv("PHI_TELEMETRY", "true").lower() == "true"
 
     # DO NOT SET THE FOLLOWING FIELDS MANUALLY
     # Run ID: DO NOT SET MANUALLY
@@ -97,7 +92,7 @@ class Workflow(BaseModel):
 
     @field_validator("debug_mode", mode="before")
     def set_log_level(cls, v: bool) -> bool:
-        if v or getenv("PHI_DEBUG", "false").lower() == "true":
+        if v or getenv("AGENTICA_DEBUG", "false").lower() == "true":
             set_log_level_to_debug()
             logger.debug("Debug logs enabled")
         return v

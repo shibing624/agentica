@@ -139,15 +139,17 @@ pip install .
 
 浏览我们全面的示例，了解 Agentica 的无限可能：
 
-| 示例                                                                                                                                                    | 描述                                                                                                                                |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| [**高级 RAG 智能体**](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                 | 基于您的 PDF 文档构建一个强大的问答系统，具备查询重写、混合检索和重排序功能。                                                               |
-| [**多智能体团队**](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                       | 组建一个由专业智能体（如研究员和作家）组成的团队，协作撰写新闻文章。                                                     |
-| [**自我进化智能体**](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                   | 创建一个能从交互中学习并随时间推移改进其知识库的智能体。                                                                                                                 |
-| [**LLM 操作系统**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | 一个有趣的实验，旨在构建一个由 LLM 驱动的对话式操作系统。                                                  |
-| [**投资研究工作流**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | 自动化整个投资研究流程，从数据收集和分析到报告生成。                                                                                                   |
-| [**视觉智能体**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 构建一个能够理解和推理图像的智能体。                                                                                                                          |
-| [**安全Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | 演示如何使用输入/输出守卫验证智能体和工具的输入输出，过滤敏感数据。                                                                                                                          |
+| 示例 | 描述 |
+|------|------|
+| [**Hello World**](https://github.com/shibing624/agentica/blob/main/examples/basic/01_hello_world.py) | 最简单的 Agent 入门示例 |
+| [**自定义工具**](https://github.com/shibing624/agentica/blob/main/examples/tools/01_custom_tool.py) | 学习如何为 Agent 添加自定义工具 |
+| [**高级 RAG**](https://github.com/shibing624/agentica/blob/main/examples/rag/02_advanced_rag.py) | 基于文档构建问答系统，具备混合检索和重排序功能 |
+| [**团队协作**](https://github.com/shibing624/agentica/blob/main/examples/agent_patterns/03_team_collaboration.py) | 组建专业智能体团队协作完成任务 |
+| [**安全护栏**](https://github.com/shibing624/agentica/blob/main/examples/guardrails/01_input_guardrail.py) | 输入/输出验证和安全检查 |
+| [**工作流编排**](https://github.com/shibing624/agentica/blob/main/examples/workflow/02_investment.py) | 自动化投资研究流程 |
+| [**视觉理解**](https://github.com/shibing624/agentica/blob/main/examples/basic/06_vision.py) | 构建能够理解图像的智能体 |
+| [**MCP 协议**](https://github.com/shibing624/agentica/blob/main/examples/mcp/01_stdio.py) | Model Context Protocol 集成示例 |
+| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/applications/llm_os/main.py) | 由 LLM 驱动的对话式操作系统 |
 
 [➡️ **查看所有示例**](https://github.com/shibing624/agentica/tree/main/examples)
 

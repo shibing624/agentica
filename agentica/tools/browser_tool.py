@@ -1042,9 +1042,9 @@ class BaseBrowser:
         from pathlib import Path
 
         path = os.path.join(AGENTICA_HOME, "browser")
-        cache_dir = Path(path)
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        cache_file = cache_dir / f"{self.channel}_installed"
+        install_dir = Path(path)
+        install_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = install_dir / f"{self.channel}_installed"
 
         if cache_file.exists():
             import time
@@ -1174,13 +1174,13 @@ class Browser:
             planning_model = planning_agent_model_backend
 
         web_agent = Agent(
-            system_message=WEB_AGENT_SYSTEM_PROMPT,
+            system_prompt=WEB_AGENT_SYSTEM_PROMPT,
             model=web_agent_model_instance,
             output_language=self.output_language,
         )
 
         planning_agent = Agent(
-            system_message=PLANNING_AGENT_SYSTEM_PROMPT,
+            system_prompt=PLANNING_AGENT_SYSTEM_PROMPT,
             model=planning_model,
             output_language=self.output_language,
         )

@@ -203,11 +203,11 @@ class BuiltinFileTool(Tool):
         Usage:
         - The file_path parameter must be an absolute path, not a relative path
         - The content parameter must be a string
-        - The write_file tool will create the a new file.
+        - The write_file tool will create a new file.
         - Prefer to edit existing files over creating new ones when possible.
         
         Args:
-            file_path: File absolute path
+            file_path: File absolute path, can be a new file under ./tmp/ directory
             content: File content
 
         Returns:
@@ -216,17 +216,15 @@ class BuiltinFileTool(Tool):
         try:
             self._validate_path(file_path)
             path = self._resolve_path(file_path)
-
             # Ensure directory exists
             path.parent.mkdir(parents=True, exist_ok=True)
-
             action = "Created" if not path.exists() else "Updated"
 
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
 
             logger.info(f"{action} file: {path}")
-            return f"{action} file: {file_path}"
+            return f"{action} file: {file_path}, file content length: {len(content)}"
         except Exception as e:
             logger.error(f"Error writing file {file_path}: {e}")
             return f"Error writing file: {e}"
@@ -484,14 +482,13 @@ class BuiltinExecuteTool(Tool):
         - Examples of proper quoting:
             - cd "/Users/name/My Documents" (correct)
             - cd /Users/name/My Documents (incorrect - will fail)
-            - python "/path/with spaces/script.py" (correct)
-            - python /path/with spaces/script.py (incorrect - will fail)
+            - python3 "/path/with spaces/script.py" (correct)
+            - python3 /path/with spaces/script.py (incorrect - will fail)
         - After ensuring proper quoting, execute the command
         - Capture the output of the command
 
         Usage notes:
         - The command parameter is required
-        - Commands run in an isolated sandbox environment
         - Returns combined stdout/stderr output with exit code
         - If the output is very large, it may be truncated
         - VERY IMPORTANT: You MUST avoid using search commands like find and grep. Instead use the grep, glob tools to search. You MUST avoid read tools like cat, head, tail, and use read_file to read files.
@@ -499,12 +496,13 @@ class BuiltinExecuteTool(Tool):
             - Use '&&' when commands depend on each other (e.g., "mkdir dir && cd dir")
             - Use ';' only when you need to run commands sequentially but don't care if earlier commands fail
         - Try to maintain your current working directory throughout the session by using absolute paths and avoiding usage of cd
+        - For multi-line Python code, the tool automatically converts `python3 -c "..."` to heredoc format for better handling. Use Python syntax correctly, use `None`, `True`/`False`, verify the syntax is correct Python.
 
         Examples:
         Good examples:
-            - execute(command="python /path/to/script.py")
+            - execute(command="python3 /path/to/script.py")
             - execute(command="pytest /path/to/tests/test.py")
-            - execute(command="python -c 'print(33333**2 + 332.2 / 12)'")
+            - execute(command="python3 -c 'print(33333**2 + 332.2 / 12)'")
             - execute(command="npm install && npm test")
 
         Bad examples (avoid these):

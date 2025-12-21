@@ -258,7 +258,8 @@ model/
 ├── nvidia/              # NVIDIA
 ├── fireworks/           # Fireworks
 ├── sambanova/           # SambaNova
-└── openrouter/          # OpenRouter
+├── openrouter/          # OpenRouter
+└── litellm/             # LiteLLM (统一接口，支持100+模型提供商)
 ```
 
 ### 3.2 Model 基类 (`agentica/model/base.py`)
@@ -318,6 +319,46 @@ class UserMessage(Message): role = "user"
 class AssistantMessage(Message): role = "assistant"
 class ToolMessage(Message): role = "tool"
 ```
+
+### 3.4 LiteLLM 统一接口 (`agentica/model/litellm/`)
+
+LiteLLM 提供统一接口调用 100+ 模型提供商，使用 OpenAI 格式。
+
+```python
+from agentica.model.litellm import LiteLLM
+from agentica import Agent
+
+# 支持的模型格式: provider/model_name
+model = LiteLLM(id="openai/gpt-4o")
+model = LiteLLM(id="anthropic/claude-3-opus-20240229")
+model = LiteLLM(id="azure/gpt-4")
+model = LiteLLM(id="ollama/llama2")
+model = LiteLLM(id="together_ai/mistralai/Mixtral-8x7B-Instruct-v0.1")
+
+# 与 Agent 结合使用
+agent = Agent(
+    name="Assistant",
+    model=LiteLLM(id="openai/gpt-4o-mini"),
+    instructions="You are a helpful assistant.",
+)
+```
+
+**支持的提供商**：
+- `openai/`: OpenAI (gpt-4o, gpt-4, gpt-3.5-turbo)
+- `anthropic/`: Anthropic Claude
+- `azure/`: Azure OpenAI
+- `ollama/`: 本地 Ollama 模型
+- `together_ai/`: Together AI
+- `huggingface/`: Huggingface
+- `bedrock/`: AWS Bedrock
+- `vertex_ai/`: Google Vertex AI
+- `cohere/`: Cohere
+- `groq/`: Groq
+- `mistral/`: Mistral AI
+- `deepseek/`: DeepSeek
+- 更多提供商参见: https://docs.litellm.ai/docs/providers
+
+**安装**: `pip install litellm`
 
 ---
 

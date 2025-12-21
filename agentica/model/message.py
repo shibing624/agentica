@@ -140,18 +140,45 @@ class Message(BaseModel):
 
 
 class SystemMessage(Message):
-    """System message to the model"""
+    """System message to the model
+    
+    Supports shorthand: SystemMessage("You are helpful") instead of SystemMessage(content="You are helpful")
+    """
     role: str = "system"
+
+    def __init__(self, content: Optional[Union[List[Any], str]] = None, **kwargs):
+        """Initialize SystemMessage with optional positional content argument.
+        
+        Args:
+            content: The message content (can be passed as positional argument)
+            **kwargs: Additional keyword arguments passed to Message
+        """
+        super().__init__(content=content, **kwargs)
 
 
 class UserMessage(Message):
-    """User message to the model"""
+    """User message to the model
+    
+    Supports shorthand: UserMessage("hello") instead of UserMessage(content="hello")
+    """
     role: str = "user"
+
+    def __init__(self, content: Optional[Union[List[Any], str]] = None, **kwargs):
+        """Initialize UserMessage with optional positional content argument.
+        
+        Args:
+            content: The message content (can be passed as positional argument)
+            **kwargs: Additional keyword arguments passed to Message
+        """
+        super().__init__(content=content, **kwargs)
 
 
 class AssistantMessage(Message):
     """Assistant message from the model"""
     role: str = "assistant"
+
+    def __init__(self, content: Optional[Union[List[Any], str]] = None, **kwargs):
+        super().__init__(content=content, **kwargs)
 
 
 class ToolMessage(Message):

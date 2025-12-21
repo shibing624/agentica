@@ -139,15 +139,17 @@ pip install .
 
 Explore our comprehensive examples to see what's possible with Agentica:
 
-| Example                                                                                                                                                    | Description                                                                                                                                |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| [**Advanced RAG Agent**](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                 | Build a powerful Q&A system over your PDF documents with query rewriting, hybrid retrieval, and reranking.                                                               |
-| [**Multi-Agent Team**](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                       | Assemble a team of agents (e.g., a researcher and a writer) to collaborate on writing a news article.                                                     |
-| [**Self-Evolving Agent**](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                   | Create an agent that learns from its interactions and improves its knowledge base over time.                                                                                                                 |
-| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | A fascinating experiment in building a conversational operating system powered by an LLM.                                                  |
-| [**Investment Research Workflow**](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | Automate the entire investment research process, from data collection and analysis to report generation.                                                                                                   |
-| [**Vision Agent**](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | Build an agent that can understand and reason about images.                                                                                                                          |
-| [**Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                                             | Demonstrate how to use input/output guardrails to validate agent and tool I/O, and filter sensitive data.                                                                                                                          |
+| Example | Description |
+|---------|-------------|
+| [**Hello World**](https://github.com/shibing624/agentica/blob/main/examples/basic/01_hello_world.py) | The simplest Agent getting started example |
+| [**Custom Tool**](https://github.com/shibing624/agentica/blob/main/examples/tools/01_custom_tool.py) | Learn how to add custom tools to your Agent |
+| [**Advanced RAG**](https://github.com/shibing624/agentica/blob/main/examples/rag/02_advanced_rag.py) | Build a Q&A system with hybrid retrieval and reranking |
+| [**Team Collaboration**](https://github.com/shibing624/agentica/blob/main/examples/agent_patterns/03_team_collaboration.py) | Assemble a team of specialized agents to collaborate |
+| [**Guardrails**](https://github.com/shibing624/agentica/blob/main/examples/guardrails/01_input_guardrail.py) | Input/output validation and security checks |
+| [**Workflow**](https://github.com/shibing624/agentica/blob/main/examples/workflow/02_investment.py) | Automate investment research workflow |
+| [**Vision**](https://github.com/shibing624/agentica/blob/main/examples/basic/06_vision.py) | Build an agent that understands images |
+| [**MCP Protocol**](https://github.com/shibing624/agentica/blob/main/examples/mcp/01_stdio.py) | Model Context Protocol integration example |
+| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/applications/llm_os/main.py) | A conversational operating system powered by LLM |
 
 [➡️ **See all examples**](https://github.com/shibing624/agentica/tree/main/examples)
 
