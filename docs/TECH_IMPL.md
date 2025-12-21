@@ -1620,18 +1620,107 @@ from agentica import RunResponse, RunEvent, pprint_run_response
 
 ## 17. 示例目录 (`examples/`)
 
-包含 50+ 示例文件，涵盖：
-- 基础 LLM 调用
-- 工具使用
-- RAG 实现
-- 多 Agent 协作
-- Workflow 编排
-- MCP 集成
-- 长期记忆
-- Token 压缩
-- Temporal 分布式工作流
-- Skills 技能系统
-- Guardrails 护栏系统
+示例按功能模块组织，共 17 个分类目录：
+
+```
+examples/
+├── basic/              # 🚀 基础用法 (6个示例)
+│   ├── 01_hello_world.py
+│   ├── 02_custom_prompt.py
+│   ├── 03_stream_output.py
+│   ├── 04_structured_output.py
+│   ├── 05_multi_turn.py
+│   └── 06_vision.py
+│
+├── tools/              # 🔧 工具系统 (6个示例)
+│   ├── 01_custom_tool.py
+│   ├── 02_builtin_tools.py
+│   ├── 03_web_search.py
+│   ├── 04_code_execution.py
+│   ├── 05_file_operations.py
+│   └── 06_browser.py
+│
+├── agent_patterns/     # 🎯 Agent设计模式 (5个示例)
+│   ├── 01_agent_as_tool.py
+│   ├── 02_parallelization.py
+│   ├── 03_team_collaboration.py
+│   ├── 04_debate.py
+│   └── 05_context_passing.py
+│
+├── guardrails/         # 🛡️ 安全护栏 (3个示例)
+│   ├── 01_input_guardrail.py
+│   ├── 02_output_guardrail.py
+│   └── 03_tool_guardrail.py
+│
+├── memory/             # 🧠 记忆系统 (3个示例)
+│   ├── 01_session_memory.py
+│   ├── 02_long_term_memory.py
+│   └── 03_compression.py
+│
+├── rag/                # 📚 RAG检索增强 (5个示例)
+│   ├── 01_naive_rag.py
+│   ├── 02_advanced_rag.py
+│   ├── 03_chat_pdf.py
+│   ├── 04_langchain_integration.py
+│   └── 05_llamaindex_integration.py
+│
+├── workflow/           # ⚙️ 工作流编排 (4个示例)
+│   ├── 01_simple_workflow.py
+│   ├── 02_investment.py
+│   ├── 03_news_article.py
+│   └── 04_novel_writing.py
+│
+├── mcp/                # 🔌 MCP协议 (6个示例)
+│   ├── 01_stdio.py
+│   ├── 02_sse_server.py
+│   ├── 02_sse_client.py
+│   ├── 03_http_server.py
+│   ├── 03_http_client.py
+│   └── 04_json_config.py
+│
+├── model_providers/    # 🤖 模型提供商 (5个示例)
+│   ├── 01_openai.py
+│   ├── 02_deepseek.py
+│   ├── 03_zhipuai.py
+│   ├── 04_custom_endpoint.py
+│   └── 05_litellm.py
+│
+├── skills/             # 🎨 技能系统 (3个示例)
+│   ├── 01_skill_basics.py
+│   ├── 02_web_research.py
+│   └── 03_custom_skill.py
+│
+├── temporal/           # ⏱️ 分布式工作流 (3个示例)
+│   ├── 01_worker.py
+│   ├── 02_client.py
+│   └── 03_parallel_workflow.py
+│
+├── deep_agent/         # 💪 DeepAgent (4个示例)
+│   ├── 01_basic.py
+│   ├── 02_file_operations.py
+│   ├── 03_code_assistant.py
+│   └── 04_research_assistant.py
+│
+├── observability/      # 📊 可观测性 (2个示例)
+│   ├── 01_langfuse.py
+│   └── 02_token_tracking.py
+│
+├── cli/                # 🖥️ 命令行工具 (1个示例)
+│   └── 01_cli_demo.py
+│
+├── applications/       # 🏢 完整应用 (3个示例)
+│   ├── llm_os/main.py         # LLM OS - 综合AI助手
+│   ├── research_bot/main.py   # 研究机器人
+│   └── customer_service/main.py # 客服系统
+│
+└── data/               # 配置文件
+    └── mcp_config.json
+```
+
+**学习路径**：
+1. 入门：`basic/` → `tools/01_custom_tool.py` → `memory/01_session_memory.py`
+2. 进阶：`agent_patterns/` → `guardrails/` → `rag/02_advanced_rag.py`
+3. 高级：`workflow/` → `temporal/` → `applications/llm_os/`
 
 ---
 
