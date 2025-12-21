@@ -1,71 +1,212 @@
 # Agentica Examples
 
+本目录包含 Agentica 的各种示例，按功能模块组织，便于学习和参考。
 
-| 示例                                                                                                                                                    | 描述                                                                                                                                |
-|-------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| [examples/01_llm_demo.py](https://github.com/shibing624/agentica/blob/main/examples/01_llm_demo.py)                                                   | LLM问答Demo                                                                                                                         |
-| [examples/02_user_prompt_demo.py](https://github.com/shibing624/agentica/blob/main/examples/02_user_prompt_demo.py)                                   | 自定义用户prompt的Demo                                                                                                                  |
-| [examples/03_user_messages_demo.py](https://github.com/shibing624/agentica/blob/main/examples/03_user_messages_demo.py)                               | 自定义输入用户消息的Demo                                                                                                                    |
-| [examples/04_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/04_memory_demo.py)                                             | Agent的记忆Demo                                                                                                                      |
-| [examples/05_response_model_demo.py](https://github.com/shibing624/agentica/blob/main/examples/05_response_model_demo.py)                             | 按指定格式（pydantic的BaseModel）回复的Demo                                                                                                  |
-| [examples/06_calc_with_csv_file_demo.py](https://github.com/shibing624/agentica/blob/main/examples/06_calc_with_csv_file_demo.py)                     | LLM加载CSV文件，并执行计算来回答的Demo                                                                                                          |
-| [examples/07_create_image_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/07_create_image_tool_demo.py)                       | 实现了创建图像工具的Demo                                                                                                                    |
-| [examples/08_ocr_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/08_ocr_tool_demo.py)                                         | 实现了OCR工具的Demo                                                                                                                     |
-| [examples/09_remove_image_background_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/09_remove_image_background_tool_demo.py) | 实现了自动去除图片背景功能，包括自动通过pip安装库，调用库实现去除图片背景                                                                                            |
-| [examples/10_vision_demo.py](https://github.com/shibing624/agentica/blob/main/examples/10_vision_demo.py)                                             | 视觉理解Demo                                                                                                                          |
-| [examples/11_web_search_openai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/11_web_search_openai_demo.py)                       | 基于OpenAI的function call做网页搜索Demo                                                                                                   |
-| [examples/12_web_search_moonshot_demo.py](https://github.com/shibing624/agentica/blob/main/examples/12_web_search_moonshot_demo.py)                   | 基于Moonshot的function call做网页搜索Demo                                                                                                 |
-| [examples/13_storage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/13_storage_demo.py)                                           | Agent的存储Demo                                                                                                                      |
-| [examples/14_custom_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/14_custom_tool_demo.py)                                   | 自定义工具，并用大模型自主选择调用的Demo                                                                                                            |
-| [examples/15_crawl_webpage_demo.py](https://github.com/shibing624/agentica/blob/main/examples/15_crawl_webpage_demo.py)                               | 实现了网页分析工作流：从Url爬取融资快讯 - 分析网页内容和格式 - 提取核心信息 - 汇总存为md文件                                                                             |
-| [examples/16_get_top_papers_demo.py](https://github.com/shibing624/agentica/blob/main/examples/16_get_top_papers_demo.py)                             | 解析每日论文，并保存为json格式的Demo                                                                                                            |
-| [examples/17_find_paper_from_arxiv_demo.py](https://github.com/shibing624/agentica/blob/main/examples/17_find_paper_from_arxiv_demo.py)               | 实现了论文推荐的Demo：自动从arxiv搜索多组论文 - 相似论文去重 - 提取核心论文信息 - 保存为csv文件                                                                        |
-| [examples/18_agent_input_is_list.py](https://github.com/shibing624/agentica/blob/main/examples/18_agent_input_is_list.py)                             | 展示Agent的message可以是列表的Demo                                                                                                         |
-| [examples/19_naive_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/19_naive_rag_demo.py)                                       | 实现了基础版RAG，基于Txt文档回答问题                                                                                                             |
-| [examples/20_advanced_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/20_advanced_rag_demo.py)                                 | 实现了高级版RAG，基于PDF文档回答问题，新增功能：pdf文件解析、query改写，字面+语义多路混合召回，召回排序（rerank）                                                               |
-| [examples/21_memorydb_rag_demo.py](https://github.com/shibing624/agentica/blob/main/examples/21_reference_in_prompt_rag_demo.py)                      | 把参考资料放到prompt的传统RAG做法的Demo                                                                                                        |
-| [examples/22_chat_pdf_app_demo.py](https://github.com/shibing624/agentica/blob/main/examples/22_chat_pdf_app_demo.py)                                 | 对PDF文档做深入对话的Demo                                                                                                                  |
-| [examples/23_python_agent_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/23_python_agent_memory_demo.py)                   | 实现了带记忆的Code Interpreter功能，自动生成python代码并执行，下次执行时从记忆获取结果                                                                            |
-| [examples/24_context_demo.py](https://github.com/shibing624/agentica/blob/main/examples/24_context_demo.py)                                           | 实现了传入上下文进行对话的Demo                                                                                                                 |
-| [examples/25_tools_with_context_demo.py](https://github.com/shibing624/agentica/blob/main/examples/25_tools_with_context_demo.py)                     | 工具带上下文传参的Demo                                                                                                                     |
-| [examples/26_complex_translate_demo.py](https://github.com/shibing624/agentica/blob/main/examples/26_complex_translate_demo.py)                       | 实现了复杂翻译Demo                                                                                                                       |
-| [examples/27_research_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/27_research_agent_demo.py)                             | 实现了Research功能，自动调用搜索工具，汇总信息后撰写科技报告                                                                                                |
-| [examples/28_rag_integrated_langchain_demo.py](https://github.com/shibing624/agentica/blob/main/examples/28_rag_integrated_langchain_demo.py)         | 集成LangChain的RAG Demo                                                                                                              |
-| [examples/29_rag_integrated_llamaindex_demo.py](https://github.com/shibing624/agentica/blob/main/examples/29_rag_integrated_llamaindex_demo.py)       | 集成LlamaIndex的RAG Demo                                                                                                             |
-| [examples/30_text_classification_demo.py](https://github.com/shibing624/agentica/blob/main/examples/30_text_classification_demo.py)                   | 实现了自动训练分类模型的Agent：读取训练集文件并理解格式 - 谷歌搜索pytextclassifier库 - 爬取github页面了解pytextclassifier的调用方法 - 写代码并执行fasttext模型训练 - check训练好的模型预测结果 |
-| [examples/31_team_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/31_team_news_article_demo.py)                       | Team实现：写新闻稿的team协作，multi-role实现，委托不用角色完成各自任务：研究员检索分析文章，撰写员根据排版写文章，汇总多角色成果输出结果                                                     |
-| [examples/32_team_debate_demo.py](https://github.com/shibing624/agentica/blob/main/examples/32_team_debate_demo.py)                                   | Team实现：基于委托做双人辩论Demo，特朗普和拜登辩论                                                                                                     |
-| [examples/33_self_evolving_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/33_self_evolving_agent_demo.py)                   | 实现了自我进化Agent的Demo                                                                                                                 |
-| [examples/34_llm_os_demo.py](https://github.com/shibing624/agentica/blob/main/examples/34_llm_os_demo.py)                                             | 实现了LLM OS的初步设计，基于LLM设计操作系统，可以通过LLM调用RAG、代码执行器、Shell等工具，并协同代码解释器、研究助手、投资助手等来解决问题。                                                  |
-| [examples/35_workflow_investment_demo.py](https://github.com/shibing624/agentica/blob/main/examples/35_workflow_investment_demo.py)                   | 实现了投资研究的工作流：股票信息收集 - 股票分析 - 撰写分析报告 - 复查报告等多个Task                                                                                  |
-| [examples/36_workflow_news_article_demo.py](https://github.com/shibing624/agentica/blob/main/examples/36_workflow_news_article_demo.py)               | 实现了写新闻稿的工作流，multi-agent的实现，多次调用搜索工具，并生成高级排版的新闻文章                                                                                  |
-| [examples/37_workflow_write_novel_demo.py](https://github.com/shibing624/agentica/blob/main/examples/37_workflow_write_novel_demo.py)                 | 实现了写小说的工作流：定小说提纲 - 搜索谷歌反思提纲 - 撰写小说内容 - 保存为md文件                                                                                    |
-| [examples/38_workflow_write_tutorial_demo.py](https://github.com/shibing624/agentica/blob/main/examples/38_workflow_write_tutorial_demo.py)           | 实现了写技术教程的工作流：定教程目录 - 反思目录内容 - 撰写教程内容 - 保存为md文件                                                                                    |
-| [examples/39_audio_multi_turn_demo.py](https://github.com/shibing624/agentica/blob/main/examples/39_audio_multi_turn_demo.py)                         | 基于openai的语音api做多轮音频对话的Demo                                                                                                        |
-| [examples/40_weather_zhipuai_demo.py](https://github.com/shibing624/agentica/blob/main/examples/40_web_search_zhipuai_demo.py)                        | 基于智谱AI的api做天气查询的Demo                                                                                                              |
-| [examples/41_mcp_stdio_demo.py](https://github.com/shibing624/agentica/blob/main/examples/41_mcp_stdio_demo.py)                                       | Stdio的MCP Server调用的Demo                                                                                                           |
-| [examples/42_mcp_sse_server.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_server.py)                                       | SSE的MCP Server调用的Demo                                                                                                             |
-| [examples/42_mcp_sse_client.py](https://github.com/shibing624/agentica/blob/main/examples/42_mcp_sse_client.py)                                       | SSE的MCP Client调用的Demo                                                                                                             |
-| [examples/43_minimax_mcp_demo.py](https://github.com/shibing624/agentica/blob/main/examples/43_minimax_mcp_demo.py)                                   | Minimax语音生成调用的Demo                                                                                                                |
-| [examples/44_mcp_streamable_http_server.py](https://github.com/shibing624/agentica/blob/main/examples/44_mcp_streamable_http_server.py)                           | Streamable Http的MCP Server调用的Demo                                                                                                 |
-| [examples/44_mcp_streamable_http_client.py](https://github.com/shibing624/agentica/blob/main/examples/44_mcp_streamable_http_client.py)                           | Streamable Http的MCP Client调用的Demo                                                                                                 |
-| [examples/45_browser_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/45_browser_tool_demo.py)                           | BrowserTool网页浏览工具Demo                                                                                                 |
-| [examples/46_custom_llm_demo.py](https://github.com/shibing624/agentica/blob/main/examples/46_custom_llm_demo.py)                           | 使用OpenAILike自定义LLM端点的Demo                                                                                                 |
-| [examples/47_multi_round_deep_research_demo.py](https://github.com/shibing624/agentica/blob/main/examples/47_multi_round_deep_research_demo.py)                           | 多轮深度研究Demo，基于DeepSeek-Reasoner的多轮推理                                                                                                 |
-| [examples/48_long_term_memory_demo.py](https://github.com/shibing624/agentica/blob/main/examples/48_long_term_memory_demo.py)                           | 基于SqliteDb的长期记忆Demo                                                                                                 |
-| [examples/49_langfuse_demo.py](https://github.com/shibing624/agentica/blob/main/examples/49_langfuse_demo.py)                           | Langfuse集成Demo，实现LLM可观测性：自动追踪所有LLM调用、会话分组、工具调用追踪                                                                                                 |
-| [examples/50_token_compression_demo.py](https://github.com/shibing624/agentica/blob/main/examples/50_token_compression_demo.py)                           | Token计数和压缩Demo：消息/工具/多模态内容的token计数，工具结果压缩以节省上下文空间                                                                                                 |
-| [examples/51_skill_demo.py](https://github.com/shibing624/agentica/blob/main/examples/51_skill_demo.py)                           | Agent Skill技能系统Demo：基于Prompt Engineering的技能扩展，将SKILL.md技能说明注入System Prompt，模型无关，易于维护                                                                                                 |
-| [examples/52_guardrails_demo.py](https://github.com/shibing624/agentica/blob/main/examples/52_guardrails_demo.py)                           | Guardrails安全守卫Demo：演示Agent级别和Tool级别的输入/输出守卫，支持allow/reject_content/raise_exception三种行为模式                                                                                                 |
-| [examples/53_agent_as_tool_demo.py](https://github.com/shibing624/agentica/blob/main/examples/53_agent_as_tool_demo.py)                           | Agent作为工具Demo：将Agent封装为Tool供其他Agent调用，实现模块化Agent组合，支持链式操作（先摘要再翻译）                                                                                                 |
-| [examples/54_deep_agent_demo.py](https://github.com/shibing624/agentica/blob/main/examples/54_deep_agent_demo.py)                           | DeepAgent增强Agent Demo：自动包含内置工具（文件操作、代码执行、Web搜索、任务管理），适用于复杂编程和研究任务                                                                                                 |
-| [examples/55_skill_web_research_demo.py](https://github.com/shibing624/agentica/blob/main/examples/55_skill_web_research_demo.py)                           | SkillTool网络研究Demo：使用DeepAgent结合SkillTool执行web-research技能，自动加载SKILL.md指令进行深度调研                                                                                                 |
-| [examples/56_cli_demo.py](https://github.com/shibing624/agentica/blob/main/examples/56_cli_demo.py)                           | CLI命令行Demo：交互式命令行界面，支持@文件自动补全、/命令、多行输入，内置40+工具，支持自定义模型和工作目录                                                                                                 |
-| [examples/57_parallelization_demo.py](https://github.com/shibing624/agentica/blob/main/examples/57_parallelization_demo.py)                           | 并行执行Demo：使用asyncio.gather并行运行多个Agent翻译任务，对比并行vs顺序执行的性能差异，展示3倍加速效果                                                                                                 |
-| [examples/58_temporal_worker.py](https://github.com/shibing624/agentica/blob/main/examples/58_temporal_worker.py)                           | Temporal Worker Demo：启动Temporal工作节点，注册AgentWorkflow、SequentialAgentWorkflow、ParallelAgentWorkflow等工作流                                                                                                 |
-| [examples/58_temporal_client.py](https://github.com/shibing624/agentica/blob/main/examples/58_temporal_client.py)                           | Temporal Client Demo：分布式工作流客户端，支持单Agent、顺序执行（流水线）、并行执行、并行翻译等多种工作流模式                                                                                                 |
-| [examples/59_litellm_demo.py](https://github.com/shibing624/agentica/blob/main/examples/59_litellm_demo.py)                           | LiteLLM统一模型接口Demo：支持100+模型提供商（OpenAI、Anthropic、Azure、Ollama等），统一API调用，支持工具调用、流式输出、异步执行                                                                                                 |
+## 快速开始
 
+### 安装
+
+```bash
+pip install agentica
+```
+
+### 运行第一个示例
+
+```bash
+python examples/basic/01_hello_world.py
+```
+
+## 示例目录
+
+### 🚀 基础用法 (`basic/`)
+
+从这里开始学习 Agentica 的核心概念。
+
+| 示例 | 描述 | 关键概念 |
+|------|------|----------|
+| [01_hello_world.py](basic/01_hello_world.py) | 创建并运行最简单的 Agent | `Agent`, `run()` |
+| [02_custom_prompt.py](basic/02_custom_prompt.py) | 自定义系统提示词和用户消息 | `instructions`, `messages` |
+| [03_stream_output.py](basic/03_stream_output.py) | 流式输出 | `stream=True` |
+| [04_structured_output.py](basic/04_structured_output.py) | 结构化输出 (Pydantic) | `response_model` |
+| [05_multi_turn.py](basic/05_multi_turn.py) | 多轮对话 | `add_history_to_messages` |
+| [06_vision.py](basic/06_vision.py) | 视觉理解 | `images` |
+
+### 🔧 工具系统 (`tools/`)
+
+学习如何为 Agent 添加各种能力。
+
+| 示例 | 描述 |
+|------|------|
+| [01_custom_tool.py](tools/01_custom_tool.py) | 自定义工具（函数和类） |
+| [02_builtin_tools.py](tools/02_builtin_tools.py) | 内置工具概览 |
+| [03_web_search.py](tools/03_web_search.py) | 网页搜索工具 |
+| [04_code_execution.py](tools/04_code_execution.py) | 代码执行工具 |
+| [05_file_operations.py](tools/05_file_operations.py) | 文件操作工具 |
+| [06_browser.py](tools/06_browser.py) | 浏览器工具 |
+
+### 🎯 Agent 设计模式 (`agent_patterns/`)
+
+常见的 Agent 架构模式和最佳实践。
+
+| 示例 | 描述 |
+|------|------|
+| [01_agent_as_tool.py](agent_patterns/01_agent_as_tool.py) | Agent 作为工具 |
+| [02_parallelization.py](agent_patterns/02_parallelization.py) | 并行执行 |
+| [03_team_collaboration.py](agent_patterns/03_team_collaboration.py) | 团队协作 |
+| [04_debate.py](agent_patterns/04_debate.py) | 多Agent辩论 |
+| [05_context_passing.py](agent_patterns/05_context_passing.py) | 上下文传递 |
+
+### 🛡️ 安全护栏 (`guardrails/`)
+
+输入/输出验证和安全检查。
+
+| 示例 | 描述 |
+|------|------|
+| [01_input_guardrail.py](guardrails/01_input_guardrail.py) | 输入检查 |
+| [02_output_guardrail.py](guardrails/02_output_guardrail.py) | 输出检查 |
+| [03_tool_guardrail.py](guardrails/03_tool_guardrail.py) | 工具护栏 |
+
+### 🧠 记忆系统 (`memory/`)
+
+会话记忆、长期记忆和上下文压缩。
+
+| 示例 | 描述 |
+|------|------|
+| [01_session_memory.py](memory/01_session_memory.py) | 会话记忆 |
+| [02_long_term_memory.py](memory/02_long_term_memory.py) | 长期记忆 (SqliteDb) |
+| [03_compression.py](memory/03_compression.py) | Token 压缩 |
+
+### 📚 RAG 检索增强 (`rag/`)
+
+基于文档的问答和知识库。
+
+| 示例 | 描述 |
+|------|------|
+| [01_naive_rag.py](rag/01_naive_rag.py) | 基础 RAG |
+| [02_advanced_rag.py](rag/02_advanced_rag.py) | 高级 RAG (rerank) |
+| [03_chat_pdf.py](rag/03_chat_pdf.py) | PDF 对话应用 |
+| [04_langchain_integration.py](rag/04_langchain_integration.py) | LangChain 集成 |
+| [05_llamaindex_integration.py](rag/05_llamaindex_integration.py) | LlamaIndex 集成 |
+
+### ⚙️ 工作流编排 (`workflow/`)
+
+多步骤任务的编排和执行。
+
+| 示例 | 描述 |
+|------|------|
+| [01_simple_workflow.py](workflow/01_simple_workflow.py) | 简单工作流入门 |
+| [02_investment.py](workflow/02_investment.py) | 投资研究工作流 |
+| [03_news_article.py](workflow/03_news_article.py) | 新闻报道生成工作流 |
+| [04_novel_writing.py](workflow/04_novel_writing.py) | 小说写作工作流 |
+
+### 🔌 MCP 协议 (`mcp/`)
+
+Model Context Protocol 集成。
+
+| 示例 | 描述 |
+|------|------|
+| [01_stdio.py](mcp/01_stdio.py) | Stdio 传输 |
+| [02_sse_server.py](mcp/02_sse_server.py) | SSE Server |
+| [02_sse_client.py](mcp/02_sse_client.py) | SSE Client |
+| [03_http_server.py](mcp/03_http_server.py) | HTTP Server |
+| [03_http_client.py](mcp/03_http_client.py) | HTTP Client |
+| [04_json_config.py](mcp/04_json_config.py) | JSON 配置加载 |
+
+### 🤖 模型提供商 (`model_providers/`)
+
+支持多种 LLM 提供商。
+
+| 示例 | 描述 |
+|------|------|
+| [01_openai.py](model_providers/01_openai.py) | OpenAI |
+| [02_deepseek.py](model_providers/02_deepseek.py) | DeepSeek |
+| [03_zhipuai.py](model_providers/03_zhipuai.py) | 智谱 AI |
+| [04_custom_endpoint.py](model_providers/04_custom_endpoint.py) | 自定义端点 |
+| [05_litellm.py](model_providers/05_litellm.py) | LiteLLM 统一接口 |
+
+### 🎨 技能系统 (`skills/`)
+
+基于 SKILL.md 的能力扩展。
+
+| 示例 | 描述 |
+|------|------|
+| [01_skill_basics.py](skills/01_skill_basics.py) | 技能基础 |
+| [02_web_research.py](skills/02_web_research.py) | 网络研究技能 |
+| [03_custom_skill.py](skills/03_custom_skill.py) | 自定义技能 |
+
+### ⏱️ 分布式工作流 (`temporal/`)
+
+Temporal 集成，支持持久化执行。
+
+| 示例 | 描述 |
+|------|------|
+| [01_worker.py](temporal/01_worker.py) | Worker 启动 |
+| [02_client.py](temporal/02_client.py) | Client 使用 |
+| [03_parallel_workflow.py](temporal/03_parallel_workflow.py) | 并行工作流 |
+
+### 💪 DeepAgent (`deep_agent/`)
+
+内置工具的增强版 Agent。
+
+| 示例 | 描述 |
+|------|------|
+| [01_basic.py](deep_agent/01_basic.py) | 基础用法 |
+| [02_file_operations.py](deep_agent/02_file_operations.py) | 文件操作 |
+| [03_code_assistant.py](deep_agent/03_code_assistant.py) | 代码助手 |
+| [04_research_assistant.py](deep_agent/04_research_assistant.py) | 研究助手 |
+
+### 📊 可观测性 (`observability/`)
+
+监控、追踪和调试。
+
+| 示例 | 描述 |
+|------|------|
+| [01_langfuse.py](observability/01_langfuse.py) | Langfuse 集成 |
+| [02_token_tracking.py](observability/02_token_tracking.py) | Token 追踪 |
+
+### 🖥️ 命令行工具 (`cli/`)
+
+交互式命令行界面。
+
+| 示例 | 描述 |
+|------|------|
+| [01_cli_demo.py](cli/01_cli_demo.py) | CLI 演示 |
+
+### 🏢 完整应用 (`applications/`)
+
+端到端的应用示例。
+
+| 示例 | 描述 |
+|------|------|
+| [llm_os/main.py](applications/llm_os/main.py) | LLM OS - 综合AI助手 |
+| [research_bot/main.py](applications/research_bot/main.py) | 研究机器人 |
+| [customer_service/main.py](applications/customer_service/main.py) | 客服系统 |
+
+---
+
+## 学习路径
+
+### 入门级
+
+1. `basic/01_hello_world.py` - 第一个 Agent
+2. `basic/02_custom_prompt.py` - 自定义提示词
+3. `tools/01_custom_tool.py` - 添加工具
+4. `memory/01_session_memory.py` - 会话记忆
+
+### 进阶级
+
+1. `agent_patterns/01_agent_as_tool.py` - Agent 组合
+2. `agent_patterns/02_parallelization.py` - 并行执行
+3. `guardrails/01_input_guardrail.py` - 安全护栏
+4. `rag/02_advanced_rag.py` - 高级 RAG
+
+### 高级
+
+1. `workflow/02_investment.py` - 复杂工作流
+2. `temporal/01_worker.py` - 分布式执行
+3. `applications/llm_os/main.py` - 完整应用
+
+---
 
 ## LLM OS
 
@@ -85,7 +226,7 @@ Let's build the LLM OS proposed by Andrej Karpathy [in this tweet](https://twitt
   - [x] Can see and generate images and video
   - [x] Can hear and speak, and generate music
   - [x] Can think for a long time using a system 2
-  - [x] Can “self-improve” in domains
+  - [x] Can "self-improve" in domains
   - [x] Can be customized and fine-tuned for specific tasks
   - [x] Can communicate with other LLMs
 
@@ -104,24 +245,22 @@ source ~/.venvs/aienv/bin/activate
 ### 2. Install libraries
 
 ```shell
-pip install agentica streamlit text2vec sqlalchemy lancedb pyarrow yfinance
+pip install agentica streamlit text2vec sqlalchemy lancedb pyarrow
 ```
 
 ### 3. Export credentials
 
-- Our initial implementation uses GPT-4, so export your OpenAI API Key in the `../.env` file
+- Our initial implementation uses GPT-4o, so export your OpenAI API Key in the `../.env` file
 
 ```shell
 OPENAI_API_KEY=***
-EXA_API_KEY=xxx # optional
-SERPER_API_KEY=xxx # optional
 ```
 
 ### 4. Run the LLM OS App
 
 ```shell
-cd examples
-streamlit run 34_llm_os_demo.py
+cd examples/applications/llm_os
+streamlit run main.py
 ```
 
 ![llm_os](https://github.com/shibing624/agentica/blob/main/docs/llm_os_snap.png)
@@ -130,9 +269,5 @@ streamlit run 34_llm_os_demo.py
 - Add a blog URL to knowledge base: https://blog.samaltman.com/gpt-4o
 - Ask: What is gpt-4o?
 - `Web search`: 北京今天天气?
-- Enable `shell tool` and ask: is docker running?
-- `Python Assistant`: 帮我计算下 [168, 151, 171, 105, 124, 159, 153, 132, 112.2] , 计算它们的平均值。
-- Enable the `Research Assistant` and ask: write a report on the ibm hashicorp acquisition
-- Enable the `Investment Assistant` and ask: shall i invest in nvda?
-
-
+- `Code execution`: 帮我计算下 [168, 151, 171, 105, 124, 159, 153, 132, 112.2] 的平均值
+- `File operations`: 列出当前目录下的所有文件
