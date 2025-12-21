@@ -108,12 +108,16 @@ class RunResponse(BaseModel):
             return json.dumps(self.content, ensure_ascii=False, **kwargs)
 
     def __str__(self) -> str:
-        """Return content as string for easy printing."""
-        return self.get_content_as_string()
+        """Return content as string for easy printing, including reasoning_content if available."""
+        result = ""
+        if self.reasoning_content:
+            result += f"[Thinking]:\n{self.reasoning_content}\n\n[Answer]:\n"
+        result += self.get_content_as_string()
+        return result
 
     def __repr__(self) -> str:
         """Return detailed representation for debugging."""
-        return f"RunResponse(run_id={self.run_id!r}, event={self.event!r}, content={self.content!r})"
+        return f"RunResponse(run_id={self.run_id!r}, event={self.event!r}, reasoning_content={self.reasoning_content!r}, content={self.content!r})"
 
 
 def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse]]) -> None:

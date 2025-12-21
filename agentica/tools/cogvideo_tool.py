@@ -37,7 +37,7 @@ class CogVideoTool(Tool):
 
     ):
         super().__init__(name="create_video_from_cogvideo_tool")
-        self.api_key = api_key or getenv("ZHIPUAI_API_KEY")
+        self.api_key = api_key or getenv("ZHIPUAI_API_KEY") or getenv("ZAI_API_KEY")
         if not self.api_key:
             logger.error("ZHIPUAI_API_KEY not set. Please set the ZHIPUAI_API_KEY environment variable.")
         self.client = ZhipuAI(api_key=self.api_key)

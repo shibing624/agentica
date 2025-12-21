@@ -773,7 +773,7 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             display_user_message(user_input)
             
             # Show thinking indicator
-            status = console.status(f"[bold {COLORS['thinking']}]Agent is thinking...", spinner="dots")
+            status = console.status(f"[bold {COLORS['thinking']}]Thinking...", spinner="dots")
             status.start()
             spinner_active = True
             

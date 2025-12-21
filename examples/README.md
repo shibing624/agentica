@@ -64,6 +64,7 @@
 | [examples/57_parallelization_demo.py](https://github.com/shibing624/agentica/blob/main/examples/57_parallelization_demo.py)                           | 并行执行Demo：使用asyncio.gather并行运行多个Agent翻译任务，对比并行vs顺序执行的性能差异，展示3倍加速效果                                                                                                 |
 | [examples/58_temporal_worker.py](https://github.com/shibing624/agentica/blob/main/examples/58_temporal_worker.py)                           | Temporal Worker Demo：启动Temporal工作节点，注册AgentWorkflow、SequentialAgentWorkflow、ParallelAgentWorkflow等工作流                                                                                                 |
 | [examples/58_temporal_client.py](https://github.com/shibing624/agentica/blob/main/examples/58_temporal_client.py)                           | Temporal Client Demo：分布式工作流客户端，支持单Agent、顺序执行（流水线）、并行执行、并行翻译等多种工作流模式                                                                                                 |
+| [examples/59_litellm_demo.py](https://github.com/shibing624/agentica/blob/main/examples/59_litellm_demo.py)                           | LiteLLM统一模型接口Demo：支持100+模型提供商（OpenAI、Anthropic、Azure、Ollama等），统一API调用，支持工具调用、流式输出、异步执行                                                                                                 |
 
 
 ## LLM OS

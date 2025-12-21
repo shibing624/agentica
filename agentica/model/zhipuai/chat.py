@@ -25,5 +25,5 @@ class ZhipuAI(OpenAILike):
     name: str = "ZhipuAI"
     provider: str = "ZhipuAI"
 
-    api_key: Optional[str] = getenv("ZHIPUAI_API_KEY") or getenv("ZHIPU_API_KEY")
+    api_key: Optional[str] = getenv("ZHIPUAI_API_KEY") or getenv("ZAI_API_KEY")
     base_url: str = "https://open.bigmodel.cn/api/paas/v4"

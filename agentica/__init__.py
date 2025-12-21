@@ -38,6 +38,7 @@ from agentica.model.qwen.chat import Qwen
 from agentica.model.zhipuai.chat import ZhipuAI
 from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAIChat
 from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAILLM
+from agentica.model.litellm import LiteLLM
 
 # memory
 from agentica.model.base import Model

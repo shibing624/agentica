@@ -5,6 +5,7 @@
 """
 
 import json
+from httpx import get
 import requests
 import uuid
 from os import getenv
@@ -22,7 +23,7 @@ from agentica.utils.log import logger
 class WebSearchProTool(Tool):
     def __init__(self, api_key: Optional[str] = None, timeout: int = 300):
         super().__init__(name="web_search_pro")
-        self.api_key = api_key or getenv("ZHIPUAI_API_KEY")
+        self.api_key = api_key or getenv("ZHIPUAI_API_KEY") or getenv("ZAI_API_KEY")
         if not self.api_key:
             logger.error("ZHIPUAI_API_KEY not set. Please set the ZHIPUAI_API_KEY environment variable.")
         self.timeout = timeout

@@ -25,3 +25,4 @@ qdrant-client
 langfuse
 python-frontmatter
 temporalio
+litellm>=1.80.10
