@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent, OpenAIChat
 from agentica.workflow import Workflow
-from agentica import RunResponse, RunEvent, SqlWorkflowStorage, pprint_run_response
+from agentica import RunResponse, SqlWorkflowStorage, pprint_run_response
 from agentica.tools.search_serper_tool import SearchSerperTool
 from agentica.tools.search_exa_tool import SearchExaTool
 from agentica.tools.wikipedia_tool import WikipediaTool

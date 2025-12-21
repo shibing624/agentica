@@ -799,6 +799,3 @@ agent = Agent(
 agent.print_response("创作一篇关于 AI 的文章，配上插图")
 ```
 
----
-
-*文档最后更新: 2025-12-20*
