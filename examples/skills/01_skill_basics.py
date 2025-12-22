@@ -41,7 +41,8 @@ def run_sync_demo():
         skill = skill_tool.add_skill_dir(skill_dir)
         if skill:
             print(f"  Added: {skill.name}")
-            result = skill_tool.execute_skill(skill.name)
+            # Show skill info instead of execute_skill (which is now injected via system prompt)
+            result = skill_tool.get_skill_info(skill.name)
             print(result[:500] + "..." if len(result) > 500 else result)
 
 
@@ -70,13 +71,15 @@ async def main() -> None:
     print()
 
     # Create agent with SkillTool
+    # Note: Skill prompts are automatically injected into the system prompt via get_system_prompt()
     agent = Agent(
         name="Skill-Enabled Agent",
         description="An AI assistant with skill capabilities.",
         instructions=[
             "You are a helpful assistant that can use skills to answer questions.",
-            "Use execute_skill(skill_name) to load a skill's instructions.",
+            "Skill instructions are automatically loaded into the system prompt.",
             "Use list_skills() to see all available skills.",
+            "Use get_skill_info(skill_name) to get details about a specific skill.",
         ],
         tools=[skill_tool, ShellTool(), RunPythonCodeTool()],
         show_tool_calls=True,

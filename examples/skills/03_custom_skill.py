@@ -8,13 +8,14 @@ This example shows how to:
 2. Create skills programmatically
 3. Use skills with agents
 """
+from doctest import debug
 import sys
 import os
 import tempfile
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, DeepAgent
 from agentica.tools.skill_tool import SkillTool
 
 
@@ -64,10 +65,16 @@ Provide feedback in the following format:
         print(f"\nAvailable skills:")
         print(skill_tool.list_skills())
 
-        # Execute the skill
-        print("\nExecuting 'code-reviewer' skill:")
-        result = skill_tool.execute_skill("code-reviewer")
+        # Get skill info (skill prompts are now injected via system prompt)
+        print("\nGetting 'code-reviewer' skill info:")
+        result = skill_tool.get_skill_info("code-reviewer")
         print(result)
+        
+        # Show system prompt preview
+        print("\nSystem prompt preview (skill instructions are injected):")
+        prompt = skill_tool.get_system_prompt()
+        if prompt:
+            print(prompt[:800] + "..." if len(prompt) > 800 else prompt)
 
 
 def programmatic_skill_demo():
@@ -162,16 +169,12 @@ When analyzing data:
 
         skill_tool = SkillTool(custom_skill_dirs=[skill_dir])
 
-        agent = Agent(
-            model=OpenAIChat(id="gpt-4o-mini"),
+        agent = DeepAgent(
+            model=OpenAIChat(id="gpt-4o"),
             name="Skill-Enabled Assistant",
-            instructions=[
-                "You are a helpful assistant with skill capabilities.",
-                "Use list_skills() to see available skills.",
-                "Use execute_skill(name) to load a skill's instructions.",
-            ],
             tools=[skill_tool],
             show_tool_calls=True,
+            debug=True,
         )
 
         print("\nAsking agent about available skills...")
@@ -180,7 +183,7 @@ When analyzing data:
 
         print("\nAsking agent to use the data-analyst skill...")
         response = agent.run(
-            "Load the data-analyst skill and then analyze this data: "
+            "Use the data-analyst skill instructions to analyze this data: "
             "Sales in Q1: $100k, Q2: $150k, Q3: $120k, Q4: $200k"
         )
         print(f"Response: {response.content}")

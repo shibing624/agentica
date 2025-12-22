@@ -6,7 +6,7 @@
 Tests cover:
 1. SkillTool initialization with empty skill directories
 2. list_skills() with no skills available
-3. execute_skill() with non-existent skill
+3. get_skill_info() with non-existent skill
 4. get_system_prompt() with empty registry
 5. Custom skill directory handling
 """
@@ -18,7 +18,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.tools.skill_tool import SkillTool
-from agentica.skills.skill_registry import reset_skill_registry, get_skill_registry
+from agentica.skills.skill_registry import reset_skill_registry
 
 
 class TestSkillToolEmpty(unittest.TestCase):
@@ -54,15 +54,6 @@ class TestSkillToolEmpty(unittest.TestCase):
         self.assertIn("No skills available", result)
         self.assertIn(".claude/skills", result)
         self.assertIn(".agentica/skills", result)
-
-    def test_execute_skill_nonexistent(self):
-        """Test execute_skill() with non-existent skill returns error message."""
-        skill_tool = SkillTool(auto_load=False)
-        result = skill_tool.execute_skill("nonexistent-skill")
-        
-        self.assertIn("Error", result)
-        self.assertIn("Unknown skill", result)
-        self.assertIn("nonexistent-skill", result)
 
     def test_get_skill_info_nonexistent(self):
         """Test get_skill_info() with non-existent skill returns error message."""
@@ -146,10 +137,15 @@ Use this skill for testing.
         # Should have loaded the skill
         self.assertEqual(len(skill_tool.registry), 1)
         
-        # Test execute_skill
-        result = skill_tool.execute_skill("test-skill")
-        self.assertIn("Skill Activated", result)
+        # Test get_skill_info
+        result = skill_tool.get_skill_info("test-skill")
         self.assertIn("test-skill", result)
+        self.assertIn("Description", result)
+        
+        # Test get_system_prompt includes skill instructions
+        prompt = skill_tool.get_system_prompt()
+        self.assertIn("test-skill", prompt)
+        self.assertIn("instructions", prompt.lower())
 
     def test_custom_dir_nonexistent(self):
         """Test custom skill directory that doesn't exist."""
@@ -191,65 +187,6 @@ Added dynamically.
         self.assertEqual(len(skill_tool.registry), 1)
 
 
-class TestSkillToolFileFunctions(unittest.TestCase):
-    """Test SkillTool file operation functions."""
-
-    def setUp(self):
-        """Create temporary test files."""
-        reset_skill_registry()
-        self.temp_dir = tempfile.mkdtemp()
-        
-        # Create test file
-        self.test_file = os.path.join(self.temp_dir, "test.txt")
-        with open(self.test_file, "w") as f:
-            f.write("Test content")
-
-    def tearDown(self):
-        """Clean up temporary directory."""
-        reset_skill_registry()
-        if os.path.exists(self.temp_dir):
-            shutil.rmtree(self.temp_dir)
-
-    def test_list_skill_files(self):
-        """Test list_skill_files() function."""
-        skill_tool = SkillTool(auto_load=False)
-        result = skill_tool.list_skill_files(self.temp_dir)
-        
-        self.assertIn("test.txt", result)
-        self.assertIn("[FILE]", result)
-
-    def test_list_skill_files_empty_dir(self):
-        """Test list_skill_files() on empty directory."""
-        empty_dir = os.path.join(self.temp_dir, "empty")
-        os.makedirs(empty_dir)
-        
-        skill_tool = SkillTool(auto_load=False)
-        result = skill_tool.list_skill_files(empty_dir)
-        
-        self.assertIn("empty", result.lower())
-
-    def test_list_skill_files_nonexistent(self):
-        """Test list_skill_files() on non-existent directory."""
-        skill_tool = SkillTool(auto_load=False)
-        result = skill_tool.list_skill_files("/nonexistent/path")
-        
-        self.assertIn("Error", result)
-
-    def test_read_skill_file(self):
-        """Test read_skill_file() function."""
-        skill_tool = SkillTool(auto_load=False)
-        result = skill_tool.read_skill_file(self.test_file)
-        
-        self.assertEqual(result, "Test content")
-
-    def test_read_skill_file_nonexistent(self):
-        """Test read_skill_file() on non-existent file."""
-        skill_tool = SkillTool(auto_load=False)
-        result = skill_tool.read_skill_file("/nonexistent/file.txt")
-        
-        self.assertIn("Error", result)
-
-
 class TestSkillToolIntegration(unittest.TestCase):
     """Integration tests for SkillTool with DeepAgent."""
 
@@ -263,23 +200,17 @@ class TestSkillToolIntegration(unittest.TestCase):
 
     def test_skill_tool_with_deep_agent_empty_skills(self):
         """Test SkillTool works with DeepAgent when no skills are available."""
-        try:
-            from agentica import DeepAgent, OpenAIChat
-            
-            # Create SkillTool with no skills
-            skill_tool = SkillTool(auto_load=False)
-            
-            # This should not crash even with empty skills
-            # Note: We don't actually run the agent, just verify initialization
-            self.assertIsNotNone(skill_tool)
-            self.assertEqual(len(skill_tool.registry), 0)
-            
-            # Verify system prompt is valid
-            prompt = skill_tool.get_system_prompt()
-            self.assertIsNotNone(prompt)
-            
-        except ImportError:
-            self.skipTest("DeepAgent or OpenAIChat not available")
+        # Create SkillTool with no skills
+        skill_tool = SkillTool(auto_load=False)
+        
+        # This should not crash even with empty skills
+        # Note: We don't actually run the agent, just verify initialization
+        self.assertIsNotNone(skill_tool)
+        self.assertEqual(len(skill_tool.registry), 0)
+        
+        # Verify system prompt is valid
+        prompt = skill_tool.get_system_prompt()
+        self.assertIsNotNone(prompt)
 
 
 if __name__ == "__main__":

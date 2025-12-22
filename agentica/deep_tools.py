@@ -1066,8 +1066,10 @@ def get_builtin_tools(
         include_fetch_url: bool = True,
         include_todos: bool = True,
         include_task: bool = True,
+        include_skills: bool = True,
         task_model: Optional["Model"] = None,
         task_tools: Optional[List[Any]] = None,
+        custom_skill_dirs: Optional[List[str]] = None,
 ) -> List[Tool]:
     """
     Get the list of built-in tools for DeepAgent.
@@ -1080,8 +1082,10 @@ def get_builtin_tools(
         include_fetch_url: Whether to include URL fetching tool
         include_todos: Whether to include task management tools
         include_task: Whether to include subagent task tool
+        include_skills: Whether to include skill tool for executing skills
         task_model: Model for subagent tasks (optional, will use parent agent's model if not set)
         task_tools: Tools for subagent tasks (optional)
+        custom_skill_dirs: Custom skill directories to load (optional)
 
     Returns:
         List of tools
@@ -1105,6 +1109,10 @@ def get_builtin_tools(
 
     if include_task:
         tools.append(BuiltinTaskTool(model=task_model, tools=task_tools))
+
+    if include_skills:
+        from agentica.tools.skill_tool import SkillTool
+        tools.append(SkillTool(custom_skill_dirs=custom_skill_dirs))
 
     return tools
 

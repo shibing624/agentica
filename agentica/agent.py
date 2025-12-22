@@ -512,6 +512,9 @@ class Agent:
         else:
             set_log_level_to_info()
 
+        # Collect and merge tool system prompts into instructions
+        self._merge_tool_system_prompts()
+
         # Initialize compression manager if compress_tool_results is enabled
         if self.compress_tool_results and self.compression_manager is None:
             from agentica.compression import CompressionManager
@@ -530,6 +533,54 @@ class Agent:
         # Sync user_id from Agent to AgentMemory if not set
         if self.user_id is not None and self.memory.user_id is None:
             self.memory.user_id = self.user_id
+
+    def _merge_tool_system_prompts(self) -> None:
+        """
+        Collect system prompts from all tools and merge them into instructions.
+        
+        This allows tools to provide their own usage guidance that gets injected
+        into the agent's system prompt automatically.
+        
+        Tool prompts are deduplicated by tool class name to avoid duplicate content
+        when multiple instances of the same tool type are present.
+        """
+        if not self.tools:
+            return
+
+        # Use dict to deduplicate by tool class name
+        # This prevents duplicate prompts when same tool type appears multiple times
+        tool_prompts_map: Dict[str, str] = {}
+        
+        for tool in self.tools:
+            if isinstance(tool, Tool) and hasattr(tool, 'get_system_prompt'):
+                prompt = tool.get_system_prompt()
+                if prompt:
+                    # Use tool class name as key for deduplication
+                    tool_class_name = tool.__class__.__name__
+                    # Keep the first (or longest) prompt for each tool type
+                    if tool_class_name not in tool_prompts_map or len(prompt) > len(tool_prompts_map[tool_class_name]):
+                        tool_prompts_map[tool_class_name] = prompt
+
+        if not tool_prompts_map:
+            return
+
+        # Build structured tool instructions with clear hierarchy
+        tool_sections = []
+        for tool_name, prompt in tool_prompts_map.items():
+            tool_sections.append(f"<tool_instructions name=\"{tool_name}\">\n{prompt}\n</tool_instructions>")
+        
+        merged_prompt = "<tool_system_prompts>\n" + "\n\n".join(tool_sections) + "\n</tool_system_prompts>"
+
+        # Merge tool prompts into instructions
+        if self.instructions is None:
+            self.instructions = [merged_prompt]
+        elif isinstance(self.instructions, str):
+            self.instructions = [self.instructions, merged_prompt]
+        elif isinstance(self.instructions, list):
+            self.instructions = list(self.instructions) + [merged_prompt]
+        # Note: if instructions is a Callable, we don't modify it
+
+        logger.debug(f"Merged {len(tool_prompts_map)} tool system prompts into instructions: {list(tool_prompts_map.keys())}")
 
     @property
     def is_streamable(self) -> bool:

@@ -45,21 +45,22 @@ async def main() -> None:
     print(skill_tool.list_skills())
     print()
 
-    # Explore skill directory
+    # Print skill info
     print("=" * 60)
-    print("Skill directory contents:")
+    print("Skill Info:")
     print("=" * 60)
-    print(skill_tool.list_skill_files(skill_dir))
+    print(skill_tool.get_skill_info("web-research"))
     print()
 
     # Create DeepAgent with SkillTool
+    # Note: Skill prompts are automatically injected into the system prompt via get_system_prompt()
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="DeepAgent-web-research",
         instructions=[
             "You are a research assistant with skill capabilities.",
-            "Use execute_skill(skill_name) to load a skill's instructions.",
-            "Use the web-research skill to conduct thorough research on topics.",
+            "Skill instructions are automatically loaded into the system prompt.",
+            "Use the web-research skill instructions to conduct thorough research on topics.",
         ],
         tools=[skill_tool],
         show_tool_calls=True,
@@ -69,10 +70,11 @@ async def main() -> None:
     print(f"Agent tools: {agent.tools}")
     print()
 
-    # Execute the web-research skill
-    print("\nExecuting web-research skill...")
-    result = skill_tool.execute_skill("web-research")
-    print(result[:500] + "..." if len(result) > 500 else result)
+    # Show system prompt (skill instructions are injected)
+    print("\nSkill instructions are now injected into the system prompt automatically.")
+    prompt = skill_tool.get_system_prompt()
+    if prompt:
+        print(f"System prompt preview: {prompt[:500]}...")
 
     # Research question
     question = "帮我调研可再生能源的环境影响，写出简短的中文调研报告。"

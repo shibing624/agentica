@@ -29,7 +29,7 @@ Usage:
     )
 """
 import json
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from agentica.tools.base import Tool
 from agentica.skills import (
@@ -38,8 +38,6 @@ from agentica.skills import (
     get_skill_registry,
     load_skills,
     register_skill,
-    list_skill_files,
-    read_skill_file,
 )
 from agentica.utils.log import logger
 
@@ -82,11 +80,10 @@ class SkillTool(Tool):
         self._initialized = False
 
         # Register tool functions
-        self.register(self.execute_skill)
+        # Note: get_skill_prompt is removed as a tool function since skill prompts
+        # are now injected into the system prompt via get_system_prompt()
         self.register(self.list_skills)
         self.register(self.get_skill_info)
-        self.register(self.list_skill_files)
-        self.register(self.read_skill_file)
 
     def _ensure_initialized(self):
         """Ensure skills are loaded before use."""
@@ -112,46 +109,6 @@ class SkillTool(Tool):
         """Get the skill registry, loading skills if needed."""
         self._ensure_initialized()
         return self._registry
-
-    def execute_skill(self, skill_name: str) -> str:
-        """
-        Execute a skill by loading its instructions into the conversation.
-
-        When you invoke a skill, its prompt will expand and provide detailed
-        instructions on how to complete the task.
-
-        Args:
-            skill_name: Name of the skill to execute (e.g., 'web-research', 'pdf-reader')
-
-        Returns:
-            The skill prompt and instructions, or error message if skill not found
-        """
-        # Check if skill exists
-        skill_obj = self.registry.get(skill_name)
-
-        if skill_obj is None:
-            available = [s.name for s in self.registry.list_all()]
-            return (
-                f"Error: Unknown skill '{skill_name}'.\n"
-                f"Available skills: {', '.join(available[:10]) if available else 'None'}\n"
-                f"Use list_skills() to see all available skills."
-            )
-
-        # Get the skill prompt
-        prompt = skill_obj.get_prompt()
-
-        # Build response with skill content
-        result = (
-            f"=== Skill Activated: {skill_obj.name} ===\n"
-            f"Description: {skill_obj.description}\n"
-            f"Location: {skill_obj.location}\n"
-            f"Path: {skill_obj.path}\n"
-        )
-        if skill_obj.allowed_tools:
-            result += f"Allowed Tools: {', '.join(skill_obj.allowed_tools)}\n"
-        result += f"\n--- Skill Instructions ---\n{prompt}"
-
-        return result
 
     def list_skills(self) -> str:
         """
@@ -214,42 +171,6 @@ class SkillTool(Tool):
 
         return result
 
-    def list_skill_files(self, directory: str) -> str:
-        """
-        List all files in a skill directory.
-
-        This tool is specifically for exploring skill directories that contain
-        resources like scripts, references, and assets bundled with the skill.
-        
-        Note: When used with DeepAgent which has built-in ls(), prefer using ls()
-        for general file operations. Use this only for skill-specific exploration.
-
-        Args:
-            directory: Path to the skill directory to list
-
-        Returns:
-            Formatted string containing the list of files
-        """
-        return list_skill_files(directory)
-
-    def read_skill_file(self, file_path: str) -> str:
-        """
-        Read the contents of a file in a skill directory.
-
-        This tool is specifically for reading skill resources like SKILL.md,
-        scripts, or reference documents bundled with the skill.
-        
-        Note: When used with DeepAgent which has built-in read_file(), prefer using
-        read_file() for general file operations. Use this only for skill-specific files.
-
-        Args:
-            file_path: Path to the file to read
-
-        Returns:
-            Contents of the file, or error message if cannot be read
-        """
-        return read_skill_file(file_path)
-
     def add_skill_dir(self, skill_dir: str) -> Optional[Skill]:
         """
         Add a custom skill directory at runtime.
@@ -271,10 +192,11 @@ class SkillTool(Tool):
         Get the system prompt for the skill tool.
 
         This prompt is injected into the agent's system message to guide
-        the LLM on how to use skills effectively.
+        the LLM on how to use skills effectively. Includes full skill prompts
+        for each available skill.
 
         Returns:
-            System prompt string describing available skills
+            System prompt string describing available skills with their full instructions
         """
         self._ensure_initialized()
         skills = self.registry.list_all()
@@ -293,26 +215,37 @@ Each skill directory should contain a SKILL.md file with:
 - Detailed usage instructions
 """
 
-        skills_xml = "\n".join(skill.to_xml() for skill in skills)
+        # Build full skill prompts for each skill
+        skill_prompts = []
+        for skill in skills:
+            prompt = skill.get_prompt()
+            skill_entry = f"""<skill>
+<name>{skill.name}</name>
+<description>{skill.description}</description>
+<location>{skill.location}</location>
+<path>{skill.path}</path>
+{f'<allowed_tools>{", ".join(skill.allowed_tools)}</allowed_tools>' if skill.allowed_tools else ''}
+</skill>"""
+            skill_prompts.append(skill_entry)
+
+        skills_content = "\n".join(skill_prompts)
 
         return f"""# Skills Tool
 
 When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
 
 ## How to use skills:
-- Use execute_skill(skill_name) to load a skill's instructions
-- The skill's prompt will provide detailed instructions on how to complete the task
+- Skill instructions are automatically loaded into the system prompt below
 - Use list_skills() to see all available skills
 - Use get_skill_info(skill_name) to get details about a specific skill
-- Use list_skill_files(directory) to explore skill directory resources
-- Use read_skill_file(file_path) to read skill files (SKILL.md, scripts, references)
+- Follow the skill instructions in <available_skills> section to complete tasks
 
 ## Important:
-- Only use skills listed in <available_skills> below
+- Only use skills listed in available_skills section below
 - Read the skill's instructions carefully before proceeding
 
 <available_skills>
-{skills_xml}
+{skills_content}
 </available_skills>
 """
 
