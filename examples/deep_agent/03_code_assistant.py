@@ -13,7 +13,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, OpenAIChat
+from agentica import DeepAgent, OpenAIChat, ZhipuAI
 
 
 def code_execution_demo():
@@ -23,18 +23,19 @@ def code_execution_demo():
     print("=" * 60)
 
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(),
         name="CodeRunner",
         description="A code execution assistant",
         show_tool_calls=True,
-        # debug_mode=True,
+        debug_mode=True,
     )
 
     # Simple calculation
     response = agent.run(
-        "Write and execute Python code to calculate the first 10 Fibonacci numbers"
+        "Write and execute Python code to calculate the first 10 Fibonacci numbers, "
+        "and judge each num is even or odd. give me the result after execution."
     )
-    print(f"\nResponse:\n{response.content}")
+    print(f"\nResponse:\n{response}")
 
 
 def code_analysis_demo():
@@ -44,15 +45,15 @@ def code_analysis_demo():
     print("=" * 60)
 
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(),
         name="CodeAnalyzer",
         description="A code analysis assistant",
         instructions=[
             "You are an expert code reviewer.",
-            "Analyze code for bugs, performance issues, and best practices.",
+            "Analyze code for bugs, performance issues, and best practices. last run it and fix the bug.",
         ],
         show_tool_calls=True,
-        # debug_mode=True,
+        debug_mode=True,
     )
 
     buggy_code = '''
@@ -68,9 +69,9 @@ print(find_max([-5, -2, -10]))  # Expected: -2, but returns 0
 '''
 
     response = agent.run(
-        f"Analyze this code and find the bug:\n```python\n{buggy_code}\n```"
+        f"Analyze this code and find the bug:\n```python\n{buggy_code}\n``` --- last run it and verify the result."
     )
-    print(f"\nResponse:\n{response.content}")
+    print(f"\nResponse:\n{response}")
 
 
 def code_generation_demo():
@@ -80,7 +81,7 @@ def code_generation_demo():
     print("=" * 60)
 
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(),
         name="CodeGenerator",
         description="A code generation assistant",
         instructions=[
@@ -91,15 +92,14 @@ def code_generation_demo():
             "Before executing code, verify the syntax is correct Python.",
         ],
         show_tool_calls=True,
-        # debug_mode=True,
+        debug_mode=True,
     )
 
     response = agent.run(
         "Write a Python function that implements binary search. "
-        "Include type hints, docstring, and test cases. Then execute the tests. "
-        "Remember: use None for null values in Python."
+        "Include type hints, docstring, and test cases. Then execute the tests. output the test results."
     )
-    print(f"\nResponse:\n{response.content}")
+    print(f"\nResponse:\n{response}")
 
 
 def data_processing_demo():
@@ -109,10 +109,15 @@ def data_processing_demo():
     print("=" * 60)
 
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o"),
+        model=OpenAIChat(),
         name="DataProcessor",
+        instructions=[
+            "You are a data processing expert.",
+            "Use Python to manipulate and analyze data.",
+            "Include error handling and validation. wirte the code to ./tmp/ directory.",
+        ],
         show_tool_calls=True,
-        # debug_mode=True,
+        debug_mode=True,
     )
 
     response = agent.run(
@@ -121,13 +126,12 @@ def data_processing_demo():
         "2. Calculate mean, median, and standard deviation\n"
         "3. Find the top 5 largest numbers\n"
         "4. Print a summary of the results\n"
-        "write the code to ./tmp/ directory."
     )
-    print(f"\nResponse:\n{response.content}")
+    print(f"\nResponse:\n{response}")
 
 
 if __name__ == "__main__":
     code_execution_demo()
     code_analysis_demo()
-    code_generation_demo()
-    data_processing_demo()
+    # code_generation_demo()
+    # data_processing_demo()

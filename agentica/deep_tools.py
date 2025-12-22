@@ -198,20 +198,25 @@ class BuiltinFileTool(Tool):
             return f"Error reading file: {e}"
 
     def write_file(self, file_path: str, content: str) -> str:
-        """Writes to a new file in the filesystem.
+        """Writes content to a file in the filesystem.
 
         Usage:
-        - The file_path parameter must be an absolute path, not a relative path
+        - The file_path can be relative (e.g., "tmp/script.py", "./outputs/data.txt") or absolute path
+        - Relative paths are resolved relative to the base working directory
+        - The tool returns the actual absolute path of the created file - ALWAYS use this returned path for subsequent operations (read_file, execute, etc.)
         - The content parameter must be a string
-        - The write_file tool will create a new file.
-        - Prefer to edit existing files over creating new ones when possible.
+        - The write_file tool will create a new file or overwrite existing file
+        - Parent directories will be created automatically if they don't exist
+        - Prefer to edit existing files over creating new ones when possible
+        
+        IMPORTANT: After calling write_file, use the absolute path returned in the result for any follow-up operations like execute or read_file. Do NOT guess or construct the path yourself.
         
         Args:
-            file_path: File absolute path, can be a new file under ./tmp/ directory
-            content: File content
+            file_path: File path (relative or absolute). Examples: "tmp/script.py", "outputs/result.txt", "./tmp/main.py", use './tmp/' prefix file path for temporary files
+            content: File content to write
 
         Returns:
-            Operation result message
+            Operation result message containing the actual absolute path of the file
         """
         try:
             self._validate_path(file_path)
@@ -223,8 +228,10 @@ class BuiltinFileTool(Tool):
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
 
-            logger.info(f"{action} file: {path}")
-            return f"{action} file: {file_path}, file content length: {len(content)}"
+            # Return absolute path to help LLM use correct path in subsequent operations
+            absolute_path = str(path.resolve())
+            logger.info(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
+            return f"{action} file, absolute path: {absolute_path}, Use this absolute path for subsequent operations (read/execute)."
         except Exception as e:
             logger.error(f"Error writing file {file_path}: {e}")
             return f"Error writing file: {e}"
