@@ -47,6 +47,26 @@ def main():
     )
     print(response)
 
+    # Example 3: Base64 encoded image
+    print("\n" + "=" * 60)
+    print("Example 3: Base64 Encoded Image")
+    print("=" * 60)
+    
+    import base64
+    
+    # Read local image and convert to base64
+    image_path = os.path.join(os.path.dirname(__file__), "..", "data", "chinese.jpg")
+    with open(image_path, "rb") as f:
+        image_data = f.read()
+    base64_image = base64.b64encode(image_data).decode("utf-8")
+    base64_image_with_prefix = f"data:image/jpeg;base64,{base64_image}"
+    
+    response = agent.run(
+        "这张图片里有什么？",
+        images=[base64_image_with_prefix]
+    )
+    print(response)
+
 
 if __name__ == "__main__":
     main()
