@@ -8,6 +8,8 @@ from agentica.db.sqlite import SqliteDb
 from agentica.db.postgres import PostgresDb
 from agentica.db.memory import InMemoryDb
 from agentica.db.json import JsonDb
+from agentica.db.mysql import MysqlDb
+from agentica.db.redis import RedisDb
 
 __all__ = [
     "BaseDb",
@@ -19,4 +21,6 @@ __all__ = [
     "PostgresDb",
     "InMemoryDb",
     "JsonDb",
+    "MysqlDb",
+    "RedisDb",
 ]
