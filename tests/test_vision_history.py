@@ -12,6 +12,7 @@ import sys
 import os
 import base64
 import unittest
+from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -360,6 +361,170 @@ class TestVisionWithLocalImage(unittest.TestCase):
             elif isinstance(content, str):
                 self.assertNotIn(BASE64_PLACEHOLDER, content,
                     f"Found placeholder in content: {content}")
+
+
+class TestAgentWithVisionHistory(unittest.TestCase):
+    """Test Agent with add_history_to_messages=True and vision messages.
+    
+    These tests use mocks to avoid actual LLM API calls.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """Load test image."""
+        cls.test_image_path = os.path.join(
+            os.path.dirname(__file__), 'data', 'chinese.jpg'
+        )
+        if os.path.exists(cls.test_image_path):
+            with open(cls.test_image_path, 'rb') as f:
+                image_data = f.read()
+            cls.base64_image = base64.b64encode(image_data).decode('utf-8')
+            cls.base64_image_with_prefix = f"data:image/jpeg;base64,{cls.base64_image}"
+        else:
+            cls.base64_image = None
+            cls.base64_image_with_prefix = None
+
+    def _create_mock_model_response(self, content: str):
+        """Create a mock model response."""
+        mock_response = Mock()
+        mock_response.content = content
+        mock_response.parsed = None
+        mock_response.audio = None
+        mock_response.reasoning_content = None
+        mock_response.created_at = 1234567890
+        mock_response.tool_calls = None
+        mock_response.stop_reason = "stop"
+        return mock_response
+
+    @patch('agentica.model.openai.chat.OpenAIChat.response')
+    def test_agent_vision_with_history(self, mock_response):
+        """Test Agent with vision and add_history_to_messages=True."""
+        if self.base64_image_with_prefix is None:
+            self.skipTest("Test image not found")
+        
+        from agentica import Agent, OpenAIChat
+        
+        # Setup mock
+        mock_response.return_value = self._create_mock_model_response("这是一张中文图片。")
+        
+        # Create agent with history enabled
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o"),
+            add_history_to_messages=True,
+        )
+        
+        # First turn: send image
+        response1 = agent.run(
+            "这张图片里有什么？",
+            images=[self.base64_image_with_prefix]
+        )
+        
+        # Setup mock for second call
+        mock_response.return_value = self._create_mock_model_response("图片中显示的是中文文字内容。")
+        
+        # Second turn: follow-up question (should include history)
+        # This should NOT raise "Invalid chat format" error
+        response2 = agent.run("能详细描述一下吗？")
+        
+        # Verify mock was called twice
+        self.assertEqual(mock_response.call_count, 2)
+        
+        # Verify second call's messages don't contain placeholder URLs
+        second_call_args = mock_response.call_args_list[1]
+        messages = second_call_args[1].get('messages', [])
+        
+        for msg in messages:
+            content = msg.content if hasattr(msg, 'content') else msg.get('content')
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'image_url':
+                        url = item.get('image_url', {}).get('url', '')
+                        self.assertNotIn(BASE64_PLACEHOLDER, url,
+                            f"Found placeholder in API call: {url}")
+
+    @patch('agentica.model.openai.chat.OpenAIChat.response')
+    def test_agent_multi_turn_vision_conversation(self, mock_response):
+        """Test multi-turn conversation with multiple images."""
+        if self.base64_image_with_prefix is None:
+            self.skipTest("Test image not found")
+        
+        from agentica import Agent, OpenAIChat
+        
+        # Create agent with history enabled
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o"),
+            add_history_to_messages=True,
+        )
+        
+        # Turn 1: First image
+        mock_response.return_value = self._create_mock_model_response("第一张图片显示中文内容。")
+        agent.run("描述第一张图片", images=[self.base64_image_with_prefix])
+        
+        # Turn 2: Second image
+        mock_response.return_value = self._create_mock_model_response("第二张图片也是中文内容。")
+        agent.run("描述第二张图片", images=[self.base64_image_with_prefix])
+        
+        # Turn 3: Question without image (history should be clean)
+        mock_response.return_value = self._create_mock_model_response("两张图片都包含中文文字。")
+        agent.run("比较一下两张图片")
+        
+        # Verify all calls succeeded (no exceptions)
+        self.assertEqual(mock_response.call_count, 3)
+        
+        # Check third call's messages for placeholders
+        third_call_args = mock_response.call_args_list[2]
+        messages = third_call_args[1].get('messages', [])
+        
+        for msg in messages:
+            content = msg.content if hasattr(msg, 'content') else msg.get('content')
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'image_url':
+                        url = item.get('image_url', {}).get('url', '')
+                        self.assertNotIn(BASE64_PLACEHOLDER, url,
+                            "Found placeholder in multi-turn conversation")
+
+    @patch('agentica.model.openai.chat.OpenAIChat.response')
+    def test_agent_url_images_preserved_in_history(self, mock_response):
+        """Test that URL-based images are preserved in history.
+        
+        Note: URL images are converted to image_url format in content,
+        but they should NOT be filtered out (only base64 images are filtered).
+        """
+        from agentica import Agent, OpenAIChat
+        
+        url_image = "https://example.com/test-image.jpg"
+        
+        # Create agent with history enabled
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o"),
+            add_history_to_messages=True,
+        )
+        
+        # Turn 1: URL image
+        mock_response.return_value = self._create_mock_model_response("这是一张网络图片。")
+        agent.run("描述这张图片", images=[url_image])
+        
+        # Turn 2: Follow-up
+        mock_response.return_value = self._create_mock_model_response("图片内容很丰富。")
+        agent.run("还有什么细节？")
+        
+        # Verify second call succeeded without errors
+        self.assertEqual(mock_response.call_count, 2)
+        
+        # Verify no placeholder URLs in history
+        second_call_args = mock_response.call_args_list[1]
+        messages = second_call_args[1].get('messages', [])
+        
+        for msg in messages:
+            content = msg.content if hasattr(msg, 'content') else msg.get('content')
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'image_url':
+                        url = item.get('image_url', {}).get('url', '')
+                        # URL images should NOT have placeholder
+                        self.assertNotIn(BASE64_PLACEHOLDER, url,
+                            "URL image should not be replaced with placeholder")
 
 
 if __name__ == "__main__":
