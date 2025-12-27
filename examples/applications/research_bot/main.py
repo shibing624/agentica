@@ -162,7 +162,7 @@ def main():
     bot = create_research_bot()
 
     # Example: Research a topic
-    topic = "茅台股票能买吗？是低点吗"
+    topic = "AI Agent框架的发展趋势"
     report = research_topic(bot, topic)
     print(f"\n{report}")
 
