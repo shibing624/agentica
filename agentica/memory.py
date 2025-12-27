@@ -1293,6 +1293,20 @@ class AgentMemory(BaseModel):
             return True
         return False
 
+    async def aclassify_user_input(self, input: str) -> bool:
+        """Async classify user input to determine if it should be added to memory.
+        
+        This is an alias for ashould_update_memory, used for parallel processing
+        during LLM response generation.
+        
+        Args:
+            input: The user input to classify.
+            
+        Returns:
+            True if the input should be added to memory, False otherwise.
+        """
+        return await self.ashould_update_memory(input=input)
+
     def update_memory(self, input: str, force: bool = False) -> Optional[str]:
         """Creates a memory from a message and adds it to the memory db."""
 
