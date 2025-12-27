@@ -2117,6 +2117,8 @@ class Agent:
         # Update the run_response content if streaming as run_response will only contain the last chunk
         if self.stream:
             self.run_response.content = model_response.content
+            if model_response.reasoning_content:
+                self.run_response.reasoning_content = model_response.reasoning_content
             # Also update the reasoning_content with the complete accumulated content
             if hasattr(model_response, 'reasoning_content') and model_response.reasoning_content:
                 self.run_response.reasoning_content = model_response.reasoning_content
@@ -2733,19 +2735,32 @@ class Agent:
         model_response: ModelResponse
         self.model = cast(Model, self.model)
         if stream and self.is_streamable:
-            model_response = ModelResponse(content="")
+            model_response = ModelResponse(content="", reasoning_content="")
             model_response_stream = self.model.aresponse_stream(messages=messages_for_model)
             async for model_response_chunk in model_response_stream:  # type: ignore
                 if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
+                    # Handle reasoning_content (for thinking models like DeepSeek-R1)
+                    if model_response_chunk.reasoning_content is not None:
+                        if model_response.reasoning_content is None:
+                            model_response.reasoning_content = ""
+                        model_response.reasoning_content += model_response_chunk.reasoning_content
+                        yield RunResponse(
+                            event=RunEvent.run_response,
+                            reasoning_content=model_response_chunk.reasoning_content,
+                            run_id=self.run_id,
+                            session_id=self.session_id,
+                            agent_id=self.agent_id
+                        )
+                    # Handle content
                     if model_response_chunk.content is not None and model_response.content is not None:
                         model_response.content += model_response_chunk.content
-                    yield RunResponse(
-                        event=RunEvent.run_response,
-                        content=model_response_chunk.content,
-                        run_id=self.run_id,
-                        session_id=self.session_id,
-                        agent_id=self.agent_id
-                    )
+                        yield RunResponse(
+                            event=RunEvent.run_response,
+                            content=model_response_chunk.content,
+                            run_id=self.run_id,
+                            session_id=self.session_id,
+                            agent_id=self.agent_id
+                        )
                 elif model_response_chunk.event == ModelResponseEvent.tool_call_started.value:
                     # Add tool call to the run_response
                     tool_call_dict = model_response_chunk.tool_call
@@ -2792,6 +2807,8 @@ class Agent:
         # Update the run_response content if streaming as run_response will only contain the last chunk
         if self.stream:
             self.run_response.content = model_response.content
+            if model_response.reasoning_content:
+                self.run_response.reasoning_content = model_response.reasoning_content
 
         # 6. Update Memory
         if self.stream_intermediate_steps:
@@ -3174,6 +3191,35 @@ class Agent:
 
         yield self.run_response
 
+    @overload
+    async def arun(
+            self,
+            message: Optional[Union[str, List, Dict, Message]] = None,
+            *,
+            stream: Literal[False] = False,
+            audio: Optional[Any] = None,
+            images: Optional[Sequence[Any]] = None,
+            videos: Optional[Sequence[Any]] = None,
+            messages: Optional[Sequence[Union[Dict, Message]]] = None,
+            **kwargs: Any,
+    ) -> RunResponse:
+        ...
+
+    @overload
+    async def arun(
+            self,
+            message: Optional[Union[str, List, Dict, Message]] = None,
+            *,
+            stream: Literal[True] = True,
+            audio: Optional[Any] = None,
+            images: Optional[Sequence[Any]] = None,
+            videos: Optional[Sequence[Any]] = None,
+            messages: Optional[Sequence[Union[Dict, Message]]] = None,
+            stream_intermediate_steps: bool = False,
+            **kwargs: Any,
+    ) -> AsyncIterator[RunResponse]:
+        ...
+
     async def arun(
             self,
             message: Optional[Union[str, List, Dict, Message]] = None,
@@ -3185,8 +3231,43 @@ class Agent:
             messages: Optional[Sequence[Union[Dict, Message]]] = None,
             stream_intermediate_steps: bool = False,
             **kwargs: Any,
-    ) -> Any:
-        """Async Run the Agent with a message and return the response."""
+    ) -> Union[RunResponse, AsyncIterator[RunResponse]]:
+        """Async Run the Agent with a message and return the response.
+        
+        This method supports both streaming and non-streaming modes:
+        
+        - stream=False (default): Returns a single RunResponse after completion
+        - stream=True: Returns an AsyncIterator[RunResponse] for streaming output
+        
+        For async streaming, we recommend using `arun_stream()` method instead,
+        which provides a cleaner API without needing to await first.
+        
+        Examples:
+            # Non-streaming (async) - recommended
+            response = await agent.arun("Hello")
+            print(response.content)
+            
+            # Streaming (async) - use arun_stream() instead for cleaner API
+            async for chunk in agent.arun_stream("Hello"):
+                print(chunk.content, end="", flush=True)
+            
+            # Streaming with arun (requires await first)
+            async for chunk in await agent.arun("Hello", stream=True):
+                print(chunk.content, end="", flush=True)
+        
+        Args:
+            message: The message to send to the agent
+            stream: If True, returns an AsyncIterator for streaming responses
+            audio: Optional audio input
+            images: Optional image inputs
+            videos: Optional video inputs
+            messages: Optional list of messages (alternative to single message)
+            stream_intermediate_steps: If True, stream intermediate steps (requires stream=True)
+            **kwargs: Additional arguments passed to the model
+            
+        Returns:
+            RunResponse if stream=False, AsyncIterator[RunResponse] if stream=True
+        """
 
         # If a response_model is set, return the response as a structured output
         if self.response_model is not None and self.parse_response:
@@ -3285,6 +3366,50 @@ class Agent:
                     return final_response
                 else:
                     return await resp.__anext__()
+
+    async def arun_stream(
+            self,
+            message: Optional[Union[str, List, Dict, Message]] = None,
+            *,
+            audio: Optional[Any] = None,
+            images: Optional[Sequence[Any]] = None,
+            videos: Optional[Sequence[Any]] = None,
+            messages: Optional[Sequence[Union[Dict, Message]]] = None,
+            stream_intermediate_steps: bool = False,
+            **kwargs: Any,
+    ) -> AsyncIterator[RunResponse]:
+        """Async streaming run - yields response chunks as they arrive.
+        
+        This is a convenience method that provides a cleaner API for async streaming.
+        Use this method when you want to iterate over streaming responses with `async for`.
+        
+        Examples:
+            async for chunk in agent.arun_stream("Hello"):
+                print(chunk.content, end="", flush=True)
+        
+        Args:
+            message: The message to send to the agent
+            audio: Optional audio input
+            images: Optional image inputs
+            videos: Optional video inputs
+            messages: Optional list of messages (alternative to single message)
+            stream_intermediate_steps: If True, stream intermediate steps
+            **kwargs: Additional arguments passed to the model
+            
+        Yields:
+            RunResponse chunks as they arrive from the model
+        """
+        async for chunk in self._arun(
+            message=message,
+            stream=True,
+            audio=audio,
+            images=images,
+            videos=videos,
+            messages=messages,
+            stream_intermediate_steps=stream_intermediate_steps,
+            **kwargs,
+        ):
+            yield chunk
 
     def rename(self, name: str) -> None:
         """Rename the Agent and save to storage"""
