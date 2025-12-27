@@ -2713,7 +2713,7 @@ class Agent:
                 if user_message_for_memory is not None:
                     # Start memory classification in parallel with LLM response generation
                     memory_task = asyncio.create_task(
-                        self.memory.aclassify_user_input(input=user_message_for_memory.get_content_string())
+                        self.memory.ashould_update_memory(input=user_message_for_memory.get_content_string())
                     )
                     memory_classification_tasks.append((user_message_for_memory, memory_task))
             elif messages is not None and len(messages) > 0:
@@ -2728,7 +2728,7 @@ class Agent:
                             logger.error(f"Error converting message to Message: {e}")
                     if _um:
                         memory_task = asyncio.create_task(
-                            self.memory.aclassify_user_input(input=_um.get_content_string())
+                            self.memory.ashould_update_memory(input=_um.get_content_string())
                         )
                         memory_classification_tasks.append((_um, memory_task))
 
