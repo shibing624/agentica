@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: Unified database module for agentica
 """
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow
+from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow, filter_base64_images
 from agentica.db.sqlite import SqliteDb
 from agentica.db.postgres import PostgresDb
 from agentica.db.memory import InMemoryDb
@@ -17,6 +17,7 @@ __all__ = [
     "MemoryRow",
     "MetricsRow",
     "KnowledgeRow",
+    "filter_base64_images",
     "SqliteDb",
     "PostgresDb",
     "InMemoryDb",

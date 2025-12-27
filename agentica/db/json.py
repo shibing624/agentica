@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime
 from copy import deepcopy
 
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow
+from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow, filter_base64_images
 from agentica.utils.log import logger
 
 
@@ -129,6 +129,12 @@ class JsonDb(BaseDb):
             existing = self._data["sessions"].get(session_row.session_id)
             
             session_dict = session_row.model_dump()
+            # Filter base64 images from stored data
+            session_dict["memory"] = filter_base64_images(session_dict.get("memory"))
+            session_dict["agent_data"] = filter_base64_images(session_dict.get("agent_data"))
+            session_dict["user_data"] = filter_base64_images(session_dict.get("user_data"))
+            session_dict["session_data"] = filter_base64_images(session_dict.get("session_data"))
+            
             if existing:
                 session_dict["created_at"] = existing.get("created_at", now)
                 session_dict["updated_at"] = now
@@ -238,7 +244,7 @@ class JsonDb(BaseDb):
             memory_dict = {
                 "id": memory.id,
                 "user_id": memory.user_id,
-                "memory": memory.memory,
+                "memory": filter_base64_images(memory.memory),
             }
             
             if existing:

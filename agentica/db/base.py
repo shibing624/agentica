@@ -9,6 +9,7 @@ This module provides a unified database abstraction for storing:
 - Metrics: Usage metrics and statistics
 - Knowledge: RAG knowledge documents
 """
+import re
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -16,6 +17,45 @@ from hashlib import md5
 import json
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
+
+# Pattern to match base64 image data (data:image/xxx;base64,...)
+BASE64_IMAGE_PATTERN = re.compile(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+')
+# Placeholder for filtered base64 images
+BASE64_PLACEHOLDER = "[BASE64_IMAGE_FILTERED]"
+
+
+def filter_base64_images(data: Any) -> Any:
+    """
+    Recursively filter base64 image data from nested structures.
+    This prevents storing large base64 strings in database fields.
+
+    Args:
+        data: Any data structure (dict, list, str, etc.)
+
+    Returns:
+        Data with base64 images replaced by placeholder
+    """
+    if data is None:
+        return None
+
+    if isinstance(data, str):
+        # Check if string contains base64 image data
+        if data.startswith("data:image") and ";base64," in data:
+            return BASE64_PLACEHOLDER
+        # Also check for embedded base64 in longer strings
+        return BASE64_IMAGE_PATTERN.sub(BASE64_PLACEHOLDER, data)
+
+    if isinstance(data, dict):
+        result = {}
+        for key, value in data.items():
+            result[key] = filter_base64_images(value)
+        return result
+
+    if isinstance(data, list):
+        return [filter_base64_images(item) for item in data]
+
+    # For other types (int, float, bool, etc.), return as-is
+    return data
 
 
 class SessionRow(BaseModel):

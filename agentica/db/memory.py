@@ -8,7 +8,7 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from copy import deepcopy
 
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow
+from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow, filter_base64_images
 from agentica.utils.log import logger
 
 
@@ -76,16 +76,21 @@ class InMemoryDb(BaseDb):
         now = int(time.time())
         
         existing = self._sessions.get(session_row.session_id)
-        if existing:
-            # Update existing session
-            session_row.created_at = existing.created_at
-            session_row.updated_at = now
-        else:
-            # New session
-            session_row.created_at = session_row.created_at or now
-            session_row.updated_at = now
         
-        self._sessions[session_row.session_id] = deepcopy(session_row)
+        # Filter base64 images before storing
+        filtered_session = SessionRow(
+            session_id=session_row.session_id,
+            agent_id=session_row.agent_id,
+            user_id=session_row.user_id,
+            memory=filter_base64_images(session_row.memory),
+            agent_data=filter_base64_images(session_row.agent_data),
+            user_data=filter_base64_images(session_row.user_data),
+            session_data=filter_base64_images(session_row.session_data),
+            created_at=existing.created_at if existing else (session_row.created_at or now),
+            updated_at=now,
+        )
+        
+        self._sessions[session_row.session_id] = deepcopy(filtered_session)
         logger.debug(f"Session upserted: {session_row.session_id}")
         return session_row
 
@@ -152,14 +157,17 @@ class InMemoryDb(BaseDb):
         now = datetime.now()
         
         existing = self._memories.get(memory.id)
-        if existing:
-            memory.created_at = existing.created_at
-            memory.updated_at = now
-        else:
-            memory.created_at = memory.created_at or now
-            memory.updated_at = now
         
-        self._memories[memory.id] = deepcopy(memory)
+        # Filter base64 images before storing
+        filtered_memory = MemoryRow(
+            id=memory.id,
+            user_id=memory.user_id,
+            memory=filter_base64_images(memory.memory),
+            created_at=existing.created_at if existing else (memory.created_at or now),
+            updated_at=now,
+        )
+        
+        self._memories[memory.id] = deepcopy(filtered_memory)
         logger.debug(f"Memory upserted: {memory.id}")
         return memory
 

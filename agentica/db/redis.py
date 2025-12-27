@@ -8,7 +8,7 @@ import time
 from typing import Optional, List
 from datetime import datetime
 
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow
+from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow, filter_base64_images
 from agentica.utils.log import logger
 
 try:
@@ -168,10 +168,10 @@ class RedisDb(BaseDb):
                 "session_id": session_row.session_id,
                 "agent_id": session_row.agent_id or "",
                 "user_id": session_row.user_id or "",
-                "memory": json.dumps(session_row.memory, ensure_ascii=False) if session_row.memory else "",
-                "agent_data": json.dumps(session_row.agent_data, ensure_ascii=False) if session_row.agent_data else "",
-                "user_data": json.dumps(session_row.user_data, ensure_ascii=False) if session_row.user_data else "",
-                "session_data": json.dumps(session_row.session_data, ensure_ascii=False) if session_row.session_data else "",
+                "memory": json.dumps(filter_base64_images(session_row.memory), ensure_ascii=False) if session_row.memory else "",
+                "agent_data": json.dumps(filter_base64_images(session_row.agent_data), ensure_ascii=False) if session_row.agent_data else "",
+                "user_data": json.dumps(filter_base64_images(session_row.user_data), ensure_ascii=False) if session_row.user_data else "",
+                "session_data": json.dumps(filter_base64_images(session_row.session_data), ensure_ascii=False) if session_row.session_data else "",
                 "created_at": str(created_at),
                 "updated_at": str(now),
             }
@@ -288,7 +288,7 @@ class RedisDb(BaseDb):
             data = {
                 "id": memory.id,
                 "user_id": memory.user_id or "",
-                "memory": json.dumps(memory.memory, ensure_ascii=False),
+                "memory": json.dumps(filter_base64_images(memory.memory), ensure_ascii=False),
                 "created_at": created_at,
                 "updated_at": now.isoformat(),
             }

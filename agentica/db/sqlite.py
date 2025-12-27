@@ -17,7 +17,7 @@ from sqlalchemy.schema import MetaData, Table
 from sqlalchemy.sql.expression import select, delete
 from sqlalchemy.inspection import inspect
 
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow
+from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow, filter_base64_images
 from agentica.utils.log import logger
 
 
@@ -171,10 +171,10 @@ class SqliteDb(BaseDb):
                 values = {
                     "agent_id": session_row.agent_id,
                     "user_id": session_row.user_id,
-                    "memory": json.dumps(session_row.memory, ensure_ascii=False) if session_row.memory else None,
-                    "agent_data": json.dumps(session_row.agent_data, ensure_ascii=False) if session_row.agent_data else None,
-                    "user_data": json.dumps(session_row.user_data, ensure_ascii=False) if session_row.user_data else None,
-                    "session_data": json.dumps(session_row.session_data, ensure_ascii=False) if session_row.session_data else None,
+                    "memory": json.dumps(filter_base64_images(session_row.memory), ensure_ascii=False) if session_row.memory else None,
+                    "agent_data": json.dumps(filter_base64_images(session_row.agent_data), ensure_ascii=False) if session_row.agent_data else None,
+                    "user_data": json.dumps(filter_base64_images(session_row.user_data), ensure_ascii=False) if session_row.user_data else None,
+                    "session_data": json.dumps(filter_base64_images(session_row.session_data), ensure_ascii=False) if session_row.session_data else None,
                     "updated_at": now,
                 }
 
@@ -330,14 +330,14 @@ class SqliteDb(BaseDb):
                 if existing:
                     stmt = table.update().where(table.c.id == memory.id).values(
                         user_id=memory.user_id,
-                        memory=json.dumps(memory.memory, ensure_ascii=False),
+                        memory=json.dumps(filter_base64_images(memory.memory), ensure_ascii=False),
                         updated_at=now,
                     )
                 else:
                     stmt = table.insert().values(
                         id=memory.id,
                         user_id=memory.user_id,
-                        memory=json.dumps(memory.memory, ensure_ascii=False),
+                        memory=json.dumps(filter_base64_images(memory.memory), ensure_ascii=False),
                         created_at=memory.created_at.isoformat() if memory.created_at else now,
                         updated_at=now,
                     )

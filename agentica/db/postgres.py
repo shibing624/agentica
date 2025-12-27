@@ -15,7 +15,7 @@ from sqlalchemy.schema import MetaData, Table
 from sqlalchemy.sql.expression import select, delete
 from sqlalchemy.inspection import inspect
 
-from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow
+from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow, KnowledgeRow, filter_base64_images
 from agentica.utils.log import logger
 
 
@@ -167,10 +167,10 @@ class PostgresDb(BaseDb):
                     session_id=session_row.session_id,
                     agent_id=session_row.agent_id,
                     user_id=session_row.user_id,
-                    memory=session_row.memory,
-                    agent_data=session_row.agent_data,
-                    user_data=session_row.user_data,
-                    session_data=session_row.session_data,
+                    memory=filter_base64_images(session_row.memory),
+                    agent_data=filter_base64_images(session_row.agent_data),
+                    user_data=filter_base64_images(session_row.user_data),
+                    session_data=filter_base64_images(session_row.session_data),
                     created_at=session_row.created_at or now,
                     updated_at=now,
                 )
@@ -323,7 +323,7 @@ class PostgresDb(BaseDb):
                 stmt = postgresql.insert(table).values(
                     id=memory.id,
                     user_id=memory.user_id,
-                    memory=memory.memory,
+                    memory=filter_base64_images(memory.memory),
                 )
 
                 stmt = stmt.on_conflict_do_update(
