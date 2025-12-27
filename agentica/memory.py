@@ -1167,18 +1167,65 @@ class AgentMemory(BaseModel):
             A list of Messages in the last_n runs.
         """
         def clean_message_for_history(msg: Message) -> Message:
-            """Clean a message by removing filtered media placeholders."""
+            """Clean a message by removing filtered media placeholders.
+            
+            This handles two scenarios:
+            1. images/audio/videos fields containing placeholders
+            2. content field containing image_url/input_audio blocks with placeholder URLs
+            """
             # Create a copy to avoid modifying the original
             cleaned_msg = msg.model_copy(deep=True)
             
-            # Clean content field if it contains placeholders
+            # Clean content field - handle both string and list formats
             if cleaned_msg.content is not None:
-                cleaned_content = clean_media_placeholders(cleaned_msg.content)
-                # If content is a list and becomes empty after cleaning, set to None or empty string
-                if cleaned_content is None:
-                    cleaned_msg.content = ""
-                else:
-                    cleaned_msg.content = cleaned_content
+                if isinstance(cleaned_msg.content, list):
+                    # Content is a list of content blocks (text, image_url, input_audio, etc.)
+                    cleaned_content_list = []
+                    for item in cleaned_msg.content:
+                        if isinstance(item, dict):
+                            item_type = item.get("type", "")
+                            # Check image_url blocks
+                            if item_type == "image_url":
+                                image_url_data = item.get("image_url", {})
+                                url = image_url_data.get("url", "") if isinstance(image_url_data, dict) else ""
+                                if BASE64_PLACEHOLDER in str(url):
+                                    continue  # Skip this image_url block entirely
+                            # Check input_audio blocks
+                            elif item_type == "input_audio":
+                                audio_data = item.get("input_audio", {})
+                                data = audio_data.get("data", "") if isinstance(audio_data, dict) else ""
+                                if BASE64_PLACEHOLDER in str(data):
+                                    continue  # Skip this input_audio block entirely
+                            # Check text blocks for placeholders
+                            elif item_type == "text":
+                                text = item.get("text", "")
+                                if BASE64_PLACEHOLDER in str(text):
+                                    continue  # Skip text blocks containing placeholders
+                            # For other types, check if they contain placeholders
+                            else:
+                                if BASE64_PLACEHOLDER in str(item):
+                                    continue
+                            cleaned_content_list.append(item)
+                        elif isinstance(item, str):
+                            if BASE64_PLACEHOLDER not in item:
+                                cleaned_content_list.append(item)
+                        else:
+                            cleaned_content_list.append(item)
+                    
+                    # If only text blocks remain, simplify to string if possible
+                    if len(cleaned_content_list) == 1 and isinstance(cleaned_content_list[0], dict):
+                        if cleaned_content_list[0].get("type") == "text":
+                            cleaned_msg.content = cleaned_content_list[0].get("text", "")
+                        else:
+                            cleaned_msg.content = cleaned_content_list
+                    elif len(cleaned_content_list) == 0:
+                        cleaned_msg.content = ""
+                    else:
+                        cleaned_msg.content = cleaned_content_list
+                elif isinstance(cleaned_msg.content, str):
+                    # String content - check for placeholders
+                    if BASE64_PLACEHOLDER in cleaned_msg.content:
+                        cleaned_msg.content = ""
             
             # Clear images/audio/videos if they contain placeholders
             if cleaned_msg.images is not None:
