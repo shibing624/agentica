@@ -18,41 +18,92 @@ import json
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 
-# Pattern to match base64 image data (data:image/xxx;base64,...)
-BASE64_IMAGE_PATTERN = re.compile(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+')
-# Placeholder for filtered base64 images
-BASE64_PLACEHOLDER = "[BASE64_IMAGE_FILTERED]"
+# Pattern to match base64 data (data:image/xxx;base64,..., data:audio/xxx;base64,..., data:video/xxx;base64,...)
+BASE64_MEDIA_PATTERN = re.compile(r'data:(?:image|audio|video)/[^;]+;base64,[A-Za-z0-9+/=]+')
+# Placeholder for filtered base64 media
+BASE64_PLACEHOLDER = "[BASE64_MEDIA_FILTERED]"
 
 
-def filter_base64_images(data: Any) -> Any:
+def filter_base64_media(data: Any) -> Any:
     """
-    Recursively filter base64 image data from nested structures.
+    Recursively filter base64 media data (image/audio/video) from nested structures.
     This prevents storing large base64 strings in database fields.
 
     Args:
         data: Any data structure (dict, list, str, etc.)
 
     Returns:
-        Data with base64 images replaced by placeholder
+        Data with base64 media replaced by placeholder
     """
     if data is None:
         return None
 
     if isinstance(data, str):
-        # Check if string contains base64 image data
-        if data.startswith("data:image") and ";base64," in data:
+        # Check if string is a base64 media data URI
+        if data.startswith(("data:image", "data:audio", "data:video")) and ";base64," in data:
             return BASE64_PLACEHOLDER
         # Also check for embedded base64 in longer strings
-        return BASE64_IMAGE_PATTERN.sub(BASE64_PLACEHOLDER, data)
+        return BASE64_MEDIA_PATTERN.sub(BASE64_PLACEHOLDER, data)
 
     if isinstance(data, dict):
         result = {}
         for key, value in data.items():
-            result[key] = filter_base64_images(value)
+            result[key] = filter_base64_media(value)
         return result
 
     if isinstance(data, list):
-        return [filter_base64_images(item) for item in data]
+        return [filter_base64_media(item) for item in data]
+
+    # For other types (int, float, bool, etc.), return as-is
+    return data
+
+
+# Alias for backward compatibility
+filter_base64_images = filter_base64_media
+
+
+def clean_media_placeholders(data: Any) -> Any:
+    """
+    Recursively remove items containing BASE64_PLACEHOLDER from nested structures.
+    Used to clean history messages before sending to model API.
+
+    Args:
+        data: Any data structure (dict, list, str, etc.)
+
+    Returns:
+        Data with placeholder items removed (not just replaced)
+    """
+    if data is None:
+        return None
+
+    if isinstance(data, str):
+        # If the string is exactly the placeholder, return None to signal removal
+        if data == BASE64_PLACEHOLDER:
+            return None
+        # If string contains placeholder, return None
+        if BASE64_PLACEHOLDER in data:
+            return None
+        return data
+
+    if isinstance(data, dict):
+        result = {}
+        for key, value in data.items():
+            cleaned = clean_media_placeholders(value)
+            # Skip keys with None values that were placeholders
+            if cleaned is not None:
+                result[key] = cleaned
+            # Special handling for image_url type - remove entire item if url is None
+            elif key == "url" and value and BASE64_PLACEHOLDER in str(value):
+                return None  # Signal to remove the entire dict
+        return result if result else None
+
+    if isinstance(data, list):
+        result = []
+        for item in data:
+            cleaned = clean_media_placeholders(item)
+            if cleaned is not None:
+                result.append(cleaned)
+        return result if result else None
 
     # For other types (int, float, bool, etc.), return as-is
     return data

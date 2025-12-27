@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional, cast, Tuple, Literal
 from copy import deepcopy
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from agentica.db.base import BaseDb, MemoryRow
+from agentica.db.base import BaseDb, MemoryRow, clean_media_placeholders, BASE64_PLACEHOLDER
 from agentica.model.openai import OpenAIChat
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -1166,6 +1166,56 @@ class AgentMemory(BaseModel):
         Returns:
             A list of Messages in the last_n runs.
         """
+        def clean_message_for_history(msg: Message) -> Message:
+            """Clean a message by removing filtered media placeholders."""
+            # Create a copy to avoid modifying the original
+            cleaned_msg = msg.model_copy(deep=True)
+            
+            # Clean content field if it contains placeholders
+            if cleaned_msg.content is not None:
+                cleaned_content = clean_media_placeholders(cleaned_msg.content)
+                # If content is a list and becomes empty after cleaning, set to None or empty string
+                if cleaned_content is None:
+                    cleaned_msg.content = ""
+                else:
+                    cleaned_msg.content = cleaned_content
+            
+            # Clear images/audio/videos if they contain placeholders
+            if cleaned_msg.images is not None:
+                cleaned_images = []
+                for img in cleaned_msg.images:
+                    if isinstance(img, str) and BASE64_PLACEHOLDER in img:
+                        continue  # Skip filtered images
+                    elif isinstance(img, dict):
+                        cleaned = clean_media_placeholders(img)
+                        if cleaned is not None:
+                            cleaned_images.append(cleaned)
+                    else:
+                        cleaned_images.append(img)
+                cleaned_msg.images = cleaned_images if cleaned_images else None
+            
+            if cleaned_msg.audio is not None:
+                if isinstance(cleaned_msg.audio, str) and BASE64_PLACEHOLDER in cleaned_msg.audio:
+                    cleaned_msg.audio = None
+                elif isinstance(cleaned_msg.audio, dict):
+                    cleaned = clean_media_placeholders(cleaned_msg.audio)
+                    cleaned_msg.audio = cleaned
+            
+            if cleaned_msg.videos is not None:
+                cleaned_videos = []
+                for vid in cleaned_msg.videos:
+                    if isinstance(vid, str) and BASE64_PLACEHOLDER in vid:
+                        continue
+                    elif isinstance(vid, dict):
+                        cleaned = clean_media_placeholders(vid)
+                        if cleaned is not None:
+                            cleaned_videos.append(cleaned)
+                    else:
+                        cleaned_videos.append(vid)
+                cleaned_msg.videos = cleaned_videos if cleaned_videos else None
+            
+            return cleaned_msg
+
         if last_n is None:
             logger.debug("Getting messages from all previous runs")
             messages_from_all_history = []
@@ -1175,7 +1225,9 @@ class AgentMemory(BaseModel):
                         prev_run_messages = [m for m in prev_run.response.messages if m.role != skip_role]
                     else:
                         prev_run_messages = prev_run.response.messages
-                    messages_from_all_history.extend(prev_run_messages)
+                    # Clean each message to remove media placeholders
+                    cleaned_messages = [clean_message_for_history(m) for m in prev_run_messages]
+                    messages_from_all_history.extend(cleaned_messages)
             logger.debug(f"Messages from previous runs: {len(messages_from_all_history)}")
             return messages_from_all_history
 
@@ -1187,7 +1239,9 @@ class AgentMemory(BaseModel):
                     prev_run_messages = [m for m in prev_run.response.messages if m.role != skip_role]
                 else:
                     prev_run_messages = prev_run.response.messages
-                messages_from_last_n_history.extend(prev_run_messages)
+                # Clean each message to remove media placeholders
+                cleaned_messages = [clean_message_for_history(m) for m in prev_run_messages]
+                messages_from_last_n_history.extend(cleaned_messages)
         logger.debug(f"Messages from last {last_n} runs: {len(messages_from_last_n_history)}")
         return messages_from_last_n_history
 
