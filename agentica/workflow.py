@@ -371,7 +371,7 @@ class Workflow(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
-        for field_name, field in self.__fields__.items():
+        for field_name in self.__class__.model_fields:
             value = getattr(self, field_name)
             if isinstance(value, Agent):
                 value.session_id = self.session_id

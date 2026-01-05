@@ -162,7 +162,7 @@ class Agent:
     # Enable multi-round strategy for better search accuracy
     enable_multi_round: bool = False
     # Maximum number of rounds for multi-round strategy
-    max_rounds: int = 100
+    max_rounds: int = 10
     # Maximum number of tokens to use in the model input
     max_tokens: int = 128000
 
@@ -2204,6 +2204,61 @@ class Agent:
         if not self.stream:
             yield self.run_response
 
+    # =============================================================================
+    # Multi-round Hook Methods (can be overridden by subclasses like DeepAgent)
+    # =============================================================================
+
+    def _on_pre_step(
+            self,
+            step: int,
+            messages: List[Message]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Hook called before each step in multi-round execution.
+        
+        Override this method in subclasses to implement custom pre-step logic
+        such as context overflow handling.
+        
+        Args:
+            step: Current step number
+            messages: Current message list
+            
+        Returns:
+            (should_force_answer, optional_warning_message)
+            - should_force_answer: If True, stop execution and force final answer
+            - optional_warning_message: Message to inject into context (e.g., warnings)
+        """
+        return False, None
+
+    def _on_tool_call(self, tool_name: str, step: int) -> Optional[str]:
+        """
+        Hook called when a tool is about to be executed.
+        
+        Override this method in subclasses to implement custom tool call logic
+        such as repetitive behavior detection.
+        
+        Args:
+            tool_name: Name of the tool being called
+            step: Current step number
+            
+        Returns:
+            Optional warning message to inject into context
+        """
+        return None
+
+    def _on_post_step(self, step: int, messages: List[Message]) -> None:
+        """
+        Hook called after each step in multi-round execution.
+        
+        Override this method in subclasses to implement custom post-step logic
+        such as reflection prompts.
+        
+        Args:
+            step: Current step number
+            messages: Current message list (can be modified in place)
+        """
+        pass
+
     def _run_multi_round(self, message, stream, audio, images, videos, messages, stream_intermediate_steps, **kwargs):
         """Run the Agent with a multi-round strategy for better search accuracy.
 
@@ -2263,7 +2318,15 @@ class Agent:
             for current_round in range(1, self.max_rounds + 1):
                 logger.debug(f"Turn {current_round}/{self.max_rounds}")
 
-                # Token limit check
+                # Hook: Pre-step processing (for DeepAgent context management)
+                should_force_answer, warning_msg = self._on_pre_step(current_round, messages_for_model)
+                if warning_msg:
+                    messages_for_model.append(Message(role="system", content=warning_msg))
+                if should_force_answer:
+                    logger.warning(f"Force answer triggered at turn {current_round}")
+                    break
+
+                # Token limit check (legacy, kept for backward compatibility)
                 total_content = " ".join([str(msg.content or "") for msg in messages_for_model])
                 if len(total_content) > self.max_tokens * 3:
                     logger.warning(f"Token limit approaching, stopping at turn {current_round}")
@@ -2320,6 +2383,11 @@ class Agent:
                         func_args_str = func_info.get("arguments", "{}")
 
                         logger.debug(f"Tool call: {func_name}({func_args_str})")
+
+                        # Hook: Check for repetitive behavior (for DeepAgent)
+                        repetition_warning = self._on_tool_call(func_name, current_round)
+                        if repetition_warning:
+                            messages_for_model.append(Message(role="system", content=repetition_warning))
 
                         # Yield tool call event
                         yield RunResponse(
@@ -2403,6 +2471,9 @@ class Agent:
                         ):
                             self.compression_manager.compress(messages_for_model)
                             logger.debug(f"Compressed tool results, stats: {self.compression_manager.get_stats()}")
+
+                    # Hook: Post-step processing (for DeepAgent reflection)
+                    self._on_post_step(current_round, messages_for_model)
                 else:
                     # No tool calls - task completed
                     logger.debug("No tool calls, task completed")
@@ -3013,6 +3084,11 @@ class Agent:
 
                         logger.debug(f"Tool call: {func_name}({func_args_str})")
 
+                        # Hook: Check for repetitive behavior (for DeepAgent)
+                        repetition_warning = self._on_tool_call(func_name, current_round)
+                        if repetition_warning:
+                            messages_for_model.append(Message(role="system", content=repetition_warning))
+
                         # Yield tool call event
                         yield RunResponse(
                             content=f"{func_name}({func_args_str[:100]}{'...' if len(func_args_str) > 100 else ''})",
@@ -3098,6 +3174,9 @@ class Agent:
                         ):
                             self.compression_manager.compress(messages_for_model)
                             logger.debug(f"Compressed tool results, stats: {self.compression_manager.get_stats()}")
+
+                    # Hook: Post-step processing (for DeepAgent reflection)
+                    self._on_post_step(current_round, messages_for_model)
                 else:
                     # No tool calls - task completed
                     logger.debug("No tool calls, task completed")

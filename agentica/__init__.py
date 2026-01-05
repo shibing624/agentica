@@ -161,7 +161,7 @@ from agentica.utils.tokens import (
 
 # agent
 from agentica.agent import Agent
-from agentica.deep_agent import DeepAgent
+from agentica.deep_agent import DeepAgent, DeepResearchAgent
 from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow
 from agentica.workflow_session import WorkflowSession
@@ -176,6 +176,9 @@ from agentica.deep_tools import (
     BuiltinTaskTool,
     get_builtin_tools,
 )
+
+# human-in-the-loop tool
+from agentica.tools.user_input_tool import UserInputTool, UserInputRequired
 
 # guardrails
 from agentica.guardrails import (
