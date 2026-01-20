@@ -30,8 +30,18 @@ class TestDeepAgent(unittest.TestCase):
         )
 
         self.assertEqual(agent.name, "TestAgent")
-        self.assertTrue(agent.enable_multi_round)
+        self.assertFalse(agent.enable_multi_round)  # Default is False for DeepAgent
         self.assertEqual(agent.max_rounds, 15)  # Default
+        self.assertFalse(agent.enable_deep_research)
+
+    def test_deep_agent_with_multi_round_enabled(self):
+        """Test DeepAgent with enable_multi_round explicitly set to True."""
+        agent = DeepAgent(
+            name="TestAgent",
+            enable_multi_round=True,
+        )
+
+        self.assertTrue(agent.enable_multi_round)
         self.assertFalse(agent.enable_deep_research)
 
     def test_deep_agent_with_deep_research(self):

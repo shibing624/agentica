@@ -156,6 +156,8 @@ def parse_args():
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
     parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
     parser.add_argument('--work_dir', type=str, help='Working directory for file operations', default=None)
+    parser.add_argument('--enable_multi_round', type=lambda x: x.lower() in ('true', '1', 'yes'),
+                        help='Enable multi-round conversation mode (default: True)', default=None)
     parser.add_argument('--tools', nargs='*',
                         choices=list(TOOL_REGISTRY.keys()),
                         help='Additional tools to enable (on top of DeepAgent built-in tools)')
@@ -234,14 +236,21 @@ def _create_agent(agent_config: dict, extra_tools: Optional[List] = None):
         temperature=agent_config.get("temperature"),
     )
 
-    new_agent = DeepAgent(
-        model=model,
-        work_dir=agent_config.get("work_dir"),
-        tools=extra_tools,  # Additional tools on top of built-in tools
-        add_datetime_to_instructions=True,
-        add_history_to_messages=True,
-        debug_mode=agent_config["debug_mode"]
-    )
+    # Build kwargs for DeepAgent
+    deep_agent_kwargs = {
+        "model": model,
+        "work_dir": agent_config.get("work_dir"),
+        "tools": extra_tools,  # Additional tools on top of built-in tools
+        "add_datetime_to_instructions": True,
+        "add_history_to_messages": True,
+        "debug_mode": agent_config["debug_mode"],
+    }
+
+    # Only pass enable_multi_round if explicitly set by user
+    if agent_config.get("enable_multi_round") is not None:
+        deep_agent_kwargs["enable_multi_round"] = agent_config["enable_multi_round"]
+
+    new_agent = DeepAgent(**deep_agent_kwargs)
     return new_agent
 
 
@@ -901,7 +910,7 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
 
 def main():
     args = parse_args()
-    
+
     # Store agent configuration parameters
     agent_config = {
         "model_provider": args.model_provider,
@@ -912,6 +921,7 @@ def main():
         "temperature": args.temperature,
         "debug_mode": args.verbose > 0,
         "work_dir": args.work_dir,
+        "enable_multi_round": args.enable_multi_round,
     }
     extra_tool_names = list(args.tools) if args.tools else None
 

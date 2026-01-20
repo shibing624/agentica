@@ -318,14 +318,15 @@ class DeepAgent(Agent):
             current_date = datetime.now().strftime("%Y-%m-%d")
             final_system_prompt = DEEP_RESEARCH_SYSTEM_PROMPT.format(current_date=current_date)
 
-        # DeepAgent always enables multi-round by default
-        # When enable_deep_research=True, multi-round is required for iterative research
-        if 'enable_multi_round' not in kwargs:
+        # Multi-round configuration:
+        # - When enable_deep_research=True, multi-round is required for iterative research
+        # - When enable_deep_research=False, user can choose (defaults to False for DeepAgent)
+        if enable_deep_research:
+            # Deep research mode requires multi-round for iterative search and validation
+            if kwargs.get('enable_multi_round') is False:
+                logger.warning("enable_deep_research=True requires enable_multi_round=True, forcing enable_multi_round=True")
             kwargs['enable_multi_round'] = True
-        elif enable_deep_research and kwargs.get('enable_multi_round') is False:
-            # Warn user if they try to disable multi-round with deep research enabled
-            logger.warning("enable_deep_research=True requires enable_multi_round=True, forcing enable_multi_round=True")
-            kwargs['enable_multi_round'] = True
+        # Otherwise, respect user's setting or default to False
         
         # Default max_rounds to 15 if not specified
         if 'max_rounds' not in kwargs:
