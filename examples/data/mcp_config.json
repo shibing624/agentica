@@ -1,10 +1,10 @@
 {
   "mcpServers": {
     "weather": {
-      "command": "uv run weather-forecast-server"
+      "command": "uvx weather-forecast-server"
     },
     "minimax": {
-      "command": "uv run minimax-mcp"
+      "command": "uvx minimax-mcp"
     }
   }
 }
