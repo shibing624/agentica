@@ -198,7 +198,7 @@ Agentica 与 [ChatPilot](https://github.com/shibing624/ChatPilot) 完全兼容�
 ## 💬 社区与支持
 
 *   **GitHub Issues**：有任何问题或功能请求？[提交 issue](https://github.com/shibing624/agentica/issues)。
-*   **微信**：加入我们的开发者社群！添加微信号 `xuming624`，并备注"agentica"，即可加入群聊。
+*   **微信**：加入我们的开发者社群！添加微信号 `xuming624`，并备注"llm"，即可加入大模型技术交流群。
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
 
