@@ -1542,3 +1542,311 @@ class WorkflowMemory(BaseModel):
         # clear the new memory to remove any references to the old memory
         new_memory.clear()
         return new_memory
+
+
+class MemoryChunk(BaseModel):
+    """A chunk of memory content for search results."""
+
+    content: str = Field(description="The memory content")
+    file_path: str = Field(description="Path to the source file")
+    start_line: int = Field(default=1, description="Starting line number in the file")
+    end_line: int = Field(default=1, description="Ending line number in the file")
+    score: float = Field(default=0.0, description="Relevance score")
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class WorkspaceMemorySearch(BaseModel):
+    """
+    Workspace memory search for searching Markdown files in a workspace.
+
+    Supports keyword search and vector search (hybrid search) when an
+    embedding model is provided.
+
+    Example:
+        >>> from agentica.memory import WorkspaceMemorySearch
+        >>> from pathlib import Path
+        >>>
+        >>> searcher = WorkspaceMemorySearch(workspace_path=Path("~/.agentica/workspace"))
+        >>> searcher.index()
+        >>> results = searcher.search("project deadline")
+        >>>
+        >>> # With vector search (requires OpenAI API key)
+        >>> results = searcher.search_hybrid("project deadline")
+    """
+
+    workspace_path: str = Field(description="Path to the workspace directory")
+    chunk_size: int = Field(default=400, description="Size of each chunk in characters")
+    chunk_overlap: int = Field(default=80, description="Overlap between chunks")
+    chunks: List[MemoryChunk] = Field(default_factory=list, description="Indexed memory chunks")
+    # Embeddings cache: chunk index -> embedding vector
+    _embeddings: Dict[int, List[float]] = {}
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def _get_path(self) -> "Path":
+        """Get workspace path as Path object."""
+        from pathlib import Path
+        return Path(self.workspace_path).expanduser().resolve()
+
+    def index(self, patterns: Optional[List[str]] = None) -> int:
+        """
+        Index Markdown files in the workspace.
+
+        Args:
+            patterns: Glob patterns for files to index.
+                     Default: ["MEMORY.md", "memory/*.md"]
+
+        Returns:
+            Number of chunks indexed
+        """
+        from pathlib import Path as PathLib
+
+        if patterns is None:
+            patterns = ["MEMORY.md", "memory/*.md"]
+
+        self.chunks = []
+        workspace = self._get_path()
+
+        for pattern in patterns:
+            for file_path in workspace.glob(pattern):
+                if file_path.is_file() and file_path.suffix == ".md":
+                    self._index_file(file_path)
+
+        logger.debug(f"Indexed {len(self.chunks)} chunks from workspace {workspace}")
+        return len(self.chunks)
+
+    def _index_file(self, file_path: "Path"):
+        """Index a single file."""
+        from pathlib import Path as PathLib
+
+        try:
+            content = file_path.read_text(encoding="utf-8")
+            lines = content.split("\n")
+            new_chunks = self._chunk_lines(
+                lines,
+                str(file_path.relative_to(self._get_path()))
+            )
+            self.chunks.extend(new_chunks)
+        except Exception as e:
+            logger.warning(f"Failed to index file {file_path}: {e}")
+
+    def _chunk_lines(self, lines: List[str], file_path: str) -> List[MemoryChunk]:
+        """Split file into chunks by lines."""
+        chunks = []
+        chunk_lines = 20  # Approximately 20 lines per chunk
+        overlap_lines = 4  # 4 lines overlap
+
+        i = 0
+        while i < len(lines):
+            end = min(i + chunk_lines, len(lines))
+            chunk_content = "\n".join(lines[i:end])
+
+            if chunk_content.strip():
+                chunks.append(MemoryChunk(
+                    content=chunk_content,
+                    file_path=file_path,
+                    start_line=i + 1,
+                    end_line=end,
+                    score=0.0,
+                ))
+
+            i = end - overlap_lines if end < len(lines) else len(lines)
+
+        return chunks
+
+    def search(
+        self,
+        query: str,
+        limit: int = 5,
+        min_score: float = 0.3,
+    ) -> List[MemoryChunk]:
+        """
+        Search memory using keyword matching.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            min_score: Minimum match score (0-1)
+
+        Returns:
+            List of matching memory chunks, sorted by relevance
+        """
+        if not self.chunks:
+            return []
+
+        query_lower = query.lower()
+        query_words = query_lower.split()
+        results = []
+
+        for chunk in self.chunks:
+            content_lower = chunk.content.lower()
+
+            # Calculate simple match score
+            score = 0.0
+            for word in query_words:
+                if word in content_lower:
+                    score += 1.0 / len(query_words)
+
+            if score >= min_score:
+                # Create a copy with updated score
+                result = MemoryChunk(
+                    content=chunk.content,
+                    file_path=chunk.file_path,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                    score=score,
+                )
+                results.append(result)
+
+        # Sort by score descending
+        results.sort(key=lambda x: -x.score)
+        return results[:limit]
+
+    def search_hybrid(
+        self,
+        query: str,
+        limit: int = 5,
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+        embedder: Optional[Any] = None,
+    ) -> List[MemoryChunk]:
+        """
+        Hybrid search combining vector similarity and keyword matching.
+
+        Uses embedding model for vector search if available, otherwise
+        falls back to keyword search only.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results
+            vector_weight: Weight for vector similarity score (0-1)
+            keyword_weight: Weight for keyword matching score (0-1)
+            embedder: Optional embedding model instance (e.g., OpenAIEmb).
+                     If None, will try to create OpenAIEmb (requires OPENAI_API_KEY).
+
+        Returns:
+            List of matching memory chunks, sorted by combined score
+        """
+        if not self.chunks:
+            return []
+
+        # Get keyword search results
+        keyword_results = self.search(query, limit=len(self.chunks), min_score=0.0)
+        keyword_scores = {r.file_path + str(r.start_line): r.score for r in keyword_results}
+
+        # Try to do vector search
+        vector_scores: Dict[str, float] = {}
+        try:
+            # Initialize embedder if not provided
+            if embedder is None:
+                from agentica.emb.openai_emb import OpenAIEmb
+                embedder = OpenAIEmb()
+
+            # Get query embedding
+            query_embedding = embedder.get_embedding(query)
+            if not query_embedding:
+                logger.warning("Failed to get query embedding, falling back to keyword search")
+                return self.search(query, limit)
+
+            # Compute embeddings for chunks if not cached
+            self._compute_embeddings(embedder)
+
+            # Calculate cosine similarity for each chunk
+            import math
+
+            def cosine_similarity(a: List[float], b: List[float]) -> float:
+                if not a or not b or len(a) != len(b):
+                    return 0.0
+                dot_product = sum(x * y for x, y in zip(a, b))
+                norm_a = math.sqrt(sum(x * x for x in a))
+                norm_b = math.sqrt(sum(x * x for x in b))
+                if norm_a == 0 or norm_b == 0:
+                    return 0.0
+                return dot_product / (norm_a * norm_b)
+
+            for i, chunk in enumerate(self.chunks):
+                if i in self._embeddings:
+                    chunk_key = chunk.file_path + str(chunk.start_line)
+                    similarity = cosine_similarity(query_embedding, self._embeddings[i])
+                    # Normalize similarity from [-1, 1] to [0, 1]
+                    vector_scores[chunk_key] = (similarity + 1) / 2
+
+        except ImportError:
+            logger.warning("OpenAI not available, falling back to keyword search")
+            return self.search(query, limit)
+        except Exception as e:
+            logger.warning(f"Vector search failed: {e}, falling back to keyword search")
+            return self.search(query, limit)
+
+        # Combine scores
+        results = []
+        for chunk in self.chunks:
+            chunk_key = chunk.file_path + str(chunk.start_line)
+            kw_score = keyword_scores.get(chunk_key, 0.0)
+            vec_score = vector_scores.get(chunk_key, 0.0)
+
+            # Weighted combination
+            combined_score = (keyword_weight * kw_score) + (vector_weight * vec_score)
+
+            if combined_score > 0:
+                result = MemoryChunk(
+                    content=chunk.content,
+                    file_path=chunk.file_path,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                    score=combined_score,
+                )
+                results.append(result)
+
+        # Sort by combined score descending
+        results.sort(key=lambda x: -x.score)
+        return results[:limit]
+
+    def _compute_embeddings(self, embedder: Any) -> None:
+        """
+        Compute and cache embeddings for all chunks.
+
+        Args:
+            embedder: Embedding model instance with get_embedding() method
+        """
+        for i, chunk in enumerate(self.chunks):
+            if i not in self._embeddings:
+                try:
+                    embedding = embedder.get_embedding(chunk.content)
+                    if embedding:
+                        self._embeddings[i] = embedding
+                except Exception as e:
+                    logger.warning(f"Failed to compute embedding for chunk {i}: {e}")
+
+    def clear(self):
+        """Clear all indexed chunks."""
+        self.chunks = []
+
+    def get_context(self, query: str, max_chars: int = 2000) -> str:
+        """
+        Get relevant memory context for a query.
+
+        Useful for injecting context into prompts.
+
+        Args:
+            query: Search query
+            max_chars: Maximum characters to return
+
+        Returns:
+            Formatted context string
+        """
+        results = self.search(query, limit=10)
+        if not results:
+            return ""
+
+        context_parts = []
+        total_chars = 0
+
+        for chunk in results:
+            if total_chars + len(chunk.content) > max_chars:
+                break
+            context_parts.append(f"[{chunk.file_path}:{chunk.start_line}]\n{chunk.content}")
+            total_chars += len(chunk.content)
+
+        return "\n\n---\n\n".join(context_parts)

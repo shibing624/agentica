@@ -34,9 +34,15 @@ class Skill:
     name: My Skill
     description: A skill for doing something useful.
     license: MIT
+    trigger: /myskill
+    requires:
+      - shell
+      - python
     allowed-tools:
       - shell
       - python
+    metadata:
+      emoji: "🔧"
     ---
 
     # My Skill
@@ -48,6 +54,18 @@ class Skill:
     1. First, do this...
     2. Then, do that...
     ```
+
+    Attributes:
+        name: Skill name (required)
+        description: Skill description (required)
+        content: The markdown body with instructions
+        path: Path to the skill directory
+        license: Optional license information
+        trigger: Optional trigger command (e.g., /commit)
+        requires: List of required tools or commands
+        allowed_tools: List of tools allowed for this skill
+        metadata: Additional metadata from frontmatter
+        location: Source location type (project, user, managed)
     """
 
     name: str
@@ -57,6 +75,8 @@ class Skill:
 
     # Optional metadata from frontmatter
     license: Optional[str] = None
+    trigger: Optional[str] = None  # Trigger command like /commit
+    requires: List[str] = field(default_factory=list)  # Required tools/commands
     allowed_tools: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -96,6 +116,8 @@ class Skill:
             content=body.strip(),
             path=skill_md_path.parent,
             license=frontmatter.get('license'),
+            trigger=frontmatter.get('trigger'),
+            requires=frontmatter.get('requires', []) or [],
             allowed_tools=frontmatter.get('allowed-tools', []) or [],
             metadata=frontmatter.get('metadata', {}) or {},
             location=location,
@@ -184,10 +206,26 @@ Base directory: {self.path}
             "content": self.content,
             "path": str(self.path),
             "license": self.license,
+            "trigger": self.trigger,
+            "requires": self.requires,
             "allowed_tools": self.allowed_tools,
             "metadata": self.metadata,
             "location": self.location,
         }
+
+    def matches_trigger(self, text: str) -> bool:
+        """
+        Check if the given text matches this skill's trigger.
+
+        Args:
+            text: User input text to check
+
+        Returns:
+            True if text starts with this skill's trigger command
+        """
+        if not self.trigger:
+            return False
+        return text.strip().startswith(self.trigger)
 
     def __repr__(self) -> str:
         return f"Skill(name={self.name!r}, location={self.location!r})"

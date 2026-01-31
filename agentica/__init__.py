@@ -9,6 +9,7 @@ from agentica.config import (
     AGENTICA_DOTENV_PATH,
     AGENTICA_LOG_LEVEL,
     AGENTICA_LOG_FILE,
+    AGENTICA_WORKSPACE_DIR,
 )  # noqa, isort: skip
 from agentica.utils.log import set_log_level_to_debug, logger, set_log_level_to_info
 from agentica.utils.io import write_audio_to_file
@@ -57,6 +58,8 @@ from agentica.memory import (
     AgentMemory,
     WorkflowRun,
     WorkflowMemory,
+    MemoryChunk,
+    WorkspaceMemorySearch,
 )
 
 # database
@@ -165,6 +168,9 @@ from agentica.deep_agent import DeepAgent, DeepResearchAgent
 from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow
 from agentica.workflow_session import WorkflowSession
+
+# workspace
+from agentica.workspace import Workspace, WorkspaceConfig
 
 # built-in tools for DeepAgent
 from agentica.deep_tools import (

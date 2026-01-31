@@ -23,6 +23,7 @@ class SkillRegistry:
         "project": 0,
         "user": 1,
         "managed": 2,
+        "builtin": 3,
     }
 
     def __init__(self):
@@ -31,6 +32,7 @@ class SkillRegistry:
             "project": [],
             "user": [],
             "managed": [],
+            "builtin": [],
         }
 
     def register(self, skill: Skill) -> bool:
@@ -106,6 +108,50 @@ class SkillRegistry:
             List of skills from that location
         """
         return self._skills_by_location.get(location, [])
+
+    def match_trigger(self, text: str) -> Optional[Skill]:
+        """
+        Find a skill that matches the given trigger text.
+
+        Args:
+            text: User input text (e.g., "/commit fix bug")
+
+        Returns:
+            Matching Skill or None if no match found
+        """
+        text = text.strip()
+        for skill in self._skills.values():
+            if skill.matches_trigger(text):
+                return skill
+        return None
+
+    def get_skill_by_trigger(self, trigger: str) -> Optional[Skill]:
+        """
+        Get a skill by its trigger command.
+
+        Args:
+            trigger: Trigger command (e.g., "/commit")
+
+        Returns:
+            Skill with matching trigger or None
+        """
+        for skill in self._skills.values():
+            if skill.trigger == trigger:
+                return skill
+        return None
+
+    def list_triggers(self) -> Dict[str, str]:
+        """
+        Get all registered trigger commands.
+
+        Returns:
+            Dict mapping trigger to skill name
+        """
+        triggers = {}
+        for skill in self._skills.values():
+            if skill.trigger:
+                triggers[skill.trigger] = skill.name
+        return triggers
 
     def remove(self, name: str) -> bool:
         """
@@ -186,19 +232,40 @@ class SkillRegistry:
         )
 
         skill_template = (
-            "## {name}\n"
+            "## {name}{trigger_info}\n"
             "{description}\n"
             'Check "{dir}/SKILL.md" for how to use this skill\n\n'
         )
 
         for skill in self._skills.values():
+            trigger_info = f" (`{skill.trigger}`)" if skill.trigger else ""
             instruction += skill_template.format(
                 name=skill.name,
                 description=skill.description,
                 dir=skill.path,
+                trigger_info=trigger_info,
             )
 
         return instruction
+
+    def get_skills_summary(self) -> str:
+        """
+        Get a brief summary of all available skills.
+
+        Useful for including in system prompts without full details.
+
+        Returns:
+            Formatted summary string
+        """
+        if not self._skills:
+            return ""
+
+        lines = ["## Available Skills\n"]
+        for name, skill in self._skills.items():
+            trigger = f" (`{skill.trigger}`)" if skill.trigger else ""
+            lines.append(f"- **{name}**{trigger}: {skill.description}")
+
+        return "\n".join(lines)
 
     def __len__(self) -> int:
         return len(self._skills)

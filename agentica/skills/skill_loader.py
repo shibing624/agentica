@@ -30,6 +30,7 @@ class SkillLoader:
     2. .agentica/skills (project-level)
     3. ~/.claude/skills (user-level)
     4. ~/.agentica/skills (user-level)
+    5. Built-in skills (agentica/skills/builtin/)
 
     Project-level skills override user-level skills with the same name.
 
@@ -58,6 +59,8 @@ class SkillLoader:
         """
         self.project_root = Path(project_root) if project_root else Path.cwd()
         self.home_dir = Path.home()
+        # Path to built-in skills
+        self.builtin_dir = Path(__file__).parent / "builtin"
 
     def get_search_paths(self) -> List[tuple]:
         """
@@ -84,7 +87,11 @@ class SkillLoader:
         for skill_dir in self.SKILL_DIRS:
             user_path = self.home_dir / skill_dir
             paths.append((user_path, "user"))
-        
+
+        # Built-in skills (lowest priority)
+        if self.builtin_dir.exists():
+            paths.append((self.builtin_dir, "builtin"))
+
         return paths
 
     def discover_skills(self, skills_dir: Path) -> List[Path]:

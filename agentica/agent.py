@@ -33,6 +33,7 @@ from copy import copy, deepcopy
 from pathlib import Path
 from dataclasses import dataclass, field, fields
 from pydantic import BaseModel, ValidationError
+from typing import TYPE_CHECKING
 
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.document import Document
@@ -54,6 +55,9 @@ from agentica.utils.message import get_text_from_message
 from agentica.utils.timer import Timer
 from agentica.utils.string import parse_structured_output
 from agentica.utils.langfuse_integration import langfuse_trace_context
+
+if TYPE_CHECKING:
+    from agentica.workspace import Workspace
 
 
 @dataclass(init=False)
@@ -119,6 +123,18 @@ class Agent:
     db: Optional[BaseDb] = None
     # AgentSession from the database: DO NOT SET MANUALLY
     _agent_session: Optional[AgentSession] = None
+
+    # -*- Workspace settings
+    # Workspace instance for this agent
+    workspace: Optional["Workspace"] = None
+    # Path to the workspace directory
+    workspace_path: Optional[str] = None
+    # If True, load workspace context (AGENT.md, PERSONA.md, etc.) into instructions
+    load_workspace_context: bool = True
+    # If True, load workspace memory into instructions
+    load_workspace_memory: bool = True
+    # Number of days of memory to load from workspace
+    memory_days: int = 2
 
     # -*- Agent Tools
     # A list of tools provided to the Model.
@@ -304,6 +320,13 @@ class Agent:
             # Database
             db: Optional[BaseDb] = None,
 
+            # Workspace
+            workspace: Optional["Workspace"] = None,
+            workspace_path: Optional[str] = None,
+            load_workspace_context: bool = True,
+            load_workspace_memory: bool = True,
+            memory_days: int = 2,
+
             # Tools
             tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
             support_tool_calls: bool = True,
@@ -433,6 +456,13 @@ class Agent:
         self.db = db
         self._agent_session = None
 
+        # Workspace initialization
+        self.workspace = workspace
+        self.workspace_path = workspace_path
+        self.load_workspace_context = load_workspace_context
+        self.load_workspace_memory = load_workspace_memory
+        self.memory_days = memory_days
+
         self.tools = tools
         self.support_tool_calls = support_tool_calls
         self.show_tool_calls = show_tool_calls
@@ -512,6 +542,9 @@ class Agent:
         else:
             set_log_level_to_info()
 
+        # Initialize workspace if workspace_path is provided
+        self._init_workspace()
+
         # Collect and merge tool system prompts into instructions
         self._merge_tool_system_prompts()
 
@@ -533,6 +566,49 @@ class Agent:
         # Sync user_id from Agent to AgentMemory if not set
         if self.user_id is not None and self.memory.user_id is None:
             self.memory.user_id = self.user_id
+
+    def _init_workspace(self):
+        """Initialize workspace from workspace_path if provided"""
+        # Create workspace from path if not already provided
+        if self.workspace_path and not self.workspace:
+            from agentica.workspace import Workspace
+            self.workspace = Workspace(self.workspace_path)
+
+        # Inject workspace context into instructions
+        if self.workspace and self.workspace.exists():
+            self._inject_workspace_context()
+
+    def _inject_workspace_context(self):
+        """Inject workspace context and memory into instructions"""
+        if not self.workspace:
+            return
+
+        context_parts = []
+
+        # Load workspace context (AGENT.md, PERSONA.md, TOOLS.md, USER.md)
+        if self.load_workspace_context:
+            context = self.workspace.get_context_prompt()
+            if context:
+                context_parts.append(f"# Workspace Context\n\n{context}")
+
+        # Load workspace memory
+        if self.load_workspace_memory:
+            memory = self.workspace.get_memory_prompt(days=self.memory_days)
+            if memory:
+                context_parts.append(f"# Recent Memory\n\n{memory}")
+
+        # Merge into instructions
+        if context_parts:
+            workspace_prompt = "\n\n---\n\n".join(context_parts)
+            if self.instructions is None:
+                self.instructions = [workspace_prompt]
+            elif isinstance(self.instructions, str):
+                self.instructions = [workspace_prompt, self.instructions]
+            elif isinstance(self.instructions, list):
+                self.instructions = [workspace_prompt] + list(self.instructions)
+            # Note: if instructions is a Callable, we don't modify it
+
+            logger.debug(f"Injected workspace context into instructions from {self.workspace.path}")
 
     def _merge_tool_system_prompts(self) -> None:
         """
@@ -593,6 +669,68 @@ class Agent:
     def identifier(self) -> Optional[str]:
         """Get an identifier for the agent"""
         return self.name or self.agent_id
+
+    @classmethod
+    def from_workspace(
+        cls,
+        workspace_path: str,
+        model: Optional["Model"] = None,
+        initialize: bool = True,
+        **kwargs
+    ) -> "Agent":
+        """从工作空间创建 Agent
+
+        这是一个工厂方法，用于从工作空间目录创建 Agent 实例。
+        工作空间包含 AGENT.md, PERSONA.md 等配置文件，以及 memory/ 和 skills/ 目录。
+
+        Args:
+            workspace_path: 工作空间路径
+            model: LLM 模型实例
+            initialize: 是否初始化工作空间（如果不存在则创建默认文件）
+            **kwargs: 其他 Agent 参数
+
+        Returns:
+            Agent 实例
+
+        Example:
+            >>> agent = Agent.from_workspace(
+            ...     workspace_path="~/.agentica/workspace",
+            ...     model=ZhipuAI(),
+            ...     initialize=True,
+            ... )
+            >>> agent.run("你好")
+        """
+        from agentica.workspace import Workspace
+
+        workspace = Workspace(workspace_path)
+        if initialize and not workspace.exists():
+            workspace.initialize()
+
+        return cls(
+            workspace=workspace,
+            workspace_path=workspace_path,
+            model=model,
+            **kwargs
+        )
+
+    def save_memory(self, content: str, long_term: bool = False):
+        """保存记忆到工作空间
+
+        将内容保存到工作空间的记忆文件中。支持保存到日记忆或长期记忆。
+
+        Args:
+            content: 记忆内容
+            long_term: True 保存到长期记忆 (MEMORY.md)，False 保存到日记忆 (memory/YYYY-MM-DD.md)
+
+        Example:
+            >>> agent.save_memory("用户偏好：喜欢简洁的回答", long_term=True)
+            >>> agent.save_memory("今天讨论了项目进度")  # 保存到日记忆
+        """
+        if self.workspace:
+            self.workspace.write_memory(content, to_daily=not long_term)
+            logger.debug(f"Saved memory to workspace: long_term={long_term}")
+        else:
+            logger.warning("No workspace configured, memory not saved")
 
     def deep_copy(self, *, update: Optional[Dict[str, Any]] = None) -> "Agent":
         """Create and return a deep copy of this Agent, optionally updating fields.
