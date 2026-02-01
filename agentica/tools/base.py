@@ -9,6 +9,8 @@ part of the code from https://github.com/phidatahq/phidata
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import weakref
 from collections import OrderedDict
@@ -278,8 +280,28 @@ class FunctionCall(BaseModel):
         call_str = f"{self.function.name}({', '.join([f'{k}={v}' for k, v in trimmed_arguments.items()])})"
         return call_str
 
+    def _run_sync_or_async(self, func: Callable, *args, **kwargs) -> Any:
+        """Run a function, handling both sync and async functions in sync context."""
+        if inspect.iscoroutinefunction(func):
+            # Async function: run in event loop
+            try:
+                asyncio.get_running_loop()
+                # Already in an event loop, run in thread pool
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, func(*args, **kwargs))
+                    return future.result()
+            except RuntimeError:
+                # No running event loop, safe to use asyncio.run
+                return asyncio.run(func(*args, **kwargs))
+        else:
+            return func(*args, **kwargs)
+
     def execute(self) -> bool:
         """Execute the function.
+
+        Supports both sync and async entrypoints. Async functions are executed
+        using asyncio.run() when called from a sync context.
 
         Returns:
             bool: True if the function call was successful, False otherwise.
@@ -304,7 +326,7 @@ class FunctionCall(BaseModel):
                 # Check if the pre-hook has fc argument
                 if "fc" in signature(self.function.pre_hook).parameters:
                     pre_hook_args["fc"] = self
-                self.function.pre_hook(**pre_hook_args)
+                self._run_sync_or_async(self.function.pre_hook, **pre_hook_args)
             except ToolCallException as e:
                 logger.debug(f"{e.__class__.__name__}: {e}")
                 self.error = str(e)
@@ -313,49 +335,29 @@ class FunctionCall(BaseModel):
                 logger.warning(f"Error in pre-hook callback: {e}")
                 logger.exception(e)
 
-        # Call the function with no arguments if none are provided.
-        if self.arguments is None:
-            try:
-                entrypoint_args = {}
-                # Check if the entrypoint has and agent argument
-                if "agent" in signature(self.function.entrypoint).parameters:
-                    entrypoint_args["agent"] = self.function._agent
-                # Check if the entrypoint has an fc argument
-                if "fc" in signature(self.function.entrypoint).parameters:
-                    entrypoint_args["fc"] = self
+        # Build entrypoint args
+        entrypoint_args = {}
+        if "agent" in signature(self.function.entrypoint).parameters:
+            entrypoint_args["agent"] = self.function._agent
+        if "fc" in signature(self.function.entrypoint).parameters:
+            entrypoint_args["fc"] = self
 
-                self.result = self.function.entrypoint(**entrypoint_args)
-                function_call_success = True
-            except ToolCallException as e:
-                logger.debug(f"{e.__class__.__name__}: {e}")
-                self.error = str(e)
-                raise
-            except Exception as e:
-                logger.warning(f"Could not run function {self.get_call_str()}")
-                logger.exception(e)
-                self.error = str(e)
-                return function_call_success
-        else:
-            try:
-                entrypoint_args = {}
-                # Check if the entrypoint has and agent argument
-                if "agent" in signature(self.function.entrypoint).parameters:
-                    entrypoint_args["agent"] = self.function._agent
-                # Check if the entrypoint has an fc argument
-                if "fc" in signature(self.function.entrypoint).parameters:
-                    entrypoint_args["fc"] = self
-
-                self.result = self.function.entrypoint(**entrypoint_args, **self.arguments)
-                function_call_success = True
-            except ToolCallException as e:
-                logger.debug(f"{e.__class__.__name__}: {e}")
-                self.error = str(e)
-                raise
-            except Exception as e:
-                logger.warning(f"Could not run function {self.get_call_str()}")
-                logger.exception(e)
-                self.error = str(e)
-                return function_call_success
+        # Execute the function
+        try:
+            if self.arguments is None:
+                self.result = self._run_sync_or_async(self.function.entrypoint, **entrypoint_args)
+            else:
+                self.result = self._run_sync_or_async(self.function.entrypoint, **entrypoint_args, **self.arguments)
+            function_call_success = True
+        except ToolCallException as e:
+            logger.debug(f"{e.__class__.__name__}: {e}")
+            self.error = str(e)
+            raise
+        except Exception as e:
+            logger.warning(f"Could not run function {self.get_call_str()}")
+            logger.exception(e)
+            self.error = str(e)
+            return function_call_success
 
         # Execute post-hook if it exists
         if self.function.post_hook is not None:
@@ -367,7 +369,103 @@ class FunctionCall(BaseModel):
                 # Check if the post-hook has an fc argument
                 if "fc" in signature(self.function.post_hook).parameters:
                     post_hook_args["fc"] = self
-                self.function.post_hook(**post_hook_args)
+                self._run_sync_or_async(self.function.post_hook, **post_hook_args)
+            except ToolCallException as e:
+                logger.debug(f"{e.__class__.__name__}: {e}")
+                self.error = str(e)
+                raise
+            except Exception as e:
+                logger.warning(f"Error in post-hook callback: {e}")
+                logger.exception(e)
+
+        return function_call_success
+
+    async def aexecute(self) -> bool:
+        """Execute the function asynchronously.
+
+        Supports both sync and async entrypoints. Async functions are awaited directly,
+        while sync functions are executed normally.
+
+        Returns:
+            bool: True if the function call was successful, False otherwise.
+        """
+        from inspect import signature
+
+        if self.function.entrypoint is None:
+            self.error = f"No entrypoint found for function: {self.function.name}"
+            logger.warning(self.error)
+            return False
+
+        logger.debug(f"Running (async): {self.get_call_str()}")
+        function_call_success = False
+
+        # Check if the entrypoint is a coroutine function
+        is_async = inspect.iscoroutinefunction(self.function.entrypoint)
+
+        # Execute pre-hook if it exists
+        if self.function.pre_hook is not None:
+            try:
+                pre_hook_args = {}
+                if "agent" in signature(self.function.pre_hook).parameters:
+                    pre_hook_args["agent"] = self.function._agent
+                if "fc" in signature(self.function.pre_hook).parameters:
+                    pre_hook_args["fc"] = self
+                # Support async pre-hook
+                if inspect.iscoroutinefunction(self.function.pre_hook):
+                    await self.function.pre_hook(**pre_hook_args)
+                else:
+                    self.function.pre_hook(**pre_hook_args)
+            except ToolCallException as e:
+                logger.debug(f"{e.__class__.__name__}: {e}")
+                self.error = str(e)
+                raise
+            except Exception as e:
+                logger.warning(f"Error in pre-hook callback: {e}")
+                logger.exception(e)
+
+        # Build entrypoint args
+        entrypoint_args = {}
+        if "agent" in signature(self.function.entrypoint).parameters:
+            entrypoint_args["agent"] = self.function._agent
+        if "fc" in signature(self.function.entrypoint).parameters:
+            entrypoint_args["fc"] = self
+
+        # Execute the function
+        try:
+            if self.arguments is None:
+                if is_async:
+                    self.result = await self.function.entrypoint(**entrypoint_args)
+                else:
+                    self.result = self.function.entrypoint(**entrypoint_args)
+            else:
+                if is_async:
+                    self.result = await self.function.entrypoint(**entrypoint_args, **self.arguments)
+                else:
+                    self.result = self.function.entrypoint(**entrypoint_args, **self.arguments)
+            function_call_success = True
+        except ToolCallException as e:
+            logger.debug(f"{e.__class__.__name__}: {e}")
+            self.error = str(e)
+            raise
+        except Exception as e:
+            logger.warning(f"Could not run function {self.get_call_str()}")
+            logger.exception(e)
+            self.error = str(e)
+            return function_call_success
+
+        # Execute post-hook if it exists
+        if self.function.post_hook is not None:
+            try:
+                post_hook_args = {}
+                if "agent" in signature(self.function.post_hook).parameters:
+                    post_hook_args["agent"] = self.function._agent
+                if "fc" in signature(self.function.post_hook).parameters:
+                    post_hook_args["fc"] = self
+                # Support async post-hook
+                if inspect.iscoroutinefunction(self.function.post_hook):
+                    await self.function.post_hook(**post_hook_args)
+                else:
+                    self.function.post_hook(**post_hook_args)
             except ToolCallException as e:
                 logger.debug(f"{e.__class__.__name__}: {e}")
                 self.error = str(e)
@@ -595,8 +693,9 @@ def remove_function_calls_from_string(
 class Tool:
     """Tool for managing functions."""
 
-    def __init__(self, name: str = "tool"):
+    def __init__(self, name: str = "tool", description: str = ""):
         self.name: str = name
+        self.description = description
         self.functions: Dict[str, Function] = OrderedDict()
 
     def register(self, function: Callable[..., Any], sanitize_arguments: bool = True):
@@ -612,7 +711,7 @@ class Tool:
         try:
             f = Function(
                 name=function.__name__,
-                description=function.__doc__ or "",
+                description=function.__doc__ or self.description,
                 entrypoint=function,
                 sanitize_arguments=sanitize_arguments,
             )

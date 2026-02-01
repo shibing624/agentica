@@ -2575,7 +2575,7 @@ class Agent:
                         try:
                             function_call = get_function_call_for_tool_call(tool_call, self.model.functions)
                             if function_call is not None:
-                                # Execute and get result
+                                # Execute and get result (supports async tools in sync context)
                                 function_call.execute()
                                 result_str = str(function_call.result) if function_call.result is not None else ""
 
