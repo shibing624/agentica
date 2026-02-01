@@ -1018,8 +1018,32 @@ class MemorySummarizer(BaseModel):
 
 
 class AgentMemory(BaseModel):
-    """Agent memory for managing conversation history and user memories."""
-    
+    """Agent memory for managing conversation history and session summaries.
+
+    AgentMemory focuses on runtime conversation management:
+    - Session history (runs, messages)
+    - Session summaries (optional)
+
+    For persistent user memories and preferences, use Workspace instead:
+    - Workspace stores memories in human-readable Markdown files
+    - Supports version control (Git)
+    - Easy to edit and share
+
+    Example - Session management only (recommended):
+        >>> memory = AgentMemory(create_session_summary=True)
+        >>> agent = Agent(memory=memory)
+
+    Example - With Workspace for persistent memory:
+        >>> from agentica.workspace import Workspace
+        >>> workspace = Workspace("~/.agentica/workspace")
+        >>> agent = Agent(workspace=workspace)
+
+    Note:
+        The `create_user_memories` feature is DEPRECATED.
+        Use Workspace.save_memory() for persistent memory storage instead.
+    """
+
+    # ========== Session Management (Core Features) ==========
     # Runs between the user and agent
     runs: List[AgentRun] = []
     # List of messages sent to the model
@@ -1035,17 +1059,18 @@ class AgentMemory(BaseModel):
     # Summarizer to generate session summaries
     summarizer: Optional[MemorySummarizer] = None
 
-    # Create and store personalized memories for this user
+    # ========== User Memory (DEPRECATED - Use Workspace instead) ==========
+    # DEPRECATED: Use Workspace.save_memory() instead
     create_user_memories: bool = False
-    # Update memories for the user after each run, effect when create_user_memories is True
+    # DEPRECATED: Use Workspace instead
     update_user_memories_after_run: bool = True
-
-    # Database to store personalized memories (uses BaseDb)
+    # DEPRECATED: Database for user memories - use Workspace for file-based storage
     db: Optional[BaseDb] = None
     # User ID for the personalized memories
     user_id: Optional[str] = None
     # Retrieval mode: last_n, first_n
     retrieval: MemoryRetrieval = MemoryRetrieval.last_n
+    # DEPRECATED: Use Workspace memory files instead
     memories: Optional[List[Memory]] = None
     # Number of memories to retrieve
     num_memories: Optional[int] = None
@@ -1067,31 +1092,64 @@ class AgentMemory(BaseModel):
             **kwargs
     ) -> "AgentMemory":
         """Factory method to create AgentMemory with database enabled.
-        
-        This is a convenience method that automatically sets create_user_memories=True.
-        
+
+        .. deprecated::
+            This method is deprecated. Use Workspace for persistent memory storage.
+            Workspace provides human-readable Markdown files that can be version controlled.
+
+        For new projects, use Workspace instead:
+            >>> from agentica.workspace import Workspace
+            >>> workspace = Workspace("~/.agentica/workspace")
+            >>> workspace.save_memory("User prefers concise responses")
+
         Args:
             db: BaseDb instance (e.g., SqliteDb, PostgresDb)
             user_id: Optional user ID for personalized memories
             retrieval: Memory retrieval mode (last_n, first_n)
             num_memories: Number of memories to retrieve
             **kwargs: Additional arguments passed to AgentMemory
-            
+
         Returns:
             AgentMemory instance with database enabled
-            
-        Example:
-            >>> from agentica.db.sqlite import SqliteDb
-            >>> db = SqliteDb(db_file="agent.db")
-            >>> memory = AgentMemory.with_db(db=db)
-            >>> agent = Agent(memory=memory)
         """
+        import warnings
+        warnings.warn(
+            "AgentMemory.with_db() is deprecated. Use Workspace for persistent memory storage. "
+            "See: from agentica.workspace import Workspace",
+            DeprecationWarning,
+            stacklevel=2
+        )
         return cls(
             create_user_memories=True,
             db=db,
             user_id=user_id,
             retrieval=retrieval,
             num_memories=num_memories,
+            **kwargs
+        )
+
+    @classmethod
+    def with_summary(cls, **kwargs) -> "AgentMemory":
+        """Factory method to create AgentMemory with session summary enabled.
+
+        This is the recommended way to use AgentMemory for conversation tracking.
+        For persistent user memories, use Workspace instead.
+
+        Args:
+            **kwargs: Additional arguments passed to AgentMemory
+
+        Returns:
+            AgentMemory instance with session summary enabled
+
+        Example:
+            >>> memory = AgentMemory.with_summary()
+            >>> agent = Agent(memory=memory)
+            >>> # After conversation, get summary
+            >>> print(agent.memory.summary)
+        """
+        return cls(
+            create_session_summary=True,
+            update_session_summary_after_run=True,
             **kwargs
         )
 

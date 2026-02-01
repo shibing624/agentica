@@ -3,6 +3,10 @@
 @author:XuMing(xuming624@qq.com)
 @description: command line interface for agentica
 
+Data Isolation Architecture:
+  - user_id: Workspace memory isolation (each user has independent memories)
+  - session_id: Conversation history isolation (each session is independent)
+
 Interactive Features:
   Enter           Submit your message
   Alt+Enter       Insert newline for multi-line (Option+Enter or ESC then Enter)
@@ -13,6 +17,13 @@ Interactive Features:
 Interactive Commands:
   /help           Show available commands and features
   /clear          Clear screen and reset conversation
+  /newchat        Start a new chat session (new session_id)
+  /user [id]      Show current user or switch to another user
+  /users          List all registered users
+  /skills         List available skills and triggers
+  /memory         Show recent memory
+  /save <text>    Save to daily memory
+  /workspace      Show workspace status
 """
 import argparse
 import importlib
@@ -23,6 +34,7 @@ import re
 import glob as glob_module
 from pathlib import Path
 from typing import List, Optional
+from uuid import uuid4
 
 from rich.console import Console
 from rich.text import Text
@@ -30,6 +42,8 @@ from rich.text import Text
 from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek
 from agentica.config import AGENTICA_HOME
 from agentica.utils.log import suppress_console_logging
+from agentica.workspace import Workspace
+from agentica.skills import load_skills, get_skill_registry, get_available_skills
 
 console = Console()
 history_file = os.path.join(AGENTICA_HOME, "cli_history.txt")
@@ -148,8 +162,8 @@ def parse_args():
                         choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
                         help='LLM model provider', default='zhipuai')
     parser.add_argument('--model_name', type=str,
-                        help='LLM model name to use, can be gpt-5/glm-4.6v-flash/deepseek-chat/yi-lightning/...',
-                        default='glm-4.6v-flash')
+                        help='LLM model name to use, can be gpt-5/glm-4.7-flash/deepseek-chat/yi-lightning/...',
+                        default='glm-4.7-flash')
     parser.add_argument('--api_base', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
@@ -161,6 +175,16 @@ def parse_args():
     parser.add_argument('--tools', nargs='*',
                         choices=list(TOOL_REGISTRY.keys()),
                         help='Additional tools to enable (on top of DeepAgent built-in tools)')
+    parser.add_argument('--workspace', type=str, default=None,
+                        help='Workspace directory path (default: ~/.agentica/workspace)')
+    parser.add_argument('--user', type=str, default=None,
+                        help='User ID for workspace memory isolation (default: "default")')
+    parser.add_argument('--session', type=str, default=None,
+                        help='Session ID for conversation isolation (default: auto-generated)')
+    parser.add_argument('--no-workspace', action='store_true',
+                        help='Disable workspace context injection')
+    parser.add_argument('--no-skills', action='store_true',
+                        help='Disable skills loading')
     return parser.parse_args()
 
 
@@ -225,8 +249,19 @@ def get_model(model_provider, model_name, api_base=None, api_key=None, max_token
     return model
 
 
-def _create_agent(agent_config: dict, extra_tools: Optional[List] = None):
-    """Helper to create or recreate a DeepAgent with current config."""
+def _create_agent(agent_config: dict, extra_tools: Optional[List] = None,
+                  workspace: Optional[Workspace] = None, skills_registry=None,
+                  user_id: Optional[str] = None, session_id: Optional[str] = None):
+    """Helper to create or recreate a DeepAgent with current config.
+
+    Args:
+        agent_config: Agent configuration parameters
+        extra_tools: Additional tool instances
+        workspace: Workspace instance for context and memory
+        skills_registry: Skills registry for skill triggers
+        user_id: User ID for workspace memory isolation
+        session_id: Session ID for conversation isolation
+    """
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -235,6 +270,25 @@ def _create_agent(agent_config: dict, extra_tools: Optional[List] = None):
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
     )
+
+    # Build instructions with workspace context and skills
+    instructions = []
+
+    # Add workspace context if available
+    if workspace and workspace.exists():
+        context = workspace.get_context_prompt()
+        if context:
+            instructions.append(context)
+        # Add recent memory
+        memory = workspace.get_memory_prompt(days=2)
+        if memory:
+            instructions.append(f"\n# Recent Memory\n{memory}")
+
+    # Add skills summary if available
+    if skills_registry and len(skills_registry) > 0:
+        skills_summary = skills_registry.get_skills_summary()
+        if skills_summary:
+            instructions.append(f"\n# Available Skills\n{skills_summary}")
 
     # Build kwargs for DeepAgent
     deep_agent_kwargs = {
@@ -245,6 +299,16 @@ def _create_agent(agent_config: dict, extra_tools: Optional[List] = None):
         "add_history_to_messages": True,
         "debug_mode": agent_config["debug_mode"],
     }
+
+    # Add user_id and session_id for data isolation
+    if user_id:
+        deep_agent_kwargs["user_id"] = user_id
+    if session_id:
+        deep_agent_kwargs["session_id"] = session_id
+
+    # Add instructions if we have any
+    if instructions:
+        deep_agent_kwargs["instructions"] = instructions
 
     # Only pass enable_multi_round if explicitly set by user
     if agent_config.get("enable_multi_round") is not None:
@@ -413,21 +477,41 @@ def show_help():
 Available Commands:
   /help           Show this help message
   /clear          Clear screen and reset conversation
+  /newchat        Start a new chat session (new session_id)
+  /user [id]      Show current user or switch to another user
+  /users          List all registered users in workspace
   /tools          List available additional tools
+  /skills         List available skills and triggers
+  /memory         Show recent memory from workspace
+  /save <text>    Save text to daily memory
+  /workspace      Show workspace status and files
   /exit, /quit    Exit the CLI
+
+Data Isolation:
+  --user <id>     Set user ID for workspace memory isolation
+  --session <id>  Set session ID for conversation history isolation
+  /user <id>      Switch to another user (reloads their memories)
+  /newchat        Create new session (clears conversation history)
+
+Skill Triggers:
+  /commit <msg>   Trigger commit skill (if loaded)
+  /github <cmd>   Trigger github skill (if loaded)
+  /<skill> <args> Trigger any loaded skill by its trigger
 
 Input Features:
   Enter           Submit your message
   Alt+Enter       Insert newline for multi-line input (Option+Enter on Mac)
   Ctrl+J          Insert newline (alternative)
   @filename       Reference a file - content will be injected into prompt
-  
+
 Tips:
   - Type @ followed by a filename to reference files
   - Use Alt+Enter or Ctrl+J to write multi-line messages
   - DeepAgent has built-in tools: ls, read_file, write_file, edit_file, glob, grep,
     execute, web_search, fetch_url, write_todos, read_todos, task
   - Use --tools to add extra tools, e.g.: --tools calculator shell wikipedia
+  - Use --workspace <path> to specify workspace directory
+  - Use --user <id> for multi-user memory isolation
 """
     console.print(help_text, style="yellow")
 
@@ -617,12 +701,27 @@ def display_tool_call(tool_name: str, tool_args: dict) -> None:
             console.print()  # Ensure newline when no args to display
 
 
-def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None):
-    """Run the interactive CLI with prompt_toolkit support."""
+def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None,
+                    workspace: Optional[Workspace] = None, skills_registry=None,
+                    user_id: Optional[str] = None, session_id: Optional[str] = None):
+    """Run the interactive CLI with prompt_toolkit support.
+
+    Args:
+        agent_config: Agent configuration parameters
+        extra_tool_names: Names of additional tools to load
+        workspace: Workspace instance for context and memory
+        skills_registry: Skills registry for skill triggers
+        user_id: User ID for workspace memory isolation
+        session_id: Session ID for conversation isolation
+    """
     # Suppress logger console output in CLI mode for cleaner UI (unless verbose mode)
     if not agent_config.get("debug_mode"):
         suppress_console_logging()
-    
+
+    # Generate session_id if not provided
+    current_session_id = session_id or str(uuid4())
+    current_user_id = user_id
+
     try:
         from prompt_toolkit import PromptSession
         from prompt_toolkit.history import FileHistory
@@ -639,8 +738,9 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
 
     # Configure extra tools
     extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
-    current_agent = _create_agent(agent_config, extra_tools)
-    
+    current_agent = _create_agent(agent_config, extra_tools, workspace, skills_registry,
+                                   user_id=current_user_id, session_id=current_session_id)
+
     print_header(
         agent_config["model_provider"],
         agent_config["model_name"],
@@ -648,20 +748,38 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
         extra_tools=extra_tool_names
     )
 
+    # Show workspace, user, and session info
+    if workspace and workspace.exists():
+        user_info = f" (user: [cyan]{current_user_id}[/cyan])" if current_user_id else ""
+        console.print(f"  Workspace: [green]{workspace.path}[/green]{user_info}")
+    if current_session_id:
+        console.print(f"  Session: [dim]{current_session_id[:8]}...[/dim]")
+    if skills_registry and len(skills_registry) > 0:
+        triggers = skills_registry.list_triggers()
+        if triggers:
+            trigger_str = ", ".join(triggers.keys())
+            console.print(f"  Skills: [cyan]{len(skills_registry)} loaded[/cyan] (triggers: {trigger_str})")
+    console.print()
+
     if use_prompt_toolkit:
         # Custom completer for @ file mentions and / commands
         class AgenticaCompleter(Completer):
             def get_completions(self, document, complete_event):
                 text = document.text_before_cursor
-                
+
                 # Command completion
                 if text.startswith("/"):
-                    commands = ["/help", "/clear", "/tools", "/exit", "/quit"]
+                    commands = ["/help", "/clear", "/newchat", "/user", "/users", "/tools",
+                                "/skills", "/memory", "/save", "/workspace", "/exit", "/quit"]
+                    # Add skill triggers
+                    if skills_registry:
+                        for trigger in skills_registry.list_triggers().keys():
+                            commands.append(trigger)
                     for cmd in commands:
                         if cmd.startswith(text):
                             yield Completion(cmd, start_position=-len(text))
                     return
-                
+
                 # File completion after @
                 match = re.search(r"@([\w./-]*)$", text)
                 if match:
@@ -742,7 +860,10 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             
             # Handle commands
             if user_input.startswith("/"):
-                cmd = user_input.lower().split()[0]
+                cmd_parts = user_input.split(maxsplit=1)
+                cmd = cmd_parts[0].lower()
+                cmd_args = cmd_parts[1] if len(cmd_parts) > 1 else ""
+
                 if cmd in ["/exit", "/quit"]:
                     break
                 elif cmd == "/help":
@@ -756,10 +877,113 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     console.print()
                     console.print("Use --tools <name> when starting CLI to enable tools.", style="dim")
                     continue
+                elif cmd == "/skills":
+                    if skills_registry and len(skills_registry) > 0:
+                        console.print("Available Skills:", style="cyan")
+                        for skill in skills_registry.list_all():
+                            trigger_info = f" (trigger: [green]{skill.trigger}[/green])" if skill.trigger else ""
+                            console.print(f"  - [bold]{skill.name}[/bold]{trigger_info}")
+                            console.print(f"    {skill.description[:60]}...", style="dim")
+                        console.print()
+                        triggers = skills_registry.list_triggers()
+                        if triggers:
+                            console.print("Triggers:", style="cyan")
+                            for trigger, skill_name in triggers.items():
+                                console.print(f"  {trigger} -> {skill_name}")
+                    else:
+                        console.print("No skills loaded. Use --no-skills=false to enable.", style="yellow")
+                    continue
+                elif cmd == "/memory":
+                    if workspace and workspace.exists():
+                        memory = workspace.get_memory_prompt(days=3)
+                        if memory:
+                            console.print("Recent Memory:", style="cyan")
+                            console.print(memory[:2000] + "..." if len(memory) > 2000 else memory)
+                        else:
+                            console.print("No memory found.", style="yellow")
+                    else:
+                        console.print("Workspace not available.", style="yellow")
+                    continue
+                elif cmd == "/save":
+                    if workspace and workspace.exists():
+                        if cmd_args:
+                            workspace.write_memory(cmd_args, to_daily=True)
+                            console.print(f"Saved to daily memory: {cmd_args[:50]}...", style="green")
+                        else:
+                            console.print("Usage: /save <text to save>", style="yellow")
+                    else:
+                        console.print("Workspace not available.", style="yellow")
+                    continue
+                elif cmd == "/workspace":
+                    if workspace:
+                        console.print(f"Workspace: [bold]{workspace.path}[/bold]", style="cyan")
+                        user_info = f"User: [cyan]{current_user_id}[/cyan]" if current_user_id else "User: [dim]default[/dim]"
+                        console.print(user_info)
+                        console.print(f"Session: [dim]{current_session_id[:8]}...[/dim]")
+                        console.print(f"Exists: {'Yes' if workspace.exists() else 'No'}")
+                        if workspace.exists():
+                            files = workspace.list_files()
+                            console.print("Files:", style="cyan")
+                            for fname, exists in files.items():
+                                status_icon = "✓" if exists else "✗"
+                                console.print(f"  {status_icon} {fname}")
+                    else:
+                        console.print("Workspace not configured.", style="yellow")
+                    continue
+                elif cmd == "/newchat":
+                    # Create a new session (new session_id, keep user_id)
+                    current_session_id = str(uuid4())
+                    current_agent = _create_agent(agent_config, extra_tools, workspace, skills_registry,
+                                                   user_id=current_user_id, session_id=current_session_id)
+                    console.print(f"[green]New chat session created: {current_session_id[:8]}...[/green]")
+                    console.print("[dim]Conversation history cleared. Workspace memory preserved.[/dim]")
+                    continue
+                elif cmd == "/user":
+                    if cmd_args:
+                        # Switch to new user
+                        new_user_id = cmd_args.strip()
+                        current_user_id = new_user_id
+                        # Update workspace user
+                        if workspace:
+                            workspace.set_user(new_user_id)
+                            if not (workspace._get_user_path() / workspace.config.memory_dir).exists():
+                                workspace._initialize_user_dir()
+                        # Recreate agent with new user context
+                        current_agent = _create_agent(agent_config, extra_tools, workspace, skills_registry,
+                                                       user_id=current_user_id, session_id=current_session_id)
+                        console.print(f"[green]Switched to user: {new_user_id}[/green]")
+                        console.print("[dim]Loaded user's workspace memory.[/dim]")
+                    else:
+                        # Show current user
+                        console.print(f"Current user: [cyan]{current_user_id or 'default'}[/cyan]")
+                        console.print(f"Session: [dim]{current_session_id[:8]}...[/dim]")
+                        if workspace and current_user_id:
+                            info = workspace.get_user_info()
+                            console.print(f"Memory count: {info.get('memory_count', 0)}")
+                    continue
+                elif cmd == "/users":
+                    if workspace:
+                        users = workspace.list_users()
+                        if users:
+                            console.print("Registered Users:", style="cyan")
+                            for user in users:
+                                marker = " [current]" if user == current_user_id else ""
+                                info = workspace.get_user_info(user)
+                                memory_count = info.get('memory_count', 0)
+                                console.print(f"  - {user}{marker} ({memory_count} memories)")
+                        else:
+                            console.print("No users registered yet.", style="yellow")
+                        console.print()
+                        console.print("Use /user <id> to switch users.", style="dim")
+                    else:
+                        console.print("Workspace not configured.", style="yellow")
+                    continue
                 elif cmd == "/clear":
                     os.system('clear' if os.name != 'nt' else 'cls')
-                    # Reset agent conversation
-                    current_agent = _create_agent(agent_config, extra_tools)
+                    # Reset agent conversation but keep user
+                    current_session_id = str(uuid4())
+                    current_agent = _create_agent(agent_config, extra_tools, workspace, skills_registry,
+                                                   user_id=current_user_id, session_id=current_session_id)
                     print_header(
                         agent_config["model_provider"],
                         agent_config["model_name"],
@@ -769,8 +993,24 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     console.print("[info]Screen cleared and conversation reset.[/info]")
                     continue
                 else:
-                    console.print(f"Unknown command: {user_input}. Type /help for available commands.", style="red")
-                    continue
+                    # Check if it's a skill trigger
+                    if skills_registry:
+                        matched_skill = skills_registry.match_trigger(user_input)
+                        if matched_skill:
+                            # Inject skill prompt and process the message
+                            skill_prompt = matched_skill.get_prompt()
+                            current_agent.add_instruction(f"\n# {matched_skill.name} Skill\n{skill_prompt}")
+                            # Remove trigger prefix from user input
+                            if matched_skill.trigger and user_input.lower().startswith(matched_skill.trigger):
+                                user_input = user_input[len(matched_skill.trigger):].strip()
+                            console.print(f"[dim]Skill activated: {matched_skill.name}[/dim]")
+                            # Fall through to normal processing with modified input
+                        else:
+                            console.print(f"Unknown command: {cmd}. Type /help for available commands.", style="red")
+                            continue
+                    else:
+                        console.print(f"Unknown command: {cmd}. Type /help for available commands.", style="red")
+                        continue
             
             # Parse file mentions
             prompt_text, mentioned_files = parse_file_mentions(user_input)
@@ -925,16 +1165,43 @@ def main():
     }
     extra_tool_names = list(args.tools) if args.tools else None
 
+    # Get user_id and session_id from args
+    # Default user_id to "default" for single-user CLI usage
+    user_id = args.user or "default"
+    session_id = args.session or str(uuid4())
+
+    # Initialize workspace with user_id for memory isolation
+    workspace = None
+    if not args.no_workspace:
+        workspace_path = args.workspace  # Can be None for default
+        workspace = Workspace(workspace_path, user_id=user_id)
+        if not workspace.exists():
+            workspace.initialize()
+        elif user_id:
+            # Ensure user directory exists
+            workspace._initialize_user_dir()
+
+    # Load skills
+    skills_registry = None
+    if not args.no_skills:
+        # Suppress logging during skill loading for cleaner output
+        if args.verbose == 0:
+            suppress_console_logging()
+        load_skills()
+        skills_registry = get_skill_registry()
+
     if args.query:
         # Non-interactive mode
         console.print(f"Running query: {args.query}", style="cyan")
         tools_info = f", Extra Tools: {', '.join(extra_tool_names)}" if extra_tool_names else ""
+        user_info = f", User: {user_id}" if user_id else ""
         console.print(
-            f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}",
+            f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}{user_info}",
             style="magenta")
 
         extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
-        agent_instance = _create_agent(agent_config, extra_tools)
+        agent_instance = _create_agent(agent_config, extra_tools, workspace, skills_registry,
+                                        user_id=user_id, session_id=session_id)
         response = agent_instance.run(args.query, stream=True)
         for chunk in response:
             if chunk and chunk.content:
@@ -942,7 +1209,8 @@ def main():
         console.print()  # final newline
     else:
         # Interactive mode
-        run_interactive(agent_config, extra_tool_names)
+        run_interactive(agent_config, extra_tool_names, workspace, skills_registry,
+                        user_id=user_id, session_id=session_id)
 
 
 if __name__ == "__main__":

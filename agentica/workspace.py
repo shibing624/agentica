@@ -28,6 +28,7 @@ class WorkspaceConfig:
         memory_md: 长期记忆文件名
         memory_dir: 日记忆目录名
         skills_dir: 技能目录名
+        users_dir: 用户数据目录名（用于多用户隔离）
     """
     agent_md: str = "AGENT.md"
     persona_md: str = "PERSONA.md"
@@ -36,25 +37,41 @@ class WorkspaceConfig:
     memory_md: str = "MEMORY.md"
     memory_dir: str = "memory"
     skills_dir: str = "skills"
+    users_dir: str = "users"
 
 
 class Workspace:
     """Agent 工作空间
 
-    工作空间是 Agent 的配置和记忆存储目录，包含：
-    - AGENT.md: Agent 操作指南和约束
-    - PERSONA.md: Agent 人格设定
-    - TOOLS.md: 工具使用说明
-    - USER.md: 用户信息
-    - MEMORY.md: 长期记忆
-    - memory/: 日记忆目录
-    - skills/: 自定义技能目录
+    工作空间是 Agent 的配置和记忆存储目录，支持多用户隔离。
 
-    Example:
+    目录结构：
+    - AGENT.md: Agent 操作指南和约束（全局共享）
+    - PERSONA.md: Agent 人格设定（全局共享）
+    - TOOLS.md: 工具使用说明（全局共享）
+    - USER.md: 默认用户信息（无 user_id 时使用）
+    - MEMORY.md: 默认长期记忆（无 user_id 时使用）
+    - memory/: 默认日记忆目录（无 user_id 时使用）
+    - skills/: 自定义技能目录（全局共享）
+    - users/: 用户数据目录（多用户隔离）
+        - {user_id}/
+            - USER.md: 用户信息
+            - MEMORY.md: 长期记忆
+            - memory/: 日记忆目录
+
+    单用户模式（不指定 user_id）：
         >>> workspace = Workspace("~/.agentica/workspace")
         >>> workspace.initialize()
-        >>> context = workspace.get_context_prompt()
-        >>> memory = workspace.get_memory_prompt(days=2)
+        >>> workspace.save_memory("User prefers concise responses")
+
+    多用户模式（指定 user_id）：
+        >>> workspace = Workspace("~/.agentica/workspace", user_id="alice@example.com")
+        >>> workspace.initialize()
+        >>> workspace.save_memory("Alice likes Python")  # 存储到 users/alice@example.com/
+
+    切换用户：
+        >>> workspace.set_user("bob@example.com")
+        >>> workspace.save_memory("Bob prefers detailed explanations")
     """
 
     DEFAULT_FILES = {
@@ -107,23 +124,65 @@ You are a helpful AI assistant.
     def __init__(
         self,
         path: Optional[str | Path] = None,
-        config: Optional[WorkspaceConfig] = None
+        config: Optional[WorkspaceConfig] = None,
+        user_id: Optional[str] = None,
     ):
         """初始化工作空间
 
         Args:
             path: 工作空间路径，默认使用 AGENTICA_WORKSPACE_DIR (~/.agentica/workspace)
             config: 工作空间配置，默认使用 WorkspaceConfig 默认值
+            user_id: 用户 ID，用于多用户隔离。不指定则使用默认用户目录
         """
         if path is None:
             path = DEFAULT_WORKSPACE_PATH
         self.path = Path(path).expanduser().resolve()
         self.config = config or WorkspaceConfig()
+        self._user_id = user_id
+
+    @property
+    def user_id(self) -> Optional[str]:
+        """获取当前用户 ID"""
+        return self._user_id
+
+    def set_user(self, user_id: Optional[str]):
+        """设置当前用户 ID
+
+        Args:
+            user_id: 用户 ID，设为 None 则使用默认用户
+        """
+        self._user_id = user_id
+
+    def _get_user_path(self) -> Path:
+        """获取当前用户的数据目录路径
+
+        Returns:
+            如果指定了 user_id，返回 users/{user_id}/ 目录路径
+            否则返回工作空间根目录
+        """
+        if self._user_id:
+            # 对 user_id 进行安全处理，替换不安全字符
+            safe_user_id = self._user_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+            return self.path / self.config.users_dir / safe_user_id
+        return self.path
+
+    def _get_user_memory_dir(self) -> Path:
+        """获取当前用户的日记忆目录"""
+        return self._get_user_path() / self.config.memory_dir
+
+    def _get_user_memory_md(self) -> Path:
+        """获取当前用户的长期记忆文件路径"""
+        return self._get_user_path() / self.config.memory_md
+
+    def _get_user_md(self) -> Path:
+        """获取当前用户的 USER.md 文件路径"""
+        return self._get_user_path() / self.config.user_md
 
     def initialize(self, force: bool = False) -> bool:
         """初始化工作空间
 
         创建工作空间目录和默认配置文件。
+        如果指定了 user_id，会同时创建用户数据目录。
 
         Args:
             force: 是否覆盖已存在的文件
@@ -133,17 +192,46 @@ You are a helpful AI assistant.
         """
         self.path.mkdir(parents=True, exist_ok=True)
 
-        # 创建默认文件
+        # 创建全局共享的默认文件
         for filename, content in self.DEFAULT_FILES.items():
             filepath = self.path / filename
             if not filepath.exists() or force:
                 filepath.write_text(content, encoding="utf-8")
 
-        # 创建目录
+        # 创建全局目录
         (self.path / self.config.memory_dir).mkdir(exist_ok=True)
         (self.path / self.config.skills_dir).mkdir(exist_ok=True)
+        (self.path / self.config.users_dir).mkdir(exist_ok=True)
+
+        # 如果指定了 user_id，创建用户目录
+        if self._user_id:
+            self._initialize_user_dir()
 
         return True
+
+    def _initialize_user_dir(self):
+        """初始化当前用户的数据目录"""
+        user_path = self._get_user_path()
+        user_path.mkdir(parents=True, exist_ok=True)
+
+        # 创建用户的 USER.md
+        user_md = user_path / self.config.user_md
+        if not user_md.exists():
+            user_md.write_text(f"""# User Profile
+
+## User ID
+{self._user_id}
+
+## Preferences
+- Language: 中文
+- Style: Concise
+
+## Context
+<!-- User's background, projects, etc. -->
+""", encoding="utf-8")
+
+        # 创建用户的记忆目录
+        (user_path / self.config.memory_dir).mkdir(exist_ok=True)
 
     def exists(self) -> bool:
         """检查工作空间是否存在
@@ -199,31 +287,45 @@ You are a helpful AI assistant.
     def get_context_prompt(self) -> str:
         """获取工作空间上下文（用于注入 System Prompt）
 
-        读取 AGENT.md, PERSONA.md, TOOLS.md, USER.md 文件内容，
-        合并为一个上下文字符串。
+        读取 AGENT.md, PERSONA.md, TOOLS.md 文件内容（全局共享），
+        以及用户特定的 USER.md 文件内容。
 
         Returns:
             合并后的上下文字符串
         """
-        files = [
+        contents = []
+
+        # 读取全局共享文件
+        global_files = [
             self.config.agent_md,
             self.config.persona_md,
             self.config.tools_md,
-            self.config.user_md,
         ]
-
-        contents = []
-        for f in files:
+        for f in global_files:
             content = self.read_file(f)
             if content:
                 contents.append(f"<!-- {f} -->\n{content}")
+
+        # 读取用户特定的 USER.md
+        user_md_path = self._get_user_md()
+        if user_md_path.exists():
+            content = user_md_path.read_text(encoding="utf-8").strip()
+            if content:
+                user_label = f"USER.md (user: {self._user_id})" if self._user_id else "USER.md"
+                contents.append(f"<!-- {user_label} -->\n{content}")
+        else:
+            # 回退到全局 USER.md
+            content = self.read_file(self.config.user_md)
+            if content:
+                contents.append(f"<!-- {self.config.user_md} -->\n{content}")
 
         return "\n\n---\n\n".join(contents) if contents else ""
 
     def get_memory_prompt(self, days: int = 2) -> str:
         """获取最近记忆（用于注入上下文）
 
-        读取 MEMORY.md 长期记忆和最近几天的日记忆。
+        读取用户特定的 MEMORY.md 长期记忆和最近几天的日记忆。
+        如果未指定 user_id，则读取默认记忆目录。
 
         Args:
             days: 读取最近几天的记忆
@@ -233,13 +335,16 @@ You are a helpful AI assistant.
         """
         contents = []
 
-        # 读取 MEMORY.md
-        long_term = self.read_file(self.config.memory_md)
-        if long_term:
-            contents.append(f"## Long-term Memory\n\n{long_term}")
+        # 读取长期记忆（用户特定）
+        long_term_path = self._get_user_memory_md()
+        if long_term_path.exists():
+            long_term = long_term_path.read_text(encoding="utf-8").strip()
+            if long_term:
+                user_label = f" (user: {self._user_id})" if self._user_id else ""
+                contents.append(f"## Long-term Memory{user_label}\n\n{long_term}")
 
-        # 读取日记忆
-        memory_dir = self.path / self.config.memory_dir
+        # 读取日记忆（用户特定）
+        memory_dir = self._get_user_memory_dir()
         if memory_dir.exists():
             files = sorted(memory_dir.glob("*.md"), reverse=True)[:days]
             for f in files:
@@ -252,16 +357,48 @@ You are a helpful AI assistant.
     def write_memory(self, content: str, to_daily: bool = True):
         """写入记忆
 
+        将内容写入当前用户的记忆文件。
+        如果未指定 user_id，则写入默认记忆目录。
+
         Args:
             content: 记忆内容
             to_daily: True 写入日记忆，False 写入长期记忆
         """
+        # 确保用户目录存在
+        if self._user_id:
+            self._initialize_user_dir()
+
         if to_daily:
             today = date.today().isoformat()
-            filepath = self.path / self.config.memory_dir / f"{today}.md"
-            self.append_file(str(filepath.relative_to(self.path)), content)
+            memory_dir = self._get_user_memory_dir()
+            memory_dir.mkdir(parents=True, exist_ok=True)
+            filepath = memory_dir / f"{today}.md"
+
+            # 追加内容
+            existing = ""
+            if filepath.exists():
+                existing = filepath.read_text(encoding="utf-8").strip()
+            new_content = f"{existing}\n\n{content}".strip() if existing else content
+            filepath.write_text(new_content, encoding="utf-8")
         else:
-            self.append_file(self.config.memory_md, content)
+            memory_md = self._get_user_memory_md()
+            memory_md.parent.mkdir(parents=True, exist_ok=True)
+
+            # 追加内容
+            existing = ""
+            if memory_md.exists():
+                existing = memory_md.read_text(encoding="utf-8").strip()
+            new_content = f"{existing}\n\n{content}".strip() if existing else content
+            memory_md.write_text(new_content, encoding="utf-8")
+
+    def save_memory(self, content: str, long_term: bool = False):
+        """保存记忆（write_memory 的别名，更符合语义）
+
+        Args:
+            content: 记忆内容
+            long_term: True 写入长期记忆，False 写入日记忆（默认）
+        """
+        self.write_memory(content, to_daily=not long_term)
 
     def get_skills_dir(self) -> Path:
         """获取技能目录路径
@@ -287,7 +424,7 @@ You are a helpful AI assistant.
         return {f: (self.path / f).exists() for f in files}
 
     def get_all_memory_files(self) -> List[Path]:
-        """获取所有记忆文件路径
+        """获取当前用户的所有记忆文件路径
 
         Returns:
             所有记忆文件的路径列表
@@ -295,12 +432,12 @@ You are a helpful AI assistant.
         files = []
 
         # 长期记忆
-        memory_md = self.path / self.config.memory_md
+        memory_md = self._get_user_memory_md()
         if memory_md.exists():
             files.append(memory_md)
 
         # 日记忆
-        memory_dir = self.path / self.config.memory_dir
+        memory_dir = self._get_user_memory_dir()
         if memory_dir.exists():
             files.extend(sorted(memory_dir.glob("*.md"), reverse=True))
 
@@ -353,10 +490,12 @@ You are a helpful AI assistant.
     def clear_daily_memory(self, keep_days: int = 7):
         """清理旧的日记忆
 
+        清理当前用户的旧日记忆文件。
+
         Args:
             keep_days: 保留最近几天的记忆
         """
-        memory_dir = self.path / self.config.memory_dir
+        memory_dir = self._get_user_memory_dir()
         if not memory_dir.exists():
             return
 
@@ -421,7 +560,87 @@ You are a helpful AI assistant.
         ]
 
     def __repr__(self) -> str:
-        return f"Workspace(path={self.path}, exists={self.exists()})"
+        user_info = f", user_id={self._user_id}" if self._user_id else ""
+        return f"Workspace(path={self.path}, exists={self.exists()}{user_info})"
 
     def __str__(self) -> str:
         return str(self.path)
+
+    def list_users(self) -> List[str]:
+        """列出所有已注册的用户 ID
+
+        Returns:
+            用户 ID 列表
+        """
+        users_dir = self.path / self.config.users_dir
+        if not users_dir.exists():
+            return []
+
+        users = []
+        for user_dir in users_dir.iterdir():
+            if user_dir.is_dir():
+                users.append(user_dir.name)
+        return sorted(users)
+
+    def get_user_info(self, user_id: Optional[str] = None) -> Dict:
+        """获取用户信息摘要
+
+        Args:
+            user_id: 用户 ID，如果不指定则使用当前用户
+
+        Returns:
+            用户信息字典，包含 user_id, memory_count, last_activity 等
+        """
+        target_user = user_id or self._user_id
+        old_user = self._user_id
+
+        try:
+            if target_user:
+                self._user_id = target_user
+
+            memory_files = self.get_all_memory_files()
+            memory_count = len(memory_files)
+
+            last_activity = None
+            if memory_files:
+                # 获取最新记忆文件的修改时间
+                latest_file = memory_files[0]
+                if latest_file.exists():
+                    import datetime
+                    mtime = latest_file.stat().st_mtime
+                    last_activity = datetime.datetime.fromtimestamp(mtime).isoformat()
+
+            return {
+                "user_id": target_user or "default",
+                "memory_count": memory_count,
+                "last_activity": last_activity,
+                "user_path": str(self._get_user_path()),
+            }
+        finally:
+            self._user_id = old_user
+
+    def delete_user(self, user_id: str, confirm: bool = False) -> bool:
+        """删除用户数据
+
+        Args:
+            user_id: 要删除的用户 ID
+            confirm: 必须设为 True 才能执行删除
+
+        Returns:
+            是否成功删除
+        """
+        if not confirm:
+            raise ValueError("Must set confirm=True to delete user data")
+
+        if not user_id:
+            raise ValueError("user_id cannot be empty")
+
+        safe_user_id = user_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        user_path = self.path / self.config.users_dir / safe_user_id
+
+        if not user_path.exists():
+            return False
+
+        import shutil
+        shutil.rmtree(user_path)
+        return True

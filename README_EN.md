@@ -164,10 +164,10 @@ Interact with your agents directly from the terminal.
 pip install -U agentica
 
 # Run a single query
-agentica --query "Where will the next Olympics be held?" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
+agentica --query "Where will the next Olympics be held?" --model_provider zhipuai --model_name glm-4.7-flash --tools baidu_search
 
 # Start an interactive chat session
-agentica --model_provider zhipuai --model_name glm-4.6v-flash
+agentica --model_provider zhipuai --model_name glm-4.7-flash
 ```
 CLI show case (Like ClaudeCode):
 <img src="https://github.com/shibing624/agentica/blob/main/docs/cli_snap.png" width="800" />

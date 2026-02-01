@@ -3,7 +3,21 @@
 @author:XuMing(xuming624@qq.com)
 @description: Long-term memory demo with multiple database backends
 
-This example shows how to use different databases for long-term memory storage:
+DEPRECATED: This approach is deprecated for new projects.
+For persistent user memories, use Workspace instead:
+
+    from agentica import Agent
+    from agentica.workspace import Workspace
+
+    workspace = Workspace("~/.agentica/workspace")
+    workspace.save_memory("User prefers concise responses")
+
+    agent = Agent(workspace=workspace, model=...)
+
+This example is preserved for legacy support and multi-user web applications
+where database-based storage is required.
+
+Database backends supported:
 1. SqliteDb - SQLite file-based storage
 2. MysqlDb - MySQL database storage
 3. RedisDb - Redis key-value storage

@@ -164,10 +164,10 @@ Agenticaで何が可能か、包括的な例をご覧ください：
 pip install -U agentica
 
 # 単一のクエリを実行
-agentica --query "次のオリンピックはどこで開催されますか？" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
+agentica --query "次のオリンピックはどこで開催されますか？" --model_provider zhipuai --model_name glm-4.7-flash --tools baidu_search
 
 # 対話型チャットセッションを開始
-agentica --model_provider zhipuai --model_name glm-4.6v-flash
+agentica --model_provider zhipuai --model_name glm-4.7-flash
 ```
 
 CLI show case (Like ClaudeCode):

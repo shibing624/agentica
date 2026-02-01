@@ -84,7 +84,7 @@ pip install .
 1.  **设置您的 API 密钥。** 在 `~/.agentica/.env` 路径下创建一个文件，或设置环境变量。
 
     ```shell
-    # 智谱AI ZhipuAI, glm-4.6v-flash 免费用，支持工具调用，128k
+    # 智谱AI ZhipuAI, glm-4.7-flash 免费用，支持工具调用，128k
     export ZHIPUAI_API_KEY="your-api-key"
     ```
 
@@ -164,10 +164,10 @@ pip install .
 pip install -U agentica
 
 # 运行单个查询
-agentica --query "下一届奥运会在哪里举办？" --model_provider zhipuai --model_name glm-4.6v-flash --tools baidu_search
+agentica --query "下一届奥运会在哪里举办？" --model_provider zhipuai --model_name glm-4.7-flash --tools baidu_search
 
 # 启动交互式聊天会话
-agentica --model_provider zhipuai --model_name glm-4.6v-flash
+agentica --model_provider zhipuai --model_name glm-4.7-flash
 ```
 
 CLI show case (实现ClaudeCode效果):

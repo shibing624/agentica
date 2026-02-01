@@ -3,11 +3,28 @@
 @author:XuMing(xuming624@qq.com)
 @description: Session memory demo - Demonstrates persistent user memory with Agent
 
-This example shows how to use persistent memory with an Agent:
-1. Simple API: Just set `enable_user_memories=True` and provide a `db`
-2. Agent and AgentMemory share the same database
-3. User memories persist across sessions
-4. Automatic memory extraction from conversations
+DEPRECATED: The `enable_user_memories` feature is deprecated.
+For persistent user memories, use Workspace instead (see examples/workspace/):
+
+    from agentica import Agent
+    from agentica.workspace import Workspace
+
+    workspace = Workspace("~/.agentica/workspace")
+    agent = Agent(workspace=workspace, model=...)
+    agent.save_memory("User prefers concise responses")
+
+This example is preserved for:
+1. Legacy support
+2. Multi-user web applications where database-based storage is required
+3. Understanding session history management (which is NOT deprecated)
+
+What's NOT deprecated:
+- Session history (add_history_to_messages)
+- Session summaries (AgentMemory.with_summary())
+
+What IS deprecated:
+- enable_user_memories
+- AgentMemory.with_db() for user memories
 """
 import sys
 import os

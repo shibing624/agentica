@@ -21,7 +21,7 @@ class ZhipuAI(OpenAILike):
     - base_url: str: The base URL for the model.
     """
 
-    id: str = "glm-4.6v-flash"
+    id: str = "glm-4.7-flash"
     name: str = "ZhipuAI"
     provider: str = "ZhipuAI"
 
