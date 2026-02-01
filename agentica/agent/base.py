@@ -370,7 +370,7 @@ class Agent:
 
             # Agent Multi-round Strategy Settings
             enable_multi_round: bool = False,
-            max_rounds: int = 100,
+            max_rounds: int = 20,
             max_tokens: int = 128000,
             enable_agentic_prompt: bool = False,
 

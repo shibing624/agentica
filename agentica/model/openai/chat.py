@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from agentica.model.base import Model
 from agentica.model.message import Message
-from agentica.model.response import ModelResponse
+from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
@@ -569,16 +569,24 @@ class OpenAIChat(Model):
                 function_calls_to_run.append(_function_call)
 
             if self.show_tool_calls:
-                model_response.content += "\nRunning:"
+                # Show tool calls being executed
+                model_response.content += "\n"
                 for _f in function_calls_to_run:
-                    model_response.content += f"\n - {_f.get_call_str()}"
-                model_response.content += "\n\n"
+                    model_response.content += f"🔧 {_f.get_call_str()}\n"
 
-            for _ in self.run_function_calls(
+            for tool_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results,
                     tool_role=tool_role
             ):
-                pass
+                # In non-streaming mode, show tool results if show_tool_calls is enabled
+                if self.show_tool_calls and tool_response.event == ModelResponseEvent.tool_call_completed.value:
+                    tool_info = tool_response.tool_call
+                    if tool_info:
+                        tool_name = tool_info.get("tool_name", "unknown")
+                        tool_result = tool_info.get("content", "")
+                        # Truncate long results
+                        result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else tool_result
+                        model_response.content += f"   📤 {tool_name}: {result_preview}\n"
 
             if len(function_call_results) > 0:
                 messages.extend(function_call_results)
@@ -932,17 +940,28 @@ class OpenAIChat(Model):
                     continue
                 function_calls_to_run.append(_function_call)
 
-            if self.show_tool_calls:
-                yield ModelResponse(content="\nRunning:")
-                for _f in function_calls_to_run:
-                    yield ModelResponse(content=f"\n - {_f.get_call_str()}")
-                yield ModelResponse(content="\n\n")
-
             for function_call_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results,
                     tool_role=tool_role
             ):
+                # Always yield the event for stream_intermediate_steps
                 yield function_call_response
+                
+                # If show_tool_calls, also output readable text
+                if self.show_tool_calls:
+                    if function_call_response.event == ModelResponseEvent.tool_call_started.value:
+                        tool_info = function_call_response.tool_call
+                        if tool_info:
+                            tool_name = tool_info.get("tool_name", "unknown")
+                            tool_args = tool_info.get("tool_args", {})
+                            yield ModelResponse(content=f"\n🔧 {tool_name}({tool_args})\n")
+                    elif function_call_response.event == ModelResponseEvent.tool_call_completed.value:
+                        tool_info = function_call_response.tool_call
+                        if tool_info:
+                            tool_result = tool_info.get("content", "")
+                            # Truncate long results
+                            result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else tool_result
+                            yield ModelResponse(content=f"   📤 {result_preview}\n")
 
             if len(function_call_results) > 0:
                 messages.extend(function_call_results)

@@ -55,7 +55,6 @@ from agentica.prompts.base.deep_agent import (
     get_force_answer_prompt,
     get_repetitive_behavior_prompt,
     get_iteration_checkpoint_prompt,
-    get_must_continue_prompt,
 )
 
 
@@ -109,24 +108,29 @@ class DeepAgent(Agent):
     include_user_input: bool = False
     custom_skill_dirs: Optional[List[str]] = None
 
-    # Deep Research Mode (only affects system prompt, not multi-round capability)
+    # Deep Research Mode (only affects system prompt)
+    # NOTE: Does NOT require enable_multi_round=True anymore!
+    # Model layer has built-in recursive tool calling that works better.
     enable_deep_research: bool = False
 
-    # ReAct Loop Control (uses Agent's max_rounds)
-    enable_step_reflection: bool = True  # Enable reflection after each step
+    # The following options only take effect when enable_multi_round=True
+    # They are kept for backward compatibility but NOT recommended for most use cases
+    
+    # ReAct Loop Control (only used with enable_multi_round=True)
+    enable_step_reflection: bool = False  # Disabled by default - may interfere with model reasoning
     reflection_frequency: int = 3  # Inject reflection prompt every N steps
 
-    # Context Management (Two-threshold hysteresis mechanism)
+    # Context Management (only used with enable_multi_round=True)
     context_soft_limit: int = 80000  # Soft threshold: start compression
     context_hard_limit: int = 120000  # Hard threshold: force termination
-    enable_context_overflow_handling: bool = True
+    enable_context_overflow_handling: bool = False  # Disabled by default
 
-    # Repetitive Behavior Detection
-    enable_repetition_detection: bool = True
+    # Repetitive Behavior Detection (only used with enable_multi_round=True)
+    enable_repetition_detection: bool = False  # Disabled by default - may block necessary searches
     max_same_tool_calls: int = 3  # Max consecutive calls to same tool
 
-    # HEARTBEAT-style Forced Iteration Control (Phase 3)
-    enable_forced_iteration: bool = True  # Enable HEARTBEAT-style iteration control
+    # HEARTBEAT-style Forced Iteration Control (only used with enable_multi_round=True)
+    enable_forced_iteration: bool = False  # Disabled by default - may cause premature termination
     iteration_checkpoint_frequency: int = 5  # Inject iteration checkpoint every N steps
 
     # Tool call history for repetition detection
@@ -147,18 +151,18 @@ class DeepAgent(Agent):
             custom_skill_dirs: Optional[List[str]] = None,
             # Deep Research Mode (only affects system prompt)
             enable_deep_research: bool = False,
-            # ReAct Loop Control
-            enable_step_reflection: bool = True,
+            # ReAct Loop Control (only used with enable_multi_round=True, disabled by default)
+            enable_step_reflection: bool = False,
             reflection_frequency: int = 3,
-            # Context Management
+            # Context Management (only used with enable_multi_round=True, disabled by default)
             context_soft_limit: int = 80000,
             context_hard_limit: int = 120000,
-            enable_context_overflow_handling: bool = True,
-            # Repetitive Behavior Detection
-            enable_repetition_detection: bool = True,
+            enable_context_overflow_handling: bool = False,
+            # Repetitive Behavior Detection (only used with enable_multi_round=True, disabled by default)
+            enable_repetition_detection: bool = False,
             max_same_tool_calls: int = 3,
-            # HEARTBEAT-style Forced Iteration Control (Phase 3)
-            enable_forced_iteration: bool = True,
+            # HEARTBEAT-style Forced Iteration Control (only used with enable_multi_round=True, disabled by default)
+            enable_forced_iteration: bool = False,
             iteration_checkpoint_frequency: int = 5,
             # User-provided custom tools
             tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
@@ -264,23 +268,15 @@ class DeepAgent(Agent):
             current_date = datetime.now().strftime("%Y-%m-%d")
             final_system_prompt = get_deep_research_prompt(current_date)
 
-        # Multi-round and agentic prompt configuration:
-        # - When enable_deep_research=True, multi-round and agentic_prompt are required
-        # - When enable_deep_research=False, user can choose (defaults to False for DeepAgent)
-        if enable_deep_research:
-            # Deep research mode requires multi-round for iterative search and validation
-            if kwargs.get('enable_multi_round') is False:
-                logger.warning("enable_deep_research=True requires enable_multi_round=True, forcing enable_multi_round=True")
-            kwargs['enable_multi_round'] = True
-            # Deep research mode also requires agentic prompt enhancement
-            if kwargs.get('enable_agentic_prompt') is False:
-                logger.warning("enable_deep_research=True requires enable_agentic_prompt=True, forcing enable_agentic_prompt=True")
-            kwargs['enable_agentic_prompt'] = True
-        # Otherwise, respect user's setting or default to False
-        
-        # Default max_rounds to 15 if not specified
-        if 'max_rounds' not in kwargs:
-            kwargs['max_rounds'] = 15
+        # NOTE: enable_multi_round is NO LONGER required for deep research!
+        # The Model layer already has built-in recursive tool calling (agentic loop),
+        # which is equivalent to OpenClaw's pi-agent-core approach.
+        # enable_multi_round=True adds extra complexity (reflection prompts, checkpoints)
+        # that may actually interfere with the model's natural reasoning.
+        #
+        # Recommendation:
+        # - For most cases: use default (enable_multi_round=False), let Model layer handle it
+        # - Only use enable_multi_round=True if you need explicit step-by-step control
 
         # Call parent class init with merged tools
         super().__init__(
@@ -535,9 +531,9 @@ class DeepResearchAgent(DeepAgent):
     DeepResearchAgent - Specialized agent for deep research tasks.
     
     This is a convenience class that pre-configures DeepAgent for deep research:
-    - Enables deep research mode by default
-    - Increases max_rounds for thorough investigation
-    - Enables all relevant tools
+    - Enables deep research system prompt by default
+    - Uses Model layer's built-in recursive tool calling (like OpenClaw)
+    - Does NOT enable enable_multi_round by default (which adds unnecessary complexity)
     
     Example:
         ```python
@@ -554,56 +550,50 @@ class DeepResearchAgent(DeepAgent):
 
     def __init__(
             self,
-            max_rounds: int = 20,
             **kwargs,
     ):
         """
         Initialize DeepResearchAgent.
         
         Args:
-            max_rounds: Maximum research rounds (default: 20)
             **kwargs: Other parameters passed to DeepAgent
         """
-        # Set defaults for deep research
+        # Set defaults for deep research - simple and clean
         kwargs.setdefault('enable_deep_research', True)
         kwargs.setdefault('include_todos', True)
         kwargs.setdefault('include_web_search', True)
         kwargs.setdefault('include_fetch_url', True)
         kwargs.setdefault('include_execute', True)
-        kwargs.setdefault('enable_step_reflection', True)
-        kwargs.setdefault('enable_context_overflow_handling', True)
-        kwargs.setdefault('enable_repetition_detection', True)
-        kwargs.setdefault('compress_tool_results', True)
+        # NOTE: We do NOT enable multi-round features by default anymore!
+        # Model layer's built-in recursive tool calling works better.
 
-        super().__init__(max_rounds=max_rounds, **kwargs)
+        super().__init__(**kwargs)
 
 
 if __name__ == '__main__':
     # Simple test
     from agentica import OpenAIChat
 
-    # Create DeepAgent
+    # Create DeepAgent with deep research mode
+    # NOTE: enable_multi_round is NOT needed! Model layer handles tool loops.
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o-mini"),
         name="TestDeepAgent",
         description="A test deep agent",
-        enable_deep_research=True,
-        max_rounds=15,
+        enable_deep_research=True,  # Only affects system prompt
         debug_mode=True,
     )
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
-    print(f"Max rounds: {agent.max_rounds}")
+    print(f"enable_multi_round: {agent.enable_multi_round}")  # Should be False
 
     # Test DeepResearchAgent
     research_agent = DeepResearchAgent(
         model=OpenAIChat(id="gpt-4o-mini"),
         name="TestResearchAgent",
-        max_rounds=20,
         debug_mode=True,
-        include_todos=False,
     )
     print(f"\nCreated: {research_agent}")
-    print(f"Max rounds: {research_agent.max_rounds}")
-    print(f"Tools: {research_agent.get_builtin_tool_names()}, {research_agent.tools}")
+    print(f"enable_multi_round: {research_agent.enable_multi_round}")  # Should be False
+    print(f"Tools: {research_agent.get_builtin_tool_names()}")
