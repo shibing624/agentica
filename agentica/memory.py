@@ -1173,6 +1173,64 @@ class AgentMemory(BaseModel):
             _memory_dict["memories"] = [memory.to_dict() for memory in self.memories]
         return _memory_dict
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentMemory":
+        """Create an AgentMemory instance from a dictionary.
+        
+        Args:
+            data: Dictionary containing memory data (typically from to_dict())
+            
+        Returns:
+            AgentMemory instance
+        """
+        if not data:
+            return cls()
+        
+        # Create a copy to avoid modifying input
+        data_copy = data.copy()
+        
+        # Convert runs if present
+        if "runs" in data_copy and data_copy["runs"]:
+            runs = []
+            for run_data in data_copy["runs"]:
+                if isinstance(run_data, dict):
+                    # Convert nested message/messages/response
+                    if "message" in run_data and run_data["message"]:
+                        run_data["message"] = Message(**run_data["message"])
+                    if "messages" in run_data and run_data["messages"]:
+                        run_data["messages"] = [Message(**m) for m in run_data["messages"]]
+                    if "response" in run_data and run_data["response"]:
+                        run_data["response"] = RunResponse(**run_data["response"])
+                    runs.append(AgentRun(**run_data))
+                elif isinstance(run_data, AgentRun):
+                    runs.append(run_data)
+            data_copy["runs"] = runs
+        
+        # Convert messages if present
+        if "messages" in data_copy and data_copy["messages"]:
+            data_copy["messages"] = [
+                Message(**m) if isinstance(m, dict) else m 
+                for m in data_copy["messages"]
+            ]
+        
+        # Convert summary if present
+        if "summary" in data_copy and data_copy["summary"]:
+            if isinstance(data_copy["summary"], dict):
+                data_copy["summary"] = SessionSummary(**data_copy["summary"])
+        
+        # Convert memories if present (deprecated but still supported)
+        if "memories" in data_copy and data_copy["memories"]:
+            data_copy["memories"] = [
+                Memory(**m) if isinstance(m, dict) else m 
+                for m in data_copy["memories"]
+            ]
+        
+        # Remove fields that shouldn't be passed to constructor
+        for field_name in ["summarizer", "db", "classifier", "manager"]:
+            data_copy.pop(field_name, None)
+        
+        return cls(**data_copy)
+
     def add_run(self, agent_run: AgentRun) -> None:
         """Adds an AgentRun to the runs list."""
         self.runs.append(agent_run)

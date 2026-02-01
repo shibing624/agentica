@@ -25,8 +25,10 @@ def test_crawl_url_to_file_html(mock_get):
     # Mock response
     mock_response = Mock()
     mock_response.status_code = 200
-    mock_response.headers = {"content-type": "text/html"}
-    mock_response.text = "<html><head><title>Test</title></head><body><h1>Test Content</h1></body></html>"
+    mock_response.headers = {"content-type": "text/html; charset=utf-8"}
+    html_content = "<html><head><title>Test</title></head><body><h1>Test Content</h1></body></html>"
+    mock_response.text = html_content
+    mock_response.content = html_content.encode('utf-8')
     mock_response.apparent_encoding = "utf-8"
     mock_response.raise_for_status = Mock()
     mock_get.return_value = mock_response
@@ -51,6 +53,7 @@ def test_crawl_url_to_file_non_html(mock_get):
     mock_response.status_code = 200
     mock_response.headers = {"content-type": "application/pdf"}
     mock_response.text = "%PDF-1.4 ..."
+    mock_response.content = b"%PDF-1.4 ..."
     mock_response.apparent_encoding = "utf-8"
     mock_response.raise_for_status = Mock()
     mock_get.return_value = mock_response
@@ -69,8 +72,10 @@ def test_url_crawl(mock_get):
     # Mock response
     mock_response = Mock()
     mock_response.status_code = 200
-    mock_response.headers = {"content-type": "text/html"}
-    mock_response.text = "<html><head><title>Test</title></head><body><h1>Test</h1></body></html>"
+    mock_response.headers = {"content-type": "text/html; charset=utf-8"}
+    html_content = "<html><head><title>Test</title></head><body><h1>Test</h1></body></html>"
+    mock_response.text = html_content
+    mock_response.content = html_content.encode('utf-8')
     mock_response.apparent_encoding = "utf-8"
     mock_response.raise_for_status = Mock()
     mock_get.return_value = mock_response

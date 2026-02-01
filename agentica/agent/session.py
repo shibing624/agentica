@@ -147,7 +147,7 @@ class SessionMixin:
         try:
             agent_session: AgentSession = self.get_agent_session()
             self.db.upsert_session(
-                session=SessionRow(
+                session_row=SessionRow(
                     session_id=agent_session.session_id,
                     agent_id=agent_session.agent_id,
                     user_id=agent_session.user_id,

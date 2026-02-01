@@ -584,9 +584,9 @@ class BuiltinFetchUrlTool(Tool):
         """
         super().__init__(name="builtin_fetch_url_tool")
         self.max_content_length = max_content_length
-        # Import and initialize UrlCrawlerTool
+        # Import and initialize UrlCrawlerTool (uses default cache dir ~/.cache/agentica/web_cache/)
         from agentica.tools.url_crawler_tool import UrlCrawlerTool
-        self._crawler = UrlCrawlerTool(base_dir='./tmp/', max_content_length=max_content_length)
+        self._crawler = UrlCrawlerTool(max_content_length=max_content_length)
         self.register(self.fetch_url)
 
     def fetch_url(self, url: str) -> str:

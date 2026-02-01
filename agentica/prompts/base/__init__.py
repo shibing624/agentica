@@ -1,0 +1,88 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Base prompt modules
+
+Core prompt components:
+- heartbeat: Forced iteration mechanism (must iterate until solved)
+- task_management: Task tracking with TodoWrite
+- tools: Tool usage priority and parallel strategy
+- soul: Professional objectivity and tone guidelines
+- identity: Agent identity definitions
+- deep_agent: DeepAgent specific prompts (research, reflection, etc.)
+"""
+
+from agentica.prompts.base.heartbeat import (
+    HEARTBEAT_PROMPT,
+    HEARTBEAT_PROMPT_COMPACT,
+    get_heartbeat_prompt,
+    get_iteration_reminder,
+)
+from agentica.prompts.base.task_management import (
+    TASK_MANAGEMENT_PROMPT,
+    TASK_MANAGEMENT_PROMPT_COMPACT,
+    get_task_management_prompt,
+)
+from agentica.prompts.base.tools import (
+    TOOLS_PRIORITY_PROMPT,
+    TOOLS_PRIORITY_PROMPT_COMPACT,
+    get_tools_prompt,
+)
+from agentica.prompts.base.soul import (
+    SOUL_PROMPT,
+    SOUL_PROMPT_COMPACT,
+    get_soul_prompt,
+)
+from agentica.prompts.base.identity import (
+    IDENTITY_CLI_PROMPT,
+    IDENTITY_API_PROMPT,
+    IDENTITY_DEFAULT_PROMPT,
+    get_identity_prompt,
+)
+from agentica.prompts.base.deep_agent import (
+    DEEP_RESEARCH_PROMPT,
+    STEP_REFLECTION_PROMPT,
+    FORCE_ANSWER_PROMPT,
+    REPETITIVE_BEHAVIOR_PROMPT,
+    ITERATION_CHECKPOINT_PROMPT,
+    MUST_CONTINUE_PROMPT,
+    get_deep_research_prompt,
+    get_step_reflection_prompt,
+    get_force_answer_prompt,
+    get_repetitive_behavior_prompt,
+    get_iteration_checkpoint_prompt,
+    get_must_continue_prompt,
+)
+
+__all__ = [
+    "HEARTBEAT_PROMPT",
+    "HEARTBEAT_PROMPT_COMPACT",
+    "get_heartbeat_prompt",
+    "get_iteration_reminder",
+    "TASK_MANAGEMENT_PROMPT",
+    "TASK_MANAGEMENT_PROMPT_COMPACT",
+    "get_task_management_prompt",
+    "TOOLS_PRIORITY_PROMPT",
+    "TOOLS_PRIORITY_PROMPT_COMPACT",
+    "get_tools_prompt",
+    "SOUL_PROMPT",
+    "SOUL_PROMPT_COMPACT",
+    "get_soul_prompt",
+    "IDENTITY_CLI_PROMPT",
+    "IDENTITY_API_PROMPT",
+    "IDENTITY_DEFAULT_PROMPT",
+    "get_identity_prompt",
+    # Deep Agent prompts
+    "DEEP_RESEARCH_PROMPT",
+    "STEP_REFLECTION_PROMPT",
+    "FORCE_ANSWER_PROMPT",
+    "REPETITIVE_BEHAVIOR_PROMPT",
+    "ITERATION_CHECKPOINT_PROMPT",
+    "MUST_CONTINUE_PROMPT",
+    "get_deep_research_prompt",
+    "get_step_reflection_prompt",
+    "get_force_answer_prompt",
+    "get_repetitive_behavior_prompt",
+    "get_iteration_checkpoint_prompt",
+    "get_must_continue_prompt",
+]

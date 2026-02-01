@@ -201,6 +201,10 @@ class Agent:
     # Maximum number of tokens to use in the model input
     max_tokens: int = 128000
 
+    # -*- Agentic Prompt Settings, prompt enhancement, like openclaw/claude code
+    # Enable agentic prompt enhancement (HEARTBEAT, SOUL modules)
+    enable_agentic_prompt: bool = False
+
     # -*- Compression Settings
     # Enable compression of tool call results to save context space
     compress_tool_results: bool = False
@@ -368,6 +372,7 @@ class Agent:
             enable_multi_round: bool = False,
             max_rounds: int = 100,
             max_tokens: int = 128000,
+            enable_agentic_prompt: bool = False,
 
             # Compression Settings
             compress_tool_results: bool = False,
@@ -499,6 +504,7 @@ class Agent:
         self.enable_multi_round = enable_multi_round
         self.max_rounds = max_rounds
         self.max_tokens = max_tokens
+        self.enable_agentic_prompt = enable_agentic_prompt
 
         self.compress_tool_results = compress_tool_results
         self.compression_manager = compression_manager

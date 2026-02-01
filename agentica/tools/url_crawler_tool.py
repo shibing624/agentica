@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 import sys
 sys.path.append("../..")
 from agentica.tools.base import Tool
+from agentica.config import AGENTICA_HOME
 from agentica.utils.log import logger
 
 
@@ -35,14 +36,27 @@ def clean_text(text: str) -> str:
 
 
 class UrlCrawlerTool(Tool):
+    # Default cache directory for crawled web pages
+    DEFAULT_CACHE_DIR = os.path.join(AGENTICA_HOME, "web_cache")
+    
     def __init__(
             self,
-            base_dir: str = os.path.curdir,
+            base_dir: str = None,
             max_content_length: int = 16000,
     ):
+        """Initialize UrlCrawlerTool.
+        
+        Args:
+            base_dir: Directory to save crawled web pages. 
+                      Defaults to ~/.cache/agentica/web_cache/
+            max_content_length: Maximum length of returned content
+        """
         super().__init__(name="url_crawler_tool")
-        self.base_dir = base_dir
+        # Use default cache directory if not specified
+        self.base_dir = base_dir if base_dir else self.DEFAULT_CACHE_DIR
         self.max_content_length = max_content_length
+        # Ensure cache directory exists
+        os.makedirs(self.base_dir, exist_ok=True)
         self.register(self.url_crawl)
 
     @staticmethod
@@ -85,6 +99,64 @@ class UrlCrawlerTool(Tool):
             return truncated + "... (content truncated)"
         return content
 
+    def _detect_encoding(self, response) -> str:
+        """Detect the correct encoding for the response.
+        
+        Priority:
+        1. Content-Type header charset
+        2. HTML meta charset tag
+        3. apparent_encoding (chardet detection)
+        4. Default to utf-8
+        
+        Args:
+            response: requests.Response object
+            
+        Returns:
+            str: Detected encoding
+        """
+        # 1. Check Content-Type header
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'charset=' in content_type:
+            charset = content_type.split('charset=')[-1].split(';')[0].strip()
+            if charset:
+                return charset
+        
+        # 2. Check HTML meta tag for charset
+        # Use raw content bytes to avoid encoding issues
+        raw_content = response.content[:4096]  # Check first 4KB
+        try:
+            # Try to decode as ASCII to find charset declaration
+            text_sample = raw_content.decode('ascii', errors='ignore')
+            
+            # Look for <meta charset="xxx">
+            charset_match = re.search(r'<meta[^>]+charset=["\']?([^"\'\s>]+)', text_sample, re.IGNORECASE)
+            if charset_match:
+                return charset_match.group(1)
+            
+            # Look for <meta http-equiv="Content-Type" content="text/html; charset=xxx">
+            content_type_match = re.search(
+                r'<meta[^>]+content=["\'][^"\']*charset=([^"\'\s;]+)',
+                text_sample,
+                re.IGNORECASE
+            )
+            if content_type_match:
+                return content_type_match.group(1)
+        except Exception:
+            pass
+        
+        # 3. Use apparent_encoding (chardet detection)
+        apparent = response.apparent_encoding
+        if apparent:
+            # Map common misdetections
+            apparent_lower = apparent.lower()
+            # GB2312/GBK/GB18030 are all compatible, use GB18030 for best coverage
+            if apparent_lower in ('gb2312', 'gbk', 'gb18030'):
+                return 'gb18030'
+            return apparent
+        
+        # 4. Default to UTF-8
+        return 'utf-8'
+
     def url_crawl(self, url: str) -> str:
         """Crawl a website url and return the content of the website as a json string.
 
@@ -101,11 +173,17 @@ class UrlCrawlerTool(Tool):
         try:
             logger.debug(f"Crawling URL: {url}")
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate',
             }
             response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
-            response.encoding = response.apparent_encoding
+            
+            # Improved encoding detection for Chinese websites
+            encoding = self._detect_encoding(response)
+            response.encoding = encoding
 
             soup = BeautifulSoup(response.text, 'html.parser')
             for script in soup(["script", "style", "noscript", "iframe", "svg"]):

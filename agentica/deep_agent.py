@@ -26,6 +26,7 @@ Key Features:
 3. Forced Termination: Auto-stop when context limit reached
 4. Reflection & Strategy Adjustment: Detect repetitive behavior
 5. Deep Research System Prompt: Optimized for thorough investigation
+6. Enhanced Iteration Control: HEARTBEAT-style forced iteration (Phase 3)
 """
 from __future__ import annotations
 
@@ -47,83 +48,15 @@ from agentica.deep_tools import get_builtin_tools, BuiltinTaskTool
 from agentica.model.message import Message
 from agentica.utils.log import logger
 
-
-# =============================================================================
-# Deep Research System Prompt
-# =============================================================================
-
-DEEP_RESEARCH_SYSTEM_PROMPT = """**任务目标:** 针对以下问题，请进行深入、详尽的调查与分析，并提供一个经过充分验证的、全面的答案。
-
-**核心要求:** 在整个过程中，你需要**最大化地、策略性地使用你可用的工具** (例如：搜索引擎、代码执行器等)，并**清晰地展示你的思考、决策和验证过程**。不仅仅是给出最终答案，更要展现获得答案的严谨路径。
-
-**行为指令:**
-
-1. **启动调查 (Initiate Investigation):** 首先分析问题，识别关键信息点和潜在的约束条件。初步规划你需要哪些信息（使用todo工具制定你的调查计划），并使用工具（如搜索）开始收集。
-
-2. **迭代式信息收集与反思 (Iterative Information Gathering & Reflection):**
-   * **处理搜索失败:** 如果首次搜索（或后续搜索）未能找到相关结果或结果不佳，**必须**明确说明（例如："初步搜索未能找到关于'XXX'的直接信息，尝试调整关键词为'YYY'再次搜索。"），并调整策略（修改关键词、尝试不同搜索引擎或数据库、扩大搜索范围如增加top K结果数量并说明"之前的Top K结果不足，现在尝试查看更多页面获取信息"）。
-   * **评估信息充分性:** 在获取部分信息后，**必须**停下来评估这些信息是否足以回答原始问题的所有方面（例如："已找到关于'AAA'的信息，但问题中提到的'BBB'方面尚未覆盖，需要继续搜索'BBB'相关内容。"）。
-   * **追求信息深度:** 即使已有一些信息，如果觉得不够深入或全面，**必须**说明需要更多信息来源并继续搜索（例如："现有信息提供了基础，但为确保全面性，需要查找更多权威来源或不同角度的报道来深化理解。"）。
-   * **信源考量:** 在引用信息时，**主动思考并简述**信息来源的可靠性或背景（例如："这个信息来自'XYZ网站'，该网站通常被认为是[领域]的权威来源/是一个用户生成内容平台，信息需要进一步核实。"）。
-
-3. **多源/多工具交叉验证 (Multi-Source/Multi-Tool Cross-Validation):**
-   * **主动验证:** **不要**满足于单一来源的信息。**必须**尝试使用不同工具或搜索不同来源来交叉验证关键信息点（例如："为确认'CCC'数据的准确性，让我们尝试用另一个搜索引擎或查询官方数据库进行验证。" 或 "让我们用代码计算器/Python工具来验证刚才推理中得到的数值/字符串处理结果。"）。
-   * **工具切换:** 如果一个工具不适用或效果不佳，**明确说明**并尝试使用其他可用工具（例如："搜索引擎未能提供结构化数据，尝试使用代码执行器分析或提取网页内容。"）。
-
-4. **约束条件检查 (Constraint Checklist):** 在整合信息和形成答案之前，**必须**明确回顾原始问题的所有约束条件，并逐一确认现有信息是否完全满足这些条件（例如："让我们检查一下：问题要求时间在'2023年后'，地点为'欧洲'，并且涉及'特定技术'。目前收集到的信息 A 满足时间，信息 B 满足地点，信息 C 涉及该技术... 所有约束均已覆盖。"）。
-
-5. **计算与操作验证 (Calculation & Operation Verification):** 如果在你的思考链（Chain of Thought）中进行了任何计算、数据提取、字符串操作或其他逻辑推导，**必须**在最终确定前使用工具（如代码执行器）进行验证，并展示验证步骤（例如："推理得出总和为 X，现在使用代码验证：`print(a+b)` ... 结果确认是 X。"）。
-
-6. **清晰的叙述:** 在每一步工具调用前后，用简短的语句**清晰说明你为什么要调用这个工具、期望获得什么信息、以及调用后的结果和下一步计划**。这包括上述所有反思和验证的插入语。
-
-**制定计划:** 在开始收集信息之前，请先分析问题，并使用todo工具制定你的行动计划。
-
-**格式要求:** 每次执行工具调用后，分析返回的信息，如果已收集到足够的信息，可以直接回答用户请求，否则继续执行工具调用。在整个过程中，请始终明确你的目标是回答用户请求。当通过充分的工具调用获取并验证了所有必要信息后，在 <answer>...</answer> 中输出一个详尽全面的报告。
-
-**引用要求:** 报告中引用搜索信息时，必须使用Markdown链接格式标注来源，格式为：`[来源名称](URL)`。例如：`根据[OpenAI官方博客](https://openai.com/blog/xxx)的报道...`。禁止使用LaTeX的cite格式或占位符（如\\cite{{}}），必须使用实际的URL链接。
-
-**报告要求:** 请确保深度、全面地回答任务中的所有子问题，采用符合用户提问的语言风格和结构，使用逻辑清晰、论证充分的长段落，禁止碎片化罗列。论证需要基于具体的数字和最新的权威引用，进行必要的关联对比分析、利弊权衡、风险讨论，并确保事实准确、术语清晰，避免模糊和绝对化措辞。
-
-**当前日期:** {current_date}"""
-
-
-# =============================================================================
-# Reflection Prompts
-# =============================================================================
-
-STEP_REFLECTION_PROMPT = """
-## 步骤反思
-
-请在继续之前进行反思：
-
-1. **信息评估**: 我获得了什么新信息？这些信息是否足够回答用户问题？
-2. **策略检查**: 当前搜索策略是否有效？是否需要更换关键词或搜索角度？
-3. **进度判断**: 是否应该继续搜索，还是信息已经足够可以给出答案？
-
-重要：避免重复相同的搜索。如果连续两次搜索结果相似，应调整策略或停止。
-"""
-
-FORCE_ANSWER_PROMPT = """
-⚠️ **上下文长度已达到限制**
-
-你现在必须：
-1. **停止所有工具调用** - 不要再进行任何搜索或工具操作
-2. **基于已收集的信息给出最终答案** - 整合目前已有的所有信息
-3. **如果信息不足，说明已知内容并指出缺失部分**
-
-请立即在 <answer>...</answer> 中给出你的最终回答。
-"""
-
-REPETITIVE_BEHAVIOR_PROMPT = """
-⚠️ **检测到重复行为模式**
-
-你已经连续 {count} 次调用相同的工具 `{tool_name}`。这可能意味着：
-1. 搜索策略需要调整 - 尝试不同的关键词或工具
-2. 已有信息可能已经足够 - 考虑是否可以给出答案
-3. 问题可能需要分解 - 尝试将问题拆分为更小的子问题
-
-请调整你的策略，或者如果信息已经足够，直接给出最终答案。
-"""
+# Import prompts from the centralized prompt module
+from agentica.prompts.base.deep_agent import (
+    get_deep_research_prompt,
+    get_step_reflection_prompt,
+    get_force_answer_prompt,
+    get_repetitive_behavior_prompt,
+    get_iteration_checkpoint_prompt,
+    get_must_continue_prompt,
+)
 
 
 @dataclass(init=False)
@@ -192,6 +125,10 @@ class DeepAgent(Agent):
     enable_repetition_detection: bool = True
     max_same_tool_calls: int = 3  # Max consecutive calls to same tool
 
+    # HEARTBEAT-style Forced Iteration Control (Phase 3)
+    enable_forced_iteration: bool = True  # Enable HEARTBEAT-style iteration control
+    iteration_checkpoint_frequency: int = 5  # Inject iteration checkpoint every N steps
+
     # Tool call history for repetition detection
     _tool_call_history: deque = field(default_factory=lambda: deque(maxlen=10))
 
@@ -220,6 +157,9 @@ class DeepAgent(Agent):
             # Repetitive Behavior Detection
             enable_repetition_detection: bool = True,
             max_same_tool_calls: int = 3,
+            # HEARTBEAT-style Forced Iteration Control (Phase 3)
+            enable_forced_iteration: bool = True,
+            iteration_checkpoint_frequency: int = 5,
             # User-provided custom tools
             tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
             # Instructions from user
@@ -251,6 +191,8 @@ class DeepAgent(Agent):
             enable_context_overflow_handling: Enable context overflow handling
             enable_repetition_detection: Enable repetitive behavior detection
             max_same_tool_calls: Max consecutive calls to same tool
+            enable_forced_iteration: Enable HEARTBEAT-style forced iteration control
+            iteration_checkpoint_frequency: How often to inject iteration checkpoints
             tools: User-provided custom tools list
             instructions: User-provided instructions
             system_prompt: Override system prompt (if not using deep research mode)
@@ -285,6 +227,10 @@ class DeepAgent(Agent):
         self.max_same_tool_calls = max_same_tool_calls
         self._tool_call_history = deque(maxlen=10)
 
+        # HEARTBEAT-style Forced Iteration Control (Phase 3)
+        self.enable_forced_iteration = enable_forced_iteration
+        self.iteration_checkpoint_frequency = iteration_checkpoint_frequency
+
         # Get built-in tools
         builtin_tools = get_builtin_tools(
             base_dir=work_dir,
@@ -316,16 +262,20 @@ class DeepAgent(Agent):
         if enable_deep_research and system_prompt is None:
             # Use deep research prompt with current date
             current_date = datetime.now().strftime("%Y-%m-%d")
-            final_system_prompt = DEEP_RESEARCH_SYSTEM_PROMPT.format(current_date=current_date)
+            final_system_prompt = get_deep_research_prompt(current_date)
 
-        # Multi-round configuration:
-        # - When enable_deep_research=True, multi-round is required for iterative research
+        # Multi-round and agentic prompt configuration:
+        # - When enable_deep_research=True, multi-round and agentic_prompt are required
         # - When enable_deep_research=False, user can choose (defaults to False for DeepAgent)
         if enable_deep_research:
             # Deep research mode requires multi-round for iterative search and validation
             if kwargs.get('enable_multi_round') is False:
                 logger.warning("enable_deep_research=True requires enable_multi_round=True, forcing enable_multi_round=True")
             kwargs['enable_multi_round'] = True
+            # Deep research mode also requires agentic prompt enhancement
+            if kwargs.get('enable_agentic_prompt') is False:
+                logger.warning("enable_deep_research=True requires enable_agentic_prompt=True, forcing enable_agentic_prompt=True")
+            kwargs['enable_agentic_prompt'] = True
         # Otherwise, respect user's setting or default to False
         
         # Default max_rounds to 15 if not specified
@@ -395,10 +345,7 @@ class DeepAgent(Agent):
         # Check if the last N calls are all the same tool
         recent_calls = list(self._tool_call_history)[-self.max_same_tool_calls:]
         if len(set(recent_calls)) == 1:
-            return REPETITIVE_BEHAVIOR_PROMPT.format(
-                count=self.max_same_tool_calls,
-                tool_name=tool_name
-            )
+            return get_repetitive_behavior_prompt(tool_name, self.max_same_tool_calls)
 
         return None
 
@@ -426,7 +373,7 @@ class DeepAgent(Agent):
         if current_tokens >= self.context_hard_limit:
             # Hard threshold: force termination
             logger.warning(f"Context hard limit reached: {current_tokens} >= {self.context_hard_limit}")
-            return True, FORCE_ANSWER_PROMPT
+            return True, get_force_answer_prompt()
 
         # Soft threshold: trigger compression
         logger.info(f"Context soft limit reached: {current_tokens} >= {self.context_soft_limit}")
@@ -446,7 +393,7 @@ class DeepAgent(Agent):
         if step > 0 and step % self.reflection_frequency == 0:
             messages.append(Message(
                 role="system",
-                content=STEP_REFLECTION_PROMPT
+                content=get_step_reflection_prompt()
             ))
             logger.debug(f"Injected reflection prompt at step {step}")
 
@@ -524,13 +471,49 @@ class DeepAgent(Agent):
 
     def _on_post_step(self, step: int, messages: List[Message]) -> None:
         """
-        Post-step hook: Inject reflection prompts at appropriate intervals.
-        
+        Post-step hook: Inject reflection and iteration checkpoint prompts.
+
+        Enhanced in Phase 3 with HEARTBEAT-style iteration control:
+        - Inject reflection prompts at regular intervals
+        - Inject iteration checkpoint prompts to ensure task completion
+
         Args:
             step: Current step number
             messages: Current message list (modified in place)
         """
+        # Original reflection prompt injection
         self._inject_reflection_prompt(messages, step)
+
+        # HEARTBEAT-style iteration checkpoint (Phase 3 Enhancement)
+        if self.enable_forced_iteration and step > 0:
+            if step % self.iteration_checkpoint_frequency == 0:
+                checkpoint_prompt = get_iteration_checkpoint_prompt(step)
+                messages.append(Message(
+                    role="system",
+                    content=checkpoint_prompt
+                ))
+                logger.debug(f"Injected iteration checkpoint at step {step}")
+
+    def _get_iteration_reminder(self, step: int) -> str:
+        """Generate an iteration reminder message for the current step.
+
+        This is used by the PromptBuilder integration to provide
+        HEARTBEAT-style reminders during multi-round execution.
+
+        Args:
+            step: Current step number
+
+        Returns:
+            Iteration reminder message
+        """
+        return f"""
+Step {step} checkpoint:
+- Have you fully solved the problem?
+- Are there any remaining tasks in the task list?
+- Did you verify your changes?
+
+If not complete, continue working. Do NOT end your turn prematurely.
+"""
 
     def __repr__(self) -> str:
         """Return string representation of DeepAgent."""
