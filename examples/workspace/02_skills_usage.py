@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Skills system usage example
+@description: Skills system usage with Workspace example
 
 This example shows how to:
-1. Load skills from directories
-2. Match trigger commands
-3. Get skill prompts for injection
+1. Load skills from directories including workspace skills
+2. Match trigger commands and inject prompts
+3. Integrate skills with workspace-based agents
 """
 import os
 import sys
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, ZhipuAI
+from agentica import Agent, ZhipuAI, Workspace
 from agentica.skills import (
     SkillLoader,
     get_skill_registry,
@@ -22,8 +22,11 @@ from agentica.skills import (
 )
 
 
-def main():
-    print("=== Loading Skills ===")
+def demo_workspace_with_skills():
+    """Demo: Create workspace-based agent with skills."""
+    print("=" * 60)
+    print("Demo: Workspace + Skills Integration")
+    print("=" * 60)
 
     # Load all skills from standard directories
     registry = load_skills()
@@ -33,56 +36,104 @@ def main():
     print(f"\nFound {len(skills)} skills:")
     for skill in skills:
         trigger_info = f" (trigger: {skill.trigger})" if skill.trigger else ""
-        print(f"  - {skill.name}: {skill.description}{trigger_info}")
+        print(f"  - {skill.name}: {skill.description[:40]}...{trigger_info}")
 
-    # Get skills summary for system prompt
-    print("\n=== Skills Summary ===")
-    summary = registry.get_skills_summary()
-    print(summary)
+    # Create a workspace-based agent
+    # The workspace provides: AGENT.md, PERSONA.md, TOOLS.md, USER.md, MEMORY.md
+    print("\n" + "-" * 40)
+    print("Creating Agent from Workspace")
+    print("-" * 40)
 
-    # Match trigger commands
-    print("\n=== Trigger Matching ===")
-    test_inputs = [
-        "/commit fix bug",
-        "/github pr list",
-        "regular message",
-    ]
+    # Use default workspace path from config (~/.agentica/workspace)
+    workspace = Workspace()
+    workspace.initialize()  # Create if not exists
 
-    for text in test_inputs:
-        matched = registry.match_trigger(text)
-        if matched:
-            print(f"'{text}' -> matches skill: {matched.name}")
-        else:
-            print(f"'{text}' -> no match")
+    # Get workspace context
+    context = workspace.get_context_prompt()
+    if context:
+        print(f"Workspace context loaded ({len(context)} chars)")
 
-    # List all registered triggers
-    print("\n=== Registered Triggers ===")
-    triggers = registry.list_triggers()
-    for trigger, skill_name in triggers.items():
-        print(f"  {trigger} -> {skill_name}")
+    # Get skills summary
+    skills_summary = registry.get_skills_summary()
 
-    # Get skill instruction for agent
-    print("\n=== Skill Instructions ===")
-    instructions = registry.get_skill_instruction()
-    print(instructions[:500] + "..." if len(instructions) > 500 else instructions)
-
-    # Example: Create agent with skills
-    print("\n=== Creating Agent with Skills ===")
+    # Create agent with workspace context + skills
     agent = Agent(
         model=ZhipuAI(model="glm-4-flash"),
-        instructions=f"You are a helpful assistant.\n\n{registry.get_skills_summary()}",
+        name="Workspace-Skills-Agent",
+        instructions=[
+            "You are a helpful assistant with workspace and skill capabilities.",
+            "",
+            "# Workspace Context",
+            context if context else "No workspace context available.",
+            "",
+            "# Available Skills",
+            skills_summary,
+        ],
     )
 
-    # Run with skill context (manually inject skill prompt when triggered)
-    user_input = "/github pr view 123"
-    matched_skill = registry.match_trigger(user_input)
+    print(f"Agent created: {agent.name}")
 
-    if matched_skill:
-        print(f"Detected skill: {matched_skill.name}")
-        # Get skill prompt and inject it
-        skill_prompt = matched_skill.get_prompt()
-        print(f"Skill prompt preview: {skill_prompt[:200]}...")
+    # Demo: Match trigger and inject skill
+    print("\n" + "-" * 40)
+    print("Trigger Matching Demo")
+    print("-" * 40)
+
+    user_inputs = [
+        "/commit add new feature",
+        "/github pr list",
+        "What is the weather today?",
+    ]
+
+    for user_input in user_inputs:
+        matched = registry.match_trigger(user_input)
+        if matched:
+            print(f"'{user_input}' -> {matched.name} skill activated")
+
+            # Inject skill prompt dynamically
+            agent.add_instruction(f"\n# {matched.name} Skill\n{matched.get_prompt()}")
+
+            # Extract actual message
+            trigger = matched.trigger
+            if trigger and user_input.startswith(trigger):
+                actual_msg = user_input[len(trigger):].strip()
+                print(f"  Actual message: '{actual_msg}'")
+        else:
+            print(f"'{user_input}' -> no skill trigger")
+
+
+def demo_workspace_skills_directory():
+    """Demo: Skills from workspace skills directory."""
+    print("\n" + "=" * 60)
+    print("Demo: Workspace Skills Directory")
+    print("=" * 60)
+
+    workspace = Workspace()
+    skills_dir = workspace.get_skills_dir()
+
+    print(f"\nWorkspace skills directory: {skills_dir}")
+    print(f"Exists: {skills_dir.exists()}")
+
+    if skills_dir.exists():
+        # List skills in workspace
+        skill_dirs = [d for d in skills_dir.iterdir() if d.is_dir()]
+        if skill_dirs:
+            print(f"\nFound {len(skill_dirs)} skill directories:")
+            for sd in skill_dirs:
+                skill_md = sd / "SKILL.md"
+                status = "✓" if skill_md.exists() else "✗"
+                print(f"  {status} {sd.name}/")
+        else:
+            print("No skills in workspace directory yet.")
+    else:
+        print("Workspace skills directory not created yet.")
+
+    # Show how to add a skill to workspace
+    print("\nTo add a skill to workspace:")
+    print(f"  1. Create directory: {skills_dir}/my-skill/")
+    print(f"  2. Create SKILL.md with YAML frontmatter")
+    print(f"  3. Skills will be auto-loaded on next load_skills()")
 
 
 if __name__ == "__main__":
-    main()
+    demo_workspace_with_skills()
+    demo_workspace_skills_directory()

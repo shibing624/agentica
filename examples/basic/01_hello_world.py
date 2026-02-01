@@ -8,9 +8,12 @@ This is the most basic example showing how to create and run an Agent.
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+import time
+t1 = time.time()
 from agentica import Agent, OpenAIChat
+t2 = time.time()
+print(f"import time: {t2-t1}")
 
 # Create a simple agent
 agent = Agent(

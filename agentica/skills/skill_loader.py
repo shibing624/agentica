@@ -213,6 +213,50 @@ class SkillLoader:
         registry.clear()
         return self.load_all(registry)
 
+    def match_trigger(self, text: str) -> Optional[Skill]:
+        """
+        Find a skill that matches the given trigger text.
+
+        Convenience method that delegates to the registry.
+
+        Args:
+            text: User input text (e.g., "/commit fix bug")
+
+        Returns:
+            Matching Skill or None if no match found
+        """
+        registry = get_skill_registry()
+        return registry.match_trigger(text)
+
+    def get_skill_prompt(self, name: str) -> Optional[str]:
+        """
+        Get the full prompt content for a skill by name.
+
+        Args:
+            name: Name of the skill
+
+        Returns:
+            Full prompt string with base directory header, or None if skill not found
+        """
+        registry = get_skill_registry()
+        skill = registry.get(name)
+        if skill:
+            return skill.get_prompt()
+        return None
+
+    def get_skill(self, name: str) -> Optional[Skill]:
+        """
+        Get a skill by name from the registry.
+
+        Args:
+            name: Name of the skill
+
+        Returns:
+            Skill instance or None if not found
+        """
+        registry = get_skill_registry()
+        return registry.get(name)
+
     @staticmethod
     def list_skill_files(directory: str) -> str:
         """

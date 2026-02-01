@@ -364,6 +364,62 @@ You are a helpful AI assistant.
         for f in files[keep_days:]:
             f.unlink()
 
+    def create_memory_search(self):
+        """创建工作空间记忆搜索实例
+
+        Returns:
+            WorkspaceMemorySearch 实例，可用于向量搜索和关键词搜索
+
+        Example:
+            >>> workspace = Workspace()
+            >>> search = workspace.create_memory_search()
+            >>> search.index()
+            >>> results = search.search("Python programming")
+        """
+        from agentica.memory import WorkspaceMemorySearch
+        return WorkspaceMemorySearch(workspace_path=str(self.path))
+
+    def search_memory_hybrid(
+        self,
+        query: str,
+        limit: int = 5,
+        embedder=None,
+    ) -> List[Dict]:
+        """混合搜索记忆（向量 + 关键词）
+
+        使用向量相似度和关键词匹配的组合来搜索记忆。
+
+        Args:
+            query: 搜索查询
+            limit: 返回数量限制
+            embedder: 可选的嵌入模型实例，如果未提供会尝试使用 OpenAIEmb
+
+        Returns:
+            匹配的记忆列表
+
+        Example:
+            >>> workspace = Workspace()
+            >>> workspace.initialize()
+            >>> workspace.write_memory("Python is great for AI")
+            >>> results = workspace.search_memory_hybrid("artificial intelligence")
+        """
+        from agentica.memory import WorkspaceMemorySearch
+
+        search = WorkspaceMemorySearch(workspace_path=str(self.path))
+        search.index()
+
+        results = search.search_hybrid(query, limit=limit, embedder=embedder)
+
+        # Convert MemoryChunk to dict for consistency with search_memory
+        return [
+            {
+                "content": r.content,
+                "file_path": r.file_path,
+                "score": r.score,
+            }
+            for r in results
+        ]
+
     def __repr__(self) -> str:
         return f"Workspace(path={self.path}, exists={self.exists()})"
 

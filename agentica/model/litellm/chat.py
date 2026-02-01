@@ -32,14 +32,6 @@ from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
-try:
-    from litellm import completion, acompletion
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-    completion = None
-    acompletion = None
-
 
 @dataclass
 class Metrics:
@@ -161,7 +153,9 @@ class LiteLLM(Model):
     
     def __post_init__(self):
         """Validate LiteLLM is installed."""
-        if not LITELLM_AVAILABLE:
+        try:
+            from litellm import completion, acompletion
+        except ImportError:
             raise ImportError(
                 "LiteLLM is not installed. Please install it with: pip install litellm"
             )
@@ -275,6 +269,7 @@ class LiteLLM(Model):
         Returns:
             LiteLLM response object
         """
+        from litellm import completion
         api_key = self._get_api_key()
         
         response = completion(
@@ -295,6 +290,7 @@ class LiteLLM(Model):
         Returns:
             LiteLLM response object
         """
+        from litellm import acompletion
         api_key = self._get_api_key()
         
         response = await acompletion(
@@ -315,6 +311,7 @@ class LiteLLM(Model):
         Yields:
             Streaming response chunks
         """
+        from litellm import completion
         api_key = self._get_api_key()
         
         response = completion(
@@ -336,6 +333,7 @@ class LiteLLM(Model):
         Returns:
             Async iterator of streaming response chunks
         """
+        from litellm import acompletion
         api_key = self._get_api_key()
         
         response = await acompletion(

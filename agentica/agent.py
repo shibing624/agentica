@@ -37,7 +37,6 @@ from typing import TYPE_CHECKING
 
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.document import Document
-from agentica.knowledge.base import Knowledge
 from agentica.model.openai import OpenAIChat
 from agentica.tools.base import ModelTool, Tool, Function, get_function_call_for_tool_call
 from agentica.utils.misc import merge_dictionaries
@@ -58,6 +57,7 @@ from agentica.utils.langfuse_integration import langfuse_trace_context
 
 if TYPE_CHECKING:
     from agentica.workspace import Workspace
+    from agentica.knowledge.base import Knowledge
 
 
 @dataclass(init=False)
@@ -731,6 +731,38 @@ class Agent:
             logger.debug(f"Saved memory to workspace: long_term={long_term}")
         else:
             logger.warning("No workspace configured, memory not saved")
+
+    def add_instruction(self, instruction: str):
+        """动态添加指令到 Agent
+
+        在运行时向 Agent 添加额外的指令，常用于注入技能提示或临时上下文。
+
+        Args:
+            instruction: 要添加的指令内容
+
+        Example:
+            >>> # 注入技能指令
+            >>> skill_prompt = skill_loader.get_skill_prompt("github")
+            >>> agent.add_instruction(skill_prompt)
+            >>>
+            >>> # 添加临时上下文
+            >>> agent.add_instruction("当前项目是一个 Python Web 应用")
+        """
+        if not instruction:
+            return
+
+        if self.instructions is None:
+            self.instructions = [instruction]
+        elif isinstance(self.instructions, str):
+            self.instructions = [self.instructions, instruction]
+        elif isinstance(self.instructions, list):
+            self.instructions = list(self.instructions) + [instruction]
+        # Note: if instructions is a Callable, we don't modify it
+        else:
+            logger.warning(f"Cannot add instruction: instructions is {type(self.instructions)}")
+            return
+
+        logger.debug(f"Added instruction to agent: {instruction[:50]}...")
 
     def deep_copy(self, *, update: Optional[Dict[str, Any]] = None) -> "Agent":
         """Create and return a deep copy of this Agent, optionally updating fields.
