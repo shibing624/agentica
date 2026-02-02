@@ -7,13 +7,14 @@ This example demonstrates DeepAgent as a coding assistant:
 - Code execution with the 'execute' tool
 - Code analysis and debugging
 - Code generation and refactoring
+- Self-verification with lint/test commands
 """
 import sys
 import os
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, OpenAIChat, ZhipuAI
+from agentica import DeepAgent, OpenAIChat
 
 
 def code_execution_demo():
@@ -130,8 +131,90 @@ def data_processing_demo():
     print(f"\nResponse:\n{response}")
 
 
+def self_verification_demo():
+    """Demo: Write code to file and verify with lint/test."""
+    print("\n" + "=" * 60)
+    print("Demo 5: Self Verification - Write and Verify Code")
+    print("=" * 60)
+
+    agent = DeepAgent(
+        model=OpenAIChat(),
+        show_tool_calls=True,
+        debug_mode=True,
+    )
+
+    # Create output directory
+    demo_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(demo_dir, "tmp")
+    os.makedirs(output_dir, exist_ok=True)
+
+    response = agent.run(
+        f"""Please complete the following tasks:
+
+1. Write a Python module `calculator.py` in {output_dir}/ with these functions:
+   - add(a, b) -> sum of two numbers
+   - subtract(a, b) -> difference
+   - multiply(a, b) -> product
+   - divide(a, b) -> quotient (handle division by zero)
+   All functions should have type hints and docstrings.
+
+2. Write a test file `test_calculator.py` and run, last verify the code.
+"""
+    )
+    print(f"\nResponse:\n{response}")
+
+
+def lint_fix_demo():
+    """Demo: Detect and fix lint issues in existing code."""
+    print("\n" + "=" * 60)
+    print("Demo 6: Lint Fix - Detect and Fix Code Issues")
+    print("=" * 60)
+
+    agent = DeepAgent(
+        model=OpenAIChat(),
+        show_tool_calls=True,
+        debug_mode=True,
+    )
+
+    demo_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(demo_dir, "tmp")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create a file with intentional lint issues
+    bad_code = '''
+import os
+import sys
+import json
+
+def process_data(data,config):  # missing space after comma
+    """Process data."""
+    result=[]=
+    for item in data:
+        if item>0: >
+            result.append(item*2)
+    return result
+
+x = 1
+y = 2
+z=3
+
+'''
+
+    bad_code_path = os.path.join(output_dir, "bad_code.py")
+    with open(bad_code_path, "w") as f:
+        f.write(bad_code)
+
+    response = agent.run(
+        f"""I have a Python file at {bad_code_path} . fix，do Verification.
+"""
+    )
+    print(f"\nResponse:\n{response}")
+
+
 if __name__ == "__main__":
     code_execution_demo()
     code_analysis_demo()
     # code_generation_demo()
     # data_processing_demo()
+    # self_verification_demo()
+    lint_fix_demo()

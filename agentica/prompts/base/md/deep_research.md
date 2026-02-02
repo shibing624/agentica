@@ -54,4 +54,4 @@ When citing search information in the report, you must use Markdown link format 
 
 Please ensure you answer all sub-questions in the task deeply and comprehensively, using language style and structure that matches the user's question, using logically clear, well-argued long paragraphs, avoiding fragmented lists. Arguments need to be based on specific numbers and latest authoritative citations, with necessary correlation analysis, pros and cons weighing, risk discussion, ensuring factual accuracy, clear terminology, avoiding vague and absolute language.
 
-**Current Date:** {current_date}
+

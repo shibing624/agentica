@@ -252,7 +252,7 @@ class Agent:
     add_name_to_instructions: bool = False
     # If True, add the current datetime to the instructions to give the agent a sense of time
     # This allows for relative times like "tomorrow" to be used in the prompt
-    add_datetime_to_instructions: bool = False
+    add_datetime_to_instructions: bool = True
     # The language to use for output, e.g. "en" for English, "zh" for Chinese, etc.
     output_language: Optional[str] = None
 
@@ -399,7 +399,7 @@ class Agent:
             limit_tool_access: bool = False,
             markdown: bool = False,
             add_name_to_instructions: bool = False,
-            add_datetime_to_instructions: bool = False,
+            add_datetime_to_instructions: bool = True,
             output_language: Optional[str] = None,
 
             # User prompt

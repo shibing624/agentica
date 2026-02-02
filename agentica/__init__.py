@@ -103,7 +103,7 @@ from agentica.utils.tokens import (
 
 # agent (core)
 from agentica.agent import Agent
-from agentica.deep_agent import DeepAgent, DeepResearchAgent
+from agentica.deep_agent import DeepAgent
 from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow
 from agentica.workflow_session import WorkflowSession
@@ -457,7 +457,6 @@ __all__ = [
     # agent
     "Agent",
     "DeepAgent",
-    "DeepResearchAgent",
     "AgentSession",
     "Workflow",
     "WorkflowSession",

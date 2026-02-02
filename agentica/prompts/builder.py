@@ -11,6 +11,7 @@ from modular components:
 4. Tools (tool usage priority)
 5. Heartbeat (forced iteration)
 6. Task management
+7. Self verification (lint/test/typecheck)
 
 Based on OpenCode's system.ts prompt selection logic.
 """
@@ -22,6 +23,7 @@ from agentica.prompts.base.task_management import get_task_management_prompt
 from agentica.prompts.base.tools import get_tools_prompt
 from agentica.prompts.base.soul import get_soul_prompt
 from agentica.prompts.base.identity import get_identity_prompt
+from agentica.prompts.base.self_verification import get_self_verification_prompt
 
 from agentica.prompts.models.claude import get_claude_prompt
 from agentica.prompts.models.openai import get_openai_prompt
@@ -133,6 +135,7 @@ class PromptBuilder:
         enable_task_management: bool = True,
         enable_soul: bool = True,
         enable_tools_guide: bool = True,
+        enable_self_verification: bool = True,
         compact: bool = False,
     ) -> str:
         """Assemble the complete system prompt from modular components.
@@ -147,6 +150,7 @@ class PromptBuilder:
             enable_task_management: Enable task tracking instructions
             enable_soul: Enable behavioral guidelines
             enable_tools_guide: Enable tool usage priority guide
+            enable_self_verification: Enable code validation guidance (lint/test/typecheck)
             compact: Use compact versions of prompts (for context-sensitive situations)
 
         Returns:
@@ -186,11 +190,16 @@ class PromptBuilder:
             task_prompt = get_task_management_prompt(compact)
             sections.append(task_prompt)
 
-        # 7. Workspace context (injected from workspace files)
+        # 7. Self verification (lint/test/typecheck)
+        if enable_self_verification:
+            verification_prompt = get_self_verification_prompt(compact)
+            sections.append(verification_prompt)
+
+        # 8. Workspace context (injected from workspace files)
         if workspace_context:
             sections.append(f"# Workspace Context\n\n{workspace_context}")
 
-        # 8. Available tools reference
+        # 9. Available tools reference
         if tools_list:
             tools_section = "# Available Tools\n\n"
             tools_section += "You have access to the following tools:\n"

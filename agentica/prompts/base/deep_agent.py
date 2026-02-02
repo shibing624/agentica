@@ -34,10 +34,8 @@ ITERATION_CHECKPOINT_PROMPT = _load_prompt("iteration_checkpoint.md")
 MUST_CONTINUE_PROMPT = _load_prompt("must_continue.md")
 
 
-def get_deep_research_prompt(current_date: str = "") -> str:
-    """Get the deep research system prompt with current date."""
-    if current_date:
-        return DEEP_RESEARCH_PROMPT.replace("{current_date}", current_date)
+def get_deep_research_prompt() -> str:
+    """Get the deep research system prompt."""
     return DEEP_RESEARCH_PROMPT
 
 

@@ -1,14 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Tests for DeepAgent and DeepResearchAgent
+@description: Tests for DeepAgent
 
 This test module covers:
 1. DeepAgent initialization and configuration
-2. DeepResearchAgent pre-configured settings
-3. Human-in-the-loop with UserInputTool
-4. Context overflow handling
-5. Repetitive behavior detection
+2. Human-in-the-loop with UserInputTool
+3. Context overflow handling
+4. Repetitive behavior detection
 """
 import os
 import sys
@@ -16,7 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica import DeepAgent, DeepResearchAgent, UserInputTool
+from agentica import DeepAgent, UserInputTool
 
 
 class TestDeepAgent(unittest.TestCase):
@@ -31,8 +30,9 @@ class TestDeepAgent(unittest.TestCase):
 
         self.assertEqual(agent.name, "TestAgent")
         self.assertFalse(agent.enable_multi_round)  # Default is False for DeepAgent
-        self.assertEqual(agent.max_rounds, 15)  # Default
+        self.assertEqual(agent.max_rounds, 20)  # Default
         self.assertFalse(agent.enable_deep_research)
+        self.assertTrue(agent.enable_agentic_prompt)  # Default is True for DeepAgent
 
     def test_deep_agent_with_multi_round_enabled(self):
         """Test DeepAgent with enable_multi_round explicitly set to True."""
@@ -53,19 +53,20 @@ class TestDeepAgent(unittest.TestCase):
         )
 
         self.assertTrue(agent.enable_deep_research)
-        self.assertTrue(agent.enable_multi_round)  # Should be forced True
+        # NOTE: deep_research no longer forces multi_round
+        self.assertFalse(agent.enable_multi_round)
         self.assertEqual(agent.max_rounds, 20)
 
-    def test_deep_research_forces_multi_round(self):
-        """Test that enable_deep_research=True forces enable_multi_round=True."""
+    def test_deep_research_does_not_force_multi_round(self):
+        """Test that enable_deep_research=True does NOT force enable_multi_round=True anymore."""
         agent = DeepAgent(
             name="TestAgent",
             enable_deep_research=True,
-            enable_multi_round=False,  # Try to disable
+            enable_multi_round=False,
         )
 
-        # Should be forced to True
-        self.assertTrue(agent.enable_multi_round)
+        # Should remain False - deep_research no longer forces multi_round
+        self.assertFalse(agent.enable_multi_round)
 
     def test_builtin_tools(self):
         """Test that builtin tools are correctly configured."""
@@ -173,31 +174,12 @@ class TestDeepAgent(unittest.TestCase):
         self.assertIn("deep_research=True", repr_str)
         self.assertIn("max_rounds=10", repr_str)
 
-
-class TestDeepResearchAgent(unittest.TestCase):
-    """Test cases for DeepResearchAgent."""
-
-    def test_deep_research_agent_defaults(self):
-        """Test DeepResearchAgent default settings."""
-        agent = DeepResearchAgent(
-            name="ResearchAgent",
+    def test_enable_agentic_prompt_default(self):
+        """Test that DeepAgent enables agentic_prompt by default."""
+        agent = DeepAgent(
+            name="TestAgent",
         )
-
-        self.assertTrue(agent.enable_deep_research)
-        self.assertTrue(agent.enable_multi_round)
-        self.assertEqual(agent.max_rounds, 20)  # Default for DeepResearchAgent
-        self.assertTrue(agent.enable_step_reflection)
-        self.assertTrue(agent.enable_context_overflow_handling)
-        self.assertTrue(agent.enable_repetition_detection)
-
-    def test_deep_research_agent_custom_rounds(self):
-        """Test DeepResearchAgent with custom max_rounds."""
-        agent = DeepResearchAgent(
-            name="ResearchAgent",
-            max_rounds=30,
-        )
-
-        self.assertEqual(agent.max_rounds, 30)
+        self.assertTrue(agent.enable_agentic_prompt)
 
 
 class TestUserInputTool(unittest.TestCase):

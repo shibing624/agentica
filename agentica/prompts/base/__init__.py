@@ -9,6 +9,7 @@ Core prompt components:
 - tools: Tool usage priority and parallel strategy
 - soul: Professional objectivity and tone guidelines
 - identity: Agent identity definitions
+- self_verification: Code validation after changes (lint/test/typecheck)
 - deep_agent: DeepAgent specific prompts (research, reflection, etc.)
 """
 
@@ -38,6 +39,11 @@ from agentica.prompts.base.identity import (
     IDENTITY_API_PROMPT,
     IDENTITY_DEFAULT_PROMPT,
     get_identity_prompt,
+)
+from agentica.prompts.base.self_verification import (
+    SELF_VERIFICATION_PROMPT,
+    SELF_VERIFICATION_PROMPT_COMPACT,
+    get_self_verification_prompt,
 )
 from agentica.prompts.base.deep_agent import (
     DEEP_RESEARCH_PROMPT,
@@ -72,6 +78,10 @@ __all__ = [
     "IDENTITY_API_PROMPT",
     "IDENTITY_DEFAULT_PROMPT",
     "get_identity_prompt",
+    # Self Verification prompts
+    "SELF_VERIFICATION_PROMPT",
+    "SELF_VERIFICATION_PROMPT_COMPACT",
+    "get_self_verification_prompt",
     # Deep Agent prompts
     "DEEP_RESEARCH_PROMPT",
     "STEP_REFLECTION_PROMPT",

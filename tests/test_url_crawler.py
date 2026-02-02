@@ -16,7 +16,7 @@ from agentica.tools.url_crawler_tool import UrlCrawlerTool
 @pytest.fixture
 def url_crawler_tool():
     """Fixture to create a UrlCrawlerTool instance for testing."""
-    return UrlCrawlerTool(base_dir="./test_work_dir")
+    return UrlCrawlerTool(base_dir="./tmp")
 
 
 @patch('agentica.tools.url_crawler_tool.requests.get')
@@ -34,7 +34,7 @@ def test_crawl_url_to_file_html(mock_get):
     mock_get.return_value = mock_response
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
     res = url_crawler_tool.url_crawl(url)
     print('content:', res)
     # Assertions
@@ -59,7 +59,7 @@ def test_crawl_url_to_file_non_html(mock_get):
     mock_get.return_value = mock_response
 
     url = "https://example.com/test-file.pdf"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
     res = url_crawler_tool.url_crawl(url)
     print('content:', res)
     # Assertions
@@ -81,7 +81,7 @@ def test_url_crawl(mock_get):
     mock_get.return_value = mock_response
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
     result = url_crawler_tool.url_crawl(url)
     print('result:', result)
     # Assertions
@@ -98,7 +98,7 @@ def test_crawl_url_to_file_error(mock_get):
     mock_get.side_effect = Exception("404 Not Found")
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
     content = url_crawler_tool.url_crawl(url)
     print('content:', content)
     # Assertions
@@ -116,7 +116,7 @@ def test_url_crawl_error(mock_get):
     mock_get.side_effect = Exception("404 Not Found")
 
     url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./test_work_dir")
+    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
     result = url_crawler_tool.url_crawl(url)
     print('result:', result)
     # Assertions

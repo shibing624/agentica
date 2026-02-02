@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Deep Research Application using DeepResearchAgent
+@description: Deep Research Application using DeepAgent
 
 This application demonstrates comprehensive deep research capabilities:
 1. Search the web for information with iterative refinement
@@ -19,15 +19,17 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from agentica import DeepResearchAgent, DeepSeek
+from agentica import DeepAgent, DeepSeek
 
 
 def create_deep_research_agent():
     """Create a deep research agent with full capabilities."""
-    return DeepResearchAgent(
+    return DeepAgent(
         model=DeepSeek(),
         name="DeepResearcher",
         description="A comprehensive deep research assistant with reflection and context management",
+        # Enable deep research mode
+        enable_deep_research=True,
         # Research settings
         max_rounds=20,
         enable_step_reflection=True,

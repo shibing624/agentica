@@ -30,7 +30,6 @@ Key Features:
 """
 from __future__ import annotations
 
-from datetime import datetime
 from collections import deque
 from typing import (
     Any,
@@ -48,7 +47,6 @@ from agentica.deep_tools import get_builtin_tools, BuiltinTaskTool
 from agentica.model.message import Message
 from agentica.utils.log import logger
 
-# Import prompts from the centralized prompt module
 from agentica.prompts.base.deep_agent import (
     get_deep_research_prompt,
     get_step_reflection_prompt,
@@ -264,9 +262,8 @@ class DeepAgent(Agent):
         # Determine system prompt
         final_system_prompt = system_prompt
         if enable_deep_research and system_prompt is None:
-            # Use deep research prompt with current date
-            current_date = datetime.now().strftime("%Y-%m-%d")
-            final_system_prompt = get_deep_research_prompt(current_date)
+            # Use deep research prompt
+            final_system_prompt = get_deep_research_prompt()
 
         # NOTE: enable_multi_round is NO LONGER required for deep research!
         # The Model layer already has built-in recursive tool calling (agentic loop),
@@ -279,6 +276,9 @@ class DeepAgent(Agent):
         # - Only use enable_multi_round=True if you need explicit step-by-step control
 
         # Call parent class init with merged tools
+        # Enable agentic prompt by default for enhanced capabilities (heartbeat, soul, self-verification, etc.)
+        kwargs.setdefault('enable_agentic_prompt', True)
+        
         super().__init__(
             tools=all_tools,
             instructions=instructions,
@@ -522,78 +522,15 @@ If not complete, continue working. Do NOT end your turn prematurely.
         )
 
 
-# =============================================================================
-# DeepResearchAgent - Specialized for deep research tasks
-# =============================================================================
-
-class DeepResearchAgent(DeepAgent):
-    """
-    DeepResearchAgent - Specialized agent for deep research tasks.
-    
-    This is a convenience class that pre-configures DeepAgent for deep research:
-    - Enables deep research system prompt by default
-    - Uses Model layer's built-in recursive tool calling (like OpenClaw)
-    - Does NOT enable enable_multi_round by default (which adds unnecessary complexity)
-    
-    Example:
-        ```python
-        from agentica import DeepResearchAgent, OpenAIChat
-        
-        agent = DeepResearchAgent(
-            model=OpenAIChat(id="gpt-4o"),
-        )
-        
-        response = agent.run("Research the impact of AI on healthcare in 2024")
-        print(response.content)
-        ```
-    """
-
-    def __init__(
-            self,
-            **kwargs,
-    ):
-        """
-        Initialize DeepResearchAgent.
-        
-        Args:
-            **kwargs: Other parameters passed to DeepAgent
-        """
-        # Set defaults for deep research - simple and clean
-        kwargs.setdefault('enable_deep_research', True)
-        kwargs.setdefault('include_todos', True)
-        kwargs.setdefault('include_web_search', True)
-        kwargs.setdefault('include_fetch_url', True)
-        kwargs.setdefault('include_execute', True)
-        # NOTE: We do NOT enable multi-round features by default anymore!
-        # Model layer's built-in recursive tool calling works better.
-
-        super().__init__(**kwargs)
-
-
 if __name__ == '__main__':
-    # Simple test
-    from agentica import OpenAIChat
-
     # Create DeepAgent with deep research mode
-    # NOTE: enable_multi_round is NOT needed! Model layer handles tool loops.
     agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
         name="TestDeepAgent",
         description="A test deep agent",
-        enable_deep_research=True,  # Only affects system prompt
+        enable_deep_research=True,
         debug_mode=True,
     )
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
-    print(f"enable_multi_round: {agent.enable_multi_round}")  # Should be False
-
-    # Test DeepResearchAgent
-    research_agent = DeepResearchAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        name="TestResearchAgent",
-        debug_mode=True,
-    )
-    print(f"\nCreated: {research_agent}")
-    print(f"enable_multi_round: {research_agent.enable_multi_round}")  # Should be False
-    print(f"Tools: {research_agent.get_builtin_tool_names()}")
+    print(f"enable_agentic_prompt: {agent.enable_agentic_prompt}")

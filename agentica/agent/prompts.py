@@ -588,8 +588,8 @@ class PromptsMixin:
     def _enhance_with_prompt_builder(self: "Agent", base_prompt: str) -> str:
         """Enhance an existing prompt with PromptBuilder modules.
 
-        This method adds HEARTBEAT (forced iteration) and SOUL (behavioral guidelines)
-        prompts to an existing system prompt for improved task completion.
+        This method adds HEARTBEAT (forced iteration), SOUL (behavioral guidelines),
+        and SELF_VERIFICATION prompts to an existing system prompt for improved task completion.
 
         Args:
             base_prompt: The original system prompt
@@ -599,6 +599,7 @@ class PromptsMixin:
         """
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt
         from agentica.prompts.base.soul import get_soul_prompt
+        from agentica.prompts.base.self_verification import get_self_verification_prompt
 
         # Build enhanced sections
         sections = [base_prompt]
@@ -607,9 +608,13 @@ class PromptsMixin:
         soul_prompt = get_soul_prompt(compact=True)
         sections.append(soul_prompt)
 
-        # Add HEARTBEAT (forced iteration) - this is critical for task completion
-        heartbeat_prompt = get_heartbeat_prompt(compact=False)
+        # Add HEARTBEAT (forced iteration) - compact version, critical for task completion
+        heartbeat_prompt = get_heartbeat_prompt(compact=True)
         sections.append(heartbeat_prompt)
+
+        # Add SELF_VERIFICATION (lint/test/typecheck) - compact version
+        verification_prompt = get_self_verification_prompt(compact=True)
+        sections.append(verification_prompt)
 
         return "\n\n---\n\n".join(sections)
 
@@ -645,7 +650,7 @@ class PromptsMixin:
         if self.workspace and self.workspace.exists():
             workspace_context = self.workspace.get_context_prompt()
 
-        # Build base prompt using PromptBuilder
+        # Build base prompt using PromptBuilder (compact mode for shorter prompts)
         base_prompt = PromptBuilder.build_system_prompt(
             model_id=model_id,
             identity=identity,
@@ -655,7 +660,8 @@ class PromptsMixin:
             enable_task_management=True,
             enable_soul=True,
             enable_tools_guide=True,
-            compact=False,
+            enable_self_verification=True,
+            compact=True,  # Use compact mode to reduce prompt length
         )
 
         # Now add the agent-specific instructions
