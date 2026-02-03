@@ -1,6 +1,6 @@
-# Self Verification
+# Code Verification
 
-After completing code changes, you MUST verify your work by running appropriate validation commands.
+After completing code changes, you MUST verify your code by running appropriate validation commands.
 
 ## Verification Requirements
 
@@ -35,9 +35,10 @@ After completing code changes, you MUST verify your work by running appropriate 
 ## Language-Specific Commands
 
 ### Python
+- Syntax check: `python3 -m py_compile <file>` or `python3 -m compileall .`
 - Lint: `ruff check .` or `flake8 .` or `pylint`
 - Type check: `mypy .` or `pyright`
-- Test: `pytest` or `python -m unittest`
+- Test: `pytest` or `python3 -m unittest`
 - Format check: `black --check .` or `ruff format --check .`
 
 ### JavaScript/TypeScript

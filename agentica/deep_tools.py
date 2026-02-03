@@ -361,12 +361,13 @@ class BuiltinFileTool(Tool):
             glob_pattern: Optional[str] = None,
             output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
             max_results: int = 50,
+            use_regex: bool = True,
     ) -> str:
         """Search for a pattern in files.
 
         Usage:
         - The grep tool searches for text patterns across files
-        - The pattern parameter is the text to search for (literal string, not regex)
+        - The pattern parameter supports regex by default (e.g., 'class .*Tool', 'def \\w+')
         - The path parameter filters which directory to search in (default is the current working directory)
         - The glob parameter accepts a glob pattern to filter which files to search (e.g., `*.py`)
         - The output_mode parameter controls the output format:
@@ -375,7 +376,7 @@ class BuiltinFileTool(Tool):
         - `count`: Show count of matches per file
 
         Args:
-            pattern: Text to search for (literal string)
+            pattern: Text/regex to search for (supports regex by default)
             path: Starting directory for search
             glob_pattern: File filter pattern, e.g., "*.py"
             output_mode: Output mode
@@ -383,15 +384,25 @@ class BuiltinFileTool(Tool):
                 - "content": Show matching lines with context
                 - "count": Show match count per file
             max_results: Maximum number of results
+            use_regex: If True (default), treat pattern as regex; if False, literal string match
 
         Returns:
             Search results
         """
+        import re
         try:
             self._validate_path(path)
             base_path = self._resolve_path(path)
             if not base_path.exists():
                 return f"Error: Directory not found: {path}"
+
+            # Compile regex if use_regex is True
+            regex_pattern = None
+            if use_regex:
+                try:
+                    regex_pattern = re.compile(pattern)
+                except re.error as e:
+                    return f"Error: Invalid regex pattern '{pattern}': {e}"
 
             # Determine files to search
             if glob_pattern:
@@ -416,7 +427,9 @@ class BuiltinFileTool(Tool):
 
                     file_matches = []
                     for line_num, line in enumerate(lines, 1):
-                        if pattern in line:
+                        # Use regex or literal string match
+                        matched = regex_pattern.search(line) if use_regex else (pattern in line)
+                        if matched:
                             file_matches.append({
                                 "line_num": line_num,
                                 "content": line.strip()[:200],
@@ -808,44 +821,17 @@ class BuiltinTaskTool(Tool):
     - general: Full capabilities for complex tasks
     - research: Web search and document analysis
     - code: Code generation and execution
+    - Custom user-defined subagent types (via register_custom_subagent)
     """
 
-    # System prompt for task tool usage guidance (injected into main agent)
-    TASK_SYSTEM_PROMPT = """## `task` (subagent spawner)
+    # Base system prompt template for task tool usage guidance
+    TASK_SYSTEM_PROMPT_TEMPLATE = """## `task` (subagent spawner)
 
 You have access to a `task` tool to launch short-lived subagents that handle isolated tasks. These agents are ephemeral — they live only for the duration of the task and return a single result.
 
 ### Available Subagent Types
 
-| Type | Description | Best For |
-|------|-------------|----------|
-| `explore` | Read-only codebase explorer | Finding files, searching code, understanding project structure |
-| `general` | Full-capability agent | Complex multi-step tasks, file operations, general reasoning |
-| `research` | Web search specialist | Searching the web, analyzing documents, synthesizing findings |
-| `code` | Code specialist | Writing code, executing commands, debugging |
-
-### When to Use Each Type
-
-**Use `explore` when:**
-- Searching for files or code patterns
-- Understanding project structure
-- Reading and analyzing source code
-- You only need read-only access
-
-**Use `general` when:**
-- Task requires multiple types of operations
-- Complex reasoning is needed
-- Default choice for most tasks
-
-**Use `research` when:**
-- Searching the web for information
-- Analyzing online resources
-- Synthesizing research findings
-
-**Use `code` when:**
-- Writing or modifying code
-- Running tests or commands
-- Debugging issues
+{subagent_table}
 
 ### Usage Guidelines
 
@@ -888,9 +874,33 @@ You have access to a `task` tool to launch short-lived subagents that handle iso
         self._custom_configs = custom_subagent_configs or {}
         self.register(self.task)
 
+    def _build_subagent_table(self) -> str:
+        """Build a markdown table of available subagent types."""
+        from agentica.subagent import get_available_subagent_types
+        
+        available_types = get_available_subagent_types()
+        
+        lines = ["| Type | Name | Description |", "|------|------|-------------|"]
+        for st in available_types:
+            # Truncate description for table
+            desc = st['description'].split('\n')[0][:60]
+            if len(st['description'].split('\n')[0]) > 60:
+                desc += "..."
+            type_name = st['type']
+            name = st['name']
+            lines.append(f"| `{type_name}` | {name} | {desc} |")
+        
+        return "\n".join(lines)
+
     def get_system_prompt(self) -> Optional[str]:
-        """Get the system prompt for task tool usage guidance."""
-        return self.TASK_SYSTEM_PROMPT
+        """
+        Get the dynamically generated system prompt for task tool.
+        
+        This prompt is regenerated each time to include any custom subagent types
+        that may have been registered since initialization.
+        """
+        subagent_table = self._build_subagent_table()
+        return self.TASK_SYSTEM_PROMPT_TEMPLATE.format(subagent_table=subagent_table)
 
     def set_parent_agent(self, agent: "Agent") -> None:
         """Set the parent agent reference for accessing model and tools."""

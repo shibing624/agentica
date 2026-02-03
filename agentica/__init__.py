@@ -211,6 +211,22 @@ _LAZY_IMPORTS = {
     "get_subagent_config": "agentica.subagent",
     "get_available_subagent_types": "agentica.subagent",
     "is_subagent_session": "agentica.subagent",
+    "register_custom_subagent": "agentica.subagent",
+    "unregister_custom_subagent": "agentica.subagent",
+    "get_custom_subagent_configs": "agentica.subagent",
+    
+    # acp system
+    "ACPServer": "agentica.acp",
+    "ACPTool": "agentica.acp",
+    "ACPToolCall": "agentica.acp",
+    "ACPToolResult": "agentica.acp",
+    "ACPRequest": "agentica.acp",
+    "ACPResponse": "agentica.acp",
+    "ACPErrorCode": "agentica.acp",
+    "ACPMethod": "agentica.acp",
+    "SessionManager": "agentica.acp",
+    "ACPSession": "agentica.acp",
+    "SessionStatus": "agentica.acp",
 
     # human-in-the-loop tool
     "UserInputTool": "agentica.tools.user_input_tool",
@@ -355,6 +371,24 @@ if TYPE_CHECKING:  # noqa: F401
         get_subagent_config,
         get_available_subagent_types,
         is_subagent_session,
+        register_custom_subagent,
+        unregister_custom_subagent,
+        get_custom_subagent_configs,
+    )
+    
+    # acp system
+    from agentica.acp import (  # noqa: F401
+        ACPServer,
+        ACPTool,
+        ACPToolCall,
+        ACPToolResult,
+        ACPRequest,
+        ACPResponse,
+        ACPErrorCode,
+        ACPMethod,
+        SessionManager,
+        ACPSession,
+        SessionStatus,
     )
 
     # human-in-the-loop tool

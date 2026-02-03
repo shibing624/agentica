@@ -157,6 +157,11 @@ COLORS = {
 
 def parse_args():
     parser = argparse.ArgumentParser(description='CLI for agentica')
+    
+    # Check if running in ACP mode (special handling)
+    if len(sys.argv) > 1 and sys.argv[1] == 'acp':
+        return None  # Signal to run in ACP mode
+    
     parser.add_argument('--query', type=str, help='Question to ask the LLM', default=None)
     parser.add_argument('--model_provider', type=str,
                         choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
@@ -185,6 +190,8 @@ def parse_args():
                         help='Disable workspace context injection')
     parser.add_argument('--no-skills', action='store_true',
                         help='Disable skills loading')
+    parser.add_argument('command', nargs='?', choices=['acp'],
+                        help='Run in ACP mode for IDE integration (agentica acp)')
     return parser.parse_args()
 
 
@@ -555,31 +562,15 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         line_range = _format_line_range(offset, limit)
         return f"{filename} ({line_range})"
     
-    # File writing tools - show filename and content preview
+    # File writing tools - show filename only
     if tool_name == "write_file":
         file_path = tool_args.get("file_path", "")
-        filename = _extract_filename(file_path)
-        content = tool_args.get("content", "")
-        # Show first 60 chars of content as preview
-        preview = content[:60].replace('\n', ' ').strip()
-        if len(content) > 60:
-            preview += "..."
-        return f"{filename}: {preview}"
+        return _extract_filename(file_path)
     
-    # File editing tools - show filename and brief change info
+    # File editing tools - show filename only
     if tool_name == "edit_file":
         file_path = tool_args.get("file_path", "")
-        filename = _extract_filename(file_path)
-        old_str = tool_args.get("old_string", "")
-        new_str = tool_args.get("new_string", "")
-        # Show brief description of the change
-        old_preview = old_str[:30].replace('\n', ' ').strip()
-        if len(old_str) > 30:
-            old_preview += "..."
-        if new_str:
-            return f"{filename}: replace '{old_preview}'"
-        else:
-            return f"{filename}: delete '{old_preview}'"
+        return _extract_filename(file_path)
     
     # Execute command - show full command (important for users)
     if tool_name == "execute":
@@ -664,6 +655,126 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         args_str += ", ..."
     
     return args_str if args_str else ""
+
+
+class StreamDisplayManager:
+    """Manages CLI output display state for streaming responses.
+    
+    Handles visual separation between different content types:
+    - Thinking (reasoning_content)
+    - Tool calls
+    - Final response
+    """
+    
+    SEPARATOR = "─" * 50
+    
+    def __init__(self, console_instance):
+        self.console = console_instance
+        self.reset()
+    
+    def reset(self):
+        """Reset state for a new response."""
+        self.in_thinking = False
+        self.thinking_shown = False
+        self.tool_count = 0
+        self.in_tool_section = False
+        self.response_started = False
+        self.has_content_output = False
+    
+    def start_thinking(self):
+        """Start thinking section."""
+        if not self.thinking_shown:
+            self.console.print()
+            self.console.print(f"[dim]{self.SEPARATOR}[/dim]")
+            self.console.print("[dim italic]💭 Thinking...[/dim italic]")
+            self.thinking_shown = True
+            self.in_thinking = True
+    
+    def stream_thinking(self, content: str):
+        """Stream thinking content."""
+        self.console.print(content, end="", style="dim")
+    
+    def end_thinking(self):
+        """End thinking section."""
+        if self.in_thinking:
+            self.console.print()  # End current line
+            self.console.print(f"[dim]{self.SEPARATOR}[/dim]")
+            self.console.print()
+            self.in_thinking = False
+    
+    def start_tool_section(self):
+        """Start tool section with separator."""
+        if not self.in_tool_section:
+            # End thinking first if active
+            if self.in_thinking:
+                self.end_thinking()
+            # End any previous content
+            if self.has_content_output and not self.response_started:
+                self.console.print()
+            self.console.print()
+            self.console.print(f"[dim]{self.SEPARATOR}[/dim]")
+            self.console.print("[bold cyan]🔧 Tool Calls[/bold cyan]")
+            self.in_tool_section = True
+    
+    def display_tool(self, tool_name: str, tool_args: dict):
+        """Display a single tool call."""
+        self.start_tool_section()
+        self.tool_count += 1
+        
+        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+        display_str = format_tool_display(tool_name, tool_args)
+        
+        # Add blank line between tools for readability
+        if self.tool_count > 1:
+            self.console.print()
+        
+        # Special handling for write_todos - multi-line display
+        if tool_name == "write_todos" and "\n" in display_str:
+            self.console.print(f"  {icon} ", end="")
+            self.console.print(f"{tool_name}", end="", style="bold magenta")
+            self.console.print(" tasks:", style="dim")
+            self.console.print(f"    {display_str}", style="dim")
+        else:
+            self.console.print(f"  {icon} ", end="")
+            self.console.print(f"{tool_name}", end="", style="bold magenta")
+            if display_str:
+                self.console.print(f" {display_str}", style="dim")
+            else:
+                self.console.print()
+    
+    def end_tool_section(self):
+        """End tool section."""
+        if self.in_tool_section:
+            self.in_tool_section = False
+    
+    def start_response(self):
+        """Start response section."""
+        if not self.response_started:
+            # End any open sections
+            if self.in_thinking:
+                self.end_thinking()
+            if self.in_tool_section:
+                self.end_tool_section()
+            
+            # Always add newline before response content
+            self.console.print()
+            self.console.print()  # Extra newline for separation from tool calls
+            self.response_started = True
+    
+    def stream_response(self, content: str):
+        """Stream response content."""
+        self.start_response()
+        self.console.print(content, end="", style=COLORS["agent"])
+        self.has_content_output = True
+    
+    def finalize(self):
+        """Finalize output, close any open sections."""
+        if self.in_thinking:
+            self.end_thinking()
+        if self.in_tool_section:
+            self.end_tool_section()
+        if self.has_content_output:
+            self.console.print()  # Final newline
 
 
 def display_tool_call(tool_name: str, tool_args: dict) -> None:
@@ -1029,34 +1140,28 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             try:
                 response_stream = current_agent.run(final_input, stream=True, stream_intermediate_steps=True)
                 
-                first_chunk = True
-                response_text = ""
-                has_shown_tool = False
-                shown_tool_count = 0  # Track how many tools we've shown
-                is_thinking = False  # Track if we're in thinking phase
-                thinking_displayed = False  # Track if we've shown thinking header
+                # Use display manager for clean output
+                display = StreamDisplayManager(console)
+                shown_tool_count = 0
                 
                 for chunk in response_stream:
                     if chunk is None:
                         continue
                     
-                    # Skip RunStarted event - don't display anything
-                    if chunk.event == "RunStarted":
+                    # Skip non-display events
+                    if chunk.event in ("RunStarted", "RunCompleted", "UpdatingMemory", 
+                                       "MultiRoundToolResult", "MultiRoundCompleted"):
                         continue
                     
                     # Handle tool call events
                     if chunk.event == "ToolCallStarted":
-                        # Stop spinner before showing tool info
                         if spinner_active:
                             status.stop()
                             spinner_active = False
                         
-                        # Extract tool info from chunk - only show new tools
+                        # Display new tools
                         if chunk.tools and len(chunk.tools) > shown_tool_count:
-                            # Only display newly added tools
-                            new_tools = chunk.tools[shown_tool_count:]
-                            for tool_info in new_tools:
-                                # Tool dict uses "tool_name" and "tool_args" keys
+                            for tool_info in chunk.tools[shown_tool_count:]:
                                 tool_name = tool_info.get("tool_name") or tool_info.get("name", "unknown")
                                 tool_args = tool_info.get("tool_args") or tool_info.get("arguments", {})
                                 if isinstance(tool_args, str):
@@ -1064,72 +1169,65 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                                         tool_args = json.loads(tool_args)
                                     except:
                                         tool_args = {"args": tool_args}
-                                display_tool_call(tool_name, tool_args)
-                                has_shown_tool = True
+                                display.display_tool(tool_name, tool_args)
                             shown_tool_count = len(chunk.tools)
-                        # Don't restart spinner during tool execution - keep UI clean
                         continue
                     
                     elif chunk.event == "ToolCallCompleted":
-                        # Tool completed - enter post-tool transition phase
                         continue
                     
-                    # Skip other intermediate events that don't have content
-                    if chunk.event in ("RunCompleted", "UpdatingMemory", "MultiRoundTurn", 
-                                       "MultiRoundToolCall", "MultiRoundToolResult", "MultiRoundCompleted"):
+                    # Handle multi-round tool calls
+                    elif chunk.event == "MultiRoundToolCall":
+                        if spinner_active:
+                            status.stop()
+                            spinner_active = False
+                        
+                        if chunk.content:
+                            tool_content = str(chunk.content)
+                            if "(" in tool_content:
+                                tool_name = tool_content.split("(")[0]
+                                args_part = tool_content[len(tool_name)+1:-1] if tool_content.endswith(")") else ""
+                                try:
+                                    tool_args = json.loads(args_part) if args_part.startswith("{") else {"args": args_part[:100]}
+                                except:
+                                    tool_args = {"args": args_part[:100] + "..." if len(args_part) > 100 else args_part}
+                            else:
+                                tool_name = tool_content
+                                tool_args = {}
+                            display.display_tool(tool_name, tool_args)
                         continue
                     
-                    # Handle RunResponse event
-                    if chunk.event == "RunResponse":
-                        # Check if this is a thinking phase (reasoning_content but no content)
-                        # For thinking models like GLM, they send content=None during reasoning
-                        if not chunk.content:
-                            # Check for reasoning content (thinking phase)
-                            if hasattr(chunk, 'reasoning_content') and chunk.reasoning_content:
-                                # Stop spinner before showing thinking content
-                                if spinner_active:
-                                    status.stop()
-                                    spinner_active = False
-                                
-                                # Show thinking header once
-                                if not thinking_displayed:
-                                    console.print()
-                                    console.print("💭 ", end="", style="dim")
-                                    thinking_displayed = True
-                                    is_thinking = True
-                                
-                                # Stream thinking content in dim style
-                                console.print(chunk.reasoning_content, end="", style="dim")
-                            continue
-                        
-                        # Has actual content - transition from thinking to response
-                        content = chunk.content
-                        
-                        # End thinking phase if we were thinking
-                        if is_thinking:
-                            console.print()  # End thinking line
-                            console.print()  # Blank line before response
-                            is_thinking = False
-                        
-                        if first_chunk:
-                            if spinner_active:
-                                status.stop()
-                                spinner_active = False
-                            if has_shown_tool and not thinking_displayed:
-                                console.print()  # Extra line after tool calls
-                            if not thinking_displayed:
-                                console.print()  # Newline before response
-                            first_chunk = False
-                        response_text += content
-                        console.print(content, end="", style=COLORS["agent"])
+                    # Check for content
+                    has_content = chunk.content and isinstance(chunk.content, str)
+                    has_reasoning = hasattr(chunk, 'reasoning_content') and chunk.reasoning_content
+                    
+                    if not has_content and not has_reasoning:
+                        continue
+                    
+                    # Handle thinking (reasoning_content only)
+                    if has_reasoning and not has_content:
+                        if spinner_active:
+                            status.stop()
+                            spinner_active = False
+                        display.start_thinking()
+                        display.stream_thinking(chunk.reasoning_content)
+                        continue
+                    
+                    # Handle response content
+                    if has_content:
+                        if spinner_active:
+                            status.stop()
+                            spinner_active = False
+                        display.stream_response(chunk.content)
                 
-                if not first_chunk:
-                    console.print()  # Final newline
-                else:
+                # Finalize display
+                display.finalize()
+                
+                # Handle case of no output
+                if not display.has_content_output and display.tool_count == 0 and not display.thinking_shown:
                     if spinner_active:
                         status.stop()
-                    if not has_shown_tool:
-                        console.print("[info]Agent returned no content.[/info]")
+                    console.print("[info]Agent returned no content.[/info]")
                 
             except Exception as e:
                 if spinner_active:
@@ -1150,6 +1248,13 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
 
 def main():
     args = parse_args()
+    
+    # Handle ACP mode for IDE integration
+    if args is None or (hasattr(args, 'command') and args.command == 'acp'):
+        from agentica.acp.server import ACPServer
+        server = ACPServer()
+        server.run()
+        return
 
     # Store agent configuration parameters
     agent_config = {

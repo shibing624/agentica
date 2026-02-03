@@ -384,10 +384,93 @@ DEFAULT_SUBAGENT_CONFIGS: Dict[SubagentType, SubagentConfig] = {
     SubagentType.CODE: CODE_SUBAGENT_CONFIG,
 }
 
+# Custom subagent configurations (user-defined, keyed by string name)
+_CUSTOM_SUBAGENT_CONFIGS: Dict[str, SubagentConfig] = {}
+
+
+def register_custom_subagent(
+    name: str,
+    description: str,
+    system_prompt: str,
+    allowed_tools: Optional[List[str]] = None,
+    denied_tools: Optional[List[str]] = None,
+    max_iterations: int = 15,
+) -> SubagentConfig:
+    """
+    Register a custom subagent type.
+    
+    This allows users to define their own subagent types without modifying code.
+    Custom subagents are accessible by their name string (case-insensitive).
+    
+    Args:
+        name: Unique name for the subagent (e.g., "code-reviewer", "data-analyst")
+        description: Description of what this subagent does
+        system_prompt: System prompt for the subagent
+        allowed_tools: List of allowed tool names (None = inherit from parent)
+        denied_tools: List of denied tool names
+        max_iterations: Maximum iterations for this subagent
+        
+    Returns:
+        The created SubagentConfig
+        
+    Example:
+        >>> register_custom_subagent(
+        ...     name="code-reviewer",
+        ...     description="Reviews code for quality and bugs",
+        ...     system_prompt="You are a code review expert...",
+        ...     allowed_tools=["read_file", "ls", "glob", "grep"],
+        ...     max_iterations=10,
+        ... )
+    """
+    config = SubagentConfig(
+        type=SubagentType.GENERAL,  # Custom subagents use GENERAL as base type
+        name=name,
+        description=description,
+        system_prompt=system_prompt,
+        allowed_tools=allowed_tools,
+        denied_tools=denied_tools or ["task"],  # Prevent nesting by default
+        max_iterations=max_iterations,
+        can_spawn_subagents=False,
+    )
+    _CUSTOM_SUBAGENT_CONFIGS[name.lower()] = config
+    logger.info(f"Registered custom subagent: {name}")
+    return config
+
+
+def unregister_custom_subagent(name: str) -> bool:
+    """
+    Unregister a custom subagent type.
+    
+    Args:
+        name: Name of the subagent to unregister
+        
+    Returns:
+        True if found and removed, False otherwise
+    """
+    key = name.lower()
+    if key in _CUSTOM_SUBAGENT_CONFIGS:
+        del _CUSTOM_SUBAGENT_CONFIGS[key]
+        logger.info(f"Unregistered custom subagent: {name}")
+        return True
+    return False
+
 
 def get_subagent_config(subagent_type: Union[str, SubagentType]) -> Optional[SubagentConfig]:
-    """Get the configuration for a subagent type."""
+    """
+    Get the configuration for a subagent type.
+    
+    Lookup order:
+    1. Custom subagent configs (by name string)
+    2. Default subagent configs (by SubagentType enum)
+    3. Aliases (e.g., "general-purpose" -> GENERAL)
+    """
     if isinstance(subagent_type, str):
+        # First check custom configs (case-insensitive)
+        custom_config = _CUSTOM_SUBAGENT_CONFIGS.get(subagent_type.lower())
+        if custom_config is not None:
+            return custom_config
+        
+        # Then try to parse as SubagentType enum
         try:
             subagent_type = SubagentType(subagent_type)
         except ValueError:
@@ -406,12 +489,34 @@ def get_subagent_config(subagent_type: Union[str, SubagentType]) -> Optional[Sub
 
 
 def get_available_subagent_types() -> List[Dict[str, str]]:
-    """Get a list of available subagent types with their descriptions."""
-    return [
-        {
+    """
+    Get a list of available subagent types with their descriptions.
+    
+    Returns both default and custom subagent types.
+    """
+    result = []
+    
+    # Add default configs
+    for config in DEFAULT_SUBAGENT_CONFIGS.values():
+        result.append({
             "type": config.type.value,
             "name": config.name,
             "description": config.description,
-        }
-        for config in DEFAULT_SUBAGENT_CONFIGS.values()
-    ]
+            "is_custom": False,
+        })
+    
+    # Add custom configs
+    for name, config in _CUSTOM_SUBAGENT_CONFIGS.items():
+        result.append({
+            "type": name,  # Custom types use their name as type
+            "name": config.name,
+            "description": config.description,
+            "is_custom": True,
+        })
+    
+    return result
+
+
+def get_custom_subagent_configs() -> Dict[str, SubagentConfig]:
+    """Get all registered custom subagent configurations."""
+    return _CUSTOM_SUBAGENT_CONFIGS.copy()
