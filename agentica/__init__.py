@@ -203,6 +203,15 @@ _LAZY_IMPORTS = {
     "BuiltinTaskTool": "agentica.deep_tools",
     "get_builtin_tools": "agentica.deep_tools",
 
+    # subagent system
+    "SubagentType": "agentica.subagent",
+    "SubagentConfig": "agentica.subagent",
+    "SubagentRun": "agentica.subagent",
+    "SubagentRegistry": "agentica.subagent",
+    "get_subagent_config": "agentica.subagent",
+    "get_available_subagent_types": "agentica.subagent",
+    "is_subagent_session": "agentica.subagent",
+
     # human-in-the-loop tool
     "UserInputTool": "agentica.tools.user_input_tool",
     "UserInputRequired": "agentica.tools.user_input_tool",
@@ -335,6 +344,17 @@ if TYPE_CHECKING:  # noqa: F401
         BuiltinTodoTool,
         BuiltinTaskTool,
         get_builtin_tools,
+    )
+
+    # subagent system
+    from agentica.subagent import (  # noqa: F401
+        SubagentType,
+        SubagentConfig,
+        SubagentRun,
+        SubagentRegistry,
+        get_subagent_config,
+        get_available_subagent_types,
+        is_subagent_session,
     )
 
     # human-in-the-loop tool
