@@ -22,6 +22,7 @@ class MCPServerConfig:
     headers: Optional[Dict[str, str]] = None
     timeout: float = 5.0
     read_timeout: float = 300.0
+    enable: bool = True  # Whether to load this MCP server
 
 
 class MCPConfig:
@@ -71,6 +72,11 @@ class MCPConfig:
                     config = json.load(f)
 
             for name, server_config in config.get('mcpServers', {}).items():
+                # Check enable field, default to True if not specified
+                enable = server_config.get('enable', True)
+                if not enable:
+                    continue  # Skip disabled MCP servers
+                
                 self.servers[name] = MCPServerConfig(
                     name=name,
                     url=server_config.get('url'),
@@ -79,7 +85,8 @@ class MCPConfig:
                     env=server_config.get('env'),
                     headers=server_config.get('headers'),
                     timeout=server_config.get('timeout', 5.0),
-                    read_timeout=server_config.get('read_timeout', 300.0)
+                    read_timeout=server_config.get('read_timeout', 300.0),
+                    enable=enable
                 )
         except ImportError as e:
             raise e
