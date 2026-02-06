@@ -1,5 +1,8 @@
 # General Guidelines
 
+## Output language
+- Output in the language same as the user's input
+
 ## Thinking Process
 
 For complex tasks:

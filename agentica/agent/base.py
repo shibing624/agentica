@@ -667,8 +667,9 @@ class Agent:
         Only loads servers with enable=true (default).
         """
         try:
+            import asyncio
             from agentica.mcp.config import MCPConfig
-            from agentica.tools.mcp_tool import McpTool
+            from agentica.tools.mcp_tool import McpTool, CompositeMultiMcpTool
             
             config = MCPConfig()
             if not config.servers:
@@ -676,6 +677,31 @@ class Agent:
             
             # Use McpTool.from_config to load all enabled servers
             mcp_tool = McpTool.from_config(config_path=config.config_path)
+            
+            # Initialize MCP tool(s) to populate functions
+            # This is required because McpTool needs async initialization
+            async def init_mcp():
+                if isinstance(mcp_tool, CompositeMultiMcpTool):
+                    await mcp_tool.__aenter__()
+                else:
+                    await mcp_tool.__aenter__()
+                    await mcp_tool.initialize()
+            
+            # Run async initialization in sync context
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            
+            if loop is not None:
+                # Already in async context, create task
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, init_mcp())
+                    future.result(timeout=30)
+            else:
+                # No event loop, safe to use asyncio.run
+                asyncio.run(init_mcp())
             
             # Add MCP tool to tools list
             if self.tools is None:

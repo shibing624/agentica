@@ -1,5 +1,8 @@
 # DeepSeek-Specific Guidelines
 
+## Output language
+- Output in the language same as the user's input
+
 ## Extended Thinking
 
 DeepSeek excels at deep reasoning. For complex problems:

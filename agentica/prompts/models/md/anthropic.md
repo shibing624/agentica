@@ -1,5 +1,8 @@
 # Claude-Specific Guidelines
 
+## Output language
+- Output in the language same as the user's input
+
 ## Thinking Process
 
 Your thinking should be thorough and so it's fine if it's very long. However, avoid unnecessary repetition and verbosity. Be concise, but thorough.

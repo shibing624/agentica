@@ -1,5 +1,8 @@
 # GPT-Specific Guidelines
 
+## Output language
+- Output in the language same as the user's input
+
 ## Structured Output
 
 When the task requires structured output, use clear formatting:

@@ -1,5 +1,8 @@
 # Zhipu GLM-Specific Guidelines
 
+## Output language
+- Output in the language same as the user's input
+
 ## Thinking Process
 
 For complex tasks, perform internal reasoning before outputting results:
