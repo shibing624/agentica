@@ -213,11 +213,13 @@ class HuggingFaceChat(Model):
         if self.top_p is not None:
             _request_params["top_p"] = self.top_p
         if self.tools is not None:
-            _request_params["tools"] = self.get_tools_for_api()
-            if self.tool_choice is None:
-                _request_params["tool_choice"] = "auto"
-            else:
-                _request_params["tool_choice"] = self.tool_choice
+            tools_for_api = self.get_tools_for_api()
+            if tools_for_api:  # Only add tools if list is not empty
+                _request_params["tools"] = tools_for_api
+                if self.tool_choice is None:
+                    _request_params["tool_choice"] = "auto"
+                else:
+                    _request_params["tool_choice"] = self.tool_choice
         if self.request_params is not None:
             _request_params.update(self.request_params)
         return _request_params
@@ -255,11 +257,13 @@ class HuggingFaceChat(Model):
         if self.top_p is not None:
             _dict["top_p"] = self.top_p
         if self.tools is not None:
-            _dict["tools"] = self.get_tools_for_api()
-            if self.tool_choice is None:
-                _dict["tool_choice"] = "auto"
-            else:
-                _dict["tool_choice"] = self.tool_choice
+            tools_for_api = self.get_tools_for_api()
+            if tools_for_api:  # Only add tools if list is not empty
+                _dict["tools"] = tools_for_api
+                if self.tool_choice is None:
+                    _dict["tool_choice"] = "auto"
+                else:
+                    _dict["tool_choice"] = self.tool_choice
         return _dict
 
     def invoke(self, messages: List[Message]) -> Union[ChatCompletionOutput]:

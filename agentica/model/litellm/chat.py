@@ -229,8 +229,10 @@ class LiteLLM(Model):
             
         # Add tools if present
         if self.tools is not None:
-            params["tools"] = self.get_tools_for_api()
-            params["tool_choice"] = self.tool_choice or "auto"
+            tools_for_api = self.get_tools_for_api()
+            if tools_for_api:  # Only add tools if list is not empty
+                params["tools"] = tools_for_api
+                params["tool_choice"] = self.tool_choice or "auto"
             
         # Merge additional request params
         if self.request_params:

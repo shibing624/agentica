@@ -284,11 +284,13 @@ class OpenAIChat(Model):
         if self.metadata is not None:
             request_params["metadata"] = self.metadata
         if self.tools is not None:
-            request_params["tools"] = self.get_tools_for_api()
-            if self.tool_choice is None:
-                request_params["tool_choice"] = "auto"
-            else:
-                request_params["tool_choice"] = self.tool_choice
+            tools_for_api = self.get_tools_for_api()
+            if tools_for_api:  # Only add tools if list is not empty
+                request_params["tools"] = tools_for_api
+                if self.tool_choice is None:
+                    request_params["tool_choice"] = "auto"
+                else:
+                    request_params["tool_choice"] = self.tool_choice
         if self.request_params is not None:
             request_params.update(self.request_params)
         return request_params
@@ -344,11 +346,13 @@ class OpenAIChat(Model):
         if self.extra_query is not None:
             model_dict["extra_query"] = self.extra_query
         if self.tools is not None:
-            model_dict["tools"] = self.get_tools_for_api()
-            if self.tool_choice is None:
-                model_dict["tool_choice"] = "auto"
-            else:
-                model_dict["tool_choice"] = self.tool_choice
+            tools_for_api = self.get_tools_for_api()
+            if tools_for_api:  # Only add tools if list is not empty
+                model_dict["tools"] = tools_for_api
+                if self.tool_choice is None:
+                    model_dict["tool_choice"] = "auto"
+                else:
+                    model_dict["tool_choice"] = self.tool_choice
         cleaned_dict = {k: v for k, v in model_dict.items() if v is not None}
         return cleaned_dict
 

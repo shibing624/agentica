@@ -197,7 +197,7 @@ agent.print_response("文档中关于 X 的内容是什么？")
 
 ### MCP 协议支持
 
-CLI 自动加载 `mcp_config.json` 配置文件（搜索顺序：当前目录 → 父目录 → `~/.agentica/`）：
+Agent 支持加载 `mcp_config.json` 配置文件（搜索顺序：当前目录 → 父目录 → `~/.agentica/`）：
 
 ```json
 {
@@ -217,18 +217,22 @@ CLI 自动加载 `mcp_config.json` 配置文件（搜索顺序：当前目录 �
 ```
 
 - `enable`: 是否启用该 MCP 服务器，默认 `true`，设为 `false` 禁用
+- `auto_load_mcp`: Agent 参数，默认 `False`，设为 `True` 启用自动加载
 
 代码中使用：
 ```python
+from agentica import Agent
+
+# 启用自动加载 MCP 配置
+agent = Agent(model=model, auto_load_mcp=True)
+
+# 默认不加载（适用于不支持工具的模型）
+agent = Agent(model=model)
+
+# 手动加载
 from agentica.tools.mcp_tool import McpTool
-
-# 从配置文件加载（自动过滤 enable=false 的服务器）
 mcp_tool = McpTool.from_config()
-
-# 或直接指定
-from agentica.mcp import MCPClient
-client = MCPClient("stdio", command="npx", args=["-y", "@modelcontextprotocol/server-filesystem"])
-agent = Agent(model=model, mcp_clients=[client])
+agent = Agent(model=model, tools=[mcp_tool], auto_load_mcp=False)
 ```
 
 ## 环境变量

@@ -20,7 +20,7 @@ class MCPServerConfig:
     args: Optional[list] = None
     env: Optional[Dict[str, str]] = None
     headers: Optional[Dict[str, str]] = None
-    timeout: float = 5.0
+    timeout: float = 15.0
     read_timeout: float = 300.0
     enable: bool = True  # Whether to load this MCP server
 
@@ -84,7 +84,7 @@ class MCPConfig:
                     args=server_config.get('args', []),
                     env=server_config.get('env'),
                     headers=server_config.get('headers'),
-                    timeout=server_config.get('timeout', 5.0),
+                    timeout=server_config.get('timeout', 15.0),
                     read_timeout=server_config.get('read_timeout', 300.0),
                     enable=enable
                 )

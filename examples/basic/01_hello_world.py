@@ -18,6 +18,7 @@ print(f"import time: {t2-t1}")
 # Create a simple agent
 agent = Agent(
     model=OpenAIChat(id="gpt-4o-mini"),
+    debug=True
 )
 
 # Run the agent with a simple query

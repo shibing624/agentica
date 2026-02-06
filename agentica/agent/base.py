@@ -173,6 +173,10 @@ class Agent:
     #   forces the model to call that tool.
     # "none" is the default when no tools are present. "auto" is the default if tools are present.
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    # Auto-load MCP tools from mcp_config.json/yaml
+    # Searches: current dir -> parent dirs -> ~/.agentica/
+    # Default False since not all models support tools
+    auto_load_mcp: bool = False
 
     # -*- Agent Context
     # Context available for tools and prompt functions
@@ -356,6 +360,7 @@ class Agent:
             show_tool_calls: bool = False,
             tool_call_limit: Optional[int] = None,
             tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
+            auto_load_mcp: bool = False,
 
             # Context
             context: Optional[Dict[str, Any]] = None,
@@ -492,6 +497,7 @@ class Agent:
         self.show_tool_calls = show_tool_calls
         self.tool_call_limit = tool_call_limit
         self.tool_choice = tool_choice
+        self.auto_load_mcp = auto_load_mcp
 
         self.context = context
         self.add_context = add_context
@@ -570,6 +576,10 @@ class Agent:
         # Initialize workspace if workspace_path is provided
         self._init_workspace()
 
+        # Auto-load MCP tools from config file
+        if self.auto_load_mcp:
+            self._load_mcp_tools()
+
         # Collect and merge tool system prompts into instructions
         self._merge_tool_system_prompts()
 
@@ -646,6 +656,39 @@ class Agent:
             # Note: if instructions is a Callable, we don't modify it
 
             logger.debug(f"Injected workspace context into instructions from {self.workspace.path}")
+
+    def _load_mcp_tools(self):
+        """Auto-load MCP tools from mcp_config.json/yaml if available.
+        
+        Searches for config file in:
+        1. Current directory and parent directories
+        2. ~/.agentica/
+        
+        Only loads servers with enable=true (default).
+        """
+        try:
+            from agentica.mcp.config import MCPConfig
+            from agentica.tools.mcp_tool import McpTool
+            
+            config = MCPConfig()
+            if not config.servers:
+                return
+            
+            # Use McpTool.from_config to load all enabled servers
+            mcp_tool = McpTool.from_config(config_path=config.config_path)
+            
+            # Add MCP tool to tools list
+            if self.tools is None:
+                self.tools = [mcp_tool]
+            else:
+                self.tools = list(self.tools) + [mcp_tool]
+            
+            logger.info(f"Auto-loaded MCP tools from: {config.config_path}")
+        except ImportError:
+            # MCP dependencies not installed, skip silently
+            pass
+        except Exception as e:
+            logger.warning(f"Failed to auto-load MCP tools: {e}")
 
     def _merge_tool_system_prompts(self) -> None:
         """
