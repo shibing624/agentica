@@ -335,7 +335,7 @@ class McpTool(Tool):
                                         "timeout": self._server_config["timeout"],
                                         "sse_read_timeout": self._server_config["read_timeout"]
                                     },
-                                    client_session_timeout_seconds=self._server_config["timeout"] or 10.0
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 60.0
                                 )
                             elif self._server_config["transport_type"] == "streamable-http":
                                 server = MCPServerStreamableHttp(
@@ -347,7 +347,7 @@ class McpTool(Tool):
                                         "sse_read_timeout": timedelta(seconds=self._server_config["read_timeout"]) if self._server_config["read_timeout"] else None,
                                         "terminate_on_close": self._server_config["terminate_on_close"]
                                     },
-                                    client_session_timeout_seconds=self._server_config["timeout"] or 10.0
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 60.0
                                 )
                             else:
                                 server = MCPServerStdio(
@@ -357,7 +357,7 @@ class McpTool(Tool):
                                         "args": self._server_config["args"],
                                         "env": copy.deepcopy(self._server_config["env"])
                                     },
-                                    client_session_timeout_seconds=self._server_config["timeout"] or 10.0
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 60.0
                                 )
 
                             try:
