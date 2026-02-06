@@ -288,6 +288,9 @@ class DeepAgent(Agent):
 
         # Set parent agent reference for task tool
         self._setup_task_tool()
+        
+        # Set workspace for memory tool (workspace is initialized in parent class)
+        self._setup_memory_tool()
 
     def _merge_tools_with_dedup(
             self,
@@ -307,6 +310,18 @@ class DeepAgent(Agent):
         for tool in self.tools or []:
             if isinstance(tool, BuiltinTaskTool):
                 tool.set_parent_agent(self)
+                break
+
+    def _setup_memory_tool(self) -> None:
+        """Set up the memory tool with workspace reference."""
+        from agentica.deep_tools import BuiltinMemoryTool
+        
+        # Find and configure the memory tool with workspace
+        for tool in self.tools or []:
+            if isinstance(tool, BuiltinMemoryTool):
+                if self.workspace:
+                    tool.set_workspace(self.workspace)
+                    logger.debug(f"Memory tool configured with workspace: {self.workspace.path}")
                 break
 
     def _estimate_context_tokens(self, messages: List[Message]) -> int:

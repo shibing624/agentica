@@ -63,28 +63,24 @@ class BuiltinFileTool(Tool):
         self.register(self.grep)
 
     def _resolve_path(self, path: str) -> Path:
-        """Resolve path, supporting both absolute and relative paths.
+        """Resolve path, supporting absolute, relative, and ~ paths.
         
-        If path is absolute but not under base_dir, treat it as relative to base_dir.
-        This prevents writing to system directories like root (/).
+        - ~ paths are expanded to user home directory
+        - Absolute paths are used directly
+        - Relative paths are resolved relative to base_dir
         """
+        # Expand ~ to user home directory
+        if path.startswith("~"):
+            return Path(path).expanduser()
         p = Path(path)
         if p.is_absolute():
-            # Check if the path is under base_dir
-            try:
-                p.relative_to(self.base_dir)
-                return p
-            except ValueError:
-                # Path is not under base_dir, treat the path name as relative
-                # e.g., /research_xxx -> base_dir/research_xxx
-                relative_path = str(p).lstrip("/")
-                return self.base_dir / relative_path
+            return p
         return self.base_dir / p
 
     def _validate_path(self, path: str) -> str:
-        """Validate path security to prevent path traversal attacks."""
-        if ".." in path or path.startswith("~"):
-            raise ValueError(f"Path traversal not allowed: {path}")
+        """Validate path - currently no restrictions, base_dir is just the default."""
+        # Allow all paths: absolute, relative, with .. or ~
+        # base_dir is only used as the default starting point for relative paths
         return path
 
     def ls(self, directory: str = ".") -> str:
@@ -825,9 +821,15 @@ class BuiltinTaskTool(Tool):
     """
 
     # Base system prompt template for task tool usage guidance
-    TASK_SYSTEM_PROMPT_TEMPLATE = """## `task` (subagent spawner)
+    TASK_SYSTEM_PROMPT_TEMPLATE = """## task Tool (Subagent Spawner)
 
-You have access to a `task` tool to launch short-lived subagents that handle isolated tasks. These agents are ephemeral — they live only for the duration of the task and return a single result.
+You have access to a `task` function to launch short-lived subagents that handle isolated tasks.
+
+### IMPORTANT - How to Call This Tool
+
+The `task` tool is a FUNCTION CALL tool. Use your standard function calling mechanism to invoke it.
+- DO NOT use XML-style tags like `<tool_call>task<arg_key>...</arg_key></tool_call>` - this format does NOT work!
+- Call it as a regular function with parameters: task(description="...", subagent_type="...")
 
 ### Available Subagent Types
 
@@ -1084,6 +1086,124 @@ You have access to a `task` tool to launch short-lived subagents that handle iso
             }, ensure_ascii=False)
 
 
+class BuiltinMemoryTool(Tool):
+    """
+    Built-in memory tool for saving important information to workspace.
+    
+    This tool allows the agent to persist important user information, preferences,
+    and conversation highlights to the workspace memory system.
+    
+    Memory types:
+    - Daily memory: Temporary notes for the current day (auto-cleared after 7 days)
+    - Long-term memory: Persistent information (user preferences, important facts)
+    """
+
+    MEMORY_SYSTEM_PROMPT = """## save_memory Tool
+
+You have access to a `save_memory` tool to persist important information for future conversations.
+
+### When to Use This Tool
+
+Use this tool to save:
+1. **User Preferences**: Language, communication style, technical level
+2. **Personal Information**: Name, occupation, interests (when shared by user)
+3. **Important Facts**: Key project details, decisions made, important context
+4. **User Requests**: When user explicitly asks to "remember this" or "save this"
+
+### Memory Types
+
+- `long_term=False` (default): Daily memory - temporary notes, cleared after 7 days
+- `long_term=True`: Permanent memory - important preferences and facts that persist
+
+### Guidelines
+
+1. **Be Selective**: Only save truly important or explicitly requested information
+2. **Be Concise**: Write clear, brief memory entries (1-2 sentences)
+3. **User Intent**: If user says "remember", "save", "note this" → use this tool
+4. **Privacy Aware**: Don't save sensitive information unless explicitly asked
+
+### Examples
+
+- User says "I prefer Python over JavaScript" → save_memory("User prefers Python over JavaScript", long_term=True)
+- User says "Remember to check the API docs tomorrow" → save_memory("Check API docs", long_term=False)
+- User shares "My name is Alice, I'm a data scientist" → save_memory("User: Alice, data scientist", long_term=True)
+"""
+
+    def __init__(self, workspace=None):
+        """Initialize BuiltinMemoryTool.
+        
+        Args:
+            workspace: Workspace instance for storing memories. If None, memories won't be persisted.
+        """
+        super().__init__(name="builtin_memory_tool")
+        self._workspace = workspace
+        self.register(self.save_memory)
+
+    def set_workspace(self, workspace):
+        """Set or update the workspace instance.
+        
+        Args:
+            workspace: Workspace instance
+        """
+        self._workspace = workspace
+
+    def get_system_prompt(self) -> Optional[str]:
+        """Get the system prompt for memory tool usage."""
+        return self.MEMORY_SYSTEM_PROMPT
+
+    def save_memory(self, content: str, long_term: bool = False) -> str:
+        """Save important information to memory for future conversations.
+
+        Use this tool to remember important user preferences, personal information,
+        or any details that should be recalled in future conversations.
+
+        Args:
+            content: The information to remember. Should be a concise, clear statement.
+                Examples:
+                - "User prefers concise responses"
+                - "User is working on a Python web project"
+                - "User's name is Alice, she is a data scientist"
+            long_term: If True, save to permanent long-term memory.
+                If False (default), save to daily memory (cleared after 7 days).
+                Use long_term=True for: user preferences, personal info, important facts.
+                Use long_term=False for: temporary notes, daily tasks, short-term context.
+
+        Returns:
+            Confirmation message indicating where the memory was saved.
+        """
+        if not content or not content.strip():
+            return "Error: Memory content cannot be empty."
+
+        content = content.strip()
+        
+        if self._workspace is None:
+            logger.warning("No workspace configured, memory not saved to disk.")
+            return json.dumps({
+                "success": False,
+                "error": "No workspace configured. Memory not persisted.",
+                "content": content,
+            }, ensure_ascii=False)
+
+        try:
+            self._workspace.save_memory(content, long_term=long_term)
+            memory_type = "long-term" if long_term else "daily"
+            logger.info(f"Saved {memory_type} memory: {content[:50]}...")
+            
+            return json.dumps({
+                "success": True,
+                "memory_type": memory_type,
+                "content": content,
+                "message": f"Memory saved to {memory_type} storage.",
+            }, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving memory: {e}")
+            return json.dumps({
+                "success": False,
+                "error": f"Failed to save memory: {e}",
+                "content": content,
+            }, ensure_ascii=False)
+
+
 def get_builtin_tools(
         base_dir: Optional[str] = None,
         include_file_tools: bool = True,
@@ -1093,9 +1213,11 @@ def get_builtin_tools(
         include_todos: bool = True,
         include_task: bool = True,
         include_skills: bool = True,
+        include_memory: bool = True,
         task_model: Optional["Model"] = None,
         task_tools: Optional[List[Any]] = None,
         custom_skill_dirs: Optional[List[str]] = None,
+        workspace=None,
 ) -> List[Tool]:
     """
     Get the list of built-in tools for DeepAgent.
@@ -1109,9 +1231,11 @@ def get_builtin_tools(
         include_todos: Whether to include task management tools
         include_task: Whether to include subagent task tool
         include_skills: Whether to include skill tool for executing skills
+        include_memory: Whether to include memory save tool
         task_model: Model for subagent tasks (optional, will use parent agent's model if not set)
         task_tools: Tools for subagent tasks (optional)
         custom_skill_dirs: Custom skill directories to load (optional)
+        workspace: Workspace instance for memory tool (optional)
 
     Returns:
         List of tools
@@ -1135,6 +1259,9 @@ def get_builtin_tools(
 
     if include_task:
         tools.append(BuiltinTaskTool(model=task_model, tools=task_tools))
+
+    if include_memory:
+        tools.append(BuiltinMemoryTool(workspace=workspace))
 
     if include_skills:
         from agentica.tools.skill_tool import SkillTool

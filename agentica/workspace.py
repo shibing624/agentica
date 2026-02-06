@@ -44,28 +44,29 @@ class Workspace:
     """Agent Workspace.
 
     Workspace is the configuration and memory storage directory for Agent,
-    supporting multi-user isolation.
+    supporting multi-user isolation. All user data is stored under users/ directory.
 
     Directory structure:
     - AGENT.md: Agent instructions and constraints (globally shared)
     - PERSONA.md: Agent persona settings (globally shared)
     - TOOLS.md: Tool usage documentation (globally shared)
-    - USER.md: Default user info (used when no user_id specified)
-    - MEMORY.md: Default long-term memory (used when no user_id specified)
-    - memory/: Default daily memory directory (used when no user_id specified)
     - skills/: Custom skills directory (globally shared)
-    - users/: User data directory (multi-user isolation)
-        - {user_id}/
+    - users/: User data directory (all users including default)
+        - default/: Default user (when no user_id specified)
+            - USER.md: User information
+            - MEMORY.md: Long-term memory
+            - memory/: Daily memory directory
+        - {user_id}/: Other users
             - USER.md: User information
             - MEMORY.md: Long-term memory
             - memory/: Daily memory directory
 
-    Single-user mode (no user_id specified):
-        >>> workspace = Workspace("~/.agentica/workspace")
+    Default user mode:
+        >>> workspace = Workspace("~/.agentica/workspace")  # user_id='default'
         >>> workspace.initialize()
-        >>> workspace.save_memory("User prefers concise responses")
+        >>> workspace.save_memory("User prefers concise responses")  # Stored in users/default/
 
-    Multi-user mode (user_id specified):
+    Custom user mode:
         >>> workspace = Workspace("~/.agentica/workspace", user_id="alice@example.com")
         >>> workspace.initialize()
         >>> workspace.save_memory("Alice likes Python")  # Stored in users/alice@example.com/
@@ -75,7 +76,8 @@ class Workspace:
         >>> workspace.save_memory("Bob prefers detailed explanations")
     """
 
-    DEFAULT_FILES = {
+    # Global config files (shared across all users)
+    DEFAULT_GLOBAL_FILES = {
         "AGENT.md": """# Agent Instructions
 
 You are a helpful AI assistant.
@@ -133,9 +135,13 @@ You are a helpful AI assistant.
 - Prefer safe, non-destructive commands
 - Explain what commands will do
 """,
-        "USER.md": """# User Profile
+    }
+    
+    # Default user file template
+    DEFAULT_USER_MD = """# User Profile
 
-<!-- Add user preferences and information here -->
+## User ID
+{user_id}
 
 ## Preferences
 - Language: English
@@ -143,8 +149,7 @@ You are a helpful AI assistant.
 
 ## Context
 <!-- User's background, projects, etc. -->
-""",
-    }
+"""
 
     def __init__(
         self,
@@ -157,16 +162,17 @@ You are a helpful AI assistant.
         Args:
             path: Workspace path, defaults to AGENTICA_WORKSPACE_DIR (~/.agentica/workspace)
             config: Workspace configuration, defaults to WorkspaceConfig defaults
-            user_id: User ID for multi-user isolation. If not specified, uses default user directory
+            user_id: User ID for multi-user isolation. Defaults to 'default' if not specified
         """
         if path is None:
             path = DEFAULT_WORKSPACE_PATH
         self.path = Path(path).expanduser().resolve()
         self.config = config or WorkspaceConfig()
-        self._user_id = user_id
+        # Default to 'default' user if not specified
+        self._user_id = user_id if user_id else "default"
 
     @property
-    def user_id(self) -> Optional[str]:
+    def user_id(self) -> str:
         """Get current user ID."""
         return self._user_id
 
@@ -174,22 +180,19 @@ You are a helpful AI assistant.
         """Set current user ID.
 
         Args:
-            user_id: User ID, set to None to use default user
+            user_id: User ID, defaults to 'default' if None
         """
-        self._user_id = user_id
+        self._user_id = user_id if user_id else "default"
 
     def _get_user_path(self) -> Path:
         """Get current user's data directory path.
 
         Returns:
-            If user_id is specified, returns users/{user_id}/ directory path
-            Otherwise returns workspace root directory
+            Path to users/{user_id}/ directory
         """
-        if self._user_id:
-            # Sanitize user_id, replace unsafe characters
-            safe_user_id = self._user_id.replace("/", "_").replace("\\", "_").replace("..", "_")
-            return self.path / self.config.users_dir / safe_user_id
-        return self.path
+        # Sanitize user_id, replace unsafe characters
+        safe_user_id = self._user_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        return self.path / self.config.users_dir / safe_user_id
 
     def _get_user_memory_dir(self) -> Path:
         """Get current user's daily memory directory."""
@@ -206,8 +209,7 @@ You are a helpful AI assistant.
     def initialize(self, force: bool = False) -> bool:
         """Initialize workspace.
 
-        Creates workspace directory and default configuration files.
-        If user_id is specified, also creates user data directory.
+        Creates workspace directory, global configuration files, and user data directory.
 
         Args:
             force: Whether to overwrite existing files
@@ -217,20 +219,18 @@ You are a helpful AI assistant.
         """
         self.path.mkdir(parents=True, exist_ok=True)
 
-        # Create globally shared default files
-        for filename, content in self.DEFAULT_FILES.items():
+        # Create globally shared files (AGENT.md, PERSONA.md, TOOLS.md)
+        for filename, content in self.DEFAULT_GLOBAL_FILES.items():
             filepath = self.path / filename
             if not filepath.exists() or force:
                 filepath.write_text(content, encoding="utf-8")
 
         # Create global directories
-        (self.path / self.config.memory_dir).mkdir(exist_ok=True)
         (self.path / self.config.skills_dir).mkdir(exist_ok=True)
         (self.path / self.config.users_dir).mkdir(exist_ok=True)
 
-        # If user_id is specified, create user directory
-        if self._user_id:
-            self._initialize_user_dir()
+        # Always create user directory (default or specified)
+        self._initialize_user_dir()
 
         return True
 
@@ -242,18 +242,10 @@ You are a helpful AI assistant.
         # Create user's USER.md
         user_md = user_path / self.config.user_md
         if not user_md.exists():
-            user_md.write_text(f"""# User Profile
-
-## User ID
-{self._user_id}
-
-## Preferences
-- Language: English
-- Style: Concise
-
-## Context
-<!-- User's background, projects, etc. -->
-""", encoding="utf-8")
+            user_md.write_text(
+                self.DEFAULT_USER_MD.format(user_id=self._user_id),
+                encoding="utf-8"
+            )
 
         # Create user's memory directory
         (user_path / self.config.memory_dir).mkdir(exist_ok=True)
@@ -331,18 +323,12 @@ You are a helpful AI assistant.
             if content:
                 contents.append(f"<!-- {f} -->\n{content}")
 
-        # Read user-specific USER.md
+        # Read user-specific USER.md (always from users/{user_id}/)
         user_md_path = self._get_user_md()
         if user_md_path.exists():
             content = user_md_path.read_text(encoding="utf-8").strip()
             if content:
-                user_label = f"USER.md (user: {self._user_id})" if self._user_id else "USER.md"
-                contents.append(f"<!-- {user_label} -->\n{content}")
-        else:
-            # Fallback to global USER.md
-            content = self.read_file(self.config.user_md)
-            if content:
-                contents.append(f"<!-- {self.config.user_md} -->\n{content}")
+                contents.append(f"<!-- USER.md (user: {self._user_id}) -->\n{content}")
 
         return "\n\n---\n\n".join(contents) if contents else ""
 
@@ -350,7 +336,6 @@ You are a helpful AI assistant.
         """Get recent memory (for injecting into context).
 
         Reads user-specific MEMORY.md long-term memory and recent daily memories.
-        If no user_id specified, reads from default memory directory.
 
         Args:
             days: Number of recent days to read
@@ -360,15 +345,14 @@ You are a helpful AI assistant.
         """
         contents = []
 
-        # Read long-term memory (user-specific)
+        # Read long-term memory (user-specific, from users/{user_id}/)
         long_term_path = self._get_user_memory_md()
         if long_term_path.exists():
             long_term = long_term_path.read_text(encoding="utf-8").strip()
             if long_term:
-                user_label = f" (user: {self._user_id})" if self._user_id else ""
-                contents.append(f"## Long-term Memory{user_label}\n\n{long_term}")
+                contents.append(f"## Long-term Memory (user: {self._user_id})\n\n{long_term}")
 
-        # Read daily memory (user-specific)
+        # Read daily memory (user-specific, from users/{user_id}/memory/)
         memory_dir = self._get_user_memory_dir()
         if memory_dir.exists():
             files = sorted(memory_dir.glob("*.md"), reverse=True)[:days]
@@ -382,16 +366,14 @@ You are a helpful AI assistant.
     def write_memory(self, content: str, to_daily: bool = True):
         """Write memory.
 
-        Writes content to current user's memory file.
-        If no user_id specified, writes to default memory directory.
+        Writes content to current user's memory file (users/{user_id}/).
 
         Args:
             content: Memory content
             to_daily: True to write to daily memory, False to write to long-term memory
         """
         # Ensure user directory exists
-        if self._user_id:
-            self._initialize_user_dir()
+        self._initialize_user_dir()
 
         if to_daily:
             today = date.today().isoformat()
@@ -434,17 +416,17 @@ You are a helpful AI assistant.
         return self.path / self.config.skills_dir
 
     def list_files(self) -> Dict[str, bool]:
-        """List workspace file status.
+        """List workspace global file status.
 
         Returns:
-            Dictionary with file names as keys and existence status as values
+            Dictionary with file names as keys and existence status as values.
+            Note: Only lists globally shared files, not user-specific files.
         """
+        # Only list globally shared config files
         files = [
             self.config.agent_md,
             self.config.persona_md,
             self.config.tools_md,
-            self.config.user_md,
-            self.config.memory_md,
         ]
         return {f: (self.path / f).exists() for f in files}
 
@@ -585,8 +567,7 @@ You are a helpful AI assistant.
         ]
 
     def __repr__(self) -> str:
-        user_info = f", user_id={self._user_id}" if self._user_id else ""
-        return f"Workspace(path={self.path}, exists={self.exists()}{user_info})"
+        return f"Workspace(path={self.path}, exists={self.exists()}, user_id={self._user_id})"
 
     def __str__(self) -> str:
         return str(self.path)
@@ -620,8 +601,7 @@ You are a helpful AI assistant.
         old_user = self._user_id
 
         try:
-            if target_user:
-                self._user_id = target_user
+            self._user_id = target_user
 
             memory_files = self.get_all_memory_files()
             memory_count = len(memory_files)
@@ -636,7 +616,7 @@ You are a helpful AI assistant.
                     last_activity = datetime.datetime.fromtimestamp(mtime).isoformat()
 
             return {
-                "user_id": target_user or "default",
+                "user_id": target_user,
                 "memory_count": memory_count,
                 "last_activity": last_activity,
                 "user_path": str(self._get_user_path()),
