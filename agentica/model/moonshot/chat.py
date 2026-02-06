@@ -16,7 +16,7 @@ class Moonshot(OpenAILike):
     - base_url: str: The base URL for the model. Default: "https://api.moonshot.cn/v1".
     """
 
-    id: str = "moonshot-v1-8k"
+    id: str = "kimi-k2.5"
     name: str = "Moonshot"
     provider: str = "MoonShot"
 
