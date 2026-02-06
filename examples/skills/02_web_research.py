@@ -25,7 +25,7 @@ def demo_web_research_skill():
     print("=" * 60)
 
     # Register the web-research skill
-    skill_dir = os.path.join(pwd_path, "../data/skill/web-research")
+    skill_dir = os.path.join(pwd_path, "../data/skills/web-research")
     skill = register_skill(skill_dir, location="project")
 
     if skill:
@@ -56,7 +56,7 @@ def demo_research_agent():
 
     if not skill:
         # Load it if not already loaded
-        skill_dir = os.path.join(pwd_path, "../data/skill/web-research")
+        skill_dir = os.path.join(pwd_path, "../data/skills/web-research")
         skill = register_skill(skill_dir, location="project")
 
     if skill:

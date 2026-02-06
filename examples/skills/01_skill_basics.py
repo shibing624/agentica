@@ -166,7 +166,7 @@ def demo_custom_skill():
 
     # Custom skill directory (example data)
     pwd_path = os.path.dirname(os.path.abspath(__file__))
-    custom_skill_dir = os.path.join(pwd_path, "../data/skill/python-lib-analyzer")
+    custom_skill_dir = os.path.join(pwd_path, "../data/skills/python-lib-analyzer")
 
     if os.path.exists(custom_skill_dir):
         print(f"\nRegistering custom skill from: {custom_skill_dir}")

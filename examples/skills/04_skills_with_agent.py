@@ -149,7 +149,7 @@ def demo_custom_skill_with_agent():
 
     # Register custom skill
     pwd_path = os.path.dirname(os.path.abspath(__file__))
-    custom_skill_dir = os.path.join(pwd_path, "../data/skill/python-lib-analyzer")
+    custom_skill_dir = os.path.join(pwd_path, "../data/skills/python-lib-analyzer")
 
     if os.path.exists(custom_skill_dir):
         skill = register_skill(custom_skill_dir, location="project")

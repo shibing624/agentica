@@ -205,7 +205,7 @@ def demo_skill_tool_usage():
 
     # Create SkillTool with custom skill directory
     pwd_path = os.path.dirname(os.path.abspath(__file__))
-    custom_skill_dir = os.path.join(pwd_path, "../data/skill/python-lib-analyzer")
+    custom_skill_dir = os.path.join(pwd_path, "../data/skills/python-lib-analyzer")
 
     if os.path.exists(custom_skill_dir):
         skill_tool = SkillTool(custom_skill_dirs=[custom_skill_dir])
