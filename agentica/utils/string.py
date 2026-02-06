@@ -6,7 +6,7 @@ from typing import Optional, Type
 from pydantic import BaseModel, ValidationError
 from agentica.utils.log import logger
 
-TOOL_RESULT_TOKEN_LIMIT = 20000  # Same threshold as eviction
+TOOL_RESULT_TOKEN_LIMIT = 16000  # Same threshold as eviction
 TRUNCATION_GUIDANCE = "... [results truncated, try being more specific with your parameters]"
 
 
@@ -77,13 +77,13 @@ def parse_structured_output(content: str, response_model: Type[BaseModel]) -> Op
 
 
 def truncate_if_too_long(result: list[str] | str) -> list[str] | str:
-    """Truncate list or string result if it exceeds token limit (rough estimate: 4 chars/token)."""
+    """Truncate list or string result if it exceeds the token limit."""
     if isinstance(result, list):
         total_chars = sum(len(item) for item in result)
-        if total_chars > TOOL_RESULT_TOKEN_LIMIT * 4:
-            return result[: len(result) * TOOL_RESULT_TOKEN_LIMIT * 4 // total_chars] + [TRUNCATION_GUIDANCE]
+        if total_chars > TOOL_RESULT_TOKEN_LIMIT:
+            return result[: len(result) * TOOL_RESULT_TOKEN_LIMIT // total_chars] + [TRUNCATION_GUIDANCE]
         return result
     # string
-    if len(result) > TOOL_RESULT_TOKEN_LIMIT * 4:
-        return result[: TOOL_RESULT_TOKEN_LIMIT * 4] + "\n" + TRUNCATION_GUIDANCE
+    if len(result) > TOOL_RESULT_TOKEN_LIMIT:
+        return result[: TOOL_RESULT_TOKEN_LIMIT] + "\n" + TRUNCATION_GUIDANCE
     return result

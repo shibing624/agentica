@@ -1378,16 +1378,41 @@ class AgentMemory(BaseModel):
                 cleaned_msg.videos = cleaned_videos if cleaned_videos else None
             
             return cleaned_msg
+        
+        def is_conversation_message(msg: Message) -> bool:
+            """Check if a message is a user/assistant conversation message (not tool-related).
+            
+            Filters out:
+            - Messages with role='tool' (tool results)
+            - Assistant messages with tool_calls (function calling requests)
+            - Messages with tool_call_id (tool response)
+            
+            Keeps only clean user and assistant text messages.
+            """
+            # Skip tool role messages
+            if msg.role == "tool":
+                return False
+            # Skip assistant messages that contain tool_calls
+            if msg.role == "assistant" and msg.tool_calls:
+                return False
+            # Skip messages that are tool responses
+            if msg.tool_call_id:
+                return False
+            # Keep user and assistant messages with actual content
+            if msg.role in ("user", "assistant") and msg.content:
+                return True
+            return False
 
         if last_n is None:
             logger.debug("Getting messages from all previous runs")
             messages_from_all_history = []
             for prev_run in self.runs:
                 if prev_run.response and prev_run.response.messages:
-                    if skip_role:
-                        prev_run_messages = [m for m in prev_run.response.messages if m.role != skip_role]
-                    else:
-                        prev_run_messages = prev_run.response.messages
+                    # Filter: skip_role + only conversation messages (no tool noise)
+                    prev_run_messages = [
+                        m for m in prev_run.response.messages 
+                        if is_conversation_message(m) and (not skip_role or m.role != skip_role)
+                    ]
                     # Clean each message to remove media placeholders
                     cleaned_messages = [clean_message_for_history(m) for m in prev_run_messages]
                     messages_from_all_history.extend(cleaned_messages)
@@ -1398,10 +1423,11 @@ class AgentMemory(BaseModel):
         messages_from_last_n_history = []
         for prev_run in self.runs[-last_n:]:
             if prev_run.response and prev_run.response.messages:
-                if skip_role:
-                    prev_run_messages = [m for m in prev_run.response.messages if m.role != skip_role]
-                else:
-                    prev_run_messages = prev_run.response.messages
+                # Filter: skip_role + only conversation messages (no tool noise)
+                prev_run_messages = [
+                    m for m in prev_run.response.messages 
+                    if is_conversation_message(m) and (not skip_role or m.role != skip_role)
+                ]
                 # Clean each message to remove media placeholders
                 cleaned_messages = [clean_message_for_history(m) for m in prev_run_messages]
                 messages_from_last_n_history.extend(cleaned_messages)

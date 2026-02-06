@@ -28,7 +28,6 @@ Usage:
         tools=[skill_tool, ShellTool()],
     )
 """
-import json
 from typing import List, Optional
 
 from agentica.tools.base import Tool
@@ -141,13 +140,15 @@ class SkillTool(Tool):
 
     def get_skill_info(self, skill_name: str) -> str:
         """
-        Get detailed information about a specific skill.
+        Get detailed information and full instructions for a specific skill.
+
+        This loads the complete SKILL.md content for the requested skill.
 
         Args:
             skill_name: Name of the skill to get info for
 
         Returns:
-            Formatted string containing skill details or error if not found
+            Full skill content including instructions, or error if not found
         """
         skill_obj = self.registry.get(skill_name)
 
@@ -158,6 +159,7 @@ class SkillTool(Tool):
                 f"Available skills: {', '.join(available[:50]) if available else 'None'}"
             )
 
+        # Return full skill prompt with instructions
         result = f"=== Skill: {skill_obj.name} ===\n"
         result += f"Description: {skill_obj.description}\n"
         result += f"Location: {skill_obj.location}\n"
@@ -166,8 +168,9 @@ class SkillTool(Tool):
             result += f"License: {skill_obj.license}\n"
         if skill_obj.allowed_tools:
             result += f"Allowed Tools: {', '.join(skill_obj.allowed_tools)}\n"
-        if skill_obj.metadata:
-            result += f"Metadata: {json.dumps(skill_obj.metadata, indent=2)}\n"
+        
+        # Include full instructions from SKILL.md
+        result += f"\n--- Instructions ---\n{skill_obj.content}\n"
 
         return result
 
@@ -192,11 +195,11 @@ class SkillTool(Tool):
         Get the system prompt for the skill tool.
 
         This prompt is injected into the agent's system message to guide
-        the LLM on how to use skills effectively. Includes full skill prompts
-        for each available skill.
+        the LLM on how to use skills effectively. Only includes skill name
+        and description - full instructions are loaded on demand.
 
         Returns:
-            System prompt string describing available skills with their full instructions
+            System prompt string describing available skills
         """
         self._ensure_initialized()
         skills = self.registry.list_all()
@@ -215,41 +218,25 @@ Each skill directory should contain a SKILL.md file with:
 - Detailed usage instructions
 """
 
-        # Build full skill prompts for each skill (avoid XML tags to prevent model confusion)
-        skill_prompts = []
+        # Build skill summary list (name + description only)
+        skill_list = []
         for skill in skills:
-            prompt = skill.get_prompt()
-            allowed_tools_str = f"\n  Allowed Tools: {', '.join(skill.allowed_tools)}" if skill.allowed_tools else ""
-            skill_entry = f"""### {skill.name}
-- Description: {skill.description}
-- Location: {skill.location}{allowed_tools_str}
+            trigger_info = f" (trigger: `{skill.trigger}`)" if skill.trigger else ""
+            skill_list.append(f"- **{skill.name}**{trigger_info}: {skill.description}")
 
-**Instructions:**
-{prompt}
-"""
-            skill_prompts.append(skill_entry)
-
-        skills_content = "\n".join(skill_prompts)
+        skills_summary = "\n".join(skill_list)
 
         return f"""# Skills
 
-Skills provide specialized knowledge and workflows for specific tasks. The skill instructions below guide you on HOW to complete tasks - they are NOT tools to call.
+Skills provide specialized knowledge and workflows for specific tasks.
 
-## IMPORTANT - How Skills Work:
-- Skills are NOT callable tools. Do NOT try to call "skill_invoke" or similar - it doesn't exist.
-- Skills provide INSTRUCTIONS that tell you how to use your existing tools (web_search, task, write_file, etc.)
-- When a user's request matches a skill, follow that skill's instructions using your available tools.
-- Use list_skills() or get_skill_info(skill_name) only to LIST or DESCRIBE skills, not to execute them.
+## Available Skills ({len(skills)}):
+{skills_summary}
 
-## Example:
-- User: "搜索 React 最新版本"
-- If you have a "web-research" skill, follow its instructions to use web_search tool
-- Do NOT call skill_invoke("web-research") - this tool doesn't exist!
-
-## Available Skills:
-{skills_content}
-
-For each skill above, when a user's request matches, follow the skill's instructions to complete the task using your regular tools.
+## How to Use Skills:
+1. Use `get_skill_info(skill_name)` to get detailed instructions for a specific skill
+2. Follow the skill's instructions to complete the task
+3. Skills are NOT callable tools - they provide guidance on HOW to do tasks
 """
 
     def __repr__(self) -> str:

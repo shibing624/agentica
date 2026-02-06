@@ -84,27 +84,50 @@ def with_custom_tools_example():
     agent.print_response("Calculate (1111.2 * 22.1222) + (3333.3 / 4444.43)=?")
 
 
-def compare_agent_vs_deep_agent():
-    """Compare Agent and DeepAgent."""
+def complex_deep_agent():
+    """DeepAgent."""
+    from agentica import SqliteDb
     print("\n" + "=" * 60)
-    print("Comparison: Agent vs DeepAgent")
+    print("Complex DeepAgent Example: Create a complex DeepAgent")
     print("=" * 60)
-
-    normal_agent = Agent(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        name="NormalAgent",
-    )
-    print(f"Normal Agent tools: {normal_agent.tools}")
+    db_path = "tmp/agent_sessions.db"
+    db = SqliteDb(db_file=str(db_path))
 
     deep_agent = DeepAgent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         name="DeepAgent",
+        db=db,
+        # 工作空间配置（配置层）
+        load_workspace_context=True,
+        load_workspace_memory=True,
+        memory_days=7,
+        # 历史记录配置
+        add_history_to_messages=True,
+        num_history_responses=4,
+        # 工具配置
+        show_tool_calls=True,
+        tool_call_limit=40,
+        # 指令
+        add_datetime_to_instructions=True,
+        auto_load_mcp=True,
+        # 调试
+        debug_mode=True,
     )
     print(f"DeepAgent builtin tools: {deep_agent.get_builtin_tool_names()}")
+    print(f"DeepAgent: {deep_agent}")
+    deep_agent.print_response("List all Python files in the current directory and count them")
+    while True:
+        user_input = input("Enter your command (or 'quit' to exit): ")
+        if user_input.lower() == 'quit':
+            break
+        deep_agent.print_response(user_input)
+        print("-" * 60)
+        print("\n")
+
 
 
 if __name__ == '__main__':
     basic_example()
-    custom_config_example()
-    with_custom_tools_example()
-    compare_agent_vs_deep_agent()
+    # custom_config_example()
+    # with_custom_tools_example()
+    complex_deep_agent()

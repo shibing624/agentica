@@ -91,6 +91,14 @@ class Model(BaseModel):
             _dict["tool_call_limit"] = self.tool_call_limit
         return _dict
 
+    def __repr__(self) -> str:
+        """Concise representation for logging."""
+        tools_count = len(self.tools) if self.tools else 0
+        return f"{self.name or self.__class__.__name__}(id={self.id!r}, tools={tools_count})"
+
+    def __str__(self) -> str:
+        return self.__repr__()
+
     def invoke(self, *args, **kwargs) -> Any:
         raise NotImplementedError
 
