@@ -215,38 +215,41 @@ Each skill directory should contain a SKILL.md file with:
 - Detailed usage instructions
 """
 
-        # Build full skill prompts for each skill
+        # Build full skill prompts for each skill (avoid XML tags to prevent model confusion)
         skill_prompts = []
         for skill in skills:
             prompt = skill.get_prompt()
-            skill_entry = f"""<skill>
-<name>{skill.name}</name>
-<description>{skill.description}</description>
-<location>{skill.location}</location>
-<path>{skill.path}</path>
-{f'<allowed_tools>{", ".join(skill.allowed_tools)}</allowed_tools>' if skill.allowed_tools else ''}
-</skill>"""
+            allowed_tools_str = f"\n  Allowed Tools: {', '.join(skill.allowed_tools)}" if skill.allowed_tools else ""
+            skill_entry = f"""### {skill.name}
+- Description: {skill.description}
+- Location: {skill.location}{allowed_tools_str}
+
+**Instructions:**
+{prompt}
+"""
             skill_prompts.append(skill_entry)
 
         skills_content = "\n".join(skill_prompts)
 
-        return f"""# Skills Tool
+        return f"""# Skills
 
-When users ask you to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
+Skills provide specialized knowledge and workflows for specific tasks. The skill instructions below guide you on HOW to complete tasks - they are NOT tools to call.
 
-## How to use skills:
-- Skill instructions are automatically loaded into the system prompt below
-- Use list_skills() to see all available skills
-- Use get_skill_info(skill_name) to get details about a specific skill
-- Follow the skill instructions in <available_skills> section to complete tasks
+## IMPORTANT - How Skills Work:
+- Skills are NOT callable tools. Do NOT try to call "skill_invoke" or similar - it doesn't exist.
+- Skills provide INSTRUCTIONS that tell you how to use your existing tools (web_search, task, write_file, etc.)
+- When a user's request matches a skill, follow that skill's instructions using your available tools.
+- Use list_skills() or get_skill_info(skill_name) only to LIST or DESCRIBE skills, not to execute them.
 
-## Important:
-- Only use skills listed in available_skills section below
-- Read the skill's instructions carefully before proceeding
+## Example:
+- User: "搜索 React 最新版本"
+- If you have a "web-research" skill, follow its instructions to use web_search tool
+- Do NOT call skill_invoke("web-research") - this tool doesn't exist!
 
-<available_skills>
+## Available Skills:
 {skills_content}
-</available_skills>
+
+For each skill above, when a user's request matches, follow the skill's instructions to complete the task using your regular tools.
 """
 
     def __repr__(self) -> str:
