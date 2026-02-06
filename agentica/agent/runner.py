@@ -764,6 +764,177 @@ class RunnerMixin:
 
         yield self.run_response
 
+    def _wrap_stream_with_timeout(
+            self: "Agent",
+            stream_iter: Iterator[RunResponse],
+    ) -> Iterator[RunResponse]:
+        """Wrap a streaming iterator with timeout control.
+        
+        Implements two types of timeout:
+        - first_token_timeout: Maximum time to wait for the first token
+        - run_timeout: Maximum total time for the entire stream
+        
+        Uses a background thread to fetch items from the iterator with timeout.
+        """
+        import threading
+        import queue
+        import time
+        
+        result_queue: queue.Queue = queue.Queue()
+        stop_event = threading.Event()
+        error_holder = [None]  # Use list to allow modification in thread
+        
+        def producer():
+            """Background thread that reads from the iterator."""
+            try:
+                for item in stream_iter:
+                    if stop_event.is_set():
+                        break
+                    result_queue.put(("item", item))
+                result_queue.put(("done", None))
+            except Exception as e:
+                error_holder[0] = e
+                result_queue.put(("error", e))
+        
+        # Start producer thread
+        producer_thread = threading.Thread(target=producer, daemon=True)
+        producer_thread.start()
+        
+        start_time = time.time()
+        first_token_received = False
+        
+        try:
+            while True:
+                # Calculate timeout for this iteration
+                if not first_token_received and self.first_token_timeout is not None:
+                    # Waiting for first token
+                    timeout = self.first_token_timeout
+                elif self.run_timeout is not None:
+                    # Check total elapsed time
+                    elapsed = time.time() - start_time
+                    remaining = self.run_timeout - elapsed
+                    if remaining <= 0:
+                        logger.warning(f"Stream run timed out after {self.run_timeout} seconds")
+                        yield RunResponse(
+                            run_id=str(uuid4()),
+                            content=f"Stream run timed out after {self.run_timeout} seconds",
+                            event="RunTimeout",
+                        )
+                        return
+                    timeout = remaining
+                else:
+                    timeout = None  # No timeout
+                
+                try:
+                    msg_type, data = result_queue.get(timeout=timeout)
+                    
+                    if msg_type == "done":
+                        return
+                    elif msg_type == "error":
+                        raise data
+                    elif msg_type == "item":
+                        if not first_token_received:
+                            first_token_received = True
+                        yield data
+                        
+                except queue.Empty:
+                    # Timeout occurred
+                    if not first_token_received:
+                        logger.warning(f"First token timed out after {self.first_token_timeout} seconds")
+                        yield RunResponse(
+                            run_id=str(uuid4()),
+                            content=f"First token timed out after {self.first_token_timeout} seconds",
+                            event="FirstTokenTimeout",
+                        )
+                    else:
+                        logger.warning(f"Stream run timed out after {self.run_timeout} seconds")
+                        yield RunResponse(
+                            run_id=str(uuid4()),
+                            content=f"Stream run timed out after {self.run_timeout} seconds",
+                            event="RunTimeout",
+                        )
+                    return
+        finally:
+            stop_event.set()
+
+    def _run_with_timeout(
+            self: "Agent",
+            message: Optional[Union[str, List, Dict, Message]] = None,
+            audio: Optional[Any] = None,
+            images: Optional[Sequence[Any]] = None,
+            videos: Optional[Sequence[Any]] = None,
+            messages: Optional[Sequence[Union[Dict, Message]]] = None,
+            stream_intermediate_steps: bool = False,
+            **kwargs: Any,
+    ) -> RunResponse:
+        """Run the Agent with timeout control (non-streaming only).
+        
+        Uses ThreadPoolExecutor to implement timeout for the entire run.
+        If timeout is reached, returns a RunResponse indicating timeout.
+        """
+        import concurrent.futures
+        
+        def run_inner():
+            # Run without timeout flag to avoid recursion
+            if self.response_model is not None and self.parse_response:
+                resp = self._run(
+                    message=message,
+                    stream=False,
+                    audio=audio,
+                    images=images,
+                    videos=videos,
+                    messages=messages,
+                    stream_intermediate_steps=stream_intermediate_steps,
+                    **kwargs,
+                )
+                run_response = None
+                for response in resp:
+                    run_response = response
+                
+                if self.structured_outputs:
+                    if isinstance(run_response.content, self.response_model):
+                        return run_response
+                
+                if isinstance(run_response.content, str):
+                    try:
+                        structured_output = parse_structured_output(run_response.content, self.response_model)
+                        if structured_output is not None:
+                            run_response.content = structured_output
+                            run_response.content_type = self.response_model.__name__
+                    except Exception as e:
+                        logger.warning(f"Failed to convert response to output model: {e}")
+                return run_response
+            else:
+                resp = self._run(
+                    message=message,
+                    stream=False,
+                    audio=audio,
+                    images=images,
+                    videos=videos,
+                    messages=messages,
+                    stream_intermediate_steps=stream_intermediate_steps,
+                    **kwargs,
+                )
+                final_response = None
+                for response in resp:
+                    final_response = response
+                return final_response
+        
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_inner)
+            try:
+                result = future.result(timeout=self.run_timeout)
+                return result
+            except concurrent.futures.TimeoutError:
+                logger.warning(f"Agent run timed out after {self.run_timeout} seconds")
+                # Return a timeout response
+                timeout_response = RunResponse(
+                    run_id=str(uuid4()),
+                    content=f"Agent run timed out after {self.run_timeout} seconds",
+                    event="RunTimeout",
+                )
+                return timeout_response
+
     @overload
     def run(
             self: "Agent",
@@ -805,7 +976,24 @@ class RunnerMixin:
             stream_intermediate_steps: bool = False,
             **kwargs: Any,
     ) -> Union[RunResponse, Iterator[RunResponse]]:
-        """Run the Agent with a message and return the response."""
+        """Run the Agent with a message and return the response.
+        
+        Timeout settings:
+        - run_timeout: Maximum total execution time (in seconds). For non-streaming, aborts the run.
+                       For streaming, wraps the iterator with timeout control.
+        - first_token_timeout: Maximum time to wait for the first token (in seconds, streaming only).
+        """
+        # Handle timeout for non-streaming mode
+        if self.run_timeout is not None and not stream:
+            return self._run_with_timeout(
+                message=message,
+                audio=audio,
+                images=images,
+                videos=videos,
+                messages=messages,
+                stream_intermediate_steps=stream_intermediate_steps,
+                **kwargs,
+            )
 
         # If a response_model is set, return the response as a structured output
         if self.response_model is not None and self.parse_response:
@@ -863,6 +1051,9 @@ class RunnerMixin:
                     stream_intermediate_steps=stream_intermediate_steps,
                     **kwargs,
                 )
+                # Wrap with timeout if configured
+                if self.run_timeout is not None or self.first_token_timeout is not None:
+                    return self._wrap_stream_with_timeout(resp)
                 return resp
             else:
                 resp = self._run(

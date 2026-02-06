@@ -378,6 +378,8 @@ class Agent:
             max_rounds: int = 20,
             max_tokens: int = 128000,
             enable_agentic_prompt: bool = False,
+            run_timeout: Optional[float] = None,
+            first_token_timeout: Optional[float] = None,
 
             # Compression Settings
             compress_tool_results: bool = False,
@@ -511,6 +513,8 @@ class Agent:
         self.max_rounds = max_rounds
         self.max_tokens = max_tokens
         self.enable_agentic_prompt = enable_agentic_prompt
+        self.run_timeout = run_timeout
+        self.first_token_timeout = first_token_timeout
 
         self.compress_tool_results = compress_tool_results
         self.compression_manager = compression_manager

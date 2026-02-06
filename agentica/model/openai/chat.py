@@ -958,7 +958,14 @@ class OpenAIChat(Model):
                         if tool_info:
                             tool_name = tool_info.get("tool_name", "unknown")
                             tool_args = tool_info.get("tool_args", {})
-                            yield ModelResponse(content=f"\n🔧 {tool_name}({tool_args})\n")
+                            # Truncate long argument values for display
+                            display_args = {}
+                            for k, v in tool_args.items():
+                                if isinstance(v, str) and len(v) > 100:
+                                    display_args[k] = v[:100] + "..."
+                                else:
+                                    display_args[k] = v
+                            yield ModelResponse(content=f"\n🔧 {tool_name}({display_args})\n")
                     elif function_call_response.event == ModelResponseEvent.tool_call_completed.value:
                         tool_info = function_call_response.tool_call
                         if tool_info:

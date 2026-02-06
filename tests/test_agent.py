@@ -250,5 +250,106 @@ class TestAgentStructuredOutput(unittest.TestCase):
         self.assertTrue(agent.structured_outputs)
 
 
+class TestAgentTimeout(unittest.TestCase):
+    """Test cases for Agent timeout settings."""
+
+    def test_run_timeout_initialization(self):
+        """Test run_timeout setting."""
+        agent = Agent(run_timeout=300)
+        self.assertEqual(agent.run_timeout, 300)
+
+    def test_first_token_timeout_initialization(self):
+        """Test first_token_timeout setting."""
+        agent = Agent(first_token_timeout=30)
+        self.assertEqual(agent.first_token_timeout, 30)
+
+    def test_both_timeout_settings(self):
+        """Test both timeout settings together."""
+        agent = Agent(run_timeout=600, first_token_timeout=30)
+        self.assertEqual(agent.run_timeout, 600)
+        self.assertEqual(agent.first_token_timeout, 30)
+
+    def test_default_timeout_is_none(self):
+        """Test that default timeout values are None."""
+        agent = Agent()
+        self.assertIsNone(agent.run_timeout)
+        self.assertIsNone(agent.first_token_timeout)
+
+    def test_run_with_timeout_non_streaming(self):
+        """Test that non-streaming run uses timeout wrapper when configured."""
+        agent = Agent(run_timeout=5)
+        # Verify that _run_with_timeout method exists and will be called
+        self.assertTrue(hasattr(agent, '_run_with_timeout'))
+        self.assertTrue(callable(agent._run_with_timeout))
+        # Verify run_timeout is set
+        self.assertEqual(agent.run_timeout, 5)
+
+    def test_run_timeout_triggers_timeout_response(self):
+        """Test that timeout produces correct RunResponse event."""
+        import time
+        
+        agent = Agent(run_timeout=0.001)  # Very short timeout
+        
+        # Create a slow mock _run that will definitely timeout
+        def slow_run(*args, **kwargs):
+            time.sleep(1)  # Sleep longer than timeout
+            yield RunResponse(content="Should not reach here")
+        
+        with patch.object(agent, '_run', slow_run):
+            agent.model = Mock()
+            agent.model.id = "test-model"
+            agent.response_model = None
+            agent.parse_response = True
+            
+            response = agent.run("test", stream=False)
+            self.assertEqual(response.event, "RunTimeout")
+            self.assertIn("timed out", response.content)
+
+    def test_stream_timeout_wrapper_exists(self):
+        """Test that _wrap_stream_with_timeout method exists."""
+        agent = Agent()
+        self.assertTrue(hasattr(agent, '_wrap_stream_with_timeout'))
+        self.assertTrue(callable(agent._wrap_stream_with_timeout))
+
+    def test_first_token_timeout_in_stream(self):
+        """Test first token timeout in streaming mode."""
+        import time
+        import queue
+        
+        agent = Agent(first_token_timeout=0.001)  # Very short timeout
+        
+        # Create a slow iterator that will timeout on first token
+        def slow_iterator():
+            time.sleep(1)  # Sleep longer than first_token_timeout
+            yield RunResponse(content="Should not reach here")
+        
+        # Wrap with timeout
+        wrapped = agent._wrap_stream_with_timeout(slow_iterator())
+        
+        # Should get timeout response
+        result = next(wrapped)
+        self.assertEqual(result.event, "FirstTokenTimeout")
+        self.assertIn("First token timed out", result.content)
+
+    def test_run_timeout_in_stream(self):
+        """Test run timeout in streaming mode."""
+        import time
+        
+        agent = Agent(run_timeout=0.05, first_token_timeout=None)  # 50ms total timeout
+        
+        # Create an iterator that produces items slowly
+        def slow_iterator():
+            yield RunResponse(content="First")  # First token arrives quickly
+            time.sleep(0.1)  # Then slow down beyond run_timeout
+            yield RunResponse(content="Second")  # Should timeout before this
+        
+        wrapped = agent._wrap_stream_with_timeout(slow_iterator())
+        
+        results = list(wrapped)
+        # Should get first item, then timeout
+        self.assertEqual(results[0].content, "First")
+        self.assertEqual(results[-1].event, "RunTimeout")
+
+
 if __name__ == "__main__":
     unittest.main()
