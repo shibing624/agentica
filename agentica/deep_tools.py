@@ -227,7 +227,7 @@ class BuiltinFileTool(Tool):
             # Return absolute path to help LLM use correct path in subsequent operations
             absolute_path = str(path.resolve())
             logger.info(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
-            return f"{action} file, absolute path: {absolute_path}, Use this absolute path for subsequent operations (read/execute)."
+            return f"{action} file, absolute path: {absolute_path}"
         except Exception as e:
             logger.error(f"Error writing file {file_path}: {e}")
             return f"Error writing file: {e}"

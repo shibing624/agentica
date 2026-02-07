@@ -33,11 +33,11 @@ class WorkspaceConfig:
     agent_md: str = "AGENT.md"
     persona_md: str = "PERSONA.md"
     tools_md: str = "TOOLS.md"
-    user_md: str = "USER.md"
-    memory_md: str = "MEMORY.md"
-    memory_dir: str = "memory"
-    skills_dir: str = "skills"
-    users_dir: str = "users"
+    user_md: str = "USER.md" # user infomation
+    users_dir: str = "users" # for multi-user isolation
+    memory_dir: str = "memory" # daily memory, under users/{user_id}/memory
+    memory_md: str = "MEMORY.md" # user's long-term memory, under users/{user_id}/
+    skills_dir: str = "skills" # each user's skills, under users/{user_id}/skills
 
 
 class Workspace:
@@ -88,7 +88,7 @@ You are a helpful AI assistant.
 3. Store important information in memory
 4. Follow user preferences in USER.md
 
-## Self Verification
+## Code Verification
 
 **VERY IMPORTANT**: After completing code changes, you MUST verify your work:
 
@@ -144,7 +144,7 @@ You are a helpful AI assistant.
 {user_id}
 
 ## Preferences
-- Language: English
+- Language: Chinese or English
 - Style: Concise
 
 ## Context
