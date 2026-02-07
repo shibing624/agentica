@@ -67,12 +67,15 @@ class TestWorkspace:
         result = workspace.initialize()
 
         assert result is True
+        # Global shared files
         assert (temp_workspace_path / "AGENT.md").exists()
         assert (temp_workspace_path / "PERSONA.md").exists()
         assert (temp_workspace_path / "TOOLS.md").exists()
-        assert (temp_workspace_path / "USER.md").exists()
-        assert (temp_workspace_path / "memory").is_dir()
         assert (temp_workspace_path / "skills").is_dir()
+        # User-specific files under users/default/
+        user_path = temp_workspace_path / "users" / "default"
+        assert (user_path / "USER.md").exists()
+        assert (user_path / "memory").is_dir()
 
     def test_workspace_exists(self, temp_workspace_path):
         """Test workspace exists check."""
@@ -141,9 +144,9 @@ class TestWorkspace:
         # Write daily memory
         workspace.write_memory("Today I learned about Python.", to_daily=True)
 
-        # Check memory file exists
+        # Check memory file exists under users/default/memory/
         today = date.today().isoformat()
-        memory_file = temp_workspace_path / "memory" / f"{today}.md"
+        memory_file = temp_workspace_path / "users" / "default" / "memory" / f"{today}.md"
         assert memory_file.exists()
 
         content = memory_file.read_text()
@@ -157,8 +160,8 @@ class TestWorkspace:
         # Write long-term memory
         workspace.write_memory("User prefers concise answers.", to_daily=False)
 
-        # Check MEMORY.md file
-        memory_file = temp_workspace_path / "MEMORY.md"
+        # Check MEMORY.md file under users/default/
+        memory_file = temp_workspace_path / "users" / "default" / "MEMORY.md"
         assert memory_file.exists()
 
         content = memory_file.read_text()
@@ -194,9 +197,11 @@ class TestWorkspace:
 
         files = workspace.list_files()
 
+        # list_files only returns globally shared files
         assert "AGENT.md" in files
         assert files["AGENT.md"] is True
-        assert "MEMORY.md" in files
+        assert "PERSONA.md" in files
+        assert "TOOLS.md" in files
 
     def test_search_memory(self, temp_workspace_path):
         """Test searching memory."""
@@ -218,8 +223,8 @@ class TestWorkspace:
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        # Create some memory files
-        memory_dir = temp_workspace_path / "memory"
+        # Create some memory files under users/default/memory/
+        memory_dir = temp_workspace_path / "users" / "default" / "memory"
         for i in range(10):
             (memory_dir / f"2024-01-{i+1:02d}.md").write_text(f"Memory {i}")
 
