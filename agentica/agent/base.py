@@ -682,14 +682,17 @@ class Agent:
             # Use McpTool.from_config to load all enabled servers
             mcp_tool = McpTool.from_config(config_path=config.config_path)
             
-            # Initialize MCP tool(s) to populate functions
-            # This is required because McpTool needs async initialization
+            # Initialize MCP tool(s) to populate functions.
+            # Uses async context manager to connect, discover tools, then
+            # immediately closes the initial connection. Each subsequent tool
+            # call creates its own fresh connection (see create_tool_function).
             async def init_mcp():
                 if isinstance(mcp_tool, CompositeMultiMcpTool):
                     await mcp_tool.__aenter__()
+                    await mcp_tool.__aexit__(None, None, None)
                 else:
                     await mcp_tool.__aenter__()
-                    await mcp_tool.initialize()
+                    await mcp_tool.__aexit__(None, None, None)
             
             # Run async initialization in sync context
             try:
@@ -698,7 +701,7 @@ class Agent:
                 loop = None
             
             if loop is not None:
-                # Already in async context, create task
+                # Already in async context, run in a separate thread
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, init_mcp())
