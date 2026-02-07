@@ -473,6 +473,7 @@ class LiteLLM(Model):
         Returns:
             ModelResponse with the generated content
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -528,6 +529,7 @@ class LiteLLM(Model):
         Returns:
             ModelResponse with the generated content
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -674,6 +676,7 @@ class LiteLLM(Model):
         Yields:
             ModelResponse chunks with incremental content
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         
         stream_data = StreamData()
@@ -751,6 +754,7 @@ class LiteLLM(Model):
         Yields:
             ModelResponse chunks with incremental content
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         
         stream_data = StreamData()

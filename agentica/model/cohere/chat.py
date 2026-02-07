@@ -385,6 +385,7 @@ class Cohere(Model):
         Returns:
             ModelResponse: The model response from the API.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
 
@@ -485,6 +486,7 @@ class Cohere(Model):
             self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
     ) -> Iterator[ModelResponse]:
         # -*- Log messages for debugging
+        self.sanitize_messages(messages)
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()

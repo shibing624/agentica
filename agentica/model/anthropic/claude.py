@@ -514,6 +514,7 @@ class Claude(Model):
         Returns:
             ModelResponse: The response from the model.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -588,6 +589,7 @@ class Claude(Model):
             self.format_function_call_results(function_call_results, tool_ids, messages)
 
     def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         message_data = MessageData()
         metrics = Metrics()

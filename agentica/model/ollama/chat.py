@@ -428,6 +428,7 @@ class Ollama(Model):
         Returns:
             ModelResponse: The model response.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -488,6 +489,7 @@ class Ollama(Model):
         Returns:
             ModelResponse: The model response.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -585,6 +587,7 @@ class Ollama(Model):
         Returns:
             Iterator[ModelResponse]: An iterator of the model responses.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         message_data = MessageData()
         metrics: Metrics = Metrics()
@@ -653,6 +656,7 @@ class Ollama(Model):
         Returns:
             Any: An asynchronous iterator of the model responses.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         message_data = MessageData()
         metrics: Metrics = Metrics()

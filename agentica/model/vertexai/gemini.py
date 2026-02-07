@@ -469,6 +469,7 @@ class Gemini(Model):
         Returns:
             ModelResponse object containing the response content
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -551,6 +552,7 @@ class Gemini(Model):
         Yields:
             Iterator[ModelResponse]: Yields model responses during function execution
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         message_data = MessageData()
         metrics = Metrics()

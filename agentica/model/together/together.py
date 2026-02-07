@@ -40,6 +40,7 @@ class Together(OpenAILike):
             yield from super().response_stream(messages)
             return
 
+        self.sanitize_messages(messages)
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()

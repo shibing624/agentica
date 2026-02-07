@@ -296,6 +296,7 @@ class AwsBedrock(Model):
         Returns:
             ModelResponse: The response from the Bedrock API.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
 
@@ -474,6 +475,7 @@ class AwsBedrock(Model):
         Returns:
             Iterator[str]: The streamed response.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()

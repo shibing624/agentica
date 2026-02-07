@@ -123,6 +123,70 @@ class Model(BaseModel):
     async def aresponse_stream(self, messages: List[Message]) -> Any:
         raise NotImplementedError
 
+    @staticmethod
+    def sanitize_messages(messages: List[Message]) -> List[Message]:
+        """Validate and fix tool call message sequences.
+
+        OpenAI API requires that every assistant message with 'tool_calls' must be
+        followed by tool messages responding to each 'tool_call_id'. If any tool
+        response is missing (e.g. due to an interrupted execution or corrupted
+        history), this method adds a placeholder tool response so the API call
+        does not fail.
+
+        The messages list is modified **in-place** and also returned.
+
+        Args:
+            messages: The list of messages to sanitize.
+
+        Returns:
+            The same list of messages after sanitization.
+        """
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            # Only process assistant messages that have tool_calls
+            if msg.role == "assistant" and msg.tool_calls:
+                expected_ids = {}
+                for tc in msg.tool_calls:
+                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
+                    if tc_id:
+                        expected_ids[tc_id] = tc
+
+                # Scan the immediately following messages for matching tool responses
+                j = i + 1
+                while j < len(messages):
+                    next_msg = messages[j]
+                    if next_msg.role == "tool" and next_msg.tool_call_id in expected_ids:
+                        del expected_ids[next_msg.tool_call_id]
+                        j += 1
+                    elif next_msg.role == "tool" and next_msg.tool_call_id:
+                        # A tool response for a different call – keep scanning
+                        j += 1
+                    else:
+                        break
+
+                # Insert placeholder responses for any missing tool_call_ids
+                if expected_ids:
+                    insert_pos = j
+                    for tc_id, tc in expected_ids.items():
+                        func_info = tc.get("function", {}) if isinstance(tc, dict) else {}
+                        func_name = func_info.get("name", "unknown") if isinstance(func_info, dict) else "unknown"
+                        logger.warning(
+                            f"Missing tool response for tool_call_id={tc_id} "
+                            f"(function={func_name}), inserting placeholder."
+                        )
+                        placeholder = Message(
+                            role="tool",
+                            tool_call_id=tc_id,
+                            content=f"Error: tool call '{func_name}' did not return a response (execution may have been interrupted).",
+                        )
+                        messages.insert(insert_pos, placeholder)
+                        insert_pos += 1
+                    # Re-scan from current position since we inserted messages
+                    continue
+            i += 1
+        return messages
+
     def _log_messages(self, messages: List[Message]) -> None:
         """
         Log messages for debugging.

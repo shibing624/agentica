@@ -496,6 +496,7 @@ class Groq(Model):
         Returns:
             ModelResponse: The model response.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -550,6 +551,7 @@ class Groq(Model):
         Returns:
             ModelResponse: The model response from the API.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
@@ -718,6 +720,7 @@ class Groq(Model):
         Returns:
             Iterator[ModelResponse]: An iterator of model responses.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
@@ -785,6 +788,7 @@ class Groq(Model):
         Returns:
             Any: An asynchronous iterator of model responses.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()

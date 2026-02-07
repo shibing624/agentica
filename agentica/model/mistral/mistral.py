@@ -357,6 +357,7 @@ class MistralChat(Model):
             ModelResponse: The response from the model.
         """
         # -*- Log messages for debugging
+        self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
 
@@ -443,6 +444,7 @@ class MistralChat(Model):
         Returns:
             Iterator[ModelResponse]: The streamed response.
         """
+        self.sanitize_messages(messages)
         self._log_messages(messages)
 
         stream_data: StreamData = StreamData()
