@@ -11,10 +11,10 @@ AGENTICA_HOME = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
 if AGENTICA_HOME:
     os.makedirs(AGENTICA_HOME, exist_ok=True)
 
-# Load environment variables from .env file
-AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
-load_dotenv(AGENTICA_DOTENV_PATH, override=True)
+# Load environment variables from .env file (project .env takes priority over global)
 load_dotenv()
+AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
+load_dotenv(AGENTICA_DOTENV_PATH)
 
 AGENTICA_DATA_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
 AGENTICA_SKILL_DIR = os.getenv("AGENTICA_SKILL_DIR", f"{AGENTICA_HOME}/skills")
