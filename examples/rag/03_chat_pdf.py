@@ -67,7 +67,6 @@ def pdf_app(new: bool = False, user: str = "user"):
         user_id=user,
         knowledge_base=knowledge_base,
         db=db,
-        show_tool_calls=True,
         search_knowledge=True,
         read_chat_history=True,
         debug_mode=True,

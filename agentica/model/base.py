@@ -44,8 +44,6 @@ class Model(BaseModel):
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     # If True, runs the tool before sending back the response content.
     run_tools: bool = True
-    # If True, shows function calls in the response.
-    show_tool_calls: Optional[bool] = None
     # Maximum number of tool calls allowed.
     tool_call_limit: Optional[int] = None
 

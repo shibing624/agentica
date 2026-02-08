@@ -38,7 +38,6 @@ def demo_skill_injection():
         model=ZhipuAI(model="glm-4-flash"),
         instructions="You are a helpful coding assistant.",
         tools=[ShellTool()],
-        show_tool_calls=True,
     )
 
     # Simulate user input with trigger
@@ -166,7 +165,6 @@ def demo_custom_skill_with_agent():
                     skill.get_prompt(),
                 ],
                 tools=[ShellTool()],
-                show_tool_calls=True,
             )
             response = agent.run("What are the main modules in numpy ?")
             print(response.content)

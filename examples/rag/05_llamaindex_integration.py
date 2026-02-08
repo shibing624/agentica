@@ -67,7 +67,6 @@ def main():
         knowledge=knowledge,
         search_knowledge=True,
         debug_mode=True,
-        show_tool_calls=True
     )
 
     print("\n" + "=" * 60)

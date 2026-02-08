@@ -162,8 +162,6 @@ class Agent:
     tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None
     # Whether the LLM supports tool calls (function calls)
     support_tool_calls: bool = True
-    # Show tool calls in Agent response.
-    show_tool_calls: bool = False
     # Maximum number of tool calls allowed.
     tool_call_limit: Optional[int] = None
     # Controls which (if any) tool is called by the model.
@@ -357,7 +355,6 @@ class Agent:
             # Tools
             tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
             support_tool_calls: bool = True,
-            show_tool_calls: bool = False,
             tool_call_limit: Optional[int] = None,
             tool_choice: Optional[Union[str, Dict[str, Any]]] = None,
             auto_load_mcp: bool = False,
@@ -496,7 +493,6 @@ class Agent:
 
         self.tools = tools
         self.support_tool_calls = support_tool_calls
-        self.show_tool_calls = show_tool_calls
         self.tool_call_limit = tool_call_limit
         self.tool_choice = tool_choice
         self.auto_load_mcp = auto_load_mcp
@@ -1028,10 +1024,6 @@ class Agent:
                     self.model.add_tool(tool=tool, strict=True, agent=self)
                 else:
                     self.model.add_tool(tool=tool, agent=self)
-
-        # Set show_tool_calls if it is not set on the Model
-        if self.model.show_tool_calls is None and self.show_tool_calls is not None:
-            self.model.show_tool_calls = self.show_tool_calls
 
         # Set tool_choice to auto if it is not set on the Model
         if self.model.tool_choice is None and self.tool_choice is not None:

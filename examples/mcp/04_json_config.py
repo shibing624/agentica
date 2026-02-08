@@ -88,7 +88,6 @@ async def demo_single_server():
             agent = Agent(
                 model=OpenAIChat(id="gpt-4o-mini"),
                 tools=[mcp_tool],
-                show_tool_calls=True,
             )
 
             print("\nAsking about weather...")
@@ -128,7 +127,6 @@ async def demo_multiple_servers():
             agent = Agent(
                 model=OpenAIChat(id="gpt-4o-mini"),
                 tools=[mcp_tool],
-                show_tool_calls=True,
             )
 
             print("\nAsking about weather...")

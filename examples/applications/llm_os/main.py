@@ -124,7 +124,6 @@ def create_llm_os(
         add_history_to_messages=True,
         num_history_responses=6,
         # 显示配置
-        show_tool_calls=True,
         markdown=True,
         add_datetime_to_instructions=True,
         introduction=INTRODUCTION,

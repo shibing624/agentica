@@ -116,7 +116,7 @@ class BuiltinFileTool(Tool):
                     "type": item_type,
                 })
 
-            logger.info(f"Listed {len(items)} items in {dir_path}")
+            logger.debug(f"Listed {len(items)} items in {dir_path}")
             result = json.dumps(items, ensure_ascii=False, indent=2)
             result = truncate_if_too_long(result)
             return str(result)
@@ -187,7 +187,7 @@ class BuiltinFileTool(Tool):
             if end_line < total_lines:
                 result += f"\n\n[Showing lines {offset + 1}-{end_line} of {total_lines} total lines]"
 
-            logger.info(f"Read file {file_path}: lines {offset + 1}-{end_line}, total {total_lines} lines")
+            logger.debug(f"Read file {file_path}: lines {offset + 1}-{end_line}, total {total_lines} lines")
             return result
         except Exception as e:
             logger.error(f"Error reading file {file_path}: {e}")
@@ -226,7 +226,7 @@ class BuiltinFileTool(Tool):
 
             # Return absolute path to help LLM use correct path in subsequent operations
             absolute_path = str(path.resolve())
-            logger.info(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
+            logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
             return f"{action} file, absolute path: {absolute_path}"
         except Exception as e:
             logger.error(f"Error writing file {file_path}: {e}")
@@ -290,7 +290,7 @@ class BuiltinFileTool(Tool):
                 f.write(new_content)
 
             replaced_count = count if replace_all else 1
-            logger.info(f"Replaced {replaced_count} occurrence(s) in {file_path}")
+            logger.debug(f"Replaced {replaced_count} occurrence(s) in {file_path}")
             return f"Successfully replaced {replaced_count} occurrence(s) in '{file_path}'"
         except Exception as e:
             logger.error(f"Error editing file {file_path}: {e}")
@@ -340,7 +340,7 @@ class BuiltinFileTool(Tool):
                 if not set(m.parts).intersection(ignore_dirs)
             ]
 
-            logger.info(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
+            logger.debug(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
             # Convert to formatted JSON string
             result = json.dumps(sorted(filtered), ensure_ascii=False, indent=2)
             # Truncate if content exceeds the limit to avoid excessive output
@@ -457,7 +457,7 @@ class BuiltinFileTool(Tool):
 
             # Truncate if too long and log result
             result = truncate_if_too_long(result)
-            logger.info(f"Grep for '{pattern}': found {len(file_counts)} files, result length: {len(result)} characters.")
+            logger.debug(f"Grep for '{pattern}': found {len(file_counts)} files, result length: {len(result)} characters.")
             return str(result)
 
         except Exception as e:
@@ -571,7 +571,7 @@ class BuiltinWebSearchTool(Tool):
 
         try:
             result = self._search.baidu_search(queries, max_results=max_results)
-            logger.info(f"Web search for '{queries}', result length: {len(result)} characters.")
+            logger.debug(f"Web search for '{queries}', result length: {len(result)} characters.")
             return result
         except Exception as e:
             logger.error(f"Web search error: {e}")
@@ -614,7 +614,7 @@ class BuiltinFetchUrlTool(Tool):
         4. NEVER show the raw JSON to the user unless specifically requested
         """
         result = self._crawler.url_crawl(url)
-        logger.info(f"Fetched URL: {url}, result length: {len(result)} characters.")
+        logger.debug(f"Fetched URL: {url}, result length: {len(result)} characters.")
         return result
 
 
@@ -751,7 +751,7 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
                 })
 
             self._todos = validated_todos
-            logger.info(f"Updated todo list: {len(self._todos)} items, todos: {self._todos}")
+            logger.debug(f"Updated todo list: {len(self._todos)} items, todos: {self._todos}")
 
             return json.dumps({
                 "message": f"Updated todo list with {len(self._todos)} items",
@@ -794,7 +794,7 @@ Writing todos takes time and tokens, use it when it is helpful for managing comp
         total = len(self._todos)
         progress_pct = round(status_counts["completed"] / total * 100) if total > 0 else 0
 
-        logger.info(f"Todo list: {status_counts}, progress: {progress_pct}%")
+        logger.debug(f"Todo list: {status_counts}, progress: {progress_pct}%")
         return json.dumps({
             "summary": {
                 **status_counts,
@@ -1044,7 +1044,7 @@ The `task` tool is a FUNCTION CALL tool. Use your standard function calling mech
                 tool_call_limit=config.max_iterations,
             )
 
-            logger.info(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")
+            logger.debug(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")
             
             # Run subagent with the task description
             response = subagent.run(description)
@@ -1059,7 +1059,7 @@ The `task` tool is a FUNCTION CALL tool. Use your standard function calling mech
                 result=result,
             )
             
-            logger.info(f"{config.name} [{config.type.value}] completed task.")
+            logger.debug(f"{config.name} [{config.type.value}] completed task.")
             
             return json.dumps({
                 "success": True,
@@ -1187,7 +1187,7 @@ Use this tool to save:
         try:
             self._workspace.save_memory(content, long_term=long_term)
             memory_type = "long-term" if long_term else "daily"
-            logger.info(f"Saved {memory_type} memory: {content[:50]}...")
+            logger.debug(f"Saved {memory_type} memory: {content[:50]}...")
             
             return json.dumps({
                 "success": True,

@@ -75,7 +75,7 @@ class FileTool(Tool):
             if file_path.exists() and not overwrite:
                 return f"File {file_name} already exists"
             file_path.write_text(contents)
-            logger.info(f"Saved contents to file: {file_path}")
+            logger.debug(f"Saved contents to file: {file_path}")
             return str(file_name)
         except Exception as e:
             logger.error(f"Error saving to file: {e}")
@@ -95,7 +95,7 @@ class FileTool(Tool):
                 path = Path(file_name)
             else:
                 path = self.data_dir.joinpath(file_name)
-            logger.info(f"Reading file: {path}")
+            logger.debug(f"Reading file: {path}")
 
             if not path.exists():
                 raise FileNotFoundError(f"Could not find file: {path}")
@@ -118,7 +118,7 @@ class FileTool(Tool):
                 data_dir = Path(dir_path)
             else:
                 data_dir = self.data_dir
-            logger.info(f"Reading files in : {data_dir}")
+            logger.debug(f"Reading files in : {data_dir}")
             return json.dumps([str(file_path) for file_path in data_dir.iterdir()],
                               indent=2, ensure_ascii=False)
         except Exception as e:
@@ -139,11 +139,11 @@ class FileTool(Tool):
                 data_dir = Path(dir_path)
             else:
                 data_dir = self.data_dir
-            logger.info(f"Reading all files in: {data_dir}")
+            logger.debug(f"Reading all files in: {data_dir}")
             all_contents = []
             for file_path in data_dir.iterdir():
                 if file_path.is_file():
-                    logger.info(f"Reading file: {file_path}")
+                    logger.debug(f"Reading file: {file_path}")
                     contents = self.read_file(str(file_path))
                     all_contents.append(f"Contents of {file_path.name}:\n{contents}")
             return json.dumps(all_contents, indent=2, ensure_ascii=False)
@@ -204,7 +204,7 @@ class FileTool(Tool):
                         if ext_filter is None or file_path.suffix.lower() in ext_filter:
                             matching_files.append(str(file_path))
 
-            logger.info(f"Found {len(matching_files)} files matching pattern '{pattern}'")
+            logger.debug(f"Found {len(matching_files)} files matching pattern '{pattern}'")
             return json.dumps(matching_files, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Error searching files: {e}")
@@ -318,7 +318,7 @@ class FileTool(Tool):
                 output.append(f"Line {r['line']}: {r['match']}")
                 output.append(f"\nContext:\n{r['context']}")
 
-            logger.info(f"Found {len(results)} matches for '{query}'")
+            logger.debug(f"Found {len(results)} matches for '{query}'")
             return "\n".join(output)
         except Exception as e:
             logger.error(f"Error searching content: {e}")

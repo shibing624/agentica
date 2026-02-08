@@ -52,7 +52,7 @@ class RunPythonCodeTool(Tool):
         :param code: The code to run.
         :return: stdout output or error message.
         """
-        logger.info(f"Running code:\n\n{code}\n\n")
+        logger.debug(f"Running code:\n\n{code}\n\n")
         
         old_stdout = sys.stdout
         new_stdout = io.StringIO()
@@ -103,8 +103,8 @@ class RunPythonCodeTool(Tool):
                 
             with open(file_path, "w", encoding='utf-8') as f:
                 f.write(code)
-            logger.info(f"Saved: {file_path}")
-            logger.info(f"Running {file_path}")
+            logger.debug(f"Saved: {file_path}")
+            logger.debug(f"Running {file_path}")
             
             runpy.run_path(str(file_path), init_globals={}, run_name="__main__")
             
@@ -127,7 +127,7 @@ class RunPythonCodeTool(Tool):
         :return: success message if successful, otherwise returns an error message.
         """
         try:
-            logger.info(f"Installing package {package_name}")
+            logger.debug(f"Installing package {package_name}")
             import sys
             import subprocess
 
@@ -152,7 +152,7 @@ class RunPythonCodeTool(Tool):
         sys.stdout = new_stdout
         
         try:
-            logger.info(f"Running {file_path}")
+            logger.debug(f"Running {file_path}")
             runpy.run_path(str(file_path), init_globals={}, run_name="__main__")
             
             # get stdout output

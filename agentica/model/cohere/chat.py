@@ -330,12 +330,6 @@ class Cohere(Model):
                 continue
             function_calls_to_run.append(_function_call)
 
-        if self.show_tool_calls:
-            model_response.content += "\nRunning:"
-            for _f in function_calls_to_run:
-                model_response.content += f"\n - {_f.get_call_str()}"
-            model_response.content += "\n\n"
-
         model_response.content = assistant_message.get_content_string() + "\n\n"
 
         function_calls_to_run, error_messages = self._prepare_function_calls(assistant_message)
@@ -602,15 +596,6 @@ class Cohere(Model):
                     )
                     continue
                 function_calls_to_run.append(_function_call)
-
-            if self.show_tool_calls:
-                if len(function_calls_to_run) == 1:
-                    yield ModelResponse(content=f"- Running: {function_calls_to_run[0].get_call_str()}\n\n")
-                elif len(function_calls_to_run) > 1:
-                    yield ModelResponse(content="Running:")
-                    for _f in function_calls_to_run:
-                        yield ModelResponse(content=f"\n - {_f.get_call_str()}")
-                    yield ModelResponse(content="\n\n")
 
             for intermediate_model_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results,

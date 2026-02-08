@@ -269,13 +269,18 @@ class BaiduSearchTool(Tool):
         max_results = max_results or self.num_max_results
         results = search(keyword=query, num_results=max_results, debug=self.debug)
         res: List[Dict[str, str]] = []
-        for idx, item in enumerate(results, 1):
+        rank = 0
+        for item in results:
+            content = clean_text(item.get("abstract", ""))
+            if len(content) < 10:
+                continue
+            rank += 1
             res.append(
                 {
                     "title": clean_text(item.get("title", "")),
                     "url": item.get("url", ""),
-                    "content": clean_text(item.get("abstract", "")),
-                    "rank": str(idx),
+                    "content": content,
+                    "rank": str(rank),
                 }
             )
         logger.debug(f"Searching Baidu for: {query}, result: {res}")

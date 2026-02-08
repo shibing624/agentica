@@ -294,6 +294,24 @@ class RunnerMixin:
             self.run_response.messages = messages_for_model
             self.run_response.created_at = model_response.created_at
 
+            # Extract tool call info from messages for non-streaming mode
+            tool_calls_data = []
+            for msg in messages_for_model:
+                m = msg if isinstance(msg, Message) else None
+                if m is None:
+                    continue
+                if m.role == "tool" and m.tool_name:
+                    tool_calls_data.append({
+                        "tool_call_id": m.tool_call_id,
+                        "tool_name": m.tool_name,
+                        "tool_args": m.tool_args,
+                        "content": m.content,
+                        "tool_call_error": getattr(m, 'tool_call_error', False),
+                        "metrics": m.metrics if hasattr(m, 'metrics') else {},
+                    })
+            if tool_calls_data:
+                self.run_response.tools = tool_calls_data
+
         # Build a list of messages that belong to this particular run
         run_messages = user_messages + messages_for_model[num_input_messages:]
         if system_message is not None:
@@ -1255,6 +1273,24 @@ class RunnerMixin:
                 self.run_response.content = model_response.content
             self.run_response.messages = messages_for_model
             self.run_response.created_at = model_response.created_at
+
+            # Extract tool call info from messages for non-streaming mode
+            tool_calls_data = []
+            for msg in messages_for_model:
+                m = msg if isinstance(msg, Message) else None
+                if m is None:
+                    continue
+                if m.role == "tool" and m.tool_name:
+                    tool_calls_data.append({
+                        "tool_call_id": m.tool_call_id,
+                        "tool_name": m.tool_name,
+                        "tool_args": m.tool_args,
+                        "content": m.content,
+                        "tool_call_error": getattr(m, 'tool_call_error', False),
+                        "metrics": m.metrics if hasattr(m, 'metrics') else {},
+                    })
+            if tool_calls_data:
+                self.run_response.tools = tool_calls_data
 
         # Build a list of messages that belong to this particular run
         run_messages = user_messages + messages_for_model[num_input_messages:]

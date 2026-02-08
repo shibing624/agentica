@@ -438,15 +438,6 @@ class Gemini(Model):
             model_response.content = assistant_message.get_content_string() or ""
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
 
-            if self.show_tool_calls:
-                if len(function_calls_to_run) == 1:
-                    model_response.content += f"\n - Running: {function_calls_to_run[0].get_call_str()}\n\n"
-                elif len(function_calls_to_run) > 1:
-                    model_response.content += "\nRunning:"
-                    for _f in function_calls_to_run:
-                        model_response.content += f"\n - {_f.get_call_str()}"
-                    model_response.content += "\n\n"
-
             function_call_results: List[Message] = []
             for _ in self.run_function_calls(
                     function_calls=function_calls_to_run,
@@ -524,15 +515,6 @@ class Gemini(Model):
         """
         if assistant_message.tool_calls and self.run_tools:
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
-
-            if self.show_tool_calls:
-                if len(function_calls_to_run) == 1:
-                    yield ModelResponse(content=f"\n - Running: {function_calls_to_run[0].get_call_str()}\n\n")
-                elif len(function_calls_to_run) > 1:
-                    yield ModelResponse(content="\nRunning:")
-                    for _f in function_calls_to_run:
-                        yield ModelResponse(content=f"\n - {_f.get_call_str()}")
-                    yield ModelResponse(content="\n\n")
 
             function_call_results: List[Message] = []
             for intermediate_model_response in self.run_function_calls(

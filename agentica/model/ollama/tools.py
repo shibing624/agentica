@@ -160,15 +160,6 @@ class OllamaTools(Ollama):
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
-            if self.show_tool_calls:
-                if len(function_calls_to_run) == 1:
-                    model_response.content += f" - Running: {function_calls_to_run[0].get_call_str()}\n\n"
-                elif len(function_calls_to_run) > 1:
-                    model_response.content += "Running:"
-                    for _f in function_calls_to_run:
-                        model_response.content += f"\n - {_f.get_call_str()}"
-                    model_response.content += "\n\n"
-
             for _ in self.run_function_calls(
                 function_calls=function_calls_to_run,
                 function_call_results=function_call_results,

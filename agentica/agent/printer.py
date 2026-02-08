@@ -37,6 +37,7 @@ class PrinterMixin:
             stream: bool = False,
             show_message: bool = True,
             show_reasoning: bool = True,
+            show_tool_calls: bool = False,
             show_intermediate_steps: bool = True,
             **kwargs: Any,
     ) -> None:
@@ -48,6 +49,7 @@ class PrinterMixin:
             stream: Whether to stream the response.
             show_message: Whether to show the input message.
             show_reasoning: Whether to show reasoning content (for thinking models).
+            show_tool_calls: Whether to show tool call details (name, args, results).
             show_intermediate_steps: Whether to show intermediate steps for multi-round.
         """
         if self.response_model is not None:
@@ -73,15 +75,48 @@ class PrinterMixin:
             _reasoning_displayed = False
             _final_content_printed = False
 
-            run_generator = self._run(message=message, messages=messages, stream=True, **kwargs)
+            # Enable stream_intermediate_steps when show_tool_calls is True
+            run_generator = self._run(
+                message=message, messages=messages, stream=True,
+                stream_intermediate_steps=show_tool_calls,
+                **kwargs,
+            )
 
             for run_response in run_generator:
                 event = getattr(run_response, 'event', '')
+
+                # Handle tool call events (only when show_tool_calls=True)
+                if show_tool_calls and event == RunEvent.tool_call_started.value:
+                    tool_info = run_response.tools[-1] if run_response.tools else None
+                    if tool_info:
+                        tool_name = tool_info.get("tool_name", "unknown")
+                        tool_args = tool_info.get("tool_args", {})
+                        display_args = {}
+                        for k, v in tool_args.items():
+                            if isinstance(v, str) and len(v) > 100:
+                                display_args[k] = v[:100] + "..."
+                            else:
+                                display_args[k] = v
+                        print(f"\n  🔧 {tool_name}({display_args})", flush=True)
+                    continue
+
+                if show_tool_calls and event == RunEvent.tool_call_completed.value:
+                    tool_info = run_response.tools[-1] if run_response.tools else None
+                    if tool_info:
+                        tool_result = tool_info.get("content", "")
+                        result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
+                        print(f"     📤 {result_preview}", flush=True)
+                    continue
 
                 # Skip multi-round intermediate events in streaming mode
                 if event in (RunEvent.multi_round_tool_call.value, 
                             RunEvent.multi_round_tool_result.value,
                             RunEvent.multi_round_completed.value):
+                    continue
+
+                # Skip other intermediate events
+                if event in (RunEvent.run_started.value, RunEvent.run_completed.value,
+                            RunEvent.updating_memory.value):
                     continue
 
                 # For multi-round, only print content from multi_round_turn event (final turn)
@@ -201,11 +236,33 @@ class PrinterMixin:
                 print("🤖 RESPONSE")
                 print("=" * 80)
 
-                if (show_reasoning and hasattr(run_response, 'reasoning_content') and
-                        run_response.reasoning_content):
+                # Show reasoning (thinking) first
+                has_reasoning = (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                                 run_response.reasoning_content)
+                if has_reasoning:
                     print("💭 THINKING")
                     print("-" * 40)
                     print(run_response.reasoning_content)
+
+                # Show tool calls after thinking (matches streaming order)
+                if show_tool_calls and run_response.tools:
+                    print()
+                    for tool in run_response.tools:
+                        tool_name = tool.get("tool_name", "unknown")
+                        tool_args = tool.get("tool_args", {})
+                        display_args = {}
+                        for k, v in tool_args.items():
+                            if isinstance(v, str) and len(v) > 100:
+                                display_args[k] = v[:100] + "..."
+                            else:
+                                display_args[k] = v
+                        print(f"  🔧 {tool_name}({display_args})")
+                        tool_result = tool.get("content", "")
+                        result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
+                        print(f"     📤 {result_preview}")
+
+                # Show answer
+                if has_reasoning or (show_tool_calls and run_response.tools):
                     print()
                     print("-" * 40)
                     print("💬 ANSWER")
@@ -222,6 +279,7 @@ class PrinterMixin:
             stream: bool = False,
             show_message: bool = True,
             show_reasoning: bool = True,
+            show_tool_calls: bool = False,
             show_intermediate_steps: bool = True,
             **kwargs: Any,
     ) -> None:
@@ -233,6 +291,7 @@ class PrinterMixin:
             stream: Whether to stream the response.
             show_message: Whether to show the input message.
             show_reasoning: Whether to show reasoning content (for thinking models).
+            show_tool_calls: Whether to show tool call details (name, args, results).
             show_intermediate_steps: Whether to show intermediate steps for multi-round.
         """
         if self.response_model is not None:
@@ -258,15 +317,47 @@ class PrinterMixin:
             _reasoning_displayed = False
             _final_content_printed = False
 
-            arun_generator = self._arun(message=message, messages=messages, stream=True, **kwargs)
+            arun_generator = self._arun(
+                message=message, messages=messages, stream=True,
+                stream_intermediate_steps=show_tool_calls,
+                **kwargs,
+            )
 
             async for run_response in arun_generator:
                 event = getattr(run_response, 'event', '')
+
+                # Handle tool call events (only when show_tool_calls=True)
+                if show_tool_calls and event == RunEvent.tool_call_started.value:
+                    tool_info = run_response.tools[-1] if run_response.tools else None
+                    if tool_info:
+                        tool_name = tool_info.get("tool_name", "unknown")
+                        tool_args = tool_info.get("tool_args", {})
+                        display_args = {}
+                        for k, v in tool_args.items():
+                            if isinstance(v, str) and len(v) > 100:
+                                display_args[k] = v[:100] + "..."
+                            else:
+                                display_args[k] = v
+                        print(f"\n  🔧 {tool_name}({display_args})", flush=True)
+                    continue
+
+                if show_tool_calls and event == RunEvent.tool_call_completed.value:
+                    tool_info = run_response.tools[-1] if run_response.tools else None
+                    if tool_info:
+                        tool_result = tool_info.get("content", "")
+                        result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
+                        print(f"     📤 {result_preview}", flush=True)
+                    continue
 
                 # Skip multi-round intermediate events in streaming mode
                 if event in (RunEvent.multi_round_tool_call.value, 
                             RunEvent.multi_round_tool_result.value,
                             RunEvent.multi_round_completed.value):
+                    continue
+
+                # Skip other intermediate events
+                if event in (RunEvent.run_started.value, RunEvent.run_completed.value,
+                            RunEvent.updating_memory.value):
                     continue
 
                 # For multi-round, only print content from multi_round_turn event
@@ -385,11 +476,33 @@ class PrinterMixin:
                 print("🤖 RESPONSE")
                 print("=" * 80)
 
-                if (show_reasoning and hasattr(run_response, 'reasoning_content') and
-                        run_response.reasoning_content):
+                # Show reasoning (thinking) first
+                has_reasoning = (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                                 run_response.reasoning_content)
+                if has_reasoning:
                     print("💭 THINKING")
                     print("-" * 40)
                     print(run_response.reasoning_content)
+
+                # Show tool calls after thinking (matches streaming order)
+                if show_tool_calls and run_response.tools:
+                    print()
+                    for tool in run_response.tools:
+                        tool_name = tool.get("tool_name", "unknown")
+                        tool_args = tool.get("tool_args", {})
+                        display_args = {}
+                        for k, v in tool_args.items():
+                            if isinstance(v, str) and len(v) > 100:
+                                display_args[k] = v[:100] + "..."
+                            else:
+                                display_args[k] = v
+                        print(f"  🔧 {tool_name}({display_args})")
+                        tool_result = tool.get("content", "")
+                        result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
+                        print(f"     📤 {result_preview}")
+
+                # Show answer
+                if has_reasoning or (show_tool_calls and run_response.tools):
                     print()
                     print("-" * 40)
                     print("💬 ANSWER")

@@ -30,7 +30,6 @@ def file_listing_demo():
         model=OpenAIChat(id="gpt-4o"),
         name="FileExplorer",
         # debug_mode=True,
-        show_tool_calls=True,
     )
 
     response = agent.run("List all Python files in the current directory")
@@ -46,7 +45,6 @@ def file_read_write_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileManager",
-        show_tool_calls=True,
         # debug_mode=True,
     )
 
@@ -74,7 +72,6 @@ def file_search_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileSearcher",
-        show_tool_calls=True,
         # debug_mode=True,
     )
 
@@ -94,7 +91,6 @@ def file_edit_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileEditor",
-        show_tool_calls=True,
         # debug_mode=True,
     )
 

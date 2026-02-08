@@ -27,7 +27,6 @@ def code_execution_demo():
         model=OpenAIChat(),
         name="CodeRunner",
         description="A code execution assistant",
-        show_tool_calls=True,
         debug_mode=True,
     )
 
@@ -53,7 +52,6 @@ def code_analysis_demo():
             "You are an expert code reviewer.",
             "Analyze code for bugs, performance issues, and best practices. last run it and fix the bug.",
         ],
-        show_tool_calls=True,
         debug_mode=True,
     )
 
@@ -92,7 +90,6 @@ def code_generation_demo():
             "IMPORTANT: Use Python syntax correctly - use `None` (not `null`), `True`/`False` (not `true`/`false`).",
             "Before executing code, verify the syntax is correct Python.",
         ],
-        show_tool_calls=True,
         debug_mode=True,
     )
 
@@ -117,7 +114,6 @@ def data_processing_demo():
             "Use Python to manipulate and analyze data.",
             "Include error handling and validation. wirte the code to ./tmp/ directory.",
         ],
-        show_tool_calls=True,
         debug_mode=True,
     )
 
@@ -139,7 +135,6 @@ def self_verification_demo():
 
     agent = DeepAgent(
         model=OpenAIChat(),
-        show_tool_calls=True,
         debug_mode=True,
     )
 
@@ -172,7 +167,6 @@ def lint_fix_demo():
 
     agent = DeepAgent(
         model=OpenAIChat(),
-        show_tool_calls=True,
         debug_mode=True,
     )
 

@@ -21,7 +21,6 @@ def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         tools=[BrowserTool()],
-        show_tool_calls=True,
         add_datetime_to_instructions=True,
     )
 

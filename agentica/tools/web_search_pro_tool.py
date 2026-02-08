@@ -61,7 +61,7 @@ class WebSearchProTool(Tool):
             # parse data
             results = data['choices'][0]['message']['tool_calls'][1]['search_result']
             parsed_results = json.dumps(results, indent=2, ensure_ascii=False)
-            logger.info(f"Searching web for: {query}, results: {parsed_results}")
+            logger.debug(f"Searching web for: {query}, results: {parsed_results}")
             return parsed_results
         except Exception as e:
             logger.error(f"Failed to search exa {e}")

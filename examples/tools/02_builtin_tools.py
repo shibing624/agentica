@@ -29,7 +29,6 @@ def main():
             FileTool(),
             CalculatorTool(),
         ],
-        show_tool_calls=True,
         add_datetime_to_instructions=True,
     )
 

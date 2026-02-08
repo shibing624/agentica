@@ -70,7 +70,6 @@ def demo_research_agent():
                 "# Research Skill Instructions",
                 skill.get_prompt(),
             ],
-            show_tool_calls=True,
             add_datetime_to_instructions=True,
         )
 

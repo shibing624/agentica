@@ -55,7 +55,6 @@ async def mcp_toolkit_with_agent_demo() -> None:
             agent = Agent(
                 model=OpenAIChat(id="gpt-4o"),
                 tools=[ShellTool(), mcp_tool],
-                show_tool_calls=True,
                 add_datetime_to_instructions=True,
             )
 

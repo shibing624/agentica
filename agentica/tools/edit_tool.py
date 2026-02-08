@@ -468,7 +468,7 @@ class EditTool(Tool):
 
             # Write the new content
             file_path.write_text(code_edit, encoding='utf-8')
-            logger.info(f"{action} file: {file_path}")
+            logger.debug(f"{action} file: {file_path}")
 
             return f"{action} file: {target_file}"
 
@@ -522,7 +522,7 @@ class EditTool(Tool):
                         new_content = apply_diff("", patch_content, mode="create")
                         os.makedirs(file_path.parent, exist_ok=True)
                         file_path.write_text(new_content, encoding='utf-8')
-                        logger.info(f"Created file: {file_path}")
+                        logger.debug(f"Created file: {file_path}")
                         return f"Created file: {target_file}"
                     except ValueError as e:
                         return f"Error creating file: {str(e)}"
@@ -537,7 +537,7 @@ class EditTool(Tool):
                 try:
                     new_content = apply_diff(original_content, patch_content, mode="default")
                     file_path.write_text(new_content, encoding='utf-8')
-                    logger.info(f"Applied V4A patch to file: {file_path}")
+                    logger.debug(f"Applied V4A patch to file: {file_path}")
                     return f"Successfully patched file: {target_file}"
                 except ValueError as e:
                     return f"Error applying V4A patch: {str(e)}"
@@ -594,7 +594,7 @@ class EditTool(Tool):
 
             # Write the patched content
             file_path.write_text("\n".join(patched_content), encoding='utf-8')
-            logger.info(f"Applied unified patch to file: {file_path}")
+            logger.debug(f"Applied unified patch to file: {file_path}")
 
             return f"Successfully patched file: {file_path}"
 
@@ -677,7 +677,7 @@ class EditTool(Tool):
             # Only update the file if changes were made
             if count > 0:
                 file_path.write_text(new_content, encoding='utf-8')
-                logger.info(f"Replaced {count} occurrences in file: {file_path}")
+                logger.debug(f"Replaced {count} occurrences in file: {file_path}")
                 return f"Replaced {count} occurrences in file: {target_file}"
             else:
                 return f"No occurrences of '{search_pattern}' found in {target_file}"

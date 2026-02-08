@@ -148,7 +148,6 @@ def main():
             sync_multiply,        # Sync function tool
             AsyncDataTool(),      # Async class-based tool
         ],
-        show_tool_calls=True,
     )
     
     print("=" * 60)
@@ -181,7 +180,6 @@ async def async_main():
             async_calculate,
             sync_multiply,
         ],
-        show_tool_calls=True,
     )
     
     print("=" * 60)

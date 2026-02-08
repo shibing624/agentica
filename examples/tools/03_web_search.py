@@ -25,7 +25,6 @@ def main():
         model=OpenAIChat(id="gpt-4o"),
         tools=[BaiduSearchTool(), WeatherTool()],
         add_datetime_to_instructions=True,
-        show_tool_calls=True,
         read_chat_history=True,
     )
     

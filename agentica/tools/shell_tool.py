@@ -177,7 +177,7 @@ class ShellTool(Tool):
             # Convert python -c with multi-line code to heredoc format
             command = self._convert_python_c_to_heredoc(command)
             
-            logger.info(f"Executing command: {command}")
+            logger.debug(f"Executing command: {command}")
 
             # Execute command using shell
             result = subprocess.run(

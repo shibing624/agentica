@@ -236,7 +236,6 @@ def evaluate_instance(
             enable_multi_round=True,  # Enable multi-round deep research
             max_rounds=max_rounds,
             max_tokens=max_tokens,
-            show_tool_calls=debug,
             debug=debug
         )
         

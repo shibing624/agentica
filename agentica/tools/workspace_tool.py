@@ -294,7 +294,7 @@ class WorkspaceTool(Tool):
                 return f"Directory already exists: {directory}"
 
             dir_path.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created directory: {dir_path}")
+            logger.debug(f"Created directory: {dir_path}")
 
             return f"Successfully created directory: {directory}"
 
@@ -338,7 +338,7 @@ class WorkspaceTool(Tool):
             else:
                 os.rename(str(source_path), str(dest_path))
 
-            logger.info(f"Moved {source_path} to {dest_path}")
+            logger.debug(f"Moved {source_path} to {dest_path}")
 
             return f"Successfully moved {source} to {destination}"
 
@@ -382,7 +382,7 @@ class WorkspaceTool(Tool):
             else:
                 shutil.copy2(str(source_path), str(dest_path))
 
-            logger.info(f"Copied {source_path} to {dest_path}")
+            logger.debug(f"Copied {source_path} to {dest_path}")
 
             return f"Successfully copied {source} to {destination}"
 
@@ -414,7 +414,7 @@ class WorkspaceTool(Tool):
             else:
                 os.remove(str(file_path))
 
-            logger.info(f"Deleted {file_path}")
+            logger.debug(f"Deleted {file_path}")
 
             return f"Successfully deleted {path}"
 

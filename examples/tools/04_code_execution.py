@@ -26,7 +26,6 @@ def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         tools=[RunPythonCodeTool(save_and_run=True, base_dir="outputs")],
-        show_tool_calls=True,
         instructions=[
             "You are an expert Python programmer.",
             "When asked to solve problems, write and execute Python code.",
@@ -52,7 +51,6 @@ def main():
     agent2 = Agent(
         model=OpenAIChat(id="gpt-4o"),
         tools=[CodeTool()],
-        show_tool_calls=True,
     )
     
     agent2.print_response("写一个冒泡排序的Python函数，并解释它的工作原理")

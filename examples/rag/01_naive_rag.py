@@ -38,7 +38,6 @@ agent = Agent(
     model=OpenAIChat(),
     knowledge=knowledge,
     search_knowledge=True,  # Enable agentic RAG
-    show_tool_calls=True,
 )
 
 # Ask questions about the document

@@ -52,7 +52,6 @@ agent = Agent(
     model=OpenAIChat(),
     knowledge=knowledge,
     search_knowledge=True,
-    show_tool_calls=True,
     add_history_to_messages=True,
     markdown=True,
 )

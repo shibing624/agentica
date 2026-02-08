@@ -102,7 +102,6 @@ def main():
             ShellTool(),        # Built-in tool
             FileTool()          # Built-in tool
         ],
-        show_tool_calls=True,
     )
     
     # Example queries

@@ -73,7 +73,6 @@ if __name__ == '__main__':
         ),
         tools=[BaiduSearchTool()],
         system_prompt="You are a research assistant. Use search tools to find information.",
-        show_tool_calls=True,
         debug_mode=True,
     )
 

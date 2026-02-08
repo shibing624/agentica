@@ -35,7 +35,6 @@ def web_search_demo():
         ],
         include_web_search=True,
         add_datetime_to_instructions=True,
-        show_tool_calls=True,
         # debug_mode=True,
     )
 
@@ -57,7 +56,6 @@ def url_fetch_demo():
         name="ContentFetcher",
         description="An assistant that can fetch and analyze web content",
         include_fetch_url=True,
-        show_tool_calls=True,
         # debug_mode=True,
     )
 

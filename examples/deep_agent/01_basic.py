@@ -30,17 +30,15 @@ def basic_example():
 
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
-        name="CodingAssistant",
-        description="A powerful coding assistant with file system access",
         add_datetime_to_instructions=True,
-        # debug_mode=True,
+        # debug_mode=False,
     )
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
 
-    response = agent.run("List all Python files in the current directory and count them")
-    print(f"\nResponse:\n{response.content}")
+    agent.print_response("List all Python files in the current directory and count them", 
+    show_tool_calls=True, stream=True)
 
 
 def custom_config_example():
@@ -105,7 +103,6 @@ def complex_deep_agent():
         add_history_to_messages=True,
         num_history_responses=4,
         # 工具配置
-        show_tool_calls=True,
         tool_call_limit=40,
         # 指令
         add_datetime_to_instructions=True,
@@ -130,4 +127,4 @@ if __name__ == '__main__':
     basic_example()
     # custom_config_example()
     # with_custom_tools_example()
-    complex_deep_agent()
+    # complex_deep_agent()

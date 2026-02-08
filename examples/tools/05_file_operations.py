@@ -24,7 +24,6 @@ def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         tools=[FileTool(), EditTool(), WorkspaceTool()],
-        show_tool_calls=True,
     )
 
     # Example 1: List files

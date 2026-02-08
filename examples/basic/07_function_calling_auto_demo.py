@@ -12,7 +12,7 @@
 
 2. **Agentica Agent** (框架封装)
    - 框架自动处理工具调用循环
-   - show_tool_calls=True 自动输出执行过程
+   - 通过 ToolCallStarted/ToolCallCompleted 事件输出执行过程
    - 支持流式和非流式两种模式
 
 运行方式:
@@ -247,7 +247,7 @@ def demo_agentica_agent():
     使用 Agentica 框架的 Agent，内置了完整的 agentic loop。
 
     特点：
-    - show_tool_calls=True 自动输出工具调用过程和结果
+    - 通过 ToolCallStarted/ToolCallCompleted 事件输出工具调用过程和结果
     - 支持流式和非流式输出
     - 无需手动处理事件类型
     """
@@ -259,11 +259,9 @@ def demo_agentica_agent():
         from agentica import Agent, OpenAIChat
 
         # 创建 Agent
-        # show_tool_calls=True 会自动输出工具调用过程和结果
         agent = Agent(
             model=OpenAIChat(id='gpt-4o-mini'),
             tools=[get_weather, calculate, search_knowledge],
-            show_tool_calls=True,  # 自动输出执行过程
         )
 
         query = "查询北京和上海的天气，然后计算两地温差"
@@ -306,7 +304,7 @@ def print_comparison():
 │ 循环位置         │ 你的代码中           │ 框架内部             │
 │ 代码复杂度       │ 高（需要处理细节）    │ 低（一行代码）       │
 │ 可控性          │ 完全可控             │ 可配置扩展           │
-│ 工具执行输出     │ 需要自己实现         │ show_tool_calls=True │
+│ 工具执行输出     │ 需要自己实现         │ 事件驱动             │
 │ 流式输出        │ 可自定义             │ stream=True          │
 │ 错误处理        │ 需要自己实现         │ 框架处理             │
 │ 多提供商支持     │ 需要适配             │ 20+ 提供商           │
@@ -315,7 +313,7 @@ def print_comparison():
 
 选择建议：
    - 需要完全控制 → 手动 Loop
-   - 快速开发     → Agentica Agent (show_tool_calls=True)
+   - 快速开发     → Agentica Agent (stream_intermediate_steps=True)
 """
     print(comparison)
 
