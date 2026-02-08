@@ -242,6 +242,11 @@ class PromptsMixin:
                 system_message_lines.append(instructions[0])
             system_message_lines.append("")
 
+        # 5.4.1 Then add workspace context (dynamically loaded on every run)
+        workspace_context = self.get_workspace_context_prompt()
+        if workspace_context:
+            system_message_lines.append(f"## Workspace Context\n\n{workspace_context}\n")
+
         # 5.5 Then add the guidelines for the Agent
         if self.guidelines is not None and len(self.guidelines) > 0:
             system_message_lines.append("## Guidelines")
@@ -268,7 +273,12 @@ class PromptsMixin:
         if self.has_team() and self.add_transfer_instructions:
             system_message_lines.append(f"{self.get_transfer_prompt()}\n")
 
-        # 5.10 Then add memories to the system prompt
+        # 5.10 Then add workspace memory (dynamically loaded on every run)
+        workspace_memory = self.get_workspace_memory_prompt()
+        if workspace_memory:
+            system_message_lines.append(f"## Workspace Memory\n\n{workspace_memory}\n")
+
+        # 5.11 Then add memories to the system prompt
         if self.memory.create_user_memories:
             if self.memory.memories and len(self.memory.memories) > 0:
                 system_message_lines.append(
@@ -298,7 +308,7 @@ class PromptsMixin:
                 system_message_lines.append("If you use the `update_memory` tool, "
                                             "remember to pass on the response to the user.\n")
 
-        # 5.11 Then add a summary of the interaction to the system prompt
+        # 5.12 Then add a summary of the interaction to the system prompt
         if self.memory.create_session_summary:
             if self.memory.summary is not None:
                 system_message_lines.append("Here is a brief summary of your previous interactions if it helps:")
@@ -309,7 +319,7 @@ class PromptsMixin:
                     "You should ALWAYS prefer information from this conversation over the past summary.\n"
                 )
 
-        # 5.12 Then add the JSON output prompt if response_model is provided and structured_outputs is False
+        # 5.13 Then add the JSON output prompt if response_model is provided and structured_outputs is False
         if self.response_model is not None and not self.structured_outputs:
             system_message_lines.append(self.get_json_output_prompt() + "\n")
 
@@ -758,6 +768,11 @@ class PromptsMixin:
         # Add output language
         if self.output_language is not None:
             system_message_lines.append(f"\n**Output language:** You must output text in {self.output_language}.")
+
+        # Add workspace memory (dynamically loaded on every run)
+        workspace_memory = self.get_workspace_memory_prompt()
+        if workspace_memory:
+            system_message_lines.append(f"\n## Workspace Memory\n\n{workspace_memory}")
 
         # Add memories
         if self.memory.create_user_memories:

@@ -269,18 +269,12 @@ def _create_agent(agent_config: dict, extra_tools: Optional[List] = None,
         temperature=agent_config.get("temperature"),
     )
 
-    # Build instructions with workspace context and skills
+    # Build instructions with skills
     instructions = []
 
-    # Add workspace context if available
-    if workspace and workspace.exists():
-        context = workspace.get_context_prompt()
-        if context:
-            instructions.append(context)
-        # Add recent memory
-        memory = workspace.get_memory_prompt(days=2)
-        if memory:
-            instructions.append(f"\n# Recent Memory\n{memory}")
+    # Note: workspace context and memory are loaded dynamically in
+    # get_system_message() on every run, so we don't inject them statically here.
+    # This ensures edits to AGENT.md, USER.md, MEMORY.md etc. take effect immediately.
 
     # Add skills summary if available
     if skills_registry and len(skills_registry) > 0:

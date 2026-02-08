@@ -625,41 +625,42 @@ class Agent:
         if self.workspace and self.user_id:
             self.workspace.set_user(self.user_id)
 
-        # Inject workspace context into instructions
-        if self.workspace and self.workspace.exists():
-            self._inject_workspace_context()
+        # Note: workspace context and memory are loaded dynamically in
+        # get_system_message() on every run, not statically injected here.
+        # This ensures that edits to AGENT.md, USER.md, MEMORY.md etc.
+        # take effect on the next conversation turn.
 
-    def _inject_workspace_context(self):
-        """Inject workspace context and memory into instructions"""
-        if not self.workspace:
-            return
+    def get_workspace_context_prompt(self) -> Optional[str]:
+        """Dynamically load workspace context for injection into system prompt.
 
-        context_parts = []
+        Called on every run to ensure edits to AGENT.md, PERSONA.md, TOOLS.md,
+        USER.md take effect on the next conversation turn (like Claude Code / OpenCode).
 
-        # Load workspace context (AGENT.md, PERSONA.md, TOOLS.md, USER.md)
-        if self.load_workspace_context:
-            context = self.workspace.get_context_prompt()
-            if context:
-                context_parts.append(f"# Workspace Context\n\n{context}")
+        Returns:
+            Context prompt string, or None if no context available.
+        """
+        if not self.workspace or not self.load_workspace_context:
+            return None
 
-        # Load workspace memory
-        if self.load_workspace_memory:
-            memory = self.workspace.get_memory_prompt(days=self.memory_days)
-            if memory:
-                context_parts.append(f"# Recent Memory\n\n{memory}")
+        if not self.workspace.exists():
+            return None
 
-        # Merge into instructions
-        if context_parts:
-            workspace_prompt = "\n\n---\n\n".join(context_parts)
-            if self.instructions is None:
-                self.instructions = [workspace_prompt]
-            elif isinstance(self.instructions, str):
-                self.instructions = [workspace_prompt, self.instructions]
-            elif isinstance(self.instructions, list):
-                self.instructions = [workspace_prompt] + list(self.instructions)
-            # Note: if instructions is a Callable, we don't modify it
+        context = self.workspace.get_context_prompt()
+        return context if context else None
 
-            logger.debug(f"Injected workspace context into instructions from {self.workspace.path}")
+    def get_workspace_memory_prompt(self) -> Optional[str]:
+        """Dynamically load workspace memory for injection into system prompt.
+
+        Called on every run to ensure newly saved memories are always included.
+
+        Returns:
+            Memory prompt string, or None if no memory available.
+        """
+        if not self.workspace or not self.load_workspace_memory:
+            return None
+
+        memory = self.workspace.get_memory_prompt(days=self.memory_days)
+        return memory if memory else None
 
     def _load_mcp_tools(self):
         """Auto-load MCP tools from mcp_config.json/yaml if available.

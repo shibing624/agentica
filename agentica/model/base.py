@@ -94,7 +94,18 @@ class Model(BaseModel):
     def __repr__(self) -> str:
         """Concise representation for logging."""
         tools_count = len(self.tools) if self.tools else 0
-        return f"{self.name or self.__class__.__name__}(id={self.id!r}, tools={tools_count})"
+        # Show last 4 chars of api_key (check common field names across subclasses)
+        api_key = getattr(self, 'api_key', None) or ""
+        key_hint = f"**{api_key[-4:]}" if api_key and len(api_key) >= 4 else ""
+        # Show base_url (check common field names: base_url, api_base)
+        base_url = getattr(self, 'base_url', None) or getattr(self, 'api_base', None) or ""
+        parts = [f"id={self.id!r}"]
+        if base_url:
+            parts.append(f"base_url={str(base_url)!r}")
+        if key_hint:
+            parts.append(f"api_key='{key_hint}'")
+        parts.append(f"tools={tools_count}")
+        return f"{self.name or self.__class__.__name__}({', '.join(parts)})"
 
     def __str__(self) -> str:
         return self.__repr__()
