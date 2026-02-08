@@ -81,7 +81,7 @@ class LiteLLM(Model):
         name (str): Display name for this model instance
         provider (str): Provider name (auto-detected from id)
         api_key (str): API key for the provider (auto-detected from environment)
-        api_base (str): Custom API base URL (optional)
+        base_url (str): Custom API base URL (optional)
         
     Example:
         ```python
@@ -121,7 +121,7 @@ class LiteLLM(Model):
     
     # API configuration
     api_key: Optional[str] = None
-    api_base: Optional[str] = None
+    base_url: Optional[str] = None
 
     api_version: Optional[str] = None  # For Azure
     # Request parameters
@@ -216,8 +216,8 @@ class LiteLLM(Model):
             params["num_retries"] = self.num_retries
         if self.metadata is not None:
             params["metadata"] = self.metadata
-        if self.api_base is not None:
-            params["api_base"] = self.api_base
+        if self.base_url is not None:
+            params["api_base"] = self.base_url  # litellm uses 'api_base' internally
         if self.api_version is not None:
             params["api_version"] = self.api_version
         

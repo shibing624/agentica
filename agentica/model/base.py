@@ -97,8 +97,8 @@ class Model(BaseModel):
         # Show last 4 chars of api_key (check common field names across subclasses)
         api_key = getattr(self, 'api_key', None) or ""
         key_hint = f"**{api_key[-4:]}" if api_key and len(api_key) >= 4 else ""
-        # Show base_url (check common field names: base_url, api_base)
-        base_url = getattr(self, 'base_url', None) or getattr(self, 'api_base', None) or ""
+        # Show base_url
+        base_url = getattr(self, 'base_url', None) or ""
         parts = [f"id={self.id!r}"]
         if base_url:
             parts.append(f"base_url={str(base_url)!r}")

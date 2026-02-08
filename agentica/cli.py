@@ -35,7 +35,7 @@ from typing import List, Optional
 from rich.console import Console
 from rich.text import Text
 
-from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek
+from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, Doubao
 from agentica.config import AGENTICA_HOME
 from agentica.utils.log import suppress_console_logging
 from agentica.workspace import Workspace
@@ -162,12 +162,12 @@ def parse_args():
     
     parser.add_argument('--query', type=str, help='Question to ask the LLM', default=None)
     parser.add_argument('--model_provider', type=str,
-                        choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'],
+                        choices=['openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi', 'doubao'],
                         help='LLM model provider', default='zhipuai')
     parser.add_argument('--model_name', type=str,
                         help='LLM model name to use, can be gpt-5/glm-4.7-flash/deepseek-chat/yi-lightning/...',
                         default='glm-4.7-flash')
-    parser.add_argument('--api_base', type=str, help='API base URL for the LLM')
+    parser.add_argument('--base_url', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
@@ -223,10 +223,10 @@ def configure_tools(tool_names: Optional[List[str]] = None) -> List:
     return tools
 
 
-def get_model(model_provider, model_name, api_base=None, api_key=None, max_tokens=None, temperature=None):
+def get_model(model_provider, model_name, base_url=None, api_key=None, max_tokens=None, temperature=None):
     params = {"id": model_name}
-    if api_base is not None:
-        params["api_base"] = api_base
+    if base_url is not None:
+        params["base_url"] = base_url
     if api_key is not None:
         params["api_key"] = api_key
     if max_tokens is not None:
@@ -245,6 +245,8 @@ def get_model(model_provider, model_name, api_base=None, api_key=None, max_token
         model = DeepSeek(**params)
     elif model_provider == 'yi':
         model = Yi(**params)
+    elif model_provider == 'doubao':
+        model = Doubao(**params)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
     return model
@@ -263,7 +265,7 @@ def _create_agent(agent_config: dict, extra_tools: Optional[List] = None,
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
-        api_base=agent_config.get("api_base"),
+        base_url=agent_config.get("base_url"),
         api_key=agent_config.get("api_key"),
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
@@ -1139,7 +1141,7 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     continue
                 elif cmd == "/model":
                     # Supported providers
-                    supported_providers = {'openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi'}
+                    supported_providers = {'openai', 'azure', 'moonshot', 'zhipuai', 'deepseek', 'yi', 'doubao'}
                     # Example models for reference (users can use any model name)
                     example_models = {
                         'openai': ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o3-mini'],
@@ -1148,6 +1150,7 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         'zhipuai': ['glm-4-plus', 'glm-4-flash', 'glm-4.7-flash'],
                         'deepseek': ['deepseek-chat', 'deepseek-reasoner'],
                         'yi': ['yi-lightning', 'yi-large'],
+                        'doubao': ['doubao-1.5-pro-32k', 'doubao-1.5-lite-32k', 'doubao-1.5-vision-pro-32k'],
                     }
                     if cmd_args:
                         # Parse model spec: "provider/model" or just "model"
@@ -1420,7 +1423,7 @@ def main():
     agent_config = {
         "model_provider": args.model_provider,
         "model_name": args.model_name,
-        "api_base": args.api_base,
+        "base_url": args.base_url,
         "api_key": args.api_key,
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,
