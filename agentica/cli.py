@@ -35,11 +35,11 @@ from typing import List, Optional
 from rich.console import Console
 from rich.text import Text
 
-from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, Doubao, AgentCancelledError
+from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, Doubao
 from agentica.config import AGENTICA_HOME
 from agentica.utils.log import suppress_console_logging
 from agentica.workspace import Workspace
-from agentica.skills import load_skills, get_skill_registry, get_available_skills
+from agentica.skills import load_skills, get_skill_registry
 
 console = Console()
 history_file = os.path.join(AGENTICA_HOME, "cli_history.txt")
@@ -729,6 +729,9 @@ class StreamDisplayManager:
         how Claude Code displays tool outputs. Long results are truncated to
         max_lines with a "... (N more lines)" indicator.
         
+        For task (subagent) tools, displays the inner tool calls list and
+        an execution summary.
+        
         Args:
             tool_name: Name of the tool
             result_content: The tool's output content
@@ -736,9 +739,13 @@ class StreamDisplayManager:
             elapsed: Execution time in seconds
         """
         if not result_content:
-            # No result to show, just print completion time
             if elapsed is not None:
                 self.console.print(f"    [dim]completed in {elapsed:.1f}s[/dim]")
+            return
+        
+        # Special handling for task (subagent) - show inner tool calls
+        if tool_name == "task":
+            self._display_task_result(result_content, is_error)
             return
         
         result_str = str(result_content)
@@ -754,7 +761,6 @@ class StreamDisplayManager:
         # Show up to max_lines of preview
         display_lines = lines[:max_lines]
         for i, line in enumerate(display_lines):
-            # Truncate long lines
             if len(line) > max_line_width:
                 line = line[:max_line_width - 3] + "..."
             p = prefix if i == 0 else cont_prefix
@@ -764,6 +770,65 @@ class StreamDisplayManager:
         remaining = len(lines) - max_lines
         if remaining > 0:
             self.console.print(f"{cont_prefix}... ({remaining} more lines)", style="dim italic")
+    
+    def _display_task_result(self, result_content: str, is_error: bool = False):
+        """Display subagent task result with inner tool calls and execution summary.
+        
+        Shows each tool the subagent used with a brief description, then
+        an execution summary line with total tool count and elapsed time.
+        """
+        import json as _json
+        
+        try:
+            data = _json.loads(result_content)
+        except (ValueError, TypeError):
+            # Not JSON, fall back to default display
+            self.console.print(f"    ⎿ {str(result_content)[:120]}", style="dim")
+            return
+        
+        success = data.get("success", False)
+        tool_summary = data.get("tool_calls_summary", [])
+        exec_time = data.get("execution_time")
+        tool_count = data.get("tool_count", len(tool_summary))
+        subagent_name = data.get("subagent_name", "Subagent")
+        
+        if not success:
+            error_msg = data.get("error", "Unknown error")
+            self.console.print(f"    ⎿ ⚠ {error_msg[:120]}", style="dim red")
+            return
+        
+        # Show inner tool calls (compact list)
+        max_shown = 8
+        for i, tc in enumerate(tool_summary[:max_shown]):
+            name = tc.get("name", "")
+            info = tc.get("info", "")
+            # Truncate info
+            if len(info) > 90:
+                info = info[:87] + "..."
+            if i == 0:
+                self.console.print(f"    ⎿ ", end="", style="dim")
+            else:
+                self.console.print(f"      ", end="")
+            self.console.print(f"{name}", end="", style="dim bold")
+            if info:
+                self.console.print(f" {info}", style="dim")
+            else:
+                self.console.print(style="dim")
+        
+        # Show truncation if more tools
+        if len(tool_summary) > max_shown:
+            remaining = len(tool_summary) - max_shown
+            self.console.print(f"      ... and {remaining} more tool calls", style="dim italic")
+        
+        # Execution summary line
+        summary_parts = []
+        if tool_count > 0:
+            summary_parts.append(f"{tool_count} tool uses")
+        if exec_time is not None:
+            summary_parts.append(f"cost: {exec_time:.1f}s")
+        if summary_parts:
+            summary_str = ", ".join(summary_parts)
+            self.console.print(f"    [dim italic]Execution Summary: {summary_str}[/dim italic]")
     
     def end_tool_section(self):
         """End tool section."""

@@ -34,7 +34,6 @@ skill-name/
 ---
 name: my-skill
 description: "What the skill does and WHEN to use it. Include trigger conditions here."
-trigger: /myskill     # Optional: slash command trigger
 requires:             # Optional: required tools
   - shell
 allowed-tools:        # Optional: tools this skill can use
@@ -102,7 +101,7 @@ my-skill/
 ### Step 4: Test
 
 1. Load the skill in Agentica
-2. Trigger it with various inputs
+2. Trigger it with various inputs, run python scripts(eg: python3 scripts/helper.py), and check results
 3. Iterate based on results
 
 ## Skill Locations
@@ -144,7 +143,6 @@ json.loads(content)  # Raises if invalid
 ---
 name: test-runner
 description: "Run project tests with coverage reporting."
-trigger: /test
 requires:
   - pytest
 ---

@@ -18,6 +18,10 @@ Built-in tool set for DeepAgent, including:
 - task: Launch subagent to handle complex tasks
 """
 import json
+import re
+from datetime import datetime
+import time
+import uuid
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Literal, TYPE_CHECKING, Union
 
@@ -385,7 +389,6 @@ class BuiltinFileTool(Tool):
         Returns:
             Search results
         """
-        import re
         try:
             self._validate_path(path)
             base_path = self._resolve_path(path)
@@ -825,11 +828,9 @@ class BuiltinTaskTool(Tool):
 
 You have access to a `task` function to launch short-lived subagents that handle isolated tasks.
 
-### IMPORTANT - How to Call This Tool
+### How to Call
 
-The `task` tool is a FUNCTION CALL tool. Use your standard function calling mechanism to invoke it.
-- DO NOT use XML-style tags like `<tool_call>task<arg_key>...</arg_key></tool_call>` - this format does NOT work!
-- Call it as a regular function with parameters: task(description="...", subagent_type="...")
+Use your standard function calling mechanism to invoke `task(description="...", subagent_type="...")`.
 
 ### Available Subagent Types
 
@@ -969,8 +970,6 @@ The `task` tool is a FUNCTION CALL tool. Use your standard function calling mech
         Returns:
             The result from the subagent after completing the task.
         """
-        from datetime import datetime
-        import uuid
         from agentica.subagent import (
             SubagentRegistry, SubagentRun, SubagentType,
             get_subagent_config, generate_subagent_session_key, is_subagent_session
@@ -1046,11 +1045,49 @@ The `task` tool is a FUNCTION CALL tool. Use your standard function calling mech
 
             logger.debug(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")
             
-            # Run subagent with the task description
-            response = subagent.run(description)
-
-            # Extract result
-            result = response.content if response else "Subagent completed but returned no content."
+            # Run subagent with streaming to collect tool usage info
+            start_time = time.time()
+            tool_calls_log = []
+            final_content = ""
+            
+            response_stream = subagent.run(description, stream=True, stream_intermediate_steps=True)
+            for chunk in response_stream:
+                if chunk is None:
+                    continue
+                # Collect tool call info from intermediate events
+                if chunk.event in ("ToolCallStarted", "ToolCallCompleted", 
+                                   "MultiRoundToolCall", "MultiRoundToolResult"):
+                    if chunk.tools:
+                        for tool_info in chunk.tools:
+                            tool_name = tool_info.get("tool_name") or tool_info.get("name", "")
+                            if not tool_name:
+                                continue
+                            # Build a brief info string
+                            tool_args = tool_info.get("tool_args") or tool_info.get("arguments", {})
+                            content = tool_info.get("content")
+                            brief = self._format_tool_brief(tool_name, tool_args, content)
+                            entry = {"name": tool_name, "info": brief}
+                            # Deduplicate: update existing entry for same tool or add new
+                            if chunk.event in ("ToolCallCompleted", "MultiRoundToolResult"):
+                                # Update the last entry with same tool name (add result info)
+                                for i in range(len(tool_calls_log) - 1, -1, -1):
+                                    if tool_calls_log[i]["name"] == tool_name and "result" not in tool_calls_log[i]:
+                                        tool_calls_log[i]["info"] = brief
+                                        tool_calls_log[i]["result"] = True
+                                        break
+                            else:
+                                tool_calls_log.append(entry)
+                # Accumulate final content
+                if chunk.event in ("RunResponse",) and chunk.content:
+                    final_content += str(chunk.content)
+            
+            elapsed = time.time() - start_time
+            result = final_content if final_content else "Subagent completed but returned no content."
+            
+            # Build tool calls summary for display
+            tool_summary = []
+            for tc in tool_calls_log:
+                tool_summary.append({"name": tc["name"], "info": tc.get("info", "")})
             
             # Update registry with success
             registry.update_status(
@@ -1066,6 +1103,9 @@ The `task` tool is a FUNCTION CALL tool. Use your standard function calling mech
                 "subagent_type": config.type.value,
                 "subagent_name": config.name,
                 "result": result,
+                "tool_calls_summary": tool_summary,
+                "execution_time": round(elapsed, 3),
+                "tool_count": len(tool_summary),
             }, ensure_ascii=False, indent=2)
 
         except Exception as e:
@@ -1084,6 +1124,65 @@ The `task` tool is a FUNCTION CALL tool. Use your standard function calling mech
                 "error": f"Subagent task error: {e}",
                 "description": description[:300],
             }, ensure_ascii=False)
+
+    @staticmethod
+    def _format_tool_brief(tool_name: str, tool_args, content=None) -> str:
+        """Format a brief description for a subagent tool call."""
+        if isinstance(tool_args, str):
+            try:
+                tool_args = json.loads(tool_args)
+            except (json.JSONDecodeError, TypeError):
+                tool_args = {}
+        if not isinstance(tool_args, dict):
+            tool_args = {}
+        
+        if tool_name == "read_file":
+            fp = tool_args.get("file_path", "")
+            if fp:
+                fname = fp.rsplit("/", 1)[-1] if "/" in fp else fp
+                lines = ""
+                if tool_args.get("offset") or tool_args.get("limit"):
+                    start = (tool_args.get("offset", 0) or 0) + 1
+                    end = start + (tool_args.get("limit", 500) or 500) - 1
+                    lines = f" (L{start}-{end})"
+                if content:
+                    line_count = str(content).count("\n") + 1
+                    return f"Read {line_count} line(s) from {fname}"
+                return f"{fname}{lines}"
+        elif tool_name in ("grep", "search_content"):
+            pattern = tool_args.get("pattern", "")
+            if content and isinstance(content, str):
+                match_count = content.count("\n") + 1 if content.strip() else 0
+                return f'Found {match_count} match(es) for "{pattern[:40]}"'
+            return f'"{pattern[:40]}"'
+        elif tool_name in ("glob", "search_file"):
+            pattern = tool_args.get("pattern", "")
+            return f'pattern: {pattern}'
+        elif tool_name == "ls":
+            directory = tool_args.get("directory", ".")
+            return directory.rsplit("/", 1)[-1] if "/" in directory else directory
+        elif tool_name == "execute":
+            cmd = tool_args.get("command", "")
+            return cmd[:80] + ("..." if len(cmd) > 80 else "")
+        elif tool_name == "write_file":
+            fp = tool_args.get("file_path", "")
+            return fp.rsplit("/", 1)[-1] if "/" in fp else fp
+        elif tool_name == "edit_file":
+            fp = tool_args.get("file_path", "")
+            return fp.rsplit("/", 1)[-1] if "/" in fp else fp
+        elif tool_name == "web_search":
+            queries = tool_args.get("queries", "")
+            if isinstance(queries, list):
+                return ", ".join(str(q)[:30] for q in queries[:2])
+            return str(queries)[:60]
+        elif tool_name == "fetch_url":
+            url = tool_args.get("url", "")
+            return url[:60] + ("..." if len(url) > 60 else "")
+        
+        # Default: show first arg value briefly
+        for k, v in tool_args.items():
+            return f"{k}={str(v)[:50]}"
+        return ""
 
 
 class BuiltinMemoryTool(Tool):
