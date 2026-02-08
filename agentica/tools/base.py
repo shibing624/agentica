@@ -436,12 +436,22 @@ class FunctionCall(BaseModel):
                 if is_async:
                     self.result = await self.function.entrypoint(**entrypoint_args)
                 else:
-                    self.result = self.function.entrypoint(**entrypoint_args)
+                    # Run sync function in thread pool to avoid blocking the event loop
+                    import functools
+                    loop = asyncio.get_running_loop()
+                    self.result = await loop.run_in_executor(
+                        None, functools.partial(self.function.entrypoint, **entrypoint_args)
+                    )
             else:
                 if is_async:
                     self.result = await self.function.entrypoint(**entrypoint_args, **self.arguments)
                 else:
-                    self.result = self.function.entrypoint(**entrypoint_args, **self.arguments)
+                    # Run sync function in thread pool to avoid blocking the event loop
+                    import functools
+                    loop = asyncio.get_running_loop()
+                    self.result = await loop.run_in_executor(
+                        None, functools.partial(self.function.entrypoint, **entrypoint_args, **self.arguments)
+                    )
             function_call_success = True
         except ToolCallException as e:
             logger.debug(f"{e.__class__.__name__}: {e}")

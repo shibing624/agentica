@@ -15,6 +15,6 @@ The functionality is split across multiple files for better maintainability:
 - printer.py: Response printing utilities
 """
 
-from agentica.agent.base import Agent
+from agentica.agent.base import Agent, AgentCancelledError
 
-__all__ = ["Agent"]
+__all__ = ["Agent", "AgentCancelledError"]

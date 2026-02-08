@@ -232,7 +232,9 @@ class RunnerMixin:
         self.model = cast(Model, self.model)
         if self.stream:
             model_response = ModelResponse(content="", reasoning_content="")
+            self._cancelled = False  # reset at start
             for model_response_chunk in self.model.response_stream(messages=messages_for_model):
+                self._check_cancelled()
                 if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
                     if model_response_chunk.reasoning_content is not None:
                         # Accumulate reasoning content instead of overwriting
@@ -280,6 +282,8 @@ class RunnerMixin:
                             event=RunEvent.tool_call_completed,
                         )
         else:
+            self._cancelled = False  # reset at start
+            self._check_cancelled()
             model_response = self.model.response(messages=messages_for_model)
             # Handle structured outputs
             if self.response_model is not None and self.structured_outputs and model_response.parsed is not None:
@@ -530,7 +534,9 @@ class RunnerMixin:
         current_round = 0
 
         try:
+            self._cancelled = False  # reset at start
             for current_round in range(1, self.max_rounds + 1):
+                self._check_cancelled()
                 logger.debug(f"Turn {current_round}/{self.max_rounds}")
 
                 # Hook: Pre-step processing (for DeepAgent context management)
@@ -592,6 +598,7 @@ class RunnerMixin:
                 if has_tool_calls:
                     tool_results = []
                     for tool_call in assistant_message.tool_calls:
+                        self._check_cancelled()
                         tool_call_id = tool_call.get("id", "")
                         func_info = tool_call.get("function", {})
                         func_name = func_info.get("name", "")
@@ -1214,7 +1221,9 @@ class RunnerMixin:
         if stream and self.is_streamable:
             model_response = ModelResponse(content="", reasoning_content="")
             model_response_stream = self.model.aresponse_stream(messages=messages_for_model)
+            self._cancelled = False  # reset at start
             async for model_response_chunk in model_response_stream:  # type: ignore
+                self._check_cancelled()
                 if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
                     # Handle reasoning_content (for thinking models like DeepSeek-R1)
                     if model_response_chunk.reasoning_content is not None:
@@ -1264,6 +1273,8 @@ class RunnerMixin:
                             RunEvent.tool_call_completed,
                         )
         else:
+            self._cancelled = False  # reset at start
+            self._check_cancelled()
             model_response = await self.model.aresponse(messages=messages_for_model)
             # Handle structured outputs
             if self.response_model is not None and self.structured_outputs and model_response.parsed is not None:
@@ -1457,7 +1468,9 @@ class RunnerMixin:
         current_round = 0
 
         try:
+            self._cancelled = False  # reset at start
             for current_round in range(1, self.max_rounds + 1):
+                self._check_cancelled()
                 logger.debug(f"Turn {current_round}/{self.max_rounds}")
 
                 # Token limit check
@@ -1510,6 +1523,7 @@ class RunnerMixin:
                 if has_tool_calls:
                     tool_results = []
                     for tool_call in assistant_message.tool_calls:
+                        self._check_cancelled()
                         tool_call_id = tool_call.get("id", "")
                         func_info = tool_call.get("function", {})
                         func_name = func_info.get("name", "")
@@ -1542,7 +1556,9 @@ class RunnerMixin:
                                 if hasattr(function_call, 'aexecute'):
                                     await function_call.aexecute()
                                 else:
-                                    function_call.execute()
+                                    # Fallback: run sync execute in thread pool to avoid blocking event loop
+                                    loop = asyncio.get_running_loop()
+                                    await loop.run_in_executor(None, function_call.execute)
                                 result_str = str(function_call.result) if function_call.result is not None else ""
 
                                 # Yield tool result event

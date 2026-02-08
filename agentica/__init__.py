@@ -102,7 +102,7 @@ from agentica.utils.tokens import (
 )
 
 # agent (core)
-from agentica.agent import Agent
+from agentica.agent import Agent, AgentCancelledError
 from agentica.deep_agent import DeepAgent
 from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow

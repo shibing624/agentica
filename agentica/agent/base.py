@@ -40,7 +40,7 @@ from agentica.template import PromptTemplate
 from agentica.model.content import Image, Video
 from agentica.model.base import Model
 from agentica.model.message import Message
-from agentica.run_response import RunResponse
+from agentica.run_response import RunResponse, AgentCancelledError
 from agentica.memory import AgentMemory, Memory, AgentRun
 from agentica.compression.manager import CompressionManager
 from agentica.db.base import BaseDb
@@ -48,6 +48,7 @@ from agentica.db.base import BaseDb
 if TYPE_CHECKING:
     from agentica.workspace import Workspace
     from agentica.knowledge.base import Knowledge
+
 
 
 @dataclass(init=False)
@@ -305,6 +306,18 @@ class Agent:
     stream: Optional[bool] = None
     # If True, stream the intermediate steps from the Agent
     stream_intermediate_steps: bool = False
+    # Cancellation flag for stopping a running agent
+    _cancelled: bool = field(default=False, init=False, repr=False)
+
+    def cancel(self):
+        """Cancel the current run. Can be called from another thread/task."""
+        self._cancelled = True
+
+    def _check_cancelled(self):
+        """Check if cancelled and raise CancelledError if so."""
+        if self._cancelled:
+            self._cancelled = False  # reset for next run
+            raise AgentCancelledError("Agent run cancelled by user")
 
     def __init__(
             self,
@@ -922,10 +935,10 @@ class Agent:
         fields_for_new_agent = {}
 
         # Get all dataclass fields instead of model_fields_set
-        for field in fields(self):
-            field_name = field.name
-            # Skip runtime fields and method fields
-            if field_name in runtime_fields or field_name in method_fields:
+        for f in fields(self):
+            field_name = f.name
+            # Skip runtime fields, method fields, and non-init fields (e.g. _cancelled)
+            if field_name in runtime_fields or field_name in method_fields or not f.init:
                 continue
             field_value = getattr(self, field_name)
             if field_value is not None:

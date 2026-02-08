@@ -35,7 +35,7 @@ from typing import List, Optional
 from rich.console import Console
 from rich.text import Text
 
-from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, Doubao
+from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, Doubao, AgentCancelledError
 from agentica.config import AGENTICA_HOME
 from agentica.utils.log import suppress_console_logging
 from agentica.workspace import Workspace
@@ -679,6 +679,8 @@ class StreamDisplayManager:
         if self.in_thinking:
             self.console.print()  # End current line
             self.in_thinking = False
+            # Reset response_started so next content block gets a visual separator
+            self.response_started = False
     
     def start_tool_section(self):
         """Start tool section."""
@@ -719,10 +721,56 @@ class StreamDisplayManager:
             else:
                 self.console.print()
     
+    def display_tool_result(self, tool_name: str, result_content: str, 
+                            is_error: bool = False, elapsed: float = None):
+        """Display tool execution result as a compact preview.
+        
+        Shows a truncated preview of the tool result in dim text, similar to
+        how Claude Code displays tool outputs. Long results are truncated to
+        max_lines with a "... (N more lines)" indicator.
+        
+        Args:
+            tool_name: Name of the tool
+            result_content: The tool's output content
+            is_error: Whether the tool call errored
+            elapsed: Execution time in seconds
+        """
+        if not result_content:
+            # No result to show, just print completion time
+            if elapsed is not None:
+                self.console.print(f"    [dim]completed in {elapsed:.1f}s[/dim]")
+            return
+        
+        result_str = str(result_content)
+        lines = result_str.splitlines()
+        max_lines = 4
+        max_line_width = 120
+        
+        # Style based on error status
+        style = "dim red" if is_error else "dim"
+        prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
+        cont_prefix = "      "
+        
+        # Show up to max_lines of preview
+        display_lines = lines[:max_lines]
+        for i, line in enumerate(display_lines):
+            # Truncate long lines
+            if len(line) > max_line_width:
+                line = line[:max_line_width - 3] + "..."
+            p = prefix if i == 0 else cont_prefix
+            self.console.print(f"{p}{line}", style=style)
+        
+        # Show truncation indicator
+        remaining = len(lines) - max_lines
+        if remaining > 0:
+            self.console.print(f"{cont_prefix}... ({remaining} more lines)", style="dim italic")
+    
     def end_tool_section(self):
         """End tool section."""
         if self.in_tool_section:
             self.in_tool_section = False
+            # Reset response_started so next content block gets a visual separator
+            self.response_started = False
     
     def start_response(self):
         """Start response section."""
@@ -1331,6 +1379,20 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         continue
                     
                     elif chunk.event == "ToolCallCompleted":
+                        # Display tool result preview
+                        if chunk.tools:
+                            # Find the completed tool - it's the last one that has 'content'
+                            for tool_info in reversed(chunk.tools):
+                                if "content" in tool_info:
+                                    tool_name = tool_info.get("tool_name") or tool_info.get("name", "unknown")
+                                    result_content = tool_info.get("content", "")
+                                    is_error = tool_info.get("tool_call_error", False)
+                                    elapsed = (tool_info.get("metrics") or {}).get("time")
+                                    display.display_tool_result(
+                                        tool_name, str(result_content) if result_content else "",
+                                        is_error=is_error, elapsed=elapsed,
+                                    )
+                                    break
                         continue
                     
                     # Handle multi-round tool calls
@@ -1387,10 +1449,16 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                     console.print("[info]Agent returned no content.[/info]")
             
             except KeyboardInterrupt:
-                # Ctrl+C during request processing - interrupt output
+                # Ctrl+C during agent execution - truly cancel the agent
+                current_agent.cancel()
                 if spinner_active:
                     status.stop()
-                console.print("\n[yellow]⚠ Output interrupted.[/yellow]")
+                console.print("\n[yellow]⚠ Agent cancelled.[/yellow]")
+            except AgentCancelledError:
+                # Agent raised cancel after we called cancel()
+                if spinner_active:
+                    status.stop()
+                console.print("\n[yellow]⚠ Agent cancelled.[/yellow]")
             except Exception as e:
                 if spinner_active:
                     status.stop()

@@ -8,7 +8,7 @@ import collections.abc
 import io
 import base64
 from types import GeneratorType
-from typing import List, Iterator, Optional, Dict, Any, Callable, Union, Sequence
+from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationInfo
 
@@ -395,6 +395,119 @@ class Model(BaseModel):
             if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
                 self.deactivate_function_calls()
                 break  # Exit early if we reach the function call limit
+
+    async def arun_function_calls(
+            self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
+    ) -> AsyncIterator[ModelResponse]:
+        """Async version of run_function_calls - uses aexecute to avoid blocking the event loop."""
+        for function_call in function_calls:
+            if self.function_call_stack is None:
+                self.function_call_stack = []
+
+            # -*- Start function call
+            function_call_timer = Timer()
+            function_call_timer.start()
+            yield ModelResponse(
+                content=function_call.get_call_str(),
+                tool_call={
+                    "role": tool_role,
+                    "tool_call_id": function_call.call_id,
+                    "tool_name": function_call.function.name,
+                    "tool_args": function_call.arguments,
+                },
+                event=ModelResponseEvent.tool_call_started.value,
+            )
+
+            # Track if the function call was successful
+            function_call_success = False
+            stop_execution_after_tool_call = False
+            additional_messages_from_function_call = []
+
+            # -*- Run function call (async)
+            try:
+                function_call_success = await function_call.aexecute()
+            except ToolCallException as tce:
+                if tce.user_message is not None:
+                    if isinstance(tce.user_message, str):
+                        additional_messages_from_function_call.append(Message(role="user", content=tce.user_message))
+                    else:
+                        additional_messages_from_function_call.append(tce.user_message)
+                if tce.agent_message is not None:
+                    if isinstance(tce.agent_message, str):
+                        additional_messages_from_function_call.append(
+                            Message(role="assistant", content=tce.agent_message)
+                        )
+                    else:
+                        additional_messages_from_function_call.append(tce.agent_message)
+                if tce.messages is not None and len(tce.messages) > 0:
+                    for m in tce.messages:
+                        if isinstance(m, Message):
+                            additional_messages_from_function_call.append(m)
+                        elif isinstance(m, dict):
+                            try:
+                                additional_messages_from_function_call.append(Message(**m))
+                            except Exception as e:
+                                logger.warning(f"Failed to convert dict to Message: {e}")
+                if tce.stop_execution:
+                    stop_execution_after_tool_call = True
+                    if len(additional_messages_from_function_call) > 0:
+                        for m in additional_messages_from_function_call:
+                            m.stop_after_tool_call = True
+
+            function_call_output: Optional[Union[List[Any], str]] = ""
+            if isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
+                for item in function_call.result:
+                    function_call_output += item
+                    if function_call.function.show_result:
+                        yield ModelResponse(content=item)
+            else:
+                function_call_output = function_call.result
+                if function_call.function.show_result:
+                    yield ModelResponse(content=function_call_output)
+
+            function_call_timer.stop()
+
+            function_call_result = Message(
+                role=tool_role,
+                content=function_call_output if function_call_success else function_call.error,
+                tool_call_id=function_call.call_id,
+                tool_name=function_call.function.name,
+                tool_args=function_call.arguments,
+                tool_call_error=not function_call_success,
+                stop_after_tool_call=function_call.function.stop_after_tool_call or stop_execution_after_tool_call,
+                metrics={"time": function_call_timer.elapsed},
+            )
+
+            yield ModelResponse(
+                content=f"{function_call.get_call_str()} completed in {function_call_timer.elapsed:.4f}s.",
+                tool_call=function_call_result.model_dump(
+                    include={
+                        "content",
+                        "tool_call_id",
+                        "tool_name",
+                        "tool_args",
+                        "tool_call_error",
+                        "metrics",
+                        "created_at",
+                    }
+                ),
+                event=ModelResponseEvent.tool_call_completed.value,
+            )
+
+            if "tool_call_times" not in self.metrics:
+                self.metrics["tool_call_times"] = {}
+            if function_call.function.name not in self.metrics["tool_call_times"]:
+                self.metrics["tool_call_times"][function_call.function.name] = []
+            self.metrics["tool_call_times"][function_call.function.name].append(function_call_timer.elapsed)
+
+            function_call_results.append(function_call_result)
+            if len(additional_messages_from_function_call) > 0:
+                function_call_results.extend(additional_messages_from_function_call)
+            self.function_call_stack.append(function_call)
+
+            if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
+                self.deactivate_function_calls()
+                break
 
     def handle_post_tool_call_messages(self, messages: List[Message], model_response: ModelResponse) -> ModelResponse:
         last_message = messages[-1]

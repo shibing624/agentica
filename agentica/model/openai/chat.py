@@ -1,6 +1,6 @@
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Union, Literal
+from typing import Optional, List, Iterator, AsyncIterator, Dict, Any, Union, Literal
 
 import httpx
 from enum import Enum, EnumMeta
@@ -584,6 +584,54 @@ class OpenAIChat(Model):
             return model_response
         return None
 
+    async def ahandle_tool_calls(
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            model_response: ModelResponse,
+            tool_role: str = "tool",
+    ) -> Optional[ModelResponse]:
+        """Async version of handle_tool_calls - uses arun_function_calls to avoid blocking the event loop."""
+        if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
+            if model_response.content is None:
+                model_response.content = ""
+            function_call_results: List[Message] = []
+            function_calls_to_run: List[FunctionCall] = []
+            for tool_call in assistant_message.tool_calls:
+                _tool_call_id = tool_call.get("id")
+                _function_call = get_function_call_for_tool_call(tool_call, self.functions)
+                if _function_call is None:
+                    messages.append(
+                        Message(
+                            role="tool",
+                            tool_call_id=_tool_call_id,
+                            content="Could not find function to call.",
+                        )
+                    )
+                    continue
+                if _function_call.error is not None:
+                    messages.append(
+                        Message(
+                            role="tool",
+                            tool_call_id=_tool_call_id,
+                            content=_function_call.error,
+                        )
+                    )
+                    continue
+                function_calls_to_run.append(_function_call)
+
+            async for tool_response in self.arun_function_calls(
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
+            ):
+                pass
+
+            if len(function_call_results) > 0:
+                messages.extend(function_call_results)
+
+            return model_response
+        return None
+
     def update_usage_metrics(
             self, assistant_message: Message, metrics: Metrics, response_usage: Optional[CompletionUsage]
     ) -> None:
@@ -815,10 +863,10 @@ class OpenAIChat(Model):
             # add the reasoning content to the model response
             model_response.reasoning_content = assistant_message.reasoning_content
 
-        # -*- Handle tool calls
+        # -*- Handle tool calls (async)
         tool_role = "tool"
         if (
-                self.handle_tool_calls(
+                await self.ahandle_tool_calls(
                     assistant_message=assistant_message,
                     messages=messages,
                     model_response=model_response,
@@ -937,6 +985,48 @@ class OpenAIChat(Model):
                     tool_role=tool_role
             ):
                 # Always yield the event for stream_intermediate_steps
+                yield function_call_response
+
+            if len(function_call_results) > 0:
+                messages.extend(function_call_results)
+
+    async def ahandle_stream_tool_calls(
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            tool_role: str = "tool",
+    ) -> AsyncIterator[ModelResponse]:
+        """Async version of handle_stream_tool_calls - uses arun_function_calls."""
+        if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
+            function_calls_to_run: List[FunctionCall] = []
+            function_call_results: List[Message] = []
+            for tool_call in assistant_message.tool_calls:
+                _tool_call_id = tool_call.get("id")
+                _function_call = get_function_call_for_tool_call(tool_call, self.functions)
+                if _function_call is None:
+                    messages.append(
+                        Message(
+                            role=tool_role,
+                            tool_call_id=_tool_call_id,
+                            content="Could not find function to call.",
+                        )
+                    )
+                    continue
+                if _function_call.error is not None:
+                    messages.append(
+                        Message(
+                            role=tool_role,
+                            tool_call_id=_tool_call_id,
+                            content=_function_call.error,
+                        )
+                    )
+                    continue
+                function_calls_to_run.append(_function_call)
+
+            async for function_call_response in self.arun_function_calls(
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
+            ):
                 yield function_call_response
 
             if len(function_call_results) > 0:
@@ -1101,10 +1191,10 @@ class OpenAIChat(Model):
         assistant_message.log()
         metrics.log()
 
-        # -*- Handle tool calls
+        # -*- Handle tool calls (async)
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             tool_role = "tool"
-            for tool_call_response in self.handle_stream_tool_calls(
+            async for tool_call_response in self.ahandle_stream_tool_calls(
                     assistant_message=assistant_message, messages=messages, tool_role=tool_role
             ):
                 yield tool_call_response

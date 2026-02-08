@@ -201,3 +201,8 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse]])
                     print(resp.content, end='', flush=True)
                     streaming_content = resp.content
         response_timer.stop()
+
+
+class AgentCancelledError(Exception):
+    """Raised when an agent run is cancelled by the user via agent.cancel()."""
+    pass
