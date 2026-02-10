@@ -4,6 +4,7 @@
 @description:
 part of the code is from phidata
 """
+import asyncio
 import collections.abc
 import io
 import base64
@@ -118,28 +119,18 @@ class Model(BaseModel):
     def __str__(self) -> str:
         return self.__repr__()
 
-    def invoke(self, *args, **kwargs) -> Any:
+    # --- Async-only abstract methods (subclasses must implement) ---
+
+    async def invoke(self, *args, **kwargs) -> Any:
         raise NotImplementedError
 
-    async def ainvoke(self, *args, **kwargs) -> Any:
+    async def invoke_stream(self, *args, **kwargs) -> Any:
         raise NotImplementedError
 
-    def invoke_stream(self, *args, **kwargs) -> Iterator[Any]:
+    async def response(self, messages: List[Message]) -> ModelResponse:
         raise NotImplementedError
 
-    async def ainvoke_stream(self, *args, **kwargs) -> Any:
-        raise NotImplementedError
-
-    def response(self, messages: List[Message]) -> ModelResponse:
-        raise NotImplementedError
-
-    async def aresponse(self, messages: List[Message]) -> ModelResponse:
-        raise NotImplementedError
-
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
-        raise NotImplementedError
-
-    async def aresponse_stream(self, messages: List[Message]) -> Any:
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         raise NotImplementedError
 
     @staticmethod
@@ -285,136 +276,19 @@ class Model(BaseModel):
         # This is triggered when the function call limit is reached.
         self.tool_choice = "none"
 
-    def run_function_calls(
-            self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
-    ) -> Iterator[ModelResponse]:
-        for function_call in function_calls:
-            if self.function_call_stack is None:
-                self.function_call_stack = []
-
-            # -*- Start function call
-            function_call_timer = Timer()
-            function_call_timer.start()
-            yield ModelResponse(
-                content=function_call.get_call_str(),
-                tool_call={
-                    "role": tool_role,
-                    "tool_call_id": function_call.call_id,
-                    "tool_name": function_call.function.name,
-                    "tool_args": function_call.arguments,
-                },
-                event=ModelResponseEvent.tool_call_started.value,
-            )
-
-            # Track if the function call was successful
-            function_call_success = False
-            # If True, stop execution after this function call
-            stop_execution_after_tool_call = False
-            # Additional messages from the function call that will be added to the function call results
-            additional_messages_from_function_call = []
-
-            # -*- Run function call
-            try:
-                function_call_success = function_call.execute()
-            except ToolCallException as tce:
-                if tce.user_message is not None:
-                    if isinstance(tce.user_message, str):
-                        additional_messages_from_function_call.append(Message(role="user", content=tce.user_message))
-                    else:
-                        additional_messages_from_function_call.append(tce.user_message)
-                if tce.agent_message is not None:
-                    if isinstance(tce.agent_message, str):
-                        additional_messages_from_function_call.append(
-                            Message(role="assistant", content=tce.agent_message)
-                        )
-                    else:
-                        additional_messages_from_function_call.append(tce.agent_message)
-                if tce.messages is not None and len(tce.messages) > 0:
-                    for m in tce.messages:
-                        if isinstance(m, Message):
-                            additional_messages_from_function_call.append(m)
-                        elif isinstance(m, dict):
-                            try:
-                                additional_messages_from_function_call.append(Message(**m))
-                            except Exception as e:
-                                logger.warning(f"Failed to convert dict to Message: {e}")
-                if tce.stop_execution:
-                    stop_execution_after_tool_call = True
-                    if len(additional_messages_from_function_call) > 0:
-                        for m in additional_messages_from_function_call:
-                            m.stop_after_tool_call = True
-
-            function_call_output: Optional[Union[List[Any], str]] = ""
-            if isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
-                for item in function_call.result:
-                    function_call_output += item
-                    if function_call.function.show_result:
-                        yield ModelResponse(content=item)
-            else:
-                function_call_output = function_call.result
-                if function_call.function.show_result:
-                    yield ModelResponse(content=function_call_output)
-            # logger.debug(f"Tool {function_call.function.name} result: {function_call_output}")
-
-            # -*- Stop function call timer
-            function_call_timer.stop()
-
-            # -*- Create function call result message
-            function_call_result = Message(
-                role=tool_role,
-                content=function_call_output if function_call_success else function_call.error,
-                tool_call_id=function_call.call_id,
-                tool_name=function_call.function.name,
-                tool_args=function_call.arguments,
-                tool_call_error=not function_call_success,
-                stop_after_tool_call=function_call.function.stop_after_tool_call or stop_execution_after_tool_call,
-                metrics={"time": function_call_timer.elapsed},
-            )
-
-            # -*- Yield function call result
-            yield ModelResponse(
-                content=f"{function_call.get_call_str()} completed in {function_call_timer.elapsed:.4f}s.",
-                tool_call=function_call_result.model_dump(
-                    include={
-                        "content",
-                        "tool_call_id",
-                        "tool_name",
-                        "tool_args",
-                        "tool_call_error",
-                        "metrics",
-                        "created_at",
-                    }
-                ),
-                event=ModelResponseEvent.tool_call_completed.value,
-            )
-
-            # Add metrics to the model
-            if "tool_call_times" not in self.metrics:
-                self.metrics["tool_call_times"] = {}
-            if function_call.function.name not in self.metrics["tool_call_times"]:
-                self.metrics["tool_call_times"][function_call.function.name] = []
-            self.metrics["tool_call_times"][function_call.function.name].append(function_call_timer.elapsed)
-
-            # Add the function call result to the function call results
-            function_call_results.append(function_call_result)
-            if len(additional_messages_from_function_call) > 0:
-                function_call_results.extend(additional_messages_from_function_call)
-            self.function_call_stack.append(function_call)
-
-            # -*- Check function call limit
-            if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
-                self.deactivate_function_calls()
-                break  # Exit early if we reach the function call limit
-
-    async def arun_function_calls(
+    async def run_function_calls(
             self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
     ) -> AsyncIterator[ModelResponse]:
-        """Async version of run_function_calls - uses aexecute to avoid blocking the event loop."""
+        """Execute tool calls (async-only, single implementation).
+
+        Executes tools sequentially to maintain message ordering and streaming events.
+        Each tool's execute() is already async-first (sync tools run in thread pool).
+        """
         for function_call in function_calls:
             if self.function_call_stack is None:
                 self.function_call_stack = []
 
-            # -*- Start function call
+            # Start function call
             function_call_timer = Timer()
             function_call_timer.start()
             yield ModelResponse(
@@ -428,14 +302,13 @@ class Model(BaseModel):
                 event=ModelResponseEvent.tool_call_started.value,
             )
 
-            # Track if the function call was successful
             function_call_success = False
             stop_execution_after_tool_call = False
             additional_messages_from_function_call = []
 
-            # -*- Run function call (async)
+            # Run function call (async)
             try:
-                function_call_success = await function_call.aexecute()
+                function_call_success = await function_call.execute()
             except ToolCallException as tce:
                 if tce.user_message is not None:
                     if isinstance(tce.user_message, str):
@@ -519,7 +392,8 @@ class Model(BaseModel):
                 self.deactivate_function_calls()
                 break
 
-    def handle_post_tool_call_messages(self, messages: List[Message], model_response: ModelResponse) -> ModelResponse:
+    async def handle_post_tool_call_messages(self, messages: List[Message], model_response: ModelResponse) -> ModelResponse:
+        """Handle messages after tool calls (async-only, single implementation)."""
         last_message = messages[-1]
         if last_message.stop_after_tool_call:
             logger.debug("Stopping execution as stop_after_tool_call=True")
@@ -532,52 +406,19 @@ class Model(BaseModel):
                     model_response.content = ""
                 model_response.content += last_message.content
         else:
-            response_after_tool_calls = self.response(messages=messages)
+            response_after_tool_calls = await self.response(messages=messages)
             if response_after_tool_calls.content is not None:
                 if model_response.content is None:
                     model_response.content = ""
                 model_response.content += response_after_tool_calls.content
             if response_after_tool_calls.parsed is not None:
-                # bubble up the parsed object, so that the final response has the parsed object
-                # that is visible to the agent
                 model_response.parsed = response_after_tool_calls.parsed
             if response_after_tool_calls.audio is not None:
-                # bubble up the audio, so that the final response has the audio
-                # that is visible to the agent
                 model_response.audio = response_after_tool_calls.audio
         return model_response
 
-    async def ahandle_post_tool_call_messages(
-            self, messages: List[Message], model_response: ModelResponse
-    ) -> ModelResponse:
-        last_message = messages[-1]
-        if last_message.stop_after_tool_call:
-            logger.debug("Stopping execution as stop_after_tool_call=True")
-            if (
-                    last_message.role == "assistant"
-                    and last_message.content is not None
-                    and isinstance(last_message.content, str)
-            ):
-                if model_response.content is None:
-                    model_response.content = ""
-                model_response.content += last_message.content
-        else:
-            response_after_tool_calls = await self.aresponse(messages=messages)
-            if response_after_tool_calls.content is not None:
-                if model_response.content is None:
-                    model_response.content = ""
-                model_response.content += response_after_tool_calls.content
-            if response_after_tool_calls.parsed is not None:
-                # bubble up the parsed object, so that the final response has the parsed object
-                # that is visible to the agent
-                model_response.parsed = response_after_tool_calls.parsed
-            if response_after_tool_calls.audio is not None:
-                # bubble up the audio, so that the final response has the audio
-                # that is visible to the agent
-                model_response.audio = response_after_tool_calls.audio
-        return model_response
-
-    def handle_post_tool_call_messages_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+    async def handle_post_tool_call_messages_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
+        """Handle streaming messages after tool calls (async-only, single implementation)."""
         last_message = messages[-1]
         if last_message.stop_after_tool_call:
             logger.debug("Stopping execution as stop_after_tool_call=True")
@@ -588,20 +429,7 @@ class Model(BaseModel):
             ):
                 yield ModelResponse(content=last_message.content)
         else:
-            yield from self.response_stream(messages=messages)
-
-    async def ahandle_post_tool_call_messages_stream(self, messages: List[Message]) -> Any:
-        last_message = messages[-1]
-        if last_message.stop_after_tool_call:
-            logger.debug("Stopping execution as stop_after_tool_call=True")
-            if (
-                    last_message.role == "assistant"
-                    and last_message.content is not None
-                    and isinstance(last_message.content, str)
-            ):
-                yield ModelResponse(content=last_message.content)
-        else:
-            async for model_response in self.aresponse_stream(messages=messages):  # type: ignore
+            async for model_response in self.response_stream(messages=messages):
                 yield model_response
 
     def _process_string_image(self, image: str) -> Dict[str, Any]:
