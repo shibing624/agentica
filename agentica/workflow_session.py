@@ -3,7 +3,6 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
-from __future__ import annotations
 
 from typing import Optional, Dict, Any
 

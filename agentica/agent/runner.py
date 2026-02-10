@@ -5,7 +5,6 @@
 
 This module contains the core run/arun methods and multi-round execution logic.
 """
-from __future__ import annotations
 
 import asyncio
 import json
@@ -547,9 +546,9 @@ class RunnerMixin:
                     logger.warning(f"Force answer triggered at turn {current_round}")
                     break
 
-                # Token limit check (legacy, kept for backward compatibility)
+                # Token limit check (character-based approximation)
                 total_content = " ".join([str(msg.content or "") for msg in messages_for_model])
-                if len(total_content) > self.max_tokens * 3:
+                if len(total_content) > self.model.context_window * 3:
                     logger.warning(f"Token limit approaching, stopping at turn {current_round}")
                     break
 
@@ -1473,9 +1472,9 @@ class RunnerMixin:
                 self._check_cancelled()
                 logger.debug(f"Turn {current_round}/{self.max_rounds}")
 
-                # Token limit check
+                # Token limit check (character-based approximation)
                 total_content = " ".join([str(msg.content or "") for msg in messages_for_model])
-                if len(total_content) > self.max_tokens * 3:
+                if len(total_content) > self.model.context_window * 3:
                     logger.warning(f"Token limit approaching, stopping at turn {current_round}")
                     break
 

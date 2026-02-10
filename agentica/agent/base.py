@@ -6,8 +6,6 @@
 This module contains the Agent class definition with all fields and initialization logic.
 The actual method implementations are mixed in from other modules.
 """
-from __future__ import annotations
-
 import json
 from datetime import datetime
 from textwrap import dedent
@@ -31,8 +29,6 @@ from uuid import uuid4
 from copy import copy, deepcopy
 from dataclasses import dataclass, field, fields
 from pydantic import BaseModel
-from typing import TYPE_CHECKING
-
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.model.openai import OpenAIChat
 from agentica.tools.base import ModelTool, Tool, Function
@@ -44,10 +40,8 @@ from agentica.run_response import RunResponse, AgentCancelledError
 from agentica.memory import AgentMemory, Memory, AgentRun
 from agentica.compression.manager import CompressionManager
 from agentica.db.base import BaseDb
-
-if TYPE_CHECKING:
-    from agentica.workspace import Workspace
-    from agentica.knowledge.base import Knowledge
+from agentica.workspace import Workspace
+from agentica.knowledge.base import Knowledge
 
 
 
@@ -128,7 +122,7 @@ class Agent:
     enable_user_memories: bool = False
 
     # -*- Agent Knowledge
-    knowledge: Optional[Knowledge] = None
+    knowledge: Optional["Knowledge"] = None
     # Enable RAG by adding references from Knowledge to the user prompt.
     add_references: bool = False
     # Function to get references to add to the user_message
@@ -201,8 +195,6 @@ class Agent:
     enable_multi_round: bool = False
     # Maximum number of rounds for multi-round strategy
     max_rounds: int = 10
-    # Maximum number of tokens to use in the model input
-    max_tokens: int = 128000
 
     # -*- Agentic Prompt Settings, prompt enhancement, like openclaw/claude code
     # Enable agentic prompt enhancement (HEARTBEAT, SOUL modules)
@@ -350,7 +342,7 @@ class Agent:
             enable_user_memories: bool = False,
 
             # Knowledge
-            knowledge: Optional[Knowledge] = None,
+            knowledge: Optional["Knowledge"] = None,
             add_references: bool = False,
             retriever: Optional[Callable[..., Optional[list[dict]]]] = None,
             references_format: Literal["json", "yaml"] = "json",
@@ -386,7 +378,6 @@ class Agent:
             # Agent Multi-round Strategy Settings
             enable_multi_round: bool = False,
             max_rounds: int = 20,
-            max_tokens: int = 128000,
             enable_agentic_prompt: bool = False,
             run_timeout: Optional[float] = None,
             first_token_timeout: Optional[float] = None,
@@ -443,7 +434,7 @@ class Agent:
 
             # Aliases for backward compatibility
             llm: Optional[Model] = None,
-            knowledge_base: Optional[Knowledge] = None,
+            knowledge_base: Optional["Knowledge"] = None,
             add_chat_history_to_messages: Optional[bool] = None,
             add_knowledge_references_to_prompt: Optional[bool] = None,
             output_model: Optional[Type[Any]] = None,
@@ -520,7 +511,6 @@ class Agent:
         self.read_tool_call_history = read_tool_call_history
         self.enable_multi_round = enable_multi_round
         self.max_rounds = max_rounds
-        self.max_tokens = max_tokens
         self.enable_agentic_prompt = enable_agentic_prompt
         self.run_timeout = run_timeout
         self.first_token_timeout = first_token_timeout

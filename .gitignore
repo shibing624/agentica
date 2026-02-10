@@ -187,6 +187,8 @@ tmp/
 
 CLAUDE.md
 CLAUDE copy.md
+.codebuddy/*
 .codebuddy/
 update_tech_v3.md
 prompt_update.md
+

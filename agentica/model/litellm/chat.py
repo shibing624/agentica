@@ -118,7 +118,9 @@ class LiteLLM(Model):
     id: str = "openai/gpt-4o"
     name: str = "LiteLLM-gpt-4o"
     provider: str = "openai"
-    
+    context_window: int = 128000
+    max_output_tokens: int = 4096
+
     # API configuration
     api_key: Optional[str] = None
     base_url: Optional[str] = None

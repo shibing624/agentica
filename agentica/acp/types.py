@@ -7,7 +7,6 @@ Data models for Agent Client Protocol (ACP) communication.
 Based on JSON-RPC 2.0 specification.
 """
 
-from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Optional, Union
@@ -83,7 +82,7 @@ class ACPRequest(ACPMessage):
         return result
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ACPRequest:
+    def from_dict(cls, data: Dict[str, Any]) -> "ACPRequest":
         return cls(
             jsonrpc=data.get("jsonrpc", "2.0"),
             id=data.get("id", 0),
@@ -111,7 +110,7 @@ class ACPResponse(ACPMessage):
         return result
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ACPResponse:
+    def from_dict(cls, data: Dict[str, Any]) -> "ACPResponse":
         return cls(
             jsonrpc=data.get("jsonrpc", "2.0"),
             id=data.get("id", 0),
@@ -120,12 +119,12 @@ class ACPResponse(ACPMessage):
         )
     
     @classmethod
-    def create_success(cls, id: Union[str, int], result: Dict[str, Any]) -> ACPResponse:
+    def create_success(cls, id: Union[str, int], result: Dict[str, Any]) -> "ACPResponse":
         """Create a success response (factory method)"""
         return cls(id=id, result=result)
     
     @classmethod
-    def create_error(cls, id: Union[str, int], code: int, message: str, data: Any = None) -> ACPResponse:
+    def create_error(cls, id: Union[str, int], code: int, message: str, data: Any = None) -> "ACPResponse":
         """Create an error response (factory method)"""
         error = {"code": code, "message": message}
         if data is not None:
@@ -155,7 +154,7 @@ class ACPToolCall:
     arguments: Dict[str, Any] = field(default_factory=dict)
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ACPToolCall:
+    def from_dict(cls, data: Dict[str, Any]) -> "ACPToolCall":
         return cls(
             name=data["name"],
             arguments=data.get("arguments", {}),
@@ -183,7 +182,7 @@ class ACPInitializeParams:
     clientInfo: Dict[str, str] = field(default_factory=dict)
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ACPInitializeParams:
+    def from_dict(cls, data: Dict[str, Any]) -> "ACPInitializeParams":
         return cls(
             protocolVersion=data.get("protocolVersion", "2024-11-05"),
             capabilities=data.get("capabilities", {}),
@@ -217,7 +216,7 @@ class ACPAgentExecuteParams:
     files: Optional[List[str]] = None
     
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> ACPAgentExecuteParams:
+    def from_dict(cls, data: Dict[str, Any]) -> "ACPAgentExecuteParams":
         return cls(
             task=data["task"],
             context=data.get("context"),

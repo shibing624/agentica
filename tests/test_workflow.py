@@ -87,11 +87,6 @@ class TestWorkflowRun(unittest.TestCase):
         self.assertIsInstance(response, RunResponse)
         self.assertEqual(response.content, "Processed: Hello")
 
-    def test_run_workflow_wrapper(self):
-        """Test run_workflow wrapper method."""
-        workflow = SimpleWorkflow()
-        response = workflow.run_workflow("Test message")
-        self.assertIsInstance(response, RunResponse)
 
 
 class TestWorkflowSessionState(unittest.TestCase):

@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Investment workflow demo - Multi-agent investment report generation
+@description: Investment analysis workflow with session persistence
 
-This example shows a complex workflow for investment analysis:
-1. Stock analyst - Gathers company information
-2. Research analyst - Ranks companies by investment potential
-3. Investment lead - Creates investment proposal
+WHY Workflow (not a single Agent or Skill):
+1. Multi-agent isolation: each analyst has different tools and prompts
+2. Session state persistence: resume interrupted analysis from DB
+3. Deterministic pipeline: always Stock -> Research -> Investment order
+4. Per-step file output: each agent writes to its own report file
 
 pip install yfinance agentica
 """
@@ -17,104 +18,102 @@ from shutil import rmtree
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent
-from agentica.workflow import Workflow
-from agentica import logger
-from agentica import RunResponse, pprint_run_response
+from agentica import Agent, OpenAIChat, Workflow, RunResponse, pprint_run_response, logger
 from agentica.tools.yfinance_tool import YFinanceTool
 from agentica.db.sqlite import SqliteDb
 
 # Setup output directory
-reports_dir = Path(__file__).parent.joinpath("outputs", "report_investment")
+reports_dir = Path(__file__).parent.joinpath("outputs", "investment")
 if reports_dir.is_dir():
     rmtree(path=reports_dir, ignore_errors=True)
 reports_dir.mkdir(parents=True, exist_ok=True)
 
-stock_analyst_report = str(reports_dir.joinpath("stock_analyst_report.md"))
-research_analyst_report = str(reports_dir.joinpath("research_analyst_report.md"))
-investment_report = str(reports_dir.joinpath("investment_report.md"))
 
+class InvestmentPipeline(Workflow):
+    """Three-stage investment analysis: Data Collection -> Research -> Proposal.
 
-class InvestmentReportGenerator(Workflow):
-    """Generate investment reports for a list of companies."""
-    
-    description: str = (
-        "Produce a research report on a list of companies and rank them based on investment potential."
-    )
+    Each stage uses a different agent with different tools and expertise.
+    Session state is persisted to SQLite, allowing resumption on failure.
+    """
 
-    stock_analyst: Agent = Agent(
+    description: str = "Multi-agent investment analysis with session persistence."
+
+    # Stage 1: Data collection agent (has financial data tools)
+    data_collector: Agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini"),
+        name="DataCollector",
         tools=[YFinanceTool(company_info=True, analyst_recommendations=True, company_news=True)],
-        description="You are a Senior Investment Analyst for Goldman Sachs.",
         instructions=[
-            "You will be provided with a list of companies to write a report on.",
-            "Get the company information, analyst recommendations and news for each company",
-            "Generate an in-depth report for each company in markdown format.",
-            "Note: This is only for educational purposes.",
+            "Collect financial data for the given companies.",
+            "Get company info, analyst recommendations, and recent news.",
+            "Output a structured markdown report with all collected data.",
         ],
-        expected_output="Report in markdown format",
-        save_response_to_file=stock_analyst_report,
+        save_response_to_file=str(reports_dir / "01_data_collection.md"),
     )
 
-    research_analyst: Agent = Agent(
-        name="Research Analyst",
-        description="You are a Senior Investment Analyst tasked with ranking companies.",
+    # Stage 2: Research analyst (no tools, pure analysis)
+    researcher: Agent = Agent(
+        model=OpenAIChat(id="gpt-4o"),
+        name="ResearchAnalyst",
         instructions=[
-            "You will write a research report based on the Stock Analyst's information.",
-            "Think deeply about the value of each stock.",
-            "Be discerning, you are a skeptical investor focused on maximising growth.",
-            "Rank the companies in order of investment potential.",
-            "Prepare a markdown report with your findings.",
+            "Analyze the financial data and rank companies by investment potential.",
+            "Consider: growth trajectory, market position, risk factors, analyst consensus.",
+            "Be skeptical - focus on maximizing risk-adjusted returns.",
         ],
-        expected_output="Report in markdown format",
-        save_response_to_file=research_analyst_report,
+        save_response_to_file=str(reports_dir / "02_research_analysis.md"),
     )
 
+    # Stage 3: Investment lead (final decision maker)
     investment_lead: Agent = Agent(
-        name="Investment Lead",
-        description="You are a Senior Investment Lead tasked with investing $100,000.",
+        model=OpenAIChat(id="gpt-4o"),
+        name="InvestmentLead",
         instructions=[
-            "Review the report provided by the research analyst.",
-            "Produce an investment proposal for the client.",
-            "Provide the amount to invest in each company and explain why.",
+            "Create an investment proposal based on the research analysis.",
+            "Allocate a $100,000 budget across the recommended companies.",
+            "Specify exact dollar amounts and provide clear rationale for each allocation.",
         ],
-        save_response_to_file=investment_report,
+        save_response_to_file=str(reports_dir / "03_investment_proposal.md"),
     )
 
     def run(self, companies: str):
-        logger.info(f"Getting investment reports for companies: {companies}")
-        
-        # Step 1: Stock analysis
-        initial_report = self.stock_analyst.run(companies)
-        if initial_report is None or not initial_report.content:
-            yield RunResponse(run_id=self.run_id, content="Sorry, could not get the stock analyst report.")
+        """Execute the investment analysis pipeline."""
+        # Stage 1: Collect financial data
+        logger.info(f"Stage 1: Collecting data for {companies}")
+        data_response = self.data_collector.run(companies)
+        if not data_response or not data_response.content:
+            yield RunResponse(content="Data collection failed.")
             return
 
-        # Step 2: Research and ranking
-        logger.info("Ranking companies based on investment potential.")
-        ranked_companies = self.research_analyst.run(initial_report.content)
-        if ranked_companies is None or not ranked_companies.content:
-            yield RunResponse(run_id=self.run_id, content="Sorry, could not get the ranked companies.")
+        # Cache in session state for potential resume
+        self.session_state["data_collected"] = True
+
+        # Stage 2: Research and ranking
+        logger.info("Stage 2: Analyzing and ranking companies")
+        research_response = self.researcher.run(data_response.content)
+        if not research_response or not research_response.content:
+            yield RunResponse(content="Research analysis failed.")
             return
 
-        # Step 3: Investment proposal
-        logger.info("Reviewing the research report and producing an investment proposal.")
-        yield from self.investment_lead.run(ranked_companies.content, stream=True)
+        self.session_state["research_completed"] = True
+
+        # Stage 3: Investment proposal (streamed)
+        logger.info("Stage 3: Creating investment proposal")
+        yield from self.investment_lead.run(research_response.content, stream=True)
 
 
 if __name__ == "__main__":
-    companies = 'TSLA'
+    companies = "TSLA, NVDA"
 
-    # Convert to URL-safe string
-    url_safe_companies = companies.lower().replace(" ", "-").replace(",", "")
-
-    # Initialize workflow
-    investment_report_generator = InvestmentReportGenerator(
-        session_id=f"investment-report-{url_safe_companies}",
-        db=SqliteDb(
-            db_file="outputs/investment_workflows.db",
-        ),
+    # Session ID enables persistence and resume
+    session_key = companies.lower().replace(" ", "").replace(",", "-")
+    pipeline = InvestmentPipeline(
+        session_id=f"invest-{session_key}",
+        db=SqliteDb(db_file=str(reports_dir / "sessions.db")),
     )
 
-    # Execute workflow
-    report = investment_report_generator.run(companies=companies)
-    pprint_run_response(report)
+    print("=" * 60)
+    print(f"Investment Pipeline: {companies}")
+    print("=" * 60)
+
+    result = pipeline.run(companies=companies)
+    pprint_run_response(result)

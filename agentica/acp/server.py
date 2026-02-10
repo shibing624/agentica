@@ -13,7 +13,6 @@ Usage:
     server.run()
 """
 
-from __future__ import annotations
 
 import sys
 from typing import TYPE_CHECKING, Optional
@@ -47,7 +46,7 @@ class ACPServer:
     }
     """
     
-    def __init__(self, agent: Optional[Agent] = None, model: Optional[Model] = None):
+    def __init__(self, agent: Optional["Agent"] = None, model: Optional["Model"] = None):
         """
         Initialize ACP Server.
         

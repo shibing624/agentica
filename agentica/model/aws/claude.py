@@ -24,6 +24,8 @@ class Claude(AwsBedrock):
     id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
     name: str = "AwsBedrockAnthropicClaude"
     provider: str = "AwsBedrock"
+    context_window: int = 200000
+    max_output_tokens: int = 8192
 
     # -*- Request parameters
     max_tokens: int = 4096

@@ -6,7 +6,6 @@
 This module contains methods for session management, storage operations,
 and memory persistence.
 """
-from __future__ import annotations
 
 import json
 from typing import (

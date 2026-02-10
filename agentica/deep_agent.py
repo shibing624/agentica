@@ -28,7 +28,6 @@ Key Features:
 5. Deep Research System Prompt: Optimized for thorough investigation
 6. Enhanced Iteration Control: HEARTBEAT-style forced iteration (Phase 3)
 """
-from __future__ import annotations
 
 from collections import deque
 from typing import (
@@ -46,6 +45,7 @@ from agentica.tools.base import ModelTool, Tool, Function
 from agentica.deep_tools import get_builtin_tools, BuiltinTaskTool
 from agentica.model.message import Message
 from agentica.utils.log import logger
+from agentica.utils.tokens import count_message_tokens
 
 from agentica.prompts.base.deep_agent import (
     get_deep_research_prompt,
@@ -119,8 +119,8 @@ class DeepAgent(Agent):
     reflection_frequency: int = 3  # Inject reflection prompt every N steps
 
     # Context Management (only used with enable_multi_round=True)
-    context_soft_limit: int = 80000  # Soft threshold: start compression
-    context_hard_limit: int = 120000  # Hard threshold: force termination
+    context_soft_limit: Optional[int] = None  # Soft threshold: start compression (default: model.context_window * 0.6)
+    context_hard_limit: Optional[int] = None  # Hard threshold: force termination (default: model.context_window * 0.8)
     enable_context_overflow_handling: bool = False  # Disabled by default
 
     # Repetitive Behavior Detection (only used with enable_multi_round=True)
@@ -153,8 +153,8 @@ class DeepAgent(Agent):
             enable_step_reflection: bool = False,
             reflection_frequency: int = 3,
             # Context Management (only used with enable_multi_round=True, disabled by default)
-            context_soft_limit: int = 80000,
-            context_hard_limit: int = 120000,
+            context_soft_limit: Optional[int] = None,
+            context_hard_limit: Optional[int] = None,
             enable_context_overflow_handling: bool = False,
             # Repetitive Behavior Detection (only used with enable_multi_round=True, disabled by default)
             enable_repetition_detection: bool = False,
@@ -188,8 +188,8 @@ class DeepAgent(Agent):
             enable_deep_research: Enable deep research system prompt (does not affect multi-round)
             enable_step_reflection: Enable reflection after steps
             reflection_frequency: How often to inject reflection prompts
-            context_soft_limit: Token count to start compression
-            context_hard_limit: Token count to force termination
+            context_soft_limit: Token count to start compression (default: model.context_window * 0.6)
+            context_hard_limit: Token count to force termination (default: model.context_window * 0.8)
             enable_context_overflow_handling: Enable context overflow handling
             enable_repetition_detection: Enable repetitive behavior detection
             max_same_tool_calls: Max consecutive calls to same tool
@@ -219,9 +219,13 @@ class DeepAgent(Agent):
         self.enable_step_reflection = enable_step_reflection
         self.reflection_frequency = reflection_frequency
 
-        # Context Management
-        self.context_soft_limit = context_soft_limit
-        self.context_hard_limit = context_hard_limit
+        # Context Management - auto-derive from model capabilities if not explicitly set
+        # Effective context = context_window - max_output_tokens (reserve space for output)
+        cw = getattr(self.model, 'context_window', None) if self.model else None
+        mot = getattr(self.model, 'max_output_tokens', None) if self.model else None
+        effective_context = (cw - (mot or 0)) if cw else None
+        self.context_soft_limit = context_soft_limit if context_soft_limit is not None else (int(effective_context * 0.6) if effective_context else 80000)
+        self.context_hard_limit = context_hard_limit if context_hard_limit is not None else (int(effective_context * 0.8) if effective_context else 120000)
         self.enable_context_overflow_handling = enable_context_overflow_handling
 
         # Repetitive Behavior Detection
@@ -265,18 +269,7 @@ class DeepAgent(Agent):
             # Use deep research prompt
             final_system_prompt = get_deep_research_prompt()
 
-        # NOTE: enable_multi_round is NO LONGER required for deep research!
-        # The Model layer already has built-in recursive tool calling (agentic loop),
-        # which is equivalent to OpenClaw's pi-agent-core approach.
-        # enable_multi_round=True adds extra complexity (reflection prompts, checkpoints)
-        # that may actually interfere with the model's natural reasoning.
-        #
-        # Recommendation:
-        # - For most cases: use default (enable_multi_round=False), let Model layer handle it
-        # - Only use enable_multi_round=True if you need explicit step-by-step control
-
-        # Call parent class init with merged tools
-        # Enable agentic prompt by default for enhanced capabilities (heartbeat, soul, self-verification, etc.)
+        # Enable agentic prompt by default for enhanced capabilities (heartbeat, soul, etc.)
         kwargs.setdefault('enable_agentic_prompt', True)
         
         super().__init__(
@@ -325,19 +318,12 @@ class DeepAgent(Agent):
                 break
 
     def _estimate_context_tokens(self, messages: List[Message]) -> int:
-        """
-        Estimate the current context token count.
-        
-        Uses character count / 4 as a rough estimate if tiktoken is not available.
-        """
-        try:
-            from agentica.utils.tokens import count_tokens
-            model_id = getattr(self.model, 'id', 'gpt-4o') if self.model else 'gpt-4o'
-            return count_tokens(messages, self.model.functions if hasattr(self.model, 'functions') else None, model_id)
-        except Exception:
-            # Fallback: estimate tokens as characters / 4
-            total_chars = sum(len(str(m.content or "")) for m in messages)
-            return total_chars // 4
+        """Estimate the current context token count using tokens.py utilities."""
+        model_id = getattr(self.model, 'id', 'gpt-4o') if self.model else 'gpt-4o'
+        total = 0
+        for msg in messages:
+            total += count_message_tokens(msg, model_id)
+        return total
 
     def _check_repetitive_behavior(self, tool_name: str) -> Optional[str]:
         """
@@ -529,10 +515,12 @@ If not complete, continue working. Do NOT end your turn prematurely.
     def __repr__(self) -> str:
         """Return string representation of DeepAgent."""
         builtin_tools = self.get_builtin_tool_names()
+        mot = getattr(self.model, 'max_output_tokens', None) if self.model else None
         return (
             f"DeepAgent(name={self.name}, "
             f"deep_research={self.enable_deep_research}, "
             f"max_rounds={self.max_rounds}, "
+            f"max_output_tokens={mot}, "
             f"builtin_tools={len(builtin_tools)})"
         )
 

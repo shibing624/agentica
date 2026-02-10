@@ -6,7 +6,6 @@
 This module contains the default tool implementations that can be
 enabled on the Agent (chat history, knowledge base, memory, etc.)
 """
-from __future__ import annotations
 
 import json
 from typing import (

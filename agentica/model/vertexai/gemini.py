@@ -75,6 +75,8 @@ class Gemini(Model):
     id: str = "gemini-2.0-flash-exp"
     name: str = "Gemini"
     provider: str = "VertexAI"
+    context_window: int = 1048576
+    max_output_tokens: int = 8192
 
     # Request parameters
     generation_config: Optional[Any] = None

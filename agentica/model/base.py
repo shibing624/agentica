@@ -30,6 +30,16 @@ class Model(BaseModel):
     metrics: Dict[str, Any] = Field(default_factory=dict)
     response_format: Optional[Any] = None
 
+    # -*- Model capability limits (not sent to the API) -*-
+    # Maximum context window size in tokens. Subclasses should override with model-specific values.
+    # Used by Agent/DeepAgent for context management decisions.
+    context_window: int = 128000
+    # Maximum number of tokens the model can generate in a single response.
+    # This declares the model's output capability, NOT the per-request budget.
+    # Per-request budget is controlled by each subclass's `max_tokens` or equivalent parameter.
+    # Subclasses should override with model-specific values.
+    max_output_tokens: Optional[int] = None
+
     # A list of tools provided to the Model.
     # Tools are functions the model may generate JSON inputs for.
     # If you provide a dict, it is not called by the model.

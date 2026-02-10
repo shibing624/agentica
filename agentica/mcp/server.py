@@ -3,7 +3,6 @@
 @author:XuMing(xuming624@qq.com)
 @description: Model Context Protocol (MCP) client implementations supporting both stdio and SSE transports
 """
-from __future__ import annotations
 
 import abc
 import asyncio

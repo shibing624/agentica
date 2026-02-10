@@ -60,9 +60,11 @@ class Claude(Model):
     id: str = "claude-3-5-sonnet-20241022"
     name: str = "Claude"
     provider: str = "Anthropic"
+    context_window: int = 200000
+    max_output_tokens: int = 8192
 
     # Request parameters
-    max_tokens: Optional[int] = 1024
+    max_tokens: int = 8192
     temperature: Optional[float] = None
     stop_sequences: Optional[List[str]] = None
     top_p: Optional[float] = None
@@ -107,8 +109,7 @@ class Claude(Model):
             Dict[str, Any]: A dictionary of keyword arguments for API requests.
         """
         _request_params: Dict[str, Any] = {}
-        if self.max_tokens:
-            _request_params["max_tokens"] = self.max_tokens
+        _request_params["max_tokens"] = self.max_tokens
         if self.temperature:
             _request_params["temperature"] = self.temperature
         if self.stop_sequences:

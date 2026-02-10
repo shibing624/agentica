@@ -11,7 +11,6 @@ from typing import Optional, Any, Dict, List, Union, Iterable
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentica.model.content import Video, Image, Audio
-from agentica.reasoning import ReasoningStep
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 from agentica.model.message import Message, MessageReferences
@@ -42,9 +41,6 @@ class RunResponseExtraData(BaseModel):
     references: Optional[List[MessageReferences]] = None
     add_messages: Optional[List[Message]] = None
     history: Optional[List[Message]] = None
-    reasoning_steps: Optional[List[ReasoningStep]] = None
-    reasoning_messages: Optional[List[Message]] = None
-
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 
 

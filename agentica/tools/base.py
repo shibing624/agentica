@@ -7,7 +7,6 @@ It includes an abstract base class for tools and a class for managing tool insta
 
 part of the code from https://github.com/phidatahq/phidata
 """
-from __future__ import annotations
 
 import asyncio
 import inspect

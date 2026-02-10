@@ -4,7 +4,6 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from __future__ import annotations
 from typing import Optional, Dict, Any, List
 
 from pydantic import BaseModel, ConfigDict

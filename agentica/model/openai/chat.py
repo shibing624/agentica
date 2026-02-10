@@ -99,6 +99,8 @@ class OpenAIChat(Model):
     id: str = "gpt-4o"  # model name
     name: str = "OpenAIChat"
     provider: str = "OpenAI"
+    context_window: int = 128000
+    max_output_tokens: int = 16384
 
     # Request parameters
     store: Optional[bool] = None

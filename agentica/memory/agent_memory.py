@@ -1,0 +1,609 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Agent memory for managing conversation history and session summaries
+"""
+
+from typing import Dict, List, Any, Optional, Tuple
+from copy import deepcopy
+from pydantic import BaseModel, ConfigDict
+
+from agentica.db.base import BaseDb, BASE64_PLACEHOLDER, clean_media_placeholders
+from agentica.model.message import Message
+from agentica.utils.log import logger
+from agentica.run_response import RunResponse
+from agentica.utils.tokens import count_message_tokens
+from agentica.memory.models import (
+    AgentRun,
+    SessionSummary,
+    Memory,
+    MemoryRetrieval,
+)
+from agentica.memory.manager import MemoryManager, MemoryClassifier
+from agentica.memory.summarizer import MemorySummarizer
+
+
+def _clean_content_list(content_list: list) -> list:
+    """Clean a list-type content by removing BASE64 placeholder items."""
+    cleaned = []
+    for item in content_list:
+        if isinstance(item, dict):
+            item_type = item.get("type", "")
+            if item_type == "image_url":
+                image_url_data = item.get("image_url", {})
+                url = image_url_data.get("url", "") if isinstance(image_url_data, dict) else ""
+                if BASE64_PLACEHOLDER in str(url):
+                    continue
+            elif item_type == "input_audio":
+                audio_data = item.get("input_audio", {})
+                data = audio_data.get("data", "") if isinstance(audio_data, dict) else ""
+                if BASE64_PLACEHOLDER in str(data):
+                    continue
+            elif item_type == "text":
+                text = item.get("text", "")
+                if BASE64_PLACEHOLDER in str(text):
+                    continue
+            else:
+                if BASE64_PLACEHOLDER in str(item):
+                    continue
+            cleaned.append(item)
+        elif isinstance(item, str):
+            if BASE64_PLACEHOLDER not in item:
+                cleaned.append(item)
+        else:
+            cleaned.append(item)
+    return cleaned
+
+
+def _clean_media_list(media_list: list) -> Optional[list]:
+    """Clean a list of media items (images/videos) by removing placeholders."""
+    cleaned = []
+    for item in media_list:
+        if isinstance(item, str) and BASE64_PLACEHOLDER in item:
+            continue
+        elif isinstance(item, dict):
+            result = clean_media_placeholders(item)
+            if result is not None:
+                cleaned.append(result)
+        else:
+            cleaned.append(item)
+    return cleaned if cleaned else None
+
+
+def _clean_message_for_history(msg: Message) -> Message:
+    """Clean a message by removing filtered media placeholders."""
+    cleaned_msg = msg.model_copy(deep=True)
+
+    if cleaned_msg.content is not None:
+        if isinstance(cleaned_msg.content, list):
+            cleaned_content_list = _clean_content_list(cleaned_msg.content)
+            if len(cleaned_content_list) == 1 and isinstance(cleaned_content_list[0], dict):
+                if cleaned_content_list[0].get("type") == "text":
+                    cleaned_msg.content = cleaned_content_list[0].get("text", "")
+                else:
+                    cleaned_msg.content = cleaned_content_list
+            elif len(cleaned_content_list) == 0:
+                cleaned_msg.content = ""
+            else:
+                cleaned_msg.content = cleaned_content_list
+        elif isinstance(cleaned_msg.content, str):
+            if BASE64_PLACEHOLDER in cleaned_msg.content:
+                cleaned_msg.content = ""
+
+    if cleaned_msg.images is not None:
+        cleaned_msg.images = _clean_media_list(cleaned_msg.images)
+
+    if cleaned_msg.audio is not None:
+        if isinstance(cleaned_msg.audio, str) and BASE64_PLACEHOLDER in cleaned_msg.audio:
+            cleaned_msg.audio = None
+        elif isinstance(cleaned_msg.audio, dict):
+            cleaned_msg.audio = clean_media_placeholders(cleaned_msg.audio)
+
+    if cleaned_msg.videos is not None:
+        cleaned_msg.videos = _clean_media_list(cleaned_msg.videos)
+
+    return cleaned_msg
+
+
+def _is_conversation_message(msg: Message) -> bool:
+    """Check if a message is a user/assistant conversation message (not tool-related)."""
+    if msg.role == "tool":
+        return False
+    if msg.role == "assistant" and msg.tool_calls:
+        return False
+    if msg.tool_call_id:
+        return False
+    if msg.role in ("user", "assistant") and msg.content:
+        return True
+    return False
+
+
+def _truncate_tool_content(msg: Message, max_chars: int = 500) -> Message:
+    """Truncate long content in a message to save token space."""
+    if not msg.content or not isinstance(msg.content, str):
+        return msg
+    if len(msg.content) <= max_chars:
+        return msg
+
+    truncated = msg.model_copy(deep=True)
+    head_size = max_chars * 2 // 3
+    tail_size = max_chars - head_size
+    truncated.content = (
+        msg.content[:head_size]
+        + f"\n...[truncated {len(msg.content) - max_chars} chars]...\n"
+        + msg.content[-tail_size:]
+    )
+    return truncated
+
+
+class AgentMemory(BaseModel):
+    """Agent memory for managing conversation history and session summaries.
+
+    AgentMemory focuses on runtime conversation management:
+    - Session history (runs, messages)
+    - Session summaries (optional)
+
+    For persistent user memories and preferences, use Workspace instead:
+    - Workspace stores memories in human-readable Markdown files
+    - Supports version control (Git)
+    - Easy to edit and share
+
+    Example - Session management only (recommended):
+        >>> memory = AgentMemory(create_session_summary=True)
+        >>> agent = Agent(memory=memory)
+
+    Example - With Workspace for persistent memory:
+        >>> from agentica.workspace import Workspace
+        >>> workspace = Workspace("~/.agentica/workspace")
+        >>> agent = Agent(workspace=workspace)
+
+    Note:
+        The `create_user_memories` feature is DEPRECATED.
+        Use Workspace.save_memory() for persistent memory storage instead.
+    """
+
+    # ========== Session Management (Core Features) ==========
+    runs: List[AgentRun] = []
+    messages: List[Message] = []
+    update_system_message_on_change: bool = False
+
+    create_session_summary: bool = False
+    update_session_summary_after_run: bool = True
+    summary: Optional[SessionSummary] = None
+    summarizer: Optional[MemorySummarizer] = None
+
+    # ========== User Memory (DEPRECATED - Use Workspace instead) ==========
+    create_user_memories: bool = False
+    update_user_memories_after_run: bool = True
+    db: Optional[BaseDb] = None
+    user_id: Optional[str] = None
+    retrieval: MemoryRetrieval = MemoryRetrieval.last_n
+    memories: Optional[List[Memory]] = None
+    num_memories: Optional[int] = None
+    classifier: Optional[MemoryClassifier] = None
+    manager: Optional[MemoryManager] = None
+
+    updating_memory: bool = False
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @classmethod
+    def with_db(
+            cls,
+            db: BaseDb,
+            user_id: Optional[str] = None,
+            retrieval: MemoryRetrieval = MemoryRetrieval.last_n,
+            num_memories: Optional[int] = None,
+            **kwargs
+    ) -> "AgentMemory":
+        """Factory method to create AgentMemory with database enabled.
+
+        .. deprecated::
+            This method is deprecated. Use Workspace for persistent memory storage.
+        """
+        import warnings
+        warnings.warn(
+            "AgentMemory.with_db() is deprecated. Use Workspace for persistent memory storage. "
+            "See: from agentica.workspace import Workspace",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return cls(
+            create_user_memories=True,
+            db=db,
+            user_id=user_id,
+            retrieval=retrieval,
+            num_memories=num_memories,
+            **kwargs
+        )
+
+    @classmethod
+    def with_summary(cls, **kwargs) -> "AgentMemory":
+        """Factory method to create AgentMemory with session summary enabled."""
+        return cls(
+            create_session_summary=True,
+            update_session_summary_after_run=True,
+            **kwargs
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        _memory_dict = self.model_dump(
+            exclude_none=True,
+            exclude={
+                "summary",
+                "summarizer",
+                "db",
+                "updating_memory",
+                "memories",
+                "classifier",
+                "manager",
+                "retrieval",
+            },
+        )
+        if self.summary:
+            _memory_dict["summary"] = self.summary.to_dict()
+        if self.memories:
+            _memory_dict["memories"] = [memory.to_dict() for memory in self.memories]
+        return _memory_dict
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AgentMemory":
+        """Create an AgentMemory instance from a dictionary."""
+        if not data:
+            return cls()
+        
+        data_copy = data.copy()
+        
+        if "runs" in data_copy and data_copy["runs"]:
+            runs = []
+            for run_data in data_copy["runs"]:
+                if isinstance(run_data, dict):
+                    if "message" in run_data and run_data["message"]:
+                        run_data["message"] = Message(**run_data["message"])
+                    if "messages" in run_data and run_data["messages"]:
+                        run_data["messages"] = [Message(**m) for m in run_data["messages"]]
+                    if "response" in run_data and run_data["response"]:
+                        run_data["response"] = RunResponse(**run_data["response"])
+                    runs.append(AgentRun(**run_data))
+                elif isinstance(run_data, AgentRun):
+                    runs.append(run_data)
+            data_copy["runs"] = runs
+        
+        if "messages" in data_copy and data_copy["messages"]:
+            data_copy["messages"] = [
+                Message(**m) if isinstance(m, dict) else m 
+                for m in data_copy["messages"]
+            ]
+        
+        if "summary" in data_copy and data_copy["summary"]:
+            if isinstance(data_copy["summary"], dict):
+                data_copy["summary"] = SessionSummary(**data_copy["summary"])
+        
+        if "memories" in data_copy and data_copy["memories"]:
+            data_copy["memories"] = [
+                Memory(**m) if isinstance(m, dict) else m 
+                for m in data_copy["memories"]
+            ]
+        
+        for field_name in ["summarizer", "db", "classifier", "manager"]:
+            data_copy.pop(field_name, None)
+        
+        return cls(**data_copy)
+
+    def add_run(self, agent_run: AgentRun) -> None:
+        """Adds an AgentRun to the runs list."""
+        self.runs.append(agent_run)
+
+    def add_system_message(self, message: Message, system_message_role: str = "system") -> None:
+        """Add the system messages to the messages list"""
+        if len(self.messages) == 0:
+            if message is not None:
+                self.messages.append(message)
+        else:
+            system_message_index = next((i for i, m in enumerate(self.messages) if m.role == system_message_role), None)
+            if system_message_index is not None:
+                if (
+                        self.messages[system_message_index].content != message.content
+                        and self.update_system_message_on_change
+                ):
+                    logger.info("Updating system message in memory with new content")
+                    self.messages[system_message_index] = message
+            else:
+                self.messages.insert(0, message)
+
+    def add_message(self, message: Message) -> None:
+        """Add a Message to the messages list."""
+        self.messages.append(message)
+
+    def add_messages(self, messages: List[Message]) -> None:
+        """Add a list of messages to the messages list."""
+        self.messages.extend(messages)
+
+    def get_messages(self) -> List[Dict[str, Any]]:
+        """Returns the messages list as a list of dictionaries."""
+        return [message.model_dump(exclude_none=True) for message in self.messages]
+
+    def get_messages_from_last_n_runs(
+            self,
+            last_n: Optional[int] = None,
+            skip_role: Optional[str] = None,
+            max_tokens: Optional[int] = None,
+            truncate_tool_results: bool = True,
+            tool_result_max_chars: int = 500,
+    ) -> List[Message]:
+        """Returns the messages from the last_n runs with token budget awareness."""
+        if last_n is None:
+            selected_runs = self.runs
+        else:
+            selected_runs = self.runs[-last_n:]
+
+        if not selected_runs:
+            return []
+
+        runs_messages: List[List[Message]] = []
+        for prev_run in selected_runs:
+            if prev_run.response and prev_run.response.messages:
+                run_msgs = [
+                    m for m in prev_run.response.messages
+                    if _is_conversation_message(m) and (not skip_role or m.role != skip_role)
+                ]
+                cleaned = [_clean_message_for_history(m) for m in run_msgs]
+                if cleaned:
+                    runs_messages.append(cleaned)
+
+        if not runs_messages:
+            return []
+
+        if max_tokens is None:
+            all_messages = []
+            for i, run_msgs in enumerate(runs_messages):
+                if truncate_tool_results and i < len(runs_messages) - 1:
+                    run_msgs = [_truncate_tool_content(m, tool_result_max_chars) for m in run_msgs]
+                all_messages.extend(run_msgs)
+            logger.debug(f"History messages: {len(all_messages)} (no token limit)")
+            return all_messages
+
+        total_tokens = 0
+        collected_runs: List[List[Message]] = []
+
+        for i in range(len(runs_messages) - 1, -1, -1):
+            run_msgs = runs_messages[i]
+            is_older_run = i < len(runs_messages) - 1
+
+            if truncate_tool_results and is_older_run:
+                run_msgs = [_truncate_tool_content(m, tool_result_max_chars) for m in run_msgs]
+
+            run_tokens = sum(count_message_tokens(m) for m in run_msgs)
+
+            if total_tokens + run_tokens > max_tokens:
+                if is_older_run:
+                    truncated = [_truncate_tool_content(m, tool_result_max_chars // 2) for m in run_msgs]
+                    run_tokens = sum(count_message_tokens(m) for m in truncated)
+                    if total_tokens + run_tokens <= max_tokens:
+                        collected_runs.insert(0, truncated)
+                        total_tokens += run_tokens
+                        continue
+                if not collected_runs:
+                    collected_runs.append(run_msgs)
+                    total_tokens += run_tokens
+                break
+
+            collected_runs.insert(0, run_msgs)
+            total_tokens += run_tokens
+
+        result = []
+        for run_msgs in collected_runs:
+            result.extend(run_msgs)
+
+        logger.debug(f"History messages: {len(result)}, estimated tokens: {total_tokens}")
+        return result
+
+    def get_message_pairs(
+            self, user_role: str = "user", assistant_role: Optional[List[str]] = None
+    ) -> List[Tuple[Message, Message]]:
+        """Returns a list of tuples of (user message, assistant response)."""
+
+        if assistant_role is None:
+            assistant_role = ["assistant", "model", "CHATBOT"]
+
+        runs_as_message_pairs: List[Tuple[Message, Message]] = []
+        for run in self.runs:
+            if run.response and run.response.messages:
+                user_messages_from_run = None
+                assistant_messages_from_run = None
+
+                for message in run.response.messages:
+                    if message.role == user_role:
+                        user_messages_from_run = message
+                        break
+
+                for message in run.response.messages[::-1]:
+                    if message.role in assistant_role:
+                        assistant_messages_from_run = message
+                        break
+
+                if user_messages_from_run and assistant_messages_from_run:
+                    runs_as_message_pairs.append((user_messages_from_run, assistant_messages_from_run))
+        return runs_as_message_pairs
+
+    def get_tool_calls(self, num_calls: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Returns a list of tool calls from the messages"""
+
+        tool_calls = []
+        for message in self.messages[::-1]:
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_calls.append(tool_call)
+                    if num_calls and len(tool_calls) >= num_calls:
+                        return tool_calls
+        return tool_calls
+
+    def load_user_memories(self) -> None:
+        """Load memories from memory db for this user."""
+        if self.db is None:
+            return
+
+        try:
+            if self.retrieval == MemoryRetrieval.first_n:
+                memory_rows = self.db.read_memories(
+                    user_id=self.user_id,
+                    limit=self.num_memories,
+                    sort="asc",
+                )
+            else:
+                memory_rows = self.db.read_memories(
+                    user_id=self.user_id,
+                    limit=self.num_memories,
+                    sort="desc",
+                )
+        except Exception as e:
+            logger.debug(f"Error reading memory: {e}")
+            return
+
+        self.memories = []
+
+        if memory_rows is None or len(memory_rows) == 0:
+            return
+
+        for row in memory_rows:
+            try:
+                self.memories.append(Memory.model_validate(row.memory))
+            except Exception as e:
+                logger.warning(f"Error loading memory: {e}")
+                continue
+
+    def _check_should_update_memory(self, input: str) -> bool:
+        """Common logic for determining if a message should be added to the memory db."""
+        if self.classifier is None:
+            self.classifier = MemoryClassifier()
+
+        self.classifier.existing_memories = self.memories
+        return True  # Will be called with sync/async response separately
+
+    def should_update_memory(self, input: str) -> bool:
+        """Determines if a message should be added to the memory db."""
+        if self.classifier is None:
+            self.classifier = MemoryClassifier()
+        self.classifier.existing_memories = self.memories
+        classifier_response = self.classifier.run(input)
+        return classifier_response is not None and classifier_response.strip().lower().startswith("yes")
+
+    async def ashould_update_memory(self, input: str) -> bool:
+        """Determines if a message should be added to the memory db."""
+        if self.classifier is None:
+            self.classifier = MemoryClassifier()
+        self.classifier.existing_memories = self.memories
+        classifier_response = await self.classifier.arun(input)
+        return classifier_response is not None and classifier_response.strip().lower().startswith("yes")
+
+    def _prepare_memory_update(self, input: str) -> Optional[str]:
+        """Common validation logic for memory updates. Returns error message or None."""
+        if input is None or not isinstance(input, str):
+            return "Invalid message content"
+        if self.db is None:
+            logger.warning("Database not provided.")
+            return "Please provide a db to store memories"
+        return None
+
+    def _ensure_manager(self) -> None:
+        """Ensure manager is initialized with current db and user_id."""
+        if self.manager is None:
+            self.manager = MemoryManager(user_id=self.user_id, db=self.db)
+        else:
+            self.manager.db = self.db
+            self.manager.user_id = self.user_id
+
+    def update_memory(self, input: str, force: bool = False) -> Optional[str]:
+        """Creates a memory from a message and adds it to the memory db."""
+        error = self._prepare_memory_update(input)
+        if error:
+            return error
+
+        self.updating_memory = True
+        try:
+            should_update = force or self.should_update_memory(input=input)
+            logger.debug(f"Update memory: {should_update}")
+
+            if not should_update:
+                logger.debug("Memory update not required")
+                return "Memory update not required"
+
+            self._ensure_manager()
+            response = self.manager.run(input)
+            self.load_user_memories()
+            return response
+        finally:
+            self.updating_memory = False
+
+    async def aupdate_memory(self, input: str, force: bool = False) -> Optional[str]:
+        """Creates a memory from a message and adds it to the memory db."""
+        error = self._prepare_memory_update(input)
+        if error:
+            return error
+
+        self.updating_memory = True
+        try:
+            should_update = force or await self.ashould_update_memory(input=input)
+            logger.debug(f"Async update memory: {should_update}")
+
+            if not should_update:
+                logger.debug("Memory update not required")
+                return "Memory update not required"
+
+            self._ensure_manager()
+            response = await self.manager.arun(input)
+            self.load_user_memories()
+            return response
+        finally:
+            self.updating_memory = False
+
+    def update_summary(self) -> Optional[SessionSummary]:
+        """Creates a summary of the session"""
+        self.updating_memory = True
+        try:
+            if self.summarizer is None:
+                self.summarizer = MemorySummarizer()
+            self.summary = self.summarizer.run(self.get_message_pairs())
+            return self.summary
+        finally:
+            self.updating_memory = False
+
+    async def aupdate_summary(self) -> Optional[SessionSummary]:
+        """Creates a summary of the session"""
+        self.updating_memory = True
+        try:
+            if self.summarizer is None:
+                self.summarizer = MemorySummarizer()
+            self.summary = await self.summarizer.arun(self.get_message_pairs())
+            return self.summary
+        finally:
+            self.updating_memory = False
+
+    def clear(self) -> None:
+        """Clear the AgentMemory"""
+
+        self.runs = []
+        self.messages = []
+        self.summary = None
+        self.memories = None
+
+    def deep_copy(self):
+        copied_obj = self.__class__(**self.model_dump())
+
+        for field_name, field_value in self.__dict__.items():
+            if field_name not in ["db", "classifier", "manager", "summarizer"]:
+                try:
+                    setattr(copied_obj, field_name, deepcopy(field_value))
+                except Exception as e:
+                    logger.warning(f"Failed to deepcopy field: {field_name} - {e}")
+                    setattr(copied_obj, field_name, field_value)
+
+        copied_obj.db = self.db
+        copied_obj.classifier = self.classifier
+        copied_obj.manager = self.manager
+        copied_obj.summarizer = self.summarizer
+
+        return copied_obj
+
+    def get_memories(self) -> List[Memory]:
+        return self.memories or []

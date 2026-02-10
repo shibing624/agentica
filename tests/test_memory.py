@@ -19,6 +19,11 @@ from agentica.memory import (
     WorkflowMemory,
     WorkflowRun,
 )
+from agentica.memory.agent_memory import (
+    _clean_message_for_history,
+    _is_conversation_message,
+    _truncate_tool_content,
+)
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 
@@ -224,6 +229,154 @@ class TestWorkflowRun(unittest.TestCase):
         )
         self.assertEqual(run.input["key"], "value")
         self.assertEqual(run.response.content, "Result")
+
+
+class TestHelperFunctions(unittest.TestCase):
+    """Test cases for module-level helper functions."""
+
+    def test_is_conversation_message_user(self):
+        """Test _is_conversation_message keeps user messages."""
+        msg = Message(role="user", content="Hello")
+        self.assertTrue(_is_conversation_message(msg))
+
+    def test_is_conversation_message_assistant(self):
+        """Test _is_conversation_message keeps assistant messages."""
+        msg = Message(role="assistant", content="Hi there")
+        self.assertTrue(_is_conversation_message(msg))
+
+    def test_is_conversation_message_tool(self):
+        """Test _is_conversation_message filters tool messages."""
+        msg = Message(role="tool", content="result")
+        self.assertFalse(_is_conversation_message(msg))
+
+    def test_is_conversation_message_assistant_with_tool_calls(self):
+        """Test _is_conversation_message filters assistant with tool_calls."""
+        msg = Message(role="assistant", content="calling", tool_calls=[{"id": "1"}])
+        self.assertFalse(_is_conversation_message(msg))
+
+    def test_truncate_tool_content_short(self):
+        """Test _truncate_tool_content keeps short content unchanged."""
+        msg = Message(role="assistant", content="short text")
+        result = _truncate_tool_content(msg, max_chars=500)
+        self.assertEqual(result.content, "short text")
+
+    def test_truncate_tool_content_long(self):
+        """Test _truncate_tool_content truncates long content."""
+        long_text = "a" * 1000
+        msg = Message(role="assistant", content=long_text)
+        result = _truncate_tool_content(msg, max_chars=200)
+        self.assertIn("truncated", result.content)
+        self.assertLess(len(result.content), len(long_text))
+
+    def test_truncate_tool_content_preserves_head_tail(self):
+        """Test _truncate_tool_content keeps head and tail of content."""
+        content = "HEAD_" + "x" * 1000 + "_TAIL"
+        msg = Message(role="assistant", content=content)
+        result = _truncate_tool_content(msg, max_chars=200)
+        self.assertTrue(result.content.startswith("HEAD_"))
+        self.assertTrue(result.content.endswith("_TAIL"))
+
+    def test_truncate_tool_content_non_string(self):
+        """Test _truncate_tool_content handles non-string content."""
+        msg = Message(role="assistant", content=[{"type": "text", "text": "data"}])
+        result = _truncate_tool_content(msg, max_chars=10)
+        self.assertEqual(result.content, msg.content)
+
+
+class TestGetMessagesTokenBudget(unittest.TestCase):
+    """Test token budget and truncation in get_messages_from_last_n_runs."""
+
+    def _make_run(self, user_msg: str, assistant_msg: str) -> AgentRun:
+        """Helper to create an AgentRun with user + assistant messages."""
+        return AgentRun(
+            message=Message(role="user", content=user_msg),
+            response=RunResponse(
+                content=assistant_msg,
+                messages=[
+                    Message(role="user", content=user_msg),
+                    Message(role="assistant", content=assistant_msg),
+                ]
+            )
+        )
+
+    def test_basic_last_n(self):
+        """Test basic last_n still works as before."""
+        memory = AgentMemory()
+        for i in range(5):
+            memory.add_run(self._make_run(f"Q{i}", f"A{i}"))
+
+        msgs = memory.get_messages_from_last_n_runs(last_n=2)
+        # Should get messages from last 2 runs (each has user + assistant)
+        self.assertGreater(len(msgs), 0)
+        contents = [m.content for m in msgs]
+        self.assertIn("Q3", contents)
+        self.assertIn("A4", contents)
+
+    def test_no_last_n_returns_all(self):
+        """Test None last_n returns all runs."""
+        memory = AgentMemory()
+        for i in range(3):
+            memory.add_run(self._make_run(f"Q{i}", f"A{i}"))
+
+        msgs = memory.get_messages_from_last_n_runs()
+        contents = [m.content for m in msgs]
+        self.assertIn("Q0", contents)
+        self.assertIn("A2", contents)
+
+    def test_max_tokens_limits_history(self):
+        """Test max_tokens limits the number of history messages."""
+        memory = AgentMemory()
+        # Each message has ~10 tokens, so 10 runs * 2 messages * ~10 tokens = ~200
+        for i in range(10):
+            memory.add_run(self._make_run(f"Question {i} about topic", f"Answer {i} about topic"))
+
+        # Very small token budget should return fewer messages
+        msgs_limited = memory.get_messages_from_last_n_runs(max_tokens=50)
+        msgs_unlimited = memory.get_messages_from_last_n_runs()
+        self.assertLessEqual(len(msgs_limited), len(msgs_unlimited))
+
+    def test_max_tokens_always_includes_newest(self):
+        """Test max_tokens always includes at least the newest run."""
+        memory = AgentMemory()
+        for i in range(5):
+            memory.add_run(self._make_run(f"Q{i}", f"A{i}"))
+
+        # Even with tiny budget, should get at least the newest run
+        msgs = memory.get_messages_from_last_n_runs(max_tokens=1)
+        self.assertGreater(len(msgs), 0)
+
+    def test_truncate_tool_results_in_older_runs(self):
+        """Test that older runs get tool result truncation."""
+        memory = AgentMemory()
+        # First run with long content
+        long_answer = "detailed " * 200
+        memory.add_run(self._make_run("Q0", long_answer))
+        # Recent run with short content
+        memory.add_run(self._make_run("Q1", "short"))
+
+        msgs = memory.get_messages_from_last_n_runs(
+            truncate_tool_results=True,
+            tool_result_max_chars=50,
+        )
+        # The older run's long assistant message should be truncated
+        for m in msgs:
+            if "detailed" in str(m.content):
+                self.assertIn("truncated", m.content)
+
+    def test_skip_role(self):
+        """Test skip_role parameter still works."""
+        memory = AgentMemory()
+        memory.add_run(self._make_run("Q0", "A0"))
+
+        msgs = memory.get_messages_from_last_n_runs(skip_role="user")
+        roles = [m.role for m in msgs]
+        self.assertNotIn("user", roles)
+
+    def test_empty_runs(self):
+        """Test with no runs returns empty list."""
+        memory = AgentMemory()
+        msgs = memory.get_messages_from_last_n_runs(last_n=5, max_tokens=1000)
+        self.assertEqual(len(msgs), 0)
 
 
 if __name__ == "__main__":

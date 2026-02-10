@@ -8,7 +8,6 @@ and managing references from knowledge base.
 
 Enhanced with modular PromptBuilder for improved task completion rates.
 """
-from __future__ import annotations
 
 import json
 from datetime import datetime

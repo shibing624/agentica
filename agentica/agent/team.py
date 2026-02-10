@@ -6,7 +6,6 @@
 This module contains methods for team management, task transfer,
 and tool retrieval.
 """
-from __future__ import annotations
 
 import json
 from typing import (

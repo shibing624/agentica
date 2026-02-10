@@ -68,6 +68,8 @@ class Groq(Model):
     id: str = "llama3-groq-70b-8192-tool-use-preview"
     name: str = "Groq"
     provider: str = "Groq"
+    context_window: int = 131072
+    max_output_tokens: int = 8192
 
     # Request parameters
     frequency_penalty: Optional[float] = None

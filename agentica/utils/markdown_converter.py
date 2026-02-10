@@ -5,7 +5,6 @@ This is modified from Magentic-one's great repo:
 https://github.com/microsoft/autogen/blob/v0.4.4/python/packages/autogen-magentic-one/src/autogen_magentic_one/markdown_browser/mdconvert.py
 Thanks to Microsoft researchers for open-sourcing this!
 """
-from __future__ import annotations
 import copy
 import json
 import mimetypes
@@ -25,13 +24,6 @@ import requests
 from bs4 import BeautifulSoup
 
 
-class DocumentConverter:
-    """Abstract superclass of all DocumentConverters."""
-
-    def convert(self, local_path: str, **kwargs: Any) -> None | DocumentConverterResult:
-        raise NotImplementedError()
-
-
 class DocumentConverterResult:
     """The result of converting a document to text."""
 
@@ -41,6 +33,13 @@ class DocumentConverterResult:
 
     def __repr__(self):
         return f"DocumentConverterResult(title=```{self.title}```, text_content=```{self.text_content}```)"
+
+
+class DocumentConverter:
+    """Abstract superclass of all DocumentConverters."""
+
+    def convert(self, local_path: str, **kwargs: Any) -> None | DocumentConverterResult:
+        raise NotImplementedError()
 
 
 class _CustomMarkdownify(markdownify.MarkdownConverter):

@@ -5,7 +5,6 @@
 
 This module contains methods for handling images and videos.
 """
-from __future__ import annotations
 
 from typing import (
     List,

@@ -6,7 +6,6 @@
 Handles specific ACP methods like initialize, tools/list, tools/call, agent/execute.
 """
 
-from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Callable
 
@@ -31,7 +30,7 @@ if TYPE_CHECKING:
 class ACPHandlers:
     """Handlers for ACP methods"""
     
-    def __init__(self, agent: Optional[Agent] = None, model: Optional[Model] = None,
+    def __init__(self, agent: Optional["Agent"] = None, model: Optional["Model"] = None,
                  protocol: Optional[Any] = None):
         self._agent = agent
         self._model = model

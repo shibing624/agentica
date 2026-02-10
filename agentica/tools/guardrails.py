@@ -32,7 +32,6 @@ Architecture:
 │  5. Return Result to LLM                                     │
 └─────────────────────────────────────────────────────────────┘
 """
-from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, field

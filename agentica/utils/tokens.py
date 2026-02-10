@@ -4,19 +4,17 @@
 @description: Token counting utilities for messages, tools, and multi-modal content.
 
 Supports:
-- Text token counting with tiktoken (OpenAI) and HuggingFace tokenizers
+- Text token counting with tiktoken (OpenAI), with CJK-aware character fallback
 - Image token counting based on OpenAI's vision model formula
 - Audio/Video token estimation
 - Tool/Function definition token counting
 """
 import json
 import math
+import unicodedata
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
-
 from pydantic import BaseModel
-
 from agentica.utils.log import logger
 
 # Default image dimensions used as fallback when actual dimensions cannot be determined
@@ -32,7 +30,6 @@ def _get_tiktoken_encoding(model_id: str):
         import tiktoken
 
         try:
-            # Use model-specific encoding
             return tiktoken.encoding_for_model(model_id)
         except KeyError:
             return tiktoken.get_encoding("o200k_base")
@@ -41,48 +38,21 @@ def _get_tiktoken_encoding(model_id: str):
         return None
 
 
-@lru_cache(maxsize=16)
-def _get_hf_tokenizer(model_id: str):
-    """Get HuggingFace tokenizer for specific models."""
-    try:
-        from tokenizers import Tokenizer
+def _estimate_tokens_by_chars(text: str) -> int:
+    """Estimate token count using character-based heuristics.
 
-        model_id = model_id.lower()
-
-        # Llama-3 models
-        if "llama-3" in model_id or "llama3" in model_id:
-            return Tokenizer.from_pretrained("Xenova/llama-3-tokenizer")
-
-        # Llama-2 models
-        if "llama-2" in model_id or "llama2" in model_id or "replicate" in model_id:
-            return Tokenizer.from_pretrained("hf-internal-testing/llama-tokenizer")
-
-        # Cohere command-r models
-        if "command-r" in model_id:
-            return Tokenizer.from_pretrained("Xenova/c4ai-command-r-v01-tokenizer")
-
-        return None
-    except ImportError:
-        logger.warning("tokenizers not installed. Please install it using `pip install tokenizers`.")
-        return None
-    except Exception:
-        return None
-
-
-def _select_tokenizer(model_id: str) -> Tuple[str, Any]:
-    """Select the best available tokenizer for a model."""
-    # Priority 1: HuggingFace tokenizers for models with specific tokenizers
-    hf_tokenizer = _get_hf_tokenizer(model_id)
-    if hf_tokenizer is not None:
-        return ("huggingface", hf_tokenizer)
-
-    # Priority 2: tiktoken for OpenAI models
-    tiktoken_enc = _get_tiktoken_encoding(model_id)
-    if tiktoken_enc is not None:
-        return ("tiktoken", tiktoken_enc)
-
-    # Fallback: No tokenizer available, will use character-based estimation
-    return ("none", None)
+    - CJK characters (Chinese/Japanese/Korean): ~1 token per character
+    - Other characters (English, numbers, punctuation, etc.): ~1 token per 4 characters
+    """
+    cjk_chars = 0
+    other_chars = 0
+    for ch in text:
+        if unicodedata.category(ch).startswith('L') and ord(ch) > 0x2E7F:
+            # CJK Unified Ideographs and extensions, Hangul, Kana, etc.
+            cjk_chars += 1
+        else:
+            other_chars += 1
+    return cjk_chars + (other_chars + 3) // 4
 
 
 # =============================================================================
@@ -279,17 +249,16 @@ def _get_image_dimensions(image: "Image") -> Tuple[int, int]:
 
 
 def count_text_tokens(text: str, model_id: str = "gpt-4o") -> int:
-    """Count tokens in a text string."""
+    """Count tokens in a text string.
+
+    Uses tiktoken when available, otherwise falls back to CJK-aware character estimation.
+    """
     if not text:
         return 0
-    tokenizer_type, tokenizer = _select_tokenizer(model_id)
-    if tokenizer_type == "huggingface":
-        return len(tokenizer.encode(text).ids)
-    elif tokenizer_type == "tiktoken":
-        return len(tokenizer.encode(text, disallowed_special=()))
-    else:
-        # Fallback: ~4 characters per token
-        return len(text) // 4
+    encoding = _get_tiktoken_encoding(model_id)
+    if encoding is not None:
+        return len(encoding.encode(text, disallowed_special=()))
+    return _estimate_tokens_by_chars(text)
 
 
 def count_image_tokens(image: "Image") -> int:

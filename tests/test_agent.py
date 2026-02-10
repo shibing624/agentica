@@ -230,11 +230,6 @@ class TestAgentMultiRound(unittest.TestCase):
         agent = Agent(max_rounds=50)
         self.assertEqual(agent.max_rounds, 50)
 
-    def test_max_tokens(self):
-        """Test max_tokens setting."""
-        agent = Agent(max_tokens=64000)
-        self.assertEqual(agent.max_tokens, 64000)
-
 
 class TestAgentStructuredOutput(unittest.TestCase):
     """Test cases for Agent structured output settings."""

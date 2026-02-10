@@ -91,6 +91,8 @@ class HuggingFaceChat(Model):
     id: str = "meta-llama/Meta-Llama-3-8B-Instruct"
     name: str = "HuggingFaceChat"
     provider: str = "HuggingFace"
+    context_window: int = 128000
+    max_output_tokens: int = 4096
 
     # Request parameters
     store: Optional[bool] = None

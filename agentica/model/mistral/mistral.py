@@ -60,6 +60,8 @@ class MistralChat(Model):
     id: str = "mistral-large-latest"
     name: str = "MistralChat"
     provider: str = "Mistral"
+    context_window: int = 128000
+    max_output_tokens: int = 4096
 
     # -*- Request parameters
     temperature: Optional[float] = None

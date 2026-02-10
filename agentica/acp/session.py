@@ -11,7 +11,6 @@ Manages ACP sessions for IDE integration, including:
 - AbortController for cancellation
 """
 
-from __future__ import annotations
 
 import uuid
 import asyncio

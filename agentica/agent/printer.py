@@ -6,7 +6,6 @@
 This module contains methods for printing agent responses to console,
 supporting both streaming and non-streaming modes.
 """
-from __future__ import annotations
 
 from typing import (
     Any,

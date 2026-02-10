@@ -74,6 +74,8 @@ class Gemini(Model):
     id: str = "gemini-2.0-flash-exp"
     name: str = "Gemini"
     provider: str = "Google"
+    context_window: int = 1048576
+    max_output_tokens: int = 8192
 
     # Request parameters
     function_declarations: Optional[List[FunctionDeclaration]] = None

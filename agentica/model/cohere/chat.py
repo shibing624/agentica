@@ -48,6 +48,8 @@ class Cohere(Model):
     id: str = "command-r-plus"
     name: str = "cohere"
     provider: str = "Cohere"
+    context_window: int = 128000
+    max_output_tokens: int = 4096
 
     # -*- Request parameters
     temperature: Optional[float] = None
