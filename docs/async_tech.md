@@ -10,82 +10,81 @@
 
 ## 一、现状分析
 
-### 1.1 当前架构问题
+### 1.1 当前架构状态（基于最新代码）
 
-Agentica 采用 **Sync/Async 双轨并行** 模式，每层都维护独立的同步和异步方法对：
-
-```
-Agent层:     run() / arun()                    -- 独立实现，~900行 x2
-Model层:     response() / aresponse()          -- 独立实现，~200行 x2
-             run_function_calls() / arun_function_calls()  -- 独立实现，~120行 x2
-Tool层:      execute() / aexecute()            -- 独立实现，~100行 x2
-```
-
-**调用链全貌**：
+Agentica 核心逻辑已基本完成 **Async-First** 改造：核心调用链是 async-only，同步路径通过适配器薄包装。
 
 ```
-Sync路径:
-Agent.run() → _run() → _run_single_round() / _run_multi_round()
-  → Model.response() / response_stream()
-    → OpenAIChat.invoke() → openai.chat.completions.create()
-    → Model.run_function_calls() → FunctionCall.execute()
-      → _run_sync_or_async() → entrypoint()
+核心 async 路径（默认且唯一）:
+Agent.run() → _run_impl()
+  → Model.response() / response_stream()   [async-only]
+    → OpenAIChat.invoke() / invoke_stream() [async-only]
+    → Model.run_function_calls()           [async-only, 当前串行]
+      → FunctionCall.execute()             [async-only]
+        → _call_func(async await / sync run_in_executor)
 
-Async路径:
-Agent.arun() → _arun() → _arun_single_round() / _arun_multi_round()
-  → Model.aresponse() / aresponse_stream()
-    → OpenAIChat.ainvoke() → openai.chat.completions.create() [async]
-    → Model.arun_function_calls() → FunctionCall.aexecute()
-      → await entrypoint() 或 loop.run_in_executor(entrypoint)
+流式 async 路径（显式入口）:
+Agent.run_stream() → _run_impl(stream=True)
+
+同步适配器路径:
+Agent.run_sync(...)        → run_sync(self.run(...))
+Agent.run_stream_sync(...) → （专用 sync-stream 适配器：后台线程驱动 async iterator）
 ```
+
+**关键约束**：`run(stream=True)` / `run_sync(stream=True)` 不应存在，它们会逼出 `iter_over_async()` 这类"通用转换器"，增加 API 阴影与维护成本。
+
+**当前主线已统一 async 实现，但 API 命名与示例仍存在残留差异（详见 1.2/9 章）。**
 
 ### 1.2 具体问题清单（结合当前代码）
 
 | 问题 | 影响 | 严重程度 |
 |------|------|----------|
-| **sync/async 代码重复** | `agent/runner.py` 仍双轨并行，维护成本高 | 高 |
-| **接口不一致：Model async-only vs Runner sync 调用** | `Model.response()`/`response_stream()` 已是 async-only，但 `_run()` 仍同步调用 → 运行时风险 | 高 |
-| **async 多轮工具调用仍依赖 `aexecute`** | `FunctionCall.execute()` 已 async-only，`aexecute` 已不存在，`_arun_multi_round()` 的 fallback 可能执行错误 | 高 |
-| **async 路径功能缺失** | `_arun()` 缺少 Langfuse trace；`_arun_multi_round()` 缺少 `_on_pre_step()` hook | 高 |
+| **清理 `run(stream=True)` 遗留** | 代码已删除该入口，但文档/示例/第三方集成仍可能残留旧用法，需统一替换为 `run_stream()`/`run_stream_sync()` | 高 |
 | **工具串行执行** | `Model.run_function_calls()` 仍串行 for 循环，无并行 | 中 |
 | **Workflow 无异步支持** | `Workflow.run()` 仍纯同步，无法在异步上下文使用 | 中 |
-| **CLI/Printer/Examples 仍依赖旧 API** | 用户迁移成本高，文档与代码不一致 | 中 |
-| **Subagent 纯同步** | `BuiltinTaskTool.task()` 同步调用子代理 | 中 |
+| **同步调用 async-only 接口** | `acp/handlers.py`、`evaluation/run.py`、`examples/model_providers/*` 等处同步调用 `agent.run()`/`model.response()` | 高 |
+| **文档/示例/测试残留旧 API** | 仍出现 `arun`/`arun_stream`/`aprint_response`/`aexecute` 文案或用法 | 中 |
+| **Subagent 仍同步调度** | `deep_tools.py`/`agent/team.py` 等仍使用 `run_sync()` 驱动子代理 | 中 |
 
-### 1.3 代码重复量化
 
-```
-runner.py 中同步/异步方法对照：
-  _run()                ~75行   vs  _arun()              ~37行  (async缺少Langfuse)
-  _run_single_round()   ~240行  vs  _arun_single_round() ~270行 (几乎相同)
-  _run_multi_round()    ~320行  vs  _arun_multi_round()  ~310行 (几乎相同)
-  run()                 ~106行  vs  arun()               ~110行 (几乎相同)
+要求： run_stream() / run_stream_sync() 是"正解"，而不是 `run(stream=True)`，必须扔掉 run(stream=True)的设计。
+# async-first
+async def run(...)
+async def run_stream(...)
 
-model/base.py:
-  run_function_calls()  ~120行  vs  arun_function_calls() ~112行 (仅execute→aexecute)
-  handle_post_tool_*    ~27行   vs  ahandle_post_tool_*   ~28行  (仅response→aresponse)
+# sync adapters
+def run_sync(...)
+def run_stream_sync(...)
+---
+Model 层这里：async def run_function_calls(
+    self,
+    calls: list[FunctionCall],
+    *,
+    parallel: bool = True,
+    max_concurrency: int | None = None,
+) -> list[ToolResult]
+内部：await asyncio.gather(...)，否则 streaming + tool 会被串行拖死
+---
+Workflow：必须 async-first
+---
+Event / Stream 的统一抽象（非常重要）
 
-model/openai/chat.py:
-  response()            ~72行   vs  aresponse()           ~73行  (仅invoke→ainvoke)
-  response_stream()     ~83行   vs  aresponse_stream()    ~83行
-  handle_tool_calls()   ~57行   vs  ahandle_tool_calls()  ~46行
-  invoke()              ~32行   vs  ainvoke()             ~32行
+### 1.3 重复代码消减（现状）
 
-tools/base.py:
-  execute()             ~82行   vs  aexecute()            ~105行
+- **Runner**：主路径为 async-only `_run_impl()`（唯一执行引擎）。同步入口统一 `run_sync()`；流式同步入口统一 `run_stream_sync()`。
+- **Model**：`response()`/`response_stream()` async-only，`run_function_calls()` 仍保留单实现（目前串行）。
+- **Tool**：`FunctionCall.execute()` async-only，`aexecute()` 已移除。
 
-合计重复代码约 1500+ 行
-```
-
+**结论**：核心重复代码已大幅消除，但 API 命名与周边生态（示例/测试/文档）仍需清理。
 ### 1.4 代码现状快照（与文档对齐点）
 
-- **Tool 层**: `FunctionCall.execute()` 已改为 async-only，`aexecute()` 已删除，`_call_func()` 统一处理 sync/async。
-- **Model 层**: `Model.response()` / `response_stream()` 变为 async-only，但 `run_function_calls()` 仍是**串行**实现。
-- **OpenAIChat**: 异步客户端 + `response()`/`response_stream()` async-only 已落地。
-- **Runner**: 仍保留 `_run()`/`_arun()` 双实现；同步 `_run()` 直接调用 async-only `Model.response()`，存在接口不一致风险。
-- **Async 多轮**: `_arun_multi_round()` 仍判断 `aexecute()`，缺失时走 `run_in_executor(function_call.execute)`，与 async-only `execute()` 冲突。
-- **Workflow**: `Workflow.run()` 仍为同步接口，未提供 async 入口。
-- **CLI/Printer/Examples**: 仍基于同步 `_run()` 与旧的 `arun` / `arun_stream` 用法。
+- **Tool 层**: `FunctionCall.execute()` 已 async-only，`aexecute()` 已删除，`_call_func()` 统一处理 sync/async。
+- **Model 层**: `Model.response()` / `response_stream()` async-only，`run_function_calls()` 仍串行。
+- **OpenAIChat**: async-only client + response 实现已落地。
+- **Runner**: `_run_impl()` 是默认且唯一的 async-only 执行引擎；`run_sync()` / `run_stream_sync()` 作为同步适配器。
+- **流式入口**: 已收敛为 `run_stream()` / `run_stream_sync()`，明确删除 `run(stream=True)` 这类隐式入口。
+- **Workflow**: `Workflow.run()` 仍为同步接口，缺少 async 入口。
+- **ACP/Evaluation/Examples**: 仍存在同步调用 async-only 接口的风险点（见第 9 章）。
 
 ---
 
@@ -188,8 +187,7 @@ class Agent:
 ├─────────────────────────────────────────────────┤
 │                  执行引擎层                        │
 │                                                   │
-│  _run_single_round()    -- async only             │
-│  _run_multi_round()     -- async only             │
+│  _run_impl()            -- async only（唯一）     │
 │  _execute_tools()       -- asyncio.gather 并行    │
 ├─────────────────────────────────────────────────┤
 │                  Model 层                         │
@@ -217,7 +215,7 @@ class Agent:
 
 import asyncio
 import threading
-from typing import TypeVar, Coroutine, AsyncIterator, Iterator
+from typing import TypeVar, Coroutine
 
 T = TypeVar("T")
 
@@ -230,45 +228,12 @@ def run_sync(coro: Coroutine[None, None, T]) -> T:
     2. 在事件循环中（如 Jupyter） → 新线程 + 新事件循环
     3. 嵌套调用保护
     """
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        # 场景1: 无运行中的事件循环，直接运行
-        return asyncio.run(coro)
-
-    # 场景2: 已有事件循环（Jupyter / 嵌套调用）
-    # 在新线程中创建新的事件循环来运行
-    result = None
-    exception = None
-
-    def _run_in_thread():
-        nonlocal result, exception
-        try:
-            result = asyncio.run(coro)
-        except BaseException as e:
-            exception = e
-
-    thread = threading.Thread(target=_run_in_thread)
-    thread.start()
-    thread.join()
-
-    if exception is not None:
-        raise exception
-    return result
-
-
-def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
-    """将 AsyncIterator 转换为同步 Iterator。"""
-    loop = asyncio.new_event_loop()
-    try:
-        while True:
-            try:
-                yield loop.run_until_complete(ait.__anext__())
-            except StopAsyncIteration:
-                break
-    finally:
-        loop.close()
+    ...
 ```
+
+**重要取舍**：不提供通用 `iter_over_async()`。
+- `iter_over_async()` 往往是 `run(stream=True)` 这种隐式 API 的"影子"，会把错误的 API 设计长期固化。
+- `run_stream_sync()` 应作为 `Agent` 的**专用同步流式适配器**存在（通常用后台线程驱动 async iterator + 队列转发），而不是暴露一个到处可被滥用的通用转换器。
 
 ---
 
@@ -279,12 +244,21 @@ def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
 | 模块 | 现状 | 说明 |
 |------|------|------|
 | Tool (`FunctionCall`) | ✅ 已落地 | `execute()` async-only，统一 `_call_func()` |
-| Model 基类 | ✅ 已落地 | `response()`/`response_stream()` async-only，保留串行 `run_function_calls()` |
+| Model 基类 | ✅ 已落地 | `response()`/`response_stream()` async-only，`run_function_calls()` 仍串行（TODO-6 并行化） |
 | OpenAIChat | ✅ 已落地 | async-only client + response 实现 |
-| Runner | ⏳ 未完成 | 仍有 `_run`/`_arun` 双轨，接口不一致风险 |
-| Workflow | ⏳ 未完成 | `run()` 仍同步 |
-| Printer/CLI | ⏳ 未完成 | 仍基于同步 `_run()`/旧 API |
-| Tests/Examples | ⏳ 未完成 | 仍使用 `arun` / `aexecute` 旧写法 |
+| 其他 Model 实现 | ✅ 已落地 | Anthropic/Bedrock/Cohere/Ollama/Gemini/Together/Mistral 等均 async-only |
+| Runner | ✅ 已落地 | `_run_impl()` 唯一引擎；`_run_multi_round`/`_run_single_round` 已删除 |
+| 四件套 API | ✅ 已落地 | `run()`/`run_stream()` (async) + `run_sync()`/`run_stream_sync()` (sync) |
+| `iter_over_async` | ✅ 已彻底删除 | `run_stream_sync()` 用线程+队列自行实现 |
+| Printer | ✅ 已落地 | `print_response()` async + `print_response_sync()` sync adapter |
+| CLI | ✅ 已对齐 | 使用 `run_stream_sync()` 作为主入口 |
+| ACP handlers | ✅ 已适配 | 使用 `run_sync()`/`run_stream_sync()` |
+| agent/team.py | ✅ 已适配 | `as_tool()`/`get_transfer_function()` 使用 `run_sync()` |
+| deep_tools.py | ✅ 已适配 | `BuiltinTaskTool.task()` 使用 `run_stream_sync()` |
+| Workflow | ⏳ 未完成 | `run()` 仍同步（TODO-7） |
+| evaluation/run.py | ⚠️ 运行时 Bug | sync 调用 async 方法（TODO-1） |
+| Examples | ⏳ 部分完成 | 大部分已适配 `run_sync()`/`run_stream_sync()`，少量残留 Bug（TODO-2/3），待改为 async-first 原生风格（TODO-10） |
+| Tests | ⏳ 部分完成 | 基本适配，`test_llm.py` 待改 AsyncMock（TODO-8），待整体改用 pytest-asyncio（TODO-11） |
 
 ### 4.1 Tool 层改造
 
@@ -534,94 +508,45 @@ class RunnerMixin:
 **改造后** (agent/runner.py, 预计 ~800行)：
 ```python
 class RunnerMixin:
-    # ==================== 公共 API ====================
+    # ==================== 公共 API（显式分离：run vs run_stream） ====================
 
     async def run(
         self: "Agent",
         message: Optional[Union[str, List, Dict, Message]] = None,
-        *,
-        stream: bool = False,
-        **kwargs,
-    ) -> Union[RunResponse, AsyncIterator[RunResponse]]:
-        """核心运行方法 -- 纯异步，唯一实现。"""
-        # 结构化输出处理
-        if self.response_model is not None and self.parse_response:
-            return await self._run_structured(message, **kwargs)
-
-        # 流式/非流式
-        if stream and self.is_streamable:
-            return self._run_impl(message, stream=True, **kwargs)
-        else:
-            final = None
-            async for response in self._run_impl(message, stream=False, **kwargs):
-                final = response
-            return final
-
-    def run_sync(
-        self: "Agent",
-        message: Optional[Union[str, List, Dict, Message]] = None,
         **kwargs,
     ) -> RunResponse:
-        """同步适配器 -- 唯一的同步入口。"""
-        from agentica.utils.async_utils import run_sync
-        return run_sync(self.run(message, stream=False, **kwargs))
+        """非流式运行（async）。"""
+        final = None
+        async for response in self._run_impl(message, stream=False, **kwargs):
+            final = response
+        return final
 
     async def run_stream(
         self: "Agent",
         message: Optional[Union[str, List, Dict, Message]] = None,
         **kwargs,
     ) -> AsyncIterator[RunResponse]:
-        """流式运行的便捷方法。"""
-        return await self.run(message, stream=True, **kwargs)
+        """流式运行（async generator）。"""
+        async for response in self._run_impl(message, stream=True, **kwargs):
+            yield response
 
-    def run_stream_sync(
-        self: "Agent",
-        message: Optional[Union[str, List, Dict, Message]] = None,
-        **kwargs,
-    ) -> Iterator[RunResponse]:
-        """同步流式适配器。"""
-        from agentica.utils.async_utils import iter_over_async
-        async_iter = self._run_impl(message, stream=True, **kwargs)
-        return iter_over_async(async_iter)
+    def run_sync(self: "Agent", message=None, **kwargs) -> RunResponse:
+        """同步适配器：仅用于非流式。"""
+        return run_sync(self.run(message, **kwargs))
 
-    # ==================== 核心引擎 ====================
-
-    async def _run_impl(
-        self: "Agent",
-        message = None,
-        *,
-        stream: bool = False,
-        **kwargs,
-    ) -> AsyncIterator[RunResponse]:
-        """统一执行引擎 -- 合并原 _run() + _arun()。"""
-        with langfuse_trace_context(self) as trace:  # 修复: async也有Langfuse
-            if self.enable_multi_round:
-                async for response in self._run_multi_round(message, stream=stream, **kwargs):
-                    yield response
-            else:
-                async for response in self._run_single_round(message, stream=stream, **kwargs):
-                    yield response
-
-    async def _run_single_round(self, ...) -> AsyncIterator[RunResponse]:
-        """单轮执行 -- 唯一实现。"""
-        # 合并原 _run_single_round + _arun_single_round
-        # 修复: 保留所有hooks, Langfuse, 内存并行优化
+    def run_stream_sync(self: "Agent", message=None, **kwargs) -> Iterator[RunResponse]:
+        """同步流式适配器：后台线程驱动 async iterator，通过队列转发输出。"""
         ...
 
-    async def _run_multi_round(self, ...) -> AsyncIterator[RunResponse]:
-        """多轮执行 -- 唯一实现。"""
-        # 合并原 _run_multi_round + _arun_multi_round
-        # 修复: 保留 _on_pre_step() hook (原async版缺失)
-        # 新增: asyncio.gather 并行工具执行
-        ...
+    # ==================== 核心引擎（唯一实现） ====================
 
-    # 删除: arun()                   → run() 就是 async
-    # 删除: arun_stream()            → run_stream() 就是 async
-    # 删除: _arun()                  → _run_impl() 统一
-    # 删除: _run_single_round() 同步 → 只保留 async 版
-    # 删除: _arun_single_round()     → 合并到 _run_single_round()
-    # 删除: _run_multi_round() 同步  → 只保留 async 版
-    # 删除: _arun_multi_round()      → 合并到 _run_multi_round()
+    async def _run_impl(self: "Agent", message=None, *, stream: bool = False, **kwargs) -> AsyncIterator[RunResponse]:
+        """唯一执行引擎：single-round + model 内建工具循环。
+
+        - multi-round 研究范式不属于 base Agent；需要时在 `DeepAgent` 里实现。
+        """
+        with langfuse_trace_context(...):
+            ...
 ```
 
 ### 4.5 Workflow 层改造
@@ -746,7 +671,7 @@ async def _run_parallel_subagents(self, subagents, inputs):
 异步方法（默认）:  run(), execute(), response(), invoke()
 同步适配器:       run_sync(), run_stream_sync()
 流式方法:         run_stream(), response_stream(), invoke_stream()
-内部方法:         _run_impl(), _run_single_round(), _run_multi_round()
+内部方法:         _run_impl()（唯一）
 ```
 
 **原则**：
@@ -754,7 +679,7 @@ async def _run_parallel_subagents(self, subagents, inputs):
 - sync 适配器统一加 `_sync` 后缀
 - 不再使用 `a` 前缀 (`arun`, `aresponse`, `ainvoke`) -- 这是旧模式
 
-**当前代码提醒**：代码中仍存在 `arun` / `arun_stream` / `aprint_response` 等旧命名，需要在改造中删除或迁移到新命名体系。
+**当前代码提醒**：已统一为 `run()` / `run_stream()` / `run_sync()` / `run_stream_sync()` 四件套，并**明确删除** `run(stream=True)`/`run_sync(stream=True)` 与 `iter_over_async()`。后续重点是全库（docs/examples/tests/第三方集成）清理旧用法与旧文案。
 ### 6.2 API 对照表
 
 | 改造前 (旧) | 改造后 (新) | 类型 |
@@ -783,37 +708,42 @@ async def _run_parallel_subagents(self, subagents, inputs):
 
 ```
 Phase 1: 基础设施                     [预计 1天]  ✅ 已落地
-  ├── 新增 agentica/utils/async_utils.py (run_sync, iter_over_async)
-  └── 编写单元测试（待补齐或改造）
+  ├── 新增 agentica/utils/async_utils.py (run_sync，无 iter_over_async)
+  └── 编写单元测试（基础已有，待 pytest-asyncio 统一）
 
 Phase 2: Tool 层 (自底向上)            [预计 1天]  ✅ 已落地
-  ├── FunctionCall.execute() → async
-  ├── 删除 aexecute(), _run_sync_or_async()
-  └── 更新所有引用（部分仍残留旧调用）
+  ├── FunctionCall.execute() → async ✅
+  ├── 删除 aexecute(), _run_sync_or_async() ✅
+  └── 更新所有引用 ✅
 
-Phase 3: Model 层                     [预计 2天]  ⏳ 部分落地
-  ├── Model 基类: 删除同步方法，async 方法去掉 a 前缀 ✅
-  ├── OpenAIChat: 合并同步/异步，只保留 async ✅
-  ├── 其他 Model 实现同步改造（待确认/补齐）
-  ├── run_function_calls 加入 asyncio.gather 并行（未落地）
-  └── 更新所有引用（未完成）
+Phase 3: Model 层                     [预计 2天]  ✅ 已落地（并行化待补）
+  ├── Model 基类: async-only，无 a-prefix 残留 ✅
+  ├── OpenAIChat: async-only ✅
+  ├── 所有 Model 实现: Anthropic/Bedrock/Cohere/Ollama/Gemini/Together/Mistral ✅
+  ├── run_function_calls asyncio.gather 并行 ⏳ (TODO-6)
+  └── 更新所有引用 ✅
 
-Phase 4: Agent 层                     [预计 2天]  ⏳ 未落地
-  ├── runner.py: 合并 sync/async 方法对，只保留 async
-  ├── 新增 run_sync(), run_stream_sync()
-  ├── 修复 async 缺失的 hooks 和 Langfuse
-  └── 更新 base.py Mixin 注册
+Phase 4: Agent 层                     [预计 2天]  ✅ 已落地
+  ├── runner.py: _run_impl 唯一引擎，_run_multi_round/_run_single_round 已删 ✅
+  ├── 四件套 API: run/run_stream/run_sync/run_stream_sync ✅
+  ├── iter_over_async 彻底删除 ✅
+  ├── run_stream_sync 用线程+队列实现 ✅
+  └── base.py Mixin 注册 ✅（声明需清理 TODO-5）
 
-Phase 5: 上层模块                     [预计 1天]  ⏳ 未落地
-  ├── Workflow: run() → async, 新增 run_sync()
-  ├── CLI: 改用 run_stream_sync()
-  ├── DeepAgent: 更新 hook 调用
-  └── Subagent / deep_tools: 更新为 async
+Phase 5: 上层模块                     [预计 1天]  ✅ 大部分落地
+  ├── CLI: run_stream_sync() ✅
+  ├── ACP handlers: run_sync()/run_stream_sync() ✅
+  ├── deep_tools/team: run_sync()/run_stream_sync() ✅
+  ├── DeepAgent: 继承 Agent，无问题 ✅
+  └── Workflow: run() → async ⏳ (TODO-7)
 
-Phase 6: 测试与清理                   [预计 1天]  ⏳ 未开始
-  ├── 全量测试
-  ├── 更新 examples/
-  └── 更新文档
+Phase 6: 测试/示例/文档清理            [预计 2天]  ⏳ 部分完成
+  ├── Examples 基本适配 run_sync()/run_stream_sync() ✅
+  ├── Tests 基本适配 ✅
+  ├── 少量运行时 Bug 修复 ⏳ (TODO-1/2/3/4)
+  ├── Examples 改为 async-first 原生风格 ⏳ (TODO-10)
+  ├── Tests 改用 pytest-asyncio ⏳ (TODO-11)
+  └── 旧 API 文案清理 ⏳ (TODO-9)
 ```
 
 ### 7.2 破坏性变更清单
@@ -864,41 +794,155 @@ Phase 6: 测试与清理                   [预计 1天]  ⏳ 未开始
 
 ---
 
-## 九、待优化清单（基于当前代码）
+## 九、当前代码审查结论与 TODO（2026-02-11 更新）
 
-- **Runner 合并与接口对齐**：将 `run()` 变为 async-only 核心实现，新增 `run_sync()` / `run_stream_sync()`，并确保 async 路径完整 Langfuse + hooks。
-- **修复 `_arun_multi_round()` 工具执行**：移除 `aexecute()` 分支，统一 `await function_call.execute()`；避免在 `run_in_executor()` 中直接调用 async coroutine。
-- **工具并行执行**：`Model.run_function_calls()` 改为 `asyncio.gather()`，并维持消息顺序与异常传播策略。
-- **Workflow Async 化**：`Workflow.run()` 变为 async，提供 `run_sync()` 适配器以保留同步用法。
-- **CLI/Printer API 迁移**：统一改为 `run_stream_sync()` 或 `run_sync()`，移除 `arun`/`arun_stream`/`aprint_response` 等旧接口。
-- **Examples & Tests 更新**：全量替换旧 API（含 `aexecute`）并改用 async-first 规范。
-- **流式适配器健壮性**：`iter_over_async()` 如需避免阻塞，可改为后台线程驱动事件循环并通过队列传递结果。
+> 基于最新代码全量审查，以下为已落地状态与剩余 TODO。
+
+### 9.0 已落地确认（无需再动）
+
+| 模块 | 状态 | 说明 |
+|------|------|------|
+| `iter_over_async` | ✅ **已彻底删除** | 全局搜索 0 处引用。`run_stream_sync()` 用线程+队列自行实现，不暴露通用转换器 |
+| `_run_multi_round` | ✅ **已从 runner.py 删除** | runner.py 中 0 处定义，注释明确 "Multi-round NOT part of base Agent" |
+| `_run_single_round` | ✅ **已重命名为 `_run_impl`** | runner.py 中仅有 `_run_impl()`（唯一执行引擎） |
+| `run(stream=True)` | ✅ **公开 API 已移除** | `run()` 不接受 `stream` 参数，流式入口为独立的 `run_stream()` |
+| 四件套 API | ✅ **已就位** | `run()` / `run_stream()` (async) + `run_sync()` / `run_stream_sync()` (sync adapter) |
+| `run_stream_sync()` 实现 | ✅ **线程+队列模式** | 后台 daemon 线程 `asyncio.run()` 消费 async iterator → `queue.Queue` → 主线程 `yield` |
+| Tool 层 | ✅ **async-only** | `FunctionCall.execute()` async-only，`aexecute()` 已删除 |
+| Model 基类 | ✅ **async-only** | `invoke/invoke_stream/response/response_stream` 无 `a`-prefix 残留，无同步版本 |
+| Printer | ✅ **async-only** | `print_response()` async + `print_response_sync()` sync adapter |
+| CLI | ✅ **已适配** | `interactive.py` / `main.py` 使用 `run_stream_sync()` |
+| ACP handlers | ✅ **已适配** | `handle_agent_execute` / `_execute_sync` / `_execute_with_streaming` 已改为 `run_sync()`/`run_stream_sync()` |
+| `agent/team.py` | ✅ **已适配** | `as_tool()` / `get_transfer_function()` 均使用 `self.run_sync()` |
+| `deep_tools.py` | ✅ **已适配** | `BuiltinTaskTool.task()` 使用 `subagent.run_stream_sync()` |
+
+### 9.1 TODO：高优先级（运行时 Bug）
+
+#### TODO-1: `evaluation/run.py` 同步调用 async-only 方法
+- **问题**：`call_llm_judge()` (行84) `judge_model.response(messages)` 是 async，sync 调用返回 coroutine 对象；`evaluate_instance()` (行243) `agent.run(question)` 同样返回 coroutine。
+- **修复**：
+  - 方案 A（推荐）：将 `evaluate_instance()` 改为 `async def`，内部 `await agent.run()`，`call_llm_judge()` 也改为 `async def`，内部 `await judge_model.response()`。`main()` 已经是 `async def`，调用链天然支持。
+  - 方案 B：直接用同步适配器 `agent.run_sync(question)`。但 `judge_model.response()` 没有 sync adapter，需要 `run_sync(judge_model.response(messages))`。
+
+#### TODO-2: `examples/model_providers/01_openai.py` 同步调用 async 方法
+- **问题**：行27 `model.response(messages)` 和行36 `for chunk in model.response_stream(messages):` 均为 sync 调用 async 方法。
+- **修复**：改为 `async def main()` + `await model.response()` + `async for chunk in model.response_stream()` + `asyncio.run(main())`。
+
+#### TODO-3: `examples/model_providers/02_deepseek.py` 同步调用 async 方法
+- **问题**：行27 `model.response(messages)` 同步调用。
+- **修复**：同 TODO-2。
+
+#### TODO-4: `agentica/tools/memori_tool.py` `__main__` 同步调用
+- **问题**：行393/396/399 在 sync `__main__` 中调用 `agent.print_response()`（async）。
+- **修复**：改为 `agent.print_response_sync()`。
+
+### 9.2 TODO：中优先级（代码清理 & 设计改进）
+
+#### TODO-5: `base.py` 清理过时声明
+- **问题**：`agentica/agent/base.py` 中存在 6 个已不存在方法的 Callable 声明（行1056-1061）：`_run`、`_run_single_round`、`_run_multi_round`、`_on_pre_step`、`_on_tool_call`、`_on_post_step`。同时 `deep_copy` 的 `method_fields` 集合（行889-891）也引用了这些废弃名称。
+- **修复**：
+  - 删除过时的 Callable 声明。
+  - 补充缺失的声明：`run_stream: Callable`、`run_stream_sync: Callable`、`_run_impl: Callable`、`_consume_run: Callable`、`_run_with_timeout: Callable`、`_wrap_stream_with_timeout: Callable`。
+  - 更新 `method_fields` 集合与实际 runner.py 方法对齐。
+
+#### TODO-6: `Model.run_function_calls()` 并行化
+- **问题**：`model/base.py` 行287 仍为串行 `for function_call in function_calls: await function_call.execute()`。
+- **当前注释**（行285）：*"Executes tools sequentially to maintain message ordering and streaming events."*
+- **修复建议**：
+  ```python
+  # 阶段1: asyncio.gather 并行执行所有工具
+  results = await asyncio.gather(
+      *[fc.execute() for fc in function_calls],
+      return_exceptions=True
+  )
+  # 阶段2: 按原始顺序处理结果（保持消息顺序不变）
+  for fc, success in zip(function_calls, results):
+      ...
+  ```
+  并行执行不影响消息顺序——执行是并行的，结果收集后按原始顺序 yield 即可。
+
+#### TODO-7: `Workflow` Async 化
+- **问题**：`workflow.py` 行110 `def run()` 仍为纯同步，无 async 版本，无 `run_sync()` 适配器。
+- **修复**：
+  ```python
+  class Workflow:
+      async def run(self, *args, **kwargs) -> Optional[RunResponse]:
+          raise NotImplementedError
+
+      def run_sync(self, *args, **kwargs) -> Optional[RunResponse]:
+          from agentica.utils.async_utils import run_sync
+          return run_sync(self.run(*args, **kwargs))
+  ```
+  所有继承 `Workflow` 的子类（包括 examples 中的 workflow 示例）需要同步改为 `async def run()`，内部 `agent.run_sync()` → `await agent.run()`。
+
+#### TODO-8: `tests/test_llm.py` 改用 AsyncMock
+- **问题**：行30 `res = llm.response(messages)` 通过 MagicMock 测试，未覆盖 async 行为。
+- **修复**：改用 `AsyncMock` + `pytest.mark.asyncio` + `await llm.response(messages)`。
+
+### 9.3 TODO：低优先级（文案清理）
+
+#### TODO-9: 示例/文档旧 API 文案清理
+- `examples/basic/03_stream_output.py`：行67 函数名 `async_arun_stream_demo` 应改为 `async_stream_demo`；行104 注释 `# Use arun` 应改为 `# Use run`。
+- `examples/tools/02_async_tool.py`：行175 docstring `"with arun"` → `"with run"`；行186 打印文字 `"Using arun"` → `"Using run"`。
+- `tests/test_async_tool.py`：测试方法名 `test_async_function_aexecute` / `test_async_tool_method_aexecute` 等仍含 `aexecute`，应改为 `test_async_function_execute` 等。
+- `agentica/skills/builtin/agentica-intro/SKILL.md`：行32/195 `agent.print_response()` → `agent.print_response_sync()` 或加 async 上下文。
+
+#### TODO-10: Examples 整体改造（async-first 原生风格）
+- **原则**：examples 应**原生使用 async API**，避免 `run_sync()`：
+  ```python
+  async def main():
+      agent = Agent(...)
+      result = await agent.run("hello")
+      print(result.content)
+
+  if __name__ == "__main__":
+      asyncio.run(main())
+  ```
+- 仅保留少量示例（如 `examples/basic/sync_demo.py`）专门演示 `run_sync()` / `run_stream_sync()` 用法。
+- 当前约 78 处使用 `run_sync()`、5 处使用 `run_stream_sync()` 的 examples 需逐步改为原生 async。
+- 可以增删示例，重点体现 agent 各核心功能。
+
+#### TODO-11: Tests 改造（pytest-asyncio 统一）
+- 所有 test 改用 `pytest-asyncio` + `@pytest.mark.asyncio` + `async def test_xxx()`。
+- 可以增删测试，重点覆盖 agent 核心功能。
+
+### 9.4 进度总览表
+
+| TODO | 描述 | 优先级 | 预计工作量 |
+|------|------|--------|-----------|
+| TODO-1 | `evaluation/run.py` async 修复 | 🔴 高 | 0.5h |
+| TODO-2 | `examples/model_providers/01_openai.py` async 修复 | 🔴 高 | 0.5h |
+| TODO-3 | `examples/model_providers/02_deepseek.py` async 修复 | 🔴 高 | 0.5h |
+| TODO-4 | `memori_tool.py` `__main__` 修复 | 🔴 高 | 0.2h |
+| TODO-5 | `base.py` 清理过时声明 | 🟡 中 | 0.5h |
+| TODO-6 | `run_function_calls()` 并行化 | 🟡 中 | 1h |
+| TODO-7 | `Workflow` async 化 | 🟡 中 | 2h |
+| TODO-8 | `test_llm.py` AsyncMock | 🟡 中 | 0.5h |
+| TODO-9 | 旧 API 文案清理 | 🟢 低 | 1h |
+| TODO-10 | Examples async-first 改造 | 🟢 低 | 3h |
+| TODO-11 | Tests pytest-asyncio 统一 | 🟢 低 | 2h |
+
+---
 
 ## 十、附录
 
-### A. 完整文件改动清单
+### A. 核心文件现状快照
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `agentica/utils/async_utils.py` | 新增 | run_sync(), iter_over_async() |
-| `agentica/tools/base.py` | 修改 | FunctionCall async 化 |
-| `agentica/model/base.py` | 修改 | 删除同步方法，async 改名，并行工具 |
-| `agentica/model/openai/chat.py` | 修改 | 合并同步/异步，删除同步客户端 |
-| `agentica/model/anthropic/claude.py` | 修改 | 同上 |
-| `agentica/model/zhipuai/chat.py` | 修改 | 同上 |
-| `agentica/model/deepseek/chat.py` | 修改 | 同上 |
-| `agentica/model/ollama/chat.py` | 修改 | 同上 |
-| `agentica/agent/base.py` | 修改 | 更新方法声明和 Mixin 注册 |
-| `agentica/agent/runner.py` | 修改 | 核心: 合并sync/async，~1000行削减 |
-| `agentica/agent/printer.py` | 修改 | async 化 |
-| `agentica/workflow.py` | 修改 | run() async 化 |
-| `agentica/deep_agent.py` | 修改 | 更新 hook 调用 |
-| `agentica/deep_tools.py` | 修改 | task() async 化 |
-| `agentica/cli/interactive.py` | 修改 | 使用 run_stream_sync() |
-| `agentica/cli/display.py` | 修改 | 适配新 API |
-| `agentica/memory/` | 修改 | 合并 sync/async 内存操作 |
-| `tests/` | 修改 | 全部改为 pytest-asyncio |
-| `examples/` | 修改 | 更新为新 API |
+| 文件 | 行数 | 状态 | 说明 |
+|------|------|------|------|
+| `agentica/utils/async_utils.py` | 50 | ✅ | 仅 `run_sync()`，无 `iter_over_async` |
+| `agentica/tools/base.py` | ~360 | ✅ | `execute()` async-only |
+| `agentica/model/base.py` | 586 | ✅（串行工具待并行化） | async-only，`run_function_calls` 串行 |
+| `agentica/agent/runner.py` | 692 | ✅ | `_run_impl` 唯一引擎，四件套 API 就位 |
+| `agentica/agent/base.py` | 1140 | ⚠️ 过时声明待清理 | Callable 声明 & method_fields 不一致 |
+| `agentica/agent/printer.py` | 215 | ✅ | async + sync adapter |
+| `agentica/agent/team.py` | 210 | ✅ | `run_sync()` 适配 |
+| `agentica/deep_agent.py` | 540 | ✅ | 继承 Agent，无运行时问题 |
+| `agentica/deep_tools.py` | 1395 | ✅ | `run_stream_sync()` 适配 |
+| `agentica/workflow.py` | 348 | ⚠️ 待 async 化 | `run()` 仍同步 |
+| `agentica/acp/handlers.py` | 582 | ✅ | 已用 `run_sync()`/`run_stream_sync()` |
+| `agentica/cli/interactive.py` | 669 | ✅ | 已用 `run_stream_sync()` |
+| `evaluation/run.py` | 443 | ⚠️ 运行时 Bug | sync 调用 async 方法 |
 
 ### B. 参考资料
 
