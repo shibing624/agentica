@@ -24,7 +24,7 @@ from agentica import Agent, OpenAIChat
 def main():
     # Create an agent
     agent = Agent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o"),
         description="You are a helpful assistant.",
     )
 
@@ -36,7 +36,7 @@ def main():
     print()
 
     # Start CLI with streaming (default)
-    agent.cli_app()
+    agent.cli_app() # LLM chat only
 
 
 if __name__ == "__main__":

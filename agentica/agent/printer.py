@@ -255,9 +255,9 @@ class PrinterMixin:
         """
         if message:
             if stream:
-                self.print_response_stream_sync(message=message, **kwargs)
+                self.print_response_stream_sync(message=message, show_message=show_message, **kwargs)
             else:
-                self.print_response_sync(message=message, **kwargs)
+                self.print_response_sync(message=message, show_message=show_message, **kwargs)
 
         _exit_on = exit_on or ["exit", "quit", "bye"]
         while True:
@@ -272,6 +272,6 @@ class PrinterMixin:
                 break
 
             if stream:
-                self.print_response_stream_sync(message=user_input, **kwargs)
+                self.print_response_stream_sync(message=user_input, show_message=show_message, **kwargs)
             else:
-                self.print_response_sync(message=user_input, **kwargs)
+                self.print_response_sync(message=user_input, show_message=show_message, **kwargs)
