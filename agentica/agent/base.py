@@ -6,29 +6,18 @@
 This module contains the Agent class definition with all fields and initialization logic.
 Method implementations come from mixin base classes via multiple inheritance.
 """
-import json
-from datetime import datetime
-from textwrap import dedent
-from collections import defaultdict
 from typing import (
     Any,
-    AsyncIterator,
     Callable,
-    cast,
     Dict,
-    Iterator,
     List,
     Literal,
     Optional,
-    overload,
-    Sequence,
     Type,
     Union,
 )
 from uuid import uuid4
-from copy import copy, deepcopy
-from dataclasses import dataclass, field, fields
-from pydantic import BaseModel
+from dataclasses import dataclass, field
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.model.openai import OpenAIChat
 from agentica.tools.base import ModelTool, Tool, Function
@@ -37,7 +26,7 @@ from agentica.model.content import Image, Video
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.run_response import RunResponse, AgentCancelledError
-from agentica.memory import AgentMemory, Memory, AgentRun
+from agentica.memory import AgentMemory
 from agentica.compression.manager import CompressionManager
 from agentica.db.base import BaseDb
 from agentica.workspace import Workspace
