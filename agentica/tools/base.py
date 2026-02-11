@@ -5,6 +5,7 @@
 This module provides classes for managing tools.
 It includes an abstract base class for tools and a class for managing tool instances.
 """
+from __future__ import annotations  # PEP 563: Postponed Evaluation of Annotations
 
 import asyncio
 import inspect
@@ -52,6 +53,32 @@ class StopAgentRun(ToolCallException):
         super().__init__(
             exc, user_message=user_message, agent_message=agent_message, messages=messages, stop_execution=True
         )
+
+
+def _safe_validate_call(c: Callable) -> Callable:
+    """Wrap validate_call, stripping unresolvable forward-reference annotations.
+
+    Pydantic's validate_call internally calls get_type_hints(), which tries to
+    eval string annotations like ``self: "Agent"``. If the referenced class isn't
+    importable in the function's module namespace, it raises NameError.
+
+    Fix: remove such annotations from __annotations__ before validation. We only
+    strip ``self`` (mixin methods) — other forward refs should be fixed at source.
+    """
+    annotations = getattr(c, "__annotations__", None)
+    if annotations and "self" in annotations and isinstance(annotations["self"], str):
+        # Don't mutate the original — copy annotations dict
+        c.__annotations__ = {k: v for k, v in annotations.items() if k != "self"}
+    try:
+        return validate_call(c)
+    except NameError:
+        # Last resort: strip ALL string annotations that fail to resolve
+        if annotations:
+            c.__annotations__ = {
+                k: v for k, v in c.__annotations__.items()
+                if not isinstance(v, str)
+            }
+        return validate_call(c)
 
 
 class Function(BaseModel):
@@ -121,16 +148,29 @@ class Function(BaseModel):
         parameters = {"type": "object", "properties": {}, "required": []}
         try:
             sig = signature(c)
-            # Try to get type hints, but handle forward reference errors gracefully
+            # Try to get type hints with extra namespace for forward references
             try:
-                type_hints = get_type_hints(c)
+                # Provide common forward references that might be used in type hints
+                localns = {
+                    "Agent": None,  # Will be resolved if available
+                    "Tool": Tool,
+                    "Function": Function,
+                    "Message": Message,
+                }
+                # Try to import Agent for forward reference resolution
+                try:
+                    from agentica.agent.base import Agent
+                    localns["Agent"] = Agent
+                except ImportError:
+                    pass
+                type_hints = get_type_hints(c, localns=localns)
             except NameError:
-                # Forward reference (e.g., "Agent") not yet defined, skip type hints
+                # Forward reference not resolvable, skip type hints
                 type_hints = {}
 
             # If function has an the agent argument, remove the agent parameter from the type hints
             if "agent" in sig.parameters:
-                del type_hints["agent"]
+                type_hints.pop("agent", None)
             # logger.info(f"Type hints for {function_name}: {type_hints}")
 
             # Filter out return type and only process parameters
@@ -164,7 +204,7 @@ class Function(BaseModel):
             name=function_name,
             description=getdoc(c),
             parameters=parameters,
-            entrypoint=validate_call(c),
+            entrypoint=_safe_validate_call(c),
         )
 
     def process_entrypoint(self, strict: bool = False):
@@ -179,12 +219,16 @@ class Function(BaseModel):
         parameters = {"type": "object", "properties": {}, "required": []}
         try:
             sig = signature(self.entrypoint)
-            type_hints = get_type_hints(self.entrypoint)
+            # Try to get type hints, but handle forward reference errors gracefully
+            try:
+                type_hints = get_type_hints(self.entrypoint)
+            except NameError:
+                # Forward reference (e.g., "Agent") not yet defined, skip type hints
+                type_hints = {}
 
             # If function has an the agent argument, remove the agent parameter from the type hints
             if "agent" in sig.parameters:
-                del type_hints["agent"]
-            # logger.info(f"Type hints for {self.name}: {type_hints}")
+                type_hints.pop("agent", None)
 
             # Filter out return type and only process parameters
             param_type_hints = {
@@ -214,7 +258,7 @@ class Function(BaseModel):
 
         self.description = getdoc(self.entrypoint) or self.description
         self.parameters = parameters
-        self.entrypoint = validate_call(self.entrypoint)
+        self.entrypoint = _safe_validate_call(self.entrypoint)
 
     def get_type_name(self, t: Type[T]):
         name = str(t)
@@ -229,7 +273,10 @@ class Function(BaseModel):
         if self.entrypoint is None:
             return None
 
-        type_hints = get_type_hints(self.entrypoint)
+        try:
+            type_hints = get_type_hints(self.entrypoint)
+        except NameError:
+            type_hints = {}
         return_type = type_hints.get("return", None)
         returns = None
         if return_type is not None:
