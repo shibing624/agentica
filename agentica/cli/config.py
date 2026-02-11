@@ -149,8 +149,6 @@ def parse_args():
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
     parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
     parser.add_argument('--work_dir', type=str, help='Working directory for file operations', default=None)
-    parser.add_argument('--enable_multi_round', type=lambda x: x.lower() in ('true', '1', 'yes'),
-                        help='Enable multi-round conversation mode (default: True)', default=None)
     parser.add_argument('--tools', nargs='*',
                         choices=list(TOOL_REGISTRY.keys()),
                         help='Additional tools to enable (on top of DeepAgent built-in tools)')
@@ -249,9 +247,6 @@ def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
     if instructions:
         deep_agent_kwargs["instructions"] = instructions
 
-    # Only pass enable_multi_round if explicitly set by user
-    if agent_config.get("enable_multi_round") is not None:
-        deep_agent_kwargs["enable_multi_round"] = agent_config["enable_multi_round"]
 
     new_agent = DeepAgent(**deep_agent_kwargs)
     return new_agent

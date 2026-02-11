@@ -117,8 +117,8 @@ class AgentAsToolTest(unittest.TestCase):
         # Call the tool's entrypoint
         result = tool.entrypoint("Hello world")
         
-        # Verify agent.run was called with the input
-        mock_run.assert_called_once_with("Hello world", stream=False)
+        # Verify agent.run_sync was called with the input
+        mock_run.assert_called_once_with("Hello world")
         self.assertEqual(result, "翻译后的文本")
     
     @patch.object(Agent, 'run_sync')

@@ -208,4 +208,4 @@ class DeepSeekAgent:
 3. **支持多工具调用**: 遍历 `tool_calls` 列表
 4. **手动控制工具执行**: 设置 `model.run_tools = False`
 5. **保留 reasoning_content**: 在 Message 中携带
-6. **同步和异步版本**: `_run_multi_round` 和 `_arun_multi_round` 同步更新
+6. **纯异步实现**: `_run_impl` 统一处理单轮和多轮逻辑

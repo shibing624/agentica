@@ -279,18 +279,17 @@ class Model(BaseModel):
     async def run_function_calls(
             self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
     ) -> AsyncIterator[ModelResponse]:
-        """Execute tool calls (async-only, single implementation).
+        """Execute tool calls with parallel execution, sequential result reporting.
 
-        Executes tools sequentially to maintain message ordering and streaming events.
-        Each tool's execute() is already async-first (sync tools run in thread pool).
+        Phase 1: Emit all tool_call_started events (in order)
+        Phase 2: Execute all tools in parallel via asyncio.gather
+        Phase 3: Process results sequentially (preserving message order)
         """
-        for function_call in function_calls:
-            if self.function_call_stack is None:
-                self.function_call_stack = []
+        if self.function_call_stack is None:
+            self.function_call_stack = []
 
-            # Start function call
-            function_call_timer = Timer()
-            function_call_timer.start()
+        # Phase 1: Emit started events for all function calls
+        for function_call in function_calls:
             yield ModelResponse(
                 content=function_call.get_call_str(),
                 tool_call={
@@ -302,14 +301,34 @@ class Model(BaseModel):
                 event=ModelResponseEvent.tool_call_started.value,
             )
 
-            function_call_success = False
+        # Phase 2: Execute all tools in parallel
+        timers = [Timer() for _ in function_calls]
+        exceptions: List[Optional[ToolCallException]] = [None] * len(function_calls)
+
+        async def _execute_one(idx: int, fc: FunctionCall) -> bool:
+            timers[idx].start()
+            try:
+                return await fc.execute()
+            except ToolCallException as tce:
+                exceptions[idx] = tce
+                return False
+            finally:
+                timers[idx].stop()
+
+        results = await asyncio.gather(
+            *[_execute_one(i, fc) for i, fc in enumerate(function_calls)],
+            return_exceptions=True
+        )
+
+        # Phase 3: Process results in original order
+        for i, function_call in enumerate(function_calls):
+            function_call_success = results[i] if not isinstance(results[i], Exception) else False
             stop_execution_after_tool_call = False
             additional_messages_from_function_call = []
 
-            # Run function call (async)
-            try:
-                function_call_success = await function_call.execute()
-            except ToolCallException as tce:
+            # Handle ToolCallException captured during execution
+            tce = exceptions[i]
+            if tce is not None:
                 if tce.user_message is not None:
                     if isinstance(tce.user_message, str):
                         additional_messages_from_function_call.append(Message(role="user", content=tce.user_message))
@@ -348,8 +367,6 @@ class Model(BaseModel):
                 if function_call.function.show_result:
                     yield ModelResponse(content=function_call_output)
 
-            function_call_timer.stop()
-
             function_call_result = Message(
                 role=tool_role,
                 content=function_call_output if function_call_success else function_call.error,
@@ -358,11 +375,11 @@ class Model(BaseModel):
                 tool_args=function_call.arguments,
                 tool_call_error=not function_call_success,
                 stop_after_tool_call=function_call.function.stop_after_tool_call or stop_execution_after_tool_call,
-                metrics={"time": function_call_timer.elapsed},
+                metrics={"time": timers[i].elapsed},
             )
 
             yield ModelResponse(
-                content=f"{function_call.get_call_str()} completed in {function_call_timer.elapsed:.4f}s.",
+                content=f"{function_call.get_call_str()} completed in {timers[i].elapsed:.4f}s.",
                 tool_call=function_call_result.model_dump(
                     include={
                         "content",
@@ -381,7 +398,7 @@ class Model(BaseModel):
                 self.metrics["tool_call_times"] = {}
             if function_call.function.name not in self.metrics["tool_call_times"]:
                 self.metrics["tool_call_times"][function_call.function.name] = []
-            self.metrics["tool_call_times"][function_call.function.name].append(function_call_timer.elapsed)
+            self.metrics["tool_call_times"][function_call.function.name].append(timers[i].elapsed)
 
             function_call_results.append(function_call_result)
             if len(additional_messages_from_function_call) > 0:

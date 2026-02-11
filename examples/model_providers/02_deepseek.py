@@ -8,13 +8,14 @@ Requires: DEEPSEEK_API_KEY environment variable
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, Message, DeepSeek
 
 
-def main():
+async def main():
     # Example 1: Direct model usage
     print("=" * 60)
     print("Example 1: Direct DeepSeek Model Usage")
@@ -24,7 +25,7 @@ def main():
     print(f"Model: {model}")
     
     messages = [Message(role="user", content="一句话介绍北京")]
-    response = model.response(messages)
+    response = await model.response(messages)
     print(f"Response: {response}")
     
     # Example 2: Agent with DeepSeek
@@ -37,7 +38,7 @@ def main():
         instructions="You are a helpful assistant. Please respond in Chinese.",
     )
     
-    agent.print_response_sync("什么是深度学习?", stream=True)
+    await agent.print_response("什么是深度学习?", stream=True)
     
     # Example 3: DeepSeek Reasoner (if available)
     print("\n" + "=" * 60)
@@ -50,10 +51,10 @@ def main():
             model=reasoner,
             instructions="You are a reasoning assistant. Think step by step.",
         )
-        agent_reasoner.print_response_sync("计算 15 * 23 + 47", stream=True)
+        await agent_reasoner.print_response("计算 15 * 23 + 47", stream=True)
     except Exception as e:
         print(f"DeepSeek Reasoner not available: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -122,7 +122,7 @@ def demo_explore_subagent():
     
     print(f"\nUser Query: {query}")
     print("\nAgent Response:")
-    response = agent.run_sync(query, stream=False)
+    response = agent.run_sync(query)
     print(response.content if response else "No response")
 
 
@@ -156,7 +156,7 @@ def demo_parallel_subagents():
     
     print(f"\nUser Query: {query}")
     print("\nAgent Response:")
-    response = agent.run_sync(query, stream=False)
+    response = agent.run_sync(query)
     print(response.content if response else "No response")
 
 
@@ -193,7 +193,7 @@ def demo_research_subagent():
     
     print(f"\nUser Query: {query}")
     print("\nAgent Response:")
-    response = agent.run_sync(query, stream=False)
+    response = agent.run_sync(query)
     print(response.content if response else "No response")
 
 

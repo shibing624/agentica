@@ -380,6 +380,7 @@ def create_memori_search_tool(memori_toolkit: MemoriTool):
 
 if __name__ == '__main__':
     # add demo
+    import asyncio
     from agentica import OpenAIChat
 
     m = MemoriTool(enable_search_memory=True,
@@ -390,10 +391,10 @@ if __name__ == '__main__':
         tools=[m],
         description="An AI assistant with persistent memory"
     )
-    agent.print_response("I'm a Python developer and I love building web applications")
 
-    # Thanks to the Memori ToolKit, your Agent can now remember the conversation:
-    agent.print_response("What do you remember about my programming background?")
+    async def main():
+        await agent.print_response("I'm a Python developer and I love building web applications")
+        await agent.print_response("What do you remember about my programming background?")
+        await agent.print_response("Show me your memory statistics")
 
-    # Using the Memori ToolKit, your Agent also gains access to memory statistics:
-    agent.print_response("Show me your memory statistics")
+    asyncio.run(main())

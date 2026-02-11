@@ -3,21 +3,28 @@
 @author:XuMing(xuming624@qq.com)
 @description: Workflow - Multi-agent orchestration engine for deterministic pipelines.
 
+Async-first public API:
+- async: run()
+- sync adapter: run_sync()
+
 Workflow provides programmatic control over multi-agent execution:
 - Deterministic step ordering (A -> B -> C, no LLM improvisation)
 - Cross-agent data flow with type safety
 - Session state persistence and recovery
 - Per-step agent isolation (different models/tools/prompts)
 """
+import asyncio
 import collections.abc
+import inspect
 
 from os import getenv
 from uuid import uuid4
 from types import GeneratorType
-from typing import Any, Optional, Dict
+from typing import Any, AsyncIterator, Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from agentica.utils.log import logger, set_log_level_to_debug
+from agentica.utils.async_utils import run_sync
 from agentica.run_response import RunResponse
 from agentica.memory import WorkflowMemory, WorkflowRun
 from agentica.db.base import BaseDb, SessionRow
@@ -99,7 +106,6 @@ class Workflow(BaseModel):
     def _setup_run_wrapper(self):
         """Replace self.run with a wrapper that adds lifecycle management."""
         user_run = self.__class__.run
-        # Use object.__setattr__ to bypass Pydantic's __setattr__
         object.__setattr__(self, '_user_run', user_run)
         object.__setattr__(self, 'run', self._wrap_user_run)
 
@@ -107,18 +113,25 @@ class Workflow(BaseModel):
     # Public API: Subclass should override this
     # ------------------------------------------------------------------
 
-    def run(self, *args: Any, **kwargs: Any):
+    async def run(self, *args: Any, **kwargs: Any):
         """Execute workflow. Override in subclass to define your pipeline."""
         raise NotImplementedError(f"{self.__class__.__name__}.run() not implemented")
+
+    def run_sync(self, *args: Any, **kwargs: Any):
+        """Synchronous adapter for run()."""
+        return run_sync(self.run(*args, **kwargs))
 
     # ------------------------------------------------------------------
     # Lifecycle wrapper
     # ------------------------------------------------------------------
 
-    def _wrap_user_run(self, *args, **kwargs):
+    async def _wrap_user_run(self, *args, **kwargs):
         """Wrapper: lifecycle management -> user run -> result wrapping."""
         self._prepare_run(args, kwargs)
         result = self._user_run(self, *args, **kwargs)
+        # Await if the subclass run() is async
+        if inspect.isawaitable(result):
+            result = await result
         return self._process_result(result)
 
     def _prepare_run(self, args, kwargs):

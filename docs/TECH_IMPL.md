@@ -117,8 +117,10 @@ class Agent:
 
 | 方法 | 描述 |
 |------|------|
-| `run(message, stream=False)` | 运行 Agent，支持流式和非流式 |
-| `arun(message, stream=False)` | 异步运行 Agent |
+| `async run(message)` | 异步运行 Agent（非流式） |
+| `async run_stream(message)` | 异步流式运行 Agent |
+| `run_sync(message)` | 同步运行 Agent（非流式） |
+| `run_stream_sync(message)` | 同步流式运行 Agent |
 | `update_model()` | 更新/初始化模型配置 |
 | `get_tools()` | 获取所有可用工具 |
 | `get_transfer_function()` | 获取团队任务转移函数 |

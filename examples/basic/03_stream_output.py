@@ -5,10 +5,10 @@
 
 This example shows different ways to use streaming output:
 1. Using print_response with stream=True (sync)
-2. Using run with stream=True and iterating over chunks (sync)
-3. Async streaming with aprint_response
-4. Async streaming with arun_stream (recommended for async streaming)
-5. Async non-streaming with arun
+2. Using run_stream_sync and iterating over chunks (sync)
+3. Async streaming with print_response
+4. Async streaming with run_stream (recommended for async streaming)
+5. Async non-streaming with run
 """
 import sys
 import os
@@ -36,44 +36,44 @@ print("Example 2: Manual Streaming Iteration (sync)")
 print("=" * 60)
 
 print("Response: ", end="")
-for chunk in agent.run_sync("hi", stream=True):
+for chunk in agent.run_stream_sync("hi"):
     if chunk.content:
         print(chunk.content, end="", flush=True)
 print()
 
-# Example 3: Async streaming with aprint_response
+# Example 3: Async streaming with print_response
 print("\n" + "=" * 60)
-print("Example 3: Async Streaming with aprint_response")
+print("Example 3: Async Streaming with print_response")
 print("=" * 60)
 
 
-async def async_aprint_demo():
+async def async_print_demo():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
     )
     
-    # Use aprint_response for async streaming output
+    # Use print_response for async streaming output
     await agent.print_response("hi", stream=True)
 
 
-asyncio.run(async_aprint_demo())
+asyncio.run(async_print_demo())
 
-# Example 4: Async streaming with arun_stream (recommended)
+# Example 4: Async streaming with run_stream (recommended)
 print("\n" + "=" * 60)
-print("Example 4: Async Streaming with arun_stream (recommended)")
+print("Example 4: Async Streaming with run_stream (recommended)")
 print("=" * 60)
 
 
-async def async_arun_stream_demo():
+async def async_stream_demo():
     agent = Agent(
         model=DeepSeek(id='deepseek-reasoner'),
     )
     
-    # Use arun_stream for async streaming - this is the recommended way
-    # arun_stream is an async generator, can be used directly with async for
+    # Use run_stream for async streaming - this is the recommended way
+    # run_stream is an async generator, can be used directly with async for
     reasoning_printed = False
     content_started = False
-    async for chunk in agent.run("9.18比9.01大吗", stream=True):
+    async for chunk in agent.run_stream("9.18比9.01大吗"):
         # Stream reasoning content (thinking process)
         if chunk.reasoning_content:
             if not reasoning_printed:
@@ -88,22 +88,22 @@ async def async_arun_stream_demo():
             print(chunk.content, end="", flush=True)
     print()
 
-asyncio.run(async_arun_stream_demo())
+asyncio.run(async_stream_demo())
 
-# Example 5: Async non-streaming with arun
+# Example 5: Async non-streaming with run
 print("\n" + "=" * 60)
-print("Example 5: Async Non-Streaming with arun")
+print("Example 5: Async Non-Streaming with run")
 print("=" * 60)
 
 
-async def async_arun_non_stream_demo():
+async def async_run_demo():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
     )
     
-    # Use arun without streaming - returns a single RunResponse
+    # Use run without streaming - returns a single RunResponse
     response = await agent.run("hi")
     print(f"Response: {response.content}")
 
 
-asyncio.run(async_arun_non_stream_demo())
+asyncio.run(async_run_demo())

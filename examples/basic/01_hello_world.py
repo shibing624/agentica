@@ -7,6 +7,7 @@ This is the most basic example showing how to create and run an Agent.
 """
 import sys
 import os
+import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 import time
@@ -15,15 +16,21 @@ from agentica import Agent, OpenAIChat
 t2 = time.time()
 print(f"import time: {t2-t1}")
 
-# Create a simple agent
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o-mini"),
-    debug=True
-)
 
-# Run the agent with a simple query
-response = agent.run_sync("一句话介绍北京")
-print(response)
+async def main():
+    # Create a simple agent
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini"),
+        debug=True
+    )
 
-# You can also use print_response for formatted output with streaming
-agent.print_response_sync("一句话介绍上海", stream=True)
+    # Run the agent with a simple query
+    response = await agent.run("一句话介绍北京")
+    print(response)
+
+    # You can also use print_response for formatted output with streaming
+    await agent.print_response("一句话介绍上海", stream=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

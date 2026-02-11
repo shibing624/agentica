@@ -9,6 +9,7 @@ This example shows how to use code execution tools:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -17,8 +18,7 @@ from agentica.tools.run_python_code_tool import RunPythonCodeTool
 from agentica.tools.code_tool import CodeTool
 
 
-def main():
-    # Example 1: Python code execution
+async def main():
     print("=" * 60)
     print("Example 1: Python Code Execution")
     print("=" * 60)
@@ -32,18 +32,16 @@ def main():
         ],
     )
     
-    agent.print_response_sync("计算斐波那契数列的前20个数")
+    await agent.print_response("计算斐波那契数列的前20个数")
     
-    # Example 2: Data analysis
     print("\n" + "=" * 60)
     print("Example 2: Data Analysis")
     print("=" * 60)
     
-    agent.print_response_sync(
+    await agent.print_response(
         "创建一个包含10个随机数的列表，计算它们的平均值、中位数和标准差"
     )
     
-    # Example 3: Code with visualization (saves to file)
     print("\n" + "=" * 60)
     print("Example 3: Code Generation")
     print("=" * 60)
@@ -53,8 +51,8 @@ def main():
         tools=[CodeTool()],
     )
     
-    agent2.print_response_sync("写一个冒泡排序的Python函数，并解释它的工作原理")
+    await agent2.print_response("写一个冒泡排序的Python函数，并解释它的工作原理")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

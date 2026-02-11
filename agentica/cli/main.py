@@ -30,7 +30,6 @@ def main():
         "temperature": args.temperature,
         "debug_mode": args.verbose > 0,
         "work_dir": args.work_dir,
-        "enable_multi_round": args.enable_multi_round,
     }
     extra_tool_names = list(args.tools) if args.tools else None
 
@@ -65,7 +64,7 @@ def main():
         extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
         agent_instance = create_agent(agent_config, extra_tools, workspace, skills_registry)
         try:
-            response = agent_instance.run(args.query, stream=True)
+            response = agent_instance.run_stream_sync(args.query)
             for chunk in response:
                 if chunk and chunk.content:
                     console.print(chunk.content, end="")

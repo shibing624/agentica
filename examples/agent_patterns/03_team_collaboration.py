@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import asyncio
+
 from agentica import Agent, OpenAIChat, BaiduSearchTool
 
 
@@ -85,12 +87,12 @@ team = Agent(
 )
 
 
-def main():
+async def main():
     print("=" * 60)
     print("Team Collaboration Demo: News Article Writing")
     print("=" * 60)
     
-    team.print_response_sync(
+    await team.print_response(
         """
         Find the 5 most relevant articles on a topic: 人工智能最新发展,
         Read each article and write a NYT worthy news article. 用中文写。
@@ -100,4 +102,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -19,8 +19,13 @@ from agentica import Agent
 from agentica.model.litellm import LiteLLM
 
 
-def basic_example():
-    """Basic example: Use LiteLLM with OpenAI provider."""
+async def main():
+    """Run all examples."""
+    print("\n" + "=" * 60)
+    print("LiteLLM Model Provider Demo")
+    print("=" * 60 + "\n")
+    
+    # Example 1: Basic
     print("=" * 60)
     print("Example 1: Basic LiteLLM with OpenAI")
     print("=" * 60)
@@ -30,12 +35,10 @@ def basic_example():
         model=LiteLLM(id="openai/gpt-4o-mini"),
     )
     
-    response = agent.run_sync("一句话介绍北京")
+    response = await agent.run("一句话介绍北京")
     print(f"Response:\n{response}")
 
-
-def tool_calling_example():
-    """Example: LiteLLM with tool calling."""
+    # Example 2: Tool calling
     print("\n" + "=" * 60)
     print("Example 2: LiteLLM with Tool Calling")
     print("=" * 60)
@@ -43,51 +46,42 @@ def tool_calling_example():
     def get_weather(city: str) -> str:
         """Get the current weather for a city."""
         weather_data = {
-            "beijing": "Sunny, 25°C",
-            "shanghai": "Cloudy, 22°C",
-            "tokyo": "Rainy, 18°C",
+            "beijing": "Sunny, 25C",
+            "shanghai": "Cloudy, 22C",
+            "tokyo": "Rainy, 18C",
         }
         return weather_data.get(city.lower(), f"Weather data not available for {city}")
     
-    agent = Agent(
+    agent2 = Agent(
         name="Weather Assistant",
         model=LiteLLM(id="openai/gpt-4o-mini"),
         tools=[get_weather],
         instructions="You are a weather assistant. Use the get_weather tool to answer weather questions.",
     )
     
-    response = agent.run_sync("What's the weather like in Beijing?")
+    response = await agent2.run("What's the weather like in Beijing?")
     print(f"Response:\n{response.content}")
 
-
-def streaming_example():
-    """Example: LiteLLM with streaming output."""
+    # Example 3: Streaming
     print("\n" + "=" * 60)
     print("Example 3: LiteLLM with Streaming")
     print("=" * 60)
     
-    agent = Agent(
+    agent3 = Agent(
         name="Streaming Assistant",
         model=LiteLLM(id="openai/gpt-4o-mini"),
     )
     
     print("Streaming response:")
-    for chunk in agent.run_sync("Write a short poem about AI.", stream=True):
+    async for chunk in agent3.run_stream("Write a short poem about AI."):
         if chunk.content:
             print(chunk.content, end="", flush=True)
     print()
 
-
-async def async_example():
-    """Example: LiteLLM with async execution."""
+    # Example 4: Concurrent async
     print("\n" + "=" * 60)
-    print("Example 4: LiteLLM with Async")
+    print("Example 4: LiteLLM with Async Concurrency")
     print("=" * 60)
-    
-    agent = Agent(
-        name="Async Assistant",
-        model=LiteLLM(id="openai/gpt-4o-mini"),
-    )
     
     queries = ["What is Python?", "What is JavaScript?", "What is Rust?"]
     
@@ -102,32 +96,5 @@ async def async_example():
         print()
 
 
-def main():
-    """Run all examples."""
-    print("\n" + "=" * 60)
-    print("LiteLLM Model Provider Demo")
-    print("=" * 60 + "\n")
-    
-    try:
-        basic_example()
-    except Exception as e:
-        print(f"Basic example failed: {e}\n")
-    
-    try:
-        tool_calling_example()
-    except Exception as e:
-        print(f"Tool calling example failed: {e}\n")
-    
-    try:
-        streaming_example()
-    except Exception as e:
-        print(f"Streaming example failed: {e}\n")
-    
-    try:
-        asyncio.run(async_example())
-    except Exception as e:
-        print(f"Async example failed: {e}\n")
-
-
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

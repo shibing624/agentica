@@ -15,17 +15,13 @@ from agentica.model.openai import OpenAIChat
 
 
 class AgentMultiRoundTest(unittest.TestCase):
-    """Test Agent with enable_multi_round=True (ReAct-style behavior)."""
+    """Test Agent basic behavior."""
 
-    def test_agent_multi_round_init(self):
-        """Test Agent initialization with multi-round enabled."""
+    def test_agent_init(self):
+        """Test Agent initialization."""
         agent = Agent(
-            enable_multi_round=True,
-            max_rounds=5,
             add_datetime_to_instructions=True,
         )
-        self.assertEqual(agent.max_rounds, 5)
-        self.assertTrue(agent.enable_multi_round)
         self.assertTrue(agent.add_datetime_to_instructions)
 
     def test_agent_with_instructions(self):
@@ -33,11 +29,7 @@ class AgentMultiRoundTest(unittest.TestCase):
         custom_instructions = ["Always be helpful", "Use tools when needed"]
         agent = Agent(
             instructions=custom_instructions,
-            enable_multi_round=True,
-            max_rounds=10,
         )
-        self.assertEqual(agent.max_rounds, 10)
-        self.assertTrue(agent.enable_multi_round)
         self.assertIsNotNone(agent.instructions)
 
     @patch.object(OpenAIChat, 'response')
@@ -54,7 +46,6 @@ class AgentMultiRoundTest(unittest.TestCase):
 
         agent = Agent(
             model=OpenAIChat(model="gpt-4o-mini"),
-            enable_multi_round=True,
         )
         
         # Run the agent

@@ -19,6 +19,7 @@ This example shows the RECOMMENDED way to manage agent memory:
 For multi-user web applications requiring database storage,
 see examples/memory/02_long_term_memory.py (deprecated for new projects)
 """
+import asyncio
 import sys
 import os
 import tempfile
@@ -31,7 +32,7 @@ from agentica.memory import AgentMemory
 from agentica.workspace import Workspace
 
 
-def demo_workspace_memory():
+async def demo_workspace_memory():
     """Demo: Using Workspace for persistent memory (RECOMMENDED)"""
     print("=" * 60)
     print("Demo 1: Workspace for Persistent Memory (RECOMMENDED)")
@@ -63,7 +64,7 @@ def demo_workspace_memory():
     )
 
     print("\n--- First conversation ---")
-    response = agent.run_sync("My name is Alice and I'm a data scientist")
+    response = await agent.run("My name is Alice and I'm a data scientist")
     print(f"Agent: {response.content[:200]}...")
 
     # Save important information to workspace memory
@@ -123,7 +124,7 @@ def demo_multi_user_workspace():
     print(f"Agent workspace user: {agent.workspace.user_id if agent.workspace else 'None'}")
 
 
-def demo_session_summary():
+async def demo_session_summary():
     """Demo: Using AgentMemory for session summaries"""
     print("\n" + "=" * 60)
     print("Demo 3: Session Summary (for conversation tracking)")
@@ -138,9 +139,9 @@ def demo_session_summary():
     )
 
     print("\n--- Conversation ---")
-    agent.print_response_sync("Hi, I need help with Python decorators")
-    agent.print_response_sync("Can you show me a simple example?")
-    agent.print_response_sync("How about a decorator with arguments?")
+    await agent.print_response("Hi, I need help with Python decorators")
+    await agent.print_response("Can you show me a simple example?")
+    await agent.print_response("How about a decorator with arguments?")
 
     print("\n--- Session Summary ---")
     # Generate summary
@@ -152,7 +153,7 @@ def demo_session_summary():
         print("No summary generated yet")
 
 
-def demo_combined_approach():
+async def demo_combined_approach():
     """Demo: Combining Workspace + Session Summary (BEST PRACTICE)"""
     print("\n" + "=" * 60)
     print("Demo 4: Combined Approach (BEST PRACTICE)")
@@ -180,7 +181,7 @@ def demo_combined_approach():
     print("  - AgentMemory: Session history and summaries")
 
     print("\n--- Conversation ---")
-    response = agent.run_sync("I'm Bob, working on a FastAPI project")
+    response = await agent.run("I'm Bob, working on a FastAPI project")
     print(f"Agent: {response.content[:150]}...")
 
     # Save important info to workspace
@@ -195,7 +196,7 @@ def demo_combined_approach():
     print(f"Runs in session: {len(agent.memory.runs)}")
 
 
-def main():
+async def main():
     """Run all demos"""
     print("""
 ╔══════════════════════════════════════════════════════════════╗
@@ -210,10 +211,10 @@ def main():
 ╚══════════════════════════════════════════════════════════════╝
 """)
 
-    demo_workspace_memory()
+    await demo_workspace_memory()
     demo_multi_user_workspace()
-    demo_session_summary()
-    demo_combined_approach()
+    await demo_session_summary()
+    await demo_combined_approach()
 
     print("\n" + "=" * 60)
     print("Summary: Memory Management Best Practices")
@@ -251,4 +252,4 @@ workspace/
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

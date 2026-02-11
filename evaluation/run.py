@@ -13,7 +13,6 @@ import argparse
 import os
 import json
 import asyncio
-import concurrent.futures
 import re
 from typing import List, Dict, Any, Optional
 from loguru import logger
@@ -66,7 +65,7 @@ def extract_correct_judgement(response: str) -> Optional[str]:
     return None
 
 
-def call_llm_judge(item: Dict, judge_prompt: str, dataset: str) -> Dict[str, Any]:
+async def call_llm_judge(item: Dict, judge_prompt: str, dataset: str) -> Dict[str, Any]:
     """Judge if predicted answer matches ground-truth using LLM."""
     question = item.get("question", "")
     correct_answer = item.get("answer", "")
@@ -81,7 +80,7 @@ def call_llm_judge(item: Dict, judge_prompt: str, dataset: str) -> Dict[str, Any
         )
         
         judge_model = ZhipuAIChat(model='glm-4-flash')
-        response = judge_model.response([Message(role="user", content=prompt)])
+        response = await judge_model.response([Message(role="user", content=prompt)])
         judgement = response.content
 
         # Process judgement based on dataset type
@@ -186,7 +185,7 @@ def calculate_statistics(results: List[Dict]) -> Dict[str, Any]:
     }
 
 
-def evaluate_instance(
+async def evaluate_instance(
     model_name: str,
     instance: Dict,
     max_rounds: int = 100,
@@ -240,7 +239,7 @@ def evaluate_instance(
         )
         
         # Run the agent
-        response = agent.run(question)
+        response = await agent.run(question)
         response_content = response.content if response else ""
 
         logger.info(f"question: {question}\nresponse: {response_content}")
@@ -350,7 +349,7 @@ async def main():
     debug = args.debug == 1
     
     for instance in tqdm(test_data, desc="Running Agent"):
-        result = evaluate_instance(
+        result = await evaluate_instance(
             model_name=args.model,
             instance=instance,
             max_rounds=args.max_rounds,
@@ -378,17 +377,12 @@ async def main():
         correct_count = 0
     else:
         logger.info("Running LLM judgement...")
-        judged_results = []
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            futures = {
-                executor.submit(call_llm_judge, item, judge_prompt, args.dataset): item 
-                for item in results
-            }
-            
-            for future in tqdm(concurrent.futures.as_completed(futures), 
-                             total=len(futures), desc="Judging"):
-                judged_results.append(future.result())
+        # Use asyncio.gather for concurrent judge calls
+        judge_tasks = [
+            call_llm_judge(item, judge_prompt, args.dataset)
+            for item in results
+        ]
+        judged_results = await asyncio.gather(*judge_tasks)
 
         # Calculate accuracy
         correct_count = sum(1 for r in judged_results if r.get("is_correct", False))

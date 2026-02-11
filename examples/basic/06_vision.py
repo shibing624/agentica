@@ -10,14 +10,14 @@ This example shows how to:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
 
 
-def main():
-    # Create agent with vision-capable model
+async def main():
     agent = Agent(model=OpenAIChat(id="gpt-4o"))
 
     # Example 1: Single image analysis
@@ -25,7 +25,7 @@ def main():
     print("Example 1: Single Image Analysis")
     print("=" * 60)
     
-    response = agent.run_sync(
+    response = await agent.run(
         "描述这张图片的内容",
         images=[
             "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
@@ -38,7 +38,7 @@ def main():
     print("Example 2: Multiple Images Comparison")
     print("=" * 60)
     
-    response = agent.run_sync(
+    response = await agent.run(
         "一句话说明两张图片的不同",
         images=[
             "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
@@ -54,14 +54,13 @@ def main():
     
     import base64
     
-    # Read local image and convert to base64
     image_path = os.path.join(os.path.dirname(__file__), "..", "data", "chinese.jpg")
     with open(image_path, "rb") as f:
         image_data = f.read()
     base64_image = base64.b64encode(image_data).decode("utf-8")
     base64_image_with_prefix = f"data:image/jpeg;base64,{base64_image}"
     
-    response = agent.run_sync(
+    response = await agent.run(
         "这张图片里有什么？",
         images=[base64_image_with_prefix]
     )
@@ -69,4 +68,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

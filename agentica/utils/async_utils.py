@@ -3,13 +3,13 @@
 @author:XuMing(xuming624@qq.com)
 @description: Async-first utilities.
 
-Provides run_sync() and iter_over_async() for bridging async-first code
+Provides run_sync() for bridging async-first code
 to synchronous callers.
 """
 
 import asyncio
 import threading
-from typing import TypeVar, Coroutine, AsyncIterator, Iterator
+from typing import TypeVar, Coroutine
 
 T = TypeVar("T")
 
@@ -47,33 +47,3 @@ def run_sync(coro: Coroutine[None, None, T]) -> T:
         raise exception
     return result
 
-
-def iter_over_async(ait: AsyncIterator[T]) -> Iterator[T]:
-    """Convert an AsyncIterator to a synchronous Iterator.
-
-    Creates a dedicated event loop in a background thread to drive the
-    async iterator, yielding items back to the synchronous caller.
-    """
-    sentinel = object()
-    loop = asyncio.new_event_loop()
-
-    async def _get_next() -> T:
-        try:
-            return await ait.__anext__()
-        except StopAsyncIteration:
-            return sentinel  # type: ignore
-
-    try:
-        while True:
-            item = loop.run_until_complete(_get_next())
-            if item is sentinel:
-                break
-            yield item
-    finally:
-        # Clean up: close the async iterator if it has aclose()
-        if hasattr(ait, "aclose"):
-            try:
-                loop.run_until_complete(ait.aclose())
-            except Exception:
-                pass
-        loop.close()

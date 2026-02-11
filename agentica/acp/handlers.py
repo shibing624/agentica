@@ -524,7 +524,7 @@ class ACPHandlers:
         
         try:
             agent = self._get_or_create_agent()
-            response = agent.run_sync(prompt, stream=True)
+            response = agent.run_stream_sync(prompt)
             
             for chunk in response:
                 if chunk and chunk.content:

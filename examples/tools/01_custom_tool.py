@@ -10,16 +10,14 @@ This example shows:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool, FileTool
 
 
-# ============================================================================
 # Simple function-based tools
-# ============================================================================
-
 def multiply(first_num: float, second_num: float) -> str:
     """Multiply two numbers together.
     
@@ -60,10 +58,6 @@ def get_text_length(text: str) -> str:
     return str(len(text))
 
 
-# ============================================================================
-# Class-based tools
-# ============================================================================
-
 class AddTool(Tool):
     """A custom tool for adding two numbers."""
     
@@ -84,36 +78,29 @@ class AddTool(Tool):
         return str(first_num + second_num)
 
 
-# ============================================================================
-# Main execution
-# ============================================================================
-
-def main():
-    """Main function to create and run the agent with custom tools."""
-    # Create agent with custom and built-in tools
+async def main():
     agent = Agent(
         model=OpenAIChat(id='gpt-4o-mini'),
         tools=[
-            multiply,           # Function-based tool
-            AddTool(),          # Class-based tool
-            exponentiate,       # Function-based tool
-            get_text_length,    # Function-based tool
-            WeatherTool(),      # Built-in tool
-            ShellTool(),        # Built-in tool
-            FileTool()          # Built-in tool
+            multiply,
+            AddTool(),
+            exponentiate,
+            get_text_length,
+            WeatherTool(),
+            ShellTool(),
+            FileTool()
         ],
     )
     
-    # Example queries
     print("=" * 60)
     print("Example 1: Multiplication")
     print("=" * 60)
-    agent.print_response_sync("3乘以10000005是啥?")
+    await agent.print_response("3乘以10000005是啥?")
     
     print("\n" + "=" * 60)
     print("Example 2: Complex calculation")
     print("=" * 60)
-    agent.print_response_sync(
+    await agent.print_response(
         "将3的五次方乘以(12和3的和). step by step to show the result. "
         "最后统计一下结果的字符长度。"
     )
@@ -121,13 +108,13 @@ def main():
     print("\n" + "=" * 60)
     print("Example 3: Weather + calculation")
     print("=" * 60)
-    agent.print_response_sync("明天北京天气多少度？温度 乘以 2333 = ？")
+    await agent.print_response("明天北京天气多少度？温度 乘以 2333 = ？")
     
     print("\n" + "=" * 60)
     print("Example 4: File operations")
     print("=" * 60)
-    agent.print_response_sync("查询当前目录最大的py文件")
+    await agent.print_response("查询当前目录最大的py文件")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

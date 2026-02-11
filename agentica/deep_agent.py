@@ -519,7 +519,6 @@ If not complete, continue working. Do NOT end your turn prematurely.
         return (
             f"DeepAgent(name={self.name}, "
             f"deep_research={self.enable_deep_research}, "
-            f"max_rounds={self.max_rounds}, "
             f"max_output_tokens={mot}, "
             f"builtin_tools={len(builtin_tools)})"
         )

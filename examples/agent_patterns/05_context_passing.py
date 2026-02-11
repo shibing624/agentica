@@ -13,10 +13,12 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+import asyncio
+
 from agentica import Agent, OpenAIChat
 
 
-def main():
+async def main():
     # Create user context as a dictionary (required format)
     user_context = {
         "user_id": "user_123",
@@ -36,7 +38,7 @@ def main():
         instructions="你是一个个性化助手。请用中文回复，并根据上下文中的用户信息提供个性化服务。",
     )
     
-    agent.print_response_sync("请问候我并告诉我我的偏好设置")
+    await agent.print_response("请问候我并告诉我我的偏好设置")
     
     # Example 2: Multiple agents sharing context
     print("\n" + "=" * 60)
@@ -62,13 +64,13 @@ def main():
     )
     
     # Collect information
-    info = collector.run_sync("根据上下文中的用户信息生成用户基本信息摘要")
+    info = await collector.run("根据上下文中的用户信息生成用户基本信息摘要")
     print(f"Collector: {info.content}")
     
     # Process information
-    result = processor.run_sync(f"处理以下信息并给出个性化建议: {info.content}")
+    result = await processor.run(f"处理以下信息并给出个性化建议: {info.content}")
     print(f"Processor: {result.content}")
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

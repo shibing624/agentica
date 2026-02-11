@@ -258,7 +258,6 @@ def demo_agentica_agent():
     try:
         from agentica import Agent, OpenAIChat
 
-        # 创建 Agent
         agent = Agent(
             model=OpenAIChat(id='gpt-4o-mini'),
             tools=[get_weather, calculate, search_knowledge],
@@ -268,15 +267,15 @@ def demo_agentica_agent():
         print(f"\n用户查询: {query}")
         print("-" * 70)
 
-        # 非流式调用 - 最简单的方式
+        # Non-streaming
         print("\n【非流式输出】")
         response = agent.run_sync(query)
         print(response.content)
 
-        # 流式调用 - 边执行边输出
+        # Streaming
         print("\n" + "-" * 70)
         print("\n【流式输出】")
-        for chunk in agent.run_sync("查询深圳天气", stream=True):
+        for chunk in agent.run_stream_sync("查询深圳天气"):
             if chunk.content:
                 print(chunk.content, end="", flush=True)
         print()
@@ -305,7 +304,7 @@ def print_comparison():
 │ 代码复杂度       │ 高（需要处理细节）    │ 低（一行代码）       │
 │ 可控性          │ 完全可控             │ 可配置扩展           │
 │ 工具执行输出     │ 需要自己实现         │ 事件驱动             │
-│ 流式输出        │ 可自定义             │ stream=True          │
+│ 流式输出        │ 可自定义             │ run_stream()         │
 │ 错误处理        │ 需要自己实现         │ 框架处理             │
 │ 多提供商支持     │ 需要适配             │ 20+ 提供商           │
 │ 适用场景        │ 深度定制             │ 生产环境             │

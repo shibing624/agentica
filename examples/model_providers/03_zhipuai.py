@@ -8,13 +8,14 @@ Requires: ZHIPUAI_API_KEY environment variable
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, ZhipuAI, UserMessage
 
 
-def main():
+async def main():
     # Example 1: Direct model usage
     print("=" * 60)
     print("Example 1: Direct ZhipuAI Model Usage")
@@ -24,7 +25,7 @@ def main():
     print(f"Model: {model}")
     
     messages = [UserMessage("一句话介绍北京")]
-    response = model.response(messages)
+    response = await model.response(messages)
     print(f"Response: {response}")
     
     # Example 2: Streaming
@@ -34,7 +35,7 @@ def main():
     
     stream_messages = [UserMessage("一句话介绍上海")]
     print("Streaming: ", end="", flush=True)
-    for chunk in model.response_stream(stream_messages):
+    async for chunk in model.response_stream(stream_messages):
         if chunk.reasoning_content:
             print(chunk.reasoning_content, end="", flush=True)
         if chunk.content:
@@ -50,8 +51,8 @@ def main():
         model=ZhipuAI(),
     )
     
-    agent.print_response_sync("一句话简单介绍一下《红楼梦》", stream=True)
+    await agent.print_response("一句话简单介绍一下《红楼梦》", stream=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -22,6 +22,7 @@ Database backends supported:
 2. MysqlDb - MySQL database storage
 3. RedisDb - Redis key-value storage
 """
+import asyncio
 import sys
 import os
 
@@ -36,7 +37,7 @@ from agentica.db.base import MemoryRow
 from agentica.memory import Memory
 
 
-def demo_sqlite_memory():
+async def demo_sqlite_memory():
     """Demo with SqliteDb for long-term memory storage."""
     print("=" * 50)
     print("Demo 1: SqliteDb for long-term memory")
@@ -64,7 +65,7 @@ def demo_sqlite_memory():
     )
 
     print("\n--- First conversation ---")
-    agent.print_response_sync("My name is Alice and I work as a software engineer at Google.")
+    await agent.print_response("My name is Alice and I work as a software engineer at Google.")
 
     print("\n--- Loading memories ---")
     memory.load_user_memories()
@@ -76,7 +77,7 @@ def demo_sqlite_memory():
         print("No memories found")
 
 
-def demo_mysql_memory():
+async def demo_mysql_memory():
     """Demo with MysqlDb for long-term memory storage."""
     print("\n" + "=" * 50)
     print("Demo 2: MysqlDb for long-term memory")
@@ -120,7 +121,7 @@ def demo_mysql_memory():
         )
 
         print("\n--- First conversation (MySQL) ---")
-        agent.print_response_sync("My name is Bob and I'm a data scientist at Microsoft.")
+        await agent.print_response("My name is Bob and I'm a data scientist at Microsoft.")
 
         print("\n--- Loading memories from MySQL ---")
         memory.load_user_memories()
@@ -136,7 +137,7 @@ def demo_mysql_memory():
         print("Make sure MySQL is running and credentials are correct.")
 
 
-def demo_redis_memory():
+async def demo_redis_memory():
     """Demo with RedisDb for long-term memory storage."""
     print("\n" + "=" * 50)
     print("Demo 3: RedisDb for long-term memory")
@@ -178,7 +179,7 @@ def demo_redis_memory():
         )
 
         print("\n--- First conversation (Redis) ---")
-        agent.print_response_sync("My name is Charlie and I'm a ML engineer at Meta.")
+        await agent.print_response("My name is Charlie and I'm a ML engineer at Meta.")
 
         print("\n--- Loading memories from Redis ---")
         memory.load_user_memories()
@@ -226,7 +227,7 @@ def demo_direct_db_operations():
         print(f"  - {row.memory.get('memory', '')}")
 
 
-def demo_agent_with_session():
+async def demo_agent_with_session():
     """Demo using Agent with db for session persistence."""
     print("\n" + "=" * 50)
     print("Demo 5: Agent with session persistence")
@@ -250,8 +251,8 @@ def demo_agent_with_session():
     print(f"Session ID: {session_id}")
 
     print("\n--- Conversation ---")
-    agent.print_response_sync("Hi, I'm David. I love programming in Python.")
-    agent.print_response_sync("What's my name and what do I like?")
+    await agent.print_response("Hi, I'm David. I love programming in Python.")
+    await agent.print_response("What's my name and what do I like?")
 
     print("\n--- Stored sessions ---")
     session_ids = db.get_all_session_ids()
@@ -259,17 +260,11 @@ def demo_agent_with_session():
 
 
 if __name__ == "__main__":
-    # Run SQLite demo (always works)
-    demo_sqlite_memory()
+    async def _main():
+        await demo_sqlite_memory()
+        await demo_mysql_memory()
+        await demo_redis_memory()
+        demo_direct_db_operations()
+        await demo_agent_with_session()
 
-    # Run MySQL demo (requires MySQL server)
-    demo_mysql_memory()
-
-    # Run Redis demo (requires Redis server)
-    demo_redis_memory()
-
-    # Run direct database operations demo
-    demo_direct_db_operations()
-
-    # Run session persistence demo
-    demo_agent_with_session()
+    asyncio.run(_main())

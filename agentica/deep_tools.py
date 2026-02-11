@@ -1050,7 +1050,7 @@ Use your standard function calling mechanism to invoke `task(description="...", 
             tool_calls_log = []
             final_content = ""
             
-            response_stream = subagent.run_sync(description, stream=True, stream_intermediate_steps=True)
+            response_stream = subagent.run_stream_sync(description, stream_intermediate_steps=True)
             for chunk in response_stream:
                 if chunk is None:
                     continue

@@ -29,44 +29,17 @@ class TestDeepAgent(unittest.TestCase):
         )
 
         self.assertEqual(agent.name, "TestAgent")
-        self.assertFalse(agent.enable_multi_round)  # Default is False for DeepAgent
-        self.assertEqual(agent.max_rounds, 20)  # Default
         self.assertFalse(agent.enable_deep_research)
         self.assertTrue(agent.enable_agentic_prompt)  # Default is True for DeepAgent
-
-    def test_deep_agent_with_multi_round_enabled(self):
-        """Test DeepAgent with enable_multi_round explicitly set to True."""
-        agent = DeepAgent(
-            name="TestAgent",
-            enable_multi_round=True,
-        )
-
-        self.assertTrue(agent.enable_multi_round)
-        self.assertFalse(agent.enable_deep_research)
 
     def test_deep_agent_with_deep_research(self):
         """Test DeepAgent with deep research mode enabled."""
         agent = DeepAgent(
             name="ResearchAgent",
             enable_deep_research=True,
-            max_rounds=20,
         )
 
         self.assertTrue(agent.enable_deep_research)
-        # NOTE: deep_research no longer forces multi_round
-        self.assertFalse(agent.enable_multi_round)
-        self.assertEqual(agent.max_rounds, 20)
-
-    def test_deep_research_does_not_force_multi_round(self):
-        """Test that enable_deep_research=True does NOT force enable_multi_round=True anymore."""
-        agent = DeepAgent(
-            name="TestAgent",
-            enable_deep_research=True,
-            enable_multi_round=False,
-        )
-
-        # Should remain False - deep_research no longer forces multi_round
-        self.assertFalse(agent.enable_multi_round)
 
     def test_builtin_tools(self):
         """Test that builtin tools are correctly configured."""
@@ -165,14 +138,11 @@ class TestDeepAgent(unittest.TestCase):
         agent = DeepAgent(
             name="TestAgent",
             enable_deep_research=True,
-            max_rounds=10,
         )
 
         repr_str = repr(agent)
         self.assertIn("DeepAgent", repr_str)
         self.assertIn("TestAgent", repr_str)
-        self.assertIn("deep_research=True", repr_str)
-        self.assertIn("max_rounds=10", repr_str)
 
     def test_enable_agentic_prompt_default(self):
         """Test that DeepAgent enables agentic_prompt by default."""

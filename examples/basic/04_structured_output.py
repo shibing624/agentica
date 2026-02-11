@@ -7,6 +7,7 @@ This example shows how to use response_model to get structured output from the a
 """
 import sys
 import os
+import asyncio
 from typing import List
 from pydantic import BaseModel, Field
 from rich.pretty import pprint
@@ -28,28 +29,6 @@ class MovieScript(BaseModel):
     storyline: str = Field(..., description="3 sentence storyline for the movie. Make it exciting!")
 
 
-# Example 1: Movie script generation
-print("=" * 60)
-print("Example 1: Movie Script Generation")
-print("=" * 60)
-
-agent = Agent(
-    description="You help write movie scripts.",
-    response_model=MovieScript,
-)
-
-response = agent.run_sync("Write a movie script about a time traveler.")
-pprint(response)
-print(f"\nMovie name: {response.content.name}")
-print(f"Genre: {response.content.genre}")
-
-
-# Example 2: Book recommendation
-print("\n" + "=" * 60)
-print("Example 2: Book Recommendation")
-print("=" * 60)
-
-
 class Book(BaseModel):
     title: str = Field(..., description="Book title")
     author: str = Field(..., description="Book author")
@@ -63,14 +42,39 @@ class BookRecommendation(BaseModel):
     reason: str = Field(..., description="Why these books are recommended")
 
 
-agent2 = Agent(
-    description="You are a book recommendation expert.",
-    response_model=BookRecommendation,
-)
+async def main():
+    # Example 1: Movie script generation
+    print("=" * 60)
+    print("Example 1: Movie Script Generation")
+    print("=" * 60)
 
-response2 = agent2.run_sync("推荐3本关于人工智能的书籍")
-pprint(response2)
+    agent = Agent(
+        description="You help write movie scripts.",
+        response_model=MovieScript,
+    )
 
-print("\nRecommended books:")
-for book in response2.content.books:
-    print(f"  - {book.title} by {book.author} ({book.year})")
+    response = await agent.run("Write a movie script about a time traveler.")
+    pprint(response)
+    print(f"\nMovie name: {response.content.name}")
+    print(f"Genre: {response.content.genre}")
+
+    # Example 2: Book recommendation
+    print("\n" + "=" * 60)
+    print("Example 2: Book Recommendation")
+    print("=" * 60)
+
+    agent2 = Agent(
+        description="You are a book recommendation expert.",
+        response_model=BookRecommendation,
+    )
+
+    response2 = await agent2.run("推荐3本关于人工智能的书籍")
+    pprint(response2)
+
+    print("\nRecommended books:")
+    for book in response2.content.books:
+        print(f"  - {book.title} by {book.author} ({book.year})")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

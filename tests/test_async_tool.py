@@ -56,8 +56,8 @@ class TestAsyncFunctionCall:
         assert success is True
         assert fc.result == "async_no_args_result"
 
-    def test_async_function_aexecute(self):
-        """Test that async functions work with aexecute()."""
+    def test_async_function_execute_with_args(self):
+        """Test that async functions work with execute()."""
         f = Function.from_callable(async_add)
         fc = FunctionCall(function=f, arguments={'a': 10, 'b': 20})
         success = asyncio.run(fc.execute())
@@ -65,8 +65,8 @@ class TestAsyncFunctionCall:
         assert fc.result == "30"
         assert fc.error is None
 
-    def test_sync_function_aexecute(self):
-        """Test that sync functions work with aexecute()."""
+    def test_sync_function_execute_with_args(self):
+        """Test that sync functions work with execute()."""
         f = Function.from_callable(sync_multiply)
         fc = FunctionCall(function=f, arguments={'a': 5, 'b': 6})
         success = asyncio.run(fc.execute())
@@ -74,8 +74,8 @@ class TestAsyncFunctionCall:
         assert fc.result == "30"
         assert fc.error is None
 
-    def test_async_function_no_args_aexecute(self):
-        """Test async function with no arguments via aexecute()."""
+    def test_async_function_no_args_execute_2(self):
+        """Test async function with no arguments via execute()."""
         f = Function.from_callable(async_no_args)
         fc = FunctionCall(function=f)
         success = asyncio.run(fc.execute())
@@ -107,8 +107,8 @@ class TestAsyncToolClass:
         assert success is True
         assert fc.result == "50"
 
-    def test_async_tool_method_aexecute(self):
-        """Test Tool class with async method via aexecute()."""
+    def test_async_tool_method_execute_2(self):
+        """Test Tool class with async method via execute()."""
         class AsyncTool(Tool):
             def __init__(self):
                 super().__init__(name="async_tool")
@@ -198,8 +198,8 @@ class TestAsyncErrorHandling:
         assert fc.error is not None
         assert "Test error" in fc.error
 
-    def test_async_function_error_aexecute(self):
-        """Test error handling in async function via aexecute()."""
+    def test_async_function_error_execute_2(self):
+        """Test error handling in async function via execute()."""
         async def async_error_func() -> str:
             raise ValueError("Test error async")
 

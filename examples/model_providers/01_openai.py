@@ -7,6 +7,7 @@ This example shows how to use OpenAI models with Agentica.
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -14,7 +15,7 @@ from agentica import Agent, Message
 from agentica import OpenAIChat
 
 
-def main():
+async def main():
     # Example 1: Direct model usage
     print("=" * 60)
     print("Example 1: Direct OpenAI Model Usage")
@@ -24,7 +25,7 @@ def main():
     print(f"Model: {model}")
     
     messages = [Message(role="user", content="一句话介绍北京")]
-    response = model.response(messages)
+    response = await model.response(messages)
     print(f"Response: {response}")
     
     # Example 2: With streaming
@@ -33,7 +34,7 @@ def main():
     print("=" * 60)
     
     print("Streaming: ", end="")
-    for chunk in model.response_stream(messages):
+    async for chunk in model.response_stream(messages):
         if chunk.content:
             print(chunk.content, end="", flush=True)
     print()
@@ -48,8 +49,8 @@ def main():
         instructions="You are a helpful assistant.",
     )
     
-    agent.print_response_sync("介绍一下人工智能的发展历史", stream=True)
+    await agent.print_response("介绍一下人工智能的发展历史", stream=True)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

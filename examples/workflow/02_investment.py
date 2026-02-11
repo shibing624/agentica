@@ -98,7 +98,7 @@ class InvestmentPipeline(Workflow):
 
         # Stage 3: Investment proposal (streamed)
         logger.info("Stage 3: Creating investment proposal")
-        yield from self.investment_lead.run_sync(research_response.content, stream=True)
+        yield from self.investment_lead.run_stream_sync(research_response.content)
 
 
 if __name__ == "__main__":

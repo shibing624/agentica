@@ -190,12 +190,6 @@ class Agent:
     # Add a tool that allows the Model to get the tool call history.
     read_tool_call_history: bool = False
 
-    # -*- Agent Multi-round Strategy Settings
-    # Enable multi-round strategy for better search accuracy
-    enable_multi_round: bool = False
-    # Maximum number of rounds for multi-round strategy
-    max_rounds: int = 10
-
     # -*- Agentic Prompt Settings, prompt enhancement, like openclaw/claude code
     # Enable agentic prompt enhancement (HEARTBEAT, SOUL modules)
     enable_agentic_prompt: bool = False
@@ -375,9 +369,6 @@ class Agent:
             update_knowledge: bool = False,
             read_tool_call_history: bool = False,
 
-            # Agent Multi-round Strategy Settings
-            enable_multi_round: bool = False,
-            max_rounds: int = 20,
             enable_agentic_prompt: bool = False,
             run_timeout: Optional[float] = None,
             first_token_timeout: Optional[float] = None,
@@ -509,8 +500,6 @@ class Agent:
         self.search_knowledge = search_knowledge
         self.update_knowledge = update_knowledge
         self.read_tool_call_history = read_tool_call_history
-        self.enable_multi_round = enable_multi_round
-        self.max_rounds = max_rounds
         self.enable_agentic_prompt = enable_agentic_prompt
         self.run_timeout = run_timeout
         self.first_token_timeout = first_token_timeout
@@ -898,10 +887,9 @@ class Agent:
             "get_messages_for_run", "get_relevant_docs_from_knowledge",
             "convert_documents_to_string", "convert_context_to_string",
             # From runner.py
-            "run", "run_sync", "_run", "_run_single_round",
-            "_run_multi_round", "_consume_run", "_run_with_timeout",
+            "run", "run_sync", "run_stream", "run_stream_sync",
+            "_run_impl", "_consume_run", "_run_with_timeout",
             "_wrap_stream_with_timeout",
-            "_on_pre_step", "_on_tool_call", "_on_post_step",
             "save_run_response_to_file", "_aggregate_metrics_from_run_messages",
             "generic_run_response",
             # From session.py
@@ -1064,12 +1052,12 @@ class Agent:
     # From runner.py
     run: Callable
     run_sync: Callable
-    _run: Callable
-    _run_single_round: Callable
-    _run_multi_round: Callable
-    _on_pre_step: Callable
-    _on_tool_call: Callable
-    _on_post_step: Callable
+    run_stream: Callable
+    run_stream_sync: Callable
+    _run_impl: Callable
+    _consume_run: Callable
+    _run_with_timeout: Callable
+    _wrap_stream_with_timeout: Callable
     save_run_response_to_file: Callable
     _aggregate_metrics_from_run_messages: Callable
     generic_run_response: Callable

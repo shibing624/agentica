@@ -378,7 +378,7 @@ agent = Agent(
 ### 2. 监控多轮进度
 
 ```python
-for response in agent.run("复杂任务", stream=True):
+async for response in agent.run_stream("复杂任务"):
     if response.event == "MultiRoundTurn":
         print(f"轮次 {response.extra_data.round}")
     elif response.event == "MultiRoundToolCall":
@@ -479,8 +479,12 @@ class ArticleWorkflow(Workflow):
 ### 1. 流式输出
 
 ```python
-# 流式输出提升用户体验
-for chunk in agent.run("问题", stream=True):
+# 同步流式输出提升用户体验
+for chunk in agent.run_stream_sync("问题"):
+    print(chunk.content, end="", flush=True)
+
+# 异步流式输出
+async for chunk in agent.run_stream("问题"):
     print(chunk.content, end="", flush=True)
 ```
 
@@ -490,7 +494,7 @@ for chunk in agent.run("问题", stream=True):
 import asyncio
 
 async def process_queries(queries):
-    tasks = [agent.arun(q) for q in queries]
+    tasks = [agent.run(q) for q in queries]
     return await asyncio.gather(*tasks)
 
 results = asyncio.run(process_queries(["问题1", "问题2", "问题3"]))
@@ -647,7 +651,7 @@ class Query(BaseModel):
 @app.post("/chat")
 async def chat(query: Query):
     agent.session_id = query.session_id
-    response = await agent.arun(query.message)
+    response = await agent.run(query.message)
     return {"content": response.content}
 ```
 

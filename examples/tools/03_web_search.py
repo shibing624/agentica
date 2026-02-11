@@ -9,6 +9,7 @@ This example shows how to use different search tools:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -16,7 +17,7 @@ from agentica import Agent, OpenAIChat, WeatherTool
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 
 
-def main():
+async def main():
     print("=" * 60)
     print("Example 1: Web Search with Baidu Search(free)")
     print("=" * 60)
@@ -28,28 +29,24 @@ def main():
         read_chat_history=True,
     )
     
-    # Simple search
-    response = agent.run_sync("一句话介绍林黛玉")
+    response = await agent.run("一句话介绍林黛玉")
     print(response)
     
-    # Weather-related search
-    response = agent.run_sync("上海今天适合穿什么衣服")
+    response = await agent.run("上海今天适合穿什么衣服")
     print(response)
     
-    # Context-aware follow-up
-    response = agent.run_sync("总结前面的问答")
+    response = await agent.run("总结前面的问答")
     print(response)
 
-    # Example 2: Research task
     print("\n" + "=" * 60)
     print("Example 2: Research Task")
     print("=" * 60)
     
-    agent.print_response_sync(
+    await agent.print_response(
         "搜索最新的人工智能发展趋势，总结3个关键点",
         stream=True
     )
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

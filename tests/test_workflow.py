@@ -5,6 +5,7 @@
 """
 import sys
 import unittest
+import asyncio
 from unittest.mock import Mock, patch
 import os
 
@@ -18,7 +19,7 @@ from agentica.run_response import RunResponse
 class SimpleWorkflow(Workflow):
     """A simple workflow for testing."""
 
-    def run(self, message: str) -> RunResponse:
+    async def run(self, message: str) -> RunResponse:
         """Simple run implementation."""
         return RunResponse(content=f"Processed: {message}")
 
@@ -83,7 +84,7 @@ class TestWorkflowRun(unittest.TestCase):
     def test_simple_run(self):
         """Test simple workflow run."""
         workflow = SimpleWorkflow()
-        response = workflow.run("Hello")
+        response = asyncio.run(workflow.run("Hello"))
         self.assertIsInstance(response, RunResponse)
         self.assertEqual(response.content, "Processed: Hello")
 
@@ -151,11 +152,11 @@ class TestWorkflowWithAgents(unittest.TestCase):
                 super().__init__(**kwargs)
                 self._agent = Agent(name="TestAgent")
 
-            def run(self, message: str) -> RunResponse:
+            async def run(self, message: str) -> RunResponse:
                 return RunResponse(content=f"Agent: {self._agent.name}, Message: {message}")
 
         workflow = AgentWorkflow(name="AgentWorkflow")
-        response = workflow.run("Hello")
+        response = asyncio.run(workflow.run("Hello"))
         self.assertIn("TestAgent", response.content)
 
 

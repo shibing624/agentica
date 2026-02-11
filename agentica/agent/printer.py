@@ -65,8 +65,9 @@ class PrinterMixin:
             _reasoning_displayed = False
             _final_content_printed = False
 
-            run_generator = self._run(
-                message=message, messages=messages, stream=True,
+            run_generator = self.run_stream(
+                message=message,
+                messages=messages,
                 stream_intermediate_steps=show_tool_calls,
                 **kwargs,
             )
@@ -96,144 +97,70 @@ class PrinterMixin:
                         print(f"     📤 {result_preview}", flush=True)
                     continue
 
-                if event in (RunEvent.multi_round_tool_call.value,
-                            RunEvent.multi_round_tool_result.value,
-                            RunEvent.multi_round_completed.value):
-                    continue
 
                 if event in (RunEvent.run_started.value, RunEvent.run_completed.value,
                             RunEvent.updating_memory.value):
                     continue
 
-                if self.enable_multi_round:
-                    if event == RunEvent.multi_round_turn.value:
-                        if (show_reasoning and hasattr(run_response, 'reasoning_content') and
-                                run_response.reasoning_content):
-                            if not _reasoning_displayed:
-                                print("💭 THINKING")
-                                print("-" * 40)
-                                _reasoning_displayed = True
-                            if run_response.reasoning_content != _reasoning_content:
-                                print(run_response.reasoning_content, end='', flush=True)
-                                _reasoning_content = run_response.reasoning_content
+                if (show_reasoning and hasattr(run_response, 'reasoning_content') and
+                        run_response.reasoning_content):
+                    if not _reasoning_displayed:
+                        print("💭 THINKING")
+                        print("-" * 40)
+                        _reasoning_displayed = True
+                    if run_response.reasoning_content != _reasoning_content:
+                        print(run_response.reasoning_content, end='', flush=True)
+                        _reasoning_content = run_response.reasoning_content
 
-                        if run_response.content and run_response.content != _response_content:
-                            if _reasoning_displayed and _response_content == "":
-                                print()
-                                print("-" * 40)
-                                print("💬 ANSWER")
-                                print("-" * 40)
-                            print(run_response.content, end='', flush=True)
-                            _response_content = run_response.content
-                            _final_content_printed = True
-                    elif not event and _final_content_printed:
-                        continue
-                else:
-                    if (show_reasoning and hasattr(run_response, 'reasoning_content') and
-                            run_response.reasoning_content):
-                        if not _reasoning_displayed:
-                            print("💭 THINKING")
-                            print("-" * 40)
-                            _reasoning_displayed = True
-                        if run_response.reasoning_content != _reasoning_content:
-                            print(run_response.reasoning_content, end='', flush=True)
-                            _reasoning_content = run_response.reasoning_content
-
-                    if run_response.content and run_response.content != _response_content:
-                        if _reasoning_displayed and _response_content == "":
-                            print()
-                            print("-" * 40)
-                            print("💬 ANSWER")
-                            print("-" * 40)
-                        print(run_response.content, end='', flush=True)
-                        _response_content = run_response.content
+                if run_response.content and run_response.content != _response_content:
+                    if _reasoning_displayed and _response_content == "":
+                        print()
+                        print("-" * 40)
+                        print("💬 ANSWER")
+                        print("-" * 40)
+                    print(run_response.content, end='', flush=True)
+                    _response_content = run_response.content
         else:
-            if self.enable_multi_round:
-                print("=" * 80)
-                print("🤖 MULTI-ROUND RESPONSE")
-                print("=" * 80)
+            run_response = await self.run(message=message, messages=messages, **kwargs)
 
-                final_response = None
-                run_generator = self._run(message=message, messages=messages, stream=False, **kwargs)
+            print("=" * 80)
+            print("🤖 RESPONSE")
+            print("=" * 80)
 
-                async for run_response in run_generator:
-                    event = getattr(run_response, 'event', '')
+            has_reasoning = (
+                show_reasoning and hasattr(run_response, "reasoning_content") and run_response.reasoning_content
+            )
+            if has_reasoning:
+                print("💭 THINKING")
+                print("-" * 40)
+                print(run_response.reasoning_content)
 
-                    if event == RunEvent.multi_round_turn.value and show_intermediate_steps:
-                        turn_info = ""
-                        if run_response.extra_data and run_response.extra_data.add_messages:
-                            for msg in run_response.extra_data.add_messages:
-                                if msg.role == "info":
-                                    turn_info = msg.content or ""
-                        print(f"\n{'─'*20} {turn_info} {'─'*20}")
+            if show_tool_calls and run_response.tools:
+                print()
+                for tool in run_response.tools:
+                    tool_name = tool.get("tool_name", "unknown")
+                    tool_args = tool.get("tool_args", {})
+                    display_args = {}
+                    for k, v in tool_args.items():
+                        if isinstance(v, str) and len(v) > 100:
+                            display_args[k] = v[:100] + "..."
+                        else:
+                            display_args[k] = v
+                    print(f"  🔧 {tool_name}({display_args})")
+                    tool_result = tool.get("content", "")
+                    result_preview = (
+                        str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
+                    )
+                    print(f"     📤 {result_preview}")
 
-                        if show_reasoning and run_response.reasoning_content:
-                            reasoning_preview = run_response.reasoning_content
-                            if len(reasoning_preview) > 500:
-                                reasoning_preview = reasoning_preview[:500] + "..."
-                            print(f"💭 Thinking: {reasoning_preview}")
+            if has_reasoning or (show_tool_calls and run_response.tools):
+                print()
+                print("-" * 40)
+                print("💬 ANSWER")
+                print("-" * 40)
 
-                        if run_response.content:
-                            content_preview = run_response.content
-                            if len(content_preview) > 300:
-                                content_preview = content_preview[:300] + "..."
-                            print(f"💬 Content: {content_preview}")
-
-                    elif event == RunEvent.multi_round_tool_call.value and show_intermediate_steps:
-                        print(f"  🔧 Tool: {run_response.content}")
-
-                    elif event == RunEvent.multi_round_tool_result.value and show_intermediate_steps:
-                        print(f"     📤 Result: {run_response.content}")
-
-                    elif event == RunEvent.multi_round_completed.value:
-                        if show_intermediate_steps:
-                            print(f"\n{'='*20} ✅ {run_response.content} {'='*20}")
-
-                    final_response = run_response
-
-                if final_response and final_response.content:
-                    print("\n" + "=" * 80)
-                    print("📋 FINAL ANSWER")
-                    print("=" * 80)
-                    print(final_response.content)
-            else:
-                run_response = await self.run(message=message, messages=messages, stream=False, **kwargs)
-
-                print("=" * 80)
-                print("🤖 RESPONSE")
-                print("=" * 80)
-
-                has_reasoning = (show_reasoning and hasattr(run_response, 'reasoning_content') and
-                                 run_response.reasoning_content)
-                if has_reasoning:
-                    print("💭 THINKING")
-                    print("-" * 40)
-                    print(run_response.reasoning_content)
-
-                if show_tool_calls and run_response.tools:
-                    print()
-                    for tool in run_response.tools:
-                        tool_name = tool.get("tool_name", "unknown")
-                        tool_args = tool.get("tool_args", {})
-                        display_args = {}
-                        for k, v in tool_args.items():
-                            if isinstance(v, str) and len(v) > 100:
-                                display_args[k] = v[:100] + "..."
-                            else:
-                                display_args[k] = v
-                        print(f"  🔧 {tool_name}({display_args})")
-                        tool_result = tool.get("content", "")
-                        result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
-                        print(f"     📤 {result_preview}")
-
-                if has_reasoning or (show_tool_calls and run_response.tools):
-                    print()
-                    print("-" * 40)
-                    print("💬 ANSWER")
-                    print("-" * 40)
-
-                if run_response.content:
-                    print(run_response.content)
+            if run_response.content:
+                print(run_response.content)
 
     def print_response_sync(
             self: "Agent",

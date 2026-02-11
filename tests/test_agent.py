@@ -5,7 +5,7 @@
 """
 import sys
 import unittest
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, MagicMock, patch, AsyncMock
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -146,11 +146,10 @@ class TestAgentRun(unittest.TestCase):
         self.mock_model.response = Mock(return_value=mock_response)
 
         agent = Agent(model=self.mock_model)
-        # Mock the internal _run method to return a simple response
-        with patch.object(agent, '_run') as mock_run:
-            mock_run.return_value = iter([RunResponse(content="Test response")])
-            response = agent.run_sync("Hello")
-            self.assertIsInstance(response, RunResponse)
+        # Mock async run() and verify run_sync bridges correctly
+        agent.run = AsyncMock(return_value=RunResponse(content="Test response"))
+        response = agent.run_sync("Hello")
+        self.assertIsInstance(response, RunResponse)
 
 
 class TestAgentSystemPrompt(unittest.TestCase):
@@ -217,20 +216,6 @@ class TestAgentTeam(unittest.TestCase):
         self.assertEqual(agent.role, "assistant")
 
 
-class TestAgentMultiRound(unittest.TestCase):
-    """Test cases for Agent multi-round conversation settings."""
-
-    def test_enable_multi_round(self):
-        """Test enable_multi_round setting."""
-        agent = Agent(enable_multi_round=True)
-        self.assertTrue(agent.enable_multi_round)
-
-    def test_max_rounds(self):
-        """Test max_rounds setting."""
-        agent = Agent(max_rounds=50)
-        self.assertEqual(agent.max_rounds, 50)
-
-
 class TestAgentStructuredOutput(unittest.TestCase):
     """Test cases for Agent structured output settings."""
 
@@ -281,22 +266,21 @@ class TestAgentTimeout(unittest.TestCase):
 
     def test_run_timeout_triggers_timeout_response(self):
         """Test that timeout produces correct RunResponse event."""
-        import time
-        
+        import asyncio
+
         agent = Agent(run_timeout=0.001)  # Very short timeout
-        
-        # Create a slow mock _run that will definitely timeout
-        def slow_run(*args, **kwargs):
-            time.sleep(1)  # Sleep longer than timeout
-            yield RunResponse(content="Should not reach here")
-        
-        with patch.object(agent, '_run', slow_run):
+
+        async def slow_consume(*args, **kwargs):
+            await asyncio.sleep(1)  # Sleep longer than timeout
+            return RunResponse(content="Should not reach here")
+
+        with patch.object(agent, "_consume_run", slow_consume):
             agent.model = Mock()
             agent.model.id = "test-model"
             agent.response_model = None
             agent.parse_response = True
-            
-            response = agent.run_sync("test", stream=False)
+
+            response = agent.run_sync("test")
             self.assertEqual(response.event, "RunTimeout")
             self.assertIn("timed out", response.content)
 
@@ -308,39 +292,42 @@ class TestAgentTimeout(unittest.TestCase):
 
     def test_first_token_timeout_in_stream(self):
         """Test first token timeout in streaming mode."""
-        import time
-        import queue
-        
+        import asyncio
+
         agent = Agent(first_token_timeout=0.001)  # Very short timeout
-        
-        # Create a slow iterator that will timeout on first token
-        def slow_iterator():
-            time.sleep(1)  # Sleep longer than first_token_timeout
+
+        async def slow_async_iterator():
+            await asyncio.sleep(1)  # Sleep longer than first_token_timeout
             yield RunResponse(content="Should not reach here")
-        
-        # Wrap with timeout
-        wrapped = agent._wrap_stream_with_timeout(slow_iterator())
-        
-        # Should get timeout response
-        result = next(wrapped)
+
+        async def get_first():
+            async for item in agent._wrap_stream_with_timeout(slow_async_iterator()):
+                return item
+            return None
+
+        result = asyncio.run(get_first())
+        self.assertIsNotNone(result)
         self.assertEqual(result.event, "FirstTokenTimeout")
         self.assertIn("First token timed out", result.content)
 
     def test_run_timeout_in_stream(self):
         """Test run timeout in streaming mode."""
-        import time
-        
+        import asyncio
+
         agent = Agent(run_timeout=0.05, first_token_timeout=None)  # 50ms total timeout
-        
-        # Create an iterator that produces items slowly
-        def slow_iterator():
+
+        async def slow_async_iterator():
             yield RunResponse(content="First")  # First token arrives quickly
-            time.sleep(0.1)  # Then slow down beyond run_timeout
+            await asyncio.sleep(0.1)  # Then slow down beyond run_timeout
             yield RunResponse(content="Second")  # Should timeout before this
-        
-        wrapped = agent._wrap_stream_with_timeout(slow_iterator())
-        
-        results = list(wrapped)
+
+        async def collect():
+            out = []
+            async for item in agent._wrap_stream_with_timeout(slow_async_iterator()):
+                out.append(item)
+            return out
+
+        results = asyncio.run(collect())
         # Should get first item, then timeout
         self.assertEqual(results[0].content, "First")
         self.assertEqual(results[-1].event, "RunTimeout")

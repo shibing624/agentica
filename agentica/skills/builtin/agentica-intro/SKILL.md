@@ -21,15 +21,16 @@ pip install -U agentica
 ## 快速开始
 
 ```python
+import asyncio
 from agentica import Agent, ZhipuAI, WeatherTool
 
 agent = Agent(
-    model=ZhipuAI(),  # 或 OpenAIChat, DeepSeek, Moonshot 等
+    model=ZhipuAI(),  # or OpenAIChat, DeepSeek, Moonshot, etc.
     tools=[WeatherTool()],
     add_datetime_to_instructions=True
 )
 
-agent.print_response("明天北京天气怎么样？")
+asyncio.run(agent.print_response("明天北京天气怎么样？"))
 ```
 
 ## 核心组件
@@ -187,12 +188,13 @@ workflow.run("Generate market analysis report")
 ### RAG 知识库
 
 ```python
+import asyncio
 from agentica import Agent
 from agentica.knowledge import PDFKnowledgeBase
 
 kb = PDFKnowledgeBase(path="./docs")
 agent = Agent(model=model, knowledge=kb)
-agent.print_response("文档中关于 X 的内容是什么？")
+asyncio.run(agent.print_response("文档中关于 X 的内容是什么？"))
 ```
 
 ### MCP 协议支持

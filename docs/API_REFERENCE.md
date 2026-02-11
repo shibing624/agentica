@@ -57,41 +57,84 @@ from agentica import Agent
 
 #### 方法
 
-##### `run(message, stream=False, **kwargs) -> RunResponse | Iterator[RunResponse]`
+##### `async run(message, **kwargs) -> RunResponse`
 
-运行 Agent 处理消息。
+异步运行 Agent（非流式）。
 
 ```python
-# 非流式
-response = agent.run("你好")
+# 异步非流式
+response = await agent.run("你好")
 print(response.content)
+```
 
-# 流式
-for chunk in agent.run("你好", stream=True):
+**参数:**
+- `message`: `str | List | Dict | Message` - 输入消息
+- `**kwargs`: 其他参数传递给模型
+
+**返回:** `RunResponse`
+
+##### `async run_stream(message, **kwargs) -> AsyncIterator[RunResponse]`
+
+异步流式运行 Agent。
+
+```python
+# 异步流式
+async for chunk in agent.run_stream("你好"):
     print(chunk.content, end="")
 ```
 
 **参数:**
 - `message`: `str | List | Dict | Message` - 输入消息
-- `stream`: `bool` - 是否流式输出
 - `**kwargs`: 其他参数传递给模型
 
-**返回:** `RunResponse` 或 `Iterator[RunResponse]`
+**返回:** `AsyncIterator[RunResponse]`
 
-##### `arun(message, stream=False, **kwargs) -> RunResponse | AsyncIterator[RunResponse]`
+##### `run_sync(message, **kwargs) -> RunResponse`
 
-异步运行 Agent。
+同步运行 Agent（非流式）。内部调用 `run()` 的同步适配器。
 
 ```python
-response = await agent.arun("你好")
+# 同步非流式
+response = agent.run_sync("你好")
+print(response.content)
 ```
 
-##### `print_response(message, stream=True, **kwargs)`
+**参数:**
+- `message`: `str | List | Dict | Message` - 输入消息
+- `**kwargs`: 其他参数传递给模型
 
-打印格式化的响应。
+**返回:** `RunResponse`
+
+##### `run_stream_sync(message, **kwargs) -> Iterator[RunResponse]`
+
+同步流式运行 Agent。内部通过后台线程驱动异步迭代器。
 
 ```python
-agent.print_response("解释量子计算", stream=True)
+# 同步流式
+for chunk in agent.run_stream_sync("你好"):
+    print(chunk.content, end="")
+```
+
+**参数:**
+- `message`: `str | List | Dict | Message` - 输入消息
+- `**kwargs`: 其他参数传递给模型
+
+**返回:** `Iterator[RunResponse]`
+
+##### `async print_response(message, stream=True, **kwargs)`
+
+异步打印格式化的响应。
+
+```python
+await agent.print_response("解释量子计算", stream=True)
+```
+
+##### `print_response_sync(message, stream=True, **kwargs)`
+
+同步打印格式化的响应。
+
+```python
+agent.print_response_sync("解释量子计算", stream=True)
 ```
 
 ##### `cli_app(user="User", stream=True)`
@@ -547,12 +590,12 @@ class MyWorkflow(Workflow):
     researcher: Agent = Field(...)
     writer: Agent = Field(...)
     
-    def run(self, topic: str) -> RunResponse:
+    async def run(self, topic: str) -> RunResponse:
         # 研究阶段
-        research = self.researcher.run(f"研究: {topic}")
+        research = await self.researcher.run(f"研究: {topic}")
         
         # 写作阶段
-        article = self.writer.run(f"基于以下研究写文章:\n{research.content}")
+        article = await self.writer.run(f"基于以下研究写文章:\n{research.content}")
         
         return RunResponse(content=article.content)
 
@@ -561,7 +604,12 @@ workflow = MyWorkflow(
     researcher=Agent(name="Researcher", ...),
     writer=Agent(name="Writer", ...),
 )
-result = workflow.run("人工智能的未来")
+
+# 异步运行
+result = await workflow.run("人工智能的未来")
+
+# 同步运行（使用适配器）
+result = workflow.run_sync("人工智能的未来")
 ```
 
 ---
@@ -686,4 +734,4 @@ agent = Agent(
 
 ---
 
-*文档最后更新: 2025-12-20*
+*文档最后更新: 2026-02-11*

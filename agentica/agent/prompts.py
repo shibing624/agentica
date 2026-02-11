@@ -199,15 +199,6 @@ class PromptsMixin:
         # 4.8 Add output language if provided
         if self.output_language is not None:
             instructions.append(f"Regardless of the input language, you must output text in {self.output_language}.")
-        # 4.9 Add multi-round research instructions if enabled
-        if self.enable_multi_round and self.tools is not None:
-            instructions.append(
-                "**Research workflow:** When answering complex questions that require web research:\n"
-                "  1. First use search tools to find relevant web pages\n"
-                "  2. Then visit the URLs from search results to get detailed information\n"
-                "  3. Analyze the information and continue searching if needed\n"
-                "  4. Provide a comprehensive answer based on the gathered evidence"
-            )
 
         # 5. Build the default system message for the Agent.
         system_message_lines: List[str] = []

@@ -172,7 +172,7 @@ def main():
 
 
 async def async_main():
-    """Async main function to test async tools with arun."""
+    """Async main function to test async tools with run."""
     agent = Agent(
         model=OpenAIChat(id='gpt-4o-mini'),
         tools=[
@@ -183,7 +183,7 @@ async def async_main():
     )
     
     print("=" * 60)
-    print("Example: Using arun with async tools")
+    print("Example: Using run with async tools")
     print("=" * 60)
     response = await agent.run("Fetch data from https://api.test.com and then calculate 50 add 100")
     print(f"Response: {response.content}")
