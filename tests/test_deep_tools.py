@@ -168,61 +168,54 @@ class TestBuiltinFileToolEditFile:
     def test_single_edit(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "edit.txt")
         Path(fp).write_text("hello world")
-        result = asyncio.run(file_tool.edit_file(fp, {"old": "world", "new": "python"}))
+        result = asyncio.run(file_tool.edit_file(fp, "world", "python"))
         assert "Successfully" in result
         assert Path(fp).read_text() == "hello python"
 
-    def test_multiple_edits(self, file_tool, tmp_dir):
+    def test_multiple_edits_via_separate_calls(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "multi.txt")
         Path(fp).write_text("aaa bbb ccc")
-        edits = [
-            {"old": "aaa", "new": "111"},
-            {"old": "ccc", "new": "333"},
-        ]
-        result = asyncio.run(file_tool.edit_file(fp, edits))
-        assert "Successfully" in result
-        assert "2 edits" in result
+        result1 = asyncio.run(file_tool.edit_file(fp, "aaa", "111"))
+        assert "Successfully" in result1
+        result2 = asyncio.run(file_tool.edit_file(fp, "ccc", "333"))
+        assert "Successfully" in result2
         assert Path(fp).read_text() == "111 bbb 333"
 
     def test_edit_replace_all(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "replall.txt")
         Path(fp).write_text("x x x")
-        result = asyncio.run(file_tool.edit_file(fp, {"old": "x", "new": "y", "replace_all": True}))
+        result = asyncio.run(file_tool.edit_file(fp, "x", "y", replace_all=True))
         assert "Successfully" in result
         assert Path(fp).read_text() == "y y y"
 
     def test_edit_string_not_found(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "nf.txt")
         Path(fp).write_text("hello")
-        result = asyncio.run(file_tool.edit_file(fp, {"old": "zzz", "new": "yyy"}))
+        result = asyncio.run(file_tool.edit_file(fp, "zzz", "yyy"))
         assert "Error" in result
         # File should be unchanged
         assert Path(fp).read_text() == "hello"
 
     def test_edit_nonexistent_file(self, file_tool):
-        result = asyncio.run(file_tool.edit_file("/no/such/file.txt", {"old": "a", "new": "b"}))
+        result = asyncio.run(file_tool.edit_file("/no/such/file.txt", "a", "b"))
         assert "Error" in result
 
     def test_edit_multiple_matches_no_replace_all(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "dup.txt")
         Path(fp).write_text("foo bar foo")
-        result = asyncio.run(file_tool.edit_file(fp, {"old": "foo", "new": "baz"}))
+        result = asyncio.run(file_tool.edit_file(fp, "foo", "baz"))
         # Should fail because there are multiple matches and replace_all is not set
         assert "Error" in result or "Found 2 occurrences" in result
         # File unchanged
         assert Path(fp).read_text() == "foo bar foo"
 
-    def test_edit_all_or_nothing(self, file_tool, tmp_dir):
-        """If one edit in a batch fails, no changes should be applied."""
+    def test_edit_no_side_effect_on_failure(self, file_tool, tmp_dir):
+        """A failed edit should not modify the file."""
         fp = os.path.join(tmp_dir, "atomic.txt")
         Path(fp).write_text("aaa bbb")
-        edits = [
-            {"old": "aaa", "new": "111"},  # This would succeed
-            {"old": "zzz", "new": "999"},  # This will fail — not found
-        ]
-        result = asyncio.run(file_tool.edit_file(fp, edits))
+        result = asyncio.run(file_tool.edit_file(fp, "zzz", "999"))
         assert "Error" in result
-        # File should be unchanged (all-or-nothing)
+        # File should be unchanged
         assert Path(fp).read_text() == "aaa bbb"
 
 

@@ -263,49 +263,33 @@ class BuiltinFileTool(Tool):
     async def edit_file(
             self,
             file_path: str,
-            edit: Union[dict, List[dict]],
+            old_string: str,
+            new_string: str,
+            replace_all: bool = False,
     ) -> str:
-        """Replace specific strings within a specified file.
+        """Replace a specific string in a file.
 
-        **Tips:**
-        - Only use this tool on text files.
-        - Multi-line strings are supported.
-        - Can specify a single edit or a list of edits in one call.
-        - You should prefer this tool over write_file tool and shell `sed` command.
+        Uses literal string matching (NOT regex). Multi-line strings are supported.
+        Prefer this tool over write_file or shell `sed` for targeted changes.
 
-        Core logic:
-        1. Read entire file content
-        2. Apply edit(s) sequentially (each edit sees the result of previous edits)
-        3. Write modified content back (only if all edits succeed)
-
-        Important:
-        - Edits are applied sequentially: each edit operates on the result of previous edits
-        - If any edit fails when providing multiple edits, NO changes are written (all-or-nothing)
-        - Uses literal string matching (NOT regex)
+        For multiple edits, call this tool multiple times (framework runs them in parallel
+        when they are independent).
 
         Args:
-            file_path: The path to the file to edit. Absolute paths are required when editing
-                      files outside the working directory.
-            edit: The edit(s) to apply to the file. You can provide a single edit object
-                  or a list of edit objects.
-                  Each edit has the following fields:
-                  - old (str, required): The old string to replace. Can be multi-line.
-                  - new (str, required): The new string to replace with. Can be multi-line.
-                  - replace_all (bool, optional): Whether to replace all occurrences.
-                    Default: False (only replace first match).
+            file_path: The path to the file to edit. Absolute paths required for files
+                      outside the working directory.
+            old_string: The existing text to find and replace. Must match exactly.
+            new_string: The replacement text.
+            replace_all: Whether to replace all occurrences. Default: False (replace first
+                        match only; errors if multiple matches found).
 
         Returns:
             Operation result message
 
         Examples:
-            # Single edit:
-            edit_file("file.py", {"old": "def foo():", "new": "def bar():"})
-
-            # Multiple edits:
-            edit_file("file.py", [
-                {"old": "x = 1", "new": "x = 2"},
-                {"old": "print(x)", "new": "print(f'x = {x}')", "replace_all": True}
-            ])
+            edit_file("app.py", "def foo():", "def bar():")
+            edit_file("config.py", "DEBUG = True", "DEBUG = False")
+            edit_file("test.py", "old_name", "new_name", replace_all=True)
         """
         try:
             self._validate_path(file_path)
@@ -316,55 +300,21 @@ class BuiltinFileTool(Tool):
             if not path.is_file():
                 return f"Error: Not a file: {file_path}"
 
-            # Normalize edit to list
-            if isinstance(edit, dict):
-                edits = [edit]
-            elif isinstance(edit, list):
-                edits = edit
-            else:
-                return "Error: edit must be a dict or list of dicts"
-
-            if not edits:
-                return "Error: No edits provided"
-
             # Async read
             async with aiofiles.open(path, 'r', encoding='utf-8') as f:
                 content = await f.read()
 
-            results = []
+            result = self._str_replace(content, old_string, new_string, replace_all)
 
-            # Apply edits sequentially (pure CPU, no I/O)
-            for i, edit_item in enumerate(edits):
-                old_string = edit_item.get("old") or edit_item.get("old_string")
-                new_string = edit_item.get("new") or edit_item.get("new_string")
-                replace_all = edit_item.get("replace_all", False)
+            if not result["success"]:
+                return f"Error: {result['error']}"
 
-                if old_string is None or new_string is None:
-                    return f"Error: Edit {i+1} missing 'old' or 'new' field"
-
-                result = self._str_replace(content, old_string, new_string, replace_all)
-
-                if not result["success"]:
-                    if len(edits) == 1:
-                        return f"Error: {result['error']}"
-                    else:
-                        return (
-                            f"Error in edit {i+1}: {result['error']}\n"
-                            f"No changes have been applied to the file."
-                        )
-
-                content = result["new_content"]
-                results.append({
-                    "edit_num": i + 1,
-                    "replaced_count": result["count"],
-                })
-
-            # All edits succeeded — atomic write back
+            # Atomic write back
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
             try:
                 os.close(tmp_fd)
                 async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
-                    await f.write(content)
+                    await f.write(result["new_content"])
                 os.replace(tmp_path, str(path))
             except Exception:
                 try:
@@ -373,14 +323,8 @@ class BuiltinFileTool(Tool):
                     pass
                 raise
 
-            total_replacements = sum(r["replaced_count"] for r in results)
-
-            if len(results) == 1:
-                logger.debug(f"Replaced {total_replacements} occurrence(s) in {file_path}")
-                return f"Successfully replaced {total_replacements} occurrence(s) in '{file_path}'"
-            else:
-                logger.debug(f"Applied {len(results)} edits, {total_replacements} replacements in {file_path}")
-                return f"Successfully applied {len(results)} edits ({total_replacements} total replacements) in '{file_path}'"
+            logger.debug(f"Replaced {result['count']} occurrence(s) in {file_path}")
+            return f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"
 
         except Exception as e:
             logger.error(f"Error editing file {file_path}: {e}")

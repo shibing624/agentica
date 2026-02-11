@@ -43,6 +43,7 @@
 ### File Operations
 - **Always `ls` first** when path is unknown
 - **Batch reads** - call `read_file` on multiple files in parallel
+- **Never re-read** - Do NOT call `read_file` on the same file twice in one session. Cache content in your context.
 - **Use `edit_file`** for targeted changes (safer than `write_file`)
 
 ### Execution

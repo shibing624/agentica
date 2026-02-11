@@ -218,6 +218,25 @@ def _format_line_range(offset: int, limit: int) -> str:
     return f"L{start}-{end}"
 
 
+def _shorten_path(file_path: str) -> str:
+    """Shorten a file path for display: prefer relative path, fallback to filename."""
+    if not file_path or file_path == ".":
+        return "."
+    p = Path(file_path)
+    try:
+        return str(p.relative_to(Path.cwd()))
+    except ValueError:
+        return p.name
+
+
+def _shorten_paths_in_command(command: str) -> str:
+    """Shorten absolute paths embedded in a shell command."""
+    cwd = str(Path.cwd())
+    if cwd in command:
+        command = command.replace(cwd + "/", "").replace(cwd, ".")
+    return command
+
+
 def format_tool_display(tool_name: str, tool_args: dict) -> str:
     """Format tool call for user-friendly display."""
     # File reading tools - show filename and line range
@@ -239,9 +258,10 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         file_path = tool_args.get("file_path", "")
         return _extract_filename(file_path)
     
-    # Execute command - show full command (important for users)
+    # Execute command - shorten absolute paths in command
     if tool_name == "execute":
         command = tool_args.get("command", "")
+        command = _shorten_paths_in_command(command)
         if len(command) > 300:
             return command[:297] + "..."
         return command
@@ -278,20 +298,24 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
             return url[:57] + "..."
         return url
     
-    # ls/glob/grep - show path/pattern
+    # ls/glob/grep - show shortened path/pattern
     if tool_name == "ls":
         directory = tool_args.get("directory", ".")
-        return _extract_filename(directory) if directory != "." else "."
-    
+        return _shorten_path(directory)
+
     if tool_name == "glob":
         pattern = tool_args.get("pattern", "*")
         path = tool_args.get("path", ".")
-        return f"{pattern} in {_extract_filename(path) if path != '.' else '.'}"
-    
+        return f"{pattern} in {_shorten_path(path)}"
+
     if tool_name == "grep":
         pattern = tool_args.get("pattern", "")
         path = tool_args.get("path", ".")
-        return f"'{pattern[:40]}' in {_extract_filename(path) if path != '.' else '.'}"
+        include = tool_args.get("include", "")
+        display = f"'{pattern[:40]}' in {_shorten_path(path)}"
+        if include:
+            display += f" ({include})"
+        return display
     
     # Task tool - show description
     if tool_name == "task":
@@ -398,23 +422,36 @@ class StreamDisplayManager:
         self.tool_count += 1
         _display_tool_impl(self.console, tool_name, tool_args, self.tool_count)
     
-    def display_tool_result(self, tool_name: str, result_content: str, 
+    def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: float = None):
         """Display tool execution result as a compact preview."""
         if not result_content:
             if elapsed is not None:
                 self.console.print(f"    [dim]completed in {elapsed:.1f}s[/dim]")
             return
-        
+
         # Special handling for task (subagent) - show inner tool calls
         if tool_name == "task":
             self._display_task_result(result_content, is_error)
             return
-        
+
         result_str = str(result_content)
+
+        # Shorten absolute paths in results for grep/glob/execute
+        if tool_name in ("grep", "glob", "execute", "ls"):
+            cwd = str(Path.cwd())
+            if cwd in result_str:
+                result_str = result_str.replace(cwd + "/", "").replace(cwd, ".")
+
         lines = result_str.splitlines()
-        max_lines = 4
-        max_line_width = 120
+
+        # grep results: fewer preview lines, they can be very long
+        if tool_name == "grep":
+            max_lines = 3
+            max_line_width = 100
+        else:
+            max_lines = 4
+            max_line_width = 120
         
         style = "dim red" if is_error else "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
