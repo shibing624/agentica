@@ -12,7 +12,6 @@ from typing import (
     List,
     Optional,
     Union,
-    TYPE_CHECKING,
 )
 
 from agentica.utils.log import logger
@@ -21,15 +20,12 @@ from agentica.model.message import Message
 from agentica.run_response import RunEvent
 from agentica.utils.message import get_text_from_message
 
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
-
 
 class PrinterMixin:
     """Mixin class containing print response methods for Agent."""
 
     async def print_response(
-        self: "Agent",
+        self,
         message: Optional[Union[List, Dict, str, Message]] = None,
         *,
         messages: Optional[List[Union[Dict, Message]]] = None,
@@ -93,7 +89,7 @@ class PrinterMixin:
             print(run_response.content)
 
     async def print_response_stream(
-        self: "Agent",
+        self,
         message: Optional[Union[List, Dict, str, Message]] = None,
         *,
         messages: Optional[List[Union[Dict, Message]]] = None,
@@ -189,7 +185,7 @@ class PrinterMixin:
         print()  # final newline
 
     def print_response_sync(
-        self: "Agent",
+        self,
         message: Optional[Union[List, Dict, str, Message]] = None,
         *,
         messages: Optional[List[Union[Dict, Message]]] = None,
@@ -211,7 +207,7 @@ class PrinterMixin:
         )
 
     def print_response_stream_sync(
-        self: "Agent",
+        self,
         message: Optional[Union[List, Dict, str, Message]] = None,
         *,
         messages: Optional[List[Union[Dict, Message]]] = None,
@@ -235,11 +231,12 @@ class PrinterMixin:
         )
 
     def cli_app(
-        self: "Agent",
+        self,
         message: Optional[str] = None,
         user: str = "User",
         emoji: str = "😎",
         stream: bool = True,
+        show_message: bool = False,
         exit_on: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> None:

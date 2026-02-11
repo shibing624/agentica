@@ -15,7 +15,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    TYPE_CHECKING,
 )
 
 from agentica.utils.log import logger
@@ -23,9 +22,6 @@ from agentica.model.message import Message
 from agentica.memory import AgentMemory, SessionSummary, Memory
 from agentica.agent_session import AgentSession
 from agentica.db.base import SessionRow
-
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
 
 
 async def _run_in_executor(func, *args, **kwargs):
@@ -37,7 +33,7 @@ async def _run_in_executor(func, *args, **kwargs):
 class SessionMixin:
     """Mixin class containing session and storage methods for Agent."""
 
-    def get_agent_data(self: "Agent") -> Dict[str, Any]:
+    def get_agent_data(self) -> Dict[str, Any]:
         """Get agent data to store in database"""
         agent_data: Dict[str, Any] = {}
         if self.name is not None:
@@ -46,7 +42,7 @@ class SessionMixin:
             agent_data.update(self.agent_data)
         return agent_data
 
-    def get_session_data(self: "Agent") -> Dict[str, Any]:
+    def get_session_data(self) -> Dict[str, Any]:
         """Get session data to store in database"""
         session_data: Dict[str, Any] = {}
         if self.session_name is not None:
@@ -61,7 +57,7 @@ class SessionMixin:
             session_data.update(self.session_data)
         return session_data
 
-    def get_agent_session(self: "Agent") -> AgentSession:
+    def get_agent_session(self) -> AgentSession:
         """Get the AgentSession object containing the agent state"""
         return AgentSession(
             session_id=self.session_id,
@@ -74,7 +70,7 @@ class SessionMixin:
         )
 
     @classmethod
-    def from_agent_session(cls, session: AgentSession) -> "Agent":
+    def from_agent_session(cls, session: AgentSession):
         """Create an Agent instance from an AgentSession"""
         return cls(
             session_id=session.session_id,
@@ -83,7 +79,7 @@ class SessionMixin:
             memory=AgentMemory.from_dict(session.memory) if session.memory else AgentMemory(),
         )
 
-    async def read_from_storage(self: "Agent") -> Optional[AgentSession]:
+    async def read_from_storage(self) -> Optional[AgentSession]:
         """Read and load session from storage"""
         if self.db is None:
             return None
@@ -148,7 +144,7 @@ class SessionMixin:
             logger.warning(f"Failed to read from storage: {e}")
         return None
 
-    async def write_to_storage(self: "Agent") -> Optional[AgentSession]:
+    async def write_to_storage(self) -> Optional[AgentSession]:
         """Write the agent session to storage"""
         if self.db is None:
             return None
@@ -172,7 +168,7 @@ class SessionMixin:
             logger.warning(f"Failed to write to storage: {e}")
         return None
 
-    def add_introduction(self: "Agent", introduction: str) -> None:
+    def add_introduction(self, introduction: str) -> None:
         """Add an introduction message to memory"""
         if introduction is None:
             return
@@ -185,7 +181,7 @@ class SessionMixin:
         # Add introduction to memory
         self.memory.add_message(Message(role="assistant", content=introduction))
 
-    async def load_session(self: "Agent", session_id: Optional[str] = None, force: bool = False) -> Optional[str]:
+    async def load_session(self, session_id: Optional[str] = None, force: bool = False) -> Optional[str]:
         """Load a session from storage
         
         Args:
@@ -220,7 +216,7 @@ class SessionMixin:
 
         return _session_id_to_load
 
-    def create_session(self: "Agent", session_id: Optional[str] = None) -> str:
+    def create_session(self, session_id: Optional[str] = None) -> str:
         """Create a new session
         
         Args:
@@ -246,11 +242,11 @@ class SessionMixin:
 
         return _new_session_id
 
-    def new_session(self: "Agent", session_id: Optional[str] = None) -> str:
+    def new_session(self, session_id: Optional[str] = None) -> str:
         """Alias for create_session"""
         return self.create_session(session_id=session_id)
 
-    def reset(self: "Agent") -> None:
+    def reset(self) -> None:
         """Reset the agent state - creates a new session"""
         from uuid import uuid4
 
@@ -260,7 +256,7 @@ class SessionMixin:
         self.memory = AgentMemory()
         logger.info(f"Agent reset. New session_id: {self.session_id}")
 
-    def load_user_memories(self: "Agent") -> None:
+    def load_user_memories(self) -> None:
         """Load user memories from the database"""
         if self.memory is None:
             return
@@ -271,7 +267,7 @@ class SessionMixin:
         except Exception as e:
             logger.warning(f"Failed to load user memories: {e}")
 
-    def get_user_memories(self: "Agent") -> Optional[List[Memory]]:
+    def get_user_memories(self) -> Optional[List[Memory]]:
         """Get user memories from memory"""
         if self.memory is None:
             return None
@@ -279,7 +275,7 @@ class SessionMixin:
         logger.warning("get_user_memories is deprecated. Use Workspace.read_memory() instead.")
         return self.memory.memories
 
-    def clear_user_memories(self: "Agent") -> None:
+    def clear_user_memories(self) -> None:
         """Clear user memories from memory and database"""
         if self.memory is None:
             return
@@ -290,19 +286,19 @@ class SessionMixin:
         except Exception as e:
             logger.warning(f"Failed to clear user memories: {e}")
 
-    async def rename(self: "Agent", name: str) -> None:
+    async def rename(self, name: str) -> None:
         """Rename the Agent and save to storage"""
         await self.read_from_storage()
         self.name = name
         await self.write_to_storage()
 
-    async def rename_session(self: "Agent", session_name: str) -> None:
+    async def rename_session(self, session_name: str) -> None:
         """Rename the current session and save to storage"""
         await self.read_from_storage()
         self.session_name = session_name
         await self.write_to_storage()
 
-    async def generate_session_name(self: "Agent") -> str:
+    async def generate_session_name(self) -> str:
         """Generate a name for the session using the first 6 messages from memory"""
         if self.model is None:
             raise Exception("Model not set")
@@ -339,7 +335,7 @@ class SessionMixin:
             return await self.generate_session_name()
         return content.replace('"', "").strip()
 
-    async def auto_rename_session(self: "Agent") -> None:
+    async def auto_rename_session(self) -> None:
         """Automatically rename the session and save to storage"""
         await self.read_from_storage()
         generated_session_name = await self.generate_session_name()
@@ -347,7 +343,7 @@ class SessionMixin:
         self.session_name = generated_session_name
         await self.write_to_storage()
 
-    async def delete_session(self: "Agent", session_id: str) -> None:
+    async def delete_session(self, session_id: str) -> None:
         """Delete the session from database"""
         if self.db is None:
             return

@@ -4,7 +4,7 @@
 @description: Agent base class - fields definition and initialization
 
 This module contains the Agent class definition with all fields and initialization logic.
-The actual method implementations are mixed in from other modules.
+Method implementations come from mixin base classes via multiple inheritance.
 """
 import json
 from datetime import datetime
@@ -43,10 +43,18 @@ from agentica.db.base import BaseDb
 from agentica.workspace import Workspace
 from agentica.knowledge.base import Knowledge
 
+# Import mixin classes — pure method containers, no state, no __init__
+from agentica.agent.prompts import PromptsMixin
+from agentica.agent.runner import RunnerMixin
+from agentica.agent.session import SessionMixin
+from agentica.agent.team import TeamMixin
+from agentica.agent.tools import ToolsMixin
+from agentica.agent.printer import PrinterMixin
+from agentica.agent.media import MediaMixin
 
 
 @dataclass(init=False)
-class Agent:
+class Agent(PromptsMixin, RunnerMixin, SessionMixin, TeamMixin, ToolsMixin, PrinterMixin, MediaMixin):
     """AI Agent with configurable behavior and capabilities.
 
     Agent supports two memory management approaches:
@@ -937,103 +945,3 @@ class Agent:
         # Add agent name to the Model for Langfuse tracing
         if self.name is not None:
             self.model.agent_name = self.name
-
-    # Import methods from other modules
-    # These will be added via the mixin imports at the end of this file
-    
-    # From prompts.py
-    get_json_output_prompt: Callable
-    get_system_message: Callable
-    get_user_message: Callable
-    get_messages_for_run: Callable
-    get_relevant_docs_from_knowledge: Callable
-    convert_documents_to_string: Callable
-    convert_context_to_string: Callable
-    
-    # From runner.py
-    run: Callable
-    run_sync: Callable
-    run_stream: Callable
-    run_stream_sync: Callable
-    _run_impl: Callable
-    _consume_run: Callable
-    _run_with_timeout: Callable
-    _wrap_stream_with_timeout: Callable
-    save_run_response_to_file: Callable
-    _aggregate_metrics_from_run_messages: Callable
-    generic_run_response: Callable
-    
-    # From session.py
-    get_agent_data: Callable
-    get_session_data: Callable
-    get_agent_session: Callable
-    from_agent_session: Callable
-    read_from_storage: Callable
-    write_to_storage: Callable
-    add_introduction: Callable
-    load_session: Callable
-    create_session: Callable
-    new_session: Callable
-    reset: Callable
-    load_user_memories: Callable
-    get_user_memories: Callable
-    clear_user_memories: Callable
-    rename: Callable
-    rename_session: Callable
-    generate_session_name: Callable
-    auto_rename_session: Callable
-    delete_session: Callable
-    
-    # From team.py
-    as_tool: Callable
-    get_transfer_function: Callable
-    get_transfer_prompt: Callable
-    get_tools: Callable
-    
-    # From tools.py
-    get_chat_history: Callable
-    get_tool_call_history: Callable
-    search_knowledge_base: Callable
-    add_to_knowledge: Callable
-    update_memory: Callable
-    _create_run_data: Callable
-    
-    # From printer.py
-    print_response: Callable  # async print_response()
-    print_response_sync: Callable  # sync wrapper
-    cli_app: Callable
-    
-    # From media.py
-    add_image: Callable
-    add_video: Callable
-    get_images: Callable
-    get_videos: Callable
-
-
-# Import and apply mixins to add method implementations
-from agentica.agent.prompts import PromptsMixin
-from agentica.agent.runner import RunnerMixin
-from agentica.agent.session import SessionMixin
-from agentica.agent.team import TeamMixin
-from agentica.agent.tools import ToolsMixin
-from agentica.agent.printer import PrinterMixin
-from agentica.agent.media import MediaMixin
-
-
-# Apply mixins by copying methods to Agent class
-def _apply_mixin(cls, mixin_cls):
-    """Apply a mixin class to the Agent class by copying its methods."""
-    for name in dir(mixin_cls):
-        if not name.startswith('_') or name.startswith('_') and not name.startswith('__'):
-            attr = getattr(mixin_cls, name)
-            if callable(attr) and not isinstance(attr, type):
-                setattr(cls, name, attr)
-
-
-_apply_mixin(Agent, PromptsMixin)
-_apply_mixin(Agent, RunnerMixin)
-_apply_mixin(Agent, SessionMixin)
-_apply_mixin(Agent, TeamMixin)
-_apply_mixin(Agent, ToolsMixin)
-_apply_mixin(Agent, PrinterMixin)
-_apply_mixin(Agent, MediaMixin)

@@ -15,21 +15,17 @@ from typing import (
     List,
     Optional,
     Union,
-    TYPE_CHECKING,
 )
 
 from agentica.utils.log import logger
 from agentica.tools.base import ModelTool, Tool, Function
-
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
 
 
 class TeamMixin:
     """Mixin class containing team and tool methods for Agent."""
 
     def as_tool(
-        self: "Agent",
+        self,
         tool_name: Optional[str] = None,
         tool_description: Optional[str] = None,
         custom_output_extractor: Optional[Callable] = None,
@@ -78,7 +74,7 @@ class TeamMixin:
             entrypoint=agent_entrypoint,
         )
 
-    def get_transfer_function(self: "Agent") -> Function:
+    def get_transfer_function(self) -> Function:
         """Get a function to transfer tasks to this agent.
         
         Returns:
@@ -110,7 +106,7 @@ class TeamMixin:
             entrypoint=transfer_to_agent,
         )
 
-    def get_transfer_prompt(self: "Agent") -> str:
+    def get_transfer_prompt(self) -> str:
         """Get prompt for transferring tasks to team members.
         
         Returns:
@@ -130,7 +126,7 @@ class TeamMixin:
         transfer_prompt += "\nUse the appropriate transfer function to delegate tasks to team members.\n"
         return transfer_prompt
 
-    def get_tools(self: "Agent") -> Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]]:
+    def get_tools(self) -> Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]]:
         """Get all tools available to this agent.
         
         This includes:

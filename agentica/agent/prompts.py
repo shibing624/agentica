@@ -11,16 +11,13 @@ Enhanced with modular PromptBuilder for improved task completion rates.
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.utils.log import logger
 from agentica.document import Document
 from agentica.model.message import Message, MessageReferences
 from agentica.run_response import RunResponseExtraData
 from agentica.utils.timer import Timer
-
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
 
 
 class PromptsMixin:
@@ -34,7 +31,7 @@ class PromptsMixin:
     - Code validation guidance (lint/test/typecheck)
     """
 
-    def get_json_output_prompt(self: "Agent") -> str:
+    def get_json_output_prompt(self) -> str:
         """Return the JSON output prompt for the Agent.
 
         This is added to the system prompt when the response_model is set and structured_outputs is False.
@@ -100,7 +97,7 @@ class PromptsMixin:
         json_output_prompt += "\nMake sure it only contains valid JSON."
         return json_output_prompt
 
-    async def get_system_message(self: "Agent") -> Optional[Message]:
+    async def get_system_message(self) -> Optional[Message]:
         """Return the system message for the Agent.
 
         1. If the system_prompt is provided, use that.
@@ -321,7 +318,7 @@ class PromptsMixin:
         return None
 
     def get_relevant_docs_from_knowledge(
-            self: "Agent", query: str, num_documents: Optional[int] = None, **kwargs
+            self, query: str, num_documents: Optional[int] = None, **kwargs
     ) -> Optional[List[Dict[str, Any]]]:
         """Return a list of references from the knowledge base"""
 
@@ -337,7 +334,7 @@ class PromptsMixin:
             return None
         return [doc.to_dict() for doc in relevant_docs]
 
-    def convert_documents_to_string(self: "Agent", docs: List[Dict[str, Any]]) -> str:
+    def convert_documents_to_string(self, docs: List[Dict[str, Any]]) -> str:
         if docs is None or len(docs) == 0:
             return ""
 
@@ -348,7 +345,7 @@ class PromptsMixin:
 
         return json.dumps(docs, indent=2, ensure_ascii=False)
 
-    def convert_context_to_string(self: "Agent", context: Dict[str, Any]) -> str:
+    def convert_context_to_string(self, context: Dict[str, Any]) -> str:
         """Convert the context dictionary to a string representation.
 
         Args:
@@ -379,7 +376,7 @@ class PromptsMixin:
                 return str(context)
 
     def get_user_message(
-            self: "Agent",
+            self,
             *,
             message: Optional[Union[str, List]],
             audio: Optional[Any] = None,
@@ -468,7 +465,7 @@ class PromptsMixin:
         )
 
     async def get_messages_for_run(
-            self: "Agent",
+            self,
             *,
             message: Optional[Union[str, List, Dict, Message]] = None,
             audio: Optional[Any] = None,
@@ -586,7 +583,7 @@ class PromptsMixin:
 
         return system_message, user_messages, messages_for_model
 
-    def _enhance_with_prompt_builder(self: "Agent", base_prompt: str) -> str:
+    def _enhance_with_prompt_builder(self, base_prompt: str) -> str:
         """Enhance an existing prompt with PromptBuilder modules.
 
         This method adds HEARTBEAT (forced iteration), SOUL (behavioral guidelines),
@@ -619,7 +616,7 @@ class PromptsMixin:
 
         return "\n\n---\n\n".join(sections)
 
-    async def _build_enhanced_system_message(self: "Agent") -> Optional[Message]:
+    async def _build_enhanced_system_message(self) -> Optional[Message]:
         """Build an enhanced system message using PromptBuilder.
 
         This method uses the modular PromptBuilder to construct a system prompt

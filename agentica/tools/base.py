@@ -5,7 +5,6 @@
 This module provides classes for managing tools.
 It includes an abstract base class for tools and a class for managing tool instances.
 """
-from __future__ import annotations  # PEP 563: Postponed Evaluation of Annotations
 
 import asyncio
 import inspect
@@ -65,20 +64,13 @@ def _safe_validate_call(c: Callable) -> Callable:
     Fix: remove such annotations from __annotations__ before validation. We only
     strip ``self`` (mixin methods) — other forward refs should be fixed at source.
     """
-    annotations = getattr(c, "__annotations__", None)
+    # Handle bound methods - need to access underlying function via __func__
+    func = c.__func__ if inspect.ismethod(c) else c
+    annotations = getattr(func, "__annotations__", None)
     if annotations and "self" in annotations and isinstance(annotations["self"], str):
         # Don't mutate the original — copy annotations dict
-        c.__annotations__ = {k: v for k, v in annotations.items() if k != "self"}
-    try:
-        return validate_call(c)
-    except NameError:
-        # Last resort: strip ALL string annotations that fail to resolve
-        if annotations:
-            c.__annotations__ = {
-                k: v for k, v in c.__annotations__.items()
-                if not isinstance(v, str)
-            }
-        return validate_call(c)
+        func.__annotations__ = {k: v for k, v in annotations.items() if k != "self"}
+    return validate_call(c)
 
 
 class Function(BaseModel):
@@ -148,24 +140,11 @@ class Function(BaseModel):
         parameters = {"type": "object", "properties": {}, "required": []}
         try:
             sig = signature(c)
-            # Try to get type hints with extra namespace for forward references
+            # Try to get type hints, but handle forward reference errors gracefully
             try:
-                # Provide common forward references that might be used in type hints
-                localns = {
-                    "Agent": None,  # Will be resolved if available
-                    "Tool": Tool,
-                    "Function": Function,
-                    "Message": Message,
-                }
-                # Try to import Agent for forward reference resolution
-                try:
-                    from agentica.agent.base import Agent
-                    localns["Agent"] = Agent
-                except ImportError:
-                    pass
-                type_hints = get_type_hints(c, localns=localns)
+                type_hints = get_type_hints(c)
             except NameError:
-                # Forward reference not resolvable, skip type hints
+                # Forward reference (e.g., "Agent") not yet defined, skip type hints
                 type_hints = {}
 
             # If function has an the agent argument, remove the agent parameter from the type hints

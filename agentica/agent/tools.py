@@ -13,7 +13,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    TYPE_CHECKING,
 )
 
 from agentica.utils.log import logger
@@ -23,14 +22,11 @@ from agentica.model.message import MessageReferences
 from agentica.run_response import RunResponseExtraData
 from agentica.tools.base import Function
 
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
-
 
 class ToolsMixin:
     """Mixin class containing default tool implementations for Agent."""
 
-    def get_chat_history(self: "Agent", num_chats: Optional[int] = None) -> str:
+    def get_chat_history(self, num_chats: Optional[int] = None) -> str:
         """Use this function to get the chat history between the user and agent.
 
         Args:
@@ -61,7 +57,7 @@ class ToolsMixin:
                 break
         return json.dumps(history, ensure_ascii=False)
 
-    def get_tool_call_history(self: "Agent", num_calls: int = 3) -> str:
+    def get_tool_call_history(self, num_calls: int = 3) -> str:
         """Use this function to get the tools called by the agent in reverse chronological order.
 
         Args:
@@ -81,7 +77,7 @@ class ToolsMixin:
         logger.debug(f"tool_calls: {tool_calls}")
         return json.dumps(tool_calls, ensure_ascii=False)
 
-    def search_knowledge_base(self: "Agent", query: str) -> str:
+    def search_knowledge_base(self, query: str) -> str:
         """Use this function to search the knowledge base for information about a query.
 
         Args:
@@ -111,7 +107,7 @@ class ToolsMixin:
             return "No documents found"
         return self.convert_documents_to_string(docs_from_knowledge)
 
-    def add_to_knowledge(self: "Agent", query: str, result: str) -> str:
+    def add_to_knowledge(self, query: str, result: str) -> str:
         """Use this function to add information to the knowledge base for future use.
 
         Args:
@@ -136,7 +132,7 @@ class ToolsMixin:
         )
         return "Successfully added to knowledge base"
 
-    async def update_memory(self: "Agent", task: str) -> str:
+    async def update_memory(self, task: str) -> str:
         """Use this function to update the Agent's memory. Describe the task in detail.
 
         Args:
@@ -150,7 +146,7 @@ class ToolsMixin:
         except Exception as e:
             return f"Failed to update memory: {e}"
 
-    def _create_run_data(self: "Agent") -> Dict[str, Any]:
+    def _create_run_data(self) -> Dict[str, Any]:
         """Create and return the run data dictionary."""
         run_response_format = "text"
         if self.response_model is not None:

@@ -9,19 +9,15 @@ This module contains methods for handling images and videos.
 from typing import (
     List,
     Optional,
-    TYPE_CHECKING,
 )
 
 from agentica.model.content import Image, Video
-
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
 
 
 class MediaMixin:
     """Mixin class containing media handling methods for Agent."""
 
-    def add_image(self: "Agent", image: Image) -> None:
+    def add_image(self, image: Image) -> None:
         """Add an image to the agent.
         
         Args:
@@ -35,7 +31,7 @@ class MediaMixin:
                 self.run_response.images = []
             self.run_response.images.append(image)
 
-    def add_video(self: "Agent", video: Video) -> None:
+    def add_video(self, video: Video) -> None:
         """Add a video to the agent.
         
         Args:
@@ -49,7 +45,7 @@ class MediaMixin:
                 self.run_response.videos = []
             self.run_response.videos.append(video)
 
-    def get_images(self: "Agent") -> Optional[List[Image]]:
+    def get_images(self) -> Optional[List[Image]]:
         """Get all images associated with this agent.
         
         Returns:
@@ -57,7 +53,7 @@ class MediaMixin:
         """
         return self.images
 
-    def get_videos(self: "Agent") -> Optional[List[Video]]:
+    def get_videos(self) -> Optional[List[Video]]:
         """Get all videos associated with this agent.
         
         Returns:

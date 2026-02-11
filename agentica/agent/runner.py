@@ -29,7 +29,6 @@ from typing import (
     Optional,
     Sequence,
     Union,
-    TYPE_CHECKING,
 )
 from uuid import uuid4
 
@@ -45,9 +44,6 @@ from agentica.memory import AgentRun
 from agentica.utils.string import parse_structured_output
 from agentica.utils.langfuse_integration import langfuse_trace_context
 
-if TYPE_CHECKING:
-    from agentica.agent.base import Agent
-
 
 class RunnerMixin:
     """Mixin class containing run execution methods for Agent.
@@ -56,7 +52,7 @@ class RunnerMixin:
     delegate to the async implementations via `run_sync()`.
     """
 
-    def save_run_response_to_file(self: "Agent", message: Optional[Union[str, List, Dict, Message]] = None) -> None:
+    def save_run_response_to_file(self, message: Optional[Union[str, List, Dict, Message]] = None) -> None:
         if self.save_response_to_file is not None and self.run_response is not None:
             message_str = None
             if message is not None:
@@ -78,7 +74,7 @@ class RunnerMixin:
             except Exception as e:
                 logger.warning(f"Failed to save output to file: {e}")
 
-    def _aggregate_metrics_from_run_messages(self: "Agent", messages: List[Message]) -> Dict[str, Any]:
+    def _aggregate_metrics_from_run_messages(self, messages: List[Message]) -> Dict[str, Any]:
         aggregated_metrics: Dict[str, Any] = defaultdict(list)
         for m in messages:
             if m.role == "assistant" and m.metrics is not None:
@@ -86,7 +82,7 @@ class RunnerMixin:
                     aggregated_metrics[k].append(v)
         return aggregated_metrics
 
-    def generic_run_response(self: "Agent", content: Optional[str] = None, event: RunEvent = RunEvent.run_response) -> RunResponse:
+    def generic_run_response(self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response) -> RunResponse:
         return RunResponse(
             run_id=self.run_id,
             session_id=self.session_id,
@@ -107,7 +103,7 @@ class RunnerMixin:
     # =========================================================================
 
     async def _run_impl(
-        self: "Agent",
+        self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
         stream: bool = False,
@@ -408,7 +404,7 @@ class RunnerMixin:
     # =========================================================================
 
     async def _wrap_stream_with_timeout(
-        self: "Agent",
+        self,
         stream_iter: AsyncIterator[RunResponse],
     ) -> AsyncIterator[RunResponse]:
         """Wrap an async streaming iterator with timeout control."""
@@ -444,7 +440,7 @@ class RunnerMixin:
             yield item
 
     async def _run_with_timeout(
-        self: "Agent",
+        self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
@@ -473,7 +469,7 @@ class RunnerMixin:
             )
 
     async def _consume_run(
-        self: "Agent",
+        self,
         message=None,
         *,
         audio=None,
@@ -519,7 +515,7 @@ class RunnerMixin:
     # =========================================================================
 
     async def run(
-        self: "Agent",
+        self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
         audio: Optional[Any] = None,
@@ -570,7 +566,7 @@ class RunnerMixin:
         return final_response
 
     async def run_stream(
-        self: "Agent",
+        self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
         audio: Optional[Any] = None,
@@ -606,7 +602,7 @@ class RunnerMixin:
             yield item
 
     def run_sync(
-        self: "Agent",
+        self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
         audio: Optional[Any] = None,
@@ -628,7 +624,7 @@ class RunnerMixin:
         )
 
     def run_stream_sync(
-        self: "Agent",
+        self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
         audio: Optional[Any] = None,
