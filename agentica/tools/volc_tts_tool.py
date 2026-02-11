@@ -3,12 +3,13 @@
 @author:XuMing(xuming624@qq.com)
 @description: Text-to-Speech tool using Volcengine TTS API.
 """
+import asyncio
 import os
 import json
 import uuid
 import base64
 from typing import Optional, Dict, Any, List
-import requests
+import httpx
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -56,7 +57,7 @@ class VolcTtsTool(Tool):
         self.register(self.text_to_speech_file)
         self.register(self.list_voice_types)
 
-    def text_to_speech(
+    async def text_to_speech(
             self,
             text: str,
             encoding: str = "mp3",
@@ -121,10 +122,11 @@ class VolcTtsTool(Tool):
 
         try:
             logger.debug(f"Sending TTS request for text: {text[:50]}...")
-            response = requests.post(
-                self.api_url, json.dumps(request_json), headers=self.header
-            )
-            response_json = response.json()
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.api_url, content=json.dumps(request_json), headers=self.header
+                )
+                response_json = response.json()
 
             if response.status_code != 200:
                 logger.error(f"TTS API error: {response_json}")
@@ -148,7 +150,7 @@ class VolcTtsTool(Tool):
             logger.exception(f"Error in TTS API call: {str(e)}")
             return {"success": False, "error": str(e), "audio_data": None}
 
-    def text_to_speech_file(
+    async def text_to_speech_file(
             self,
             text: str,
             output_file: str,
@@ -173,7 +175,7 @@ class VolcTtsTool(Tool):
         Returns:
             Dictionary containing success status and file path
         """
-        result = self.text_to_speech(
+        result = await self.text_to_speech(
             text=text,
             encoding=encoding,
             speed_ratio=speed_ratio,
@@ -198,8 +200,8 @@ class VolcTtsTool(Tool):
             # Decode and save the audio data
             audio_data = base64.b64decode(result["audio_data"])
 
-            with open(output_file, "wb") as f:
-                f.write(audio_data)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._write_file, output_file, audio_data)
 
             logger.info(f"TTS output saved to: {output_file}")
 
@@ -214,6 +216,11 @@ class VolcTtsTool(Tool):
                 "error": str(e),
                 "file_path": None,
             }
+
+    @staticmethod
+    def _write_file(path: str, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
 
     def list_voice_types(self) -> List[Dict[str, str]]:
         """
@@ -271,6 +278,7 @@ class VolcTtsTool(Tool):
 
 
 if __name__ == '__main__':
+    import asyncio
     import os
 
     # Get credentials from environment variables
@@ -292,11 +300,11 @@ if __name__ == '__main__':
     output_file = "tts_demo_output.mp3"
 
     # Convert text to speech and save to file
-    result = tts_tool.text_to_speech_file(
+    result = asyncio.run(tts_tool.text_to_speech_file(
         text=test_text,
         output_file=output_file,
         voice_type=voice_type
-    )
+    ))
 
     if result["success"]:
         print(f"语音合成成功！已保存到文件: {result['file_path']}")

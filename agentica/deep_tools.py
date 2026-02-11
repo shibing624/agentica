@@ -17,14 +17,20 @@ Built-in tool set for DeepAgent, including:
 - read_todos: Read current task list
 - task: Launch subagent to handle complex tasks
 """
+import asyncio
 import json
+import os
 import re
+import shutil
+import tempfile
 from datetime import datetime
 import time
 import uuid
 from pathlib import Path
 from textwrap import dedent
 from typing import Optional, List, Dict, Any, Literal, TYPE_CHECKING, Union
+
+import aiofiles
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -33,6 +39,7 @@ from agentica.utils.string import truncate_if_too_long
 if TYPE_CHECKING:
     from agentica.agent import Agent
     from agentica.model.base import Model
+    from agentica.tools.skill_tool import SkillTool
 
 
 class BuiltinFileTool(Tool):
@@ -88,7 +95,7 @@ class BuiltinFileTool(Tool):
         # base_dir is only used as the default starting point for relative paths
         return path
 
-    def ls(self, directory: str = ".") -> str:
+    async def ls(self, directory: str = ".") -> str:
         """Lists all files in the directory.
 
         Usage:
@@ -112,24 +119,28 @@ class BuiltinFileTool(Tool):
             if not dir_path.is_dir():
                 return f"Error: Not a directory: {directory}"
 
-            items = []
-            for item in sorted(dir_path.iterdir()):
-                item_type = "dir" if item.is_dir() else "file"
-                items.append({
-                    "name": item.name,
-                    "path": str(item),
-                    "type": item_type,
-                })
+            def _ls_sync():
+                items = []
+                for item in sorted(dir_path.iterdir()):
+                    item_type = "dir" if item.is_dir() else "file"
+                    items.append({
+                        "name": item.name,
+                        "path": str(item),
+                        "type": item_type,
+                    })
+                return items
+
+            items = await asyncio.get_event_loop().run_in_executor(None, _ls_sync)
 
             logger.debug(f"Listed {len(items)} items in {dir_path}")
             result = json.dumps(items, ensure_ascii=False, indent=2)
             result = truncate_if_too_long(result)
             return str(result)
         except Exception as e:
-            logger.error(f"Error listing directory {path}: {e}")
+            logger.error(f"Error listing directory {directory}: {e}")
             return f"Error listing directory: {e}"
 
-    def read_file(
+    async def read_file(
             self,
             file_path: str,
             offset: int = 0,
@@ -170,35 +181,35 @@ class BuiltinFileTool(Tool):
                 return f"Error: Not a file: {file_path}"
 
             limit = limit if limit is not None else self.max_read_lines
+            max_line_len = self.max_line_length
 
-            with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-                lines = f.readlines()
-
-            total_lines = len(lines)
-            end_line = min(offset + limit, total_lines)
-            selected_lines = lines[offset:end_line]
-
-            # Format output with line numbers
+            # Async streaming read — only read the lines we need
             output_lines = []
-            for i, line in enumerate(selected_lines, start=offset + 1):
-                line = line.rstrip('\n\r')
-                if len(line) > self.max_line_length:
-                    line = line[:self.max_line_length] + "..."
-                output_lines.append(f"{i:6d}\t{line}")
+            total_lines = 0
+            end_line = offset + limit
+            async with aiofiles.open(path, 'r', encoding='utf-8', errors='ignore') as f:
+                async for line in f:
+                    total_lines += 1
+                    if total_lines > offset and total_lines <= end_line:
+                        line = line.rstrip('\n\r')
+                        if len(line) > max_line_len:
+                            line = line[:max_line_len] + "..."
+                        output_lines.append(f"{total_lines:6d}\t{line}")
 
             result = "\n".join(output_lines)
 
             # Add file info if truncated
-            if end_line < total_lines:
-                result += f"\n\n[Showing lines {offset + 1}-{end_line} of {total_lines} total lines]"
+            actual_end = min(offset + len(output_lines), total_lines)
+            if actual_end < total_lines:
+                result += f"\n\n[Showing lines {offset + 1}-{actual_end} of {total_lines} total lines]"
 
-            logger.debug(f"Read file {file_path}: lines {offset + 1}-{end_line}, total {total_lines} lines")
+            logger.debug(f"Read file {file_path}: lines {offset + 1}-{actual_end}, total {total_lines} lines")
             return result
         except Exception as e:
             logger.error(f"Error reading file {file_path}: {e}")
             return f"Error reading file: {e}"
 
-    def write_file(self, file_path: str, content: str) -> str:
+    async def write_file(self, file_path: str, content: str) -> str:
         """Writes content to a file in the filesystem.
 
         Usage:
@@ -209,9 +220,9 @@ class BuiltinFileTool(Tool):
         - The write_file tool will create a new file or overwrite existing file
         - Parent directories will be created automatically if they don't exist
         - Prefer to edit existing files over creating new ones when possible
-        
+
         IMPORTANT: After calling write_file, use the absolute path returned in the result for any follow-up operations like execute or read_file. Do NOT guess or construct the path yourself.
-        
+
         Args:
             file_path: File path (relative or absolute). Examples: "tmp/script.py", "outputs/result.txt", "./tmp/main.py", use './tmp/' prefix file path for temporary files
             content: File content to write
@@ -226,8 +237,21 @@ class BuiltinFileTool(Tool):
             path.parent.mkdir(parents=True, exist_ok=True)
             action = "Created" if not path.exists() else "Updated"
 
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # Atomic write: write to temp file then rename to avoid partial writes
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                os.close(tmp_fd)
+                async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
+                    await f.write(content)
+                # Atomic rename
+                os.replace(tmp_path, str(path))
+            except Exception:
+                # Clean up temp file on error
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
             # Return absolute path to help LLM use correct path in subsequent operations
             absolute_path = str(path.resolve())
@@ -237,7 +261,7 @@ class BuiltinFileTool(Tool):
             logger.error(f"Error writing file {file_path}: {e}")
             return f"Error writing file: {e}"
 
-    def edit_file(
+    async def edit_file(
             self,
             file_path: str,
             edit: Union[dict, List[dict]],
@@ -304,12 +328,13 @@ class BuiltinFileTool(Tool):
             if not edits:
                 return "Error: No edits provided"
 
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            # Async read
+            async with aiofiles.open(path, 'r', encoding='utf-8') as f:
+                content = await f.read()
 
             results = []
 
-            # Apply edits sequentially
+            # Apply edits sequentially (pure CPU, no I/O)
             for i, edit_item in enumerate(edits):
                 old_string = edit_item.get("old") or edit_item.get("old_string")
                 new_string = edit_item.get("new") or edit_item.get("new_string")
@@ -335,9 +360,19 @@ class BuiltinFileTool(Tool):
                     "replaced_count": result["count"],
                 })
 
-            # All edits succeeded, write back
-            with open(path, 'w', encoding='utf-8') as f:
-                f.write(content)
+            # All edits succeeded — atomic write back
+            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+            try:
+                os.close(tmp_fd)
+                async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
+                    await f.write(content)
+                os.replace(tmp_path, str(path))
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                raise
 
             total_replacements = sum(r["replaced_count"] for r in results)
 
@@ -426,7 +461,7 @@ class BuiltinFileTool(Tool):
             "error": None,
         }
 
-    def glob(self, pattern: str, path: str = ".") -> str:
+    async def glob(self, pattern: str, path: str = ".") -> str:
         """Find files matching a glob pattern (supports recursive search with `**`).
 
         Usage:
@@ -460,19 +495,20 @@ class BuiltinFileTool(Tool):
             if not base_path.exists():
                 return f"Error: Directory not found: {path}"
 
-            # Get all files matching the glob pattern
-            matches = list(base_path.glob(pattern))
+            # Run glob in executor to avoid blocking on large directory trees
+            def _glob_sync():
+                matches = list(base_path.glob(pattern))
+                ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
+                return sorted(
+                    str(m) for m in matches
+                    if not set(m.parts).intersection(ignore_dirs)
+                )
 
-            # Exclude common ignored directories to avoid invalid files
-            ignore_dirs = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', '.idea', '.pytest_cache'}
-            filtered = [
-                str(m) for m in matches
-                if not set(m.parts).intersection(ignore_dirs)
-            ]
+            filtered = await asyncio.get_event_loop().run_in_executor(None, _glob_sync)
 
             logger.debug(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
             # Convert to formatted JSON string
-            result = json.dumps(sorted(filtered), ensure_ascii=False, indent=2)
+            result = json.dumps(filtered, ensure_ascii=False, indent=2)
             # Truncate if content exceeds the limit to avoid excessive output
             result = truncate_if_too_long(result)
             return str(result)
@@ -480,58 +516,179 @@ class BuiltinFileTool(Tool):
             logger.error(f"Exception occurred during glob search (pattern: '{pattern}', path: '{path}'): {str(e)}")
             return f"Error in glob search: {str(e)}"
 
-    def grep(
+    async def grep(
             self,
             pattern: str,
             path: str = ".",
-            glob_pattern: Optional[str] = None,
+            *,
+            include: Optional[str] = None,
             output_mode: Literal["files_with_matches", "content", "count"] = "files_with_matches",
-            max_results: int = 50,
-            use_regex: bool = True,
+            case_insensitive: bool = False,
+            multiline: bool = False,
+            context_lines: int = 0,
+            before_context: int = 0,
+            after_context: int = 0,
+            max_results: int = 100,
+            fixed_strings: bool = False,
     ) -> str:
-        """Search for a pattern in files.
+        """Search for a pattern in files using ripgrep (rg).
 
         Usage:
-        - The grep tool searches for text patterns across files
-        - The pattern parameter supports regex by default (e.g., 'class .*Tool', 'def \\w+')
-        - The path parameter filters which directory to search in (default is the current working directory)
-        - The glob parameter accepts a glob pattern to filter which files to search (e.g., `*.py`)
-        - The output_mode parameter controls the output format:
-        - `files_with_matches`: List only file paths containing matches (default)
-        - `content`: Show matching lines with file path and line numbers
-        - `count`: Show count of matches per file
+        - Searches text patterns across files, powered by ripgrep for maximum speed
+        - The pattern parameter supports regex by default (e.g., 'class \\w+', 'def \\w+')
+        - Use fixed_strings=True to treat pattern as literal text (no regex interpretation)
+        - The path parameter specifies the search directory (default: current working directory)
+        - The include parameter filters files by glob (e.g., "*.py", "*.{ts,tsx}")
+        - The output_mode parameter controls output format:
+          - "files_with_matches": List only file paths (default)
+          - "content": Show matching lines with file path, line numbers, and optional context
+          - "count": Show match count per file
+        - Automatically falls back to pure Python search if ripgrep is not installed
 
         Args:
-            pattern: Text/regex to search for (supports regex by default)
-            path: Starting directory for search
-            glob_pattern: File filter pattern, e.g., "*.py"
-            output_mode: Output mode
-                - "files_with_matches": Only list file paths containing matches
-                - "content": Show matching lines with context
-                - "count": Show match count per file
-            max_results: Maximum number of results
-            use_regex: If True (default), treat pattern as regex; if False, literal string match
+            pattern: Text/regex to search for
+            path: Starting directory for search (default: ".")
+            include: File glob filter, e.g., "*.py", "*.{js,ts}" (maps to rg --glob)
+            output_mode: Output format — "files_with_matches", "content", or "count"
+            case_insensitive: Ignore case when matching (default: False)
+            multiline: Enable multiline matching where . matches newlines (default: False)
+            context_lines: Show N lines before and after each match (default: 0, content mode only)
+            before_context: Show N lines before each match (default: 0, content mode only)
+            after_context: Show N lines after each match (default: 0, content mode only)
+            max_results: Maximum results to return (default: 100)
+            fixed_strings: Treat pattern as literal text, not regex (default: False)
 
         Returns:
-            Search results
+            Search results as formatted string
         """
-        try:
-            self._validate_path(path)
-            base_path = self._resolve_path(path)
-            if not base_path.exists():
-                return f"Error: Directory not found: {path}"
+        # Resolve and validate path
+        self._validate_path(path)
+        base_path = self._resolve_path(path)
+        if not base_path.exists():
+            return f"Error: Directory not found: {path}"
 
-            # Compile regex if use_regex is True
-            regex_pattern = None
-            if use_regex:
+        # Check if rg is available
+        rg_path = shutil.which("rg")
+        if rg_path is None:
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self._grep_fallback, pattern, path, include, output_mode,
+                max_results, fixed_strings, case_insensitive,
+            )
+
+        # Build rg command arguments
+        cmd: List[str] = [rg_path]
+
+        # Output mode flags
+        if output_mode == "files_with_matches":
+            cmd.append("--files-with-matches")
+        elif output_mode == "count":
+            cmd.append("--count")
+        else:  # content
+            cmd.append("--line-number")
+
+        # Matching options
+        if fixed_strings:
+            cmd.append("--fixed-strings")
+        if case_insensitive:
+            cmd.append("--ignore-case")
+        if multiline:
+            cmd.extend(["--multiline", "--multiline-dotall"])
+
+        # Context lines (content mode only)
+        if output_mode == "content":
+            if context_lines > 0:
+                cmd.extend(["--context", str(context_lines)])
+            else:
+                if before_context > 0:
+                    cmd.extend(["--before-context", str(before_context)])
+                if after_context > 0:
+                    cmd.extend(["--after-context", str(after_context)])
+
+        # File filter
+        if include:
+            cmd.extend(["--glob", include])
+
+        # Result limit: for content mode, limit matches per file
+        if output_mode == "content":
+            cmd.extend(["--max-count", str(max_results)])
+
+        # Exclude common irrelevant directories (rg already ignores .git via .gitignore)
+        for d in ["__pycache__", "node_modules", ".venv", "venv", ".idea", ".pytest_cache"]:
+            cmd.extend(["--glob", f"!{d}/"])
+
+        # Pattern and path
+        cmd.append("--")
+        cmd.append(pattern)
+        cmd.append(str(base_path))
+
+        # Execute asynchronously
+        proc = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+        except asyncio.TimeoutError:
+            if proc is not None:
                 try:
-                    regex_pattern = re.compile(pattern)
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+            return "Error: grep timed out after 30 seconds"
+        except FileNotFoundError:
+            return await asyncio.get_event_loop().run_in_executor(
+                None, self._grep_fallback, pattern, path, include, output_mode,
+                max_results, fixed_strings, case_insensitive,
+            )
+
+        # rg exit codes: 0=matches found, 1=no matches, 2=error
+        if proc.returncode == 2:
+            err = stderr.decode("utf-8", errors="replace").strip()
+            return f"Error: {err}"
+
+        output = stdout.decode("utf-8", errors="replace").strip()
+        if not output:
+            return f"No matches found for '{pattern}'"
+
+        # Truncate result lines for files_with_matches / count
+        if output_mode in ("files_with_matches", "count"):
+            lines = output.split("\n")
+            if len(lines) > max_results:
+                output = "\n".join(lines[:max_results])
+                output += f"\n... ({len(lines) - max_results} more results truncated)"
+
+        result = truncate_if_too_long(output)
+        logger.debug(f"Grep(rg) for '{pattern}': result length {len(result)} chars")
+        return result
+
+    def _grep_fallback(
+            self,
+            pattern: str,
+            path: str,
+            include: Optional[str],
+            output_mode: str,
+            max_results: int,
+            fixed_strings: bool,
+            case_insensitive: bool = False,
+    ) -> str:
+        """Fallback grep using pure Python when ripgrep is not available."""
+        try:
+            base_path = self._resolve_path(path)
+
+            # Compile regex
+            regex_pattern = None
+            if not fixed_strings:
+                try:
+                    flags = re.IGNORECASE if case_insensitive else 0
+                    regex_pattern = re.compile(pattern, flags)
                 except re.error as e:
                     return f"Error: Invalid regex pattern '{pattern}': {e}"
 
             # Determine files to search
-            if glob_pattern:
-                files = list(base_path.glob(f"**/{glob_pattern}"))
+            if include:
+                files = list(base_path.glob(f"**/{include}"))
             else:
                 files = list(base_path.glob("**/*"))
 
@@ -542,18 +699,23 @@ class BuiltinFileTool(Tool):
             results = []
             file_counts = {}
 
-            for file_path in files:
+            match_pattern = pattern.lower() if (case_insensitive and fixed_strings) else pattern
+
+            for fp in files:
                 if len(results) >= max_results:
                     break
 
                 try:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    with open(fp, 'r', encoding='utf-8', errors='ignore') as f:
                         lines = f.readlines()
 
                     file_matches = []
                     for line_num, line in enumerate(lines, 1):
-                        # Use regex or literal string match
-                        matched = regex_pattern.search(line) if use_regex else (pattern in line)
+                        if fixed_strings:
+                            check_line = line.lower() if case_insensitive else line
+                            matched = match_pattern in check_line
+                        else:
+                            matched = regex_pattern.search(line)
                         if matched:
                             file_matches.append({
                                 "line_num": line_num,
@@ -561,60 +723,58 @@ class BuiltinFileTool(Tool):
                             })
 
                     if file_matches:
-                        file_counts[str(file_path)] = len(file_matches)
+                        file_counts[str(fp)] = len(file_matches)
                         if output_mode == "content":
                             for match in file_matches[:max_results - len(results)]:
-                                results.append({
-                                    "file": str(file_path),
-                                    "line": match["line_num"],
-                                    "content": match["content"],
-                                })
+                                results.append(f"{fp}:{match['line_num']}: {match['content']}")
                         elif output_mode == "files_with_matches":
-                            results.append(str(file_path))
+                            results.append(str(fp))
                 except Exception:
                     continue
 
             # Format output
             if output_mode == "count":
-                output = [f"{p}: {c}" for p, c in file_counts.items()]
-                result = "\n".join(output) if output else f"No matches found for '{pattern}'"
-            elif output_mode == "files_with_matches":
-                result = json.dumps(list(set(results)), ensure_ascii=False, indent=2)
-            else:  # content
-                output_lines = [f"{r['file']}:{r['line']}: {r['content']}" for r in results]
+                output_lines = [f"{p}:{c}" for p, c in file_counts.items()]
                 result = "\n".join(output_lines) if output_lines else f"No matches found for '{pattern}'"
+            elif output_mode == "files_with_matches":
+                result = "\n".join(sorted(set(results))) if results else f"No matches found for '{pattern}'"
+            else:  # content
+                result = "\n".join(results) if results else f"No matches found for '{pattern}'"
 
-            # Truncate if too long and log result
             result = truncate_if_too_long(result)
-            logger.debug(f"Grep for '{pattern}': found {len(file_counts)} files, result length: {len(result)} characters.")
-            return str(result)
+            logger.debug(f"Grep(fallback) for '{pattern}': found {len(file_counts)} files, result length: {len(result)} chars")
+            return result
 
         except Exception as e:
-            logger.error(f"Error in grep: {e}")
+            logger.error(f"Error in grep fallback: {e}")
             return f"Error in grep: {e}"
 
 
 class BuiltinExecuteTool(Tool):
     """
-    Built-in command execution tool that wraps ShellTool.
+    Built-in command execution tool using async subprocess.
     Exposed as execute function for consistent naming in DeepAgent.
     """
 
-    def __init__(self, base_dir: Optional[str] = None, timeout: int = 120):
+    def __init__(self, base_dir: Optional[str] = None, timeout: int = 120, max_output_length: int = 20000):
         """
         Initialize BuiltinExecuteTool.
 
         Args:
             base_dir: Base directory for command execution
             timeout: Command execution timeout in seconds
+            max_output_length: Maximum length of output to return
         """
         super().__init__(name="builtin_execute_tool")
-        # Import and initialize ShellTool
+        self._base_dir: Optional[Path] = Path(base_dir) if base_dir else None
+        self._timeout = timeout
+        self._max_output_length = max_output_length
+        # Import ShellTool for its syntax-fix helpers
         from agentica.tools.shell_tool import ShellTool
         self._shell = ShellTool(base_dir=base_dir, timeout=timeout)
         self.register(self.execute)
 
-    def execute(self, command: str) -> str:
+    async def execute(self, command: str) -> str:
         """Executes a given command, capturing both stdout and stderr.
 
         Before executing the command, please follow these steps:
@@ -663,7 +823,59 @@ class BuiltinExecuteTool(Tool):
         Returns:
             str: The output of the command (stdout + stderr) with exit code
         """
-        return self._shell.execute(command)
+        # Use ShellTool's syntax fixers (python -c → heredoc conversion, null/true/false fix)
+        command = self._shell._convert_python_c_to_heredoc(command)
+
+        logger.debug(f"Executing command: {command}")
+        cwd = str(self._base_dir) if self._base_dir else None
+        proc = None
+
+        try:
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+            )
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=self._timeout,
+            )
+        except asyncio.TimeoutError:
+            # Graceful termination: SIGTERM first, then SIGKILL
+            if proc is not None:
+                try:
+                    proc.terminate()
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        proc.kill()
+                except ProcessLookupError:
+                    pass
+            logger.warning(f"Command timed out after {self._timeout}s: {command}")
+            return f"Error: Command timed out after {self._timeout} seconds"
+        except Exception as e:
+            logger.warning(f"Failed to run shell command: {e}")
+            return f"Error: {e}"
+
+        # Combine stdout and stderr
+        output_parts = []
+        if stdout:
+            output_parts.append(stdout.decode("utf-8", errors="replace"))
+        if stderr:
+            output_parts.append(f"[stderr]\n{stderr.decode('utf-8', errors='replace')}")
+
+        output = "\n".join(output_parts).strip()
+
+        # Truncate if too long
+        if len(output) > self._max_output_length:
+            output = output[:self._max_output_length] + "\n... (output truncated)"
+
+        # Add exit code info
+        if proc.returncode != 0:
+            output = f"{output}\n\n[Exit code: {proc.returncode}]"
+
+        logger.debug(f"Command exit code: {proc.returncode}")
+        return output if output else f"Command executed successfully (exit code: {proc.returncode})"
 
 
 class BuiltinWebSearchTool(Tool):
@@ -681,7 +893,7 @@ class BuiltinWebSearchTool(Tool):
         self._search = BaiduSearchTool()
         self.register(self.web_search)
 
-    def web_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
+    async def web_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
         """Search the web using Baidu for multiple queries and return results
 
         Args:
@@ -700,7 +912,7 @@ class BuiltinWebSearchTool(Tool):
         """
 
         try:
-            result = self._search.baidu_search(queries, max_results=max_results)
+            result = await self._search.baidu_search(queries, max_results=max_results)
             logger.debug(f"Web search for '{queries}', result length: {len(result)} characters.")
             return result
         except Exception as e:
@@ -728,7 +940,7 @@ class BuiltinFetchUrlTool(Tool):
         self._crawler = UrlCrawlerTool(max_content_length=max_content_length)
         self.register(self.fetch_url)
 
-    def fetch_url(self, url: str) -> str:
+    async def fetch_url(self, url: str) -> str:
         """Fetch URL content and convert to clean text format.
 
         Args:
@@ -736,14 +948,14 @@ class BuiltinFetchUrlTool(Tool):
 
         Returns:
             str, JSON formatted fetch result containing url, content, and save_path
-        
+
         IMPORTANT: After using this tool:
         1. Read through the return content
         2. Extract relevant information that answers the user's question
         3. Synthesize this into a clear, natural language response
         4. NEVER show the raw JSON to the user unless specifically requested
         """
-        result = self._crawler.url_crawl(url)
+        result = await self._crawler.url_crawl(url)
         logger.debug(f"Fetched URL: {url}, result length: {len(result)} characters.")
         return result
 
@@ -1081,7 +1293,7 @@ class BuiltinTaskTool(Tool):
         
         return tools
 
-    def task(self, description: str, subagent_type: str = "general") -> str:
+    async def task(self, description: str, subagent_type: str = "general") -> str:
         """Launch a subagent to handle a complex task.
 
         Args:
@@ -1171,13 +1383,12 @@ class BuiltinTaskTool(Tool):
 
             logger.debug(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")
             
-            # Run subagent with streaming to collect tool usage info
+            # Run subagent with async streaming to collect tool usage info
             start_time = time.time()
             tool_calls_log = []
             final_content = ""
-            
-            response_stream = subagent.run_stream_sync(description, stream_intermediate_steps=True)
-            for chunk in response_stream:
+
+            async for chunk in subagent.run_stream(description, stream_intermediate_steps=True):
                 if chunk is None:
                     continue
                 # Collect tool call info from intermediate events

@@ -4,6 +4,7 @@
 @description:
 part of the code is from phidata
 """
+import asyncio
 import json
 import httpx
 from agentica.tools.base import Tool
@@ -24,7 +25,7 @@ class HackerNewsTool(Tool):
         if get_user_details:
             self.register(self.get_user_details)
 
-    def get_top_hackernews_stories(self, num_stories: int = 10) -> str:
+    async def get_top_hackernews_stories(self, num_stories: int = 10) -> str:
         """Get top stories from Hacker News.
 
         Args:
@@ -35,20 +36,24 @@ class HackerNewsTool(Tool):
         """
 
         logger.info(f"Getting top {num_stories} stories from Hacker News")
-        # Fetch top story IDs
-        response = httpx.get("https://hacker-news.firebaseio.com/v0/topstories.json")
-        story_ids = response.json()
+        async with httpx.AsyncClient() as client:
+            # Fetch top story IDs
+            response = await client.get("https://hacker-news.firebaseio.com/v0/topstories.json")
+            story_ids = response.json()
 
-        # Fetch story details
-        stories = []
-        for story_id in story_ids[:num_stories]:
-            story_response = httpx.get(f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json")
-            story = story_response.json()
-            story["username"] = story["by"]
-            stories.append(story)
-        return json.dumps(stories, indent=2, ensure_ascii=False)
+            # Fetch story details in parallel
+            async def fetch_story(story_id: int) -> dict:
+                resp = await client.get(f"https://hacker-news.firebaseio.com/v0/item/{story_id}.json")
+                story = resp.json()
+                story["username"] = story["by"]
+                return story
 
-    def get_user_details(self, username: str) -> str:
+            tasks = [fetch_story(sid) for sid in story_ids[:num_stories]]
+            stories = await asyncio.gather(*tasks)
+
+        return json.dumps(list(stories), indent=2, ensure_ascii=False)
+
+    async def get_user_details(self, username: str) -> str:
         """Get the details of a Hacker News user using their username.
 
         Args:
@@ -60,7 +65,9 @@ class HackerNewsTool(Tool):
 
         try:
             logger.info(f"Getting details for user: {username}")
-            user = httpx.get(f"https://hacker-news.firebaseio.com/v0/user/{username}.json").json()
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"https://hacker-news.firebaseio.com/v0/user/{username}.json")
+                user = resp.json()
             user_details = {
                 "id": user.get("user_id"),
                 "karma": user.get("karma"),
@@ -74,8 +81,10 @@ class HackerNewsTool(Tool):
 
 
 if __name__ == '__main__':
+    import asyncio
+
     m = HackerNewsTool()
-    r = m.get_top_hackernews_stories(3)
+    r = asyncio.run(m.get_top_hackernews_stories(3))
     print(r)
-    r = m.get_user_details('tomthe')
+    r = asyncio.run(m.get_user_details('tomthe'))
     print(r)

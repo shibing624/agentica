@@ -8,7 +8,7 @@ import json
 from os import getenv
 from typing import Optional, List, Union
 
-import requests
+import httpx
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -50,7 +50,7 @@ class SearchBochaTool(Tool):
 
         self.register(self.search_bocha)
 
-    def search_bocha_single_query(self, query: str, count: Optional[int] = None) -> str:
+    async def search_bocha_single_query(self, query: str, count: Optional[int] = None) -> str:
         """Search Bocha for a single query.
 
         Args:
@@ -82,9 +82,12 @@ class SearchBochaTool(Tool):
             if self.exclude:
                 payload["exclude"] = self.exclude
 
-            response = requests.post(self.api_url, headers=headers, data=json.dumps(payload), timeout=30)
-            response.raise_for_status()
-            result = response.json()
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.api_url, headers=headers, content=json.dumps(payload), timeout=30
+                )
+                response.raise_for_status()
+                result = response.json()
 
             if result.get("code") != 200:
                 error_msg = result.get("msg", "Unknown error")
@@ -114,14 +117,14 @@ class SearchBochaTool(Tool):
             logger.debug(f"Searching bocha for: {query}, results count: {len(parsed_results)}")
             return parsed_json
 
-        except requests.exceptions.RequestException as e:
+        except httpx.HTTPStatusError as e:
             logger.error(f"Failed to search bocha: {e}")
             return f"Error: {e}"
         except Exception as e:
             logger.error(f"Failed to search bocha: {e}")
             return f"Error: {e}"
 
-    def search_bocha(self, queries: Union[str, List[str]], count: Optional[int] = None) -> str:
+    async def search_bocha(self, queries: Union[str, List[str]], count: Optional[int] = None) -> str:
         """Search Bocha for single or multiple queries.
 
         Args:
@@ -132,19 +135,21 @@ class SearchBochaTool(Tool):
             str: The search results in JSON format.
         """
         if isinstance(queries, str):
-            return self.search_bocha_single_query(queries, count=count)
+            return await self.search_bocha_single_query(queries, count=count)
 
         all_results = {}
         for query in queries:
-            result = self.search_bocha_single_query(query, count=count)
+            result = await self.search_bocha_single_query(query, count=count)
             all_results[query] = result
         return json.dumps(all_results, ensure_ascii=False)
 
 
 if __name__ == "__main__":
+    import asyncio
+
     m = SearchBochaTool()
     query = "天空为什么是蓝色的？"
-    r = m.search_bocha(query)
+    r = asyncio.run(m.search_bocha(query))
     print(query, "\n\n", r)
-    r = m.search_bocha(["北京的新闻top3", "上海的新闻top3"], count=3)
+    r = asyncio.run(m.search_bocha(["北京的新闻top3", "上海的新闻top3"], count=3))
     print(r)

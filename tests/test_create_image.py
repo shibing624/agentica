@@ -4,6 +4,7 @@
 @description:
 This module contains a test for the CreateImage class in the agentica.functions.create_image module. It uses the unittest.mock library to mock the OpenAI and requests APIs, and checks that the image creation process works correctly.
 """
+import asyncio
 import os.path
 import shutil
 from unittest.mock import MagicMock, patch
@@ -14,9 +15,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.tools.dalle_tool import DalleTool
 
 
-@patch("agentica.tools.dalle_tool.requests.get")
 @patch("agentica.tools.dalle_tool.OpenAIChat")
-def test_execute(mock_openai_chat, mock_get):
+def test_execute(mock_openai_chat):
     """
     Tests the execute method of the CreateImage class. It mocks the OpenAI and requests APIs, and checks that the image creation process works correctly.
     """
@@ -29,23 +29,25 @@ def test_execute(mock_openai_chat, mock_get):
     mock_openai_chat_instance.get_client.return_value = mock_client
     mock_openai_chat.return_value = mock_openai_chat_instance
 
-    # Mock the requests.get call to return a mock response with mock image content
-    mock_response = MagicMock()
-    mock_response.content = b"mock image content"
-    mock_get.return_value = mock_response
+    # Mock httpx.AsyncClient.get for image download
+    mock_http_response = MagicMock()
+    mock_http_response.content = b"mock image content"
 
-    create_image = DalleTool(data_dir="test_data")
-    image_path = create_image.create_dalle_image("a white siamese cat", 1, "1024x1024")
+    async def mock_get(self, url, **kwargs):
+        return mock_http_response
 
-    # Check that the returned image name is a valid SHA-256 hash followed by ".png"
-    image_file_name = image_path.split("/")[-1]
-    print(f"image_file_name:{image_file_name}")
-    # assert re.match(r"[0-9a-f]{64}\.png$", image_file_name) is not None
+    with patch('httpx.AsyncClient.get', new=mock_get):
+        create_image = DalleTool(data_dir="test_data")
+        image_path = asyncio.run(create_image.create_dalle_image("a white siamese cat", 1, "1024x1024"))
 
-    # Check that the image file was created with the correct content
-    with open(image_path, "rb") as f:
-        assert f.read() == b"mock image content"
+        # Check that the returned image name is a valid SHA-256 hash followed by ".png"
+        image_file_name = image_path.split("/")[-1]
+        print(f"image_file_name:{image_file_name}")
 
-    # Clean up the test environment by removing the created file and directory
-    if os.path.exists(create_image.data_dir):
-        shutil.rmtree(create_image.data_dir)
+        # Check that the image file was created with the correct content
+        with open(image_path, "rb") as f:
+            assert f.read() == b"mock image content"
+
+        # Clean up the test environment by removing the created file and directory
+        if os.path.exists(create_image.data_dir):
+            shutil.rmtree(create_image.data_dir)

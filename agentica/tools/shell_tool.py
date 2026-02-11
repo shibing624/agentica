@@ -4,8 +4,8 @@
 @description:
 part of the code is from phidata
 """
+import asyncio
 import re
-import subprocess
 from pathlib import Path
 from typing import Optional, Union
 import sys,os
@@ -41,17 +41,17 @@ class ShellTool(Tool):
 
     def _fix_python_syntax(self, code: str) -> str:
         """Fix common Python syntax errors from LLM output.
-        
+
         LLMs sometimes generate JavaScript-style syntax in Python code.
         This method fixes common issues:
         - null -> None
-        - true -> True  
+        - true -> True
         - false -> False
         - undefined -> None
-        
+
         Args:
             code: Python code string
-            
+
         Returns:
             Fixed Python code
         """
@@ -63,40 +63,40 @@ class ShellTool(Tool):
             (r'\btrue\b', 'True'),
             (r'\bfalse\b', 'False'),
         ]
-        
+
         fixed_code = code
         for pattern, replacement in fixes:
             fixed_code = re.sub(pattern, replacement, fixed_code)
-        
+
         if fixed_code != code:
             logger.debug("Auto-fixed Python syntax (null/true/false -> None/True/False)")
-        
+
         return fixed_code
 
     def _convert_python_c_to_heredoc(self, command: str) -> str:
         """Convert python -c with multi-line code to heredoc format.
-        
+
         If the command is `python -c "..."` or `python3 -c "..."` with multi-line code,
         convert it to heredoc format for better handling of newlines and special characters.
         Also applies Python syntax fixes (null -> None, etc.).
-        
+
         Args:
             command: Original command string
-            
+
         Returns:
             Converted command using heredoc if applicable, otherwise original command
         """
         # Pattern to match python -c or python3 -c with quoted code
         pattern = r'^(python3?)\s+-c\s+(["\'])(.*)\2\s*$'
         match = re.match(pattern, command, re.DOTALL)
-        
+
         if match:
             python_cmd = match.group(1)
             code = match.group(3)
-            
+
             # Fix common Python syntax errors from LLM
             code = self._fix_python_syntax(code)
-            
+
             # Check if code contains newlines or is complex (has function definitions, etc.)
             if '\n' in code or '\\n' in code or 'def ' in code or 'class ' in code:
                 # Unescape \\n to actual newlines if present
@@ -108,7 +108,7 @@ class ShellTool(Tool):
             else:
                 # Return with fixed code but original format
                 return f"{python_cmd} -c '{code}'"
-        
+
         # Check if it's already a heredoc format with Python
         heredoc_pattern = r"^(python3?)\s*<<\s*['\"]?(\w+)['\"]?\s*\n(.*)\n\2\s*$"
         heredoc_match = re.match(heredoc_pattern, command, re.DOTALL)
@@ -120,10 +120,10 @@ class ShellTool(Tool):
             fixed_code = self._fix_python_syntax(code)
             if fixed_code != code:
                 return f"{python_cmd} << '{delimiter}'\n{fixed_code}\n{delimiter}"
-        
+
         return command
 
-    def execute(self, command: str) -> str:
+    async def execute(self, command: str) -> str:
         """Executes a given command in the specified base directory.
 
         Before executing the command, please follow these steps:
@@ -176,25 +176,38 @@ class ShellTool(Tool):
         try:
             # Convert python -c with multi-line code to heredoc format
             command = self._convert_python_c_to_heredoc(command)
-            
+
             logger.debug(f"Executing command: {command}")
 
-            # Execute command using shell
-            result = subprocess.run(
+            # Execute command using async subprocess
+            process = await asyncio.create_subprocess_shell(
                 command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=str(self.base_dir) if self.base_dir else None,
             )
 
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(),
+                    timeout=self.timeout
+                )
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                logger.warning(f"Command timed out after {self.timeout}s: {command}")
+                return f"Error: Command timed out after {self.timeout} seconds"
+
+            # Decode output
+            stdout_str = stdout.decode(errors='replace') if stdout else ""
+            stderr_str = stderr.decode(errors='replace') if stderr else ""
+
             # Combine stdout and stderr
             output_parts = []
-            if result.stdout:
-                output_parts.append(result.stdout)
-            if result.stderr:
-                output_parts.append(f"[stderr]\n{result.stderr}")
+            if stdout_str:
+                output_parts.append(stdout_str)
+            if stderr_str:
+                output_parts.append(f"[stderr]\n{stderr_str}")
 
             output = "\n".join(output_parts).strip()
 
@@ -203,25 +216,25 @@ class ShellTool(Tool):
                 output = output[:self.max_output_length] + "\n... (output truncated)"
 
             # Add exit code info
-            if result.returncode != 0:
-                output = f"{output}\n\n[Exit code: {result.returncode}]"
+            returncode = process.returncode
+            if returncode != 0:
+                output = f"{output}\n\n[Exit code: {returncode}]"
 
-            logger.debug(f"Command exit code: {result.returncode}")
-            return output if output else f"Command executed successfully (exit code: {result.returncode})"
+            logger.debug(f"Command exit code: {returncode}")
+            return output if output else f"Command executed successfully (exit code: {returncode})"
 
-        except subprocess.TimeoutExpired:
-            logger.warning(f"Command timed out after {self.timeout}s: {command}")
-            return f"Error: Command timed out after {self.timeout} seconds"
         except Exception as e:
             logger.warning(f"Failed to run shell command: {e}")
             return f"Error: {e}"
 
 
 if __name__ == '__main__':
+    import asyncio
+
     m = ShellTool()
-    r = m.execute("ls -l /tmp")
+    r = asyncio.run(m.execute("ls -l /tmp"))
     print(r)
-    
+
     # Test heredoc conversion
     print("\n--- Test heredoc conversion ---")
     code = '''python3 -c "def fib(n):
@@ -231,9 +244,9 @@ if __name__ == '__main__':
         a, b = b, a + b
 
 fib(10)"'''
-    r = m.execute(code)
+    r = asyncio.run(m.execute(code))
     print(r)
-    
+
     # Test auto-fix null/true/false
     print("\n--- Test auto-fix Python syntax ---")
     code_with_null = '''python3 << 'EOF'
@@ -243,5 +256,5 @@ def test():
     return true
 print(test())
 EOF'''
-    r = m.execute(code_with_null)
+    r = asyncio.run(m.execute(code_with_null))
     print(r)

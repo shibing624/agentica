@@ -5,6 +5,7 @@
 This module contains a class for reading and understanding image content using OpenAI's API.
 It uploads an image, sends it to the API, and retrieves a description of the image content.
 """
+import asyncio
 import base64
 import os
 from typing import Optional, cast
@@ -40,7 +41,7 @@ class ImageAnalysisTool(Tool):
         if self.llm is None:
             self.llm = OpenAIChat(id=self.model_name)
 
-    def analyze_image_content(self, image_path_or_url: str, prompt: str = '') -> str:
+    async def analyze_image_content(self, image_path_or_url: str, prompt: str = '') -> str:
         """Reads and understands the content of an image using image understand model API.
 
         Args:
@@ -54,22 +55,19 @@ class ImageAnalysisTool(Tool):
         # Update the Model (set defaults, add logit etc.)
         self.update_llm()
         if image_path_or_url.startswith("http"):
-            description = self._analyze_image_url(image_path_or_url, prompt)
+            description = await self._analyze_image_url(image_path_or_url, prompt)
         else:
-            description = self._analyze_image_path(image_path_or_url, prompt)
+            description = await self._analyze_image_path(image_path_or_url, prompt)
         logger.debug(f"Read Image: {image_path_or_url}, model: {self.model_name}, Result description: {description}")
         return description
 
-    def _analyze_image_url(self, image_url: str, prompt: str = '') -> str:
+    async def _analyze_image_url(self, image_url: str, prompt: str = '') -> str:
         """
         Analyzes the image content using OpenAI's API.
 
         :param image_url: The URL of the image.
-        :type image_url: str
         :param prompt: The prompt to use for the image analysis.
-        :type prompt: str
         :return: The description of the image content.
-        :rtype: str
         """
         messages = [
             {
@@ -89,25 +87,29 @@ class ImageAnalysisTool(Tool):
             }
         ]
         self.llm = cast(Model, self.llm)
-        response = self.llm.get_client().chat.completions.create(
-            model=self.model_name, messages=messages, max_tokens=4000
+        # OpenAI sync client - wrap in executor
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.llm.get_client().chat.completions.create(
+                model=self.model_name, messages=messages, max_tokens=4000
+            )
         )
 
         return response.choices[0].message.content
 
-    def _analyze_image_path(self, image_path: str, prompt: str = '') -> str:
+    async def _analyze_image_path(self, image_path: str, prompt: str = '') -> str:
         """
         Analyzes the image content using OpenAI's API.
 
         :param image_path: The path to the image.
-        :type image_path: str
         :param prompt: The prompt to use for the image analysis.
-        :type prompt: str
         :return: The description of the image content.
-        :rtype: str
         """
-        with open(image_path, "rb") as image_file:
-            base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+        # Read file in executor to avoid blocking
+        loop = asyncio.get_running_loop()
+        base64_image = await loop.run_in_executor(None, self._read_image_base64, image_path)
+
         if not base64_image:
             logger.error("Failed to encode the image to base64.")
             return ""
@@ -129,14 +131,25 @@ class ImageAnalysisTool(Tool):
             }
         ]
         self.llm = cast(Model, self.llm)
-        response = self.llm.get_client().chat.completions.create(
-            model=self.model_name, messages=messages, max_tokens=4000
+        # OpenAI sync client - wrap in executor
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.llm.get_client().chat.completions.create(
+                model=self.model_name, messages=messages, max_tokens=4000
+            )
         )
 
         return response.choices[0].message.content
 
+    @staticmethod
+    def _read_image_base64(image_path: str) -> str:
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+
 
 if __name__ == "__main__":
+    import asyncio
+
     tool = ImageAnalysisTool()
-    image_description = tool.analyze_image_content("../../examples/data/chinese.jpg")
+    image_description = asyncio.run(tool.analyze_image_content("../../examples/data/chinese.jpg"))
     print(image_description)

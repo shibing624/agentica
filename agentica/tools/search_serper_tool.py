@@ -3,12 +3,12 @@
 @author:XuMing(xuming624@qq.com)
 @description:
 """
-import http.client
 import json
 import os
 
 from typing import Dict, Optional, Union, List
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentica.tools.base import Tool
@@ -40,17 +40,20 @@ class SerperWrapper(BaseModel):
         headers = {"X-API-KEY": self.api_key, "Content-Type": "application/json"}
         return headers
 
-    def run(self, query: str, max_results: int = 8, as_string: bool = True):
+    async def run(self, query: str, max_results: int = 8, as_string: bool = True):
         """Run query through Serper and parse result"""
         headers = self.get_headers()
-
-        conn = http.client.HTTPSConnection("google.serper.dev")
         payload = json.dumps({"q": query, "num": max_results})
+
         try:
-            conn.request("POST", "/search", payload, headers)
-            res = conn.getresponse()
-            res_data = res.read()
-            data = json.loads(res_data.decode("utf-8"))
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    "https://google.serper.dev/search",
+                    content=payload,
+                    headers=headers,
+                )
+                data = response.json()
+
             logger.debug(data)
             # Check for specific error messages
             if "error" in data:
@@ -70,7 +73,6 @@ class SerperWrapper(BaseModel):
     @staticmethod
     def _process_response(res: dict, as_string: bool = False) -> Union[str, List[dict]]:
         """Process response from SerpAPI."""
-        # logger.debug(res)
         focus = ["title", "snippet", "link"]
         def get_focused(x):
             return {i: j for i, j in x.items() if i in focus}
@@ -98,7 +100,7 @@ class SearchSerperTool(Tool):
         self.api_key: Optional[str] = api_key or os.getenv("SERPER_API_KEY")
         self.register(self.search_google)
 
-    def search_google_single_query(
+    async def search_google_single_query(
             self,
             query: str,
             max_results: int = 8,
@@ -115,11 +117,11 @@ class SearchSerperTool(Tool):
         Returns:
             The search results as a string or a list of dictionaries.
         """
-        res =  SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
+        res = await SerperWrapper(api_key=self.api_key).run(query, max_results=max_results, as_string=as_string)
         logger.debug(f"Search google for query: {query}, result: {res}")
         return res
 
-    def search_google(self, queries: Union[List[str], str], max_results: int = 8) -> str:
+    async def search_google(self, queries: Union[List[str], str], max_results: int = 8) -> str:
         """
         Search Google for information. Use this tool first to find relevant web pages before visiting them.
         This function searches google for one or more queries and returns search results with titles, snippets and URLs.
@@ -132,16 +134,18 @@ class SearchSerperTool(Tool):
             Search results containing titles, snippets and URLs that can be used to visit pages for more details.
         """
         if isinstance(queries, str):
-            return self.search_google_single_query(queries, max_results=max_results, as_string=True)
+            return await self.search_google_single_query(queries, max_results=max_results, as_string=True)
         all_results = {}
         for query in queries:
-            res = self.search_google_single_query(query, max_results=max_results, as_string=True)
+            res = await self.search_google_single_query(query, max_results=max_results, as_string=True)
             all_results[query] = res
         return json.dumps(all_results, ensure_ascii=False)
 
 
 if __name__ == '__main__':
+    import asyncio
+
     search = SearchSerperTool()
     print(search.api_key)
-    r = search.search_google(["湖北的新闻top3", "北京的娱乐新闻"])
+    r = asyncio.run(search.search_google(["湖北的新闻top3", "北京的娱乐新闻"]))
     print(type(r), '\n\n', r)

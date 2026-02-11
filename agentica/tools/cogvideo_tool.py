@@ -7,13 +7,15 @@ CogVideoX
 
 CogVideoX 是由智谱AI开发的视频生成大模型，具备强大的视频生成能力，只需输入文本或图片就可以轻松完成视频制作。
 """
+import asyncio
 import hashlib
 import json
 import os
 from os import getenv
 import time
-import requests
 from typing import Optional
+
+import httpx
 
 try:
     from zhipuai import ZhipuAI
@@ -58,7 +60,7 @@ class CogVideoTool(Tool):
         file_name = str(hashlib.sha256((prompt + timestamp).encode()).hexdigest())[:16]
         return file_name + ".mp4"
 
-    def create_video(
+    async def create_video(
             self,
             prompt: Optional[str] = None,
             image_url: Optional[str] = None,
@@ -97,11 +99,20 @@ class CogVideoTool(Tool):
             if fps:
                 params["fps"] = fps
         logger.info(f"params: {params}")
-        response = self.client.videos.generations(**params)
+
+        # ZhipuAI sync client - wrap in executor
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.client.videos.generations(**params)
+        )
         # 异步接口，轮询获取视频生成结果
         video_id = response.id
         while True:
-            result = self.client.videos.retrieve_videos_result(id=video_id)
+            result = await loop.run_in_executor(
+                None,
+                lambda: self.client.videos.retrieve_videos_result(id=video_id)
+            )
             if result.task_status == "SUCCESS":
                 logger.info("Video generation succeeded. URL:", result)
                 break
@@ -110,39 +121,47 @@ class CogVideoTool(Tool):
                 break
             elif result.task_status == "PROCESSING":
                 logger.debug("Video generation in progress. Checking again in 10 seconds...")
-                time.sleep(10)
+                await asyncio.sleep(10)
         video_url = result.video_result[0].url
         cover_image_url = result.video_result[0].cover_image_url
         video_path = f"{self.data_dir}/{self._generate_name(prompt)}"
-        self._download_and_save_video(video_url, video_path)
+        await self._download_and_save_video(video_url, video_path)
         saved_video_path = os.path.abspath(video_path)
         result = {"action": "create_video", "result_video_url": video_url, "result_video_path": saved_video_path,
                   "cover_image_url": cover_image_url}
         return json.dumps(result, ensure_ascii=False)
 
-    def _download_and_save_video(self, video_url: str, saved_video_path: str) -> None:
+    async def _download_and_save_video(self, video_url: str, saved_video_path: str) -> None:
         """
         Downloads the video from the given URL and saves it to the specified path.
 
         :param video_url: The URL of the video.
-        :type video_url: str
         :param saved_video_path: The path to save the video.
-        :type saved_video_path: str
         """
         try:
-            video_data = requests.get(video_url).content
+            async with httpx.AsyncClient() as client:
+                response = await client.get(video_url)
+                video_data = response.content
+
             if os.path.dirname(saved_video_path):
                 os.makedirs(os.path.dirname(saved_video_path), exist_ok=True)
-            with open(saved_video_path, "wb") as f:
-                f.write(video_data)
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._write_file, saved_video_path, video_data)
             logger.info(f"Video saved to: {saved_video_path}")
         except Exception as e:
             logger.error(f"Error downloading video: {str(e)}")
 
+    @staticmethod
+    def _write_file(path: str, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
+
 
 if __name__ == '__main__':
-    # from agentica.tools.cogview_tool import CogViewTool
+    import asyncio
+
     m = CogVideoTool()
     prompt = "比得兔开小汽车，游走在马路上，脸上的表情充满开心喜悦"
-    r = m.create_video(prompt)
+    r = asyncio.run(m.create_video(prompt))
     print(r)

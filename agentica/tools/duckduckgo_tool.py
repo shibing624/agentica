@@ -14,7 +14,7 @@ from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
 try:
-    from duckduckgo_search import DDGS
+    from duckduckgo_search import AsyncDDGS
 
     ddgs_enable = True
 except ImportError:
@@ -39,32 +39,9 @@ class DuckDuckGoTool(Tool):
         self.headers: Optional[Any] = headers
         self.proxy: Optional[Any] = proxy
         self.timeout: Optional[int] = timeout
-        self.ddgs = None
-        if ddgs_enable:
-            self.ddgs = DDGS(headers=self.headers, proxies=self.proxy, timeout=self.timeout)
         self.register(self.duckduckgo_search)
 
-    @staticmethod
-    def search_with_ddgs(query: str):
-        """
-        Search with ddgs and return the contexts.
-        """
-        contexts = []
-        search_results = []
-        with DDGS() as ddgs:
-            ddgs_gen = ddgs.text(query, backend="lite", timelimit="d, w, m, y")
-            for r in ddgs_gen:
-                search_results.append(r)
-        for idx, result in enumerate(search_results):
-            if result["body"] and result["href"]:
-                contexts.append({
-                    "name": result["title"],
-                    "url": result["href"],
-                    "snippet": result["body"]
-                })
-        return contexts
-
-    def duckduckgo_search(self, query: str, max_results: int = 5) -> str:
+    async def duckduckgo_search(self, query: str, max_results: int = 5) -> str:
         """Search DuckDuckGo for a query.
 
         Args:
@@ -75,16 +52,19 @@ class DuckDuckGoTool(Tool):
             The result from DuckDuckGo, in JSON format. The result includes the title, URL, and snippet.
         """
         logger.debug(f"Searching DDG for: {query}")
+        if not ddgs_enable:
+            return json.dumps([{"error": "duckduckgo-search not installed"}])
         try:
-            gen_res = self.ddgs.text(query, backend="lite", timelimit="d, w, m, y")
-            res = list(gen_res)[:max_results]
+            async with AsyncDDGS(headers=self.headers, proxies=self.proxy, timeout=self.timeout) as ddgs:
+                gen_res = ddgs.text(query, backend="lite", timelimit="d, w, m, y")
+                res = [r async for r in gen_res][:max_results]
             return json.dumps(res, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.warning(f"DDGS search failed, fallback to DDGS HTML search. reason: {e}")
-            res = self.ddgs_html_search(query, max_results)
+            res = await self.ddgs_html_search(query, max_results)
             return json.dumps(res, indent=2, ensure_ascii=False)
 
-    def ddgs_html_search(self, query: str, max_results: int = 5) -> list:
+    async def ddgs_html_search(self, query: str, max_results: int = 5) -> list:
         """Fallback: Use DuckDuckGo HTML page and parse results."""
         formatted_query = query.replace(" ", "+")
         url = f"{DUCKDUCKGO_URL}?q={formatted_query}"
@@ -93,8 +73,8 @@ class DuckDuckGoTool(Tool):
             "Content-Type": "application/json",
         }
         try:
-            with httpx.Client() as client:
-                response = client.get(url, headers=headers, timeout=15.0)
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=headers, timeout=15.0)
                 response.raise_for_status()
                 soup = BeautifulSoup(response.text, "html.parser")
                 result_elements = soup.select('.result__body')
@@ -116,6 +96,7 @@ class DuckDuckGoTool(Tool):
 
 
 if __name__ == '__main__':
-    # from agentica.tools.duckduckgo_tool import DuckDuckGoTool
+    import asyncio
+
     m = DuckDuckGoTool()
-    print(m.duckduckgo_search("Python newest version"))
+    print(asyncio.run(m.duckduckgo_search("Python newest version")))

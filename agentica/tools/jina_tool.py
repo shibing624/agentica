@@ -7,13 +7,15 @@ Jina 有2个功能：
 2）Jina Search, 输出查询query，结合Reader的检索结果，输出markdown格式的检索网页内容，用于LLM做RAG。
     如：苹果的最新产品是啥？ -> ## 苹果的最新产品是Apple Intelligence，iOS 18。
 """
+import asyncio
 import hashlib
 import os
-import requests
 import json
 from os import getenv
 from urllib.parse import urlparse
 from typing import Optional, cast, List, Union
+
+import httpx
 
 from agentica.model.base import Model
 from agentica.model.openai.chat import OpenAIChat
@@ -22,7 +24,7 @@ from agentica.utils.log import logger
 
 EXTRACT_PROMPT = """Please process the following webpage content and user goal to extract relevant information:
 
-## **Webpage Content** 
+## **Webpage Content**
 {webpage_content}
 
 ## **User Goal**
@@ -97,7 +99,7 @@ class JinaTool(Tool):
             file_name = file_name[:max_length]
         return file_name
 
-    def jina_url_reader(self, url: str, limit_len: int = 8000) -> str:
+    async def jina_url_reader(self, url: str, limit_len: int = 8000) -> str:
         """Reads a URL and returns the html text content using Jina Reader API.
 
         Args:
@@ -112,9 +114,10 @@ class JinaTool(Tool):
         error = ''
         try:
             data = {'url': url}
-            response = requests.post('https://r.jina.ai/', headers=self._get_headers(), json=data)
-            response.raise_for_status()
-            content = response.text
+            async with httpx.AsyncClient() as client:
+                response = await client.post('https://r.jina.ai/', headers=self._get_headers(), json=data)
+                response.raise_for_status()
+                content = response.text
         except Exception as e:
             error = f"Error reading URL: {str(e)}"
             logger.error(error)
@@ -123,8 +126,9 @@ class JinaTool(Tool):
             filename = self._generate_file_name_from_url(url)
             save_path = os.path.realpath(os.path.join(str(self.work_dir), filename))
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            with open(save_path, 'w', encoding='utf-8') as f:
-                f.write(content)
+
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._write_file, save_path, content)
             logger.debug(f"Url: {url}, saved content to: {save_path}")
 
         result = {
@@ -136,7 +140,7 @@ class JinaTool(Tool):
             result["error"] = error
         return json.dumps(result, ensure_ascii=False)
 
-    def jina_search_single_query(self, query: str) -> str:
+    async def jina_search_single_query(self, query: str) -> str:
         """Performs a web search using Jina Search API and returns the search content.
 
         Args:
@@ -148,9 +152,10 @@ class JinaTool(Tool):
         query = query.strip()
         url = f'https://s.jina.ai/{query}'
         try:
-            response = requests.get(url, headers=self._get_headers())
-            response.raise_for_status()
-            content = response.text
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, headers=self._get_headers())
+                response.raise_for_status()
+                content = response.text
             result = self._trim_content(content)
             logger.debug(f"Search query: {query}, results top300 chars:\n{result[:300]}")
         except Exception as e:
@@ -159,7 +164,7 @@ class JinaTool(Tool):
             result = msg
         return result
 
-    def jina_search(self, queries: Union[List[str], str]) -> str:
+    async def jina_search(self, queries: Union[List[str], str]) -> str:
         """
         Performs web searches for one or more queries using Jina Search API and returns the combined search content.
 
@@ -173,11 +178,23 @@ class JinaTool(Tool):
 
         all_results = {}
         for i, query in enumerate(queries, 1):
-            res = self.jina_search_single_query(query)
+            res = await self.jina_search_single_query(query)
             all_results[query] = res
         return json.dumps(all_results, ensure_ascii=False)
 
-    def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:
+    async def _llm_call(self, messages: list) -> str:
+        """Make an LLM call via run_in_executor (sync OpenAI client)."""
+        self.llm = cast(Model, self.llm)
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.llm.get_client().chat.completions.create(
+                model=self.model_name, messages=messages
+            )
+        )
+        return response.choices[0].message.content
+
+    async def jina_url_reader_by_goal(self, urls: Union[List[str], str], goal: str) -> str:
         """
         Visit webpage URLs and extract useful information. Use this tool after searching to get detailed content from web pages.
         This function reads one or more URLs and extracts information relevant to your goal.
@@ -196,7 +213,7 @@ class JinaTool(Tool):
 
         for i, url in enumerate(urls, 1):
             logger.debug(f"Processing URL {i}/{len(urls)}: {url}")
-            reader_result = self.jina_url_reader(url, 95000)
+            reader_result = await self.jina_url_reader(url, 95000)
             reader_data = json.loads(reader_result)
             content = reader_data.get("content", "")
 
@@ -209,11 +226,7 @@ class JinaTool(Tool):
 
             if content:
                 messages = [{"role": "user", "content": self.extract_prompt.format(webpage_content=content, goal=goal)}]
-                self.llm = cast(Model, self.llm)
-                response = self.llm.get_client().chat.completions.create(
-                    model=self.model_name, messages=messages
-                )
-                raw = response.choices[0].message.content
+                raw = await self._llm_call(messages)
                 summary_retries = 3
                 while len(raw) < 10 and summary_retries >= 0:
                     truncate_length = int(0.7 * len(content)) if summary_retries > 0 else 25000
@@ -233,10 +246,7 @@ class JinaTool(Tool):
                         goal=goal
                     )
                     messages = [{"role": "user", "content": extraction_prompt}]
-                    response = self.llm.get_client().chat.completions.create(
-                        model=self.model_name, messages=messages
-                    )
-                    raw = response.choices[0].message.content
+                    raw = await self._llm_call(messages)
                     summary_retries -= 1
 
                 parse_retry_times = 2
@@ -247,10 +257,7 @@ class JinaTool(Tool):
                         raw = json.loads(raw)
                         break
                     except:
-                        response = self.llm.get_client().chat.completions.create(
-                            model=self.model_name, messages=messages
-                        )
-                        raw = response.choices[0].message.content
+                        raw = await self._llm_call(messages)
                         parse_retry_times += 1
 
                 if parse_retry_times >= 3:
@@ -276,26 +283,18 @@ class JinaTool(Tool):
         logger.debug(f"Final combined result length: {len(final_result)} characters, top 500 chars:\n{final_result[:500]}")
         return final_result
 
+    @staticmethod
+    def _write_file(path: str, content: str) -> None:
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
 
 if __name__ == '__main__':
+    import asyncio
+
     os.environ["JINA_API_KEY"] = ''
     m = JinaTool()
-    # url = "https://raw.githubusercontent.com/shibing624/agentica/refs/heads/main/agentica/tools/base.py"
-    # r = m.jina_url_reader(url)
-    # print(r)
-    #
-    # url = "https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0"
-    # r = m.jina_url_reader(url)
-    # print(url, '\n\n', r)
-    #
-    # query = "苹果的最新产品是啥？"
-    # r = m.jina_search(query)
-    # print(query, '\n\n', r)
-    #
-    # url = "https://en.wikipedia.org/wiki/Artificial_intelligence"
-    # goal = "Explain the history of artificial intelligence."
-    # print(m.jina_url_reader_by_goal(url, goal))
 
     url = 'https://www.jpmorgan.com/insights/global-research/economy/china-economy-cn#section-header#0'
     goal = "中国政府将如何应对经济增长"
-    print(m.jina_url_reader_by_goal([url], goal))
+    print(asyncio.run(m.jina_url_reader_by_goal([url], goal)))

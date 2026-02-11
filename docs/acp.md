@@ -134,7 +134,7 @@ ACP 模式下暴露以下工具给 IDE：
 | `edit_file` | 编辑文件 | `file_path`, `old_string`, `new_string` |
 | `ls` | 列出目录 | `directory` |
 | `glob` | 文件模式匹配 | `pattern`, `path` |
-| `grep` | 文本搜索 | `pattern`, `path`, `glob_pattern` |
+| `grep` | 文本搜索 | `pattern`, `path`, `include` |
 | `execute` | 执行命令 | `command` |
 | `web_search` | 网页搜索 | `queries`, `max_results` |
 

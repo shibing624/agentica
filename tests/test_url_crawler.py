@@ -4,8 +4,10 @@
 @description:
 """
 
+import asyncio
+import json
 import os
-from unittest.mock import patch, Mock
+from unittest.mock import patch, AsyncMock, MagicMock
 import pytest
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -19,111 +21,99 @@ def url_crawler_tool():
     return UrlCrawlerTool(base_dir="./tmp")
 
 
-@patch('agentica.tools.url_crawler_tool.requests.get')
-def test_crawl_url_to_file_html(mock_get):
+def _make_mock_response(status_code, headers, content_bytes, text=None):
+    """Helper to create a mock httpx.Response."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_resp.headers = headers
+    mock_resp.content = content_bytes
+    mock_resp.text = text or content_bytes.decode('utf-8', errors='replace')
+    mock_resp.encoding = 'utf-8'
+    mock_resp.raise_for_status = MagicMock()
+    return mock_resp
+
+
+def test_crawl_url_to_file_html():
     """Test the crawl_url_to_file method for HTML content."""
-    # Mock response
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "text/html; charset=utf-8"}
     html_content = "<html><head><title>Test</title></head><body><h1>Test Content</h1></body></html>"
-    mock_response.text = html_content
-    mock_response.content = html_content.encode('utf-8')
-    mock_response.apparent_encoding = "utf-8"
-    mock_response.raise_for_status = Mock()
-    mock_get.return_value = mock_response
+    mock_resp = _make_mock_response(200, {"content-type": "text/html; charset=utf-8"}, html_content.encode('utf-8'), html_content)
 
-    url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
-    res = url_crawler_tool.url_crawl(url)
-    print('content:', res)
-    # Assertions
-    assert res is not None
-    import json
-    result_dict = json.loads(res)
-    assert result_dict["url"] == url
-    assert "Test Content" in result_dict["content"]
+    async def mock_get(self, url, **kwargs):
+        return mock_resp
+
+    with patch('httpx.AsyncClient.get', new=mock_get):
+        url = "https://example.com/test-url"
+        tool = UrlCrawlerTool(base_dir="./tmp")
+        res = asyncio.run(tool.url_crawl(url))
+        print('content:', res)
+        assert res is not None
+        result_dict = json.loads(res)
+        assert result_dict["url"] == url
+        assert "Test Content" in result_dict["content"]
 
 
-@patch('agentica.tools.url_crawler_tool.requests.get')
-def test_crawl_url_to_file_non_html(mock_get):
+def test_crawl_url_to_file_non_html():
     """Test the crawl_url_to_file method for non-HTML content."""
-    # Mock response
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "application/pdf"}
-    mock_response.text = "%PDF-1.4 ..."
-    mock_response.content = b"%PDF-1.4 ..."
-    mock_response.apparent_encoding = "utf-8"
-    mock_response.raise_for_status = Mock()
-    mock_get.return_value = mock_response
+    mock_resp = _make_mock_response(200, {"content-type": "application/pdf"}, b"%PDF-1.4 ...", "%PDF-1.4 ...")
 
-    url = "https://example.com/test-file.pdf"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
-    res = url_crawler_tool.url_crawl(url)
-    print('content:', res)
-    # Assertions
-    assert res is not None
+    async def mock_get(self, url, **kwargs):
+        return mock_resp
+
+    with patch('httpx.AsyncClient.get', new=mock_get):
+        url = "https://example.com/test-file.pdf"
+        tool = UrlCrawlerTool(base_dir="./tmp")
+        res = asyncio.run(tool.url_crawl(url))
+        print('content:', res)
+        assert res is not None
 
 
-@patch('agentica.tools.url_crawler_tool.requests.get')
-def test_url_crawl(mock_get):
+def test_url_crawl():
     """Test the url_crawl method."""
-    # Mock response
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "text/html; charset=utf-8"}
     html_content = "<html><head><title>Test</title></head><body><h1>Test</h1></body></html>"
-    mock_response.text = html_content
-    mock_response.content = html_content.encode('utf-8')
-    mock_response.apparent_encoding = "utf-8"
-    mock_response.raise_for_status = Mock()
-    mock_get.return_value = mock_response
+    mock_resp = _make_mock_response(200, {"content-type": "text/html; charset=utf-8"}, html_content.encode('utf-8'), html_content)
 
-    url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
-    result = url_crawler_tool.url_crawl(url)
-    print('result:', result)
-    # Assertions
-    assert result is not None
-    import json
-    result_dict = json.loads(result)
-    assert result_dict["url"] == url
+    async def mock_get(self, url, **kwargs):
+        return mock_resp
+
+    with patch('httpx.AsyncClient.get', new=mock_get):
+        url = "https://example.com/test-url"
+        tool = UrlCrawlerTool(base_dir="./tmp")
+        result = asyncio.run(tool.url_crawl(url))
+        print('result:', result)
+        assert result is not None
+        result_dict = json.loads(result)
+        assert result_dict["url"] == url
 
 
-@patch('agentica.tools.url_crawler_tool.requests.get')
-def test_crawl_url_to_file_error(mock_get):
+def test_crawl_url_to_file_error():
     """Test the crawl_url_to_file method with an error response."""
-    # Mock an error response
-    mock_get.side_effect = Exception("404 Not Found")
+    async def mock_get(self, url, **kwargs):
+        raise Exception("404 Not Found")
 
-    url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
-    content = url_crawler_tool.url_crawl(url)
-    print('content:', content)
-    # Assertions
-    assert content is not None
-    import json
-    result_dict = json.loads(content)
-    assert result_dict["url"] == url
-    assert result_dict["content"] == ""  # Error case returns empty content
+    with patch('httpx.AsyncClient.get', new=mock_get):
+        url = "https://example.com/test-url"
+        tool = UrlCrawlerTool(base_dir="./tmp")
+        content = asyncio.run(tool.url_crawl(url))
+        print('content:', content)
+        assert content is not None
+        result_dict = json.loads(content)
+        assert result_dict["url"] == url
+        assert result_dict["content"] == ""  # Error case returns empty content
 
 
-@patch('agentica.tools.url_crawler_tool.requests.get')
-def test_url_crawl_error(mock_get):
+def test_url_crawl_error():
     """Test the url_crawl method with an error response."""
-    # Mock an error response
-    mock_get.side_effect = Exception("404 Not Found")
+    async def mock_get(self, url, **kwargs):
+        raise Exception("404 Not Found")
 
-    url = "https://example.com/test-url"
-    url_crawler_tool = UrlCrawlerTool(base_dir="./tmp")
-    result = url_crawler_tool.url_crawl(url)
-    print('result:', result)
-    # Assertions
-    assert result is not None
-    import json
-    result_dict = json.loads(result)
-    assert result_dict["url"] == url
+    with patch('httpx.AsyncClient.get', new=mock_get):
+        url = "https://example.com/test-url"
+        tool = UrlCrawlerTool(base_dir="./tmp")
+        result = asyncio.run(tool.url_crawl(url))
+        print('result:', result)
+        assert result is not None
+        result_dict = json.loads(result)
+        assert result_dict["url"] == url
 
 
 if __name__ == '__main__':

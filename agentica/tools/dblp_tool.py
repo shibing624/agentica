@@ -8,7 +8,7 @@ please refer to https://dblp.org/faq/How+can+I+fetch+DBLP+data.html
 """
 import json
 
-import requests
+import httpx
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -19,7 +19,7 @@ class DblpTool(Tool):
         super().__init__(name="Dblp_tool")
         self.register(self.search_dblp_and_return_articles)
 
-    def search_dblp_and_return_articles(
+    async def search_dblp_and_return_articles(
             self,
             question: str,
             num_results: int = 20,
@@ -52,9 +52,10 @@ class DblpTool(Tool):
             "c": num_completion,
         }
         try:
-            response = requests.get(url, params=params)
-            response.raise_for_status()
-            search_results = response.json()
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                search_results = response.json()
 
             hits = search_results.get("result", {}).get("hits", {}).get("hit", [])
             for hit in hits:
@@ -92,6 +93,8 @@ class DblpTool(Tool):
 
 
 if __name__ == '__main__':
+    import asyncio
+
     m = DblpTool()
-    search_results = m.search_dblp_and_return_articles(question="Extreme Learning Machine")
+    search_results = asyncio.run(m.search_dblp_and_return_articles(question="Extreme Learning Machine"))
     print(search_results)

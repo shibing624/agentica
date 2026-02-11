@@ -4,10 +4,11 @@
 # Function:
 
 import re
-import requests
-from bs4 import BeautifulSoup
 import json
 from typing import Optional, List, Dict, Any, Union
+
+import httpx
+from bs4 import BeautifulSoup
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -15,10 +16,10 @@ from agentica.utils.log import logger
 
 def clean_text(text: str) -> str:
     """Clean text by removing control characters, empty lines and extra spaces.
-    
+
     Args:
         text: The raw text
-        
+
     Returns:
         Cleaned text without control characters, empty lines and extra spaces
     """
@@ -30,6 +31,7 @@ def clean_text(text: str) -> str:
     # Remove empty lines and collapse multiple spaces/newlines
     cleaned = re.sub(r'\s+', ' ', cleaned)
     return cleaned.strip()
+
 
 ABSTRACT_MAX_LENGTH = 300  # abstract max length
 
@@ -66,11 +68,8 @@ HEADERS = {
 baidu_host_url = "https://www.baidu.com"
 baidu_search_url = "https://www.baidu.com/s?ie=utf-8&tn=baidu&wd="
 
-session = requests.Session()
-session.headers = HEADERS
 
-
-def search(keyword, num_results=10, debug=False):
+async def search(keyword, num_results=10, debug=False):
     """
     通过关键字进行搜索
     :param keyword: 关键字
@@ -89,7 +88,7 @@ def search(keyword, num_results=10, debug=False):
 
     # 循环遍历每一页的搜索结果，并返回下一页的url
     while len(list_result) < num_results:
-        data, next_url = parse_html(next_url, rank_start=len(list_result))
+        data, next_url = await parse_html(next_url, rank_start=len(list_result))
         if data:
             list_result += data
             if debug:
@@ -109,16 +108,17 @@ def search(keyword, num_results=10, debug=False):
     return list_result[: num_results] if len(list_result) > num_results else list_result
 
 
-def parse_html(url, rank_start=0, debug=0):
+async def parse_html(url, rank_start=0, debug=0):
     """
     解析处理结果
     :param url: 需要抓取的 url
     :return:  结果列表，下一页的url
     """
     try:
-        res = session.get(url=url)
-        res.encoding = "utf-8"
-        root = BeautifulSoup(res.text, "lxml")
+        async with httpx.AsyncClient(headers=HEADERS) as client:
+            res = await client.get(url=url, follow_redirects=True)
+        text = res.content.decode("utf-8", errors="replace")
+        root = BeautifulSoup(text, "lxml")
 
         list_data = []
         div_contents = root.find("div", id="content_left")
@@ -256,7 +256,7 @@ class BaiduSearchTool(Tool):
         self.debug = debug
         self.register(self.baidu_search)
 
-    def baidu_search_single_query(self, query: str, max_results: int = 5) -> str:
+    async def baidu_search_single_query(self, query: str, max_results: int = 5) -> str:
         """Execute Baidu search and return results
 
         Args:
@@ -267,7 +267,7 @@ class BaiduSearchTool(Tool):
             str: A JSON formatted string containing the search results.
         """
         max_results = max_results or self.num_max_results
-        results = search(keyword=query, num_results=max_results, debug=self.debug)
+        results = await search(keyword=query, num_results=max_results, debug=self.debug)
         res: List[Dict[str, str]] = []
         rank = 0
         for item in results:
@@ -286,7 +286,7 @@ class BaiduSearchTool(Tool):
         logger.debug(f"Searching Baidu for: {query}, result: {res}")
         return json.dumps(res, ensure_ascii=False)
 
-    def baidu_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
+    async def baidu_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
         """Execute Baidu search for multiple queries and return results
 
         Args:
@@ -298,19 +298,21 @@ class BaiduSearchTool(Tool):
         """
         logger.debug(f"Searching Baidu for: {queries}, max_results: {max_results}")
         if isinstance(queries, str):
-            return self.baidu_search_single_query(queries, max_results=max_results)
+            return await self.baidu_search_single_query(queries, max_results=max_results)
 
         all_results: Dict[str, Any] = {}
         for query in queries:
-            result: str = self.baidu_search_single_query(query, max_results=max_results)
+            result: str = await self.baidu_search_single_query(query, max_results=max_results)
             all_results[query] = json.loads(result)
         return json.dumps(all_results, ensure_ascii=False)
 
 
 if __name__ == '__main__':
+    import asyncio
+
     keyword = "NBA"
-    results = search(keyword, num_results=5)
+    results = asyncio.run(search(keyword, num_results=5))
     print(results)
     s = BaiduSearchTool()
-    r = s.baidu_search(["北京的新闻top3", 'CBA'], max_results=2)
+    r = asyncio.run(s.baidu_search(["北京的新闻top3", 'CBA'], max_results=2))
     print(r)

@@ -6,12 +6,13 @@ This module contains a class for creating an image from a description using Open
 It generates a unique image name based on the prompt and the current time, downloads the image,
 and saves it to a specified output path.
 """
+import asyncio
 import hashlib
 import os
 import time
 from typing import Optional, cast
 
-import requests
+import httpx
 
 from agentica.model.base import Model
 from agentica.model.openai import OpenAIChat
@@ -39,7 +40,7 @@ class DalleTool(Tool):
         if self.model is None:
             self.model = OpenAIChat()
 
-    def create_dalle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
+    async def create_dalle_image(self, prompt: str, n: int = 1, size: str = "1024x1024", model: str = 'dall-e-3') -> str:
         """Creates an image from a description using dalle API, generates a unique image name based on the prompt,
         downloads the image, and saves it to a specified output path.
 
@@ -55,9 +56,9 @@ class DalleTool(Tool):
         self.update_llm()
 
         image_name = self._generate_image_name(prompt)
-        image_url = self._create_image(prompt, n, size, model)
+        image_url = await self._create_image(prompt, n, size, model)
         image_path = f"{self.data_dir}/{image_name}"
-        self._download_and_save_image(image_url, image_path)
+        await self._download_and_save_image(image_url, image_path)
         return os.path.abspath(image_path)
 
     def _generate_image_name(self, prompt: str) -> str:
@@ -73,47 +74,53 @@ class DalleTool(Tool):
         file_name = str(hashlib.sha256((prompt + timestamp).encode()).hexdigest())[:16]
         return file_name + ".png"
 
-    def _create_image(self, prompt: str, n: int, size: str, model: str = 'dall-e-3') -> str:
+    async def _create_image(self, prompt: str, n: int, size: str, model: str = 'dall-e-3') -> str:
         """
         Creates an image from a description using OpenAI's API.
 
         :param prompt: The prompt that describes the image.
-        :type prompt: str
         :param n: The number of images to generate.
-        :type n: int
         :param size: The size of the image.
-        :type size: str
         :param model: The model to use for image generation. Defaults to 'dall-e-3'.
-        :type model: str
         :return: The URL of the image.
-        :rtype: str
         """
-
-        # -*- generate_a_response_from_the_llm (includes_running_function_calls)
         self.model = cast(Model, self.model)
 
-        response = self.model.get_client().images.generate(prompt=prompt, n=n, size=size, model=model)
+        # OpenAI sync client - wrap in executor
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.model.get_client().images.generate(prompt=prompt, n=n, size=size, model=model)
+        )
         return response.data[0].url
 
-    def _download_and_save_image(self, image_url: str, image_path: str) -> None:
+    async def _download_and_save_image(self, image_url: str, image_path: str) -> None:
         """
         Downloads the image and saves it to the specified path.
 
         :param image_url: The URL of the image.
-        :type image_url: str
         :param image_path: The path to the image.
-        :type image_path: str
         """
-        image_data = requests.get(image_url).content
+        async with httpx.AsyncClient() as client:
+            response = await client.get(image_url)
+            image_data = response.content
+
         if os.path.dirname(image_path):
             os.makedirs(os.path.dirname(image_path), exist_ok=True)
-        with open(image_path, "wb") as f:
-            f.write(image_data)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, self._write_file, image_path, image_data)
+
+    @staticmethod
+    def _write_file(path: str, data: bytes) -> None:
+        with open(path, "wb") as f:
+            f.write(data)
 
 
 if __name__ == '__main__':
-    # from agentica.tools.create_image import CreateImageTool
+    import asyncio
+
     m = DalleTool()
     prompt = "A painting of a beautiful sunset over the ocean."
-    r = m.create_dalle_image(prompt)
+    r = asyncio.run(m.create_dalle_image(prompt))
     print(r)

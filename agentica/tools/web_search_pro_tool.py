@@ -5,16 +5,10 @@
 """
 
 import json
-from httpx import get
-import requests
+import httpx
 import uuid
 from os import getenv
-from typing import Optional, Dict, Any, List, Union
-
-try:
-    from zhipuai import ZhipuAI
-except ImportError:
-    raise ImportError("`zhipuai` not installed. Please install using `pip install zhipuai`.")
+from typing import Optional, List, Union
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -29,7 +23,7 @@ class WebSearchProTool(Tool):
         self.timeout = timeout
         self.register(self.search_web)
 
-    def search_web_single_query(self, query: str) -> str:
+    async def search_web_single_query(self, query: str) -> str:
         """Use this function to search Exa (a web search engine) for a query.
 
         Args:
@@ -51,12 +45,13 @@ class WebSearchProTool(Tool):
                 "stream": False,
                 "messages": msg
             }
-            resp = requests.post(
-                url,
-                json=data,
-                headers={'Authorization': self.api_key},
-                timeout=self.timeout
-            )
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    url,
+                    json=data,
+                    headers={'Authorization': self.api_key},
+                    timeout=self.timeout
+                )
             data = json.loads(resp.content.decode())
             # parse data
             results = data['choices'][0]['message']['tool_calls'][1]['search_result']
@@ -67,7 +62,7 @@ class WebSearchProTool(Tool):
             logger.error(f"Failed to search exa {e}")
             return f"Error: {e}"
 
-    def search_web(self, queries: Union[List[str], str]) -> str:
+    async def search_web(self, queries: Union[List[str], str]) -> str:
         """Use this function to search Exa (a web search engine) for a list of queries.
 
         Args:
@@ -77,18 +72,20 @@ class WebSearchProTool(Tool):
             str: The search results in JSON format.
         """
         if isinstance(queries, str):
-            return self.search_web_single_query(queries)
+            return await self.search_web_single_query(queries)
         results = {}
         for query in queries:
-            res = self.search_web_single_query(query)
+            res = await self.search_web_single_query(query)
             results[query] = res
         return json.dumps(results, ensure_ascii=False)
 
 
 if __name__ == '__main__':
+    import asyncio
+
     m = WebSearchProTool()
     query = "苹果的最新产品是啥？"
-    r = m.search_web(query)
+    r = asyncio.run(m.search_web(query))
     print(query, '\n\n', r)
-    r = m.search_web(["湖北的新闻top3", "北京的娱乐新闻"])
+    r = asyncio.run(m.search_web(["湖北的新闻top3", "北京的娱乐新闻"]))
     print(r)
