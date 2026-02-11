@@ -261,32 +261,6 @@ class MemoryManager(BaseModel):
         else:  # Default to last_n
             return self._get_last_n_memories(user_id=_user_id, limit=limit)
 
-    async def asearch_user_memories(
-        self,
-        query: Optional[str] = None,
-        limit: Optional[int] = None,
-        retrieval_method: Literal["last_n", "first_n", "keyword", "agentic"] = "last_n",
-        user_id: Optional[str] = None,
-    ) -> List[MemoryRow]:
-        """Async version of search_user_memories."""
-        _user_id = user_id or self.user_id
-
-        if retrieval_method == "agentic":
-            if not query:
-                raise ValueError("Query is required for agentic search")
-            return await self._asearch_memories_agentic(user_id=_user_id, query=query, limit=limit)
-
-        elif retrieval_method == "keyword":
-            if not query:
-                raise ValueError("Query is required for keyword search")
-            return self._search_memories_keyword(user_id=_user_id, query=query, limit=limit)
-
-        elif retrieval_method == "first_n":
-            return self._get_first_n_memories(user_id=_user_id, limit=limit)
-
-        else:  # Default to last_n
-            return self._get_last_n_memories(user_id=_user_id, limit=limit)
-
     def _get_last_n_memories(
         self,
         user_id: Optional[str] = None,
@@ -389,7 +363,7 @@ class MemoryManager(BaseModel):
             matched = matched[:limit]
         return matched
 
-    def _search_memories_agentic(
+    async def _search_memories_agentic(
         self,
         user_id: Optional[str] = None,
         query: str = "",
@@ -411,36 +385,8 @@ class MemoryManager(BaseModel):
         model_copy = deepcopy(self.model)
         model_copy.response_format = {"type": "json_object"}
 
-        response = model_copy.response(messages=messages_for_model)
+        response = await model_copy.response(messages=messages_for_model)
         logger.debug("Agentic memory search complete")
-
-        memory_ids = self._parse_agentic_response(response.content)
-        return self._filter_memories_by_ids(all_memories, memory_ids, limit)
-
-    async def _asearch_memories_agentic(
-        self,
-        user_id: Optional[str] = None,
-        query: str = "",
-        limit: Optional[int] = None
-    ) -> List[MemoryRow]:
-        """Async version of _search_memories_agentic."""
-        if self.db is None:
-            return []
-
-        all_memories = self.db.read_memories(user_id=user_id)
-        if not all_memories:
-            return []
-
-        self._ensure_model()
-        logger.debug("Searching for memories using agentic method (async)")
-
-        messages_for_model = self._build_agentic_search_messages(all_memories, query)
-
-        model_copy = deepcopy(self.model)
-        model_copy.response_format = {"type": "json_object"}
-
-        response = await model_copy.aresponse(messages=messages_for_model)
-        logger.debug("Agentic memory search complete (async)")
 
         memory_ids = self._parse_agentic_response(response.content)
         return self._filter_memories_by_ids(all_memories, memory_ids, limit)
@@ -509,7 +455,7 @@ class MemoryManager(BaseModel):
             llm_messages.append(user_prompt_message)
         return llm_messages
 
-    def run(
+    async def run(
             self,
             message: Optional[str] = None,
             **kwargs: Any,
@@ -521,18 +467,7 @@ class MemoryManager(BaseModel):
             self.update_model()
             llm_messages = self._build_llm_messages(message, **kwargs)
             self.model = cast(Model, self.model)
-            res = self.model.response(messages=llm_messages)
-            return res.content
-
-    async def arun(self, message: Optional[str] = None, **kwargs: Any):
-        self.input_message = message
-        if self.mode == "rule":
-            return self._run_rule_mode(message)
-        else:
-            self.update_model()
-            llm_messages = self._build_llm_messages(message, **kwargs)
-            self.model = cast(Model, self.model)
-            res = await self.model.aresponse(messages=llm_messages)
+            res = await self.model.response(messages=llm_messages)
             return res.content
 
 
@@ -596,7 +531,7 @@ class MemoryClassifier(BaseModel):
             llm_messages.append(user_prompt_message)
         return llm_messages
 
-    def run(
+    async def run(
             self,
             message: Optional[str] = None,
             **kwargs: Any,
@@ -604,12 +539,5 @@ class MemoryClassifier(BaseModel):
         self._ensure_model()
         llm_messages = self._build_messages(message, **kwargs)
         self.model = cast(Model, self.model)
-        classification_response = self.model.response(messages=llm_messages)
-        return classification_response.content
-
-    async def arun(self, message: Optional[str] = None, **kwargs: Any):
-        self._ensure_model()
-        llm_messages = self._build_messages(message, **kwargs)
-        self.model = cast(Model, self.model)
-        classification_response = await self.model.aresponse(messages=llm_messages)
+        classification_response = await self.model.response(messages=llm_messages)
         return classification_response.content

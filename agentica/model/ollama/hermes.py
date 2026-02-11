@@ -1,7 +1,7 @@
 import json
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Mapping, Tuple
+from typing import Optional, List, AsyncIterator, Dict, Any, Mapping, Tuple
 
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -34,17 +34,7 @@ class Hermes(Ollama):
     provider: str = "Ollama"
 
     def handle_tool_call_chunk(self, content, tool_call_buffer, message_data) -> Tuple[str, bool]:
-        """
-        Handle a tool call chunk for response stream.
-
-        Args:
-            content: The content of the tool call.
-            tool_call_buffer: The tool call buffer.
-            message_data: The message data.
-
-        Returns:
-            Tuple[str, bool]: The tool call buffer and a boolean indicating if the tool call is complete.
-        """
+        """Handle a tool call chunk for response stream."""
         if content != "</tool_call>":
             tool_call_buffer += content
 
@@ -59,102 +49,15 @@ class Hermes(Ollama):
 
         return tool_call_buffer, True
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
-        """
-        Generate a streaming response from Ollama.
-
-        Args:
-            messages (List[Message]): A list of messages.
-
-        Returns:
-            Iterator[ModelResponse]: An iterator of the model responses.
-        """
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
+        """Generate a streaming response from Ollama (async-only)."""
         self.sanitize_messages(messages)
         self._log_messages(messages)
         message_data = MessageData()
         metrics: Metrics = Metrics()
 
-        # -*- Generate response
         metrics.response_timer.start()
-        for response in self.invoke_stream(messages=messages):
-            message_data.response_message = response.get("message", {})
-            if message_data.response_message:
-                metrics.output_tokens += 1
-                if metrics.output_tokens == 1:
-                    metrics.time_to_first_token = metrics.response_timer.elapsed
-
-                message_data.response_content_chunk = message_data.response_message.get("content", "").strip("`")
-
-            if message_data.response_content_chunk:
-                if message_data.response_content_chunk.strip().startswith("</tool_call>"):
-                    message_data.end_tool_call = True
-                if message_data.in_tool_call:
-                    message_data.tool_call_chunk, message_data.in_tool_call = self.handle_tool_call_chunk(
-                        message_data.response_content_chunk, message_data.tool_call_chunk, message_data
-                    )
-                elif message_data.response_content_chunk.strip().startswith("<tool_call>"):
-                    message_data.in_tool_call = True
-                else:
-                    yield ModelResponse(content=message_data.response_content_chunk)
-                    message_data.response_content += message_data.response_content_chunk
-
-            if response.get("done"):
-                message_data.response_usage = response
-        metrics.response_timer.stop()
-
-        # Format tool calls
-        if message_data.tool_call_blocks is not None:
-            for block in message_data.tool_call_blocks:
-                tool_name = block.get("name")
-                tool_args = block.get("arguments")
-
-                function_def = {
-                    "name": tool_name,
-                    "arguments": json.dumps(tool_args) if tool_args is not None else None,
-                }
-                message_data.tool_calls.append({"type": "function", "function": function_def})
-
-        # -*- Create assistant message
-        assistant_message = Message(role="assistant", content=message_data.response_content)
-
-        if len(message_data.tool_calls) > 0:
-            assistant_message.tool_calls = message_data.tool_calls
-
-        # -*- Update usage metrics
-        self.update_usage_metrics(
-            assistant_message=assistant_message, metrics=metrics, response=message_data.response_usage
-        )
-
-        # -*- Add assistant message to messages
-        messages.append(assistant_message)
-
-        # -*- Log response and metrics
-        assistant_message.log()
-        metrics.log()
-
-        # -*- Handle tool calls
-        if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            yield from self.handle_stream_tool_calls(assistant_message, messages)
-            yield from self.handle_post_tool_call_messages_stream(messages=messages)
-
-    async def aresponse_stream(self, messages: List[Message]) -> Any:
-        """
-        Generate an asynchronous streaming response from Ollama.
-
-        Args:
-            messages (List[Message]): A list of messages.
-
-        Returns:
-            Any: An asynchronous iterator of the model responses.
-        """
-        self.sanitize_messages(messages)
-        self._log_messages(messages)
-        message_data = MessageData()
-        metrics: Metrics = Metrics()
-
-        # -*- Generate response
-        metrics.response_timer.start()
-        async for response in self.ainvoke_stream(messages=messages):
+        async for response in self.invoke_stream(messages=messages):
             message_data.response_message = response.get("message", {})
             if message_data.response_message:
                 metrics.output_tokens += 1
@@ -198,27 +101,22 @@ class Hermes(Ollama):
                 }
                 message_data.tool_calls.append({"type": "function", "function": function_def})
 
-        # -*- Create assistant message
         assistant_message = Message(role="assistant", content=message_data.response_content)
 
         if len(message_data.tool_calls) > 0:
             assistant_message.tool_calls = message_data.tool_calls
 
-        # -*- Update usage metrics
         self.update_usage_metrics(
             assistant_message=assistant_message, metrics=metrics, response=message_data.response_usage
         )
 
-        # -*- Add assistant message to messages
         messages.append(assistant_message)
-
-        # -*- Log response and metrics
         assistant_message.log()
         metrics.log()
 
-        # -*- Handle tool calls
+        # Handle tool calls
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            for tool_call_response in self.handle_stream_tool_calls(assistant_message, messages):
+            async for tool_call_response in self.handle_stream_tool_calls(assistant_message, messages):
                 yield tool_call_response
-            async for post_tool_call_response in self.ahandle_post_tool_call_messages_stream(messages=messages):
+            async for post_tool_call_response in self.handle_post_tool_call_messages_stream(messages=messages):
                 yield post_tool_call_response

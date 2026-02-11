@@ -107,7 +107,7 @@ class NewsReportWorkflow(Workflow):
         # Step 1: Search (with cache)
         search_results = self._get_cached_search(topic)
         if search_results is None:
-            response = self.searcher.run(f"Search latest news about: {topic}")
+            response = self.searcher.run_sync(f"Search latest news about: {topic}")
             if response and isinstance(response.content, SearchResults):
                 search_results = response.content
                 # Cache search results
@@ -125,7 +125,7 @@ class NewsReportWorkflow(Workflow):
         for article in search_results.articles:
             if article.url in scraped:
                 continue  # Already scraped
-            response = self.scraper.run(article.url)
+            response = self.scraper.run_sync(article.url)
             if response and isinstance(response.content, ScrapedArticle):
                 scraped[response.content.url] = response.content
 
@@ -134,7 +134,7 @@ class NewsReportWorkflow(Workflow):
 
         # Step 3: Write report (always re-run, uses latest prompt)
         articles_json = json.dumps([a.model_dump() for a in scraped.values()], ensure_ascii=False, indent=2)
-        yield from self.writer.run(
+        yield from self.writer.run_sync(
             f"Write a report on '{topic}' based on these articles:\n{articles_json}",
             stream=True,
         )

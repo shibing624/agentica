@@ -322,7 +322,7 @@ def main():
         with st.chat_message("assistant"):
             response = ""
             resp_container = st.empty()
-            for delta in llm_os.run(question, stream=True):
+            for delta in llm_os.run_sync(question, stream=True):
                 response += delta.content
                 resp_container.markdown(response)
             st.session_state["messages"].append({"role": "assistant", "content": response})

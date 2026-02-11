@@ -47,9 +47,9 @@ async def main():
     
     parallel_start = time.time()
     res_1, res_2, res_3 = await asyncio.gather(
-        chinese_agent.arun(msg),
-        chinese_agent.arun(msg),
-        chinese_agent.arun(msg),
+        chinese_agent.run(msg),
+        chinese_agent.run(msg),
+        chinese_agent.run(msg),
     )
     parallel_time = time.time() - parallel_start
 
@@ -70,9 +70,9 @@ async def main():
     print("=" * 50)
     
     sequential_start = time.time()
-    seq_res_1 = await chinese_agent.arun(msg)
-    seq_res_2 = await chinese_agent.arun(msg)
-    seq_res_3 = await chinese_agent.arun(msg)
+    seq_res_1 = await chinese_agent.run(msg)
+    seq_res_2 = await chinese_agent.run(msg)
+    seq_res_3 = await chinese_agent.run(msg)
     sequential_time = time.time() - sequential_start
 
     seq_outputs = [seq_res_1.content, seq_res_2.content, seq_res_3.content]
@@ -93,7 +93,7 @@ async def main():
     print("Picking the best translation...")
     print("=" * 50)
     
-    best_translation = await translation_picker.arun(
+    best_translation = await translation_picker.run(
         f"Input: {msg}\n\nTranslations:\n{translations}"
     )
 

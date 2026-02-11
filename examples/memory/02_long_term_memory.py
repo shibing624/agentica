@@ -64,7 +64,7 @@ def demo_sqlite_memory():
     )
 
     print("\n--- First conversation ---")
-    agent.print_response("My name is Alice and I work as a software engineer at Google.")
+    agent.print_response_sync("My name is Alice and I work as a software engineer at Google.")
 
     print("\n--- Loading memories ---")
     memory.load_user_memories()
@@ -120,7 +120,7 @@ def demo_mysql_memory():
         )
 
         print("\n--- First conversation (MySQL) ---")
-        agent.print_response("My name is Bob and I'm a data scientist at Microsoft.")
+        agent.print_response_sync("My name is Bob and I'm a data scientist at Microsoft.")
 
         print("\n--- Loading memories from MySQL ---")
         memory.load_user_memories()
@@ -178,7 +178,7 @@ def demo_redis_memory():
         )
 
         print("\n--- First conversation (Redis) ---")
-        agent.print_response("My name is Charlie and I'm a ML engineer at Meta.")
+        agent.print_response_sync("My name is Charlie and I'm a ML engineer at Meta.")
 
         print("\n--- Loading memories from Redis ---")
         memory.load_user_memories()
@@ -250,8 +250,8 @@ def demo_agent_with_session():
     print(f"Session ID: {session_id}")
 
     print("\n--- Conversation ---")
-    agent.print_response("Hi, I'm David. I love programming in Python.")
-    agent.print_response("What's my name and what do I like?")
+    agent.print_response_sync("Hi, I'm David. I love programming in Python.")
+    agent.print_response_sync("What's my name and what do I like?")
 
     print("\n--- Stored sessions ---")
     session_ids = db.get_all_session_ids()

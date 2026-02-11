@@ -29,15 +29,15 @@ def main():
     )
     
     # Simple search
-    response = agent.run("一句话介绍林黛玉")
+    response = agent.run_sync("一句话介绍林黛玉")
     print(response)
     
     # Weather-related search
-    response = agent.run("上海今天适合穿什么衣服")
+    response = agent.run_sync("上海今天适合穿什么衣服")
     print(response)
     
     # Context-aware follow-up
-    response = agent.run("总结前面的问答")
+    response = agent.run_sync("总结前面的问答")
     print(response)
 
     # Example 2: Research task
@@ -45,7 +45,7 @@ def main():
     print("Example 2: Research Task")
     print("=" * 60)
     
-    agent.print_response(
+    agent.print_response_sync(
         "搜索最新的人工智能发展趋势，总结3个关键点",
         stream=True
     )

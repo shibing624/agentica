@@ -1,7 +1,10 @@
+import asyncio
+import functools
+
 import json
 from textwrap import dedent
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Mapping
+from typing import Optional, List, AsyncIterator, Dict, Any, Mapping
 
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -137,7 +140,7 @@ class OllamaTools(Ollama):
                 )
                 messages.append(_fc_message)
 
-    def handle_tool_calls(
+    async def handle_tool_calls(
         self,
         assistant_message: Message,
         messages: List[Message],
@@ -160,7 +163,7 @@ class OllamaTools(Ollama):
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
-            for _ in self.run_function_calls(
+            async for _ in self.run_function_calls(
                 function_calls=function_calls_to_run,
                 function_call_results=function_call_results,
             ):
@@ -171,7 +174,7 @@ class OllamaTools(Ollama):
             return model_response
         return None
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """
         Generate a streaming response from OllamaTools.
 
@@ -179,7 +182,7 @@ class OllamaTools(Ollama):
             messages (List[Message]): A list of messages.
 
         Returns:
-            Iterator[ModelResponse]: An iterator of the model responses.
+            AsyncIterator[ModelResponse]: An iterator of the model responses.
         """
         self.sanitize_messages(messages)
         self._log_messages(messages)
@@ -188,7 +191,7 @@ class OllamaTools(Ollama):
 
         # -*- Generate response
         metrics.response_timer.start()
-        for response in self.invoke_stream(messages=messages):
+        async for response in self.invoke_stream(messages=messages):
             #  Parse response
             message_data.response_message = response.get("message", {})
             if message_data.response_message:
@@ -294,8 +297,12 @@ class OllamaTools(Ollama):
 
         # -*- Handle tool calls
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            yield from self.handle_stream_tool_calls(assistant_message, messages)
-            yield from self.handle_post_tool_call_messages_stream(messages=messages)
+            async for _resp in self.handle_stream_tool_calls(assistant_message, messages):
+
+                yield _resp
+            async for _resp in self.handle_post_tool_call_messages_stream(messages=messages):
+
+                yield _resp
 
     def get_instructions_to_generate_tool_calls(self) -> List[str]:
         if self.functions is not None:

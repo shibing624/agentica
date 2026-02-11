@@ -127,7 +127,7 @@ class CodeReviewPipeline(Workflow):
 
         for name, reviewer in reviewers:
             print(f"[Review] {name} reviewing...")
-            response = reviewer.run(prompt)
+            response = reviewer.run_sync(prompt)
             if response and isinstance(response.content, CodeReview):
                 response.content.reviewer = name
                 reviews.append(response.content)

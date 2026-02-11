@@ -91,7 +91,7 @@ async def run_agent_activity(input: AgentActivityInput) -> AgentActivityOutput:
                 images.append(Image(filepath=img_path))
     
     # Execute agent
-    response = await agent.arun(
+    response = await agent.run(
         message=input.message,
         images=images,
     )

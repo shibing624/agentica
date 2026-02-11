@@ -489,7 +489,7 @@ class ACPHandlers:
             Execution result
         """
         agent = self._get_or_create_agent()
-        response = agent.run(prompt)
+        response = agent.run_sync(prompt)
         content = response.content if response else ""
         
         # Add assistant message to history
@@ -524,7 +524,7 @@ class ACPHandlers:
         
         try:
             agent = self._get_or_create_agent()
-            response = agent.run(prompt, stream=True)
+            response = agent.run_sync(prompt, stream=True)
             
             for chunk in response:
                 if chunk and chunk.content:

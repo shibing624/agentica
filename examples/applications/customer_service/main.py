@@ -130,7 +130,7 @@ def handle_customer_message(
         The service response
     """
     # Step 1: Classify intent
-    intent_response = classifier.run(message)
+    intent_response = classifier.run_sync(message)
     intent: CustomerIntent = intent_response.content
 
     print(f"\n[Intent: {intent.intent} (confidence: {intent.confidence:.2f})]")
@@ -145,7 +145,7 @@ Summary: {intent.summary}
 
 Please provide a helpful response to this customer.
 """
-    response = service_agent.run(prompt)
+    response = service_agent.run_sync(prompt)
     return response.content
 
 

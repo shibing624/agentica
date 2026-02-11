@@ -79,7 +79,7 @@ class InvestmentPipeline(Workflow):
         """Execute the investment analysis pipeline."""
         # Stage 1: Collect financial data
         logger.info(f"Stage 1: Collecting data for {companies}")
-        data_response = self.data_collector.run(companies)
+        data_response = self.data_collector.run_sync(companies)
         if not data_response or not data_response.content:
             yield RunResponse(content="Data collection failed.")
             return
@@ -89,7 +89,7 @@ class InvestmentPipeline(Workflow):
 
         # Stage 2: Research and ranking
         logger.info("Stage 2: Analyzing and ranking companies")
-        research_response = self.researcher.run(data_response.content)
+        research_response = self.researcher.run_sync(data_response.content)
         if not research_response or not research_response.content:
             yield RunResponse(content="Research analysis failed.")
             return
@@ -98,7 +98,7 @@ class InvestmentPipeline(Workflow):
 
         # Stage 3: Investment proposal (streamed)
         logger.info("Stage 3: Creating investment proposal")
-        yield from self.investment_lead.run(research_response.content, stream=True)
+        yield from self.investment_lead.run_sync(research_response.content, stream=True)
 
 
 if __name__ == "__main__":

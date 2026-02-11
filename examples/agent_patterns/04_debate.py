@@ -59,11 +59,11 @@ def main():
     print("-" * 40)
     
     print("\n乐观派观点:")
-    optimist_opening = optimist.run(f"请就'{topic}'这个话题发表你的开场陈述（约200字）")
+    optimist_opening = optimist.run_sync(f"请就'{topic}'这个话题发表你的开场陈述（约200字）")
     print(optimist_opening)
     
     print("\n谨慎派观点:")
-    pessimist_opening = pessimist.run(f"请就'{topic}'这个话题发表你的开场陈述（约200字）")
+    pessimist_opening = pessimist.run_sync(f"请就'{topic}'这个话题发表你的开场陈述（约200字）")
     print(pessimist_opening)
     
     # Rebuttal round
@@ -71,13 +71,13 @@ def main():
     print("-" * 40)
     
     print("\n乐观派反驳:")
-    optimist_rebuttal = optimist.run(
+    optimist_rebuttal = optimist.run_sync(
         f"对方的观点是：{pessimist_opening.content}\n请进行反驳（约150字）"
     )
     print(optimist_rebuttal)
     
     print("\n谨慎派反驳:")
-    pessimist_rebuttal = pessimist.run(
+    pessimist_rebuttal = pessimist.run_sync(
         f"对方的观点是：{optimist_opening.content}\n请进行反驳（约150字）"
     )
     print(pessimist_rebuttal)
@@ -86,7 +86,7 @@ def main():
     print("\n【主持人总结】")
     print("-" * 40)
     
-    summary = moderator.run(
+    summary = moderator.run_sync(
         f"""请总结这场关于'{topic}'的辩论：
         
 乐观派开场：{optimist_opening.content}

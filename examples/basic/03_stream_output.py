@@ -28,7 +28,7 @@ agent = Agent(
     model=OpenAIChat(id="gpt-4o-mini"),
 )
 
-agent.print_response("hi", stream=True)
+agent.print_response_sync("hi", stream=True)
 
 # Example 2: Manual streaming iteration (sync)
 print("\n" + "=" * 60)
@@ -36,7 +36,7 @@ print("Example 2: Manual Streaming Iteration (sync)")
 print("=" * 60)
 
 print("Response: ", end="")
-for chunk in agent.run("hi", stream=True):
+for chunk in agent.run_sync("hi", stream=True):
     if chunk.content:
         print(chunk.content, end="", flush=True)
 print()
@@ -53,7 +53,7 @@ async def async_aprint_demo():
     )
     
     # Use aprint_response for async streaming output
-    await agent.aprint_response("hi", stream=True)
+    await agent.print_response("hi", stream=True)
 
 
 asyncio.run(async_aprint_demo())
@@ -73,7 +73,7 @@ async def async_arun_stream_demo():
     # arun_stream is an async generator, can be used directly with async for
     reasoning_printed = False
     content_started = False
-    async for chunk in agent.arun_stream("9.18比9.01大吗"):
+    async for chunk in agent.run("9.18比9.01大吗", stream=True):
         # Stream reasoning content (thinking process)
         if chunk.reasoning_content:
             if not reasoning_printed:
@@ -102,7 +102,7 @@ async def async_arun_non_stream_demo():
     )
     
     # Use arun without streaming - returns a single RunResponse
-    response = await agent.arun("hi")
+    response = await agent.run("hi")
     print(f"Response: {response.content}")
 
 

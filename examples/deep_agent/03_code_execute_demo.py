@@ -31,7 +31,7 @@ def code_execution_demo():
     )
 
     # Simple calculation
-    response = agent.run(
+    response = agent.run_sync(
         "Write and execute Python code to calculate the first 10 Fibonacci numbers, "
         "and judge each num is even or odd. give me the result after execution."
     )
@@ -67,7 +67,7 @@ def find_max(numbers):
 print(find_max([-5, -2, -10]))  # Expected: -2, but returns 0
 '''
 
-    response = agent.run(
+    response = agent.run_sync(
         f"Analyze this code and find the bug:\n```python\n{buggy_code}\n``` --- last run it and verify the result."
     )
     print(f"\nResponse:\n{response}")
@@ -93,7 +93,7 @@ def code_generation_demo():
         debug_mode=True,
     )
 
-    response = agent.run(
+    response = agent.run_sync(
         "Write a Python function that implements binary search. "
         "Include type hints, docstring, and test cases. Then execute the tests. output the test results."
     )
@@ -117,7 +117,7 @@ def data_processing_demo():
         debug_mode=True,
     )
 
-    response = agent.run(
+    response = agent.run_sync(
         "Write and execute Python code to:\n"
         "1. Generate a list of 100 random numbers between 1 and 1000\n"
         "2. Calculate mean, median, and standard deviation\n"
@@ -143,7 +143,7 @@ def self_verification_demo():
     output_dir = os.path.join(demo_dir, "tmp")
     os.makedirs(output_dir, exist_ok=True)
 
-    response = agent.run(
+    response = agent.run_sync(
         f"""Please complete the following tasks:
 
 1. Write a Python module `calculator.py` in {output_dir}/ with these functions:
@@ -198,7 +198,7 @@ z=3
     with open(bad_code_path, "w") as f:
         f.write(bad_code)
 
-    response = agent.run(
+    response = agent.run_sync(
         f"""I have a Python file at {bad_code_path} . fix，do Verification.
 """
     )

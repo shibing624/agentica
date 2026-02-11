@@ -38,7 +38,7 @@ agent = Agent(
     response_model=MovieScript,
 )
 
-response = agent.run("Write a movie script about a time traveler.")
+response = agent.run_sync("Write a movie script about a time traveler.")
 pprint(response)
 print(f"\nMovie name: {response.content.name}")
 print(f"Genre: {response.content.genre}")
@@ -68,7 +68,7 @@ agent2 = Agent(
     response_model=BookRecommendation,
 )
 
-response2 = agent2.run("推荐3本关于人工智能的书籍")
+response2 = agent2.run_sync("推荐3本关于人工智能的书籍")
 pprint(response2)
 
 print("\nRecommended books:")

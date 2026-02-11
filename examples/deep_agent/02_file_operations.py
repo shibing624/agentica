@@ -32,7 +32,7 @@ def file_listing_demo():
         # debug_mode=True,
     )
 
-    response = agent.run("List all Python files in the current directory")
+    response = agent.run_sync("List all Python files in the current directory")
     print(f"\nResponse:\n{response.content}")
 
 
@@ -53,13 +53,13 @@ def file_read_write_demo():
         test_file = os.path.join(tmpdir, "test.txt")
 
         # Write a file
-        response = agent.run(
+        response = agent.run_sync(
             f"Create a file at {test_file} with the content: 'Hello, DeepAgent!'"
         )
         print(f"\nWrite Response:\n{response.content}")
 
         # Read the file
-        response = agent.run(f"Read the contents of {test_file}")
+        response = agent.run_sync(f"Read the contents of {test_file}")
         print(f"\nRead Response:\n{response.content}")
 
 
@@ -76,7 +76,7 @@ def file_search_demo():
     )
 
     # Find Python files
-    response = agent.run(
+    response = agent.run_sync(
         "Find all Python files in the current directory that contain the word 'import'"
     )
     print(f"\nSearch Response:\n{response.content}")
@@ -108,7 +108,7 @@ MAX_RETRIES = 3
         print(f"Created test file: {test_file}")
 
         # Edit the file
-        response = agent.run(
+        response = agent.run_sync(
             f"Edit the file {test_file} to change DEBUG from False to True"
         )
         print(f"\nEdit Response:\n{response.content}")

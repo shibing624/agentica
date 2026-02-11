@@ -60,7 +60,7 @@ print("=" * 60)
 print("Advanced RAG Demo: Paper Q&A")
 print("=" * 60)
 
-agent.print_response("Finetune LLM有啥好处?", stream=True)
+agent.print_response_sync("Finetune LLM有啥好处?", stream=True)
 
 print("\n" + "=" * 60)
-agent.print_response("这篇论文的主要贡献是什么?", stream=True)
+agent.print_response_sync("这篇论文的主要贡献是什么?", stream=True)

@@ -36,7 +36,7 @@ def main():
         instructions="你是一个个性化助手。请用中文回复，并根据上下文中的用户信息提供个性化服务。",
     )
     
-    agent.print_response("请问候我并告诉我我的偏好设置")
+    agent.print_response_sync("请问候我并告诉我我的偏好设置")
     
     # Example 2: Multiple agents sharing context
     print("\n" + "=" * 60)
@@ -62,11 +62,11 @@ def main():
     )
     
     # Collect information
-    info = collector.run("根据上下文中的用户信息生成用户基本信息摘要")
+    info = collector.run_sync("根据上下文中的用户信息生成用户基本信息摘要")
     print(f"Collector: {info.content}")
     
     # Process information
-    result = processor.run(f"处理以下信息并给出个性化建议: {info.content}")
+    result = processor.run_sync(f"处理以下信息并给出个性化建议: {info.content}")
     print(f"Processor: {result.content}")
 
 

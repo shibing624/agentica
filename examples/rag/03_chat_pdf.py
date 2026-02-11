@@ -82,4 +82,4 @@ def pdf_app(new: bool = False, user: str = "user"):
 
 
 if __name__ == "__main__":
-    typer.run(pdf_app)
+    typer.run_sync(pdf_app)

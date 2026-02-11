@@ -45,7 +45,7 @@ def main():
         debug_mode=True,
     )
     
-    agent.print_response("你是谁？详细介绍自己", stream=True)
+    agent.print_response_sync("你是谁？详细介绍自己", stream=True)
     
     # Example 3: Local model (e.g., Ollama)
     print("\n" + "=" * 60)
@@ -63,7 +63,7 @@ To use a local Ollama model:
     )
     
     agent = Agent(model=model)
-    agent.print_response("Hello!")
+    agent.print_response_sync("Hello!")
     """)
 
 

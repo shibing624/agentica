@@ -1,7 +1,10 @@
 import json
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Union, Tuple
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, Tuple
+
+import asyncio
+import functools
 
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -277,7 +280,7 @@ class Claude(Model):
             tools.append(tool)
         return tools
 
-    def invoke(self, messages: List[Message]) -> AnthropicMessage:
+    async def invoke(self, messages: List[Message]) -> AnthropicMessage:
         """
         Send a request to the Anthropic API to generate a response.
 
@@ -290,13 +293,27 @@ class Claude(Model):
         chat_messages, system_message = self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
 
-        return self.get_client().messages.create(
-            model=self.id,
-            messages=chat_messages,  # type: ignore
-            **request_kwargs,
+        loop = asyncio.get_running_loop()
+
+
+        return await loop.run_in_executor(
+
+
+            None, functools.partial(
+
+
+                self.get_client().messages.create,
+
+
+                model=self.id, messages=chat_messages, **request_kwargs,
+
+
+            )
+
+
         )
 
-    def invoke_stream(self, messages: List[Message]) -> Any:
+    async def invoke_stream(self, messages: List[Message]) -> Any:
         """
         Stream a response from the Anthropic API.
 
@@ -309,10 +326,24 @@ class Claude(Model):
         chat_messages, system_message = self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
 
-        return self.get_client().messages.stream(
-            model=self.id,
-            messages=chat_messages,  # type: ignore
-            **request_kwargs,
+        loop = asyncio.get_running_loop()
+
+
+        return await loop.run_in_executor(
+
+
+            None, functools.partial(
+
+
+                self.get_client().messages.stream,
+
+
+                model=self.id, messages=chat_messages, **request_kwargs,
+
+
+            )
+
+
         )
 
     def update_usage_metrics(
@@ -458,7 +489,7 @@ class Claude(Model):
                 )
             messages.append(Message(role="user", content=fc_responses))
 
-    def handle_tool_calls(
+    async def handle_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
@@ -485,7 +516,7 @@ class Claude(Model):
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
-            for _ in self.run_function_calls(
+            async for _ in self.run_function_calls(
                     function_calls=function_calls_to_run,
                     function_call_results=function_call_results,
             ):
@@ -496,7 +527,7 @@ class Claude(Model):
             return model_response
         return None
 
-    def response(self, messages: List[Message]) -> ModelResponse:
+    async def response(self, messages: List[Message]) -> ModelResponse:
         """
         Send a chat completion request to the Anthropic API.
 
@@ -512,7 +543,7 @@ class Claude(Model):
         metrics = Metrics()
 
         metrics.response_timer.start()
-        response: AnthropicMessage = self.invoke(messages=messages)
+        response: AnthropicMessage = await self.invoke(messages=messages)
         metrics.response_timer.stop()
 
         # -*- Create assistant message
@@ -528,8 +559,8 @@ class Claude(Model):
         metrics.log()
 
         # -*- Handle tool calls
-        if self.handle_tool_calls(assistant_message, messages, model_response, response_content, tool_ids):
-            response_after_tool_calls = self.response(messages=messages)
+        if await self.handle_tool_calls(assistant_message, messages, model_response, response_content, tool_ids):
+            response_after_tool_calls = await self.response(messages=messages)
             if response_after_tool_calls.content is not None:
                 if model_response.content is None:
                     model_response.content = ""
@@ -542,12 +573,12 @@ class Claude(Model):
 
         return model_response
 
-    def handle_stream_tool_calls(
+    async def handle_stream_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
             tool_ids: List[str],
-    ) -> Iterator[ModelResponse]:
+    ) -> AsyncIterator[ModelResponse]:
         """
         Parse and run function calls from the assistant message.
 
@@ -557,21 +588,21 @@ class Claude(Model):
             tool_ids (List[str]): The list of tool IDs.
 
         Yields:
-            Iterator[ModelResponse]: Yields model responses during function execution.
+            AsyncIterator[ModelResponse]: Yields model responses during function execution.
         """
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             yield ModelResponse(content="\n\n")
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
             function_call_results: List[Message] = []
 
-            for intermediate_model_response in self.run_function_calls(
+            async for intermediate_model_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results
             ):
                 yield intermediate_model_response
 
             self.format_function_call_results(function_call_results, tool_ids, messages)
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         self.sanitize_messages(messages)
         self._log_messages(messages)
         message_data = MessageData()
@@ -579,7 +610,7 @@ class Claude(Model):
 
         # -*- Generate response
         metrics.response_timer.start()
-        response = self.invoke_stream(messages=messages)
+        response = await self.invoke_stream(messages=messages)
         with response as stream:
             for delta in stream:
                 if isinstance(delta, RawContentBlockDeltaEvent):
@@ -636,8 +667,12 @@ class Claude(Model):
         metrics.log()
 
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            yield from self.handle_stream_tool_calls(assistant_message, messages, message_data.tool_ids)
-            yield from self.response_stream(messages=messages)
+            async for _resp in self.handle_stream_tool_calls(assistant_message, messages, message_data.tool_ids):
+
+                yield _resp
+            async for _resp in self.response_stream(messages=messages):
+
+                yield _resp
 
     def get_tool_call_prompt(self) -> Optional[str]:
         if self.functions is not None and len(self.functions) > 0:

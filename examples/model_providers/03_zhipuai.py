@@ -50,7 +50,7 @@ def main():
         model=ZhipuAI(),
     )
     
-    agent.print_response("一句话简单介绍一下《红楼梦》", stream=True)
+    agent.print_response_sync("一句话简单介绍一下《红楼梦》", stream=True)
 
 
 if __name__ == "__main__":

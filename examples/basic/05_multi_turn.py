@@ -25,8 +25,8 @@ agent_no_history = Agent(
     add_history_to_messages=False,
 )
 
-print(agent_no_history.run("我叫张三，住在北京"))
-print(agent_no_history.run("我叫什么名字?"))  # Won't remember
+print(agent_no_history.run_sync("我叫张三，住在北京"))
+print(agent_no_history.run_sync("我叫什么名字?"))  # Won't remember
 
 # Example 2: With history enabled
 print("\n" + "=" * 60)
@@ -39,8 +39,8 @@ agent_with_history = Agent(
     read_chat_history=True,  # Allow agent to read chat history
 )
 
-print(agent_with_history.run("我叫李四，是一名软件工程师"))
-print(agent_with_history.run("我叫什么名字？做什么工作?"))  # Will remember
+print(agent_with_history.run_sync("我叫李四，是一名软件工程师"))
+print(agent_with_history.run_sync("我叫什么名字？做什么工作?"))  # Will remember
 
 # Example 3: Multi-turn with context
 print("\n" + "=" * 60)
@@ -54,15 +54,15 @@ agent = Agent(
 )
 
 # First turn
-response1 = agent.run("我最喜欢的颜色是蓝色")
+response1 = agent.run_sync("我最喜欢的颜色是蓝色")
 print(f"Turn 1: {response1}")
 
 # Second turn
-response2 = agent.run("我喜欢吃川菜")
+response2 = agent.run_sync("我喜欢吃川菜")
 print(f"Turn 2: {response2}")
 
 # Third turn - reference previous context
-response3 = agent.run("总结一下你了解到的关于我的信息")
+response3 = agent.run_sync("总结一下你了解到的关于我的信息")
 print(f"Turn 3: {response3}")
 
 # Example 4: Check conversation history

@@ -36,31 +36,31 @@ def main():
     print("=" * 60)
     print("Example 1: Weather Tool")
     print("=" * 60)
-    agent.print_response("北京今天天气怎么样?")
+    agent.print_response_sync("北京今天天气怎么样?")
 
     # Example 2: Shell commands
     print("\n" + "=" * 60)
     print("Example 2: Shell Tool")
     print("=" * 60)
-    agent.print_response("列出当前目录下的文件")
+    agent.print_response_sync("列出当前目录下的文件")
 
     # Example 3: File operations
     print("\n" + "=" * 60)
     print("Example 3: File Tool")
     print("=" * 60)
-    agent.print_response("读取当前目录下的README.md文件的前10行")
+    agent.print_response_sync("读取当前目录下的README.md文件的前10行")
 
     # Example 4: Calculator
     print("\n" + "=" * 60)
     print("Example 4: Calculator Tool")
     print("=" * 60)
-    agent.print_response("计算 (123 + 456) * 789 / 2 的结果")
+    agent.print_response_sync("计算 (123 + 456) * 789 / 2 的结果")
 
     # Example 5: Combining multiple tools
     print("\n" + "=" * 60)
     print("Example 5: Combining Multiple Tools")
     print("=" * 60)
-    agent.print_response(
+    agent.print_response_sync(
         "查询上海天气，然后计算如果温度乘以2会是多少度"
     )
 

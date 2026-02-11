@@ -153,22 +153,22 @@ def main():
     print("=" * 60)
     print("Example 1: Async fetch")
     print("=" * 60)
-    agent.print_response("Fetch data from https://api.example.com/users")
+    agent.print_response_sync("Fetch data from https://api.example.com/users")
     
     print("\n" + "=" * 60)
     print("Example 2: Async calculation")
     print("=" * 60)
-    agent.print_response("Calculate 100 add 200 using async_calculate")
+    agent.print_response_sync("Calculate 100 add 200 using async_calculate")
     
     print("\n" + "=" * 60)
     print("Example 3: Mix of async and sync")
     print("=" * 60)
-    agent.print_response("Use sync_multiply to multiply 5 and 10, then use async_calculate to add 100 to the result")
+    agent.print_response_sync("Use sync_multiply to multiply 5 and 10, then use async_calculate to add 100 to the result")
     
     print("\n" + "=" * 60)
     print("Example 4: Async class-based tool")
     print("=" * 60)
-    agent.print_response("Use AsyncDataTool to fetch and process data from https://example.com with uppercase transform")
+    agent.print_response_sync("Use AsyncDataTool to fetch and process data from https://example.com with uppercase transform")
 
 
 async def async_main():
@@ -185,7 +185,7 @@ async def async_main():
     print("=" * 60)
     print("Example: Using arun with async tools")
     print("=" * 60)
-    response = await agent.arun("Fetch data from https://api.test.com and then calculate 50 add 100")
+    response = await agent.run("Fetch data from https://api.test.com and then calculate 50 add 100")
     print(f"Response: {response.content}")
 
 

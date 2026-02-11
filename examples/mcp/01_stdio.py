@@ -91,9 +91,9 @@ async def mcp_toolkit_with_agent_demo():
             tools = agent.get_tools()
             print(f"Agent tools: {[t.name for t in tools]}")
 
-            await agent.aprint_response("调天气工具 get_weather 查询合肥市天气咋样")
-            await agent.aprint_response("调shell 查看本地目录的路径")
-            await agent.aprint_response("写python代码并执行计算 123*456*32.132的平方值")
+            await agent.print_response("调天气工具 get_weather 查询合肥市天气咋样")
+            await agent.print_response("调shell 查看本地目录的路径")
+            await agent.print_response("写python代码并执行计算 123*456*32.132的平方值")
     except Exception as e:
         logger.error(f"Error in MCPToolkit with agent demo: {e}")
         sys.exit(1)

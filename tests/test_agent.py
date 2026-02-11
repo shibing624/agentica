@@ -149,7 +149,7 @@ class TestAgentRun(unittest.TestCase):
         # Mock the internal _run method to return a simple response
         with patch.object(agent, '_run') as mock_run:
             mock_run.return_value = iter([RunResponse(content="Test response")])
-            response = agent.run("Hello")
+            response = agent.run_sync("Hello")
             self.assertIsInstance(response, RunResponse)
 
 
@@ -296,7 +296,7 @@ class TestAgentTimeout(unittest.TestCase):
             agent.response_model = None
             agent.parse_response = True
             
-            response = agent.run("test", stream=False)
+            response = agent.run_sync("test", stream=False)
             self.assertEqual(response.event, "RunTimeout")
             self.assertIn("timed out", response.content)
 

@@ -73,7 +73,7 @@ def main():
     print("Asking question: 2023年全国田径锦标赛在哪里举办的?")
     print("=" * 60)
 
-    response = agent.run("2023年全国田径锦标赛在哪里举办的?")
+    response = agent.run_sync("2023年全国田径锦标赛在哪里举办的?")
     print(f"\nAnswer: {response}")
 
 

@@ -22,8 +22,8 @@ agent = Agent(
 )
 
 # Run the agent with a simple query
-response = agent.run("一句话介绍北京")
+response = agent.run_sync("一句话介绍北京")
 print(response)
 
 # You can also use print_response for formatted output with streaming
-agent.print_response("一句话介绍上海", stream=True)
+agent.print_response_sync("一句话介绍上海", stream=True)

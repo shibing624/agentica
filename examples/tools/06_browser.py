@@ -28,7 +28,7 @@ def main():
     print("=" * 60)
     print("Example 1: Visit Webpage")
     print("=" * 60)
-    agent.print_response(
+    agent.print_response_sync(
         "访问 https://github.com/shibing624/agentica 并总结这个项目的主要功能"
     )
 
@@ -36,7 +36,7 @@ def main():
     print("\n" + "=" * 60)
     print("Example 2: Search and Browse")
     print("=" * 60)
-    agent.print_response(
+    agent.print_response_sync(
         "搜索Python最新版本的发布说明，并总结主要更新内容"
     )
 

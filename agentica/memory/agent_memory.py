@@ -472,28 +472,12 @@ class AgentMemory(BaseModel):
                 logger.warning(f"Error loading memory: {e}")
                 continue
 
-    def _check_should_update_memory(self, input: str) -> bool:
-        """Common logic for determining if a message should be added to the memory db."""
-        if self.classifier is None:
-            self.classifier = MemoryClassifier()
-
-        self.classifier.existing_memories = self.memories
-        return True  # Will be called with sync/async response separately
-
-    def should_update_memory(self, input: str) -> bool:
+    async def should_update_memory(self, input: str) -> bool:
         """Determines if a message should be added to the memory db."""
         if self.classifier is None:
             self.classifier = MemoryClassifier()
         self.classifier.existing_memories = self.memories
-        classifier_response = self.classifier.run(input)
-        return classifier_response is not None and classifier_response.strip().lower().startswith("yes")
-
-    async def ashould_update_memory(self, input: str) -> bool:
-        """Determines if a message should be added to the memory db."""
-        if self.classifier is None:
-            self.classifier = MemoryClassifier()
-        self.classifier.existing_memories = self.memories
-        classifier_response = await self.classifier.arun(input)
+        classifier_response = await self.classifier.run(input)
         return classifier_response is not None and classifier_response.strip().lower().startswith("yes")
 
     def _prepare_memory_update(self, input: str) -> Optional[str]:
@@ -513,7 +497,7 @@ class AgentMemory(BaseModel):
             self.manager.db = self.db
             self.manager.user_id = self.user_id
 
-    def update_memory(self, input: str, force: bool = False) -> Optional[str]:
+    async def update_memory(self, input: str, force: bool = False) -> Optional[str]:
         """Creates a memory from a message and adds it to the memory db."""
         error = self._prepare_memory_update(input)
         if error:
@@ -521,7 +505,7 @@ class AgentMemory(BaseModel):
 
         self.updating_memory = True
         try:
-            should_update = force or self.should_update_memory(input=input)
+            should_update = force or await self.should_update_memory(input=input)
             logger.debug(f"Update memory: {should_update}")
 
             if not should_update:
@@ -529,52 +513,19 @@ class AgentMemory(BaseModel):
                 return "Memory update not required"
 
             self._ensure_manager()
-            response = self.manager.run(input)
+            response = await self.manager.run(input)
             self.load_user_memories()
             return response
         finally:
             self.updating_memory = False
 
-    async def aupdate_memory(self, input: str, force: bool = False) -> Optional[str]:
-        """Creates a memory from a message and adds it to the memory db."""
-        error = self._prepare_memory_update(input)
-        if error:
-            return error
-
-        self.updating_memory = True
-        try:
-            should_update = force or await self.ashould_update_memory(input=input)
-            logger.debug(f"Async update memory: {should_update}")
-
-            if not should_update:
-                logger.debug("Memory update not required")
-                return "Memory update not required"
-
-            self._ensure_manager()
-            response = await self.manager.arun(input)
-            self.load_user_memories()
-            return response
-        finally:
-            self.updating_memory = False
-
-    def update_summary(self) -> Optional[SessionSummary]:
+    async def update_summary(self) -> Optional[SessionSummary]:
         """Creates a summary of the session"""
         self.updating_memory = True
         try:
             if self.summarizer is None:
                 self.summarizer = MemorySummarizer()
-            self.summary = self.summarizer.run(self.get_message_pairs())
-            return self.summary
-        finally:
-            self.updating_memory = False
-
-    async def aupdate_summary(self) -> Optional[SessionSummary]:
-        """Creates a summary of the session"""
-        self.updating_memory = True
-        try:
-            if self.summarizer is None:
-                self.summarizer = MemorySummarizer()
-            self.summary = await self.summarizer.arun(self.get_message_pairs())
+            self.summary = await self.summarizer.run(self.get_message_pairs())
             return self.summary
         finally:
             self.updating_memory = False

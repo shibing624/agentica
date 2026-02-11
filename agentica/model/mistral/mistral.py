@@ -1,6 +1,8 @@
+import asyncio
+import functools
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Union
+from typing import Optional, List, AsyncIterator, Dict, Any, Union
 
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -162,96 +164,60 @@ class MistralChat(Model):
             _dict["response_format"] = self.response_format
         return _dict
 
-    def invoke(self, messages: List[Message]) -> ChatCompletionResponse:
-        """
-        Send a chat completion request to the Mistral model.
-
-        Args:
-            messages (List[Message]): The messages to send to the model.
-
-        Returns:
-            ChatCompletionResponse: The response from the model.
-        """
+    def _build_mistral_messages(self, messages: List[Message]) -> List[MistralMessage]:
+        """Convert internal messages to Mistral format."""
         mistral_messages: List[MistralMessage] = []
         for m in messages:
-            mistral_message: MistralMessage
             if m.role == "user":
-                mistral_message = models.UserMessage(role=m.role, content=m.content)
+                mistral_messages.append(models.UserMessage(role=m.role, content=m.content))
             elif m.role == "assistant":
                 if m.tool_calls is not None:
-                    mistral_message = models.AssistantMessage(role=m.role, content=m.content, tool_calls=m.tool_calls)
+                    mistral_messages.append(models.AssistantMessage(role=m.role, content=m.content, tool_calls=m.tool_calls))
                 else:
-                    mistral_message = models.AssistantMessage(role=m.role, content=m.content)
+                    mistral_messages.append(models.AssistantMessage(role=m.role, content=m.content))
             elif m.role == "system":
-                mistral_message = models.SystemMessage(role=m.role, content=m.content)
+                mistral_messages.append(models.SystemMessage(role=m.role, content=m.content))
             elif m.role == "tool":
-                mistral_message = models.ToolMessage(name=m.name, content=m.content, tool_call_id=m.tool_call_id)
+                mistral_messages.append(models.ToolMessage(name=m.name, content=m.content, tool_call_id=m.tool_call_id))
             else:
                 raise ValueError(f"Unknown role: {m.role}")
-            mistral_messages.append(mistral_message)
+        return mistral_messages
+
+    async def invoke(self, messages: List[Message]) -> ChatCompletionResponse:
+        """Send a chat completion request to the Mistral model (async-only)."""
+        mistral_messages = self._build_mistral_messages(messages)
         logger.debug(f"Mistral messages: {mistral_messages}")
-        response = self.client.chat.complete(
-            messages=mistral_messages,
-            model=self.id,
-            **self.api_kwargs,
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, functools.partial(
+                self.client.chat.complete,
+                messages=mistral_messages, model=self.id, **self.api_kwargs,
+            )
         )
         if response is None:
             raise ValueError("Chat completion returned None")
         return response
 
-    def invoke_stream(self, messages: List[Message]) -> Iterator[Any]:
-        """
-        Stream the response from the Mistral model.
-
-        Args:
-            messages (List[Message]): The messages to send to the model.
-
-        Returns:
-            Iterator[Any]: The streamed response.
-        """
-        mistral_messages: List[MistralMessage] = []
-        for m in messages:
-            mistral_message: MistralMessage
-            if m.role == "user":
-                mistral_message = models.UserMessage(role=m.role, content=m.content)
-            elif m.role == "assistant":
-                if m.tool_calls is not None:
-                    mistral_message = models.AssistantMessage(role=m.role, content=m.content, tool_calls=m.tool_calls)
-                else:
-                    mistral_message = models.AssistantMessage(role=m.role, content=m.content)
-            elif m.role == "system":
-                mistral_message = models.SystemMessage(role=m.role, content=m.content)
-            elif m.role == "tool":
-                logger.debug(f"Tool message: {m}")
-                mistral_message = models.ToolMessage(name=m.name, content=m.content, tool_call_id=m.tool_call_id)
-            else:
-                raise ValueError(f"Unknown role: {m.role}")
-            mistral_messages.append(mistral_message)
+    async def invoke_stream(self, messages: List[Message]) -> AsyncIterator[Any]:
+        """Stream the response from the Mistral model (async-only)."""
+        mistral_messages = self._build_mistral_messages(messages)
         logger.debug(f"Mistral messages sending to stream endpoint: {mistral_messages}")
-        response = self.client.chat.stream(
-            messages=mistral_messages,
-            model=self.id,
-            **self.api_kwargs,
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, functools.partial(
+                self.client.chat.stream,
+                messages=mistral_messages, model=self.id, **self.api_kwargs,
+            )
         )
         if response is None:
             raise ValueError("Chat stream returned None")
-        # Since response is a generator, use 'yield from' to yield its items
-        yield from response
+        for item in response:
+            yield item
 
-    def _handle_tool_calls(
+    async def _handle_tool_calls(
         self, assistant_message: Message, messages: List[Message], model_response: ModelResponse
     ) -> Optional[ModelResponse]:
-        """
-        Handle tool calls in the assistant message.
-
-        Args:
-            assistant_message (Message): The assistant message.
-            messages (List[Message]): The messages to send to the model.
-            model_response (ModelResponse): The model response.
-
-        Returns:
-            Optional[ModelResponse]: The model response after handling tool calls.
-        """
+        """Handle tool calls in the assistant message (async-only)."""
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0:
             model_response.content = ""
             tool_role: str = "tool"
@@ -268,14 +234,12 @@ class MistralChat(Model):
                     continue
                 if _function_call.error is not None:
                     messages.append(
-                        Message(
-                            role="tool", tool_call_id=_tool_call_id, tool_call_error=True, content=_function_call.error
-                        )
+                        Message(role="tool", tool_call_id=_tool_call_id, tool_call_error=True, content=_function_call.error)
                     )
                     continue
                 function_calls_to_run.append(_function_call)
 
-            for _ in self.run_function_calls(
+            async for _ in self.run_function_calls(
                 function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
             ):
                 pass
@@ -339,54 +303,36 @@ class MistralChat(Model):
         for m in messages:
             m.log()
 
-    def response(self, messages: List[Message]) -> ModelResponse:
-        """
-        Send a chat completion request to the Mistral model.
-
-        Args:
-            messages (List[Message]): The messages to send to the model.
-
-        Returns:
-            ModelResponse: The response from the model.
-        """
-        # -*- Log messages for debugging
+    async def response(self, messages: List[Message]) -> ModelResponse:
+        """Send a chat completion request to the Mistral model (async-only)."""
         self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
 
         response_timer = Timer()
         response_timer.start()
-        response: ChatCompletionResponse = self.invoke(messages=messages)
+        response: ChatCompletionResponse = await self.invoke(messages=messages)
         response_timer.stop()
         logger.debug(f"Time to generate response: {response_timer.elapsed:.4f}s")
 
-        # -*- Ensure response.choices is not None
         if response.choices is None or len(response.choices) == 0:
             raise ValueError("Chat completion response has no choices")
 
-        # -*- Create assistant message
         assistant_message = self._create_assistant_message(response)
-
-        # -*- Update usage metrics
         self._update_usage_metrics(assistant_message, response, response_timer)
-
-        # -*- Add assistant message to messages
         messages.append(assistant_message)
         assistant_message.log()
 
-        # -*- Parse and run tool calls
         logger.debug(f"Functions: {self.functions}")
 
-        # -*- Handle tool calls
-        if self._handle_tool_calls(assistant_message, messages, model_response):
-            response_after_tool_calls = self.response(messages=messages)
+        if await self._handle_tool_calls(assistant_message, messages, model_response):
+            response_after_tool_calls = await self.response(messages=messages)
             if response_after_tool_calls.content is not None:
                 if model_response.content is None:
                     model_response.content = ""
                 model_response.content += response_after_tool_calls.content
             return model_response
 
-        # -*- Add content to model response
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
 
@@ -427,16 +373,8 @@ class MistralChat(Model):
         assistant_message.metrics["total_tokens"] = stream_data.response_total_tokens
         self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + stream_data.response_total_tokens
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
-        """
-        Stream the response from the Mistral model.
-
-        Args:
-            messages (List[Message]): The messages to send to the model.
-
-        Returns:
-            Iterator[ModelResponse]: The streamed response.
-        """
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
+        """Stream the response from the Mistral model (async-only)."""
         self.sanitize_messages(messages)
         self._log_messages(messages)
 
@@ -444,8 +382,7 @@ class MistralChat(Model):
         stream_data.response_timer.start()
 
         assistant_message_role = None
-        for response in self.invoke_stream(messages=messages):
-            # -*- Parse response
+        async for response in self.invoke_stream(messages=messages):
             response_delta: DeltaMessage = response.data.choices[0].delta
             if assistant_message_role is None and response_delta.role is not None:
                 assistant_message_role = response_delta.role
@@ -455,7 +392,6 @@ class MistralChat(Model):
                 response_content = response_delta.content
             response_tool_calls = response_delta.tool_calls
 
-            # -*- Return content if present, otherwise get tool call
             if response_content is not None:
                 stream_data.response_content += response_content
                 stream_data.completion_tokens += 1
@@ -464,7 +400,6 @@ class MistralChat(Model):
                     logger.debug(f"Time to first token: {stream_data.time_to_first_token:.4f}s")
                 yield ModelResponse(content=response_content)
 
-            # -*- Parse tool calls
             if response_tool_calls is not None:
                 if stream_data.response_tool_calls is None:
                     stream_data.response_tool_calls = []
@@ -476,21 +411,17 @@ class MistralChat(Model):
             logger.debug(f"Time per output token: {stream_data.response_timer.elapsed / completion_tokens:.4f}s")
             logger.debug(f"Throughput: {completion_tokens / stream_data.response_timer.elapsed:.4f} tokens/s")
 
-        # -*- Create assistant message
         assistant_message = Message(role=(assistant_message_role or "assistant"))
         if stream_data.response_content != "":
             assistant_message.content = stream_data.response_content
 
-        # -*- Add tool calls to assistant message
         if stream_data.response_tool_calls is not None:
             assistant_message.tool_calls = [t.model_dump() for t in stream_data.response_tool_calls]
 
-        # -*- Update usage metrics
         self._update_stream_metrics(stream_data, assistant_message)
         messages.append(assistant_message)
         assistant_message.log()
 
-        # -*- Parse and run tool calls
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0:
             tool_role: str = "tool"
             function_calls_to_run: List[FunctionCall] = []
@@ -507,14 +438,12 @@ class MistralChat(Model):
                     continue
                 if _function_call.error is not None:
                     messages.append(
-                        Message(
-                            role="tool", tool_call_id=_tool_call_id, tool_call_error=True, content=_function_call.error
-                        )
+                        Message(role="tool", tool_call_id=_tool_call_id, tool_call_error=True, content=_function_call.error)
                     )
                     continue
                 function_calls_to_run.append(_function_call)
 
-            for intermediate_model_response in self.run_function_calls(
+            async for intermediate_model_response in self.run_function_calls(
                 function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
             ):
                 yield intermediate_model_response
@@ -522,4 +451,5 @@ class MistralChat(Model):
             if len(function_call_results) > 0:
                 messages.extend(function_call_results)
 
-            yield from self.response_stream(messages=messages)
+            async for resp in self.response_stream(messages=messages):
+                yield resp

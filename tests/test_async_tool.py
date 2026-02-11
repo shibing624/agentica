@@ -34,7 +34,7 @@ class TestAsyncFunctionCall:
         """Test that sync functions still work with execute()."""
         f = Function.from_callable(sync_multiply)
         fc = FunctionCall(function=f, arguments={'a': 3, 'b': 4})
-        success = fc.execute()
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "12"
         assert fc.error is None
@@ -43,7 +43,7 @@ class TestAsyncFunctionCall:
         """Test that async functions work with execute() in sync context."""
         f = Function.from_callable(async_add)
         fc = FunctionCall(function=f, arguments={'a': 5, 'b': 7})
-        success = fc.execute()
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "12"
         assert fc.error is None
@@ -52,7 +52,7 @@ class TestAsyncFunctionCall:
         """Test async function with no arguments via execute()."""
         f = Function.from_callable(async_no_args)
         fc = FunctionCall(function=f)
-        success = fc.execute()
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "async_no_args_result"
 
@@ -60,7 +60,7 @@ class TestAsyncFunctionCall:
         """Test that async functions work with aexecute()."""
         f = Function.from_callable(async_add)
         fc = FunctionCall(function=f, arguments={'a': 10, 'b': 20})
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "30"
         assert fc.error is None
@@ -69,7 +69,7 @@ class TestAsyncFunctionCall:
         """Test that sync functions work with aexecute()."""
         f = Function.from_callable(sync_multiply)
         fc = FunctionCall(function=f, arguments={'a': 5, 'b': 6})
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "30"
         assert fc.error is None
@@ -78,7 +78,7 @@ class TestAsyncFunctionCall:
         """Test async function with no arguments via aexecute()."""
         f = Function.from_callable(async_no_args)
         fc = FunctionCall(function=f)
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "async_no_args_result"
 
@@ -103,7 +103,7 @@ class TestAsyncToolClass:
         
         func = tool.functions["async_method"]
         fc = FunctionCall(function=func, arguments={'x': 25})
-        success = fc.execute()
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "50"
 
@@ -122,7 +122,7 @@ class TestAsyncToolClass:
         tool = AsyncTool()
         func = tool.functions["async_method"]
         fc = FunctionCall(function=func, arguments={'x': 10})
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         assert success is True
         assert fc.result == "30"
 
@@ -142,7 +142,7 @@ class TestAsyncHooks:
         f.pre_hook = async_pre_hook
         
         fc = FunctionCall(function=f, arguments={'a': 1, 'b': 2})
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         
         assert success is True
         assert "pre" in hook_called
@@ -159,7 +159,7 @@ class TestAsyncHooks:
         f.post_hook = async_post_hook
         
         fc = FunctionCall(function=f, arguments={'a': 3, 'b': 4})
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         
         assert success is True
         assert "post" in hook_called
@@ -175,7 +175,7 @@ class TestAsyncHooks:
         f.pre_hook = sync_pre_hook
         
         fc = FunctionCall(function=f, arguments={'a': 5, 'b': 5})
-        success = fc.execute()
+        success = asyncio.run(fc.execute())
         
         assert success is True
         assert "sync_pre" in hook_called
@@ -192,7 +192,7 @@ class TestAsyncErrorHandling:
 
         f = Function.from_callable(async_error_func)
         fc = FunctionCall(function=f)
-        success = fc.execute()
+        success = asyncio.run(fc.execute())
         
         assert success is False
         assert fc.error is not None
@@ -205,7 +205,7 @@ class TestAsyncErrorHandling:
 
         f = Function.from_callable(async_error_func)
         fc = FunctionCall(function=f)
-        success = asyncio.run(fc.aexecute())
+        success = asyncio.run(fc.execute())
         
         assert success is False
         assert fc.error is not None

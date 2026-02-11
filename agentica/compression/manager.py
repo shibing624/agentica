@@ -148,7 +148,7 @@ class CompressionManager:
 
         return False
 
-    def _compress_tool_result(self, tool_result: "Message") -> Optional[str]:
+    async def _compress_tool_result(self, tool_result: "Message") -> Optional[str]:
         """Compress a single tool result message."""
         if not tool_result:
             return None
@@ -165,7 +165,7 @@ class CompressionManager:
 
         try:
             from agentica.model.message import Message
-            response = self.model.response(
+            response = await self.model.response(
                 messages=[
                     Message(role="system", content=compression_prompt),
                     Message(role="user", content=compression_message),
@@ -178,132 +178,9 @@ class CompressionManager:
             logger.error(f"Error compressing tool result: {e}")
             return tool_content
 
-    def compress(self, messages: List["Message"]) -> None:
+    async def compress(self, messages: List["Message"]) -> None:
         """
-        Compress uncompressed tool results in place.
-        
-        Args:
-            messages: List of messages to process (modified in place)
-        """
-        if not self.compress_tool_results:
-            return
-
-        uncompressed_tools = [
-            msg for msg in messages 
-            if msg.role == "tool" and not getattr(msg, 'compressed_content', None)
-        ]
-
-        if not uncompressed_tools:
-            return
-
-        for tool_msg in uncompressed_tools:
-            original_len = len(str(tool_msg.content)) if tool_msg.content else 0
-            compressed = self._compress_tool_result(tool_msg)
-            if compressed:
-                tool_msg.compressed_content = compressed
-                # Update stats
-                tool_results_count = len(tool_msg.tool_calls) if tool_msg.tool_calls else 1
-                self.stats["tool_results_compressed"] = (
-                    self.stats.get("tool_results_compressed", 0) + tool_results_count
-                )
-                self.stats["original_size"] = self.stats.get("original_size", 0) + original_len
-                self.stats["compressed_size"] = self.stats.get("compressed_size", 0) + len(compressed)
-                logger.debug(f"Compressed tool result: {original_len} -> {len(compressed)} chars")
-            else:
-                logger.warning(f"Compression failed for {getattr(tool_msg, 'tool_name', 'unknown')}")
-
-    # =============================================================================
-    # Async Methods
-    # =============================================================================
-
-    async def ashould_compress(
-        self,
-        messages: List["Message"],
-        tools: Optional[List] = None,
-        model: Optional[Any] = None,
-        response_format: Optional[Union[Dict, Type[BaseModel]]] = None,
-    ) -> bool:
-        """
-        Async check if tool results should be compressed.
-
-        Args:
-            messages: List of messages to check
-            tools: List of tools for token counting
-            model: The Agent model (for token counting)
-            response_format: Output schema for accurate token counting
-        
-        Returns:
-            True if compression should be triggered
-        """
-        if not self.compress_tool_results:
-            return False
-
-        # Token-based threshold check
-        if self.compress_token_limit is not None:
-            try:
-                from agentica.utils.tokens import count_tokens
-                model_id = getattr(model, 'id', 'gpt-4o') if model else 'gpt-4o'
-                tokens = count_tokens(messages, tools, model_id, response_format)
-                if tokens >= self.compress_token_limit:
-                    logger.info(f"Token limit hit: {tokens} >= {self.compress_token_limit}")
-                    return True
-            except Exception as e:
-                logger.warning(f"Error counting tokens: {e}")
-
-        # Count-based threshold check
-        if self.compress_tool_results_limit is not None:
-            uncompressed_tools_count = len(
-                [m for m in messages if self._is_tool_result_message(m) and not getattr(m, 'compressed_content', None)]
-            )
-            if uncompressed_tools_count >= self.compress_tool_results_limit:
-                logger.info(f"Tool count limit hit: {uncompressed_tools_count} >= {self.compress_tool_results_limit}")
-                return True
-
-        return False
-
-    async def _acompress_tool_result(self, tool_result: "Message") -> Optional[str]:
-        """Async compress a single tool result."""
-        if not tool_result:
-            return None
-
-        tool_name = getattr(tool_result, 'tool_name', None) or 'unknown'
-        tool_content = f"Tool: {tool_name}\n{tool_result.content}"
-
-        if not self.model:
-            logger.warning("No compression model available")
-            return None
-
-        compression_prompt = self.compress_tool_call_instructions or DEFAULT_COMPRESSION_PROMPT
-        compression_message = "Tool Results to Compress: " + tool_content + "\n"
-
-        try:
-            from agentica.model.message import Message
-            # Check if model has async response method
-            if hasattr(self.model, 'aresponse'):
-                response = await self.model.aresponse(
-                    messages=[
-                        Message(role="system", content=compression_prompt),
-                        Message(role="user", content=compression_message),
-                    ]
-                )
-            else:
-                # Fallback to sync method
-                response = self.model.response(
-                    messages=[
-                        Message(role="system", content=compression_prompt),
-                        Message(role="user", content=compression_message),
-                    ]
-                )
-            if hasattr(response, 'content'):
-                return response.content
-            return str(response)
-        except Exception as e:
-            logger.error(f"Error compressing tool result: {e}")
-            return tool_content
-
-    async def acompress(self, messages: List["Message"]) -> None:
-        """
-        Async compress uncompressed tool results using parallel processing.
+        Compress uncompressed tool results using parallel processing.
         
         Args:
             messages: List of messages to process (modified in place)
@@ -323,7 +200,7 @@ class CompressionManager:
         original_sizes = [len(str(msg.content)) if msg.content else 0 for msg in uncompressed_tools]
 
         # Parallel compression using asyncio.gather
-        tasks = [self._acompress_tool_result(msg) for msg in uncompressed_tools]
+        tasks = [self._compress_tool_result(msg) for msg in uncompressed_tools]
         results = await asyncio.gather(*tasks)
 
         # Apply results and track stats

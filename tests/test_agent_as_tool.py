@@ -102,9 +102,9 @@ class AgentAsToolTest(unittest.TestCase):
         self.assertIsNotNone(tool.entrypoint)
         self.assertTrue(callable(tool.entrypoint))
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_as_tool_calls_agent_run(self, mock_run):
-        """Test that calling the tool invokes agent.run()."""
+        """Test that calling the tool invokes agent.run_sync()."""
         mock_response = RunResponse(content="翻译后的文本")
         mock_run.return_value = mock_response
         
@@ -121,7 +121,7 @@ class AgentAsToolTest(unittest.TestCase):
         mock_run.assert_called_once_with("Hello world", stream=False)
         self.assertEqual(result, "翻译后的文本")
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_as_tool_handles_none_content(self, mock_run):
         """Test that tool handles None content from agent response."""
         mock_response = RunResponse(content=None)
@@ -137,7 +137,7 @@ class AgentAsToolTest(unittest.TestCase):
         
         self.assertEqual(result, "No response from agent.")
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_as_tool_custom_output_extractor(self, mock_run):
         """Test that custom output extractor is used when provided."""
         mock_response = RunResponse(content="原始输出", run_id="test-123")
@@ -156,7 +156,7 @@ class AgentAsToolTest(unittest.TestCase):
         
         self.assertEqual(result, "提取结果: 原始输出 (run_id: test-123)")
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_as_tool_handles_dict_content(self, mock_run):
         """Test that tool handles dict content from agent response."""
         mock_response = RunResponse(content={"key": "value", "number": 42})
@@ -179,7 +179,7 @@ class AgentAsToolTest(unittest.TestCase):
 class AgentAsToolMockedIntegrationTest(unittest.TestCase):
     """Integration tests for Agent as Tool pattern with mocked LLM."""
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_orchestrator_with_agent_tools(self, mock_run):
         """Test orchestrator agent using sub-agents as tools (mocked)."""
         # Mock the run method to return a predefined response
@@ -212,7 +212,7 @@ class AgentAsToolMockedIntegrationTest(unittest.TestCase):
         self.assertIsInstance(tool, Function)
         self.assertEqual(tool.name, "translate_to_chinese")
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_multiple_agent_tools(self, mock_run):
         """Test orchestrator with multiple agent tools (mocked)."""
         mock_run.return_value = RunResponse(content="处理结果")
@@ -242,7 +242,7 @@ class AgentAsToolMockedIntegrationTest(unittest.TestCase):
         self.assertIn("summarize", tool_names)
         self.assertIn("analyze", tool_names)
     
-    @patch.object(Agent, 'run')
+    @patch.object(Agent, 'run_sync')
     def test_agent_tool_execution_chain(self, mock_run):
         """Test chained execution of agent tools (mocked)."""
         # Setup mock to return different values on each call

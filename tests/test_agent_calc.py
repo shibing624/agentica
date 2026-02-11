@@ -29,6 +29,6 @@ class CalcParser(unittest.TestCase):
         mock_run.return_value = "The result is 7073851546.5406"
         
         m = Agent(llm=ZhipuAI(api_key="fake_zhipuai_api_key"), tools=[CalculatorTool()])
-        r = m.run("What is the result of 33332.22 * 212222.323 - 1222.1 =?")
+        r = m.run_sync("What is the result of 33332.22 * 212222.323 - 1222.1 =?")
         print(r)
         self.assertIsNotNone(r)

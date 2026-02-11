@@ -898,8 +898,9 @@ class Agent:
             "get_messages_for_run", "get_relevant_docs_from_knowledge",
             "convert_documents_to_string", "convert_context_to_string",
             # From runner.py
-            "run", "arun", "arun_stream", "_run", "_arun", "_run_single_round",
-            "_run_multi_round", "_arun_single_round", "_arun_multi_round",
+            "run", "run_sync", "_run", "_run_single_round",
+            "_run_multi_round", "_consume_run", "_run_with_timeout",
+            "_wrap_stream_with_timeout",
             "_on_pre_step", "_on_tool_call", "_on_post_step",
             "save_run_response_to_file", "_aggregate_metrics_from_run_messages",
             "generic_run_response",
@@ -916,7 +917,7 @@ class Agent:
             "get_chat_history", "get_tool_call_history", "search_knowledge_base",
             "add_to_knowledge", "update_memory", "_create_run_data",
             # From printer.py
-            "print_response", "aprint_response", "cli_app",
+            "print_response", "print_response_sync", "cli_app",
             # From media.py
             "add_image", "add_video", "get_images", "get_videos",
         }
@@ -1062,14 +1063,10 @@ class Agent:
     
     # From runner.py
     run: Callable
-    arun: Callable
-    arun_stream: Callable
+    run_sync: Callable
     _run: Callable
-    _arun: Callable
     _run_single_round: Callable
     _run_multi_round: Callable
-    _arun_single_round: Callable
-    _arun_multi_round: Callable
     _on_pre_step: Callable
     _on_tool_call: Callable
     _on_post_step: Callable
@@ -1113,8 +1110,8 @@ class Agent:
     _create_run_data: Callable
     
     # From printer.py
-    print_response: Callable
-    aprint_response: Callable
+    print_response: Callable  # async print_response()
+    print_response_sync: Callable  # sync wrapper
     cli_app: Callable
     
     # From media.py

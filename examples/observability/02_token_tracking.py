@@ -31,7 +31,7 @@ def basic_token_tracking():
     )
 
     # Run a query
-    response = agent.run("What is machine learning? Explain in 2-3 sentences.")
+    response = agent.run_sync("What is machine learning? Explain in 2-3 sentences.")
 
     # Get token usage from response
     if hasattr(response, 'metrics') and response.metrics:
@@ -69,7 +69,7 @@ def multi_turn_token_tracking():
         print(f"\n--- Turn {i} ---")
         print(f"Question: {question}")
 
-        response = agent.run(question)
+        response = agent.run_sync(question)
 
         if hasattr(response, 'metrics') and response.metrics:
             input_tokens = response.metrics.get('input_tokens', 0)
@@ -193,7 +193,7 @@ def token_compression_demo():
         model=OpenAIChat(id="gpt-4o-mini"),
         name="Summarizer",
     )
-    summary = agent.run(f"Please summarize the following conversation in 2-3 sentences:\n{long_conversation}")
+    summary = agent.run_sync(f"Please summarize the following conversation in 2-3 sentences:\n{long_conversation}")
 
     if summary and summary.content:
         compressed_tokens = count_text_tokens(summary.content)

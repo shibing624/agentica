@@ -68,7 +68,7 @@ def research_topic(agent, topic: str) -> str:
     print(f"Deep Researching: {topic}")
     print(f"{'=' * 60}\n")
 
-    response = agent.run(topic)
+    response = agent.run_sync(topic)
     return response.content
 
 

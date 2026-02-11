@@ -59,7 +59,7 @@ class TeamMixin:
 
         def agent_entrypoint(message: str) -> str:
             """Run the agent with the given message and return the response."""
-            response = self.run(message, stream=False)
+            response = self.run_sync(message, stream=False)
             
             # Use custom output extractor if provided
             if custom_output_extractor:
@@ -97,7 +97,7 @@ class TeamMixin:
                 The response from the agent.
             """
             logger.info(f"Transferring task to {agent_name}: {task}")
-            response = self.run(message=task, stream=False)
+            response = self.run_sync(message=task, stream=False)
             if response and response.content:
                 if isinstance(response.content, str):
                     return response.content

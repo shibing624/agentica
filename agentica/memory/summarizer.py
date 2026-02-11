@@ -129,7 +129,7 @@ class MemorySummarizer(BaseModel):
                     logger.warning(f"Failed to validate session_summary response: {exc}")
             return None
 
-    def run(
+    async def run(
             self,
             message_pairs: List[Tuple[Message, Message]],
             **kwargs: Any,
@@ -139,18 +139,5 @@ class MemorySummarizer(BaseModel):
             return None
 
         self.model = cast(Model, self.model)
-        response = self.model.response(messages=messages_for_model)
-        return self._parse_summary_response(response)
-
-    async def arun(
-            self,
-            message_pairs: List[Tuple[Message, Message]],
-            **kwargs: Any,
-    ) -> Optional[SessionSummary]:
-        messages_for_model = self._prepare_messages(message_pairs)
-        if messages_for_model is None:
-            return None
-
-        self.model = cast(Model, self.model)
-        response = await self.model.aresponse(messages=messages_for_model)
+        response = await self.model.response(messages=messages_for_model)
         return self._parse_summary_response(response)

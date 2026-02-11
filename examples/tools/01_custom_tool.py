@@ -108,12 +108,12 @@ def main():
     print("=" * 60)
     print("Example 1: Multiplication")
     print("=" * 60)
-    agent.print_response("3乘以10000005是啥?")
+    agent.print_response_sync("3乘以10000005是啥?")
     
     print("\n" + "=" * 60)
     print("Example 2: Complex calculation")
     print("=" * 60)
-    agent.print_response(
+    agent.print_response_sync(
         "将3的五次方乘以(12和3的和). step by step to show the result. "
         "最后统计一下结果的字符长度。"
     )
@@ -121,12 +121,12 @@ def main():
     print("\n" + "=" * 60)
     print("Example 3: Weather + calculation")
     print("=" * 60)
-    agent.print_response("明天北京天气多少度？温度 乘以 2333 = ？")
+    agent.print_response_sync("明天北京天气多少度？温度 乘以 2333 = ？")
     
     print("\n" + "=" * 60)
     print("Example 4: File operations")
     print("=" * 60)
-    agent.print_response("查询当前目录最大的py文件")
+    agent.print_response_sync("查询当前目录最大的py文件")
 
 
 if __name__ == "__main__":

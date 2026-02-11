@@ -298,7 +298,7 @@ def _process_stream_response(current_agent, final_input: str) -> None:
     spinner_active = True
     
     try:
-        response_stream = current_agent.run(final_input, stream=True, stream_intermediate_steps=True)
+        response_stream = current_agent.run_sync(final_input, stream=True, stream_intermediate_steps=True)
         
         display = StreamDisplayManager(console)
         shown_tool_count = 0

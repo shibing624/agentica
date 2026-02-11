@@ -1,7 +1,10 @@
 import json
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Tuple
+from typing import Optional, List, AsyncIterator, Dict, Any, Tuple
+
+import asyncio
+import functools
 
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -129,7 +132,7 @@ class Cohere(Model):
             for f_name, function in self.functions.items()
         ]
 
-    def invoke(
+    async def invoke(
             self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
     ) -> NonStreamedChatResponse:
         """
@@ -178,11 +181,14 @@ class Cohere(Model):
         if tool_results:
             api_kwargs["tool_results"] = tool_results
 
-        return self.client.chat(message=chat_message or "", model=self.id, **api_kwargs)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, functools.partial(self.client.chat, message=chat_message or "", model=self.id, **api_kwargs)
+        )
 
-    def invoke_stream(
+    async def invoke_stream(
             self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
-    ) -> Iterator[StreamedChatResponse]:
+    ) -> AsyncIterator[StreamedChatResponse]:
         """
         Invoke a streamed chat response from the Cohere API.
 
@@ -191,7 +197,7 @@ class Cohere(Model):
             tool_results (Optional[List[ToolResult]]): The list of tool results.
 
         Returns:
-            Iterator[StreamedChatResponse]: An iterator of streamed chat responses.
+            AsyncIterator[StreamedChatResponse]: An async iterator of streamed chat responses.
         """
         api_kwargs: Dict[str, Any] = self.request_kwargs
         chat_message: Optional[str] = None
@@ -229,7 +235,12 @@ class Cohere(Model):
         if tool_results:
             api_kwargs["tool_results"] = tool_results
 
-        return self.client.chat_stream(message=chat_message or "", model=self.id, **api_kwargs)
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, functools.partial(self.client.chat_stream, message=chat_message or "", model=self.id, **api_kwargs)
+        )
+        for item in response:
+            yield item
 
     def _log_messages(self, messages: List[Message]) -> None:
         """
@@ -283,7 +294,7 @@ class Cohere(Model):
 
         return function_calls_to_run, error_messages
 
-    def _handle_tool_calls(
+    async def _handle_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
@@ -336,7 +347,7 @@ class Cohere(Model):
 
         function_calls_to_run, error_messages = self._prepare_function_calls(assistant_message)
 
-        for _ in self.run_function_calls(
+        async for _ in self.run_function_calls(
                 function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
         ):
             pass
@@ -371,7 +382,7 @@ class Cohere(Model):
         response_content = response.text
         return Message(role="assistant", content=response_content)
 
-    def response(self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None) -> ModelResponse:
+    async def response(self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None) -> ModelResponse:
         """
         Send a chat completion request to the Cohere API.
 
@@ -389,7 +400,7 @@ class Cohere(Model):
         response_timer = Timer()
         response_timer.start()
         logger.debug(f"Tool Results: {tool_results}")
-        response: NonStreamedChatResponse = self.invoke(messages=messages, tool_results=tool_results)
+        response: NonStreamedChatResponse = await self.invoke(messages=messages, tool_results=tool_results)
         response_timer.stop()
         logger.debug(f"Time to generate response: {response_timer.elapsed:.4f}s")
 
@@ -412,7 +423,7 @@ class Cohere(Model):
 
         # Handle tool calls if present and tool running is enabled
         if assistant_message.tool_calls and self.run_tools:
-            tool_results = self._handle_tool_calls(
+            tool_results = await self._handle_tool_calls(
                 assistant_message=assistant_message,
                 messages=messages,
                 response_tool_calls=response_tool_calls,
@@ -424,7 +435,7 @@ class Cohere(Model):
                 # Cohere doesn't allow tool calls in the same message as the user's message, so we add a new user message with empty content
                 messages.append(Message(role="user", content=""))
 
-            response_after_tool_calls = self.response(messages=messages, tool_results=tool_results)
+            response_after_tool_calls = await self.response(messages=messages, tool_results=tool_results)
             if response_after_tool_calls.content:
                 if model_response.content is None:
                     model_response.content = ""
@@ -478,9 +489,9 @@ class Cohere(Model):
         assistant_message.metrics["total_tokens"] = stream_data.response_total_tokens
         self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + stream_data.response_total_tokens
 
-    def response_stream(
+    async def response_stream(
             self, messages: List[Message], tool_results: Optional[List[ToolResult]] = None
-    ) -> Iterator[ModelResponse]:
+    ) -> AsyncIterator[ModelResponse]:
         # -*- Log messages for debugging
         self.sanitize_messages(messages)
         self._log_messages(messages)
@@ -493,7 +504,7 @@ class Cohere(Model):
         stream_data.response_tool_calls = []
         last_delta: Optional[NonStreamedChatResponse] = None
 
-        for response in self.invoke_stream(messages=messages, tool_results=tool_results):
+        async for response in self.invoke_stream(messages=messages, tool_results=tool_results):
             if isinstance(response, StreamStartStreamedChatResponse):
                 pass
 
@@ -599,7 +610,7 @@ class Cohere(Model):
                     continue
                 function_calls_to_run.append(_function_call)
 
-            for intermediate_model_response in self.run_function_calls(
+            async for intermediate_model_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results,
                     tool_role=tool_role
             ):
@@ -619,4 +630,6 @@ class Cohere(Model):
                 messages.append(Message(role="user", content=""))
 
             # -*- Yield new response using results of tool calls
-            yield from self.response_stream(messages=messages, tool_results=tool_results)
+            async for _resp in self.response_stream(messages=messages, tool_results=tool_results):
+
+                yield _resp

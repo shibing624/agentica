@@ -26,7 +26,7 @@ agent = Agent(
     debug_mode=True,
 )
 
-agent.print_response("介绍一下唐朝", stream=True)
+agent.print_response_sync("介绍一下唐朝", stream=True)
 
 # Example 2: Custom user messages with message list input
 print("\n" + "=" * 60)
@@ -38,7 +38,7 @@ agent2 = Agent(
     debug_mode=True,
 )
 
-response = agent2.run(
+response = agent2.run_sync(
     messages=[
         {"role": "user", "content": "What is the color of a banana? Provide your answer in the xml tag <answer>."},
         {"role": "assistant", "content": "<answer>"},
@@ -60,4 +60,4 @@ agent3 = Agent(
     ],
 )
 
-agent3.print_response("如何用Python实现快速排序?", stream=True)
+agent3.print_response_sync("如何用Python实现快速排序?", stream=True)

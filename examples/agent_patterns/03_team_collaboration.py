@@ -90,7 +90,7 @@ def main():
     print("Team Collaboration Demo: News Article Writing")
     print("=" * 60)
     
-    team.print_response(
+    team.print_response_sync(
         """
         Find the 5 most relevant articles on a topic: 人工智能最新发展,
         Read each article and write a NYT worthy news article. 用中文写。

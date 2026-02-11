@@ -91,7 +91,7 @@ async def demo_single_server():
             )
 
             print("\nAsking about weather...")
-            await agent.aprint_response("What's the weather in Beijing? 中文回答")
+            await agent.print_response("What's the weather in Beijing? 中文回答")
 
     except ValueError as e:
         print(f"Config error: {e}")
@@ -130,7 +130,7 @@ async def demo_multiple_servers():
             )
 
             print("\nAsking about weather...")
-            await agent.aprint_response("What's the weather in Shanghai? 中文回答")
+            await agent.print_response("What's the weather in Shanghai? 中文回答")
 
     except ValueError as e:
         print(f"Config error: {e}")

@@ -63,7 +63,7 @@ def demo_workspace_memory():
     )
 
     print("\n--- First conversation ---")
-    response = agent.run("My name is Alice and I'm a data scientist")
+    response = agent.run_sync("My name is Alice and I'm a data scientist")
     print(f"Agent: {response.content[:200]}...")
 
     # Save important information to workspace memory
@@ -138,9 +138,9 @@ def demo_session_summary():
     )
 
     print("\n--- Conversation ---")
-    agent.print_response("Hi, I need help with Python decorators")
-    agent.print_response("Can you show me a simple example?")
-    agent.print_response("How about a decorator with arguments?")
+    agent.print_response_sync("Hi, I need help with Python decorators")
+    agent.print_response_sync("Can you show me a simple example?")
+    agent.print_response_sync("How about a decorator with arguments?")
 
     print("\n--- Session Summary ---")
     # Generate summary
@@ -180,7 +180,7 @@ def demo_combined_approach():
     print("  - AgentMemory: Session history and summaries")
 
     print("\n--- Conversation ---")
-    response = agent.run("I'm Bob, working on a FastAPI project")
+    response = agent.run_sync("I'm Bob, working on a FastAPI project")
     print(f"Agent: {response.content[:150]}...")
 
     # Save important info to workspace

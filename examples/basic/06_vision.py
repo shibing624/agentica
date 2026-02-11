@@ -25,7 +25,7 @@ def main():
     print("Example 1: Single Image Analysis")
     print("=" * 60)
     
-    response = agent.run(
+    response = agent.run_sync(
         "描述这张图片的内容",
         images=[
             "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
@@ -38,7 +38,7 @@ def main():
     print("Example 2: Multiple Images Comparison")
     print("=" * 60)
     
-    response = agent.run(
+    response = agent.run_sync(
         "一句话说明两张图片的不同",
         images=[
             "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
@@ -61,7 +61,7 @@ def main():
     base64_image = base64.b64encode(image_data).decode("utf-8")
     base64_image_with_prefix = f"data:image/jpeg;base64,{base64_image}"
     
-    response = agent.run(
+    response = agent.run_sync(
         "这张图片里有什么？",
         images=[base64_image_with_prefix]
     )

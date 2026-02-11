@@ -92,12 +92,12 @@ def main():
     print("=" * 60)
     print("示例1: 简单翻译成中文")
     print("=" * 60)
-    orchestrator.print_response("请将 'Hello, how are you today?' 翻译成中文")
+    orchestrator.print_response_sync("请将 'Hello, how are you today?' 翻译成中文")
     
     print("\n" + "=" * 60)
     print("示例2: 翻译成法语")
     print("=" * 60)
-    orchestrator.print_response("请将 'The weather is beautiful today' 翻译成法语")
+    orchestrator.print_response_sync("请将 'The weather is beautiful today' 翻译成法语")
     
     print("\n" + "=" * 60)
     print("示例3: 文本摘要")
@@ -109,12 +109,12 @@ def main():
     which refers to any system that perceives its environment and takes actions 
     that maximize its chance of achieving its goals.
     """
-    orchestrator.print_response(f"请总结以下文本：\n{long_text}")
+    orchestrator.print_response_sync(f"请总结以下文本：\n{long_text}")
     
     print("\n" + "=" * 60)
     print("示例4: 链式操作 - 先摘要再翻译成中文")
     print("=" * 60)
-    orchestrator.print_response(
+    orchestrator.print_response_sync(
         f"请先总结这段文本，然后将摘要翻译成中文：\n{long_text}"
     )
 

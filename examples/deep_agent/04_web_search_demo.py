@@ -38,7 +38,7 @@ def web_search_demo():
         # debug_mode=True,
     )
 
-    response = agent.run(
+    response = agent.run_sync(
         "Search for the latest news about large language models. "
         "Provide a brief summary with sources."
     )
@@ -59,7 +59,7 @@ def url_fetch_demo():
         # debug_mode=True,
     )
 
-    response = agent.run(
+    response = agent.run_sync(
         "Fetch the content from https://en.wikipedia.org/wiki/Artificial_intelligence "
         "and provide a brief summary of the main topics covered."
     )

@@ -70,7 +70,7 @@ async def mcp_toolkit_with_agent_demo() -> None:
                 print(f" - {tool.name}: {list(tool.functions.keys())}")
 
             print("\nTesting agent with weather tool:")
-            await agent.aprint_response("查询北京市今天的气温，并用温度的值乘以 314159.14=？")
+            await agent.print_response("查询北京市今天的气温，并用温度的值乘以 314159.14=？")
     except Exception as e:
         logger.error(f"Error in MCPToolkit with agent demo: {e}")
         sys.exit(1)

@@ -291,7 +291,7 @@ When analyzing data:
                 print("Ready to analyze data...")
 
                 # Uncomment to run actual analysis
-                # response = agent.run("Analyze: Sales Q1=100k, Q2=150k, Q3=120k, Q4=200k")
+                # response = agent.run_sync("Analyze: Sales Q1=100k, Q2=150k, Q3=120k, Q4=200k")
                 # print(response.content)
 
 

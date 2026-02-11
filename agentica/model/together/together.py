@@ -1,6 +1,9 @@
+import asyncio
+import functools
+
 import json
 from os import getenv
-from typing import Optional, List, Iterator, Dict, Any
+from typing import Optional, List, AsyncIterator, Dict, Any
 
 from agentica.model.message import Message
 from agentica.model.openai.chat import StreamData, Metrics
@@ -35,9 +38,11 @@ class Together(OpenAILike):
     base_url: str = "https://api.together.xyz/v1"
     monkey_patch: bool = False
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         if not self.monkey_patch:
-            yield from super().response_stream(messages)
+            async for _resp in super().response_stream(messages):
+
+                yield _resp
             return
 
         self.sanitize_messages(messages)
@@ -50,7 +55,7 @@ class Together(OpenAILike):
 
         # -*- Generate response
         metrics.response_timer.start()
-        for response in self.invoke_stream(messages=messages):
+        async for response in self.invoke_stream(messages=messages):
             if len(response.choices) > 0:
                 metrics.completion_tokens += 1
                 if metrics.completion_tokens == 1:
@@ -159,7 +164,7 @@ class Together(OpenAILike):
                     continue
                 function_calls_to_run.append(_function_call)
 
-            for intermediate_model_response in self.run_function_calls(
+            async for intermediate_model_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results,
                     tool_role=tool_role
             ):
@@ -168,4 +173,6 @@ class Together(OpenAILike):
             if len(function_call_results) > 0:
                 messages.extend(function_call_results)
             # -*- Yield new response using results of tool calls
-            yield from self.response_stream(messages=messages)
+            async for _resp in self.response_stream(messages=messages):
+
+                yield _resp

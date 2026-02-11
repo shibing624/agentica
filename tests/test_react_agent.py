@@ -58,7 +58,7 @@ class AgentMultiRoundTest(unittest.TestCase):
         )
         
         # Run the agent
-        response = agent.run("What is the capital of China?")
+        response = agent.run_sync("What is the capital of China?")
         self.assertIsNotNone(response)
 
 

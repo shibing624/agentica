@@ -65,7 +65,7 @@ def demo_skill_injection():
             actual_message = user_input
 
         print(f"\nProcessing: '{actual_message}'")
-        # In real usage, you would call: agent.run(actual_message)
+        # In real usage, you would call: agent.run_sync(actual_message)
 
     else:
         print(f"\nNo skill trigger detected in: '{user_input}'")
@@ -121,7 +121,7 @@ def demo_skill_based_agent():
 
         # Process the message
         print(f"Message: {actual_message}")
-        # response = agent.run(actual_message)
+        # response = agent.run_sync(actual_message)
         # return response
 
     # Test with different inputs
@@ -166,7 +166,7 @@ def demo_custom_skill_with_agent():
                 ],
                 tools=[ShellTool()],
             )
-            response = agent.run("What are the main modules in numpy ?")
+            response = agent.run_sync("What are the main modules in numpy ?")
             print(response.content)
     else:
         print(f"Custom skill directory not found: {custom_skill_dir}")

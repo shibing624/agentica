@@ -32,14 +32,14 @@ def main():
         ],
     )
     
-    agent.print_response("计算斐波那契数列的前20个数")
+    agent.print_response_sync("计算斐波那契数列的前20个数")
     
     # Example 2: Data analysis
     print("\n" + "=" * 60)
     print("Example 2: Data Analysis")
     print("=" * 60)
     
-    agent.print_response(
+    agent.print_response_sync(
         "创建一个包含10个随机数的列表，计算它们的平均值、中位数和标准差"
     )
     
@@ -53,7 +53,7 @@ def main():
         tools=[CodeTool()],
     )
     
-    agent2.print_response("写一个冒泡排序的Python函数，并解释它的工作原理")
+    agent2.print_response_sync("写一个冒泡排序的Python函数，并解释它的工作原理")
 
 
 if __name__ == "__main__":

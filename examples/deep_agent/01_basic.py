@@ -37,7 +37,7 @@ def basic_example():
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
 
-    agent.print_response("List all Python files in the current directory and count them", 
+    agent.print_response_sync("List all Python files in the current directory and count them", 
     show_tool_calls=True, stream=True)
 
 
@@ -79,7 +79,7 @@ def with_custom_tools_example():
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
 
-    agent.print_response("Calculate (1111.2 * 22.1222) + (3333.3 / 4444.43)=?")
+    agent.print_response_sync("Calculate (1111.2 * 22.1222) + (3333.3 / 4444.43)=?")
 
 
 def complex_deep_agent():
@@ -112,12 +112,12 @@ def complex_deep_agent():
     )
     print(f"DeepAgent builtin tools: {deep_agent.get_builtin_tool_names()}")
     print(f"DeepAgent: {deep_agent}")
-    deep_agent.print_response("List all Python files in the current directory and count them")
+    deep_agent.print_response_sync("List all Python files in the current directory and count them")
     while True:
         user_input = input("Enter your command (or 'quit' to exit): ")
         if user_input.lower() == 'quit':
             break
-        deep_agent.print_response(user_input)
+        deep_agent.print_response_sync(user_input)
         print("-" * 60)
         print("\n")
 

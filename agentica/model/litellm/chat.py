@@ -23,7 +23,7 @@ Reference: https://docs.litellm.ai/docs/providers
 """
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Union
+from typing import Optional, List, AsyncIterator, Dict, Any, Union
 
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -141,9 +141,7 @@ class LiteLLM(Model):
     metadata: Optional[Dict[str, Any]] = None
     
     # Thinking/Reasoning parameters for DeepSeek, Claude, etc.
-    # thinking: {"type": "enabled"} or {"type": "disabled"}
     thinking: Optional[Dict[str, Any]] = None
-    # reasoning_effort: "low", "medium", "high" (maps to thinking enabled)
     reasoning_effort: Optional[str] = None
     
     # Additional request parameters
@@ -167,7 +165,6 @@ class LiteLLM(Model):
         if self.api_key:
             return self.api_key
             
-        # Auto-detect API key based on provider prefix
         provider = self.id.split("/")[0].lower() if "/" in self.id else ""
         
         env_key_map = {
@@ -184,7 +181,7 @@ class LiteLLM(Model):
             "groq": "GROQ_API_KEY",
             "mistral": "MISTRAL_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",
-            "zai": "ZAI_API_KEY",  # ZhipuAI
+            "zai": "ZAI_API_KEY",
             "zhipuai": "ZHIPUAI_API_KEY",
         }
         
@@ -219,7 +216,7 @@ class LiteLLM(Model):
         if self.metadata is not None:
             params["metadata"] = self.metadata
         if self.base_url is not None:
-            params["api_base"] = self.base_url  # litellm uses 'api_base' internally
+            params["api_base"] = self.base_url
         if self.api_version is not None:
             params["api_version"] = self.api_version
         
@@ -232,7 +229,7 @@ class LiteLLM(Model):
         # Add tools if present
         if self.tools is not None:
             tools_for_api = self.get_tools_for_api()
-            if tools_for_api:  # Only add tools if list is not empty
+            if tools_for_api:
                 params["tools"] = tools_for_api
                 params["tool_choice"] = self.tool_choice or "auto"
             
@@ -263,37 +260,8 @@ class LiteLLM(Model):
             
         return msg_dict
     
-    def invoke(self, messages: List[Message]) -> Any:
-        """
-        Send a completion request to LiteLLM.
-        
-        Args:
-            messages: List of messages to send
-            
-        Returns:
-            LiteLLM response object
-        """
-        from litellm import completion
-        api_key = self._get_api_key()
-        
-        response = completion(
-            model=self.id,
-            messages=[self.format_message(m) for m in messages],
-            api_key=api_key,
-            **self.request_kwargs,
-        )
-        return response
-    
-    async def ainvoke(self, messages: List[Message]) -> Any:
-        """
-        Send an async completion request to LiteLLM.
-        
-        Args:
-            messages: List of messages to send
-            
-        Returns:
-            LiteLLM response object
-        """
+    async def invoke(self, messages: List[Message]) -> Any:
+        """Send an async completion request to LiteLLM."""
         from litellm import acompletion
         api_key = self._get_api_key()
         
@@ -305,38 +273,8 @@ class LiteLLM(Model):
         )
         return response
     
-    def invoke_stream(self, messages: List[Message]) -> Iterator[Any]:
-        """
-        Send a streaming completion request to LiteLLM.
-        
-        Args:
-            messages: List of messages to send
-            
-        Yields:
-            Streaming response chunks
-        """
-        from litellm import completion
-        api_key = self._get_api_key()
-        
-        response = completion(
-            model=self.id,
-            messages=[self.format_message(m) for m in messages],
-            api_key=api_key,
-            stream=True,
-            **self.request_kwargs,
-        )
-        yield from response
-    
-    async def ainvoke_stream(self, messages: List[Message]) -> Any:
-        """
-        Send an async streaming completion request to LiteLLM.
-        
-        Args:
-            messages: List of messages to send
-            
-        Returns:
-            Async iterator of streaming response chunks
-        """
+    async def invoke_stream(self, messages: List[Message]) -> Any:
+        """Send an async streaming completion request to LiteLLM."""
         from litellm import acompletion
         api_key = self._get_api_key()
         
@@ -408,18 +346,17 @@ class LiteLLM(Model):
                 for tc in tool_calls
             ]
         
-        # Update metrics
         self._update_usage_metrics(assistant_message, metrics, response_usage)
         return assistant_message
     
-    def _handle_tool_calls(
+    async def _handle_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
             model_response: ModelResponse,
             tool_role: str = "tool",
     ) -> Optional[ModelResponse]:
-        """Handle tool calls in assistant message."""
+        """Handle tool calls in assistant message (async-only)."""
         if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
             if model_response.content is None:
                 model_response.content = ""
@@ -446,7 +383,7 @@ class LiteLLM(Model):
                     continue
                 function_calls_to_run.append(_function_call)
             
-            for _ in self.run_function_calls(
+            async for _ in self.run_function_calls(
                     function_calls=function_calls_to_run,
                     function_call_results=function_call_results,
                     tool_role=tool_role
@@ -459,115 +396,43 @@ class LiteLLM(Model):
             return model_response
         return None
     
-    def response(self, messages: List[Message]) -> ModelResponse:
-        """
-        Generate a response from the model.
-        
-        Args:
-            messages: List of messages to send
-            
-        Returns:
-            ModelResponse with the generated content
-        """
+    async def response(self, messages: List[Message]) -> ModelResponse:
+        """Generate a response from the model (async-only)."""
         self.sanitize_messages(messages)
         self._log_messages(messages)
         model_response = ModelResponse()
         metrics = Metrics()
         
-        # Generate response
         metrics.response_timer.start()
-        response = self.invoke(messages)
+        response = await self.invoke(messages)
         metrics.response_timer.stop()
         
-        # Parse response
         response_message = response.choices[0].message
         response_usage = getattr(response, 'usage', None)
         
-        # Create assistant message
         assistant_message = self._create_assistant_message(
             response_message=response_message,
             metrics=metrics,
             response_usage=response_usage
         )
         
-        # Add assistant message to messages
         messages.append(assistant_message)
-        
-        # Log response and metrics
         assistant_message.log()
         metrics.log()
         
-        # Update model response
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
         if assistant_message.reasoning_content is not None:
             model_response.reasoning_content = assistant_message.reasoning_content
         
-        # Handle tool calls
         tool_role = "tool"
-        if self._handle_tool_calls(
+        if await self._handle_tool_calls(
                 assistant_message=assistant_message,
                 messages=messages,
                 model_response=model_response,
                 tool_role=tool_role,
         ) is not None:
-            return self.handle_post_tool_call_messages(messages=messages, model_response=model_response)
-        
-        return model_response
-    
-    async def aresponse(self, messages: List[Message]) -> ModelResponse:
-        """
-        Generate an async response from the model.
-        
-        Args:
-            messages: List of messages to send
-            
-        Returns:
-            ModelResponse with the generated content
-        """
-        self.sanitize_messages(messages)
-        self._log_messages(messages)
-        model_response = ModelResponse()
-        metrics = Metrics()
-        
-        # Generate response
-        metrics.response_timer.start()
-        response = await self.ainvoke(messages)
-        metrics.response_timer.stop()
-        
-        # Parse response
-        response_message = response.choices[0].message
-        response_usage = getattr(response, 'usage', None)
-        
-        # Create assistant message
-        assistant_message = self._create_assistant_message(
-            response_message=response_message,
-            metrics=metrics,
-            response_usage=response_usage
-        )
-        
-        # Add assistant message to messages
-        messages.append(assistant_message)
-        
-        # Log response and metrics
-        assistant_message.log()
-        metrics.log()
-        
-        # Update model response
-        if assistant_message.content is not None:
-            model_response.content = assistant_message.get_content_string()
-        if assistant_message.reasoning_content is not None:
-            model_response.reasoning_content = assistant_message.reasoning_content
-        
-        # Handle tool calls
-        tool_role = "tool"
-        if self._handle_tool_calls(
-                assistant_message=assistant_message,
-                messages=messages,
-                model_response=model_response,
-                tool_role=tool_role,
-        ) is not None:
-            return await self.ahandle_post_tool_call_messages(messages=messages, model_response=model_response)
+            return await self.handle_post_tool_call_messages(messages=messages, model_response=model_response)
         
         return model_response
     
@@ -590,13 +455,13 @@ class LiteLLM(Model):
             assistant_message.metrics["total_tokens"] = metrics.total_tokens
             self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + metrics.total_tokens
     
-    def _handle_stream_tool_calls(
+    async def _handle_stream_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
             tool_role: str = "tool",
-    ) -> Iterator[ModelResponse]:
-        """Handle tool calls for streaming response."""
+    ) -> AsyncIterator[ModelResponse]:
+        """Handle tool calls for streaming response (async-only)."""
         if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
             function_calls_to_run: List[FunctionCall] = []
             function_call_results: List[Message] = []
@@ -620,7 +485,7 @@ class LiteLLM(Model):
                     continue
                 function_calls_to_run.append(_function_call)
             
-            for function_call_response in self.run_function_calls(
+            async for function_call_response in self.run_function_calls(
                     function_calls=function_calls_to_run,
                     function_call_results=function_call_results,
                     tool_role=tool_role
@@ -656,16 +521,8 @@ class LiteLLM(Model):
         
         return list(tool_calls_by_index.values())
     
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
-        """
-        Generate a streaming response from the model.
-        
-        Args:
-            messages: List of messages to send
-            
-        Yields:
-            ModelResponse chunks with incremental content
-        """
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
+        """Generate a streaming response from the model (async-only)."""
         self.sanitize_messages(messages)
         self._log_messages(messages)
         
@@ -673,7 +530,7 @@ class LiteLLM(Model):
         metrics = Metrics()
         
         metrics.response_timer.start()
-        for chunk in self.invoke_stream(messages):
+        async for chunk in self.invoke_stream(messages):
             if chunk.choices and len(chunk.choices) > 0:
                 if metrics.completion_tokens == 0:
                     metrics.time_to_first_token = metrics.response_timer.elapsed
@@ -714,102 +571,20 @@ class LiteLLM(Model):
         if stream_data.response_tool_calls:
             assistant_message.tool_calls = self._merge_tool_call_deltas(stream_data.response_tool_calls)
         
-        # Update metrics
         self._update_stream_metrics(assistant_message=assistant_message, metrics=metrics)
         
-        # Add assistant message to messages
         messages.append(assistant_message)
-        
-        # Log response and metrics
         assistant_message.log()
         metrics.log()
         
         # Handle tool calls
         if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
             tool_role = "tool"
-            yield from self._handle_stream_tool_calls(
+            async for tool_call_response in self._handle_stream_tool_calls(
                 assistant_message=assistant_message,
                 messages=messages,
                 tool_role=tool_role
-            )
-            yield from self.handle_post_tool_call_messages_stream(messages=messages)
-    
-    async def aresponse_stream(self, messages: List[Message]) -> Any:
-        """
-        Generate an async streaming response from the model.
-        
-        Args:
-            messages: List of messages to send
-            
-        Yields:
-            ModelResponse chunks with incremental content
-        """
-        self.sanitize_messages(messages)
-        self._log_messages(messages)
-        
-        stream_data = StreamData()
-        metrics = Metrics()
-        
-        metrics.response_timer.start()
-        async for chunk in self.ainvoke_stream(messages):
-            if chunk.choices and len(chunk.choices) > 0:
-                if metrics.completion_tokens == 0:
-                    metrics.time_to_first_token = metrics.response_timer.elapsed
-                metrics.completion_tokens += 1
-                
-                delta = chunk.choices[0].delta
-                
-                # Handle reasoning content
-                if hasattr(delta, "reasoning_content") and delta.reasoning_content:
-                    stream_data.response_reasoning_content += delta.reasoning_content
-                    yield ModelResponse(reasoning_content=delta.reasoning_content)
-                
-                # Handle content
-                if hasattr(delta, "content") and delta.content:
-                    stream_data.response_content += delta.content
-                    yield ModelResponse(content=delta.content)
-                
-                # Handle tool calls
-                if hasattr(delta, "tool_calls") and delta.tool_calls:
-                    if stream_data.response_tool_calls is None:
-                        stream_data.response_tool_calls = []
-                    stream_data.response_tool_calls.extend(delta.tool_calls)
-            
-            # Handle usage in streaming
-            if hasattr(chunk, "usage") and chunk.usage:
-                metrics.input_tokens = getattr(chunk.usage, 'prompt_tokens', 0)
-                metrics.output_tokens = getattr(chunk.usage, 'completion_tokens', 0)
-                metrics.total_tokens = getattr(chunk.usage, 'total_tokens', 0)
-        
-        metrics.response_timer.stop()
-        
-        # Create assistant message
-        assistant_message = Message(role="assistant")
-        if stream_data.response_content:
-            assistant_message.content = stream_data.response_content
-        if stream_data.response_reasoning_content:
-            assistant_message.reasoning_content = stream_data.response_reasoning_content
-        if stream_data.response_tool_calls:
-            assistant_message.tool_calls = self._merge_tool_call_deltas(stream_data.response_tool_calls)
-        
-        # Update metrics
-        self._update_stream_metrics(assistant_message=assistant_message, metrics=metrics)
-        
-        # Add assistant message to messages
-        messages.append(assistant_message)
-        
-        # Log response and metrics
-        assistant_message.log()
-        metrics.log()
-        
-        # Handle tool calls
-        if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            tool_role = "tool"
-            for tool_call_response in self._handle_stream_tool_calls(
-                    assistant_message=assistant_message,
-                    messages=messages,
-                    tool_role=tool_role
             ):
                 yield tool_call_response
-            async for post_tool_call_response in self.ahandle_post_tool_call_messages_stream(messages=messages):
+            async for post_tool_call_response in self.handle_post_tool_call_messages_stream(messages=messages):
                 yield post_tool_call_response

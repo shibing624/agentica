@@ -1210,7 +1210,7 @@ Here is a plan about how to solve the task step-by-step which you must follow:
         img = _reload_image(som_screenshot)
         message = UserMessage(content=observe_prompt, images=[img])
         self.web_agent.reset()
-        resp = await self.web_agent.arun(message)
+        resp = await self.web_agent.run(message)
         resp_content = resp.content
 
         resp_dict = _parse_json_output(resp_content, logger)
@@ -1309,7 +1309,7 @@ Here is a plan about how to solve the task step-by-step which you must follow:
         )
         message = UserMessage(content=prompt)
         self.web_agent.reset()
-        resp = await self.web_agent.arun(message)
+        resp = await self.web_agent.run(message)
         return resp.content
 
     async def _task_planning(self, task_prompt: str, start_url: str) -> str:
@@ -1320,7 +1320,7 @@ Here is a plan about how to solve the task step-by-step which you must follow:
 
         message = UserMessage(content=planning_prompt)
         self.planning_agent.reset()
-        resp = await self.planning_agent.arun(message)
+        resp = await self.planning_agent.run(message)
         return resp.content
 
     async def _task_replanning(
@@ -1334,7 +1334,7 @@ Here is a plan about how to solve the task step-by-step which you must follow:
             history=self.history[-self.history_window:],
         )
         self.planning_agent.reset()
-        resp = await self.planning_agent.arun(replanning_prompt)
+        resp = await self.planning_agent.run(replanning_prompt)
         resp_dict = _parse_json_output(resp.content, logger)
 
         if_need_replan_eval = resp_dict.get("if_need_replan", False)

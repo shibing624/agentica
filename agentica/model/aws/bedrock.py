@@ -1,8 +1,11 @@
 import json
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Tuple
+from typing import Optional, List, AsyncIterator, Dict, Any, Tuple
 
 from agentica.model.aws.api_client import AwsApiClient
+import asyncio
+import functools
+
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -101,7 +104,7 @@ class AwsBedrock(Model):
     def api_kwargs(self) -> Dict[str, Any]:
         return {}
 
-    def invoke(self, body: Dict[str, Any]) -> Dict[str, Any]:
+    async def invoke(self, body: Dict[str, Any]) -> Dict[str, Any]:
         """
         Invoke the Bedrock API.
 
@@ -111,9 +114,15 @@ class AwsBedrock(Model):
         Returns:
             Dict[str, Any]: The response from the Bedrock API.
         """
-        return self.bedrock_runtime_client.converse(**body)
+        loop = asyncio.get_running_loop()
 
-    def invoke_stream(self, body: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
+        return await loop.run_in_executor(
+
+            None, functools.partial(self.bedrock_runtime_client.converse, **body)
+
+        )
+
+    async def invoke_stream(self, body: Dict[str, Any]) -> AsyncIterator[Dict[str, Any]]:
         """
         Invoke the Bedrock API with streaming.
 
@@ -123,7 +132,13 @@ class AwsBedrock(Model):
         Returns:
             Iterator[Dict[str, Any]]: The streamed response.
         """
-        response = self.bedrock_runtime_client.converse_stream(**body)
+        loop = asyncio.get_running_loop()
+
+        response = await loop.run_in_executor(
+
+            None, functools.partial(self.bedrock_runtime_client.converse_stream, **body)
+
+        )
         stream = response.get("stream")
         if stream:
             for event in stream:
@@ -180,7 +195,7 @@ class AwsBedrock(Model):
 
         return tool_ids, tool_calls
 
-    def _handle_tool_calls(
+    async def _handle_tool_calls(
         self, assistant_message: Message, messages: List[Message], model_response: ModelResponse, tool_ids
     ) -> Optional[ModelResponse]:
         """
@@ -224,7 +239,7 @@ class AwsBedrock(Model):
                     continue
                 function_calls_to_run.append(_function_call)
 
-            for _ in self.run_function_calls(
+            async for _ in self.run_function_calls(
                 function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
             ):
                 pass
@@ -280,7 +295,7 @@ class AwsBedrock(Model):
             assistant_message.metrics["total_tokens"] = total_tokens
             self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + total_tokens
 
-    def response(self, messages: List[Message]) -> ModelResponse:
+    async def response(self, messages: List[Message]) -> ModelResponse:
         """
         Generate a response from the Bedrock API.
 
@@ -298,7 +313,7 @@ class AwsBedrock(Model):
         response_timer = Timer()
         response_timer.start()
         body = self.get_request_body(messages)
-        response: Dict[str, Any] = self.invoke(body=body)
+        response: Dict[str, Any] = await self.invoke(body=body)
         response_timer.stop()
 
         # Parse response
@@ -325,8 +340,8 @@ class AwsBedrock(Model):
             assistant_message.tool_calls = tool_calls
 
         # Run tool calls
-        if self._handle_tool_calls(assistant_message, messages, model_response, tool_ids):
-            response_after_tool_calls = self.response(messages=messages)
+        if await self._handle_tool_calls(assistant_message, messages, model_response, tool_ids):
+            response_after_tool_calls = await self.response(messages=messages)
             if response_after_tool_calls.content is not None:
                 if model_response.content is None:
                     model_response.content = ""
@@ -357,7 +372,7 @@ class AwsBedrock(Model):
         assistant_message.tool_calls = tool_calls
         return assistant_message
 
-    def _handle_stream_tool_calls(self, assistant_message: Message, messages: List[Message], tool_ids: List[str]):
+    async def _handle_stream_tool_calls(self, assistant_message: Message, messages: List[Message], tool_ids: List[str]):
         """
         Handle tool calls in the assistant message.
 
@@ -392,7 +407,7 @@ class AwsBedrock(Model):
                 continue
             function_calls_to_run.append(_function_call)
 
-        for _ in self.run_function_calls(
+        async for _ in self.run_function_calls(
             function_calls=function_calls_to_run, function_call_results=function_call_results, tool_role=tool_role
         ):
             pass
@@ -453,7 +468,7 @@ class AwsBedrock(Model):
         assistant_message.metrics["total_tokens"] = stream_data.response_total_tokens
         self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + stream_data.response_total_tokens
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """
         Stream the response from the Bedrock API.
 
@@ -479,7 +494,7 @@ class AwsBedrock(Model):
         response = self.invoke_stream(body=request_body)
 
         # Process the streaming response
-        for chunk in response:
+        async for chunk in response:
             if "contentBlockStart" in chunk:
                 tool = chunk["contentBlockStart"]["start"].get("toolUse")
                 if tool:
@@ -558,5 +573,9 @@ class AwsBedrock(Model):
 
         # Handle tool calls if any
         if tool_calls and self.run_tools:
-            yield from self._handle_stream_tool_calls(assistant_message, messages, tool_ids)
-            yield from self.response_stream(messages=messages)
+            async for _resp in self._handle_stream_tool_calls(assistant_message, messages, tool_ids):
+
+                yield _resp
+            async for _resp in self.response_stream(messages=messages):
+
+                yield _resp

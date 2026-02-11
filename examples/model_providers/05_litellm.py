@@ -30,7 +30,7 @@ def basic_example():
         model=LiteLLM(id="openai/gpt-4o-mini"),
     )
     
-    response = agent.run("一句话介绍北京")
+    response = agent.run_sync("一句话介绍北京")
     print(f"Response:\n{response}")
 
 
@@ -56,7 +56,7 @@ def tool_calling_example():
         instructions="You are a weather assistant. Use the get_weather tool to answer weather questions.",
     )
     
-    response = agent.run("What's the weather like in Beijing?")
+    response = agent.run_sync("What's the weather like in Beijing?")
     print(f"Response:\n{response.content}")
 
 
@@ -72,7 +72,7 @@ def streaming_example():
     )
     
     print("Streaming response:")
-    for chunk in agent.run("Write a short poem about AI.", stream=True):
+    for chunk in agent.run_sync("Write a short poem about AI.", stream=True):
         if chunk.content:
             print(chunk.content, end="", flush=True)
     print()
@@ -92,7 +92,7 @@ async def async_example():
     queries = ["What is Python?", "What is JavaScript?", "What is Rust?"]
     
     async def run_query(query: str) -> str:
-        response = await agent.arun(query)
+        response = await agent.run(query)
         return f"Q: {query}\nA: {response.content[:100]}..."
     
     results = await asyncio.gather(*[run_query(q) for q in queries])

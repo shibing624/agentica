@@ -48,7 +48,7 @@ def main():
         instructions="You are a helpful assistant.",
     )
     
-    agent.print_response("介绍一下人工智能的发展历史", stream=True)
+    agent.print_response_sync("介绍一下人工智能的发展历史", stream=True)
 
 
 if __name__ == "__main__":

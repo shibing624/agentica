@@ -55,7 +55,7 @@ async with mcp_tool:
         tools=[ShellTool(), mcp_tool]
     )
 
-    await agent.aprint_response("Use the weather tool to check the forecast for Beijing")
+    await agent.print_response("Use the weather tool to check the forecast for Beijing")
 ```
 
 ### Using Low-Level MCPClient and Server Classes

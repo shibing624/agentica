@@ -92,7 +92,7 @@ class DataPipeline(Workflow):
     def run(self, raw_text: str) -> RunResponse:
         """Execute the data pipeline."""
         # Step 1: LLM extraction (cheap model)
-        extract_response = self.extractor.run(
+        extract_response = self.extractor.run_sync(
             f"Extract structured data from this text:\n\n{raw_text}"
         )
         if not extract_response or not isinstance(extract_response.content, ExtractedData):
@@ -113,7 +113,7 @@ class DataPipeline(Workflow):
             f"- {item.name} ({item.category}): value={item.value}, source='{item.source}'"
             for item in validated.items
         )
-        analysis_response = self.analyst.run(
+        analysis_response = self.analyst.run_sync(
             f"Analyze these validated data items:\n{items_text}"
         )
         if not analysis_response or not isinstance(analysis_response.content, AnalysisReport):

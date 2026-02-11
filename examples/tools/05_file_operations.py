@@ -30,19 +30,19 @@ def main():
     print("=" * 60)
     print("Example 1: List Files")
     print("=" * 60)
-    agent.print_response("列出当前目录下的所有Python文件")
+    agent.print_response_sync("列出当前目录下的所有Python文件")
 
     # Example 2: Read file
     print("\n" + "=" * 60)
     print("Example 2: Read File")
     print("=" * 60)
-    agent.print_response("读取当前目录下README.md的内容摘要")
+    agent.print_response_sync("读取当前目录下README.md的内容摘要")
 
     # Example 3: Create and write file
     print("\n" + "=" * 60)
     print("Example 3: Create File")
     print("=" * 60)
-    agent.print_response(
+    agent.print_response_sync(
         "在outputs目录下创建一个test_hello.py文件，内容是打印Hello World"
     )
 
@@ -50,7 +50,7 @@ def main():
     print("\n" + "=" * 60)
     print("Example 4: Edit File")
     print("=" * 60)
-    agent.print_response(
+    agent.print_response_sync(
         "修改outputs/test_hello.py，添加一行打印当前时间的代码"
     )
 
@@ -58,13 +58,13 @@ def main():
     print("\n" + "=" * 60)
     print("Example 5: Workspace Navigation")
     print("=" * 60)
-    agent.print_response("查看当前工作目录的结构")
+    agent.print_response_sync("查看当前工作目录的结构")
 
     # Cleanup
     print("\n" + "=" * 60)
     print("Cleanup")
     print("=" * 60)
-    agent.print_response("删除outputs/test_hello.py文件")
+    agent.print_response_sync("删除outputs/test_hello.py文件")
 
 
 if __name__ == "__main__":

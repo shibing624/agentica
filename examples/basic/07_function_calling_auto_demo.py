@@ -270,13 +270,13 @@ def demo_agentica_agent():
 
         # 非流式调用 - 最简单的方式
         print("\n【非流式输出】")
-        response = agent.run(query)
+        response = agent.run_sync(query)
         print(response.content)
 
         # 流式调用 - 边执行边输出
         print("\n" + "-" * 70)
         print("\n【流式输出】")
-        for chunk in agent.run("查询深圳天气", stream=True):
+        for chunk in agent.run_sync("查询深圳天气", stream=True):
             if chunk.content:
                 print(chunk.content, end="", flush=True)
         print()

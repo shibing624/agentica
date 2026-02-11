@@ -37,7 +37,7 @@ def main():
         instructions="You are a helpful assistant. Please respond in Chinese.",
     )
     
-    agent.print_response("什么是深度学习?", stream=True)
+    agent.print_response_sync("什么是深度学习?", stream=True)
     
     # Example 3: DeepSeek Reasoner (if available)
     print("\n" + "=" * 60)
@@ -50,7 +50,7 @@ def main():
             model=reasoner,
             instructions="You are a reasoning assistant. Think step by step.",
         )
-        agent_reasoner.print_response("计算 15 * 23 + 47", stream=True)
+        agent_reasoner.print_response_sync("计算 15 * 23 + 47", stream=True)
     except Exception as e:
         print(f"DeepSeek Reasoner not available: {e}")
 

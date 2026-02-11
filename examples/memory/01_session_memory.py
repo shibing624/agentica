@@ -46,9 +46,9 @@ agent = Agent(
     add_history_to_messages=False,
 )
 
-r = agent.run("李四住在北京，一家三口住大别墅")
+r = agent.run_sync("李四住在北京，一家三口住大别墅")
 print(r)
-r = agent.run("我前面问了啥")
+r = agent.run_sync("我前面问了啥")
 print(r)
 
 # ============================================================
@@ -81,12 +81,12 @@ agent = Agent(
 
 # First conversation - Agent will remember user info
 print("\n--- First conversation ---")
-r = agent.run("My name is John Doe and I like to hike in the mountains on weekends.")
+r = agent.run_sync("My name is John Doe and I like to hike in the mountains on weekends.")
 print(r)
 
 # Query about hobbies - Agent should remember
 print("\n--- Query about hobbies ---")
-r = agent.run("What are my hobbies?")
+r = agent.run_sync("What are my hobbies?")
 print(r)
 
 # Get user memories
@@ -97,7 +97,7 @@ for mem in memories:
 
 # Update preferences
 print("\n--- Update preferences ---")
-r = agent.run("Ok I don't like hiking anymore, I like to play soccer instead.")
+r = agent.run_sync("Ok I don't like hiking anymore, I like to play soccer instead.")
 print(r)
 
 # Check updated memories
@@ -126,12 +126,12 @@ agent2 = Agent(
 )
 
 print("\n--- 中文对话 ---")
-print(agent2.run("我叫张三，是一名软件工程师，住在北京"))
-print(agent2.run("我最喜欢的电影是《花样年华》"))
-print(agent2.run("我喜欢打篮球和游泳"))
+print(agent2.run_sync("我叫张三，是一名软件工程师，住在北京"))
+print(agent2.run_sync("我最喜欢的电影是《花样年华》"))
+print(agent2.run_sync("我喜欢打篮球和游泳"))
 
 print("\n--- 查询用户信息 ---")
-print(agent2.run("你还记得我的职业和爱好吗？"))
+print(agent2.run_sync("你还记得我的职业和爱好吗？"))
 
 print("\n--- 张三的记忆 ---")
 memories = agent2.get_user_memories(user_id=chinese_user_id)

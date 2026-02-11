@@ -61,7 +61,7 @@ You are a helpful AI assistant specialized in Python programming.
     )
 
     # Run agent
-    response = agent.run("用 Python 写一个快速排序算法")
+    response = agent.run_sync("用 Python 写一个快速排序算法")
     print("\n=== Response ===")
     print(response.content)
 
@@ -79,7 +79,7 @@ You are a helpful AI assistant specialized in Python programming.
         workspace_path=str(workspace_path),
         model=ZhipuAI(model="glm-4-flash"),
     )
-    response2 = agent2.run("你能帮我做什么？")
+    response2 = agent2.run_sync("你能帮我做什么？")
     print(response2.content)
 
     # Clean up

@@ -80,7 +80,7 @@ def demo_research_agent():
         # Example research question (uncomment to run)
         # question = "帮我调研 2024 年人工智能的主要发展趋势，写出简短的中文报告。"
         # print(f"\nResearch Question: {question}")
-        # response = agent.run(question)
+        # response = agent.run_sync(question)
         # print(f"\nResearch Report:\n{response.content}")
 
         print("\nTo run actual research, uncomment the code above.")

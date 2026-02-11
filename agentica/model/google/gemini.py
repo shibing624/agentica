@@ -3,7 +3,10 @@ import time
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, List, Iterator, Dict, Any, Union, Callable
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, Callable
+
+import asyncio
+import functools
 
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -409,7 +412,7 @@ class Gemini(Model):
                 except Exception as e:
                     logger.warning(f"Could not add function {tool}: {e}")
 
-    def invoke(self, messages: List[Message]):
+    async def invoke(self, messages: List[Message]):
         """
         Invokes the model with a list of messages and returns the response.
 
@@ -419,9 +422,15 @@ class Gemini(Model):
         Returns:
             GenerateContentResponse: The response from the model.
         """
-        return self.get_client().generate_content(contents=self.format_messages(messages))
+        loop = asyncio.get_running_loop()
 
-    def invoke_stream(self, messages: List[Message]):
+        return await loop.run_in_executor(
+
+            None, functools.partial(self.get_client().generate_content, contents=self.format_messages(messages))
+
+        )
+
+    async def invoke_stream(self, messages: List[Message]):
         """
         Invokes the model with a list of messages and returns the response as a stream.
 
@@ -431,10 +440,23 @@ class Gemini(Model):
         Returns:
             Iterator[GenerateContentResponse]: The response from the model as a stream.
         """
-        yield from self.get_client().generate_content(
-            contents=self.format_messages(messages),
-            stream=True,
+        loop = asyncio.get_running_loop()
+
+        result = await loop.run_in_executor(
+
+            None, functools.partial(
+
+                self.get_client().generate_content,
+
+                contents=self.format_messages(messages), stream=True,
+
+            )
+
         )
+
+        for item in result:
+
+            yield item
 
     def update_usage_metrics(
             self,
@@ -577,7 +599,7 @@ class Gemini(Model):
                 combined_parts.append(function_response)
             messages.append(Message(role="tool", content=combined_content, parts=combined_parts))
 
-    def handle_tool_calls(self, assistant_message: Message, messages: List[Message], model_response: ModelResponse):
+    async def handle_tool_calls(self, assistant_message: Message, messages: List[Message], model_response: ModelResponse):
         """
         Handle tool calls in the assistant message.
 
@@ -594,7 +616,7 @@ class Gemini(Model):
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
 
             function_call_results: List[Message] = []
-            for _ in self.run_function_calls(
+            async for _ in self.run_function_calls(
                     function_calls=function_calls_to_run,
                     function_call_results=function_call_results,
             ):
@@ -605,7 +627,7 @@ class Gemini(Model):
             return model_response
         return None
 
-    def response(self, messages: List[Message]) -> ModelResponse:
+    async def response(self, messages: List[Message]) -> ModelResponse:
         """
         Send a generate cone content request to the model and return the response.
 
@@ -622,7 +644,7 @@ class Gemini(Model):
 
         # -*- Generate response
         metrics.response_timer.start()
-        response: GenerateContentResponse = self.invoke(messages=messages)
+        response: GenerateContentResponse = await self.invoke(messages=messages)
         metrics.response_timer.stop()
 
         # -*- Create assistant message
@@ -640,8 +662,8 @@ class Gemini(Model):
             model_response.content = assistant_message.get_content_string()
 
         # -*- Handle tool calls
-        if self.handle_tool_calls(assistant_message, messages, model_response) is not None:
-            response_after_tool_calls = self.response(messages=messages)
+        if await self.handle_tool_calls(assistant_message, messages, model_response) is not None:
+            response_after_tool_calls = await self.response(messages=messages)
             if response_after_tool_calls.content is not None:
                 if model_response.content is None:
                     model_response.content = ""
@@ -654,7 +676,7 @@ class Gemini(Model):
         #         m.parts = None
         return model_response
 
-    def handle_stream_tool_calls(self, assistant_message: Message, messages: List[Message]):
+    async def handle_stream_tool_calls(self, assistant_message: Message, messages: List[Message]):
         """
         Parse and run function calls and append the results to messages.
 
@@ -663,20 +685,20 @@ class Gemini(Model):
             messages (List[Message]): The list of conversation messages.
 
         Yields:
-            Iterator[ModelResponse]: Yields model responses during function execution.
+            AsyncIterator[ModelResponse]: Yields model responses during function execution.
         """
         if assistant_message.tool_calls and self.run_tools:
             function_calls_to_run = self.get_function_calls_to_run(assistant_message, messages)
 
             function_call_results: List[Message] = []
-            for intermediate_model_response in self.run_function_calls(
+            async for intermediate_model_response in self.run_function_calls(
                     function_calls=function_calls_to_run, function_call_results=function_call_results
             ):
                 yield intermediate_model_response
 
             self.format_function_call_results(function_call_results, messages)
 
-    def response_stream(self, messages: List[Message]) -> Iterator[ModelResponse]:
+    async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """
         Send a generate content request to the model and return the response as a stream.
 
@@ -684,7 +706,7 @@ class Gemini(Model):
             messages (List[Message]): The list of messages to send to the model.
 
         Yields:
-            Iterator[ModelResponse]: The model responses
+            AsyncIterator[ModelResponse]: The model responses
         """
         self.sanitize_messages(messages)
         self._log_messages(messages)
@@ -692,7 +714,7 @@ class Gemini(Model):
         metrics = Metrics()
 
         metrics.response_timer.start()
-        for response in self.invoke_stream(messages=messages):
+        async for response in self.invoke_stream(messages=messages):
             message_data.response_block = response.candidates[0].content
             message_data.response_role = message_data.response_block.role
             message_data.response_parts = message_data.response_block.parts
@@ -751,8 +773,12 @@ class Gemini(Model):
         metrics.log()
 
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            yield from self.handle_stream_tool_calls(assistant_message, messages)
-            yield from self.response_stream(messages=messages)
+            async for _resp in self.handle_stream_tool_calls(assistant_message, messages):
+
+                yield _resp
+            async for _resp in self.response_stream(messages=messages):
+
+                yield _resp
 
         # -*- Remove parts from messages
         # for m in messages:

@@ -414,7 +414,7 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         )
         
         # First turn: send image
-        response1 = agent.run(
+        response1 = agent.run_sync(
             "这张图片里有什么？",
             images=[self.base64_image_with_prefix]
         )
@@ -424,7 +424,7 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         
         # Second turn: follow-up question (should include history)
         # This should NOT raise "Invalid chat format" error
-        response2 = agent.run("能详细描述一下吗？")
+        response2 = agent.run_sync("能详细描述一下吗？")
         
         # Verify mock was called twice
         self.assertEqual(mock_response.call_count, 2)
@@ -458,15 +458,15 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         
         # Turn 1: First image
         mock_response.return_value = self._create_mock_model_response("第一张图片显示中文内容。")
-        agent.run("描述第一张图片", images=[self.base64_image_with_prefix])
+        agent.run_sync("描述第一张图片", images=[self.base64_image_with_prefix])
         
         # Turn 2: Second image
         mock_response.return_value = self._create_mock_model_response("第二张图片也是中文内容。")
-        agent.run("描述第二张图片", images=[self.base64_image_with_prefix])
+        agent.run_sync("描述第二张图片", images=[self.base64_image_with_prefix])
         
         # Turn 3: Question without image (history should be clean)
         mock_response.return_value = self._create_mock_model_response("两张图片都包含中文文字。")
-        agent.run("比较一下两张图片")
+        agent.run_sync("比较一下两张图片")
         
         # Verify all calls succeeded (no exceptions)
         self.assertEqual(mock_response.call_count, 3)
@@ -503,11 +503,11 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         
         # Turn 1: URL image
         mock_response.return_value = self._create_mock_model_response("这是一张网络图片。")
-        agent.run("描述这张图片", images=[url_image])
+        agent.run_sync("描述这张图片", images=[url_image])
         
         # Turn 2: Follow-up
         mock_response.return_value = self._create_mock_model_response("图片内容很丰富。")
-        agent.run("还有什么细节？")
+        agent.run_sync("还有什么细节？")
         
         # Verify second call succeeded without errors
         self.assertEqual(mock_response.call_count, 2)
