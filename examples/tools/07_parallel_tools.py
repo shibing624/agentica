@@ -20,7 +20,10 @@ import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, logger
+
+# Disable noisy logs for cleaner output
+logger.propagate = False
 
 
 # ============================================================================
@@ -81,41 +84,64 @@ async def search_news(topic: str) -> str:
 
 
 # ============================================================================
-# Main
+# Main - Demo parallel tool execution
 # ============================================================================
 
 async def main():
-    agent = Agent(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        tools=[search_weather, search_stock, search_news],
-        instructions=[
-            "你是一个信息聚合助手。",
-            "当用户同时问多个不同来源的信息时，请同时调用所有相关工具，不要一个一个调。",
-        ],
-    )
-
-    # ---- Demo: one question triggers 3 parallel tool calls ----
-    query = "帮我同时查一下：1) 北京今天天气 2) 苹果(AAPL)股价 3) AI最新新闻"
-
     print("=" * 60)
     print("Parallel Async Tool Execution Demo")
     print("=" * 60)
 
-    # Sequential timing baseline
+    # ---- Part 1: Direct parallel tool calls (guaranteed parallelism) ----
+    print("\n--- Demo 1: Direct asyncio.gather (3 tools in parallel) ---")
+
     tool_count = 3
     delay_per_tool = 1.5
     sequential_time = tool_count * delay_per_tool
 
     t0 = time.perf_counter()
-    await agent.print_response(query)
-    elapsed = time.perf_counter() - t0
+    results = await asyncio.gather(
+        search_weather("北京"),
+        search_stock("AAPL"),
+        search_news("AI"),
+    )
+    parallel_elapsed = time.perf_counter() - t0
+
+    print(f"Results:")
+    for r in results:
+        print(f"  • {r}")
+    print(f"\nTiming:")
+    print(f"  Sequential estimate: {sequential_time:.1f}s")
+    print(f"  Parallel actual: {parallel_elapsed:.2f}s")
+    print(f"  Speedup: {sequential_time/parallel_elapsed:.1f}x")
+
+    # ---- Part 2: Agent with parallel tool calls ----
+    print("\n--- Demo 2: Agent tool calling (depends on LLM behavior) ---")
+
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini"),
+        tools=[search_weather, search_stock, search_news],
+        instructions=[
+            "你是一个信息聚合助手。",
+            "当用户问多个问题时，请一次性调用所有需要的工具。",
+        ],
+    )
+
+    query = "帮我同时查一下：1) 北京今天天气 2) 苹果(AAPL)股价 3) AI最新新闻"
+
+    t0 = time.perf_counter()
+    response = await agent.run(query)
+    agent_elapsed = time.perf_counter() - t0
+
+    print(f"Query: {query}")
+    print(f"Response: {response.content[:200]}...")
+    print(f"Agent time: {agent_elapsed:.2f}s")
+    print(f"Note: Agent time includes LLM processing + tool calls")
+    if response.tools:
+        print(f"Tools executed: {len(response.tools)}")
 
     print(f"\n{'=' * 60}")
-    print(f"Query: {query}")
-    print(f"Tools called: {tool_count} (each ~{delay_per_tool}s)")
-    print(f"Sequential time: {sequential_time:.1f}s")
-    print(f"Parallel time: {elapsed:.2f}s")
-    print(f"Speedup: {sequential_time/elapsed:.1f}x")
+    print("Summary: Direct parallel calls achieve near-linear speedup")
     print(f"{'=' * 60}")
 
 
