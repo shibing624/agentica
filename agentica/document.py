@@ -2,7 +2,6 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description:
-part of the code from https://github.com/phidatahq/phidata
 """
 from typing import Optional, Dict, Any, List
 
