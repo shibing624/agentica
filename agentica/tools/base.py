@@ -121,7 +121,12 @@ class Function(BaseModel):
         parameters = {"type": "object", "properties": {}, "required": []}
         try:
             sig = signature(c)
-            type_hints = get_type_hints(c)
+            # Try to get type hints, but handle forward reference errors gracefully
+            try:
+                type_hints = get_type_hints(c)
+            except NameError:
+                # Forward reference (e.g., "Agent") not yet defined, skip type hints
+                type_hints = {}
 
             # If function has an the agent argument, remove the agent parameter from the type hints
             if "agent" in sig.parameters:
