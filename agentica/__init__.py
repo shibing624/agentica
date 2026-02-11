@@ -81,6 +81,7 @@ from agentica.run_response import (
     RunResponse,
     RunEvent,
     RunResponseExtraData,
+    ToolCallInfo,
     pprint_run_response,
 )
 
@@ -497,6 +498,7 @@ __all__ = [
     "RunResponse",
     "RunEvent",
     "RunResponseExtraData",
+    "ToolCallInfo",
     "pprint_run_response",
     # document
     "Document",

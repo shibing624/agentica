@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description:
 """
 import inspect
 import json
@@ -36,6 +36,38 @@ class RunEvent(str, Enum):
     multi_round_tool_call = "MultiRoundToolCall"
     multi_round_tool_result = "MultiRoundToolResult"
     multi_round_completed = "MultiRoundCompleted"
+
+
+class ToolCallInfo(BaseModel):
+    """Flat, typed view of a single tool call result.
+
+    Eliminates nested .get() chains — every field is a direct attribute.
+
+    Usage:
+        for t in response.tool_calls:
+            print(f"{t.tool_name}({t.tool_args}) → {t.content}  [{t.elapsed:.2f}s]")
+    """
+
+    tool_call_id: Optional[str] = None
+    tool_name: str = ""
+    tool_args: Dict[str, Any] = Field(default_factory=dict)
+    content: Optional[Any] = None
+    is_error: bool = False
+    elapsed: float = 0.0
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> "ToolCallInfo":
+        metrics = d.get("metrics") or {}
+        return cls(
+            tool_call_id=d.get("tool_call_id"),
+            tool_name=d.get("tool_name") or d.get("name") or "",
+            tool_args=d.get("tool_args") or d.get("arguments") or {},
+            content=d.get("content"),
+            is_error=d.get("tool_call_error", False),
+            elapsed=metrics.get("time", 0.0),
+        )
 
 
 class RunResponseExtraData(BaseModel):
@@ -116,6 +148,38 @@ class RunResponse(BaseModel):
         """Return detailed representation for debugging."""
         return f"RunResponse(run_id={self.run_id!r}, event={self.event!r}, reasoning_content={self.reasoning_content!r}, content={self.content!r})"
 
+    @property
+    def tool_calls(self) -> List["ToolCallInfo"]:
+        """Flat, typed list of tool call results.
+
+        Replaces nested .get() chains with direct attribute access:
+            for t in response.tool_calls:
+                print(f"{t.tool_name}({t.tool_args}) → {t.content}  [{t.elapsed:.2f}s]")
+        """
+        if not self.tools:
+            return []
+        return [ToolCallInfo.from_dict(t) for t in self.tools]
+
+    @property
+    def tool_call_times(self) -> Dict[str, float]:
+        """Per-tool execution time in seconds.
+
+        Returns:
+            Dict mapping tool name to execution time, e.g.
+            {"search_weather": 1.51, "search_stock": 1.50, "search_news": 1.52}
+        """
+        if not self.tools:
+            return {}
+        return {
+            t["tool_name"]: t.get("metrics", {}).get("time", 0.0)
+            for t in self.tools if t.get("tool_name")
+        }
+
+    @property
+    def tool_call_count(self) -> int:
+        """Number of tool calls made during this run."""
+        return len(self.tools) if self.tools else 0
+
 
 def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], Coroutine[Any, Any, Any]]) -> None:
     """
@@ -131,23 +195,23 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], 
             run_response = run_sync(run_response)
         except Exception as e:
             logger.error(f"Failed to run coroutine: {e}")
-            print(f"❌ Error: Failed to execute async workflow - {e}")
+            print(f"Error: Failed to execute async workflow - {e}")
             return
 
     # Handle single RunResponse
     if isinstance(run_response, RunResponse):
         print("=" * 80)
-        print("🤖 RESPONSE")
+        print("RESPONSE")
         print("=" * 80)
 
         # Display reasoning content if available
         if hasattr(run_response, 'reasoning_content') and run_response.reasoning_content:
-            print("💭 THINKING")
+            print("THINKING")
             print("-" * 40)
             print(run_response.reasoning_content)
             print()
             print("-" * 40)
-            print("💬 ANSWER")
+            print("ANSWER")
             print("-" * 40)
 
         # Display main content
@@ -172,7 +236,7 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], 
     else:
         # Handle streaming responses
         print("=" * 80)
-        print("🤖 RESPONSE")
+        print("RESPONSE")
         print("=" * 80)
 
         streaming_content = ""
@@ -188,7 +252,7 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], 
                         and resp.reasoning_content != reasoning_content):
 
                     if not reasoning_displayed:
-                        print("💭 THINKING")
+                        print("THINKING")
                         print("-" * 40)
                         reasoning_displayed = True
 
@@ -201,7 +265,7 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], 
                     if reasoning_displayed and streaming_content == "":
                         print()
                         print("-" * 40)
-                        print("💬 ANSWER")
+                        print("ANSWER")
                         print("-" * 40)
 
                     print(resp.content, end='', flush=True)

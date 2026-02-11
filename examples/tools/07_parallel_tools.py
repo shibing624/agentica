@@ -3,15 +3,15 @@
 @author:XuMing(xuming624@qq.com)
 @description: Parallel async tool execution demo
 
-Demonstrates the core advantage of async-first architecture:
-When the LLM returns multiple tool_calls in one response,
-the framework executes them IN PARALLEL via asyncio.TaskGroup —
-wall-clock time ≈ max(tool_times) instead of sum(tool_times).
+Demonstrates the core advantage of async-first tool architecture:
+
+  Parallel:   wall-clock ≈ max(tool_times)  ← asyncio.TaskGroup in framework
+  Sequential: wall-clock ≈ sum(tool_times)  ← one-by-one await
 
 This example:
-1. Defines 3 async I/O-bound tools (each simulates 1~2s network latency)
-2. Asks the Agent a question that requires ALL 3 tools simultaneously
-3. Prints elapsed time — should be ~2s, NOT ~4.5s
+1. Defines 3 async I/O-bound tools (each simulates 1.5s network latency)
+2. Runs them sequentially vs in parallel, printing wall-clock comparison
+3. Shows Agent-level parallel tool calling with one-line metrics access
 """
 import sys
 import os
@@ -20,21 +20,16 @@ import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, logger
-
-# Disable noisy logs for cleaner output
-logger.propagate = False
-
 
 # ============================================================================
-# Three async I/O-bound tools — each simulates network latency
+# Three async I/O-bound tools — each simulates 1.5s network latency
 # ============================================================================
 
 async def search_weather(city: str) -> str:
     """Search real-time weather for a city.
 
     Args:
-        city: City name, e.g. "Beijing", "Shanghai"
+        city: City name, e.g. "北京", "上海"
 
     Returns:
         Weather information string
@@ -70,7 +65,7 @@ async def search_news(topic: str) -> str:
     """Search latest news headlines for a topic.
 
     Args:
-        topic: Topic keyword, e.g. "AI", "finance"
+        topic: Topic keyword, e.g. "AI", "科技"
 
     Returns:
         News headlines string
@@ -80,69 +75,108 @@ async def search_news(topic: str) -> str:
         "AI": "1. GPT-5 发布在即  2. 开源大模型突破千亿参数  3. AI Agent 成为企业标配",
         "科技": "1. 苹果发布新款 Vision Pro  2. 量子计算突破性进展  3. 6G 标准制定启动",
     }
-    return news.get(topic, f"{topic} 相关: 暂无最新新闻")
+    return news.get(topic, f"{topic}: 暂无最新新闻")
 
 
 # ============================================================================
-# Main - Demo parallel tool execution
+# Demo 1: Pure tool-level comparison (no LLM, deterministic)
 # ============================================================================
 
-async def main():
+async def demo_tool_parallelism():
+    """Compare sequential vs parallel execution of 3 async tools."""
     print("=" * 60)
-    print("Parallel Async Tool Execution Demo")
+    print("Demo 1: Tool-Level Parallel Execution")
     print("=" * 60)
+    print("3 async tools, each with 1.5s simulated I/O latency\n")
 
-    # ---- Part 1: Direct parallel tool calls (guaranteed parallelism) ----
-    print("\n--- Demo 1: Direct asyncio.gather (3 tools in parallel) ---")
-
-    tool_count = 3
-    delay_per_tool = 1.5
-    sequential_time = tool_count * delay_per_tool
-
+    # --- Sequential ---
     t0 = time.perf_counter()
-    results = await asyncio.gather(
+    r1 = await search_weather("北京")
+    r2 = await search_stock("AAPL")
+    r3 = await search_news("AI")
+    seq_time = time.perf_counter() - t0
+    print(f"[Sequential] {seq_time:.2f}s")
+    print(f"  weather: {r1}")
+    print(f"  stock:   {r2}")
+    print(f"  news:    {r3}")
+
+    # --- Parallel ---
+    t0 = time.perf_counter()
+    r1, r2, r3 = await asyncio.gather(
         search_weather("北京"),
         search_stock("AAPL"),
         search_news("AI"),
     )
-    parallel_elapsed = time.perf_counter() - t0
+    par_time = time.perf_counter() - t0
+    print(f"\n[Parallel]   {par_time:.2f}s")
+    print(f"  weather: {r1}")
+    print(f"  stock:   {r2}")
+    print(f"  news:    {r3}")
 
-    print(f"Results:")
-    for r in results:
-        print(f"  • {r}")
-    print(f"\nTiming:")
-    print(f"  Sequential estimate: {sequential_time:.1f}s")
-    print(f"  Parallel actual: {parallel_elapsed:.2f}s")
-    print(f"  Speedup: {sequential_time/parallel_elapsed:.1f}x")
+    print(f"\n  Speedup: {seq_time / par_time:.1f}x "
+          f"({seq_time:.2f}s → {par_time:.2f}s)")
+    print(f"  Saved:   {seq_time - par_time:.2f}s\n")
 
-    # ---- Part 2: Agent with parallel tool calls ----
-    print("\n--- Demo 2: Agent tool calling (depends on LLM behavior) ---")
+
+# ============================================================================
+# Demo 2: Agent-level parallel tool calling (requires LLM API)
+# ============================================================================
+
+async def demo_agent_parallel():
+    """Show Agent parallel tool execution with tool_calls convenience API."""
+    from agentica import Agent, OpenAIChat
+
+    print("=" * 60)
+    print("Demo 2: Agent Parallel Tool Calling")
+    print("=" * 60)
+    print("Agent → LLM returns 3 tool_calls → framework runs in parallel\n")
 
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         tools=[search_weather, search_stock, search_news],
         instructions=[
             "你是一个信息聚合助手。",
-            "当用户问多个问题时，请一次性调用所有需要的工具。",
+            "当用户同时问多个不同来源的信息时，一次性调用所有需要的工具。",
         ],
     )
 
-    query = "帮我同时查一下：1) 北京今天天气 2) 苹果(AAPL)股价 3) AI最新新闻"
+    query = "帮我同时查：北京天气、AAPL股价、AI最新新闻"
 
-    t0 = time.perf_counter()
     response = await agent.run(query)
-    agent_elapsed = time.perf_counter() - t0
+    print(response.content)
 
-    print(f"Query: {query}")
-    print(f"Response: {response.content[:200]}...")
-    print(f"Agent time: {agent_elapsed:.2f}s")
-    print(f"Note: Agent time includes LLM processing + tool calls")
-    if response.tools:
-        print(f"Tools executed: {len(response.tools)}")
+    # ---- Flat attribute access via response.tool_calls ----
+    if response.tool_calls:
+        print(f"\n  Tool call count: {response.tool_call_count}")
+        for t in response.tool_calls:
+            status = "ERROR" if t.is_error else "OK"
+            preview = str(t.content)[:50] if t.content else ""
+            print(f"  {t.tool_name}({t.tool_args}) → {preview}  [{t.elapsed:.2f}s] {status}")
 
-    print(f"\n{'=' * 60}")
-    print("Summary: Direct parallel calls achieve near-linear speedup")
-    print(f"{'=' * 60}")
+        sum_t = sum(t.elapsed for t in response.tool_calls)
+        max_t = max(t.elapsed for t in response.tool_calls)
+        print(f"\n  sum(tool_times) = {sum_t:.2f}s  ← sequential would take this")
+        print(f"  max(tool_times) = {max_t:.2f}s  ← parallel actual ≈ this")
+        print(f"  Tool speedup:     {sum_t / max_t:.1f}x")
+    print()
+
+
+# ============================================================================
+# Main
+# ============================================================================
+
+async def main():
+    # Demo 1 always runs (no external dependencies)
+    await demo_tool_parallelism()
+
+    # Demo 2 requires OPENAI_API_KEY
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if api_key:
+        await demo_agent_parallel()
+    else:
+        print("=" * 60)
+        print("Demo 2: Skipped (set OPENAI_API_KEY to run Agent demo)")
+        print("=" * 60)
 
 
 if __name__ == "__main__":
