@@ -142,14 +142,14 @@ class RunnerMixin:
                 self._resolve_context()
 
             # 2. Read existing session
-            self.read_from_storage()
+            await self.read_from_storage()
 
             # Add introduction if provided
             if self.introduction is not None:
                 self.add_introduction(self.introduction)
 
             # 3. Prepare messages
-            system_message, user_messages, messages_for_model = self.get_messages_for_run(
+            system_message, user_messages, messages_for_model = await self.get_messages_for_run(
                 message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
             )
             num_input_messages = len(messages_for_model)
@@ -354,7 +354,7 @@ class RunnerMixin:
                 await self.memory.update_summary()
 
             # 6. Save session to storage
-            self.write_to_storage()
+            await self.write_to_storage()
 
             # 7. Save output to file
             self.save_run_response_to_file(message=message)

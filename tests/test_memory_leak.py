@@ -24,14 +24,17 @@ import gc
 import weakref
 from unittest import TestCase
 
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agentica import Agent
+
 
 class TestMemoryLeak(TestCase):
     """Test cases for memory leak detection in Agent framework."""
 
     def test_agent_team_no_circular_reference(self):
         """Test that Agent team doesn't create circular references that prevent GC."""
-        from agentica import Agent
-
         # Create a leader agent with a team member
         member_agent = Agent(name="Member")
         leader_agent = Agent(name="Leader", team=[member_agent])
@@ -53,9 +56,6 @@ class TestMemoryLeak(TestCase):
 
     def test_function_agent_weakref(self):
         """Test that Function._agent uses weakref and doesn't prevent Agent GC."""
-        from agentica import Agent
-        from agentica.tools.base import Function
-
         def dummy_tool(x: str) -> str:
             """A dummy tool."""
             return x
@@ -85,8 +85,7 @@ class TestMemoryLeak(TestCase):
 
     def test_model_functions_agent_weakref(self):
         """Test Model.functions holding Agent references via Function._agent weakref."""
-        from agentica import Agent
-        from agentica.model.openai import OpenAIChat
+        from agentica import Agent, OpenAIChat
 
         def my_tool(query: str) -> str:
             """Search tool."""

@@ -124,7 +124,6 @@ class Agent:
 | `update_model()` | 更新/初始化模型配置 |
 | `get_tools()` | 获取所有可用工具 |
 | `get_transfer_function()` | 获取团队任务转移函数 |
-| `deep_copy()` | 深拷贝 Agent 实例 |
 | `search_knowledge_base()` | 搜索知识库（Agentic RAG） |
 | `get_chat_history()` | 获取聊天历史 |
 
@@ -1445,7 +1444,6 @@ class Workflow(BaseModel):
     def load_session(self, force=False) -> Optional[str]
     def read_from_storage(self) -> Optional[WorkflowSession]
     def write_to_storage(self) -> Optional[WorkflowSession]
-    def deep_copy(self, update=None) -> "Workflow"
 ```
 
 **使用示例**：

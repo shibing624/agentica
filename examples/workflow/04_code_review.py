@@ -177,5 +177,5 @@ def read_config():
     print("Code Review Pipeline")
     print("=" * 60)
 
-    result = pipeline.run(sample_code, language="python")
+    result = pipeline.run_sync(sample_code, language="python")
     print("\n" + result.content)

@@ -3,9 +3,11 @@
 @author:XuMing(xuming624@qq.com)
 @description: MCP StreamableHttp client demo - Demonstrates using MCP with HTTP streaming
 
+No external API needed. Uses calc_server.py which provides math/string/datetime tools.
+
 Usage:
 1. Start the server: python 03_http_server.py
-2. Run this client: python 03_http_client.py
+2. Run this client:  python 03_http_client.py
 """
 import sys
 import os
@@ -14,75 +16,70 @@ from datetime import timedelta
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, logger, ShellTool
+from agentica import Agent, OpenAIChat, logger
 from agentica.mcp.server import MCPServerStreamableHttp
 from agentica.mcp.client import MCPClient
 from agentica.tools.mcp_tool import McpTool
 
 
-async def streamable_http_server_demo() -> None:
-    """Demonstrates direct connection to StreamableHttp MCP server."""
-    print("\n=== Testing StreamableHttp MCP server (direct connection) ===")
+async def low_level_http_demo():
+    """Demo 1: Direct MCPClient connection to StreamableHttp server."""
+    print("\n=== Demo 1: Low-level MCPClient with StreamableHttp server ===")
 
     async with MCPServerStreamableHttp(
-            name="Streamable HTTP Python Server",
+            name="CalcServer-HTTP",
             params={
                 "url": "http://localhost:8000/mcp",
                 "timeout": timedelta(seconds=5),
                 "sse_read_timeout": timedelta(seconds=300),
-                "terminate_on_close": True
+                "terminate_on_close": True,
             }
     ) as server:
-        try:
-            async with MCPClient(server=server) as client:
-                tools = await client.list_tools()
-                logger.debug(f"Available tools: {[tool.name for tool in tools]}")
+        async with MCPClient(server=server) as client:
+            tools = await client.list_tools()
+            print(f"Available tools: {[tool.name for tool in tools]}")
 
-                city = "北京市"
-                result = await client.call_tool("get_current_weather", {"city": city})
-                weather_result = client.extract_result_text(result)
-                logger.info(f"{city} weather = {weather_result}")
-        except Exception as e:
-            logger.error(f"Error in StreamableHttp server demo: {e}")
-            sys.exit(1)
+            result = await client.call_tool("sqrt", {"number": 144})
+            print(f"sqrt(144) = {client.extract_result_text(result)}")
+
+            result = await client.call_tool("power", {"base": 2, "exponent": 10})
+            print(f"power(2, 10) = {client.extract_result_text(result)}")
+
+            result = await client.call_tool("current_time", {})
+            print(f"current_time() = {client.extract_result_text(result)}")
 
 
-async def mcp_toolkit_with_agent_demo() -> None:
-    """Demonstrates using MCPToolkit with an agent via StreamableHttp."""
-    print("\n=== Testing MCPToolkit with StreamableHttp and agent ===")
-    try:
-        mcp_tool = McpTool(
-            url="http://localhost:8000/mcp",
-            sse_timeout=5.0,
-            sse_read_timeout=300.0
+async def agent_with_http_demo():
+    """Demo 2: Agent with MCP tools via StreamableHttp transport."""
+    print("\n=== Demo 2: Agent with MCP StreamableHttp tools ===")
+    mcp_tool = McpTool(
+        url="http://localhost:8000/mcp",
+        sse_timeout=5.0,
+        sse_read_timeout=300.0,
+    )
+
+    async with mcp_tool:
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini"),
+            tools=[mcp_tool],
+            add_datetime_to_instructions=True,
         )
 
-        async with mcp_tool:
-            agent = Agent(
-                model=OpenAIChat(id="gpt-4o"),
-                tools=[ShellTool(), mcp_tool],
-                add_datetime_to_instructions=True,
-                debug_mode=True
-            )
+        print("Agent available tools:")
+        for tool in agent.get_tools():
+            print(f"  - {tool.name}: {list(tool.functions.keys())}")
 
-            print("Agent available tools:")
-            for tool in agent.get_tools():
-                print(f" - {tool.name}: {list(tool.functions.keys())}")
-
-            print("\nTesting agent with weather tool:")
-            await agent.print_response("查询北京市今天的气温，并用温度的值乘以 314159.14=？")
-    except Exception as e:
-        logger.error(f"Error in MCPToolkit with agent demo: {e}")
-        sys.exit(1)
+        await agent.print_response("计算 2 的 20 次方，再对结果开平方，使用工具分步完成")
+        await agent.print_response("获取当前时间，并统计 'Hello World from Agentica MCP' 有多少个单词")
 
 
-async def main() -> None:
-    """Run all examples."""
-    print("MCP StreamableHttp Client Demo")
+async def main():
+    print("=" * 60)
+    print("MCP StreamableHttp Transport Demo (no external API needed)")
     print("=" * 60)
 
-    await streamable_http_server_demo()
-    await mcp_toolkit_with_agent_demo()
+    await low_level_http_demo()
+    await agent_with_http_demo()
 
 
 if __name__ == "__main__":

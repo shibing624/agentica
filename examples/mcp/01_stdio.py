@@ -4,13 +4,15 @@
 @description: MCP stdio client demo - Demonstrates using MCP with stdio-based servers
 
 This example shows how to:
+1. Connect to a stdio-based MCP server (no external API needed)
+2. List and call tools via MCPClient
+3. Integrate MCP tools with an Agent
 
-install dependencies:
-uv pip install weather-forecast-server mcp-run-python-code
+Install dependencies:
+    pip install mcp
 
-1. Connect to stdio-based MCP servers
-2. List and call tools
-3. Integrate MCP tools with agents
+Usage:
+    python 01_stdio.py
 """
 import sys
 import os
@@ -18,96 +20,73 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, logger
 from agentica.mcp.server import MCPServerStdio
 from agentica.mcp.client import MCPClient
 from agentica.tools.mcp_tool import McpTool
-from agentica import logger, ShellTool
+
+# Path to the local MCP server script (no external API needed)
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SERVER_SCRIPT = os.path.join(_SCRIPT_DIR, "calc_server.py")
 
 
-async def get_weather_stdio_demo():
-    """Demonstrates how to use the MCP client with a stdio-based server."""
-    logger.debug("\n=== Testing stdio-based MCP server ===")
+async def low_level_client_demo():
+    """Demo 1: Use MCPClient directly to list and call tools."""
+    print("\n=== Demo 1: Low-level MCPClient with stdio server ===")
     server = MCPServerStdio(
-        name="GetWeather",
-        client_session_timeout_seconds=90,
-        params={
-            "command": "uv",
-            "args": ["run", "weather-forecast-server"],
-        }
-    )
-    
-    async with MCPClient(server=server) as client:
-        tools = await client.list_tools()
-        print(f"Available tools: {[tool.name for tool in tools]}")
-
-        try:
-            result = await client.call_tool("get_weather", {"city": "北京"})
-            print(f"北京天气 = {client.extract_result_text(result)}")
-        except Exception as e:
-            print(f"Error calling tool: {e}")
-
-
-async def run_python_code_server_demo():
-    """Demonstrates MCP server for Python code execution."""
-    logger.debug("\n=== Testing Python code execution MCP server ===")
-    server = MCPServerStdio(
-        name="code-interpreter",
+        name="CalcServer",
         client_session_timeout_seconds=30,
         params={
-            "command": "uv",
-            "args": ["run", "mcp-run-python-code"],
+            "command": sys.executable,
+            "args": [_SERVER_SCRIPT],
         }
     )
-    
+
     async with MCPClient(server=server) as client:
+        # List available tools
         tools = await client.list_tools()
         print(f"Available tools: {[tool.name for tool in tools]}")
 
-        try:
-            result = await client.call_tool(
-                "run_python_code", 
-                {"code": "c=123*456", 'variable_to_return': 'c'}
-            )
-            print(f"Result: {client.extract_result_text(result)}")
-        except Exception as e:
-            print(f"Error calling tool: {e}")
+        # Call tools directly
+        result = await client.call_tool("add", {"a": 123, "b": 456})
+        print(f"add(123, 456) = {client.extract_result_text(result)}")
+
+        result = await client.call_tool("multiply", {"a": 3.14, "b": 100})
+        print(f"multiply(3.14, 100) = {client.extract_result_text(result)}")
+
+        result = await client.call_tool("string_length", {"text": "Hello MCP!"})
+        print(f'string_length("Hello MCP!") = {client.extract_result_text(result)}')
+
+        result = await client.call_tool("current_time", {})
+        print(f"current_time() = {client.extract_result_text(result)}")
 
 
-async def mcp_toolkit_with_agent_demo():
-    """Demonstrates how to integrate MCP tools with an agent."""
-    logger.debug("\n=== Testing MCPToolkit with agent ===")
-    try:
-        async with McpTool("uv run weather-forecast-server") as mcp_tool1, \
-                McpTool("uv run mcp-run-python-code") as mcp_tool2:
-            agent = Agent(
-                model=OpenAIChat(id="gpt-4o-mini"),
-                tools=[ShellTool(), mcp_tool1, mcp_tool2],
-                add_datetime_to_instructions=True,
-                debug_mode=True
-            )
-            
-            # List available tools
-            tools = agent.get_tools()
-            print(f"Agent tools: {[t.name for t in tools]}")
+async def agent_with_mcp_demo():
+    """Demo 2: Integrate MCP tools with an Agent."""
+    print("\n=== Demo 2: Agent with MCP stdio tools ===")
+    async with McpTool(f"{sys.executable} {_SERVER_SCRIPT}") as mcp_tool:
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini"),
+            tools=[mcp_tool],
+            add_datetime_to_instructions=True,
+        )
 
-            await agent.print_response("调天气工具 get_weather 查询合肥市天气咋样")
-            await agent.print_response("调shell 查看本地目录的路径")
-            await agent.print_response("写python代码并执行计算 123*456*32.132的平方值")
-    except Exception as e:
-        logger.error(f"Error in MCPToolkit with agent demo: {e}")
-        sys.exit(1)
+        # List tools the agent can use
+        tools = agent.get_tools()
+        print(f"Agent tools: {[t.name for t in tools]}")
+
+        # Let the agent use MCP tools to answer questions
+        await agent.print_response("计算 123 * 456 + 789 的结果，使用工具完成")
+        await agent.print_response("告诉我当前时间，并计算字符串 'Agentica MCP Demo' 的长度")
 
 
 async def main():
-    """Main function that runs all the examples."""
     print("=" * 60)
-    print("MCP Stdio Demo")
+    print("MCP Stdio Transport Demo (no external API needed)")
     print("=" * 60)
-    
-    await get_weather_stdio_demo()
-    await run_python_code_server_demo()
-    await mcp_toolkit_with_agent_demo()
+
+    await low_level_client_demo()
+    await agent_with_mcp_demo()
 
 
 if __name__ == "__main__":

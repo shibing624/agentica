@@ -121,23 +121,31 @@ for chunk in agent.run_stream_sync("你好"):
 
 **返回:** `Iterator[RunResponse]`
 
-##### `async print_response(message, stream=True, **kwargs)`
+##### `async print_response(message, **kwargs)` / `async print_response_stream(message, **kwargs)`
 
-异步打印格式化的响应。
-
-```python
-await agent.print_response("解释量子计算", stream=True)
-```
-
-##### `print_response_sync(message, stream=True, **kwargs)`
-
-同步打印格式化的响应。
+异步打印格式化的响应（非流式 / 流式）。
 
 ```python
-agent.print_response_sync("解释量子计算", stream=True)
+# 非流式
+await agent.print_response("解释量子计算")
+
+# 流式
+await agent.print_response_stream("解释量子计算")
 ```
 
-##### `cli_app(user="User", stream=True)`
+##### `print_response_sync(message, **kwargs)` / `print_response_stream_sync(message, **kwargs)`
+
+同步打印格式化的响应（非流式 / 流式）。
+
+```python
+# 非流式
+agent.print_response_sync("解释量子计算")
+
+# 流式
+agent.print_response_stream_sync("解释量子计算")
+```
+
+##### `cli_app(user="User", stream=False)`
 
 启动命令行交互界面。
 
@@ -145,13 +153,6 @@ agent.print_response_sync("解释量子计算", stream=True)
 agent.cli_app()
 ```
 
-##### `deep_copy(update=None) -> Agent`
-
-深拷贝 Agent 实例。
-
-```python
-new_agent = agent.deep_copy(update={"name": "NewAgent"})
-```
 
 ##### `get_chat_history() -> List[Message]`
 

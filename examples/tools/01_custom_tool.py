@@ -14,7 +14,7 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool, FileTool
+from agentica import Agent, OpenAIChat, WeatherTool, ShellTool, Tool
 
 
 # Simple function-based tools
@@ -81,6 +81,7 @@ class AddTool(Tool):
 async def main():
     agent = Agent(
         model=OpenAIChat(id='gpt-4o-mini'),
+        # debug=True,
         tools=[
             multiply,
             AddTool(),
@@ -88,7 +89,6 @@ async def main():
             get_text_length,
             WeatherTool(),
             ShellTool(),
-            FileTool()
         ],
     )
     

@@ -38,7 +38,7 @@ async def main():
         instructions="You are a helpful assistant. Please respond in Chinese.",
     )
     
-    await agent.print_response("什么是深度学习?", stream=True)
+    await agent.print_response_stream("什么是深度学习?")
     
     # Example 3: DeepSeek Reasoner (if available)
     print("\n" + "=" * 60)
@@ -51,7 +51,7 @@ async def main():
             model=reasoner,
             instructions="You are a reasoning assistant. Think step by step.",
         )
-        await agent_reasoner.print_response("计算 15 * 23 + 47", stream=True)
+        await agent_reasoner.print_response_stream("计算 15 * 23 + 47")
     except Exception as e:
         print(f"DeepSeek Reasoner not available: {e}")
 

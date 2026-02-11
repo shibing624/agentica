@@ -17,6 +17,7 @@ Setup:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -24,7 +25,8 @@ from agentica import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 
-if __name__ == '__main__':
+
+async def main():
     # Example 1: Basic agent with Langfuse tracing
     print("=" * 50)
     print("Example 1: Basic Agent with Langfuse Tracing")
@@ -42,7 +44,7 @@ if __name__ == '__main__':
         debug_mode=True,
     )
 
-    response = agent.run_sync("讲个笑话")
+    response = await agent.run("讲个笑话")
     print(f"Response: {response.content}")
     print()
 
@@ -51,10 +53,10 @@ if __name__ == '__main__':
     print("Example 2: Multi-turn Conversation (Same Session)")
     print("=" * 50)
 
-    response1 = agent.run_sync("What is Python?")
+    response1 = await agent.run("What is Python?")
     print(f"Turn 1: {response1.content}")
 
-    response2 = agent.run_sync("What are its main features?")
+    response2 = await agent.run("What are its main features?")
     print(f"Turn 2: {response2.content}")
     print()
 
@@ -76,7 +78,7 @@ if __name__ == '__main__':
         debug_mode=True,
     )
 
-    response = agent_with_tools.run_sync("What are the latest developments in AI agents in 2025? 中文回答")
+    response = await agent_with_tools.run("What are the latest developments in AI agents in 2025? 中文回答")
     print(f"Research Response: {response.content}")
     print()
 
@@ -86,3 +88,7 @@ if __name__ == '__main__':
     print("- Multi-step tool calls within single traces")
     print("- User tracking across sessions")
     print("=" * 50)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -1,10 +1,9 @@
 import json
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Union, Tuple
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, Tuple, override
 
 import asyncio
-import functools
 
 from agentica.model.base import Model
 from agentica.model.message import Message
@@ -14,7 +13,7 @@ from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
 try:
-    from anthropic import Anthropic as AnthropicClient
+    from anthropic import AsyncAnthropic as AnthropicClient
     from anthropic.types import Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta
     from anthropic.lib.streaming._types import (
         MessageStopEvent,
@@ -125,7 +124,7 @@ class Claude(Model):
             _request_params.update(self.request_params)
         return _request_params
 
-    def format_messages(self, messages: List[Message]) -> Tuple[List[Dict[str, str]], str]:
+    async def format_messages(self, messages: List[Message]) -> Tuple[List[Dict[str, str]], str]:
         """
         Process the list of messages and separate them into API messages and system messages.
 
@@ -148,14 +147,14 @@ class Claude(Model):
 
                 if message.role == "user" and message.images is not None:
                     for image in message.images:
-                        image_content = self.add_image(image)
+                        image_content = await self.add_image(image)
                         if image_content:
                             content.append(image_content)
 
                 chat_messages.append({"role": message.role, "content": content})  # type: ignore
         return chat_messages, " ".join(system_messages)
 
-    def add_image(self, image: Union[str, bytes]) -> Optional[Dict[str, Any]]:
+    async def add_image(self, image: Union[str, bytes]) -> Optional[Dict[str, Any]]:
         """
         Add an image to a message by converting it to base64 encoded format.
 
@@ -178,15 +177,17 @@ class Claude(Model):
                 if image.startswith(("http://", "https://")):
                     import httpx
 
-                    content = httpx.get(image).content
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(image)
+                        content = resp.content
                 # Case 1.2: Image is a local file path
                 else:
                     from pathlib import Path
 
                     path = Path(image)
                     if path.exists() and path.is_file():
-                        with open(image, "rb") as f:
-                            content = f.read()
+                        loop = asyncio.get_running_loop()
+                        content = await loop.run_in_executor(None, path.read_bytes)
                     else:
                         logger.error(f"Image file not found: {image}")
                         return None
@@ -280,6 +281,7 @@ class Claude(Model):
             tools.append(tool)
         return tools
 
+    @override
     async def invoke(self, messages: List[Message]) -> AnthropicMessage:
         """
         Send a request to the Anthropic API to generate a response.
@@ -290,29 +292,14 @@ class Claude(Model):
         Returns:
             AnthropicMessage: The response from the model.
         """
-        chat_messages, system_message = self.format_messages(messages)
+        chat_messages, system_message = await self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
 
-        loop = asyncio.get_running_loop()
-
-
-        return await loop.run_in_executor(
-
-
-            None, functools.partial(
-
-
-                self.get_client().messages.create,
-
-
-                model=self.id, messages=chat_messages, **request_kwargs,
-
-
-            )
-
-
+        return await self.get_client().messages.create(
+            model=self.id, messages=chat_messages, **request_kwargs,
         )
 
+    @override
     async def invoke_stream(self, messages: List[Message]) -> Any:
         """
         Stream a response from the Anthropic API.
@@ -323,27 +310,11 @@ class Claude(Model):
         Returns:
             Any: The streamed response from the model.
         """
-        chat_messages, system_message = self.format_messages(messages)
+        chat_messages, system_message = await self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
 
-        loop = asyncio.get_running_loop()
-
-
-        return await loop.run_in_executor(
-
-
-            None, functools.partial(
-
-
-                self.get_client().messages.stream,
-
-
-                model=self.id, messages=chat_messages, **request_kwargs,
-
-
-            )
-
-
+        return self.get_client().messages.stream(
+            model=self.id, messages=chat_messages, **request_kwargs,
         )
 
     def update_usage_metrics(
@@ -527,6 +498,7 @@ class Claude(Model):
             return model_response
         return None
 
+    @override
     async def response(self, messages: List[Message]) -> ModelResponse:
         """
         Send a chat completion request to the Anthropic API.
@@ -602,6 +574,7 @@ class Claude(Model):
 
             self.format_function_call_results(function_call_results, tool_ids, messages)
 
+    @override
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         self.sanitize_messages(messages)
         self._log_messages(messages)
@@ -611,8 +584,8 @@ class Claude(Model):
         # -*- Generate response
         metrics.response_timer.start()
         response = await self.invoke_stream(messages=messages)
-        with response as stream:
-            for delta in stream:
+        async with response as stream:
+            async for delta in stream:
                 if isinstance(delta, RawContentBlockDeltaEvent):
                     if isinstance(delta.delta, TextDelta):
                         yield ModelResponse(content=delta.delta.text)

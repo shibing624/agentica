@@ -92,12 +92,11 @@ async def main():
     print("Team Collaboration Demo: News Article Writing")
     print("=" * 60)
     
-    await team.print_response(
+    await team.print_response_stream(
         """
         Find the 5 most relevant articles on a topic: 人工智能最新发展,
         Read each article and write a NYT worthy news article. 用中文写。
         """,
-        stream=True,
     )
 
 

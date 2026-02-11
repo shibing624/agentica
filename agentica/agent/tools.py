@@ -136,7 +136,7 @@ class ToolsMixin:
         )
         return "Successfully added to knowledge base"
 
-    def update_memory(self: "Agent", task: str) -> str:
+    async def update_memory(self: "Agent", task: str) -> str:
         """Use this function to update the Agent's memory. Describe the task in detail.
 
         Args:
@@ -146,7 +146,7 @@ class ToolsMixin:
             str: A string indicating the status of the task.
         """
         try:
-            return self.memory.update_memory(input=task, force=True) or "Memory updated successfully"
+            return await self.memory.update_memory(input=task, force=True) or "Memory updated successfully"
         except Exception as e:
             return f"Failed to update memory: {e}"
 

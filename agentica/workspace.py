@@ -5,6 +5,8 @@
 Workspace management for Agentica agents.
 Inspired by OpenClaw's workspace concept.
 """
+import asyncio
+import functools
 from pathlib import Path
 from typing import Optional, Dict, List
 from dataclasses import dataclass
@@ -12,8 +14,17 @@ from datetime import date
 
 from agentica.config import AGENTICA_WORKSPACE_DIR
 
-# Default workspace path from config
-DEFAULT_WORKSPACE_PATH = AGENTICA_WORKSPACE_DIR
+
+async def _async_read_text(path: Path, encoding: str = "utf-8") -> str:
+    """Read text file in executor to avoid blocking event loop."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(path.read_text, encoding=encoding))
+
+
+async def _async_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """Write text file in executor to avoid blocking event loop."""
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, functools.partial(path.write_text, content, encoding=encoding))
 
 
 @dataclass
@@ -165,7 +176,7 @@ You are a helpful AI assistant.
             user_id: User ID for multi-user isolation. Defaults to 'default' if not specified
         """
         if path is None:
-            path = DEFAULT_WORKSPACE_PATH
+            path = AGENTICA_WORKSPACE_DIR
         self.path = Path(path).expanduser().resolve()
         self.config = config or WorkspaceConfig()
         # Default to 'default' user if not specified
@@ -258,8 +269,23 @@ You are a helpful AI assistant.
         """
         return self.path.exists() and (self.path / self.config.agent_md).exists()
 
+    async def read_file_async(self, filename: str) -> Optional[str]:
+        """Read workspace file asynchronously.
+
+        Args:
+            filename: File name (relative to workspace path)
+
+        Returns:
+            File content, or None if file doesn't exist or is empty
+        """
+        filepath = self.path / filename
+        if filepath.exists() and filepath.is_file():
+            content = (await _async_read_text(filepath)).strip()
+            return content if content else None
+        return None
+
     def read_file(self, filename: str) -> Optional[str]:
-        """Read workspace file.
+        """Read workspace file (sync, for init-time use).
 
         Args:
             filename: File name (relative to workspace path)
@@ -301,7 +327,7 @@ You are a helpful AI assistant.
         new_content = f"{existing}\n\n{content}".strip() if existing else content
         filepath.write_text(new_content, encoding="utf-8")
 
-    def get_context_prompt(self) -> str:
+    async def get_context_prompt(self) -> str:
         """Get workspace context (for injecting into System Prompt).
 
         Reads AGENT.md, PERSONA.md, TOOLS.md file contents (globally shared),
@@ -319,20 +345,20 @@ You are a helpful AI assistant.
             self.config.tools_md,
         ]
         for f in global_files:
-            content = self.read_file(f)
+            content = await self.read_file_async(f)
             if content:
                 contents.append(f"<!-- {f} -->\n{content}")
 
         # Read user-specific USER.md (always from users/{user_id}/)
         user_md_path = self._get_user_md()
         if user_md_path.exists():
-            content = user_md_path.read_text(encoding="utf-8").strip()
+            content = (await _async_read_text(user_md_path)).strip()
             if content:
                 contents.append(f"<!-- USER.md (user: {self._user_id}) -->\n{content}")
 
         return "\n\n---\n\n".join(contents) if contents else ""
 
-    def get_memory_prompt(self, days: int = 2) -> str:
+    async def get_memory_prompt(self, days: int = 2) -> str:
         """Get recent memory (for injecting into context).
 
         Reads user-specific MEMORY.md long-term memory and recent daily memories.
@@ -348,7 +374,7 @@ You are a helpful AI assistant.
         # Read long-term memory (user-specific, from users/{user_id}/)
         long_term_path = self._get_user_memory_md()
         if long_term_path.exists():
-            long_term = long_term_path.read_text(encoding="utf-8").strip()
+            long_term = (await _async_read_text(long_term_path)).strip()
             if long_term:
                 contents.append(f"## Long-term Memory (user: {self._user_id})\n\n{long_term}")
 
@@ -357,13 +383,13 @@ You are a helpful AI assistant.
         if memory_dir.exists():
             files = sorted(memory_dir.glob("*.md"), reverse=True)[:days]
             for f in files:
-                content = f.read_text(encoding="utf-8").strip()
+                content = (await _async_read_text(f)).strip()
                 if content:
                     contents.append(f"## {f.stem}\n\n{content}")
 
         return "\n\n".join(contents) if contents else ""
 
-    def write_memory(self, content: str, to_daily: bool = True):
+    async def write_memory(self, content: str, to_daily: bool = True):
         """Write memory.
 
         Writes content to current user's memory file (users/{user_id}/).
@@ -384,9 +410,9 @@ You are a helpful AI assistant.
             # Append content
             existing = ""
             if filepath.exists():
-                existing = filepath.read_text(encoding="utf-8").strip()
+                existing = (await _async_read_text(filepath)).strip()
             new_content = f"{existing}\n\n{content}".strip() if existing else content
-            filepath.write_text(new_content, encoding="utf-8")
+            await _async_write_text(filepath, new_content)
         else:
             memory_md = self._get_user_memory_md()
             memory_md.parent.mkdir(parents=True, exist_ok=True)
@@ -394,18 +420,18 @@ You are a helpful AI assistant.
             # Append content
             existing = ""
             if memory_md.exists():
-                existing = memory_md.read_text(encoding="utf-8").strip()
+                existing = (await _async_read_text(memory_md)).strip()
             new_content = f"{existing}\n\n{content}".strip() if existing else content
-            memory_md.write_text(new_content, encoding="utf-8")
+            await _async_write_text(memory_md, new_content)
 
-    def save_memory(self, content: str, long_term: bool = False):
+    async def save_memory(self, content: str, long_term: bool = False):
         """Save memory (alias for write_memory with more semantic naming).
 
         Args:
             content: Memory content
             long_term: True to write to long-term memory, False to write to daily memory (default)
         """
-        self.write_memory(content, to_daily=not long_term)
+        await self.write_memory(content, to_daily=not long_term)
 
     def get_skills_dir(self) -> Path:
         """Get skills directory path.

@@ -49,7 +49,7 @@ async def main():
         instructions="You are a helpful assistant.",
     )
     
-    await agent.print_response("介绍一下人工智能的发展历史", stream=True)
+    await agent.print_response_stream("介绍一下人工智能的发展历史")
 
 
 if __name__ == "__main__":

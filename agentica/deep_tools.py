@@ -23,6 +23,7 @@ from datetime import datetime
 import time
 import uuid
 from pathlib import Path
+from textwrap import dedent
 from typing import Optional, List, Dict, Any, Literal, TYPE_CHECKING, Union
 
 from agentica.tools.base import Tool
@@ -239,28 +240,49 @@ class BuiltinFileTool(Tool):
     def edit_file(
             self,
             file_path: str,
-            old_string: str,
-            new_string: str,
-            replace_all: bool = False,
+            edit: Union[dict, List[dict]],
     ) -> str:
-        """Perform exact string replacement in a file.
+        """Replace specific strings within a specified file.
 
-        Usage:
-        - You must use your `Read` tool at least once in the conversation before editing. This tool will error if you attempt an edit without reading the file.
-        - When editing text from Read tool output, ensure you preserve the exact indentation (tabs/spaces) as it appears AFTER the line number prefix. The line number prefix format is: spaces + line number + tab. Everything after that tab is the actual file content to match. Never include any part of the line number prefix in the old_string or new_string.
-        - ALWAYS prefer editing existing files. NEVER write new files unless explicitly required.
-        - Only use emojis if the user explicitly requests it. Avoid adding emojis to files unless asked.
-        - The edit will FAIL if `old_string` is not unique in the file. Either provide a larger string with more surrounding context to make it unique or use `replace_all` to change every instance of `old_string`.
-        - Use `replace_all` for replacing and renaming strings across the file. This parameter is useful if you want to rename a variable for instance.
+        **Tips:**
+        - Only use this tool on text files.
+        - Multi-line strings are supported.
+        - Can specify a single edit or a list of edits in one call.
+        - You should prefer this tool over write_file tool and shell `sed` command.
+
+        Core logic:
+        1. Read entire file content
+        2. Apply edit(s) sequentially (each edit sees the result of previous edits)
+        3. Write modified content back (only if all edits succeed)
+
+        Important:
+        - Edits are applied sequentially: each edit operates on the result of previous edits
+        - If any edit fails when providing multiple edits, NO changes are written (all-or-nothing)
+        - Uses literal string matching (NOT regex)
 
         Args:
-            file_path: File absolute path
-            old_string: Original string to replace
-            new_string: New string to replace with
-            replace_all: Whether to replace all occurrences, defaults to replacing only the first
+            file_path: The path to the file to edit. Absolute paths are required when editing
+                      files outside the working directory.
+            edit: The edit(s) to apply to the file. You can provide a single edit object
+                  or a list of edit objects.
+                  Each edit has the following fields:
+                  - old (str, required): The old string to replace. Can be multi-line.
+                  - new (str, required): The new string to replace with. Can be multi-line.
+                  - replace_all (bool, optional): Whether to replace all occurrences.
+                    Default: False (only replace first match).
 
         Returns:
             Operation result message
+
+        Examples:
+            # Single edit:
+            edit_file("file.py", {"old": "def foo():", "new": "def bar():"})
+
+            # Multiple edits:
+            edit_file("file.py", [
+                {"old": "x = 1", "new": "x = 2"},
+                {"old": "print(x)", "new": "print(f'x = {x}')", "replace_all": True}
+            ])
         """
         try:
             self._validate_path(file_path)
@@ -271,34 +293,138 @@ class BuiltinFileTool(Tool):
             if not path.is_file():
                 return f"Error: Not a file: {file_path}"
 
+            # Normalize edit to list
+            if isinstance(edit, dict):
+                edits = [edit]
+            elif isinstance(edit, list):
+                edits = edit
+            else:
+                return "Error: edit must be a dict or list of dicts"
+
+            if not edits:
+                return "Error: No edits provided"
+
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
-            # Check if old_string exists
-            count = content.count(old_string)
-            if count == 0:
-                return f"Error: String not found in file: '{old_string[:50]}...'"
+            results = []
 
-            # If not replace_all, check for uniqueness
-            if not replace_all and count > 1:
-                return (f"Error: Found {count} occurrences of the string. "
-                        f"Use replace_all=True to replace all, or provide more context to make it unique.")
+            # Apply edits sequentially
+            for i, edit_item in enumerate(edits):
+                old_string = edit_item.get("old") or edit_item.get("old_string")
+                new_string = edit_item.get("new") or edit_item.get("new_string")
+                replace_all = edit_item.get("replace_all", False)
 
-            # Perform replacement
-            if replace_all:
-                new_content = content.replace(old_string, new_string)
-            else:
-                new_content = content.replace(old_string, new_string, 1)
+                if old_string is None or new_string is None:
+                    return f"Error: Edit {i+1} missing 'old' or 'new' field"
 
+                result = self._str_replace(content, old_string, new_string, replace_all)
+
+                if not result["success"]:
+                    if len(edits) == 1:
+                        return f"Error: {result['error']}"
+                    else:
+                        return (
+                            f"Error in edit {i+1}: {result['error']}\n"
+                            f"No changes have been applied to the file."
+                        )
+
+                content = result["new_content"]
+                results.append({
+                    "edit_num": i + 1,
+                    "replaced_count": result["count"],
+                })
+
+            # All edits succeeded, write back
             with open(path, 'w', encoding='utf-8') as f:
-                f.write(new_content)
+                f.write(content)
 
-            replaced_count = count if replace_all else 1
-            logger.debug(f"Replaced {replaced_count} occurrence(s) in {file_path}")
-            return f"Successfully replaced {replaced_count} occurrence(s) in '{file_path}'"
+            total_replacements = sum(r["replaced_count"] for r in results)
+
+            if len(results) == 1:
+                logger.debug(f"Replaced {total_replacements} occurrence(s) in {file_path}")
+                return f"Successfully replaced {total_replacements} occurrence(s) in '{file_path}'"
+            else:
+                logger.debug(f"Applied {len(results)} edits, {total_replacements} replacements in {file_path}")
+                return f"Successfully applied {len(results)} edits ({total_replacements} total replacements) in '{file_path}'"
+
         except Exception as e:
             logger.error(f"Error editing file {file_path}: {e}")
             return f"Error editing file: {e}"
+
+    def _str_replace(
+            self,
+            content: str,
+            old_string: str,
+            new_string: str,
+            replace_all: bool = False,
+    ) -> dict:
+        """Internal string replacement logic.
+
+        Returns:
+            {"success": bool, "new_content": str, "count": int, "error": str}
+        """
+        # Find all match positions
+        matches = []
+        start = 0
+        while True:
+            idx = content.find(old_string, start)
+            if idx == -1:
+                break
+            matches.append(idx)
+            start = idx + len(old_string)
+
+        if not matches:
+            display_old = old_string[:100] + "..." if len(old_string) > 100 else old_string
+            return {
+                "success": False,
+                "error": f"String not found: '{display_old}'",
+                "new_content": content,
+                "count": 0,
+            }
+
+        # If not replace_all and multiple matches, show context for each match
+        if not replace_all and len(matches) > 1:
+            contexts = []
+            for idx in matches[:3]:  # Show first 3 matches
+                line_num = content[:idx].count('\n') + 1
+                # Get surrounding context (up to 50 chars around the match)
+                context_start = max(0, idx - 20)
+                context_end = min(len(content), idx + len(old_string) + 30)
+                context = content[context_start:context_end].replace('\n', '\\n')
+                contexts.append(f"  Line {line_num}: ...{context}...")
+
+            error_msg = (
+                f"Found {len(matches)} occurrences of the string.\n"
+                f"Use replace_all=True to replace all, or provide more context to make it unique.\n"
+                f"Matches found at:\n" + '\n'.join(contexts)
+            )
+            if len(matches) > 3:
+                error_msg += f"\n  ... and {len(matches) - 3} more"
+
+            return {
+                "success": False,
+                "error": error_msg,
+                "new_content": content,
+                "count": len(matches),
+            }
+
+        # Perform replacement
+        if replace_all:
+            new_content = content.replace(old_string, new_string)
+            count = len(matches)
+        else:
+            # Replace only the first match (leftmost)
+            idx = matches[0]
+            new_content = content[:idx] + new_string + content[idx + len(old_string):]
+            count = 1
+
+        return {
+            "success": True,
+            "new_content": new_content,
+            "count": count,
+            "error": None,
+        }
 
     def glob(self, pattern: str, path: str = ".") -> str:
         """Find files matching a glob pattern (supports recursive search with `**`).
@@ -467,6 +593,7 @@ class BuiltinFileTool(Tool):
             logger.error(f"Error in grep: {e}")
             return f"Error in grep: {e}"
 
+
 class BuiltinExecuteTool(Tool):
     """
     Built-in command execution tool that wraps ShellTool.
@@ -626,21 +753,20 @@ class BuiltinTodoTool(Tool):
     Built-in task management tool providing write_todos and read_todos functions.
     Used for tracking progress of complex tasks.
     """
-
     # System prompt for todo tool usage guidance
-    WRITE_TODOS_SYSTEM_PROMPT = """## `write_todos`
+    WRITE_TODOS_SYSTEM_PROMPT = dedent("""## `write_todos`
 
-You have access to the `write_todos` tool to help you manage and plan complex objectives.
-Use this tool for complex objectives to ensure that you are tracking each necessary step and giving the user visibility into your progress.
-This tool is very helpful for planning complex objectives, and for breaking down these larger complex objectives into smaller steps.
+    You have access to the `write_todos` tool to help you manage and plan complex objectives.
+    Use this tool for complex objectives to ensure that you are tracking each necessary step and giving the user visibility into your progress.
+    This tool is very helpful for planning complex objectives, and for breaking down these larger complex objectives into smaller steps.
 
-It is critical that you mark todos as completed as soon as you are done with a step. Do not batch up multiple steps before marking them as completed.
-For simple objectives that only require a few steps, it is better to just complete the objective directly and NOT use this tool.
-Writing todos takes time and tokens, use it when it is helpful for managing complex many-step problems! But not for simple few-step requests.
+    It is critical that you mark todos as completed as soon as you are done with a step. Do not batch up multiple steps before marking them as completed.
+    For simple objectives that only require a few steps, it is better to just complete the objective directly and NOT use this tool.
+    Writing todos takes time and tokens, use it when it is helpful for managing complex many-step problems! But not for simple few-step requests.
 
-## Important To-Do List Usage Notes to Remember
-- The `write_todos` tool should never be called multiple times in parallel.
-- Don't be afraid to revise the To-Do list as you go. New information may reveal new tasks that need to be done, or old tasks that are irrelevant."""
+    ## Important To-Do List Usage Notes to Remember
+    - The `write_todos` tool should never be called multiple times in parallel.
+    - Don't be afraid to revise the To-Do list as you go. New information may reveal new tasks that need to be done, or old tasks that are irrelevant.""")
 
     def __init__(self):
         """Initialize BuiltinTodoTool."""
@@ -824,31 +950,31 @@ class BuiltinTaskTool(Tool):
     """
 
     # Base system prompt template for task tool usage guidance
-    TASK_SYSTEM_PROMPT_TEMPLATE = """## task Tool (Subagent Spawner)
+    TASK_SYSTEM_PROMPT_TEMPLATE = dedent("""## task Tool (Subagent Spawner)
 
-You have access to a `task` function to launch short-lived subagents that handle isolated tasks.
+    You have access to a `task` function to launch short-lived subagents that handle isolated tasks.
 
-### How to Call
+    ### How to Call
 
-Use your standard function calling mechanism to invoke `task(description="...", subagent_type="...")`.
+    Use your standard function calling mechanism to invoke `task(description="...", subagent_type="...")`.
 
-### Available Subagent Types
+    ### Available Subagent Types
 
-{subagent_table}
+    {subagent_table}
 
-### Usage Guidelines
+    ### Usage Guidelines
 
-1. **Parallel Execution**: Launch multiple agents in a single message for independent tasks
-2. **Clear Instructions**: Provide detailed task descriptions and expected output format
-3. **Right Tool for Job**: Choose the most appropriate subagent type
-4. **Isolated Context**: Each subagent has its own context window - include all necessary info
+    1. **Parallel Execution**: Launch multiple agents in a single message for independent tasks
+    2. **Clear Instructions**: Provide detailed task descriptions and expected output format
+    3. **Right Tool for Job**: Choose the most appropriate subagent type
+    4. **Isolated Context**: Each subagent has its own context window - include all necessary info
 
-### When NOT to Use
+    ### When NOT to Use
 
-- Task is trivial (1-2 tool calls)
-- You need to see intermediate steps
-- Task depends on main conversation context
-- Simple questions that don't need delegation"""
+    - Task is trivial (1-3 tool calls)
+    - You need to see intermediate steps
+    - Task depends on main conversation context
+    - Simple questions that don't need delegation""")
 
     def __init__(
             self,
@@ -1197,36 +1323,36 @@ class BuiltinMemoryTool(Tool):
     - Long-term memory: Persistent information (user preferences, important facts)
     """
 
-    MEMORY_SYSTEM_PROMPT = """## save_memory Tool
+    MEMORY_SYSTEM_PROMPT = dedent("""## save_memory Tool
 
-You have access to a `save_memory` tool to persist important information for future conversations.
+    You have access to a `save_memory` tool to persist important information for future conversations.
 
-### When to Use This Tool
+    ### When to Use This Tool
 
-Use this tool to save:
-1. **User Preferences**: Language, communication style, technical level
-2. **Personal Information**: Name, occupation, interests (when shared by user)
-3. **Important Facts**: Key project details, decisions made, important context
-4. **User Requests**: When user explicitly asks to "remember this" or "save this"
+    Use this tool to save:
+    1. **User Preferences**: Language, communication style, technical level
+    2. **Personal Information**: Name, occupation, interests (when shared by user)
+    3. **Important Facts**: Key project details, decisions made, important context
+    4. **User Requests**: When user explicitly asks to "remember this" or "save this"
 
-### Memory Types
+    ### Memory Types
 
-- `long_term=False` (default): Daily memory - temporary notes, cleared after 7 days
-- `long_term=True`: Permanent memory - important preferences and facts that persist
+    - `long_term=False` (default): Daily memory - temporary notes, cleared after 7 days
+    - `long_term=True`: Permanent memory - important preferences and facts that persist
 
-### Guidelines
+    ### Guidelines
 
-1. **Be Selective**: Only save truly important or explicitly requested information
-2. **Be Concise**: Write clear, brief memory entries (1-2 sentences)
-3. **User Intent**: If user says "remember", "save", "note this" → use this tool
-4. **Privacy Aware**: Don't save sensitive information unless explicitly asked
+    1. **Be Selective**: Only save truly important or explicitly requested information
+    2. **Be Concise**: Write clear, brief memory entries (1-2 sentences)
+    3. **User Intent**: If user says "remember", "save", "note this" → use this tool
+    4. **Privacy Aware**: Don't save sensitive information unless explicitly asked
 
-### Examples
+    ### Examples
 
-- User says "I prefer Python over JavaScript" → save_memory("User prefers Python over JavaScript", long_term=True)
-- User says "Remember to check the API docs tomorrow" → save_memory("Check API docs", long_term=False)
-- User shares "My name is Alice, I'm a data scientist" → save_memory("User: Alice, data scientist", long_term=True)
-"""
+    - User says "I prefer Python over JavaScript" → save_memory("User prefers Python over JavaScript", long_term=True)
+    - User says "Remember to check the API docs tomorrow" → save_memory("Check API docs", long_term=False)
+    - User shares "My name is Alice, I'm a data scientist" → save_memory("User: Alice, data scientist", long_term=True)
+    """)
 
     def __init__(self, workspace=None):
         """Initialize BuiltinMemoryTool.
@@ -1250,7 +1376,7 @@ Use this tool to save:
         """Get the system prompt for memory tool usage."""
         return self.MEMORY_SYSTEM_PROMPT
 
-    def save_memory(self, content: str, long_term: bool = False) -> str:
+    async def save_memory(self, content: str, long_term: bool = False) -> str:
         """Save important information to memory for future conversations.
 
         Use this tool to remember important user preferences, personal information,
@@ -1284,7 +1410,7 @@ Use this tool to save:
             }, ensure_ascii=False)
 
         try:
-            self._workspace.save_memory(content, long_term=long_term)
+            await self._workspace.save_memory(content, long_term=long_term)
             memory_type = "long-term" if long_term else "daily"
             logger.debug(f"Saved {memory_type} memory: {content[:50]}...")
             
@@ -1317,7 +1443,7 @@ def get_builtin_tools(
         task_tools: Optional[List[Any]] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         workspace=None,
-) -> List[Tool]:
+    ) -> List[Tool]:
     """
     Get the list of built-in tools for DeepAgent.
 

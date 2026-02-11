@@ -3,22 +3,24 @@
 @author:XuMing(xuming624@qq.com)
 @description: MCP JSON Config Demo - Load MCP servers from JSON configuration
 
+No external API needed. Uses calc_server.py as the MCP server.
+
 This example shows how to:
 1. Load MCP server configurations from a JSON/YAML file using McpTool.from_config
-2. Initialize multiple MCP servers using CompositeMultiMcpTool
+2. Initialize MCP servers from config
 3. Use configured servers with agents
 
-Config file format (mcp_config.json or mcp_config.yaml):
+Config file format (mcp_config.json):
 {
     "mcpServers": {
         "server_name": {
-            "command": "command_to_run",  // for stdio
-            "args": ["arg1", "arg2"],     // optional
-            "env": {"KEY": "VALUE"},      // optional
-            "url": "http://...",          // for SSE/HTTP transport
-            "headers": {"Authorization": "Bearer ..."},  // optional
-            "timeout": 5.0,               // optional
-            "read_timeout": 300.0         // optional
+            "command": "command_to_run",
+            "args": ["arg1", "arg2"],
+            "env": {"KEY": "VALUE"},
+            "url": "http://...",
+            "headers": {"Authorization": "Bearer ..."},
+            "timeout": 5.0,
+            "read_timeout": 300.0
         }
     }
 }
@@ -30,10 +32,11 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
-from agentica.tools.mcp_tool import McpTool, CompositeMultiMcpTool
+from agentica.tools.mcp_tool import McpTool
 from agentica.mcp.config import MCPConfig
 
-pwd_path = os.path.dirname(os.path.abspath(__file__))
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.join(_SCRIPT_DIR, "..", "data")
 
 
 async def demo_load_config():
@@ -42,8 +45,7 @@ async def demo_load_config():
     print("Demo 1: Load MCP Configuration")
     print("=" * 60)
 
-    config_path = os.path.join(pwd_path, "..", "data/mcp_config.json")
-
+    config_path = os.path.join(_DATA_DIR, "mcp_config.json")
     print(f"\nLoading config from: {config_path}")
 
     try:
@@ -59,78 +61,32 @@ async def demo_load_config():
                 print(f"      args: {server_config.args}")
             if server_config.url:
                 print(f"      url: {server_config.url}")
-
     except Exception as e:
         print(f"Error: {e}")
-        print("\nPlease ensure mcp_config.json exists in examples/data/")
 
 
-async def demo_single_server():
-    """Demo 2: Load single MCP server from config using McpTool.from_config."""
+async def demo_from_config():
+    """Demo 2: Load MCP server from config and use with Agent."""
     print("\n" + "=" * 60)
-    print("Demo 2: Load Single MCP Server with from_config")
+    print("Demo 2: Load MCP Server with from_config and Agent")
     print("=" * 60)
 
-    config_path = os.path.join(pwd_path, "..", "data/mcp_config.json")
+    config_path = os.path.join(_DATA_DIR, "mcp_config.json")
 
     try:
-        # Load a single server by name
-        mcp_tool = McpTool.from_config(server_names="weather", config_path=config_path)
-
-        print(f"\nLoaded MCP tool for 'weather' server")
+        mcp_tool = McpTool.from_config(server_names="calc", config_path=config_path)
+        print(f"\nLoaded MCP tool for 'calc' server")
         print(f"Transport type: {mcp_tool._transport_type}")
 
-        # Use as context manager to initialize and get tools
         async with mcp_tool:
             print(f"Available functions: {list(mcp_tool.functions.keys())}")
 
-            # Create agent with the MCP tool
             agent = Agent(
                 model=OpenAIChat(id="gpt-4o-mini"),
                 tools=[mcp_tool],
             )
 
-            print("\nAsking about weather...")
-            await agent.print_response("What's the weather in Beijing? 中文回答")
-
-    except ValueError as e:
-        print(f"Config error: {e}")
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-async def demo_multiple_servers():
-    """Demo 3: Load multiple MCP servers using CompositeMultiMcpTool."""
-    print("\n" + "=" * 60)
-    print("Demo 3: Load Multiple MCP Servers with CompositeMultiMcpTool")
-    print("=" * 60)
-
-    config_path = os.path.join(pwd_path, "..", "data/mcp_config.json")
-
-    try:
-        # Load multiple servers - returns CompositeMultiMcpTool when multiple servers
-        mcp_tool = McpTool.from_config(
-            server_names=["weather", "minimax"],  # Load multiple servers
-            config_path=config_path
-        )
-
-        print(f"\nLoaded MCP tool type: {type(mcp_tool).__name__}")
-
-        if isinstance(mcp_tool, CompositeMultiMcpTool):
-            print(f"Number of sub-tools: {len(mcp_tool.tools)}")
-
-        # Use as context manager to initialize all tools
-        async with mcp_tool:
-            print(f"Total available functions: {list(mcp_tool.functions.keys())}")
-
-            # Create agent with the composite MCP tool
-            agent = Agent(
-                model=OpenAIChat(id="gpt-4o-mini"),
-                tools=[mcp_tool],
-            )
-
-            print("\nAsking about weather...")
-            await agent.print_response("What's the weather in Shanghai? 中文回答")
+            await agent.print_response("用工具计算 sqrt(144) + power(2, 10) 的结果")
 
     except ValueError as e:
         print(f"Config error: {e}")
@@ -139,17 +95,15 @@ async def demo_multiple_servers():
 
 
 async def demo_all_servers():
-    """Demo 4: Load all MCP servers from config."""
+    """Demo 3: Load all MCP servers from config."""
     print("\n" + "=" * 60)
-    print("Demo 4: Load All MCP Servers from Config")
+    print("Demo 3: Load All MCP Servers from Config")
     print("=" * 60)
 
-    config_path = os.path.join(pwd_path, "..", "data/mcp_config.json")
+    config_path = os.path.join(_DATA_DIR, "mcp_config.json")
 
     try:
-        # Load all servers by not specifying server_names
         mcp_tool = McpTool.from_config(config_path=config_path)
-
         print(f"\nLoaded MCP tool type: {type(mcp_tool).__name__}")
 
         async with mcp_tool:
@@ -162,20 +116,11 @@ async def demo_all_servers():
 
 
 async def main():
-    """Main function to run demos."""
-    print("MCP JSON Config Demo - Using McpTool.from_config")
+    print("MCP JSON Config Demo (no external API needed)")
     print("=" * 60)
 
-    # Demo 1: Just load and display config
     await demo_load_config()
-
-    # Demo 2: Load single server (uncomment to test)
-    await demo_single_server()
-
-    # Demo 3: Load multiple servers (uncomment to test)
-    await demo_multiple_servers()
-
-    # Demo 4: Load all servers (uncomment to test)
+    await demo_from_config()
     await demo_all_servers()
 
 

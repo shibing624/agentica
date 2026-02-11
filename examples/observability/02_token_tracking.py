@@ -11,6 +11,7 @@ This example demonstrates:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -18,7 +19,7 @@ from agentica import Agent, OpenAIChat
 from agentica.utils.tokens import count_text_tokens
 
 
-def basic_token_tracking():
+async def basic_token_tracking():
     """Demo: Basic token usage tracking."""
     print("=" * 60)
     print("Demo 1: Basic Token Tracking")
@@ -31,7 +32,7 @@ def basic_token_tracking():
     )
 
     # Run a query
-    response = agent.run_sync("What is machine learning? Explain in 2-3 sentences.")
+    response = await agent.run("What is machine learning? Explain in 2-3 sentences.")
 
     # Get token usage from response
     if hasattr(response, 'metrics') and response.metrics:
@@ -43,7 +44,7 @@ def basic_token_tracking():
     print(f"\nResponse: {response.content}")
 
 
-def multi_turn_token_tracking():
+async def multi_turn_token_tracking():
     """Demo: Track tokens across multiple turns."""
     print("\n" + "=" * 60)
     print("Demo 2: Multi-turn Token Tracking")
@@ -69,7 +70,7 @@ def multi_turn_token_tracking():
         print(f"\n--- Turn {i} ---")
         print(f"Question: {question}")
 
-        response = agent.run_sync(question)
+        response = await agent.run(question)
 
         if hasattr(response, 'metrics') and response.metrics:
             input_tokens = response.metrics.get('input_tokens', 0)
@@ -92,7 +93,7 @@ def multi_turn_token_tracking():
 
 
 def token_counter_demo():
-    """Demo: Using token counting utilities."""
+    """Demo: Using token counting utilities (pure computation, no async needed)."""
     print("\n" + "=" * 60)
     print("Demo 3: Token Counting Utilities")
     print("=" * 60)
@@ -119,12 +120,11 @@ def token_counter_demo():
 
 
 def cost_estimation_demo():
-    """Demo: Estimate costs based on token usage."""
+    """Demo: Estimate costs based on token usage (pure computation)."""
     print("\n" + "=" * 60)
     print("Demo 4: Cost Estimation")
     print("=" * 60)
 
-    # Pricing per 1M tokens (example rates, check OpenAI for current pricing)
     PRICING = {
         "gpt-4o": {"input": 2.50, "output": 10.00},
         "gpt-4o-mini": {"input": 0.15, "output": 0.60},
@@ -132,7 +132,6 @@ def cost_estimation_demo():
     }
 
     def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-        """Estimate cost based on token usage."""
         if model not in PRICING:
             return 0.0
         rates = PRICING[model]
@@ -140,7 +139,6 @@ def cost_estimation_demo():
         output_cost = (output_tokens / 1_000_000) * rates["output"]
         return input_cost + output_cost
 
-    # Simulate usage
     model = "gpt-4o-mini"
     input_tokens = 1500
     output_tokens = 500
@@ -152,32 +150,29 @@ def cost_estimation_demo():
     print(f"Output tokens: {output_tokens}")
     print(f"Estimated cost: ${cost:.6f}")
 
-    # Compare models
     print("\n--- Cost Comparison (same usage) ---")
     for model_name in PRICING:
         cost = estimate_cost(model_name, input_tokens, output_tokens)
         print(f"  {model_name}: ${cost:.6f}")
 
 
-def token_compression_demo():
+async def token_compression_demo():
     """Demo: Token compression for long conversations."""
     print("\n" + "=" * 60)
     print("Demo 5: Token Compression")
     print("=" * 60)
 
-    # Simulate a long conversation
     long_conversation = """
     User: Can you explain what machine learning is?
-    Assistant: Machine learning is a subset of artificial intelligence that enables 
-    computers to learn from data without being explicitly programmed. It uses 
-    algorithms to identify patterns in data and make predictions or decisions.
-    
+    Assistant: Machine learning is a subset of artificial intelligence that enables
+    computers to learn from data without being explicitly programmed.
+
     User: What are the main types?
-    Assistant: There are three main types of machine learning:
+    Assistant: There are three main types:
     1. Supervised Learning - learns from labeled data
     2. Unsupervised Learning - finds patterns in unlabeled data
     3. Reinforcement Learning - learns through trial and error
-    
+
     User: Can you give examples of each?
     Assistant: Sure! Examples include:
     - Supervised: spam detection, image classification
@@ -188,12 +183,13 @@ def token_compression_demo():
     original_tokens = count_text_tokens(long_conversation)
     print(f"\nOriginal conversation tokens: {original_tokens}")
 
-    # Use Agent to summarize the conversation
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         name="Summarizer",
     )
-    summary = agent.run_sync(f"Please summarize the following conversation in 2-3 sentences:\n{long_conversation}")
+    summary = await agent.run(
+        f"Please summarize the following conversation in 2-3 sentences:\n{long_conversation}"
+    )
 
     if summary and summary.content:
         compressed_tokens = count_text_tokens(summary.content)
@@ -203,9 +199,13 @@ def token_compression_demo():
         print(f"\nSummary:\n{summary.content}")
 
 
-if __name__ == "__main__":
-    basic_token_tracking()
-    multi_turn_token_tracking()
+async def main():
+    await basic_token_tracking()
+    await multi_turn_token_tracking()
     token_counter_demo()
     cost_estimation_demo()
-    token_compression_demo()
+    await token_compression_demo()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

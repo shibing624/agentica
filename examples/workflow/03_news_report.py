@@ -134,9 +134,8 @@ class NewsReportWorkflow(Workflow):
 
         # Step 3: Write report (always re-run, uses latest prompt)
         articles_json = json.dumps([a.model_dump() for a in scraped.values()], ensure_ascii=False, indent=2)
-        yield from self.writer.run_sync(
+        yield from self.writer.run_stream_sync(
             f"Write a report on '{topic}' based on these articles:\n{articles_json}",
-            stream=True,
         )
 
 
@@ -151,5 +150,5 @@ if __name__ == "__main__":
     print(f"News Report: {topic}")
     print("=" * 60)
 
-    report = workflow.run(topic=topic)
+    report = workflow.run_sync(topic=topic)
     pprint_run_response(report)

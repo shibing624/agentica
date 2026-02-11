@@ -103,9 +103,14 @@ class Model(BaseModel):
     def __repr__(self) -> str:
         """Concise representation for logging."""
         tools_count = len(self.tools) if self.tools else 0
-        # Show last 4 chars of api_key (check common field names across subclasses)
+        # Show first 3 + *** + last 4 chars of api_key for readability
         api_key = getattr(self, 'api_key', None) or ""
-        key_hint = f"**{api_key[-4:]}" if api_key and len(api_key) >= 4 else ""
+        if api_key and len(api_key) >= 8:
+            key_hint = f"{api_key[:3]}***{api_key[-4:]}"
+        elif api_key and len(api_key) >= 4:
+            key_hint = f"***{api_key[-4:]}"
+        else:
+            key_hint = ""
         # Show base_url
         base_url = getattr(self, 'base_url', None) or ""
         parts = [f"id={self.id!r}"]
@@ -162,26 +167,35 @@ class Model(BaseModel):
                     if tc_id:
                         expected_ids[tc_id] = tc
 
-                # Scan the immediately following messages for matching tool responses
+                # Scan the following messages for matching tool responses.
+                # We scan all messages until the next assistant message (or end),
+                # because additional non-tool messages (e.g. from ToolCallException)
+                # may be interleaved between tool responses.
                 j = i + 1
+                first_non_tool_pos = None
                 while j < len(messages):
                     next_msg = messages[j]
                     if next_msg.role == "tool" and next_msg.tool_call_id in expected_ids:
                         del expected_ids[next_msg.tool_call_id]
                         j += 1
-                    elif next_msg.role == "tool" and next_msg.tool_call_id:
-                        # A tool response for a different call – keep scanning
-                        j += 1
-                    else:
+                    elif next_msg.role == "assistant":
+                        # Reached the next assistant turn — stop scanning
                         break
+                    else:
+                        # Track first non-tool position for placeholder insertion
+                        if first_non_tool_pos is None:
+                            first_non_tool_pos = j
+                        j += 1
 
-                # Insert placeholder responses for any missing tool_call_ids
+                # Insert placeholder responses for any missing tool_call_ids.
+                # Insert right after the assistant message + existing tool responses,
+                # before any non-tool messages.
                 if expected_ids:
-                    insert_pos = j
+                    insert_pos = first_non_tool_pos if first_non_tool_pos is not None else j
                     for tc_id, tc in expected_ids.items():
                         func_info = tc.get("function", {}) if isinstance(tc, dict) else {}
                         func_name = func_info.get("name", "unknown") if isinstance(func_info, dict) else "unknown"
-                        logger.warning(
+                        logger.debug(
                             f"Missing tool response for tool_call_id={tc_id} "
                             f"(function={func_name}), inserting placeholder."
                         )
@@ -303,7 +317,7 @@ class Model(BaseModel):
 
         # Phase 2: Execute all tools in parallel
         timers = [Timer() for _ in function_calls]
-        exceptions: List[Optional[ToolCallException]] = [None] * len(function_calls)
+        exceptions: List[Optional[BaseException]] = [None] * len(function_calls)
 
         async def _execute_one(idx: int, fc: FunctionCall) -> bool:
             timers[idx].start()
@@ -312,13 +326,15 @@ class Model(BaseModel):
             except ToolCallException as tce:
                 exceptions[idx] = tce
                 return False
+            except Exception as exc:
+                exceptions[idx] = exc
+                return False
             finally:
                 timers[idx].stop()
 
-        results = await asyncio.gather(
-            *[_execute_one(i, fc) for i, fc in enumerate(function_calls)],
-            return_exceptions=True
-        )
+        async with asyncio.TaskGroup() as tg:
+            tasks = [tg.create_task(_execute_one(i, fc)) for i, fc in enumerate(function_calls)]
+        results = [t.result() for t in tasks]
 
         # Phase 3: Process results in original order
         for i, function_call in enumerate(function_calls):
@@ -326,35 +342,41 @@ class Model(BaseModel):
             stop_execution_after_tool_call = False
             additional_messages_from_function_call = []
 
-            # Handle ToolCallException captured during execution
-            tce = exceptions[i]
-            if tce is not None:
-                if tce.user_message is not None:
-                    if isinstance(tce.user_message, str):
-                        additional_messages_from_function_call.append(Message(role="user", content=tce.user_message))
-                    else:
-                        additional_messages_from_function_call.append(tce.user_message)
-                if tce.agent_message is not None:
-                    if isinstance(tce.agent_message, str):
-                        additional_messages_from_function_call.append(
-                            Message(role="assistant", content=tce.agent_message)
-                        )
-                    else:
-                        additional_messages_from_function_call.append(tce.agent_message)
-                if tce.messages is not None and len(tce.messages) > 0:
-                    for m in tce.messages:
-                        if isinstance(m, Message):
-                            additional_messages_from_function_call.append(m)
-                        elif isinstance(m, dict):
-                            try:
-                                additional_messages_from_function_call.append(Message(**m))
-                            except Exception as e:
-                                logger.warning(f"Failed to convert dict to Message: {e}")
-                if tce.stop_execution:
-                    stop_execution_after_tool_call = True
-                    if len(additional_messages_from_function_call) > 0:
-                        for m in additional_messages_from_function_call:
-                            m.stop_after_tool_call = True
+            # Handle exceptions captured during execution
+            exc = exceptions[i]
+            if exc is not None:
+                if isinstance(exc, ToolCallException):
+                    tce = exc
+                    if tce.user_message is not None:
+                        if isinstance(tce.user_message, str):
+                            additional_messages_from_function_call.append(Message(role="user", content=tce.user_message))
+                        else:
+                            additional_messages_from_function_call.append(tce.user_message)
+                    if tce.agent_message is not None:
+                        if isinstance(tce.agent_message, str):
+                            additional_messages_from_function_call.append(
+                                Message(role="assistant", content=tce.agent_message)
+                            )
+                        else:
+                            additional_messages_from_function_call.append(tce.agent_message)
+                    if tce.messages is not None and len(tce.messages) > 0:
+                        for m in tce.messages:
+                            if isinstance(m, Message):
+                                additional_messages_from_function_call.append(m)
+                            elif isinstance(m, dict):
+                                try:
+                                    additional_messages_from_function_call.append(Message(**m))
+                                except Exception as e:
+                                    logger.warning(f"Failed to convert dict to Message: {e}")
+                    if tce.stop_execution:
+                        stop_execution_after_tool_call = True
+                        if len(additional_messages_from_function_call) > 0:
+                            for m in additional_messages_from_function_call:
+                                m.stop_after_tool_call = True
+                else:
+                    # Generic exception — treat as tool failure
+                    function_call.error = str(exc)
+                    logger.warning(f"Tool {function_call.function.name} failed: {exc}")
 
             function_call_output: Optional[Union[List[Any], str]] = ""
             if isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
@@ -594,9 +616,3 @@ class Model(BaseModel):
         self.functions = None
         self.function_call_stack = None
         self.session_id = None
-
-    def deep_copy(self, *, update: Optional[Dict[str, Any]] = None) -> "Model":
-        new_model = self.model_copy(deep=True, update=update)
-        # Clear the new model to remove any references to the old model
-        new_model.clear()
-        return new_model

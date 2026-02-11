@@ -1,42 +1,60 @@
-# Tool Usage Policy
+、# Tool Selection Quick Reference
 
-## Specialized Tools Over Bash
+## Built-in Tools
 
-Use specialized tools instead of bash commands when possible, as this provides a better user experience:
-- **File search**: Use Glob (NOT find or ls)
-- **Content search**: Use Grep (NOT grep or rg)
-- **Read files**: Use Read (NOT cat/head/tail)
-- **Edit files**: Use Edit (NOT sed/awk)
-- **Write files**: Use Write (NOT echo >/cat <<EOF)
+| Tool | Purpose |
+|------|---------|
+| `ls` | List directory contents |
+| `read_file` | Read file (use offset/limit for large files) |
+| `write_file` | Create/overwrite file |
+| `edit_file` | Modify file via string replacement |
+| `glob` | Find files by pattern (e.g., `*.py`) |
+| `grep` | Search file contents with regex |
+| `execute` | Run commands (python, git, npm, etc.) |
+| `web_search` | Search web |
+| `fetch_url` | Fetch webpage content |
+| `write_todos` | **Task tracking** - track your own progress |
+| `read_todos` | Read task list |
+| `task` | **Delegation** - assign work to subagent |
+| `save_memory` | Save info to memory |
 
-Reserve bash tools exclusively for actual system commands and terminal operations that require shell execution.
+---
 
-## Parallel Execution Strategy
+## Critical Distinction: write_todos vs task
 
-You can call multiple tools in a single response:
-- **Independent calls**: Make all independent tool calls in parallel to maximize efficiency
-- **Dependent calls**: If tool calls depend on previous results, call them sequentially
-- **Example**: If reading 3 files with no dependencies, read all 3 in parallel
+### `write_todos` - Self-Organization (Transparent)
+- **Purpose**: Track your own work progress
+- **Visibility**: User sees the task list and updates
+- **Execution**: You do the work yourself
+- **Use when**: Complex tasks (3+ steps), user wants progress tracking
 
-Never use placeholders or guess missing parameters in tool calls.
+### `task` - Delegation (Opaque)
+- **Purpose**: Delegate subtasks to specialized subagent
+- **Visibility**: User only sees final result, not execution details
+- **Execution**: Subagent works independently
+- **Use when**: Isolated subtasks, need different expertise, parallel work
 
-## Tool Selection Priority
+**Decision**: Self-organization → `write_todos` | Delegation → `task`
 
-When exploring codebase:
-1. **Specific file**: Use Read directly if you know the file path
-2. **Class/function search**: Use Glob with pattern (e.g., `**/*.py`)
-3. **Content search**: Use Grep for searching within files
-4. **Open-ended exploration**: Use Task tool with explore agent for complex searches
+---
 
-## File Operations Guidelines
+## Quick Guidelines
 
-- Always read a file before editing to ensure you have the full context
-- Preserve exact indentation when editing
-- Edit will FAIL if old_string is not found or found multiple times
-- Make small, testable, incremental changes
+### File Operations
+- **Always `ls` first** when path is unknown
+- **Batch reads** - call `read_file` on multiple files in parallel
+- **Use `edit_file`** for targeted changes (safer than `write_file`)
 
-## Context Efficiency
+### Execution
+- Use non-interactive flags (`--yes`, `-y`)
+- Use `--no-pager` for git commands
+- Single-line commands only
 
-- When doing file search, prefer to use the Task tool to reduce context usage
-- Use specialized agents (Task tool) for complex, multi-step exploration
-- Avoid redundant reads - check if you have already read a file before reading again
+### Parallel vs Sequential
+- **Parallel**: Independent operations (multiple reads, multiple searches)
+- **Sequential**: Dependent operations (result of A needed for B)
+
+### When NOT to Use
+- Don't use `write_todos` for simple tasks (< 3 steps)
+- Don't use `task` for single-step operations
+- Don't use `execute` for file ops (use specialized tools)

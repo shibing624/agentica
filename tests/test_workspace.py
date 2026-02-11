@@ -3,6 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: Tests for Workspace module
 """
+import asyncio
 import pytest
 import tempfile
 import shutil
@@ -130,7 +131,7 @@ class TestWorkspace:
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        context = workspace.get_context_prompt()
+        context = asyncio.run(workspace.get_context_prompt())
 
         # Should include content from default files
         assert "AGENT.md" in context or "Agent" in context
@@ -141,8 +142,8 @@ class TestWorkspace:
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        # Write daily memory
-        workspace.write_memory("Today I learned about Python.", to_daily=True)
+        # Write daily memory (async)
+        asyncio.run(workspace.write_memory("Today I learned about Python.", to_daily=True))
 
         # Check memory file exists under users/default/memory/
         today = date.today().isoformat()
@@ -157,8 +158,8 @@ class TestWorkspace:
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        # Write long-term memory
-        workspace.write_memory("User prefers concise answers.", to_daily=False)
+        # Write long-term memory (async)
+        asyncio.run(workspace.write_memory("User prefers concise answers.", to_daily=False))
 
         # Check MEMORY.md file under users/default/
         memory_file = temp_workspace_path / "users" / "default" / "MEMORY.md"
@@ -172,12 +173,12 @@ class TestWorkspace:
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        # Write some memories
-        workspace.write_memory("Long-term preference", to_daily=False)
-        workspace.write_memory("Daily note", to_daily=True)
+        # Write some memories (async)
+        asyncio.run(workspace.write_memory("Long-term preference", to_daily=False))
+        asyncio.run(workspace.write_memory("Daily note", to_daily=True))
 
-        # Get memory prompt
-        memory_prompt = workspace.get_memory_prompt(days=2)
+        # Get memory prompt (async)
+        memory_prompt = asyncio.run(workspace.get_memory_prompt(days=2))
 
         assert len(memory_prompt) > 0
 
@@ -208,11 +209,11 @@ class TestWorkspace:
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        # Write some memories
-        workspace.write_memory("Python is a great programming language.", to_daily=False)
-        workspace.write_memory("I love coding in JavaScript too.", to_daily=True)
+        # Write some memories (async)
+        asyncio.run(workspace.write_memory("Python is a great programming language.", to_daily=False))
+        asyncio.run(workspace.write_memory("I love coding in JavaScript too.", to_daily=True))
 
-        # Search for Python
+        # Search for Python (sync method)
         results = workspace.search_memory("Python programming", limit=5)
 
         assert len(results) > 0

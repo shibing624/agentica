@@ -115,5 +115,5 @@ if __name__ == "__main__":
     print(f"Investment Pipeline: {companies}")
     print("=" * 60)
 
-    result = pipeline.run(companies=companies)
+    result = pipeline.run_sync(companies=companies)
     pprint_run_response(result)

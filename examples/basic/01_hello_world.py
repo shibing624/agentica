@@ -28,8 +28,8 @@ async def main():
     response = await agent.run("一句话介绍北京")
     print(response)
 
-    # You can also use print_response for formatted output with streaming
-    await agent.print_response("一句话介绍上海", stream=True)
+    # You can also use print_response_stream for formatted output with streaming
+    await agent.print_response_stream("一句话介绍上海")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tools for editing files - useful for code editors and AI coding assistants.
-
-Supports V4A diff format (used by GPT-5.1) and unified diff format.
-V4A Diff Parser (compatible with GPT-5.1 ApplyPatchTool)
+@description: Patch apply tool - supports V4A diff format and unified diff format.
 """
 import os
 import re
 import difflib
 from pathlib import Path
-from typing import Optional, List, Literal, Callable
+from typing import Optional, List, Literal
 from dataclasses import dataclass
 
 from agentica.tools.base import Tool
@@ -321,7 +318,7 @@ def _find_context_core(lines: List[str], context: List[str], start: int) -> Cont
 
 
 def _equals_slice(
-    source: List[str], target: List[str], start: int, map_fn: Callable[[str], str]
+    source: List[str], target: List[str], start: int, map_fn
 ) -> bool:
     """Check if a slice of source equals target after applying map_fn."""
     if start + len(target) > len(source):
@@ -360,47 +357,47 @@ def _apply_chunks(input_text: str, chunks: List[Chunk]) -> str:
     return "\n".join(dest_lines)
 
 
-# ============================================================================
-# EditTool Class
-# ============================================================================
-
-class EditTool(Tool):
+class PatchTool(Tool):
     """
-    A toolkit for editing files, particularly useful for code editing features.
-    Provides functionality similar to modern code editors.
+    A tool for applying patch/diff to files.
 
     Supports both V4A diff format (used by GPT-5.1) and unified diff format.
+    This tool is useful for applying code changes from AI-generated patches.
+
+    Example V4A format:
+    ```
+    *** Begin Patch
+    *** Update File: path/to/file.py
+    @@ context line
+     unchanged line
+    -removed line
+    +added line
+     unchanged line
+    *** End Patch
+    ```
     """
 
     def __init__(
-            self,
-            work_dir: Optional[str] = None,
-            edit_file: bool = True,
-            apply_patch: bool = True,
-            compare_files: bool = True,
-            search_replace: bool = True,
+        self,
+        work_dir: Optional[str] = None,
+        apply_patch: bool = True,
+        compare_files: bool = True,
     ):
         """
-        Initialize the EditTool.
+        Initialize the PatchTool.
 
         Args:
             work_dir: The working directory for file operations. Defaults to current directory.
-            edit_file: Whether to include the edit_file function.
             apply_patch: Whether to include the apply_patch function.
             compare_files: Whether to include the compare_files function.
-            search_replace: Whether to include the search_replace function.
         """
-        super().__init__(name="edit_tool")
+        super().__init__(name="patch_tool")
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
 
-        if edit_file:
-            self.register(self.edit_file)
         if apply_patch:
             self.register(self.apply_patch)
         if compare_files:
             self.register(self.compare_files)
-        if search_replace:
-            self.register(self.search_replace)
 
     def _resolve_path(self, file_path: str) -> Path:
         """Resolves a file path, making it absolute if it's relative."""
@@ -424,7 +421,6 @@ class EditTool(Tool):
             return "unified"
 
         # V4A uses bare @@ or @@ with context (not line numbers)
-        # Check if @@ is followed by content lines (V4A style)
         lines = patch_content.strip().split("\n")
         for i, line in enumerate(lines):
             if line.startswith("@@"):
@@ -443,40 +439,6 @@ class EditTool(Tool):
 
         return "unified"
 
-    def edit_file(self, target_file: str, code_edit: str) -> str:
-        """Edit a file or create a new one with the specified content.
-
-        Args:
-            target_file (str): The path of the file to edit.
-            code_edit (str): The new content for the file or a patch in V4A/unified diff format.
-
-        Returns:
-            str: A message describing the result of the operation.
-        """
-        try:
-            file_path = self._resolve_path(target_file)
-
-            # Check if this is a patch by looking for patch format markers
-            if "*** Begin Patch" in code_edit or "@@" in code_edit[:100]:
-                return self.apply_patch(target_file, code_edit)
-
-            # Ensure directory exists
-            os.makedirs(file_path.parent, exist_ok=True)
-
-            # Determine if we're creating or modifying
-            action = "Created" if not file_path.exists() else "Updated"
-
-            # Write the new content
-            file_path.write_text(code_edit, encoding='utf-8')
-            logger.debug(f"{action} file: {file_path}")
-
-            return f"{action} file: {target_file}"
-
-        except Exception as e:
-            error_msg = f"Error editing file {target_file}: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
-
     def apply_patch(self, target_file: str, patch_content: str) -> str:
         """Apply a patch to a file.
 
@@ -494,12 +456,22 @@ class EditTool(Tool):
         *** End Patch
         ```
 
+        Unified diff format example:
+        ```
+        --- a/file.py
+        +++ b/file.py
+        @@ -10,3 +10,3 @@
+         unchanged
+        -removed
+        +added
+        ```
+
         Args:
-            target_file (str): The path of the file to patch.
-            patch_content (str): The patch content in V4A or unified diff format.
+            target_file: The path of the file to patch.
+            patch_content: The patch content in V4A or unified diff format.
 
         Returns:
-            str: A message describing the result of the operation.
+            A message describing the result of the operation.
         """
         try:
             file_path = self._resolve_path(target_file)
@@ -605,12 +577,12 @@ class EditTool(Tool):
         """Compare two files and return the differences.
 
         Args:
-            file1 (str): The path to the first file.
-            file2 (str): The path to the second file.
-            context_lines (int): Number of context lines to show around differences.
+            file1: The path to the first file.
+            file2: The path to the second file.
+            context_lines: Number of context lines to show around differences.
 
         Returns:
-            str: A unified diff of the two files.
+            A unified diff of the two files.
         """
         try:
             path1 = self._resolve_path(file1)
@@ -642,77 +614,37 @@ class EditTool(Tool):
             logger.error(error_msg)
             return error_msg
 
-    def search_replace(self, target_file: str, search_pattern: str, replacement: str, use_regex: bool = False) -> str:
-        """Search and replace text in a file.
-
-        Args:
-            target_file (str): The path of the file to modify.
-            search_pattern (str): The text or pattern to search for.
-            replacement (str): The text to replace with.
-            use_regex (bool): Whether to treat search_pattern as a regular expression.
-
-        Returns:
-            str: A message describing the result of the operation.
-        """
-        try:
-            file_path = self._resolve_path(target_file)
-
-            if not file_path.exists():
-                return f"Error: File not found: {target_file}"
-
-            # Read the file content
-            content = file_path.read_text(encoding='utf-8')
-
-            # Perform the replacement
-            if use_regex:
-                try:
-                    pattern = re.compile(search_pattern, re.MULTILINE)
-                    new_content, count = re.subn(pattern, replacement, content)
-                except re.error as e:
-                    return f"Error: Invalid regular expression pattern: {str(e)}"
-            else:
-                count = content.count(search_pattern)
-                new_content = content.replace(search_pattern, replacement)
-
-            # Only update the file if changes were made
-            if count > 0:
-                file_path.write_text(new_content, encoding='utf-8')
-                logger.debug(f"Replaced {count} occurrences in file: {file_path}")
-                return f"Replaced {count} occurrences in file: {target_file}"
-            else:
-                return f"No occurrences of '{search_pattern}' found in {target_file}"
-
-        except Exception as e:
-            error_msg = f"Error performing search and replace in {target_file}: {str(e)}"
-            logger.error(error_msg)
-            return error_msg
-
 
 if __name__ == '__main__':
     # Simple test
-    editor = EditTool()
-
-    # Test edit_file
-    print(editor.edit_file("test_edit.py", "print('Hello, World!')"))
-
-    # Test search_replace
-    print(editor.search_replace("test_edit.py", "Hello", "Greetings"))
+    tool = PatchTool()
 
     # Test V4A diff format
-    v4a_patch = """@@
- print('Greetings, World!')
--print('Greetings, World!')
-+print('Hello, Universe!')
-+print('This is a new line!')
+    v4a_patch = """
+*** Begin Patch
+*** Update File: test.py
+@@
+def foo():
+-    pass
++    return 42
+*** End Patch
 """
-    print("\n--- Testing V4A Patch ---")
-    print(editor.apply_patch("test_edit.py", v4a_patch))
 
-    # Read the result
-    with open("test_edit.py", "r") as f:
-        print("File content after V4A patch:")
+    # Create a test file
+    test_file = "test_patch.py"
+    with open(test_file, "w") as f:
+        f.write("def foo():\n    pass\n")
+
+    print("Applying V4A patch...")
+    result = tool.apply_patch(test_file, v4a_patch)
+    print(result)
+
+    # Show result
+    with open(test_file, "r") as f:
+        print("File content after patch:")
         print(f.read())
 
-    # Clean up
-    if os.path.exists("test_edit.py"):
-        os.remove("test_edit.py")
+    # Cleanup
+    import os
+    if os.path.exists(test_file):
+        os.remove(test_file)

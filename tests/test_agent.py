@@ -175,28 +175,6 @@ class TestAgentSystemPrompt(unittest.TestCase):
         self.assertEqual(len(agent.instructions), 3)
 
 
-class TestAgentDeepCopy(unittest.TestCase):
-    """Test cases for Agent deep copy functionality."""
-
-    def test_deep_copy_preserves_name(self):
-        """Test deep copy preserves agent name."""
-        agent = Agent(name="Original")
-        copied = agent.deep_copy()
-        self.assertEqual(copied.name, "Original")
-
-    def test_deep_copy_preserves_user_id(self):
-        """Test deep copy preserves user_id."""
-        agent = Agent(user_id="user-1")
-        copied = agent.deep_copy()
-        self.assertEqual(copied.user_id, "user-1")
-
-    def test_deep_copy_with_name_update(self):
-        """Test deep copy with name update."""
-        agent = Agent(name="Original")
-        copied = agent.deep_copy(update={"name": "Copied"})
-        self.assertEqual(copied.name, "Copied")
-
-
 class TestAgentTeam(unittest.TestCase):
     """Test cases for Agent team functionality."""
 

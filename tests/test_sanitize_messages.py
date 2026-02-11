@@ -3,6 +3,10 @@
 Tests for Model.sanitize_messages() - ensures tool_call message sequences are valid.
 """
 import unittest
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.model.base import Model
 from agentica.model.message import Message
 

@@ -6,10 +6,11 @@ Test suite for Agentica ACP (Agent Client Protocol) implementation.
 Run with: python -m pytest tests/test_acp.py -v
 """
 
-import json
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.acp.types import (
     ACPRequest,
     ACPResponse,

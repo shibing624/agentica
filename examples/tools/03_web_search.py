@@ -28,11 +28,7 @@ async def main():
         add_datetime_to_instructions=True,
         read_chat_history=True,
     )
-    
-    response = await agent.run("一句话介绍林黛玉")
-    print(response)
-    
-    response = await agent.run("上海今天适合穿什么衣服")
+    response = await agent.run("北京新闻")
     print(response)
     
     response = await agent.run("总结前面的问答")
@@ -42,9 +38,8 @@ async def main():
     print("Example 2: Research Task")
     print("=" * 60)
     
-    await agent.print_response(
+    await agent.print_response_stream(
         "搜索最新的人工智能发展趋势，总结3个关键点",
-        stream=True
     )
 
 

@@ -57,14 +57,14 @@ class TeamMixin:
         # Generate description
         description = tool_description or self.description or self.role or f"Run the {name} agent."
 
-        def agent_entrypoint(message: str) -> str:
+        async def agent_entrypoint(message: str) -> str:
             """Run the agent with the given message and return the response."""
-            response = self.run_sync(message)
-            
+            response = await self.run(message)
+
             # Use custom output extractor if provided
             if custom_output_extractor:
                 return custom_output_extractor(response)
-            
+
             # Default extraction
             if response and response.content:
                 if isinstance(response.content, str):
@@ -87,17 +87,17 @@ class TeamMixin:
         agent_name = self.name or "agent"
         agent_description = self.description or self.role or f"Transfer task to {agent_name}"
 
-        def transfer_to_agent(task: str) -> str:
+        async def transfer_to_agent(task: str) -> str:
             """Transfer a task to this agent.
-            
+
             Args:
                 task: The task description to transfer.
-                
+
             Returns:
                 The response from the agent.
             """
             logger.info(f"Transferring task to {agent_name}: {task}")
-            response = self.run_sync(message=task)
+            response = await self.run(message=task)
             if response and response.content:
                 if isinstance(response.content, str):
                     return response.content
@@ -107,7 +107,7 @@ class TeamMixin:
         return Function(
             name=f"transfer_to_{agent_name.lower().replace(' ', '_')}",
             description=agent_description,
-            func=transfer_to_agent,
+            entrypoint=transfer_to_agent,
         )
 
     def get_transfer_prompt(self: "Agent") -> str:
@@ -149,56 +149,22 @@ class TeamMixin:
 
         # Add default tools based on settings
         if self.read_chat_history:
-            tools.append(
-                Tool(
-                    name="get_chat_history",
-                    description="Use this function to get the chat history between the user and agent. "
-                               "Returns a JSON list of messages.",
-                    func=self.get_chat_history,
-                )
-            )
+            tools.append(self.get_chat_history)
 
         if self.read_tool_call_history:
-            tools.append(
-                Tool(
-                    name="get_tool_call_history",
-                    description="Use this function to get the tool calls made by the agent. "
-                               "Returns a JSON list of tool calls in reverse chronological order.",
-                    func=self.get_tool_call_history,
-                )
-            )
+            tools.append(self.get_tool_call_history)
 
         # Add knowledge base tools if knowledge is configured
         if self.knowledge is not None:
             if self.search_knowledge:
-                tools.append(
-                    Tool(
-                        name="search_knowledge_base",
-                        description="Use this function to search the knowledge base for relevant information. "
-                                   "Returns relevant documents based on the query.",
-                        func=self.search_knowledge_base,
-                    )
-                )
+                tools.append(self.search_knowledge_base)
 
             if self.update_knowledge:
-                tools.append(
-                    Tool(
-                        name="add_to_knowledge",
-                        description="Use this function to add information to the knowledge base for future use.",
-                        func=self.add_to_knowledge,
-                    )
-                )
+                tools.append(self.add_to_knowledge)
 
         # Add memory update tool if user memories are enabled
         if self.enable_user_memories and self.memory is not None and self.memory.create_user_memories:
-            tools.append(
-                Tool(
-                    name="update_memory",
-                    description="Use this function to update the Agent's memory with important information. "
-                               "Describe the task or information in detail.",
-                    func=self.update_memory,
-                )
-            )
+            tools.append(self.update_memory)
 
         # Add team transfer functions if team is present and transfer instructions are enabled
         if self.has_team() and self.add_transfer_instructions:

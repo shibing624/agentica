@@ -7,6 +7,7 @@ Lazy loading is used for tools and optional modules to improve import speed.
 Core modules (Agent, Model, Memory, etc.) are imported eagerly.
 """
 import importlib
+import threading
 from typing import TYPE_CHECKING
 
 from agentica.version import __version__  # noqa, isort: skip
@@ -105,8 +106,7 @@ from agentica.utils.tokens import (
 from agentica.agent import Agent, AgentCancelledError
 from agentica.deep_agent import DeepAgent
 from agentica.agent_session import AgentSession
-from agentica.workflow import Workflow
-from agentica.workflow_session import WorkflowSession
+from agentica.workflow import Workflow, WorkflowSession
 
 # workspace
 from agentica.workspace import Workspace, WorkspaceConfig
@@ -167,32 +167,33 @@ _LAZY_IMPORTS = {
     "list_skill_files": "agentica.skills",
     "read_skill_file": "agentica.skills",
 
-    # tool guardrails
-    "ToolGuardrailFunctionOutput": "agentica.tools.guardrails",
-    "ToolInputGuardrail": "agentica.tools.guardrails",
-    "ToolOutputGuardrail": "agentica.tools.guardrails",
-    "ToolInputGuardrailData": "agentica.tools.guardrails",
-    "ToolOutputGuardrailData": "agentica.tools.guardrails",
-    "ToolContext": "agentica.tools.guardrails",
-    "tool_input_guardrail": "agentica.tools.guardrails",
-    "tool_output_guardrail": "agentica.tools.guardrails",
-    "ToolInputGuardrailTripwireTriggered": "agentica.tools.guardrails",
-    "ToolOutputGuardrailTripwireTriggered": "agentica.tools.guardrails",
+    # tool guardrails (now in unified guardrails package)
+    "ToolGuardrailFunctionOutput": "agentica.guardrails",
+    "ToolInputGuardrail": "agentica.guardrails",
+    "ToolOutputGuardrail": "agentica.guardrails",
+    "ToolInputGuardrailData": "agentica.guardrails",
+    "ToolOutputGuardrailData": "agentica.guardrails",
+    "ToolContext": "agentica.guardrails",
+    "tool_input_guardrail": "agentica.guardrails",
+    "tool_output_guardrail": "agentica.guardrails",
+    "ToolInputGuardrailTripwireTriggered": "agentica.guardrails",
+    "ToolOutputGuardrailTripwireTriggered": "agentica.guardrails",
+    "ToolGuardrailTripwireTriggered": "agentica.guardrails",
+    "run_tool_input_guardrails": "agentica.guardrails",
+    "run_tool_output_guardrails": "agentica.guardrails",
 
     # tools (each may have external dependencies)
     "SearchSerperTool": "agentica.tools.search_serper_tool",
     "BaiduSearchTool": "agentica.tools.baidu_search_tool",
-    "RunPythonCodeTool": "agentica.tools.run_python_code_tool",
     "ImageAnalysisTool": "agentica.tools.image_analysis_tool",
-    "CalculatorTool": "agentica.tools.calculator_tool",
     "DalleTool": "agentica.tools.dalle_tool",
-    "FileTool": "agentica.tools.file_tool",
     "HackerNewsTool": "agentica.tools.hackernews_tool",
     "JinaTool": "agentica.tools.jina_tool",
     "ShellTool": "agentica.tools.shell_tool",
     "SkillTool": "agentica.tools.skill_tool",
-    "TextAnalysisTool": "agentica.tools.text_analysis_tool",
     "WeatherTool": "agentica.tools.weather_tool",
+    "CodeTool": "agentica.tools.code_tool",
+    "PatchTool": "agentica.tools.patch_tool",
 
     # built-in tools for DeepAgent
     "BuiltinFileTool": "agentica.deep_tools",
@@ -251,15 +252,18 @@ _LAZY_IMPORTS = {
 
 # Cache for lazy-loaded modules
 _LAZY_CACHE = {}
+_LAZY_LOCK = threading.Lock()
 
 
 def __getattr__(name: str):
     """Lazy import handler for optional modules."""
     if name in _LAZY_IMPORTS:
         if name not in _LAZY_CACHE:
-            module_path = _LAZY_IMPORTS[name]
-            module = importlib.import_module(module_path)
-            _LAZY_CACHE[name] = getattr(module, name)
+            with _LAZY_LOCK:
+                if name not in _LAZY_CACHE:  # double-checked locking
+                    module_path = _LAZY_IMPORTS[name]
+                    module = importlib.import_module(module_path)
+                    _LAZY_CACHE[name] = getattr(module, name)
         return _LAZY_CACHE[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -322,8 +326,22 @@ if TYPE_CHECKING:  # noqa: F401
         read_skill_file,
     )
 
-    # tool guardrails
-    from agentica.tools.guardrails import (  # noqa: F401
+    # guardrails (unified package)
+    from agentica.guardrails import (  # noqa: F401
+        # Agent-level guardrails
+        GuardrailFunctionOutput,
+        InputGuardrail,
+        OutputGuardrail,
+        InputGuardrailResult,
+        OutputGuardrailResult,
+        input_guardrail,
+        output_guardrail,
+        InputGuardrailTripwireTriggered,
+        OutputGuardrailTripwireTriggered,
+        GuardrailTripwireTriggered,
+        run_input_guardrails,
+        run_output_guardrails,
+        # Tool-level guardrails
         ToolGuardrailFunctionOutput,
         ToolInputGuardrail,
         ToolOutputGuardrail,
@@ -334,22 +352,22 @@ if TYPE_CHECKING:  # noqa: F401
         tool_output_guardrail,
         ToolInputGuardrailTripwireTriggered,
         ToolOutputGuardrailTripwireTriggered,
+        run_tool_input_guardrails,
+        run_tool_output_guardrails,
     )
 
     # tools
     from agentica.tools.search_serper_tool import SearchSerperTool  # noqa: F401
     from agentica.tools.baidu_search_tool import BaiduSearchTool  # noqa: F401
-    from agentica.tools.run_python_code_tool import RunPythonCodeTool  # noqa: F401
     from agentica.tools.image_analysis_tool import ImageAnalysisTool  # noqa: F401
-    from agentica.tools.calculator_tool import CalculatorTool  # noqa: F401
     from agentica.tools.dalle_tool import DalleTool  # noqa: F401
-    from agentica.tools.file_tool import FileTool  # noqa: F401
     from agentica.tools.hackernews_tool import HackerNewsTool  # noqa: F401
     from agentica.tools.jina_tool import JinaTool  # noqa: F401
     from agentica.tools.shell_tool import ShellTool  # noqa: F401
     from agentica.tools.skill_tool import SkillTool  # noqa: F401
-    from agentica.tools.text_analysis_tool import TextAnalysisTool  # noqa: F401
     from agentica.tools.weather_tool import WeatherTool  # noqa: F401
+    from agentica.tools.code_tool import CodeTool  # noqa: F401
+    from agentica.tools.patch_tool import PatchTool  # noqa: F401
 
     # built-in tools for DeepAgent
     from agentica.deep_tools import (  # noqa: F401
@@ -393,19 +411,6 @@ if TYPE_CHECKING:  # noqa: F401
 
     # human-in-the-loop tool
     from agentica.tools.user_input_tool import UserInputTool, UserInputRequired  # noqa: F401
-
-    # guardrails
-    from agentica.guardrails import (  # noqa: F401
-        GuardrailFunctionOutput,
-        InputGuardrail,
-        OutputGuardrail,
-        InputGuardrailResult,
-        OutputGuardrailResult,
-        input_guardrail,
-        output_guardrail,
-        InputGuardrailTripwireTriggered,
-        OutputGuardrailTripwireTriggered,
-    )
 
     # mcp
     from agentica.mcp.config import MCPConfig  # noqa: F401

@@ -40,6 +40,3 @@ class WorkflowMemory(BaseModel):
         new_memory = self.model_copy(deep=True, update=update)
         new_memory.clear()
         return new_memory
-
-    # Keep backward compat alias
-    deep_copy = create_empty_copy

@@ -618,7 +618,7 @@ class Agent:
         # This ensures that edits to AGENT.md, USER.md, MEMORY.md etc.
         # take effect on the next conversation turn.
 
-    def get_workspace_context_prompt(self) -> Optional[str]:
+    async def get_workspace_context_prompt(self) -> Optional[str]:
         """Dynamically load workspace context for injection into system prompt.
 
         Called on every run to ensure edits to AGENT.md, PERSONA.md, TOOLS.md,
@@ -633,10 +633,10 @@ class Agent:
         if not self.workspace.exists():
             return None
 
-        context = self.workspace.get_context_prompt()
+        context = await self.workspace.get_context_prompt()
         return context if context else None
 
-    def get_workspace_memory_prompt(self) -> Optional[str]:
+    async def get_workspace_memory_prompt(self) -> Optional[str]:
         """Dynamically load workspace memory for injection into system prompt.
 
         Called on every run to ensure newly saved memories are always included.
@@ -647,7 +647,7 @@ class Agent:
         if not self.workspace or not self.load_workspace_memory:
             return None
 
-        memory = self.workspace.get_memory_prompt(days=self.memory_days)
+        memory = await self.workspace.get_memory_prompt(days=self.memory_days)
         return memory if memory else None
 
     def _load_mcp_tools(self):
@@ -815,7 +815,7 @@ class Agent:
             **kwargs
         )
 
-    def save_memory(self, content: str, long_term: bool = False):
+    async def save_memory(self, content: str, long_term: bool = False):
         """保存记忆到工作空间
 
         将内容保存到工作空间的记忆文件中。支持保存到日记忆或长期记忆。
@@ -829,7 +829,7 @@ class Agent:
             >>> agent.save_memory("今天讨论了项目进度")  # 保存到日记忆
         """
         if self.workspace:
-            self.workspace.write_memory(content, to_daily=not long_term)
+            await self.workspace.write_memory(content, to_daily=not long_term)
             logger.debug(f"Saved memory to workspace: long_term={long_term}")
         else:
             logger.warning("No workspace configured, memory not saved")
@@ -865,105 +865,6 @@ class Agent:
             return
 
         logger.debug(f"Added instruction to agent: {instruction[:50]}...")
-
-    def deep_copy(self, *, update: Optional[Dict[str, Any]] = None) -> "Agent":
-        """Create and return a deep copy of this Agent, optionally updating fields.
-
-        Args:
-            update (Optional[Dict[str, Any]]): Optional dictionary of fields for the new Agent.
-
-        Returns:
-            Agent: A new Agent instance.
-        """
-        # Runtime fields that should not be passed to __init__
-        # These are initialized manually in __init__ and marked as "DO NOT SET MANUALLY"
-        runtime_fields = {"run_id", "run_input", "run_response", "stream", "stream_intermediate_steps"}
-        
-        # Method fields that are declared as Callable type annotations (from mixins)
-        # These should not be copied as they are methods, not data fields
-        method_fields = {
-            # From prompts.py
-            "get_json_output_prompt", "get_system_message", "get_user_message", 
-            "get_messages_for_run", "get_relevant_docs_from_knowledge",
-            "convert_documents_to_string", "convert_context_to_string",
-            # From runner.py
-            "run", "run_sync", "run_stream", "run_stream_sync",
-            "_run_impl", "_consume_run", "_run_with_timeout",
-            "_wrap_stream_with_timeout",
-            "save_run_response_to_file", "_aggregate_metrics_from_run_messages",
-            "generic_run_response",
-            # From session.py
-            "get_agent_data", "get_session_data", "get_agent_session",
-            "from_agent_session", "read_from_storage", "write_to_storage",
-            "add_introduction", "load_session", "create_session", "new_session",
-            "reset", "load_user_memories", "get_user_memories", "clear_user_memories",
-            "rename", "rename_session", "generate_session_name",
-            "auto_rename_session", "delete_session",
-            # From team.py
-            "as_tool", "get_transfer_function", "get_transfer_prompt", "get_tools",
-            # From tools.py
-            "get_chat_history", "get_tool_call_history", "search_knowledge_base",
-            "add_to_knowledge", "update_memory", "_create_run_data",
-            # From printer.py
-            "print_response", "print_response_sync", "cli_app",
-            # From media.py
-            "add_image", "add_video", "get_images", "get_videos",
-        }
-
-        # Extract the fields to set for the new Agent
-        fields_for_new_agent = {}
-
-        # Get all dataclass fields instead of model_fields_set
-        for f in fields(self):
-            field_name = f.name
-            # Skip runtime fields, method fields, and non-init fields (e.g. _cancelled)
-            if field_name in runtime_fields or field_name in method_fields or not f.init:
-                continue
-            field_value = getattr(self, field_name)
-            if field_value is not None:
-                fields_for_new_agent[field_name] = self._deep_copy_field(field_name, field_value)
-
-        # Update fields if provided
-        if update:
-            fields_for_new_agent.update(update)
-
-        # Create a new Agent
-        new_agent = self.__class__(**fields_for_new_agent)
-        logger.debug(f"Created new Agent: agent_id: {new_agent.agent_id} | session_id: {new_agent.session_id}")
-        return new_agent
-
-    def _deep_copy_field(self, field_name: str, field_value: Any) -> Any:
-        """Helper method to deep copy a field based on its type."""
-        # For memory and model, use their deep_copy methods
-        if field_name in ("memory", "model"):
-            return field_value.deep_copy()
-
-        # For compound types, attempt a deep copy
-        if isinstance(field_value, (list, dict, set, BaseDb)):
-            try:
-                return deepcopy(field_value)
-            except Exception as e:
-                logger.warning(f"Failed to deepcopy field: {field_name} - {e}")
-                try:
-                    return copy(field_value)
-                except Exception as e:
-                    logger.warning(f"Failed to copy field: {field_name} - {e}")
-                    return field_value
-
-        # For pydantic models, attempt a deep copy
-        if isinstance(field_value, BaseModel):
-            try:
-                return field_value.model_copy(deep=True)
-            except Exception as e:
-                logger.warning(f"Failed to deepcopy field: {field_name} - {e}")
-                try:
-                    return field_value.model_copy(deep=False)
-                except Exception as e:
-                    logger.warning(f"Failed to copy field: {field_name} - {e}")
-                    return field_value
-
-        # For other types, return as is
-        return field_value
 
     def has_team(self) -> bool:
         return self.team is not None and len(self.team) > 0

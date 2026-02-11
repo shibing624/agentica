@@ -1,6 +1,6 @@
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Union
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, override
 
 import httpx
 
@@ -227,6 +227,7 @@ class Groq(Model):
                 message = self.add_audio_to_message(message=message, audio=message.audio)
         return message.to_dict()
 
+    @override
     async def invoke(self, messages: List[Message]) -> ChatCompletion:
         """Send an async chat completion request to the Groq API."""
         return await self.get_async_client().chat.completions.create(
@@ -235,6 +236,7 @@ class Groq(Model):
             **self.request_kwargs,
         )
 
+    @override
     async def invoke_stream(self, messages: List[Message]) -> Any:
         """Send an async streaming chat completion request to the Groq API."""
         async_stream = await self.get_async_client().chat.completions.create(
@@ -362,6 +364,7 @@ class Groq(Model):
         self.update_usage_metrics(assistant_message, metrics, response_usage)
         return assistant_message
 
+    @override
     async def response(self, messages: List[Message]) -> ModelResponse:
         """Generate a response from Groq (async-only)."""
         self.sanitize_messages(messages)
@@ -490,6 +493,7 @@ class Groq(Model):
             if len(function_call_results) > 0:
                 messages.extend(function_call_results)
 
+    @override
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """Generate a streaming response from Groq (async-only)."""
         self.sanitize_messages(messages)

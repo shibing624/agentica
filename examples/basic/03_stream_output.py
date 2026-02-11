@@ -4,7 +4,7 @@
 @description: Stream output demo - Demonstrates streaming response
 
 This example shows different ways to use streaming output:
-1. Using print_response with stream=True (sync)
+1. Using print_response_stream_sync (sync)
 2. Using run_stream_sync and iterating over chunks (sync)
 3. Async streaming with print_response
 4. Async streaming with run_stream (recommended for async streaming)
@@ -13,8 +13,6 @@ This example shows different ways to use streaming output:
 import sys
 import os
 import asyncio
-
-# Insert at beginning to ensure local version is used
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, DeepSeek
@@ -28,7 +26,7 @@ agent = Agent(
     model=OpenAIChat(id="gpt-4o-mini"),
 )
 
-agent.print_response_sync("hi", stream=True)
+agent.print_response_stream_sync("hi")
 
 # Example 2: Manual streaming iteration (sync)
 print("\n" + "=" * 60)
@@ -52,8 +50,8 @@ async def async_print_demo():
         model=OpenAIChat(id="gpt-4o-mini"),
     )
     
-    # Use print_response for async streaming output
-    await agent.print_response("hi", stream=True)
+    # Use print_response_stream for async streaming output
+    await agent.print_response_stream("hi")
 
 
 asyncio.run(async_print_demo())

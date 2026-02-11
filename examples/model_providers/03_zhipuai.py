@@ -51,7 +51,7 @@ async def main():
         model=ZhipuAI(),
     )
     
-    await agent.print_response("一句话简单介绍一下《红楼梦》", stream=True)
+    await agent.print_response_stream("一句话简单介绍一下《红楼梦》")
 
 
 if __name__ == "__main__":

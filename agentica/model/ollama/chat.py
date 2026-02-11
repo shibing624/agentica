@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Mapping, Union
+from typing import Optional, List, AsyncIterator, Dict, Any, Mapping, Union, override
 
 from pydantic import BaseModel
 
@@ -139,6 +139,7 @@ class Ollama(Model):
                 _message["images"] = message.images
         return _message
 
+    @override
     async def invoke(self, messages: List[Message]) -> Mapping[str, Any]:
         """Send an async chat request to the Ollama API."""
         request_kwargs = self.request_kwargs
@@ -155,6 +156,7 @@ class Ollama(Model):
             **request_kwargs,
         )  # type: ignore
 
+    @override
     async def invoke_stream(self, messages: List[Message]) -> Any:
         """Send an async streaming chat request to the Ollama API."""
         async_stream = await self.get_async_client().chat(
@@ -270,6 +272,7 @@ class Ollama(Model):
         self.update_usage_metrics(assistant_message=assistant_message, metrics=metrics, response=response)
         return assistant_message
 
+    @override
     async def response(self, messages: List[Message]) -> ModelResponse:
         """Generate a response from Ollama (async-only)."""
         self.sanitize_messages(messages)
@@ -331,6 +334,7 @@ class Ollama(Model):
 
             self.format_function_call_results(function_call_results, messages)
 
+    @override
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """Generate a streaming response from Ollama (async-only)."""
         self.sanitize_messages(messages)

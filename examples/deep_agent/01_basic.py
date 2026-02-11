@@ -16,13 +16,14 @@ Difference from regular Agent:
 """
 import sys
 import os
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, Agent, OpenAIChat
+from agentica import DeepAgent, OpenAIChat
 
 
-def basic_example():
+async def basic_example():
     """Basic example: Create DeepAgent and execute simple tasks."""
     print("=" * 60)
     print("Basic Example: DeepAgent Basic Usage")
@@ -31,17 +32,18 @@ def basic_example():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         add_datetime_to_instructions=True,
-        # debug_mode=False,
     )
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
 
-    agent.print_response_sync("List all Python files in the current directory and count them", 
-    show_tool_calls=True, stream=True)
+    await agent.print_response_stream(
+        "List all Python files in the current directory and count them",
+        show_tool_calls=True,
+    )
 
 
-def custom_config_example():
+async def custom_config_example():
     """Custom configuration example: Disable certain tools."""
     print("\n" + "=" * 60)
     print("Custom Config Example: Disable Code Execution Tool")
@@ -53,78 +55,76 @@ def custom_config_example():
         description="A safe assistant without code execution",
         include_execute=False,
         include_web_search=False,
-        # debug_mode=True,
     )
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
 
 
-def with_custom_tools_example():
-    """Add custom tools example."""
+async def with_custom_tools_example():
+    """Add custom tools alongside built-in tools."""
     print("\n" + "=" * 60)
-    print("Custom Tools Example: Add Calculator Tool")
+    print("Custom Tools Example: Add Custom Function Tool")
     print("=" * 60)
 
-    from agentica.tools.calculator_tool import CalculatorTool
+    def multiply(a: float, b: float) -> str:
+        """Multiply two numbers.
+
+        Args:
+            a: First number
+            b: Second number
+
+        Returns:
+            The product as a string
+        """
+        return str(a * b)
 
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="MathAssistant",
-        description="A math assistant with calculator",
-        tools=[CalculatorTool()],
-        # debug_mode=True,
+        description="A math assistant with custom tools",
+        tools=[multiply],
     )
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
 
-    agent.print_response_sync("Calculate (1111.2 * 22.1222) + (3333.3 / 4444.43)=?")
+    await agent.print_response("Calculate (1111.2 * 22.1222) using the multiply tool")
 
 
-def complex_deep_agent():
-    """DeepAgent."""
+async def complex_deep_agent():
+    """DeepAgent with full configuration."""
     from agentica import SqliteDb
+
     print("\n" + "=" * 60)
-    print("Complex DeepAgent Example: Create a complex DeepAgent")
+    print("Complex DeepAgent Example")
     print("=" * 60)
+
     db_path = "tmp/agent_sessions.db"
+    os.makedirs("tmp", exist_ok=True)
     db = SqliteDb(db_file=str(db_path))
 
     deep_agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="DeepAgent",
         db=db,
-        # 工作空间配置（配置层）
         load_workspace_context=True,
         load_workspace_memory=True,
         memory_days=7,
-        # 历史记录配置
         add_history_to_messages=True,
         num_history_responses=4,
-        # 工具配置
         tool_call_limit=40,
-        # 指令
         add_datetime_to_instructions=True,
         auto_load_mcp=True,
-        # 调试
         debug_mode=True,
     )
     print(f"DeepAgent builtin tools: {deep_agent.get_builtin_tool_names()}")
     print(f"DeepAgent: {deep_agent}")
-    deep_agent.print_response_sync("List all Python files in the current directory and count them")
-    while True:
-        user_input = input("Enter your command (or 'quit' to exit): ")
-        if user_input.lower() == 'quit':
-            break
-        deep_agent.print_response_sync(user_input)
-        print("-" * 60)
-        print("\n")
-
+    await deep_agent.print_response("List all Python files in the current directory and count them")
 
 
 if __name__ == '__main__':
-    basic_example()
-    # custom_config_example()
-    # with_custom_tools_example()
-    # complex_deep_agent()
+    asyncio.run(basic_example())
+    asyncio.run(custom_config_example())
+    asyncio.run(with_custom_tools_example())
+    asyncio.run(complex_deep_agent())

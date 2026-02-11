@@ -113,10 +113,10 @@ MODEL_REGISTRY = {
 
 # Example models for each provider (for /model command display)
 EXAMPLE_MODELS = {
-    'openai': ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o3-mini'],
+    'openai': ['gpt-4o', 'gpt-4o-mini', 'gpt-5', 'gpt-5.2', 'o3-mini'],
     'azure': ['gpt-4o', 'gpt-4o-mini'],
-    'moonshot': ['moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k'],
-    'zhipuai': ['glm-4-plus', 'glm-4-flash', 'glm-4.7-flash'],
+    'moonshot': ['kimi-k2.5', 'moonshot-v1-128k'],
+    'zhipuai': ['glm-4', 'glm-4-flash', 'glm-4.7-flash'],
     'deepseek': ['deepseek-chat', 'deepseek-reasoner'],
     'yi': ['yi-lightning', 'yi-large'],
     'doubao': ['doubao-1.5-pro-32k', 'doubao-1.5-lite-32k', 'doubao-1.5-vision-pro-32k'],

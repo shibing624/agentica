@@ -29,7 +29,7 @@ async def main():
         debug_mode=True,
     )
 
-    await agent.print_response("介绍一下唐朝", stream=True)
+    await agent.print_response_stream("介绍一下唐朝")
 
     # Example 2: Custom user messages with message list input
     print("\n" + "=" * 60)
@@ -63,7 +63,7 @@ async def main():
         ],
     )
 
-    await agent3.print_response("如何用Python实现快速排序?", stream=True)
+    await agent3.print_response_stream("如何用Python实现快速排序?")
 
 
 if __name__ == "__main__":

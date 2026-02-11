@@ -4,8 +4,6 @@
 @description:
 This module provides classes for managing tools.
 It includes an abstract base class for tools and a class for managing tool instances.
-
-part of the code from https://github.com/phidatahq/phidata
 """
 
 import asyncio

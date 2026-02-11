@@ -13,6 +13,7 @@ This example demonstrates DeepAgent's built-in file system capabilities:
 """
 import sys
 import os
+import asyncio
 import tempfile
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -20,7 +21,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from agentica import DeepAgent, OpenAIChat
 
 
-def file_listing_demo():
+async def file_listing_demo():
     """Demo: List files and directories."""
     print("=" * 60)
     print("Demo 1: File Listing (ls)")
@@ -29,14 +30,13 @@ def file_listing_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileExplorer",
-        # debug_mode=True,
     )
 
-    response = agent.run_sync("List all Python files in the current directory")
+    response = await agent.run("List all Python files in the current directory")
     print(f"\nResponse:\n{response.content}")
 
 
-def file_read_write_demo():
+async def file_read_write_demo():
     """Demo: Read and write files."""
     print("\n" + "=" * 60)
     print("Demo 2: Read and Write Files")
@@ -45,7 +45,6 @@ def file_read_write_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileManager",
-        # debug_mode=True,
     )
 
     # Create a temporary directory for demo
@@ -53,17 +52,17 @@ def file_read_write_demo():
         test_file = os.path.join(tmpdir, "test.txt")
 
         # Write a file
-        response = agent.run_sync(
+        response = await agent.run(
             f"Create a file at {test_file} with the content: 'Hello, DeepAgent!'"
         )
         print(f"\nWrite Response:\n{response.content}")
 
         # Read the file
-        response = agent.run_sync(f"Read the contents of {test_file}")
+        response = await agent.run(f"Read the contents of {test_file}")
         print(f"\nRead Response:\n{response.content}")
 
 
-def file_search_demo():
+async def file_search_demo():
     """Demo: Search files with glob and grep."""
     print("\n" + "=" * 60)
     print("Demo 3: File Search (glob and grep)")
@@ -72,17 +71,16 @@ def file_search_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileSearcher",
-        # debug_mode=True,
     )
 
     # Find Python files
-    response = agent.run_sync(
+    response = await agent.run(
         "Find all Python files in the current directory that contain the word 'import'"
     )
     print(f"\nSearch Response:\n{response.content}")
 
 
-def file_edit_demo():
+async def file_edit_demo():
     """Demo: Edit existing files."""
     print("\n" + "=" * 60)
     print("Demo 4: Edit Files")
@@ -91,7 +89,6 @@ def file_edit_demo():
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
         name="FileEditor",
-        # debug_mode=True,
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -108,7 +105,7 @@ MAX_RETRIES = 3
         print(f"Created test file: {test_file}")
 
         # Edit the file
-        response = agent.run_sync(
+        response = await agent.run(
             f"Edit the file {test_file} to change DEBUG from False to True"
         )
         print(f"\nEdit Response:\n{response.content}")
@@ -119,7 +116,7 @@ MAX_RETRIES = 3
 
 
 if __name__ == "__main__":
-    file_listing_demo()
-    file_read_write_demo()
-    file_search_demo()
-    file_edit_demo()
+    asyncio.run(file_listing_demo())
+    asyncio.run(file_read_write_demo())
+    asyncio.run(file_search_demo())
+    asyncio.run(file_edit_demo())

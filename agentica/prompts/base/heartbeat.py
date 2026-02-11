@@ -10,37 +10,22 @@ It instructs the model to:
 3. Follow a self-driven workflow
 4. Verify changes before marking complete
 
-Inspired by OpenCode's beast.txt and anthropic.txt
+Based on OpenCode's batch.txt and tool guidelines
 """
 
-from pathlib import Path
+from agentica.prompts.base.utils import load_prompt as _load_prompt
 
-_BASE_DIR = Path(__file__).parent / "md"
-
-
-def _load_prompt(filename: str) -> str:
-    """Load prompt content from MD file."""
-    filepath = _BASE_DIR / filename
-    if filepath.exists():
-        return filepath.read_text(encoding="utf-8").strip()
-    return ""
-
-
-# Load prompts from MD files
+# Load prompt from MD file
 HEARTBEAT_PROMPT = _load_prompt("heartbeat.md")
-HEARTBEAT_PROMPT_COMPACT = _load_prompt("heartbeat_compact.md")
 
 
-def get_heartbeat_prompt(compact: bool = False) -> str:
+def get_heartbeat_prompt() -> str:
     """Get the heartbeat prompt.
 
-    Args:
-        compact: If True, return the compact version for context-sensitive situations
-
     Returns:
-        The appropriate heartbeat prompt string
+        The heartbeat prompt string
     """
-    return HEARTBEAT_PROMPT_COMPACT if compact else HEARTBEAT_PROMPT
+    return HEARTBEAT_PROMPT
 
 
 def get_iteration_reminder(step: int) -> str:

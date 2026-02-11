@@ -538,23 +538,5 @@ class AgentMemory(BaseModel):
         self.summary = None
         self.memories = None
 
-    def deep_copy(self):
-        copied_obj = self.__class__(**self.model_dump())
-
-        for field_name, field_value in self.__dict__.items():
-            if field_name not in ["db", "classifier", "manager", "summarizer"]:
-                try:
-                    setattr(copied_obj, field_name, deepcopy(field_value))
-                except Exception as e:
-                    logger.warning(f"Failed to deepcopy field: {field_name} - {e}")
-                    setattr(copied_obj, field_name, field_value)
-
-        copied_obj.db = self.db
-        copied_obj.classifier = self.classifier
-        copied_obj.manager = self.manager
-        copied_obj.summarizer = self.summarizer
-
-        return copied_obj
-
     def get_memories(self) -> List[Memory]:
         return self.memories or []

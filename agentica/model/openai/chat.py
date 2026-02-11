@@ -1,6 +1,6 @@
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal, override
 
 import httpx
 from enum import Enum, EnumMeta
@@ -386,6 +386,7 @@ class OpenAIChat(Model):
 
         return extra_params
 
+    @override
     async def invoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
         """
         Send a chat completion request to the OpenAI API (async-only).
@@ -410,7 +411,8 @@ class OpenAIChat(Model):
                 else:
                     raise ValueError("response_format must be a subclass of BaseModel if structured_outputs=True")
             except Exception as e:
-                logger.error(f"Error from OpenAI API: {e}")
+                logger.error(f"Error from OpenAI API structured outputs: {e}")
+                raise
 
         return await self.get_client().chat.completions.create(
             model=self.id,
@@ -419,6 +421,7 @@ class OpenAIChat(Model):
             **langfuse_params,
         )
 
+    @override
     async def invoke_stream(self, messages: List[Message]) -> AsyncIterator[ChatCompletionChunk]:
         """
         Send a streaming chat completion request to the OpenAI API (async-only).
@@ -598,6 +601,7 @@ class OpenAIChat(Model):
         self.update_usage_metrics(assistant_message, metrics, response_usage)
         return assistant_message
 
+    @override
     async def response(self, messages: List[Message]) -> ModelResponse:
         """
         Generate a response from OpenAI (async-only, single implementation).
@@ -780,6 +784,7 @@ class OpenAIChat(Model):
             if len(function_call_results) > 0:
                 messages.extend(function_call_results)
 
+    @override
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """
         Generate a streaming response from OpenAI (async-only, single implementation).

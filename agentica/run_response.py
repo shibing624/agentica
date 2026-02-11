@@ -3,10 +3,11 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
+import inspect
 import json
 from time import time
 from enum import Enum
-from typing import Optional, Any, Dict, List, Union, Iterable
+from typing import Optional, Any, Dict, List, Union, Iterable, Coroutine
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -65,7 +66,7 @@ class RunResponse(BaseModel):
     videos: Optional[List[Video]] = None  # Videos attached to the response
     audio: Optional[List[Audio]] = None  # Audio attached to the response
     response_audio: Optional[Dict] = None  # Model audio response
-    reasoning_content: Optional[str] = ""
+    reasoning_content: Optional[str] = None
     extra_data: Optional[RunResponseExtraData] = None
     created_at: int = Field(default_factory=lambda: int(time()))
 
@@ -116,13 +117,22 @@ class RunResponse(BaseModel):
         return f"RunResponse(run_id={self.run_id!r}, event={self.event!r}, reasoning_content={self.reasoning_content!r}, content={self.content!r})"
 
 
-def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse]]) -> None:
+def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], Coroutine[Any, Any, Any]]) -> None:
     """
     Pretty print run response without rich dependency.
 
     Args:
-        run_response: Single RunResponse or iterable of RunResponse objects
+        run_response: Single RunResponse, iterable of RunResponse objects, or a coroutine
     """
+    # Handle coroutine (async result) - convert to sync
+    if inspect.iscoroutine(run_response):
+        from agentica.utils.async_utils import run_sync
+        try:
+            run_response = run_sync(run_response)
+        except Exception as e:
+            logger.error(f"Failed to run coroutine: {e}")
+            print(f"❌ Error: Failed to execute async workflow - {e}")
+            return
 
     # Handle single RunResponse
     if isinstance(run_response, RunResponse):

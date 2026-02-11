@@ -3,10 +3,10 @@
 @author:XuMing(xuming624@qq.com)
 @description: Async tool demo - Demonstrates how to use async functions as tools
 
-This example shows:
-1. Async function-based tools
-2. Async class-based tools
-3. Mixing async and sync tools
+Key points:
+1. async def tools are awaited directly — zero blocking
+2. sync def tools are auto-wrapped via run_in_executor
+3. Both can be mixed freely in the same Agent
 """
 import sys
 import os
@@ -23,10 +23,10 @@ from agentica import Agent, OpenAIChat, Tool
 
 async def async_fetch_data(url: str) -> str:
     """Simulate fetching data from a URL asynchronously.
-    
+
     Args:
         url: The URL to fetch data from
-        
+
     Returns:
         A simulated response from the URL
     """
@@ -37,11 +37,11 @@ async def async_fetch_data(url: str) -> str:
 
 async def async_process_data(data: str, operation: str) -> str:
     """Process data asynchronously with a specified operation.
-    
+
     Args:
         data: The data to process
         operation: The operation to perform (uppercase, lowercase, reverse)
-        
+
     Returns:
         The processed data
     """
@@ -58,12 +58,12 @@ async def async_process_data(data: str, operation: str) -> str:
 
 async def async_calculate(a: float, b: float, op: str) -> str:
     """Perform async calculation.
-    
+
     Args:
         a: First number
         b: Second number
         op: Operation (add, sub, mul, div)
-        
+
     Returns:
         The result of the calculation
     """
@@ -81,16 +81,16 @@ async def async_calculate(a: float, b: float, op: str) -> str:
 
 
 # ============================================================================
-# Sync function for comparison
+# Sync function for comparison (auto-wrapped via run_in_executor)
 # ============================================================================
 
 def sync_multiply(x: float, y: float) -> str:
     """Multiply two numbers synchronously.
-    
+
     Args:
         x: First number
         y: Second number
-        
+
     Returns:
         The product of x and y
     """
@@ -103,26 +103,24 @@ def sync_multiply(x: float, y: float) -> str:
 
 class AsyncDataTool(Tool):
     """A tool with async methods for data operations."""
-    
+
     def __init__(self):
         super().__init__(name="async_data_tool")
         self.register(self.fetch_and_process)
 
     async def fetch_and_process(self, url: str, transform: str = "uppercase") -> str:
         """Fetch data from URL and transform it.
-        
+
         Args:
             url: The URL to fetch from
             transform: Transformation to apply (uppercase, lowercase, reverse)
-            
+
         Returns:
             The transformed data
         """
-        # Simulate fetching
         await asyncio.sleep(0.1)
         data = f"Data from {url}"
-        
-        # Apply transformation
+
         if transform == "uppercase":
             return data.upper()
         elif transform == "lowercase":
@@ -133,64 +131,46 @@ class AsyncDataTool(Tool):
 
 
 # ============================================================================
-# Main execution
+# Main execution (async-first)
 # ============================================================================
 
-def main():
-    """Main function to test async tools."""
-    # Create agent with async and sync tools
+async def main():
+    """Demonstrate async and sync tools working together."""
     agent = Agent(
         model=OpenAIChat(id='gpt-4o-mini'),
         tools=[
-            async_fetch_data,     # Async function tool
-            async_process_data,   # Async function tool
-            async_calculate,      # Async function tool
-            sync_multiply,        # Sync function tool
-            AsyncDataTool(),      # Async class-based tool
+            async_fetch_data,     # async → directly awaited
+            async_process_data,   # async → directly awaited
+            async_calculate,      # async → directly awaited
+            sync_multiply,        # sync → auto run_in_executor
+            AsyncDataTool(),      # async class-based tool
         ],
     )
-    
+
     print("=" * 60)
-    print("Example 1: Async fetch")
+    print("Example 1: Async fetch tool")
     print("=" * 60)
-    agent.print_response_sync("Fetch data from https://api.example.com/users")
-    
+    await agent.print_response("Fetch data from https://api.example.com/users")
+
     print("\n" + "=" * 60)
-    print("Example 2: Async calculation")
+    print("Example 2: Async calculation tool")
     print("=" * 60)
-    agent.print_response_sync("Calculate 100 add 200 using async_calculate")
-    
+    await agent.print_response("Calculate 100 add 200 using async_calculate")
+
     print("\n" + "=" * 60)
-    print("Example 3: Mix of async and sync")
+    print("Example 3: Mix of async and sync tools")
     print("=" * 60)
-    agent.print_response_sync("Use sync_multiply to multiply 5 and 10, then use async_calculate to add 100 to the result")
-    
+    await agent.print_response(
+        "Use sync_multiply to multiply 5 and 10, then use async_calculate to add 100 to the result"
+    )
+
     print("\n" + "=" * 60)
     print("Example 4: Async class-based tool")
     print("=" * 60)
-    agent.print_response_sync("Use AsyncDataTool to fetch and process data from https://example.com with uppercase transform")
-
-
-async def async_main():
-    """Async main function to test async tools with run."""
-    agent = Agent(
-        model=OpenAIChat(id='gpt-4o-mini'),
-        tools=[
-            async_fetch_data,
-            async_calculate,
-            sync_multiply,
-        ],
+    await agent.print_response(
+        "Use AsyncDataTool to fetch and process data from https://example.com with uppercase transform"
     )
-    
-    print("=" * 60)
-    print("Example: Using run with async tools")
-    print("=" * 60)
-    response = await agent.run("Fetch data from https://api.test.com and then calculate 50 add 100")
-    print(f"Response: {response.content}")
 
 
 if __name__ == "__main__":
-    main()
-    
-    # Uncomment to test async execution
-    # asyncio.run(async_main())
+    asyncio.run(main())

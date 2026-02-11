@@ -157,5 +157,5 @@ if __name__ == "__main__":
     print("Data Pipeline Workflow Demo")
     print("=" * 60)
 
-    result = pipeline.run(sample_text)
+    result = pipeline.run_sync(sample_text)
     print("\n" + result.content)

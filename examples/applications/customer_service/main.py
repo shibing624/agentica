@@ -14,6 +14,7 @@ Usage:
 """
 import sys
 import os
+import asyncio
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -114,23 +115,14 @@ def create_service_agent():
     )
 
 
-def handle_customer_message(
+async def handle_customer_message(
     classifier: Agent,
     service_agent: Agent,
     message: str
 ) -> ServiceResponse:
-    """Handle a customer message.
-    
-    Args:
-        classifier: The intent classifier agent
-        service_agent: The customer service agent
-        message: The customer's message
-        
-    Returns:
-        The service response
-    """
+    """Handle a customer message."""
     # Step 1: Classify intent
-    intent_response = classifier.run_sync(message)
+    intent_response = await classifier.run(message)
     intent: CustomerIntent = intent_response.content
 
     print(f"\n[Intent: {intent.intent} (confidence: {intent.confidence:.2f})]")
@@ -145,54 +137,15 @@ Summary: {intent.summary}
 
 Please provide a helpful response to this customer.
 """
-    response = service_agent.run_sync(prompt)
+    response = await service_agent.run(prompt)
     return response.content
 
 
-def interactive_mode():
-    """Run the customer service bot in interactive mode."""
-    print("\n" + "="*60)
-    print("TechCorp Customer Service")
-    print("="*60)
-    print("\nHello! Welcome to TechCorp customer service.")
-    print("How can I help you today?")
-    print("\n(Type 'exit' to end the conversation)")
-
-    classifier = create_intent_classifier()
-    service_agent = create_service_agent()
-
-    while True:
-        try:
-            user_input = input("\nYou: ").strip()
-
-            if not user_input:
-                continue
-
-            if user_input.lower() == "exit":
-                print("\nThank you for contacting TechCorp. Have a great day!")
-                break
-
-            response = handle_customer_message(classifier, service_agent, user_input)
-
-            print(f"\nBot: {response.answer}")
-
-            if response.requires_escalation:
-                print(f"\n[Note: This issue has been flagged for escalation]")
-                print(f"[Reason: {response.escalation_reason}]")
-
-            if response.suggested_actions:
-                print(f"\n[Suggested actions: {', '.join(response.suggested_actions)}]")
-
-        except KeyboardInterrupt:
-            print("\n\nThank you for contacting TechCorp. Have a great day!")
-            break
-
-
-def demo_mode():
+async def demo_mode():
     """Run demo with sample customer messages."""
-    print("="*60)
+    print("=" * 60)
     print("Customer Service Bot - Demo Mode")
-    print("="*60)
+    print("=" * 60)
 
     classifier = create_intent_classifier()
     service_agent = create_service_agent()
@@ -206,11 +159,11 @@ def demo_mode():
     ]
 
     for message in sample_messages:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Customer: {message}")
-        print("-"*60)
+        print("-" * 60)
 
-        response = handle_customer_message(classifier, service_agent, message)
+        response = await handle_customer_message(classifier, service_agent, message)
 
         print(f"\nBot: {response.answer}")
 
@@ -218,14 +171,10 @@ def demo_mode():
             print(f"\n[Escalation needed: {response.escalation_reason}]")
 
 
-def main():
+async def main():
     """Main entry point."""
-    # Run demo mode
-    demo_mode()
-
-    # Uncomment to run interactive mode
-    # interactive_mode()
+    await demo_mode()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

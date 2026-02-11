@@ -38,7 +38,7 @@ async def main():
         debug_mode=True,
     )
     
-    await agent.print_response("你是谁？详细介绍自己", stream=True)
+    await agent.print_response_stream("你是谁？详细介绍自己")
     
     # Example 3: Local model (e.g., Ollama)
     print("\n" + "=" * 60)

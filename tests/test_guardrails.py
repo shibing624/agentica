@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 from agentica.guardrails import (
+    # Agent-level guardrails
     GuardrailFunctionOutput,
     InputGuardrail,
     OutputGuardrail,
@@ -22,8 +23,7 @@ from agentica.guardrails import (
     OutputGuardrailTripwireTriggered,
     run_input_guardrails,
     run_output_guardrails,
-)
-from agentica.tools.guardrails import (
+    # Tool-level guardrails
     ToolGuardrailFunctionOutput,
     ToolInputGuardrail,
     ToolOutputGuardrail,

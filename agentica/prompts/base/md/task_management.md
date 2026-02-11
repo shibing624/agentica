@@ -1,44 +1,58 @@
 # Task Management
 
-You have access to task management tools (TodoWrite/TaskCreate/TaskUpdate) to help you manage and plan tasks. Use these tools VERY frequently to ensure that you are tracking your tasks and giving the user visibility into your progress.
+Use the `write_todos` tool to create and manage a structured task list. This helps you track progress and demonstrate thoroughness to the user.
 
-## When to Use Task Tools
+## When to Use
 
-**MUST use task tools when:**
-- Task requires 3 or more steps
-- Task is non-trivial and requires planning
-- User explicitly requests todo list
-- User provides multiple tasks (numbered or comma-separated)
-- Immediately after receiving new instructions - capture requirements as tasks
+**Use for:**
+- Complex multi-step tasks (3+ steps)
+- Non-trivial tasks requiring planning
+- User explicitly requests a todo list
+- Multiple tasks provided (numbered/comma-separated)
+- After receiving new instructions - capture requirements immediately
 
-**Skip task tools when:**
-- Single, straightforward task
-- Task is trivial
-- Less than 3 simple steps
-- Purely conversational or informational
+**Skip for:**
+- Single, straightforward tasks
+- Trivial tasks (< 3 steps)
+- Purely conversational/informational requests
 
-## Usage Rules
+## Task States
 
-1. **Immediate Capture**: After receiving instructions, immediately capture user requirements as tasks.
+| State | Description |
+|-------|-------------|
+| `pending` | Not yet started |
+| `in_progress` | Currently working on (limit: ONE at a time) |
+| `completed` | Task finished |
+| `cancelled` | No longer needed |
 
-2. **Mark In-Progress**: When you start working on a task, mark it as `in_progress` BEFORE beginning work. Only have ONE task in_progress at a time.
+## Rules
 
-3. **Immediate Completion**: Mark tasks as `completed` IMMEDIATELY after finishing. Do NOT batch up multiple tasks before marking them as completed.
+1. **Immediate Capture** - After receiving instructions, create todos right away
+2. **Mark In-Progress** - Set status to `in_progress` BEFORE starting work
+3. **One at a Time** - Only ONE task should be `in_progress`
+4. **Immediate Completion** - Mark `completed` right after finishing (don't batch)
+5. **Update Real-Time** - Keep status current as you work
+6. **Be Specific** - Clear, actionable task names
 
-4. **Never Forget**: These tools are EXTREMELY helpful for planning. If you do not use this tool when planning, you may forget to do important tasks - and that is unacceptable.
+## Examples
 
-## Task Status Flow
-
+**Good - Multi-step feature:**
 ```
-pending → in_progress → completed
-                     → cancelled (if no longer needed)
+User: "Add dark mode toggle, run tests and build"
+→ write_todos: 1) Create toggle component, 2) Add state management,
+   3) Implement dark styles, 4) Update components, 5) Run tests and build
 ```
 
-## Task Breakdown
+**Good - Multiple files to update:**
+```
+User: "Rename getCwd to getCurrentWorkingDirectory"
+→ Search first, then create todos for each file found
+```
 
-- Create specific, actionable items
-- Break complex tasks into smaller, manageable steps
-- Use clear, descriptive task names
-- Complete current tasks before starting new ones
+**Skip - Simple task:**
+```
+User: "Add a comment to calculateTotal function"
+→ Just do it directly, no todo needed
+```
 
-When in doubt, use these tools. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.
+When in doubt, use the tool. Proactive task management demonstrates attentiveness.

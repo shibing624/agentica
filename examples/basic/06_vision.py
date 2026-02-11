@@ -28,7 +28,7 @@ async def main():
     response = await agent.run(
         "描述这张图片的内容",
         images=[
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"
+            "https://cdn.pixabay.com/photo/2013/07/18/20/26/sea-164989_1280.jpg"
         ]
     )
     print(response)
@@ -37,12 +37,12 @@ async def main():
     print("\n" + "=" * 60)
     print("Example 2: Multiple Images Comparison")
     print("=" * 60)
-    
+
     response = await agent.run(
         "一句话说明两张图片的不同",
         images=[
-            "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/2560px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg",
-            "https://img-blog.csdnimg.cn/img_convert/0ab31bdb17bebbab9c8f4185f3655b6d.jpeg",
+            "https://cdn.pixabay.com/photo/2013/07/18/20/26/sea-164989_1280.jpg",
+            "https://cdn.pixabay.com/photo/2015/04/23/22/00/tree-736885_1280.jpg",
         ]
     )
     print(response)

@@ -7,6 +7,7 @@ import asyncio
 import concurrent.futures
 import copy
 import json
+import os
 import threading
 from os import environ
 from typing import Dict, Optional, Union
@@ -335,7 +336,7 @@ class McpTool(Tool):
                                         "timeout": self._server_config["timeout"],
                                         "sse_read_timeout": self._server_config["read_timeout"]
                                     },
-                                    client_session_timeout_seconds=self._server_config["timeout"] or 60.0
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 8.0
                                 )
                             elif self._server_config["transport_type"] == "streamable-http":
                                 server = MCPServerStreamableHttp(
@@ -347,7 +348,7 @@ class McpTool(Tool):
                                         "sse_read_timeout": timedelta(seconds=self._server_config["read_timeout"]) if self._server_config["read_timeout"] else None,
                                         "terminate_on_close": self._server_config["terminate_on_close"]
                                     },
-                                    client_session_timeout_seconds=self._server_config["timeout"] or 60.0
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 8.0
                                 )
                             else:
                                 server = MCPServerStdio(
@@ -357,7 +358,7 @@ class McpTool(Tool):
                                         "args": self._server_config["args"],
                                         "env": copy.deepcopy(self._server_config["env"])
                                     },
-                                    client_session_timeout_seconds=self._server_config["timeout"] or 60.0
+                                    client_session_timeout_seconds=self._server_config["timeout"] or 8.0
                                 )
 
                             try:
@@ -505,7 +506,21 @@ class McpTool(Tool):
                 logger.debug(f"Created {transport_type} tool for server '{name}' with URL: {server.url}")
             else:
                 # Create stdio tool
-                cmd = f"{server.command} {' '.join(server.args or [])}".strip()
+                # Resolve relative paths in args to be relative to config file directory
+                config_dir = os.path.dirname(os.path.abspath(config.config_path))
+                resolved_args = []
+                for arg in (server.args or []):
+                    # If arg is a relative path that exists relative to config_dir, resolve it
+                    if not os.path.isabs(arg):
+                        potential_path = os.path.join(config_dir, arg)
+                        if os.path.exists(potential_path):
+                            resolved_args.append(os.path.abspath(potential_path))
+                        else:
+                            resolved_args.append(arg)
+                    else:
+                        resolved_args.append(arg)
+                
+                cmd = f"{server.command} {' '.join(resolved_args)}".strip()
                 tool = cls(
                     command=cmd,
                     env=server.env

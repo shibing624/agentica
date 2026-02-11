@@ -27,10 +27,11 @@ class PromptsMixin:
     """Mixin class containing prompt building methods for Agent.
 
     Enhanced with PromptBuilder integration for:
-    - Model-specific optimizations (Claude, GPT, GLM, DeepSeek)
     - Forced iteration mechanism (HEARTBEAT)
     - Task management enforcement
     - Professional objectivity guidelines (SOUL)
+    - Tool usage priority and parallel strategy
+    - Code validation guidance (lint/test/typecheck)
     """
 
     def get_json_output_prompt(self: "Agent") -> str:
@@ -99,7 +100,7 @@ class PromptsMixin:
         json_output_prompt += "\nMake sure it only contains valid JSON."
         return json_output_prompt
 
-    def get_system_message(self: "Agent") -> Optional[Message]:
+    async def get_system_message(self: "Agent") -> Optional[Message]:
         """Return the system message for the Agent.
 
         1. If the system_prompt is provided, use that.
@@ -153,7 +154,7 @@ class PromptsMixin:
 
         # 4. If enable_agentic_prompt is True, use PromptBuilder for enhanced system prompt
         if self.enable_agentic_prompt:
-            return self._build_enhanced_system_message()
+            return await self._build_enhanced_system_message()
 
         # 5. Build the list of instructions for the system prompt (legacy behavior).
         instructions = []
@@ -233,7 +234,7 @@ class PromptsMixin:
             system_message_lines.append("")
 
         # 5.4.1 Then add workspace context (dynamically loaded on every run)
-        workspace_context = self.get_workspace_context_prompt()
+        workspace_context = await self.get_workspace_context_prompt()
         if workspace_context:
             system_message_lines.append(f"## Workspace Context\n\n{workspace_context}\n")
 
@@ -264,7 +265,7 @@ class PromptsMixin:
             system_message_lines.append(f"{self.get_transfer_prompt()}\n")
 
         # 5.10 Then add workspace memory (dynamically loaded on every run)
-        workspace_memory = self.get_workspace_memory_prompt()
+        workspace_memory = await self.get_workspace_memory_prompt()
         if workspace_memory:
             system_message_lines.append(f"## Workspace Memory\n\n{workspace_memory}\n")
 
@@ -466,7 +467,7 @@ class PromptsMixin:
             **kwargs,
         )
 
-    def get_messages_for_run(
+    async def get_messages_for_run(
             self: "Agent",
             *,
             message: Optional[Union[str, List, Dict, Message]] = None,
@@ -499,7 +500,7 @@ class PromptsMixin:
         messages_for_model: List[Message] = []
 
         # 3.1. Add the System Message to the messages list
-        system_message = self.get_system_message()
+        system_message = await self.get_system_message()
         if system_message is not None:
             messages_for_model.append(system_message)
 
@@ -604,39 +605,35 @@ class PromptsMixin:
         # Build enhanced sections
         sections = [base_prompt]
 
-        # Add SOUL (behavioral guidelines) - compact version to save context
-        soul_prompt = get_soul_prompt(compact=True)
+        # Add SOUL (behavioral guidelines)
+        soul_prompt = get_soul_prompt()
         sections.append(soul_prompt)
 
-        # Add HEARTBEAT (forced iteration) - compact version, critical for task completion
-        heartbeat_prompt = get_heartbeat_prompt(compact=True)
+        # Add HEARTBEAT (forced iteration) - critical for task completion
+        heartbeat_prompt = get_heartbeat_prompt()
         sections.append(heartbeat_prompt)
 
-        # Add SELF_VERIFICATION (lint/test/typecheck) - compact version
-        verification_prompt = get_self_verification_prompt(compact=True)
+        # Add SELF_VERIFICATION (lint/test/typecheck)
+        verification_prompt = get_self_verification_prompt()
         sections.append(verification_prompt)
 
         return "\n\n---\n\n".join(sections)
 
-    def _build_enhanced_system_message(self: "Agent") -> Optional[Message]:
+    async def _build_enhanced_system_message(self: "Agent") -> Optional[Message]:
         """Build an enhanced system message using PromptBuilder.
 
         This method uses the modular PromptBuilder to construct a system prompt
         optimized for multi-round agent tasks with:
-        - Model-specific optimizations
         - Forced iteration mechanism (HEARTBEAT)
         - Task management enforcement
         - Professional objectivity guidelines (SOUL)
+        - Tool usage priority and parallel strategy
+        - Code validation guidance (lint/test/typecheck)
 
         Returns:
             Message containing the enhanced system prompt
         """
         from agentica.prompts.builder import PromptBuilder
-
-        # Get model ID for model-specific optimizations
-        model_id = ""
-        if self.model is not None:
-            model_id = getattr(self.model, 'id', '') or getattr(self.model, 'model', '') or ""
 
         # Build identity from agent description/name
         identity = None
@@ -648,20 +645,17 @@ class PromptsMixin:
         # Get workspace context if available
         workspace_context = None
         if self.workspace and self.workspace.exists():
-            workspace_context = self.workspace.get_context_prompt()
+            workspace_context = await self.workspace.get_context_prompt()
 
-        # Build base prompt using PromptBuilder (compact mode for shorter prompts)
+        # Build base prompt using PromptBuilder
         base_prompt = PromptBuilder.build_system_prompt(
-            model_id=model_id,
             identity=identity,
-            identity_type="cli" if not identity else "default",
             workspace_context=workspace_context,
             enable_heartbeat=True,  # Always enable for multi-round
             enable_task_management=True,
             enable_soul=True,
             enable_tools_guide=True,
             enable_self_verification=True,
-            compact=True,  # Use compact mode to reduce prompt length
         )
 
         # Now add the agent-specific instructions
@@ -760,7 +754,7 @@ class PromptsMixin:
             system_message_lines.append(f"\n**Output language:** You must output text in {self.output_language}.")
 
         # Add workspace memory (dynamically loaded on every run)
-        workspace_memory = self.get_workspace_memory_prompt()
+        workspace_memory = await self.get_workspace_memory_prompt()
         if workspace_memory:
             system_message_lines.append(f"\n## Workspace Memory\n\n{workspace_memory}")
 

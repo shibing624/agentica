@@ -105,27 +105,6 @@ class TestWorkflowSessionState(unittest.TestCase):
         self.assertEqual(workflow.session_state["key"], "value")
 
 
-class TestWorkflowDeepCopy(unittest.TestCase):
-    """Test cases for Workflow deep copy functionality."""
-
-    def test_deep_copy_basic(self):
-        """Test basic deep copy of Workflow."""
-        workflow = SimpleWorkflow(name="Original", user_id="user-1")
-        copied = workflow.deep_copy()
-
-        self.assertEqual(copied.name, "Original")
-        self.assertEqual(copied.user_id, "user-1")
-        self.assertIsNot(workflow, copied)
-
-    def test_deep_copy_with_update(self):
-        """Test deep copy with updates."""
-        workflow = SimpleWorkflow(name="Original")
-        copied = workflow.deep_copy(update={"name": "Copied"})
-
-        self.assertEqual(workflow.name, "Original")
-        self.assertEqual(copied.name, "Copied")
-
-
 class TestWorkflowDebugMode(unittest.TestCase):
     """Test cases for Workflow debug mode."""
 

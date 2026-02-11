@@ -3,10 +3,11 @@
 @author:XuMing(xuming624@qq.com)
 @description: Unit tests for Agent.as_tool() functionality
 """
+import asyncio
 import sys
 import os
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -25,9 +26,9 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="You are a test agent",
         )
         tool = agent.as_tool()
-        
+
         self.assertIsInstance(tool, Function)
-    
+
     def test_as_tool_default_name_from_agent_name(self):
         """Test that tool name defaults to snake_case of agent name."""
         agent = Agent(
@@ -35,9 +36,9 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="Translate to Chinese",
         )
         tool = agent.as_tool()
-        
+
         self.assertEqual(tool.name, "chinese_translator")
-    
+
     def test_as_tool_custom_name(self):
         """Test that custom tool name is used when provided."""
         agent = Agent(
@@ -45,9 +46,9 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="Translate to Chinese",
         )
         tool = agent.as_tool(tool_name="translate_zh")
-        
+
         self.assertEqual(tool.name, "translate_zh")
-    
+
     def test_as_tool_default_description_from_agent_description(self):
         """Test that tool description defaults to agent description."""
         agent = Agent(
@@ -56,9 +57,9 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="Translate text",
         )
         tool = agent.as_tool()
-        
+
         self.assertIn("A professional translator agent", tool.description)
-    
+
     def test_as_tool_default_description_from_agent_role(self):
         """Test that tool description falls back to agent role."""
         agent = Agent(
@@ -67,9 +68,9 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="Translate text",
         )
         tool = agent.as_tool()
-        
+
         self.assertIn("Professional Chinese translator", tool.description)
-    
+
     def test_as_tool_custom_description(self):
         """Test that custom tool description is used when provided."""
         agent = Agent(
@@ -77,20 +78,20 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="Translate text",
         )
         tool = agent.as_tool(tool_description="Custom description for translation")
-        
+
         self.assertIn("Custom description for translation", tool.description)
-    
+
     def test_as_tool_name_fallback_to_agent_id(self):
         """Test that tool name falls back to agent_id when name is not set."""
         agent = Agent(
             instructions="Test agent",
         )
         tool = agent.as_tool()
-        
+
         # Should start with "agent_" followed by first 8 chars of agent_id
         self.assertTrue(tool.name.startswith("agent_"))
         self.assertEqual(len(tool.name), 14)  # "agent_" + 8 chars
-    
+
     def test_as_tool_has_entrypoint(self):
         """Test that the tool has an entrypoint function."""
         agent = Agent(
@@ -98,78 +99,78 @@ class AgentAsToolTest(unittest.TestCase):
             instructions="Test",
         )
         tool = agent.as_tool()
-        
+
         self.assertIsNotNone(tool.entrypoint)
         self.assertTrue(callable(tool.entrypoint))
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_as_tool_calls_agent_run(self, mock_run):
-        """Test that calling the tool invokes agent.run_sync()."""
+        """Test that calling the tool invokes agent.run()."""
         mock_response = RunResponse(content="翻译后的文本")
         mock_run.return_value = mock_response
-        
+
         agent = Agent(
             name="Translator",
             instructions="Translate text",
         )
         tool = agent.as_tool()
-        
-        # Call the tool's entrypoint
-        result = tool.entrypoint("Hello world")
-        
-        # Verify agent.run_sync was called with the input
+
+        # Call the tool's entrypoint (async)
+        result = asyncio.run(tool.entrypoint("Hello world"))
+
+        # Verify agent.run was called with the input
         mock_run.assert_called_once_with("Hello world")
         self.assertEqual(result, "翻译后的文本")
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_as_tool_handles_none_content(self, mock_run):
         """Test that tool handles None content from agent response."""
         mock_response = RunResponse(content=None)
         mock_run.return_value = mock_response
-        
+
         agent = Agent(
             name="Translator",
             instructions="Translate text",
         )
         tool = agent.as_tool()
-        
-        result = tool.entrypoint("Hello")
-        
+
+        result = asyncio.run(tool.entrypoint("Hello"))
+
         self.assertEqual(result, "No response from agent.")
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_as_tool_custom_output_extractor(self, mock_run):
         """Test that custom output extractor is used when provided."""
         mock_response = RunResponse(content="原始输出", run_id="test-123")
         mock_run.return_value = mock_response
-        
+
         def custom_extractor(response: RunResponse) -> str:
             return f"提取结果: {response.content} (run_id: {response.run_id})"
-        
+
         agent = Agent(
             name="Translator",
             instructions="Translate text",
         )
         tool = agent.as_tool(custom_output_extractor=custom_extractor)
-        
-        result = tool.entrypoint("Hello")
-        
+
+        result = asyncio.run(tool.entrypoint("Hello"))
+
         self.assertEqual(result, "提取结果: 原始输出 (run_id: test-123)")
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_as_tool_handles_dict_content(self, mock_run):
         """Test that tool handles dict content from agent response."""
         mock_response = RunResponse(content={"key": "value", "number": 42})
         mock_run.return_value = mock_response
-        
+
         agent = Agent(
             name="Analyzer",
             instructions="Analyze text",
         )
         tool = agent.as_tool()
-        
-        result = tool.entrypoint("Analyze this")
-        
+
+        result = asyncio.run(tool.entrypoint("Analyze this"))
+
         # Should be JSON serialized
         self.assertIn('"key"', result)
         self.assertIn('"value"', result)
@@ -178,19 +179,19 @@ class AgentAsToolTest(unittest.TestCase):
 
 class AgentAsToolMockedIntegrationTest(unittest.TestCase):
     """Integration tests for Agent as Tool pattern with mocked LLM."""
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_orchestrator_with_agent_tools(self, mock_run):
         """Test orchestrator agent using sub-agents as tools (mocked)."""
         # Mock the run method to return a predefined response
         mock_run.return_value = RunResponse(content="你好，今天你好吗？")
-        
+
         # Create a simple translator agent
         translator_agent = Agent(
             name="Chinese Translator",
             instructions="将输入文本翻译成中文",
         )
-        
+
         # Create orchestrator with translator agent as tool
         orchestrator = Agent(
             name="Orchestrator",
@@ -202,26 +203,26 @@ class AgentAsToolMockedIntegrationTest(unittest.TestCase):
                 ),
             ],
         )
-        
+
         # Verify the setup works without errors
         self.assertIsNotNone(orchestrator.tools)
         self.assertEqual(len(orchestrator.tools), 1)
-        
+
         # Verify tool properties
         tool = orchestrator.tools[0]
         self.assertIsInstance(tool, Function)
         self.assertEqual(tool.name, "translate_to_chinese")
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_multiple_agent_tools(self, mock_run):
         """Test orchestrator with multiple agent tools (mocked)."""
         mock_run.return_value = RunResponse(content="处理结果")
-        
+
         # Create multiple specialist agents
         translator = Agent(name="Translator", instructions="翻译文本")
         summarizer = Agent(name="Summarizer", instructions="总结文本")
         analyzer = Agent(name="Analyzer", instructions="分析文本")
-        
+
         # Create orchestrator with multiple tools
         orchestrator = Agent(
             name="Orchestrator",
@@ -232,17 +233,17 @@ class AgentAsToolMockedIntegrationTest(unittest.TestCase):
                 analyzer.as_tool(tool_name="analyze", tool_description="分析"),
             ],
         )
-        
+
         # Verify all tools are added
         self.assertEqual(len(orchestrator.tools), 3)
-        
+
         # Verify tool names
         tool_names = [t.name for t in orchestrator.tools]
         self.assertIn("translate", tool_names)
         self.assertIn("summarize", tool_names)
         self.assertIn("analyze", tool_names)
-    
-    @patch.object(Agent, 'run_sync')
+
+    @patch.object(Agent, 'run', new_callable=AsyncMock)
     def test_agent_tool_execution_chain(self, mock_run):
         """Test chained execution of agent tools (mocked)."""
         # Setup mock to return different values on each call
@@ -250,21 +251,21 @@ class AgentAsToolMockedIntegrationTest(unittest.TestCase):
             RunResponse(content="AI是机器展示的智能。"),  # First call: summarize
             RunResponse(content="人工智能是机器展示的智能。"),  # Second call: translate
         ]
-        
+
         summarizer = Agent(name="Summarizer", instructions="总结文本")
         translator = Agent(name="Translator", instructions="翻译文本")
-        
+
         # Get tools
         summarize_tool = summarizer.as_tool(tool_name="summarize")
         translate_tool = translator.as_tool(tool_name="translate")
-        
-        # Execute chain: summarize then translate
-        summary = summarize_tool.entrypoint("Long text about AI...")
+
+        # Execute chain: summarize then translate (async entrypoints)
+        summary = asyncio.run(summarize_tool.entrypoint("Long text about AI..."))
         self.assertEqual(summary, "AI是机器展示的智能。")
-        
-        translation = translate_tool.entrypoint(summary)
+
+        translation = asyncio.run(translate_tool.entrypoint(summary))
         self.assertEqual(translation, "人工智能是机器展示的智能。")
-        
+
         # Verify both agents were called
         self.assertEqual(mock_run.call_count, 2)
 

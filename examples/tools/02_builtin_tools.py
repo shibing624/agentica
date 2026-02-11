@@ -6,8 +6,7 @@
 This example shows how to use common built-in tools:
 1. WeatherTool - Get weather information
 2. ShellTool - Execute shell commands
-3. FileTool - File operations
-4. CalculatorTool - Mathematical calculations
+3. JinaTool - Web content reading
 """
 import sys
 import os
@@ -16,8 +15,7 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
-from agentica import WeatherTool, ShellTool, FileTool
-from agentica.tools.calculator_tool import CalculatorTool
+from agentica import WeatherTool, ShellTool, JinaTool
 
 
 async def main():
@@ -26,8 +24,7 @@ async def main():
         tools=[
             WeatherTool(),
             ShellTool(),
-            FileTool(),
-            CalculatorTool(),
+            JinaTool(),
         ],
         add_datetime_to_instructions=True,
     )
@@ -43,19 +40,14 @@ async def main():
     await agent.print_response("列出当前目录下的文件")
 
     print("\n" + "=" * 60)
-    print("Example 3: File Tool")
+    print("Example 3: Jina Tool (Web Reading)")
     print("=" * 60)
-    await agent.print_response("读取当前目录下的README.md文件的前10行")
+    await agent.print_response("读取 https://httpbin.org/get 的内容摘要")
 
     print("\n" + "=" * 60)
-    print("Example 4: Calculator Tool")
+    print("Example 4: Combining Multiple Tools")
     print("=" * 60)
-    await agent.print_response("计算 (123 + 456) * 789 / 2 的结果")
-
-    print("\n" + "=" * 60)
-    print("Example 5: Combining Multiple Tools")
-    print("=" * 60)
-    await agent.print_response("查询上海天气，然后计算如果温度乘以2会是多少度")
+    await agent.print_response("查询上海天气，然后用shell命令查看当前时间")
 
 
 if __name__ == "__main__":

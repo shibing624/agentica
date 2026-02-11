@@ -10,15 +10,17 @@ This example shows how to:
 """
 import os
 import sys
+import asyncio
 import tempfile
 from pathlib import Path
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, ZhipuAI
 from agentica.workspace import Workspace
 
 
-def main():
+async def main():
     # Create a temporary workspace for demo
     temp_dir = tempfile.mkdtemp()
     workspace_path = Path(temp_dir) / "my_workspace"
@@ -61,16 +63,16 @@ You are a helpful AI assistant specialized in Python programming.
     )
 
     # Run agent
-    response = agent.run_sync("用 Python 写一个快速排序算法")
+    response = await agent.run("用 Python 写一个快速排序算法")
     print("\n=== Response ===")
     print(response.content)
 
     # Save memory to workspace
-    agent.save_memory("User asked about quicksort algorithm in Python")
+    await agent.save_memory("User asked about quicksort algorithm in Python")
 
     # Verify memory was saved
     print("\n=== Workspace Memory ===")
-    memory_content = workspace.get_memory_prompt(days=1)
+    memory_content = await workspace.get_memory_prompt(days=1)
     print(memory_content)
 
     # Method 2: Create agent from workspace using factory method
@@ -79,7 +81,7 @@ You are a helpful AI assistant specialized in Python programming.
         workspace_path=str(workspace_path),
         model=ZhipuAI(model="glm-4-flash"),
     )
-    response2 = agent2.run_sync("你能帮我做什么？")
+    response2 = await agent2.run("你能帮我做什么？")
     print(response2.content)
 
     # Clean up
@@ -88,4 +90,4 @@ You are a helpful AI assistant specialized in Python programming.
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

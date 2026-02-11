@@ -3,7 +3,7 @@ import time
 import json
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Union, Callable
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, Callable, override
 
 import asyncio
 import functools
@@ -412,6 +412,7 @@ class Gemini(Model):
                 except Exception as e:
                     logger.warning(f"Could not add function {tool}: {e}")
 
+    @override
     async def invoke(self, messages: List[Message]):
         """
         Invokes the model with a list of messages and returns the response.
@@ -430,6 +431,7 @@ class Gemini(Model):
 
         )
 
+    @override
     async def invoke_stream(self, messages: List[Message]):
         """
         Invokes the model with a list of messages and returns the response as a stream.
@@ -627,6 +629,7 @@ class Gemini(Model):
             return model_response
         return None
 
+    @override
     async def response(self, messages: List[Message]) -> ModelResponse:
         """
         Send a generate cone content request to the model and return the response.
@@ -698,6 +701,7 @@ class Gemini(Model):
 
             self.format_function_call_results(function_call_results, messages)
 
+    @override
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """
         Send a generate content request to the model and return the response as a stream.

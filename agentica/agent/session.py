@@ -8,6 +8,8 @@ and memory persistence.
 """
 
 import json
+import asyncio
+import functools
 from typing import (
     Any,
     Dict,
@@ -24,6 +26,12 @@ from agentica.db.base import SessionRow
 
 if TYPE_CHECKING:
     from agentica.agent.base import Agent
+
+
+async def _run_in_executor(func, *args, **kwargs):
+    """Run a sync function in the default thread pool executor."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
 
 
 class SessionMixin:
@@ -75,14 +83,16 @@ class SessionMixin:
             memory=AgentMemory.from_dict(session.memory) if session.memory else AgentMemory(),
         )
 
-    def read_from_storage(self: "Agent") -> Optional[AgentSession]:
+    async def read_from_storage(self: "Agent") -> Optional[AgentSession]:
         """Read and load session from storage"""
         if self.db is None:
             return None
 
         try:
-            # Read session from storage
-            session_row: Optional[SessionRow] = self.db.read_session(session_id=self.session_id)
+            # Read session from storage (sync DB call wrapped in executor)
+            session_row: Optional[SessionRow] = await _run_in_executor(
+                self.db.read_session, session_id=self.session_id
+            )
             if session_row is not None:
                 # Load memory from session_row
                 if session_row.memory is not None:
@@ -138,14 +148,15 @@ class SessionMixin:
             logger.warning(f"Failed to read from storage: {e}")
         return None
 
-    def write_to_storage(self: "Agent") -> Optional[AgentSession]:
+    async def write_to_storage(self: "Agent") -> Optional[AgentSession]:
         """Write the agent session to storage"""
         if self.db is None:
             return None
 
         try:
             agent_session: AgentSession = self.get_agent_session()
-            self.db.upsert_session(
+            await _run_in_executor(
+                self.db.upsert_session,
                 session_row=SessionRow(
                     session_id=agent_session.session_id,
                     agent_id=agent_session.agent_id,
@@ -174,7 +185,7 @@ class SessionMixin:
         # Add introduction to memory
         self.memory.add_message(Message(role="assistant", content=introduction))
 
-    def load_session(self: "Agent", session_id: Optional[str] = None, force: bool = False) -> Optional[str]:
+    async def load_session(self: "Agent", session_id: Optional[str] = None, force: bool = False) -> Optional[str]:
         """Load a session from storage
         
         Args:
@@ -205,7 +216,7 @@ class SessionMixin:
             self.memory = AgentMemory()
 
         # Load from storage
-        self.read_from_storage()
+        await self.read_from_storage()
 
         return _session_id_to_load
 
@@ -279,19 +290,19 @@ class SessionMixin:
         except Exception as e:
             logger.warning(f"Failed to clear user memories: {e}")
 
-    def rename(self: "Agent", name: str) -> None:
+    async def rename(self: "Agent", name: str) -> None:
         """Rename the Agent and save to storage"""
-        self.read_from_storage()
+        await self.read_from_storage()
         self.name = name
-        self.write_to_storage()
+        await self.write_to_storage()
 
-    def rename_session(self: "Agent", session_name: str) -> None:
+    async def rename_session(self: "Agent", session_name: str) -> None:
         """Rename the current session and save to storage"""
-        self.read_from_storage()
+        await self.read_from_storage()
         self.session_name = session_name
-        self.write_to_storage()
+        await self.write_to_storage()
 
-    def generate_session_name(self: "Agent") -> str:
+    async def generate_session_name(self: "Agent") -> str:
         """Generate a name for the session using the first 6 messages from memory"""
         if self.model is None:
             raise Exception("Model not set")
@@ -318,26 +329,26 @@ class SessionMixin:
         )
         user_message = Message(role=self.user_message_role, content=gen_session_name_prompt)
         generate_name_messages = [system_message, user_message]
-        generated_name = self.model.response(messages=generate_name_messages)
+        generated_name = await self.model.response(messages=generate_name_messages)
         content = generated_name.content
         if content is None:
             logger.error("Generated name is None. Trying again.")
-            return self.generate_session_name()
+            return await self.generate_session_name()
         if len(content.split()) > 15:
             logger.error("Generated name is too long. Trying again.")
-            return self.generate_session_name()
+            return await self.generate_session_name()
         return content.replace('"', "").strip()
 
-    def auto_rename_session(self: "Agent") -> None:
+    async def auto_rename_session(self: "Agent") -> None:
         """Automatically rename the session and save to storage"""
-        self.read_from_storage()
-        generated_session_name = self.generate_session_name()
+        await self.read_from_storage()
+        generated_session_name = await self.generate_session_name()
         logger.debug(f"Generated Session Name: {generated_session_name}")
         self.session_name = generated_session_name
-        self.write_to_storage()
+        await self.write_to_storage()
 
-    def delete_session(self: "Agent", session_id: str) -> None:
+    async def delete_session(self: "Agent", session_id: str) -> None:
         """Delete the session from database"""
         if self.db is None:
             return
-        self.db.delete_session(session_id=session_id)
+        await _run_in_executor(self.db.delete_session, session_id=session_id)
