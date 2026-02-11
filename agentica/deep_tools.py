@@ -39,7 +39,6 @@ from agentica.utils.string import truncate_if_too_long
 if TYPE_CHECKING:
     from agentica.agent import Agent
     from agentica.model.base import Model
-    from agentica.tools.skill_tool import SkillTool
 
 
 class BuiltinFileTool(Tool):
