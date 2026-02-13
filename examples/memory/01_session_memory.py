@@ -34,6 +34,7 @@ from uuid import uuid4
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, SqliteDb
+from agentica.agent.config import MemoryConfig
 
 
 async def main():
@@ -76,9 +77,8 @@ async def main():
     agent = Agent(
         model=OpenAIChat(),
         db=db,
-        user_id=user_id,
-        session_id=session_id,
-        enable_user_memories=True,
+        # user_id and session_id removed in V2 API
+        memory_config=MemoryConfig(enable_user_memories=True),
         add_history_to_messages=True,
     )
 
@@ -122,9 +122,8 @@ async def main():
     agent2 = Agent(
         model=OpenAIChat(),
         db=db,
-        user_id=chinese_user_id,
-        session_id=session_id_2,
-        enable_user_memories=True,
+        # user_id and session_id removed in V2 API
+        memory_config=MemoryConfig(enable_user_memories=True),
         add_history_to_messages=True,
     )
 

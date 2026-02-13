@@ -14,8 +14,6 @@ This example demonstrates DeepAgent's built-in file system capabilities:
 import sys
 import os
 import asyncio
-import tempfile
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import DeepAgent, OpenAIChat
@@ -48,18 +46,18 @@ async def file_read_write_demo():
     )
 
     # Create a temporary directory for demo
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "test.txt")
+    tmpdir = './tmp/'
+    test_file = os.path.join(tmpdir, "test.txt")
 
-        # Write a file
-        response = await agent.run(
-            f"Create a file at {test_file} with the content: 'Hello, DeepAgent!'"
-        )
-        print(f"\nWrite Response:\n{response.content}")
+    # Write a file
+    response = await agent.run(
+        f"Create a file at {test_file} with the content: 'Hello, DeepAgent!'"
+    )
+    print(f"\nWrite Response:\n{response.content}")
 
-        # Read the file
-        response = await agent.run(f"Read the contents of {test_file}")
-        print(f"\nRead Response:\n{response.content}")
+    # Read the file
+    response = await agent.run(f"Read the contents of {test_file}")
+    print(f"\nRead Response:\n{response.content}")
 
 
 async def file_search_demo():
@@ -88,31 +86,30 @@ async def file_edit_demo():
 
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
-        name="FileEditor",
     )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        test_file = os.path.join(tmpdir, "config.py")
+    tmpdir = './tmp/'
+    test_file = os.path.join(tmpdir, "config.py")
 
-        # Create initial file
-        with open(test_file, "w") as f:
-            f.write("""# Configuration file
+    # Create initial file
+    with open(test_file, "w") as f:
+        f.write("""# Configuration file
 DEBUG = False
 VERSION = "1.0.0"
 MAX_RETRIES = 3
 """)
 
-        print(f"Created test file: {test_file}")
+    print(f"Created test file: {test_file}")
 
-        # Edit the file
-        response = await agent.run(
-            f"Edit the file {test_file} to change DEBUG from False to True"
-        )
-        print(f"\nEdit Response:\n{response.content}")
+    # Edit the file
+    response = await agent.run(
+        f"Edit the file {test_file} to change DEBUG from False to True"
+    )
+    print(f"\nEdit Response:\n{response.content}")
 
-        # Verify the change
-        with open(test_file, "r") as f:
-            print(f"\nFile contents after edit:\n{f.read()}")
+    # Verify the change
+    with open(test_file, "r") as f:
+        print(f"\nFile contents after edit:\n{f.read()}")
 
 
 if __name__ == "__main__":

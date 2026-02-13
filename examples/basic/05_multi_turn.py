@@ -15,6 +15,7 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
+from agentica.agent.config import ToolConfig
 
 
 async def main():
@@ -39,7 +40,7 @@ async def main():
     agent_with_history = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         add_history_to_messages=True,
-        read_chat_history=True,
+        tool_config=ToolConfig(read_chat_history=True),
     )
 
     print(await agent_with_history.run("我叫李四，是一名软件工程师"))

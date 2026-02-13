@@ -105,6 +105,8 @@ from agentica.utils.tokens import (
 
 # agent (core)
 from agentica.agent import Agent, AgentCancelledError
+from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+from agentica.run_config import RunConfig
 from agentica.deep_agent import DeepAgent
 from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow, WorkflowSession
@@ -517,8 +519,14 @@ __all__ = [
     "count_tool_tokens",
     # agent
     "Agent",
+    "AgentCancelledError",
     "DeepAgent",
     "AgentSession",
+    "PromptConfig",
+    "ToolConfig",
+    "MemoryConfig",
+    "TeamConfig",
+    "RunConfig",
     "Workflow",
     "WorkflowSession",
     # workspace

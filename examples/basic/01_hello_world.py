@@ -21,7 +21,7 @@ async def main():
     # Create a simple agent
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
-        debug=True
+        debug_mode=True
     )
 
     # Run the agent with a simple query

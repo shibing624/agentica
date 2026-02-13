@@ -11,6 +11,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.agent import Agent
+from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
 from agentica.memory import AgentMemory, Memory
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -28,7 +29,6 @@ class TestAgentInitialization(unittest.TestCase):
         self.assertIsNone(agent.name)
         self.assertIsNotNone(agent.agent_id)
         self.assertIsInstance(agent.memory, AgentMemory)
-        self.assertEqual(agent.session_state, {})
 
     def test_initialization_with_name(self):
         """Test Agent with custom name."""
@@ -39,16 +39,6 @@ class TestAgentInitialization(unittest.TestCase):
         """Test Agent with custom agent_id."""
         agent = Agent(agent_id="custom-id-123")
         self.assertEqual(agent.agent_id, "custom-id-123")
-
-    def test_initialization_with_user_id(self):
-        """Test Agent with user_id."""
-        agent = Agent(user_id="user-123")
-        self.assertEqual(agent.user_id, "user-123")
-
-    def test_initialization_with_session_id(self):
-        """Test Agent with session_id."""
-        agent = Agent(session_id="session-456")
-        self.assertEqual(agent.session_id, "session-456")
 
     def test_initialization_with_instructions(self):
         """Test Agent with instructions."""
@@ -156,17 +146,17 @@ class TestAgentSystemPrompt(unittest.TestCase):
     """Test cases for Agent system prompt generation."""
 
     def test_system_prompt_string(self):
-        """Test Agent with string system_prompt."""
-        agent = Agent(system_prompt="You are a helpful assistant.")
-        self.assertEqual(agent.system_prompt, "You are a helpful assistant.")
+        """Test Agent with string system_prompt via PromptConfig."""
+        agent = Agent(prompt_config=PromptConfig(system_prompt="You are a helpful assistant."))
+        self.assertEqual(agent.prompt_config.system_prompt, "You are a helpful assistant.")
 
     def test_system_prompt_callable(self):
-        """Test Agent with callable system_prompt."""
+        """Test Agent with callable system_prompt via PromptConfig."""
         def get_prompt():
             return "Dynamic prompt"
 
-        agent = Agent(system_prompt=get_prompt)
-        self.assertTrue(callable(agent.system_prompt))
+        agent = Agent(prompt_config=PromptConfig(system_prompt=get_prompt))
+        self.assertTrue(callable(agent.prompt_config.system_prompt))
 
     def test_instructions_list(self):
         """Test Agent with list of instructions."""
@@ -180,8 +170,8 @@ class TestAgentTeam(unittest.TestCase):
 
     def test_agent_with_team(self):
         """Test Agent with team members."""
-        member1 = Agent(name="Member1", role="researcher")
-        member2 = Agent(name="Member2", role="writer")
+        member1 = Agent(name="Member1", prompt_config=PromptConfig(role="researcher"))
+        member2 = Agent(name="Member2", prompt_config=PromptConfig(role="writer"))
         leader = Agent(name="Leader", team=[member1, member2])
 
         self.assertEqual(len(leader.team), 2)
@@ -189,9 +179,9 @@ class TestAgentTeam(unittest.TestCase):
         self.assertEqual(leader.team[1].name, "Member2")
 
     def test_agent_role(self):
-        """Test Agent role setting."""
-        agent = Agent(role="assistant")
-        self.assertEqual(agent.role, "assistant")
+        """Test Agent role setting via PromptConfig."""
+        agent = Agent(prompt_config=PromptConfig(role="assistant"))
+        self.assertEqual(agent.prompt_config.role, "assistant")
 
 
 class TestAgentStructuredOutput(unittest.TestCase):
@@ -209,44 +199,21 @@ class TestAgentStructuredOutput(unittest.TestCase):
 
 
 class TestAgentTimeout(unittest.TestCase):
-    """Test cases for Agent timeout settings."""
+    """Test cases for Agent timeout settings (now passed to run()/run_stream())."""
 
-    def test_run_timeout_initialization(self):
-        """Test run_timeout setting."""
-        agent = Agent(run_timeout=300)
-        self.assertEqual(agent.run_timeout, 300)
-
-    def test_first_token_timeout_initialization(self):
-        """Test first_token_timeout setting."""
-        agent = Agent(first_token_timeout=30)
-        self.assertEqual(agent.first_token_timeout, 30)
-
-    def test_both_timeout_settings(self):
-        """Test both timeout settings together."""
-        agent = Agent(run_timeout=600, first_token_timeout=30)
-        self.assertEqual(agent.run_timeout, 600)
-        self.assertEqual(agent.first_token_timeout, 30)
-
-    def test_default_timeout_is_none(self):
-        """Test that default timeout values are None."""
+    def test_timeout_wrapper_methods_exist(self):
+        """Test that timeout wrapper methods exist on Agent."""
         agent = Agent()
-        self.assertIsNone(agent.run_timeout)
-        self.assertIsNone(agent.first_token_timeout)
-
-    def test_run_with_timeout_non_streaming(self):
-        """Test that non-streaming run uses timeout wrapper when configured."""
-        agent = Agent(run_timeout=5)
-        # Verify that _run_with_timeout method exists and will be called
         self.assertTrue(hasattr(agent, '_run_with_timeout'))
         self.assertTrue(callable(agent._run_with_timeout))
-        # Verify run_timeout is set
-        self.assertEqual(agent.run_timeout, 5)
+        self.assertTrue(hasattr(agent, '_wrap_stream_with_timeout'))
+        self.assertTrue(callable(agent._wrap_stream_with_timeout))
 
     def test_run_timeout_triggers_timeout_response(self):
         """Test that timeout produces correct RunResponse event."""
         import asyncio
 
-        agent = Agent(run_timeout=0.001)  # Very short timeout
+        agent = Agent()
 
         async def slow_consume(*args, **kwargs):
             await asyncio.sleep(1)  # Sleep longer than timeout
@@ -258,28 +225,24 @@ class TestAgentTimeout(unittest.TestCase):
             agent.response_model = None
             agent.parse_response = True
 
-            response = agent.run_sync("test")
+            response = agent.run_sync("test", run_timeout=0.001)
             self.assertEqual(response.event, "RunTimeout")
             self.assertIn("timed out", response.content)
-
-    def test_stream_timeout_wrapper_exists(self):
-        """Test that _wrap_stream_with_timeout method exists."""
-        agent = Agent()
-        self.assertTrue(hasattr(agent, '_wrap_stream_with_timeout'))
-        self.assertTrue(callable(agent._wrap_stream_with_timeout))
 
     def test_first_token_timeout_in_stream(self):
         """Test first token timeout in streaming mode."""
         import asyncio
 
-        agent = Agent(first_token_timeout=0.001)  # Very short timeout
+        agent = Agent()
 
         async def slow_async_iterator():
             await asyncio.sleep(1)  # Sleep longer than first_token_timeout
             yield RunResponse(content="Should not reach here")
 
         async def get_first():
-            async for item in agent._wrap_stream_with_timeout(slow_async_iterator()):
+            async for item in agent._wrap_stream_with_timeout(
+                slow_async_iterator(), first_token_timeout=0.001
+            ):
                 return item
             return None
 
@@ -292,7 +255,7 @@ class TestAgentTimeout(unittest.TestCase):
         """Test run timeout in streaming mode."""
         import asyncio
 
-        agent = Agent(run_timeout=0.05, first_token_timeout=None)  # 50ms total timeout
+        agent = Agent()
 
         async def slow_async_iterator():
             yield RunResponse(content="First")  # First token arrives quickly
@@ -301,7 +264,9 @@ class TestAgentTimeout(unittest.TestCase):
 
         async def collect():
             out = []
-            async for item in agent._wrap_stream_with_timeout(slow_async_iterator()):
+            async for item in agent._wrap_stream_with_timeout(
+                slow_async_iterator(), run_timeout=0.05
+            ):
                 out.append(item)
             return out
 

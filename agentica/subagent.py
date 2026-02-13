@@ -28,22 +28,16 @@ from datetime import datetime
 
 from agentica.utils.log import logger
 
-if TYPE_CHECKING:
-    pass  # Reserved for future type imports
-
 
 class SubagentType(str, Enum):
     """Types of subagents with different capabilities."""
-    
-    # General-purpose agent with full tool access
-    GENERAL = "general"
-    
+
     # Explore agent: read-only, specialized for codebase exploration
     EXPLORE = "explore"
-    
+
     # Research agent: web search and document analysis
     RESEARCH = "research"
-    
+
     # Code agent: code generation and execution
     CODE = "code"
 
@@ -296,33 +290,6 @@ Complete the user's search request efficiently and report your findings clearly.
 )
 
 
-# General-purpose agent: full capabilities
-GENERAL_SUBAGENT_CONFIG = SubagentConfig(
-    type=SubagentType.GENERAL,
-    name="General-Purpose Agent",
-    description="""General-purpose agent for handling complex, multi-step tasks.
-Use this agent for:
-- Research and analysis tasks
-- Multi-step file operations
-- Complex reasoning tasks
-- Any task that benefits from isolated context""",
-    system_prompt="""You are a helpful assistant that completes tasks autonomously.
-
-Guidelines:
-1. **Stay focused** - Complete your assigned task, nothing else
-2. **Be thorough** - Your final message is your deliverable
-3. **Complete the task** - Don't ask for clarification, make reasonable assumptions
-4. **Report clearly** - Provide a clear summary of what you accomplished
-
-Focus on the specific task given to you and provide a clear, concise result.
-Use the available tools to accomplish your task efficiently.""",
-    allowed_tools=None,  # All tools from parent
-    denied_tools=["task"],  # Cannot spawn nested subagents by default
-    max_iterations=20,
-    can_spawn_subagents=False,
-)
-
-
 # Research agent: web search and analysis
 RESEARCH_SUBAGENT_CONFIG = SubagentConfig(
     type=SubagentType.RESEARCH,
@@ -378,7 +345,6 @@ Complete your coding task and provide a summary of the results.""",
 # Registry of all default subagent configurations
 DEFAULT_SUBAGENT_CONFIGS: Dict[SubagentType, SubagentConfig] = {
     SubagentType.EXPLORE: EXPLORE_SUBAGENT_CONFIG,
-    SubagentType.GENERAL: GENERAL_SUBAGENT_CONFIG,
     SubagentType.RESEARCH: RESEARCH_SUBAGENT_CONFIG,
     SubagentType.CODE: CODE_SUBAGENT_CONFIG,
 }
@@ -422,7 +388,7 @@ def register_custom_subagent(
         ... )
     """
     config = SubagentConfig(
-        type=SubagentType.GENERAL,  # Custom subagents use GENERAL as base type
+        type=SubagentType.CODE,  # Custom subagents use CODE as base type (has full tools)
         name=name,
         description=description,
         system_prompt=system_prompt,
@@ -457,25 +423,24 @@ def unregister_custom_subagent(name: str) -> bool:
 def get_subagent_config(subagent_type: Union[str, SubagentType]) -> Optional[SubagentConfig]:
     """
     Get the configuration for a subagent type.
-    
+
     Lookup order:
     1. Custom subagent configs (by name string)
     2. Default subagent configs (by SubagentType enum)
-    3. Aliases (e.g., "general-purpose" -> GENERAL)
+    3. Aliases (e.g., "explorer" -> EXPLORE)
     """
     if isinstance(subagent_type, str):
         # First check custom configs (case-insensitive)
         custom_config = _CUSTOM_SUBAGENT_CONFIGS.get(subagent_type.lower())
         if custom_config is not None:
             return custom_config
-        
+
         # Then try to parse as SubagentType enum
         try:
             subagent_type = SubagentType(subagent_type)
         except ValueError:
             # Try mapping common aliases
             aliases = {
-                "general-purpose": SubagentType.GENERAL,
                 "explorer": SubagentType.EXPLORE,
                 "researcher": SubagentType.RESEARCH,
                 "coder": SubagentType.CODE,
@@ -483,7 +448,7 @@ def get_subagent_config(subagent_type: Union[str, SubagentType]) -> Optional[Sub
             subagent_type = aliases.get(subagent_type.lower())
             if subagent_type is None:
                 return None
-    
+
     return DEFAULT_SUBAGENT_CONFIGS.get(subagent_type)
 
 

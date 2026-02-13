@@ -48,13 +48,13 @@ def tmp_dir():
 @pytest.fixture
 def file_tool(tmp_dir):
     """BuiltinFileTool scoped to a temp directory."""
-    return BuiltinFileTool(base_dir=tmp_dir)
+    return BuiltinFileTool(work_dir=tmp_dir)
 
 
 @pytest.fixture
 def execute_tool(tmp_dir):
     """BuiltinExecuteTool scoped to a temp directory."""
-    return BuiltinExecuteTool(base_dir=tmp_dir)
+    return BuiltinExecuteTool(work_dir=tmp_dir)
 
 
 @pytest.fixture
@@ -318,7 +318,7 @@ print(f(21))"'''
         assert "42" in result
 
     def test_execute_cwd(self, tmp_dir):
-        tool = BuiltinExecuteTool(base_dir=tmp_dir)
+        tool = BuiltinExecuteTool(work_dir=tmp_dir)
         result = asyncio.run(tool.execute("pwd"))
         assert tmp_dir in result
 
@@ -496,12 +496,12 @@ class TestBuiltinTaskTool:
 
         # Agent is imported locally inside task() as `from agentica.agent import Agent`
         with patch("agentica.agent.Agent", return_value=mock_agent_instance):
-            result = asyncio.run(tool.task("compute 6 * 7", subagent_type="general"))
+            result = asyncio.run(tool.task("compute 6 * 7", subagent_type="code"))
 
         parsed = json.loads(result)
         assert parsed["success"] is True
         assert "42" in parsed["result"]
-        assert parsed["subagent_type"] == "general"
+        assert parsed["subagent_type"] == "code"
 
     def test_task_exception_handling(self):
         """If the subagent raises an exception, task should return error JSON."""
@@ -545,7 +545,7 @@ class TestBuiltinTaskTool:
         mock_agent.work_dir = "/some/path"
         tool.set_parent_agent(mock_agent)
         assert tool._parent_agent is mock_agent
-        assert tool._base_dir == "/some/path"
+        assert tool._work_dir == "/some/path"
 
 
 # ===========================================================================

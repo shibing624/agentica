@@ -72,13 +72,6 @@ class TestAgentRun:
             assert len(resp.run_id) > 0
 
     @pytest.mark.asyncio
-    async def test_run_populates_session_id(self):
-        with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response()):
-            agent = Agent(name="A", model=_make_model(), session_id="sess-1")
-            resp = await agent.run("Hi")
-            assert resp.session_id == "sess-1"
-
-    @pytest.mark.asyncio
     async def test_run_populates_agent_id(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response()):
             agent = Agent(name="A", model=_make_model(), agent_id="agent-1")

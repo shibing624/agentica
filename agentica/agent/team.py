@@ -51,7 +51,7 @@ class TeamMixin:
             name = f"agent_{self.agent_id[:8]}"
         
         # Generate description
-        description = tool_description or self.description or self.role or f"Run the {name} agent."
+        description = tool_description or self.description or self.prompt_config.role or f"Run the {name} agent."
 
         async def agent_entrypoint(message: str) -> str:
             """Run the agent with the given message and return the response."""
@@ -81,7 +81,7 @@ class TeamMixin:
             A Function instance that can transfer tasks to this agent.
         """
         agent_name = self.name or "agent"
-        agent_description = self.description or self.role or f"Transfer task to {agent_name}"
+        agent_description = self.description or self.prompt_config.role or f"Transfer task to {agent_name}"
 
         async def transfer_to_agent(task: str) -> str:
             """Transfer a task to this agent.
@@ -120,7 +120,7 @@ class TeamMixin:
         
         for member in self.team:
             member_name = member.name or "unnamed_agent"
-            member_role = member.role or member.description or "No description"
+            member_role = member.prompt_config.role or member.description or "No description"
             transfer_prompt += f"- **{member_name}**: {member_role}\n"
 
         transfer_prompt += "\nUse the appropriate transfer function to delegate tasks to team members.\n"
@@ -144,10 +144,10 @@ class TeamMixin:
             tools.extend(self.tools)
 
         # Add default tools based on settings
-        if self.read_chat_history:
+        if self.tool_config.read_chat_history:
             tools.append(self.get_chat_history)
 
-        if self.read_tool_call_history:
+        if self.tool_config.read_tool_call_history:
             tools.append(self.get_tool_call_history)
 
         # Add knowledge base tools if knowledge is configured
@@ -155,15 +155,15 @@ class TeamMixin:
             if self.search_knowledge:
                 tools.append(self.search_knowledge_base)
 
-            if self.update_knowledge:
+            if self.tool_config.update_knowledge:
                 tools.append(self.add_to_knowledge)
 
         # Add memory update tool if user memories are enabled
-        if self.enable_user_memories and self.memory is not None and self.memory.create_user_memories:
+        if self.memory_config.enable_user_memories and self.memory is not None and self.memory.create_user_memories:
             tools.append(self.update_memory)
 
         # Add team transfer functions if team is present and transfer instructions are enabled
-        if self.has_team() and self.add_transfer_instructions:
+        if self.has_team() and self.team_config.add_transfer_instructions:
             for member in self.team:
                 transfer_func = member.get_transfer_function()
                 tools.append(transfer_func)

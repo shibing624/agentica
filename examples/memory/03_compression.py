@@ -13,6 +13,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, Message
+from agentica.agent.config import ToolConfig
 from agentica.utils.tokens import (
     count_tokens,
     count_text_tokens,
@@ -134,7 +135,7 @@ def demo_agent_with_compression():
     # Method 1: Simple - enable compression via flag
     agent1 = Agent(
         model=OpenAIChat(id="gpt-4o"),
-        compress_tool_results=True,
+        tool_config=ToolConfig(compress_tool_results=True),
         name="CompressedAgent",
     )
     print("\n1. Agent with compress_tool_results=True:")

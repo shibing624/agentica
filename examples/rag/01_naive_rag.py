@@ -13,11 +13,10 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, OpenAIEmb
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica import SearchType
-from agentica.emb.text2vec_emb import Text2VecEmb
 
 # Create knowledge base with PDF document
 knowledge = Knowledge(
@@ -25,7 +24,7 @@ knowledge = Knowledge(
     vector_db=LanceDb(
         table_name="recipes",
         uri="tmp/recipes_lancedb",
-        embedder=Text2VecEmb(),
+        embedder=OpenAIEmb(),
         search_type=SearchType.vector,
     ),
 )

@@ -24,6 +24,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from agentica import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.tools.baidu_search_tool import BaiduSearchTool
+from agentica.agent.config import PromptConfig
 
 
 async def main():
@@ -34,13 +35,12 @@ async def main():
 
     agent = Agent(
         name="Langfuse Demo Agent",
-        user_id="user-123",
-        session_id="session-abc",
+        # user_id and session_id removed in V2 API
         model=OpenAIChat(
             id="gpt-4o-mini",
             langfuse_tags=["demo", "basic"],
         ),
-        system_prompt="You are a helpful assistant.",
+        prompt_config=PromptConfig(system_prompt="You are a helpful assistant."),
         debug_mode=True,
     )
 
@@ -67,14 +67,13 @@ async def main():
 
     agent_with_tools = Agent(
         name="Research Agent",
-        user_id="user-456",
-        session_id="research-session-001",
+        # user_id and session_id removed in V2 API
         model=OpenAIChat(
             id="gpt-4o-mini",
             langfuse_tags=["research", "tools"],
         ),
         tools=[BaiduSearchTool()],
-        system_prompt="You are a research assistant. Use search tools to find information.",
+        prompt_config=PromptConfig(system_prompt="You are a research assistant. Use search tools to find information."),
         debug_mode=True,
     )
 

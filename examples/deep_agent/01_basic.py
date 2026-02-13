@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: DeepAgent basic usage examples
+@description: DeepAgent usage examples
 
-DeepAgent is an enhanced version of Agent that automatically includes built-in tools:
-- File system tools: ls, read_file, write_file, edit_file, glob, grep
-- Code execution tool: execute
-- Web tools: web_search, fetch_url
-- Task management tools: write_todos, read_todos
-- Subagent tool: task
-
-Difference from regular Agent:
+DeepAgent = Agent + Built-in Tools
 - Agent: Tools must be added manually
 - DeepAgent: Automatically includes built-in tools
+
+Built-in tools:
+- File tools: ls, read_file, write_file, edit_file, glob, grep
+- Execute: execute shell commands
+- Web tools: web_search, fetch_url
+- Task tools: write_todos, read_todos
+- Subagent: task (launch subagents for parallel execution)
 """
 import sys
 import os
@@ -24,107 +24,182 @@ from agentica import DeepAgent, OpenAIChat
 
 
 async def basic_example():
-    """Basic example: Create DeepAgent and execute simple tasks."""
+    """Basic example: Create DeepAgent with minimal config."""
     print("=" * 60)
-    print("Basic Example: DeepAgent Basic Usage")
+    print("Basic Example: Minimal DeepAgent")
     print("=" * 60)
 
+    # Minimal config - just model
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
-        add_datetime_to_instructions=True,
     )
 
-    print(f"Created: {agent}")
-    print(f"Builtin tools: {agent.get_builtin_tool_names()}")
+    print(f"Tools: {agent.get_builtin_tool_names()}")
+    print(f"Total tools: {len(agent.tools)}")
 
     await agent.print_response_stream(
-        "List all Python files in the current directory and count them",
+        "List all Python files in the current directory",
         show_tool_calls=True,
     )
 
 
-async def custom_config_example():
-    """Custom configuration example: Disable certain tools."""
+async def workdir_example():
+    """Example with work_dir for file operations."""
     print("\n" + "=" * 60)
-    print("Custom Config Example: Disable Code Execution Tool")
+    print("Example: With work_dir")
     print("=" * 60)
 
+    # Set work_dir for file operations
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
-        name="SafeAssistant",
-        description="A safe assistant without code execution",
-        include_execute=False,
-        include_web_search=False,
+        work_dir="/path/to/project",  # File operations will use this as base
     )
 
-    print(f"Created: {agent}")
-    print(f"Builtin tools: {agent.get_builtin_tool_names()}")
+    print(f"work_dir: {agent.work_dir}")
+    print(f"Tools: {agent.get_builtin_tool_names()}")
 
 
-async def with_custom_tools_example():
-    """Add custom tools alongside built-in tools."""
+async def disable_tools_example():
+    """Example: Disable certain built-in tools for security."""
     print("\n" + "=" * 60)
-    print("Custom Tools Example: Add Custom Function Tool")
+    print("Example: Disable Tools for Security")
+    print("=" * 60)
+
+    # Disable dangerous tools for read-only scenarios
+    agent = DeepAgent(
+        model=OpenAIChat(id="gpt-4o"),
+        name="SafeExplorer",
+        description="Read-only file explorer",
+        include_execute=False,      # Disable shell execution
+        include_web_search=False,    # Disable web access
+        include_todos=False,         # Disable task management
+        include_task=False,          # Disable subagent spawning
+    )
+
+    print(f"Tools: {agent.get_builtin_tool_names()}")
+
+
+async def add_custom_tools_example():
+    """Example: Add custom tools alongside built-in tools."""
+    print("\n" + "=" * 60)
+    print("Example: Add Custom Tools")
     print("=" * 60)
 
     def multiply(a: float, b: float) -> str:
-        """Multiply two numbers.
-
-        Args:
-            a: First number
-            b: Second number
-
-        Returns:
-            The product as a string
-        """
+        """Multiply two numbers."""
         return str(a * b)
+
+    def weather(city: str) -> str:
+        """Get weather for a city."""
+        return f"Weather in {city}: Sunny, 25°C"
 
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
-        name="MathAssistant",
-        description="A math assistant with custom tools",
-        tools=[multiply],
+        name="Assistant",
+        tools=[multiply, weather],  # Add custom tools
     )
 
-    print(f"Created: {agent}")
-    print(f"Builtin tools: {agent.get_builtin_tool_names()}")
+    print(f"Built-in: {agent.get_builtin_tool_names()}")
+    print(f"Custom: multiply, weather")
 
-    await agent.print_response("Calculate (1111.2 * 22.1222) using the multiply tool")
+    await agent.print_response("What is 123 * 456? What's the weather in Tokyo?")
 
 
-async def complex_deep_agent():
-    """DeepAgent with full configuration."""
-    from agentica import SqliteDb
-
+async def deep_research_example():
+    """Example: Enable deep research mode."""
     print("\n" + "=" * 60)
-    print("Complex DeepAgent Example")
+    print("Example: Deep Research Mode")
     print("=" * 60)
 
-    db_path = "tmp/agent_sessions.db"
-    os.makedirs("tmp", exist_ok=True)
-    db = SqliteDb(db_file=str(db_path))
+    # Enable deep research prompt optimization
+    agent = DeepAgent(
+        model=OpenAIChat(id="gpt-4o"),
+        enable_deep_research=True,  # Optimized system prompt for research
+        include_todos=False,
+    )
 
-    deep_agent = DeepAgent(
+    print(f"Deep research mode: {agent.enable_deep_research}")
+
+    await agent.print_response(
+        "Research the latest developments in AI agents in 2025",
+        show_tool_calls=True,
+    )
+
+
+async def full_config_example():
+    """Example: Full configuration with memory and workspace."""
+    print("\n" + "=" * 60)
+    print("Example: Full Configuration")
+    print("=" * 60)
+
+    from agentica import SqliteDb
+
+    os.makedirs("tmp", exist_ok=True)
+    db = SqliteDb(db_file="tmp/agent_sessions.db")
+
+    agent = DeepAgent(
+        # Core
         model=OpenAIChat(id="gpt-4o"),
         name="DeepAgent",
-        db=db,
-        load_workspace_context=True,
-        load_workspace_memory=True,
-        memory_days=7,
+        description="Full-featured DeepAgent",
+        # DeepAgent specific
+        work_dir=".",
+        include_file_tools=True,
+        include_execute=True,
+        include_web_search=True,
+        include_fetch_url=True,
+        include_todos=True,
+        include_task=True,
+        include_skills=True,
+        enable_deep_research=False,
+        # Memory & History
         add_history_to_messages=True,
         num_history_responses=4,
+        # Tool config
         tool_call_limit=40,
-        add_datetime_to_instructions=True,
-        auto_load_mcp=True,
+        # Output
+        markdown=True,
         debug_mode=True,
     )
-    print(f"DeepAgent builtin tools: {deep_agent.get_builtin_tool_names()}")
-    print(f"DeepAgent: {deep_agent}")
-    await deep_agent.print_response("List all Python files in the current directory and count them")
+
+    print(f"Tools count: {len(agent.tools)}")
+    print(f"Tools: {agent.get_builtin_tool_names()}")
+
+    await agent.print_response("List current directory files")
+
+
+async def parallel_subagent_example():
+    """Example: Using subagents for parallel execution."""
+    print("\n" + "=" * 60)
+    print("Example: Parallel Subagents")
+    print("=" * 60)
+
+    agent = DeepAgent(
+        model=OpenAIChat(id="gpt-4o"),
+        include_todos=False,
+    )
+
+    print(f"Subagent tool available: {'task' in agent.get_builtin_tool_names()}")
+
+    # The model can launch multiple subagents in parallel
+    # Example prompt to trigger parallel subagents:
+    await agent.print_response(
+        """I need you to do three things in parallel:
+        1. Use explore subagent to find all .py files in examples/
+        2. Use research subagent to search for "LLM agents 2025"
+        3. Use code subagent to create a simple hello.py file
+
+        Launch all three at once using the task tool.""",
+        show_tool_calls=True,
+    )
 
 
 if __name__ == '__main__':
+    # Run basic example
     asyncio.run(basic_example())
-    asyncio.run(custom_config_example())
-    asyncio.run(with_custom_tools_example())
-    asyncio.run(complex_deep_agent())
+    # asyncio.run(workdir_example())
+    # asyncio.run(disable_tools_example())
+    # asyncio.run(add_custom_tools_example())
+    # asyncio.run(deep_research_example())
+    # asyncio.run(full_config_example())
+    # asyncio.run(parallel_subagent_example())

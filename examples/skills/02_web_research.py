@@ -70,7 +70,6 @@ def demo_research_agent():
                 "# Research Skill Instructions",
                 skill.get_prompt(),
             ],
-            add_datetime_to_instructions=True,
         )
 
         print(f"\nAgent: {agent.name}")

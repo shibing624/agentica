@@ -11,6 +11,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent
+from agentica.agent.config import PromptConfig
 from agentica.model.openai import OpenAIChat
 
 
@@ -20,9 +21,9 @@ class AgentMultiRoundTest(unittest.TestCase):
     def test_agent_init(self):
         """Test Agent initialization."""
         agent = Agent(
-            add_datetime_to_instructions=True,
+            prompt_config=PromptConfig(add_datetime_to_instructions=True),
         )
-        self.assertTrue(agent.add_datetime_to_instructions)
+        self.assertTrue(agent.prompt_config.add_datetime_to_instructions)
 
     def test_agent_with_instructions(self):
         """Test Agent with custom instructions."""

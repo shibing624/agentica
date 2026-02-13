@@ -239,7 +239,7 @@ class DeepAgent(Agent):
 
         # Get built-in tools
         builtin_tools = get_builtin_tools(
-            base_dir=work_dir,
+            work_dir=work_dir,
             include_file_tools=include_file_tools,
             include_execute=include_execute,
             include_web_search=include_web_search,
@@ -270,12 +270,39 @@ class DeepAgent(Agent):
             final_system_prompt = get_deep_research_prompt()
 
         # Enable agentic prompt by default for enhanced capabilities (heartbeat, soul, etc.)
-        kwargs.setdefault('enable_agentic_prompt', True)
-        
+        # Build prompt_config, tool_config, memory_config, team_config from kwargs
+        from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+        import dataclasses
+
+        prompt_config = kwargs.pop('prompt_config', None) or PromptConfig()
+        tool_config = kwargs.pop('tool_config', None) or ToolConfig()
+        memory_config = kwargs.pop('memory_config', None) or MemoryConfig()
+        team_config = kwargs.pop('team_config', None) or TeamConfig()
+
+        # Extract config-bound kwargs and merge into config objects
+        # This provides backward-compatible flat kwargs → Config migration
+        _config_field_map = {
+            'prompt_config': (prompt_config, {f.name for f in dataclasses.fields(PromptConfig)}),
+            'tool_config': (tool_config, {f.name for f in dataclasses.fields(ToolConfig)}),
+            'memory_config': (memory_config, {f.name for f in dataclasses.fields(MemoryConfig)}),
+            'team_config': (team_config, {f.name for f in dataclasses.fields(TeamConfig)}),
+        }
+        for config_name, (config_obj, field_names) in _config_field_map.items():
+            for field_name in list(field_names):
+                if field_name in kwargs:
+                    setattr(config_obj, field_name, kwargs.pop(field_name))
+
+        prompt_config.enable_agentic_prompt = kwargs.pop('enable_agentic_prompt', True)
+        if final_system_prompt is not None:
+            prompt_config.system_prompt = final_system_prompt
+
         super().__init__(
             tools=all_tools,
             instructions=instructions,
-            system_prompt=final_system_prompt,
+            prompt_config=prompt_config,
+            tool_config=tool_config,
+            memory_config=memory_config,
+            team_config=team_config,
             **kwargs
         )
 
@@ -376,9 +403,9 @@ class DeepAgent(Agent):
         logger.info(f"Context soft limit reached: {current_tokens} >= {self.context_soft_limit}")
 
         # Compress tool results if compression manager is available
-        if self.compression_manager is not None:
-            self.compression_manager.compress(messages)
-            logger.debug(f"Compressed tool results, stats: {self.compression_manager.get_stats()}")
+        if self.tool_config.compression_manager is not None:
+            self.tool_config.compression_manager.compress(messages)
+            logger.debug(f"Compressed tool results, stats: {self.tool_config.compression_manager.get_stats()}")
 
         return False, None
 

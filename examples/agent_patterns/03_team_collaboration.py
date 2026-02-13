@@ -19,6 +19,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import asyncio
 
 from agentica import Agent, OpenAIChat, BaiduSearchTool
+from agentica.agent.config import PromptConfig
 
 
 class NewsArticle(BaseModel):
@@ -40,7 +41,6 @@ researcher = Agent(
 writer = Agent(
     model=OpenAIChat(id="gpt-4o"),
     name="Article Writer",
-    save_response_to_file="outputs/team_article.md",
     description="You are a Senior NYT Editor and your task is to write a NYT cover story worthy article.",
     instructions=[
         "You will be provided with news articles and their links.",
@@ -52,8 +52,9 @@ writer = Agent(
         "Ignore articles that you cannot read or understand.",
         "REMEMBER: you are writing for the New York Times, so the quality of the article is important.",
     ],
-    expected_output=dedent(
-        """\
+    prompt_config=PromptConfig(
+        expected_output=dedent(
+            """\
     An engaging, informative, and well-structured article in the following format:
     <article_format>
     ## Engaging Article Title
@@ -76,6 +77,7 @@ writer = Agent(
     - [Title](url)
     </article_format>
     """
+        ),
     ),
 )
 
@@ -97,6 +99,7 @@ async def main():
         Find the 5 most relevant articles on a topic: 人工智能最新发展,
         Read each article and write a NYT worthy news article. 用中文写。
         """,
+        save_response_to_file="outputs/team_article.md",
     )
 
 

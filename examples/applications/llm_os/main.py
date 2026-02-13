@@ -72,18 +72,14 @@ INTRODUCTION = dedent("""\
 
 def create_llm_os(
         model_id: str = DEFAULT_MODEL,
-        user_id: Optional[str] = None,
-        session_id: Optional[str] = None,
         debug_mode: bool = False,
 ) -> DeepAgent:
     """创建LLM OS实例
-    
+
     Args:
         model_id: 模型ID
-        user_id: 用户ID
-        session_id: 会话ID
         debug_mode: 是否开启调试模式
-        
+
     Returns:
         DeepAgent实例
     """
@@ -102,8 +98,7 @@ def create_llm_os(
     llm_os = DeepAgent(
         name="llm_os",
         model=OpenAIChat(id=model_id),
-        session_id=session_id,
-        user_id=user_id,
+        # session_id and user_id removed in V2 API
         description=SYSTEM_DESCRIPTION,
         instructions=SYSTEM_INSTRUCTIONS,
         # 数据库用于会话持久化
@@ -125,7 +120,6 @@ def create_llm_os(
         num_history_responses=6,
         # 显示配置
         markdown=True,
-        add_datetime_to_instructions=True,
         introduction=INTRODUCTION,
         debug_mode=debug_mode,
     )
@@ -257,7 +251,6 @@ def render_session_controls(llm_os: DeepAgent, llm_id: str, debug_mode: bool):
             logger.info(f"Loading session: {selected_session}")
             st.session_state["llm_os"] = create_llm_os(
                 model_id=llm_id,
-                session_id=selected_session,
                 debug_mode=debug_mode,
             )
             st.rerun()

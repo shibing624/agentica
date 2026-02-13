@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from agentica.agent import Agent
+from agentica.agent.config import PromptConfig
 from agentica.model.openai import OpenAIChat
 from agentica.model.response import ModelResponse
 
@@ -134,7 +135,7 @@ class TestGetSystemMessage:
         agent = Agent(
             name="A",
             model=OpenAIChat(model="gpt-4o-mini"),
-            add_datetime_to_instructions=True,
+            prompt_config=PromptConfig(add_datetime_to_instructions=True),
         )
         msg = await agent.get_system_message()
         assert msg is not None
@@ -147,7 +148,7 @@ class TestGetSystemMessage:
         agent = Agent(
             name="A",
             model=OpenAIChat(model="gpt-4o-mini"),
-            system_prompt="You are a helpful assistant.",
+            prompt_config=PromptConfig(system_prompt="You are a helpful assistant."),
         )
         msg = await agent.get_system_message()
         assert msg is not None
@@ -158,7 +159,7 @@ class TestGetSystemMessage:
         agent = Agent(
             name="A",
             model=OpenAIChat(model="gpt-4o-mini"),
-            system_prompt=lambda agent=None: "Dynamic system prompt.",
+            prompt_config=PromptConfig(system_prompt=lambda agent=None: "Dynamic system prompt."),
         )
         msg = await agent.get_system_message()
         assert msg is not None
@@ -180,7 +181,7 @@ class TestGetSystemMessage:
         agent = Agent(
             name="A",
             model=OpenAIChat(model="gpt-4o-mini"),
-            enable_agentic_prompt=True,
+            prompt_config=PromptConfig(enable_agentic_prompt=True),
         )
         msg = await agent.get_system_message()
         assert msg is not None

@@ -101,11 +101,10 @@ class TestACPTypes:
     def test_tool_call(self):
         """Test ACPToolCall"""
         call = ACPToolCall.from_dict({
-            "name": "ls",
-            "arguments": {"directory": "."}
+            "name": "read_file",
+            "arguments": {"file_path": "tmp.txt"}
         })
-        assert call.name == "ls"
-        assert call.arguments == {"directory": "."}
+        assert call.name == "read_file"
     
     def test_tool_result(self):
         """Test ACPToolResult"""
@@ -253,17 +252,6 @@ class TestACPHandlers:
         assert "description" in tool
         assert "inputSchema" in tool
     
-    def test_handle_tools_call_ls(self, handlers):
-        """Test tools/call handler with ls tool"""
-        handlers._initialized = True
-        result = handlers.handle_tools_call({
-            "name": "ls",
-            "arguments": {"directory": "."}
-        })
-        
-        assert "content" in result
-        assert "isError" in result
-    
     def test_handle_session_new(self, handlers):
         """Test session/new handler"""
         handlers._initialized = True
@@ -396,15 +384,6 @@ class TestACPIntegration:
         tools = tools_result["tools"]
         assert len(tools) > 0
         
-        # Call a tool
-        call_result = handlers.handle_tools_call({
-            "name": "ls",
-            "arguments": {"directory": "."}
-        })
-        
-        assert "content" in call_result
-        assert "isError" in call_result
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

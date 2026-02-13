@@ -15,17 +15,14 @@ import typer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, OpenAIEmb
+from agentica.agent.config import ToolConfig
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
-from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.db.sqlite import SqliteDb
 
 pwd_path = os.path.dirname(os.path.abspath(__file__))
 
-
-llm = OpenAIChat()
-emb = Text2VecEmb()
 output_dir = "outputs"
 db_file = f"{output_dir}/medical_corpus.db"
 
@@ -34,7 +31,7 @@ files = [os.path.join(pwd_path, '../data/medical_corpus.txt'), os.path.join(pwd_
 knowledge_base = Knowledge(
     data_path=files,
     vector_db=LanceDb(
-        embedder=emb,
+        embedder=OpenAIEmb(),
         uri=f"{output_dir}/medical_corpus.lancedb",
     ),
 )
@@ -47,37 +44,22 @@ db = SqliteDb(db_file=db_file)
 
 def pdf_app(new: bool = False, user: str = "user"):
     """Run the PDF chat application.
-    
+
     Args:
         new: Start a new session
         user: User identifier
     """
-    sess_id: Optional[str] = None
+    # TODO: Session persistence (session_id, user_id, db) moved to SessionManager in V2
 
-    if not new:
-        session_ids: List[str] = db.get_all_session_ids(user_id=user)
-        if len(session_ids) > 0:
-            sess_id = session_ids[0]
-    
-    print(f"User: {user}\nSession ID: {sess_id}\n")
-    
     agent = Agent(
-        model=llm,
-        session_id=sess_id,
-        user_id=user,
-        knowledge_base=knowledge_base,
-        db=db,
+        model=OpenAIChat(),
+        knowledge=knowledge_base,
         search_knowledge=True,
-        read_chat_history=True,
+        tool_config=ToolConfig(read_chat_history=True),
         debug_mode=True,
     )
-    
-    if sess_id is None:
-        sess_id = agent.run_id
-        print(f"Started Run: {sess_id}\n")
-    else:
-        print(f"Continuing Run: {sess_id}\n")
-    
+
+    print(f"User: {user}\nRun ID: {agent.run_id}\n")
     agent.cli_app()
 
 

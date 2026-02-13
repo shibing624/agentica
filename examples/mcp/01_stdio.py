@@ -21,6 +21,7 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, logger
+from agentica.agent.config import PromptConfig
 from agentica.mcp.server import MCPServerStdio
 from agentica.mcp.client import MCPClient
 from agentica.tools.mcp_tool import McpTool
@@ -68,7 +69,7 @@ async def agent_with_mcp_demo():
         agent = Agent(
             model=OpenAIChat(id="gpt-4o-mini"),
             tools=[mcp_tool],
-            add_datetime_to_instructions=True,
+            prompt_config=PromptConfig(add_datetime_to_instructions=True),
         )
 
         # List tools the agent can use

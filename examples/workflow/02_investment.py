@@ -48,7 +48,7 @@ class InvestmentPipeline(Workflow):
             "Get company info, analyst recommendations, and recent news.",
             "Output a structured markdown report with all collected data.",
         ],
-        save_response_to_file=str(reports_dir / "01_data_collection.md"),
+        # save_response_to_file removed from constructor in V2 API — pass to run()/run_sync() instead
     )
 
     # Stage 2: Research analyst (no tools, pure analysis)
@@ -60,7 +60,7 @@ class InvestmentPipeline(Workflow):
             "Consider: growth trajectory, market position, risk factors, analyst consensus.",
             "Be skeptical - focus on maximizing risk-adjusted returns.",
         ],
-        save_response_to_file=str(reports_dir / "02_research_analysis.md"),
+        # save_response_to_file removed from constructor in V2 API — pass to run()/run_sync() instead
     )
 
     # Stage 3: Investment lead (final decision maker)
@@ -72,7 +72,7 @@ class InvestmentPipeline(Workflow):
             "Allocate a $100,000 budget across the recommended companies.",
             "Specify exact dollar amounts and provide clear rationale for each allocation.",
         ],
-        save_response_to_file=str(reports_dir / "03_investment_proposal.md"),
+        # save_response_to_file removed from constructor in V2 API — pass to run()/run_sync() instead
     )
 
     def run(self, companies: str):

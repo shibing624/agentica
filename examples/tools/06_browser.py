@@ -15,13 +15,14 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from agentica import Agent, OpenAIChat
 from agentica.tools.browser_tool import BrowserTool
+from agentica.agent.config import PromptConfig
 
 
 async def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         tools=[BrowserTool()],
-        add_datetime_to_instructions=True,
+        prompt_config=PromptConfig(add_datetime_to_instructions=True),
     )
 
     print("=" * 60)

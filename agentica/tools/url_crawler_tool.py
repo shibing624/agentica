@@ -42,22 +42,22 @@ class UrlCrawlerTool(Tool):
 
     def __init__(
             self,
-            base_dir: str = None,
+            work_dir: str = None,
             max_content_length: int = 16000,
     ):
         """Initialize UrlCrawlerTool.
 
         Args:
-            base_dir: Directory to save crawled web pages.
+            work_dir: Directory to save crawled web pages.
                       Defaults to ~/.cache/agentica/web_cache/
             max_content_length: Maximum length of returned content
         """
         super().__init__(name="url_crawler_tool")
         # Use default cache directory if not specified
-        self.base_dir = base_dir if base_dir else self.DEFAULT_CACHE_DIR
+        self.work_dir = work_dir if work_dir else self.DEFAULT_CACHE_DIR
         self.max_content_length = max_content_length
         # Ensure cache directory exists
-        os.makedirs(self.base_dir, exist_ok=True)
+        os.makedirs(self.work_dir, exist_ok=True)
         self.register(self.url_crawl)
 
     @staticmethod
@@ -167,7 +167,7 @@ class UrlCrawlerTool(Tool):
             str: The content of the website as a json string.
         """
         filename = self._generate_file_name_from_url(url)
-        save_path = os.path.realpath(os.path.join(self.base_dir, filename))
+        save_path = os.path.realpath(os.path.join(self.work_dir, filename))
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         content = ""
         try:

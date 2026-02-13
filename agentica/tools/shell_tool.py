@@ -17,7 +17,7 @@ from agentica.utils.log import logger
 class ShellTool(Tool):
     def __init__(
             self,
-            base_dir: Optional[Union[Path, str]] = None,
+            work_dir: Optional[Union[Path, str]] = None,
             timeout: int = 120,
             max_output_length: int = 20000,
     ):
@@ -25,15 +25,15 @@ class ShellTool(Tool):
         Initialize ShellTool.
 
         Args:
-            base_dir: Base directory for command execution
+            work_dir: Work directory for command execution
             timeout: Command execution timeout in seconds
             max_output_length: Maximum length of output to return
         """
         super().__init__(name="shell_tool")
 
-        self.base_dir: Optional[Path] = None
-        if base_dir is not None:
-            self.base_dir = Path(base_dir) if isinstance(base_dir, str) else base_dir
+        self.work_dir: Optional[Path] = None
+        if work_dir is not None:
+            self.work_dir = Path(work_dir) if isinstance(work_dir, str) else work_dir
         self.timeout = timeout
         self.max_output_length = max_output_length
 
@@ -184,7 +184,7 @@ class ShellTool(Tool):
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=str(self.base_dir) if self.base_dir else None,
+                cwd=str(self.work_dir) if self.work_dir else None,
             )
 
             try:

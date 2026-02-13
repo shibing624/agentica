@@ -19,9 +19,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from agentica import Agent, OpenAIChat
 from agentica.knowledge.base import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
-from agentica import SearchType
+from agentica import SearchType, OpenAIEmb
 from agentica.reranker.bge import BgeReranker
-from agentica.emb.text2vec_emb import Text2VecEmb
 
 # Get the correct path to data file
 data_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,7 +38,7 @@ knowledge = Knowledge(
         table_name='paper_sample',
         uri='tmp/paper_lancedb',
         search_type=SearchType.vector,
-        embedder=Text2VecEmb(model="shibing624/text2vec-base-multilingual"),
+        embedder=OpenAIEmb(),
         reranker=BgeReranker(model="BAAI/bge-reranker-base"),  # Add a reranker
     )
 )

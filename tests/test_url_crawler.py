@@ -18,7 +18,7 @@ from agentica.tools.url_crawler_tool import UrlCrawlerTool
 @pytest.fixture
 def url_crawler_tool():
     """Fixture to create a UrlCrawlerTool instance for testing."""
-    return UrlCrawlerTool(base_dir="./tmp")
+    return UrlCrawlerTool(work_dir="./tmp")
 
 
 def _make_mock_response(status_code, headers, content_bytes, text=None):
@@ -43,7 +43,7 @@ def test_crawl_url_to_file_html():
 
     with patch('httpx.AsyncClient.get', new=mock_get):
         url = "https://example.com/test-url"
-        tool = UrlCrawlerTool(base_dir="./tmp")
+        tool = UrlCrawlerTool(work_dir="./tmp")
         res = asyncio.run(tool.url_crawl(url))
         print('content:', res)
         assert res is not None
@@ -61,7 +61,7 @@ def test_crawl_url_to_file_non_html():
 
     with patch('httpx.AsyncClient.get', new=mock_get):
         url = "https://example.com/test-file.pdf"
-        tool = UrlCrawlerTool(base_dir="./tmp")
+        tool = UrlCrawlerTool(work_dir="./tmp")
         res = asyncio.run(tool.url_crawl(url))
         print('content:', res)
         assert res is not None
@@ -77,7 +77,7 @@ def test_url_crawl():
 
     with patch('httpx.AsyncClient.get', new=mock_get):
         url = "https://example.com/test-url"
-        tool = UrlCrawlerTool(base_dir="./tmp")
+        tool = UrlCrawlerTool(work_dir="./tmp")
         result = asyncio.run(tool.url_crawl(url))
         print('result:', result)
         assert result is not None
@@ -92,7 +92,7 @@ def test_crawl_url_to_file_error():
 
     with patch('httpx.AsyncClient.get', new=mock_get):
         url = "https://example.com/test-url"
-        tool = UrlCrawlerTool(base_dir="./tmp")
+        tool = UrlCrawlerTool(work_dir="./tmp")
         content = asyncio.run(tool.url_crawl(url))
         print('content:', content)
         assert content is not None
@@ -108,7 +108,7 @@ def test_url_crawl_error():
 
     with patch('httpx.AsyncClient.get', new=mock_get):
         url = "https://example.com/test-url"
-        tool = UrlCrawlerTool(base_dir="./tmp")
+        tool = UrlCrawlerTool(work_dir="./tmp")
         result = asyncio.run(tool.url_crawl(url))
         print('result:', result)
         assert result is not None

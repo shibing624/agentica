@@ -30,7 +30,7 @@ class TestDeepAgent(unittest.TestCase):
 
         self.assertEqual(agent.name, "TestAgent")
         self.assertFalse(agent.enable_deep_research)
-        self.assertTrue(agent.enable_agentic_prompt)  # Default is True for DeepAgent
+        self.assertTrue(agent.prompt_config.enable_agentic_prompt)  # Default is True for DeepAgent
 
     def test_deep_agent_with_deep_research(self):
         """Test DeepAgent with deep research mode enabled."""
@@ -149,7 +149,7 @@ class TestDeepAgent(unittest.TestCase):
         agent = DeepAgent(
             name="TestAgent",
         )
-        self.assertTrue(agent.enable_agentic_prompt)
+        self.assertTrue(agent.prompt_config.enable_agentic_prompt)
 
 
 class TestUserInputTool(unittest.TestCase):

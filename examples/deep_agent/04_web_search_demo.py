@@ -34,7 +34,6 @@ def web_search_demo():
             "Always cite your sources.",
         ],
         include_web_search=True,
-        add_datetime_to_instructions=True,
         # debug_mode=True,
     )
 

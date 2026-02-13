@@ -124,11 +124,8 @@ class Workflow(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
-        from agentica.agent import Agent
-        for field_name in self.__class__.model_fields:
-            value = getattr(self, field_name)
-            if isinstance(value, Agent):
-                value.session_id = self.session_id
+        # Note: In V2, session_id is managed by Workflow itself, not pushed to Agent instances.
+        # Agent session management is handled externally via SessionManager.
 
     def _has_custom_run(self) -> bool:
         """Check if subclass has overridden run()."""

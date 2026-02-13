@@ -48,7 +48,7 @@ class BuiltinFileTool(Tool):
 
     def __init__(
             self,
-            base_dir: Optional[str] = None,
+            work_dir: Optional[str] = None,
             max_read_lines: int = 500,
             max_line_length: int = 2000,
     ):
@@ -56,12 +56,12 @@ class BuiltinFileTool(Tool):
         Initialize BuiltinFileTool.
 
         Args:
-            base_dir: Base directory for file operations, defaults to current working directory
+            work_dir: Work directory for file operations, defaults to current working directory
             max_read_lines: Maximum number of lines to read by default
             max_line_length: Maximum length per line, longer lines will be truncated
         """
         super().__init__(name="builtin_file_tool")
-        self.base_dir = Path(base_dir) if base_dir else Path.cwd()
+        self.work_dir = Path(work_dir) if work_dir else Path.cwd()
         self.max_read_lines = max_read_lines
         self.max_line_length = max_line_length
 
@@ -75,10 +75,10 @@ class BuiltinFileTool(Tool):
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path, supporting absolute, relative, and ~ paths.
-        
+
         - ~ paths are expanded to user home directory
         - Absolute paths are used directly
-        - Relative paths are resolved relative to base_dir
+        - Relative paths are resolved relative to work_dir
         """
         # Expand ~ to user home directory
         if path.startswith("~"):
@@ -86,12 +86,12 @@ class BuiltinFileTool(Tool):
         p = Path(path)
         if p.is_absolute():
             return p
-        return self.base_dir / p
+        return self.work_dir / p
 
     def _validate_path(self, path: str) -> str:
-        """Validate path - currently no restrictions, base_dir is just the default."""
+        """Validate path - currently no restrictions, work_dir is just the default."""
         # Allow all paths: absolute, relative, with .. or ~
-        # base_dir is only used as the default starting point for relative paths
+        # work_dir is only used as the default starting point for relative paths
         return path
 
     async def ls(self, directory: str = ".") -> str:
@@ -699,22 +699,22 @@ class BuiltinExecuteTool(Tool):
     Exposed as execute function for consistent naming in DeepAgent.
     """
 
-    def __init__(self, base_dir: Optional[str] = None, timeout: int = 120, max_output_length: int = 20000):
+    def __init__(self, work_dir: Optional[str] = None, timeout: int = 120, max_output_length: int = 20000):
         """
         Initialize BuiltinExecuteTool.
 
         Args:
-            base_dir: Base directory for command execution
+            work_dir: Work directory for command execution
             timeout: Command execution timeout in seconds
             max_output_length: Maximum length of output to return
         """
         super().__init__(name="builtin_execute_tool")
-        self._base_dir: Optional[Path] = Path(base_dir) if base_dir else None
+        self._work_dir: Optional[Path] = Path(work_dir) if work_dir else None
         self._timeout = timeout
         self._max_output_length = max_output_length
         # Import ShellTool for its syntax-fix helpers
         from agentica.tools.shell_tool import ShellTool
-        self._shell = ShellTool(base_dir=base_dir, timeout=timeout)
+        self._shell = ShellTool(work_dir=work_dir, timeout=timeout)
         self.register(self.execute)
 
     async def execute(self, command: str) -> str:
@@ -770,7 +770,7 @@ class BuiltinExecuteTool(Tool):
         command = self._shell._convert_python_c_to_heredoc(command)
 
         logger.debug(f"Executing command: {command}")
-        cwd = str(self._base_dir) if self._base_dir else None
+        cwd = str(self._work_dir) if self._work_dir else None
         proc = None
 
         try:
@@ -1092,16 +1092,20 @@ class BuiltinTodoTool(Tool):
 class BuiltinTaskTool(Tool):
     """
     Built-in task tool for launching subagents to handle complex, multi-step tasks.
-    
+
     This tool allows the main agent to delegate complex tasks to ephemeral subagents
     that can work independently with isolated context windows.
-    
+
     Supports multiple subagent types:
     - explore: Read-only codebase exploration (fastest, lowest context)
-    - general: Full capabilities for complex tasks
     - research: Web search and document analysis
-    - code: Code generation and execution
+    - code: Code generation and execution (full capabilities)
     - Custom user-defined subagent types (via register_custom_subagent)
+
+    Key Features:
+    - Parallel execution: Launch multiple subagents simultaneously for independent tasks
+    - Isolated context: Each subagent has its own context window
+    - Type-specific tools: Each subagent type has optimized tool sets
     """
 
     # Base system prompt template for task tool usage guidance
@@ -1117,11 +1121,30 @@ class BuiltinTaskTool(Tool):
 
     {subagent_table}
 
+    ### Parallel Execution (IMPORTANT)
+
+    When you have **multiple independent tasks**, launch them **in parallel** for maximum efficiency:
+
+    ```python
+    # Launch multiple subagents in a single response - they run simultaneously
+    task(description="Task A description", subagent_type="explore")
+    task(description="Task B description", subagent_type="research")
+    task(description="Task C description", subagent_type="code")
+    ```
+
+    **Benefits:**
+    - Tasks execute simultaneously, not sequentially
+    - Total time = max(task_times), not sum(task_times)
+    - Ideal for: exploring multiple directories, researching multiple topics, running multiple code experiments
+
     ### Usage Guidelines
 
-    1. **Parallel Execution**: Launch multiple agents in a single message for independent tasks
+    1. **Parallel for Independent Tasks**: Use parallel execution when tasks don't depend on each other
     2. **Clear Instructions**: Provide detailed task descriptions and expected output format
-    3. **Right Tool for Job**: Choose the most appropriate subagent type
+    3. **Right Tool for Job**: Choose the most appropriate subagent type:
+       - `explore`: Fast codebase exploration, read-only
+       - `research`: Web search and document analysis
+       - `code`: Full code generation and execution capabilities
     4. **Isolated Context**: Each subagent has its own context window - include all necessary info
 
     ### When NOT to Use
@@ -1135,7 +1158,7 @@ class BuiltinTaskTool(Tool):
             self,
             model: Optional["Model"] = None,
             tools: Optional[List[Any]] = None,
-            base_dir: Optional[str] = None,
+            work_dir: Optional[str] = None,
             max_iterations: int = 15,
             custom_subagent_configs: Optional[Dict[str, Any]] = None,
     ):
@@ -1144,15 +1167,15 @@ class BuiltinTaskTool(Tool):
 
         Args:
             model: Model to use for subagents. If None, will use the parent agent's model.
-            tools: Default tools for general subagent. If None, will use basic tools.
-            base_dir: Base directory for file operations.
+            tools: Default tools for subagents. If None, will use basic tools based on type.
+            work_dir: Work directory for file operations.
             max_iterations: Default max iterations for subagent execution.
             custom_subagent_configs: Custom subagent configurations to add/override defaults.
         """
         super().__init__(name="builtin_task_tool")
         self._model = model
         self._tools = tools
-        self._base_dir = base_dir
+        self._work_dir = work_dir
         self._max_iterations = max_iterations
         self._parent_agent: Optional["Agent"] = None
         self._custom_configs = custom_subagent_configs or {}
@@ -1189,54 +1212,54 @@ class BuiltinTaskTool(Tool):
     def set_parent_agent(self, agent: "Agent") -> None:
         """Set the parent agent reference for accessing model and tools."""
         self._parent_agent = agent
-        # Also set base_dir from parent agent if available
-        if self._base_dir is None and hasattr(agent, 'work_dir') and agent.work_dir:
-            self._base_dir = agent.work_dir
+        # Also set work_dir from parent agent if available
+        if self._work_dir is None and hasattr(agent, 'work_dir') and agent.work_dir:
+            self._work_dir = agent.work_dir
 
     def _get_tools_for_subagent(self, subagent_type: str) -> List[Any]:
         """Get appropriate tools for a subagent type."""
         from agentica.subagent import get_subagent_config, SubagentType
-        
+
         config = get_subagent_config(subagent_type)
-        
+
         # Default tools if no config found
         if config is None:
             return self._tools or [
-                BuiltinFileTool(base_dir=self._base_dir),
+                BuiltinFileTool(work_dir=self._work_dir),
                 BuiltinWebSearchTool(),
                 BuiltinFetchUrlTool(),
             ]
-        
+
         # Build tool list based on config type
         tools = []
-        
+
         # For explore type, only include file tools (read-only)
         if config.type == SubagentType.EXPLORE:
-            tools.append(BuiltinFileTool(base_dir=self._base_dir))
+            tools.append(BuiltinFileTool(work_dir=self._work_dir))
             return tools
-        
+
         # For research type, include search and fetch tools
         if config.type == SubagentType.RESEARCH:
-            tools.append(BuiltinFileTool(base_dir=self._base_dir))
+            tools.append(BuiltinFileTool(work_dir=self._work_dir))
             tools.append(BuiltinWebSearchTool())
             tools.append(BuiltinFetchUrlTool())
             return tools
-        
+
         # For code type, include file and execute tools
         if config.type == SubagentType.CODE:
-            tools.append(BuiltinFileTool(base_dir=self._base_dir))
-            tools.append(BuiltinExecuteTool(base_dir=self._base_dir))
+            tools.append(BuiltinFileTool(work_dir=self._work_dir))
+            tools.append(BuiltinExecuteTool(work_dir=self._work_dir))
             return tools
-        
-        # For general type, include all basic tools (but not task to prevent nesting)
-        tools.append(BuiltinFileTool(base_dir=self._base_dir))
-        tools.append(BuiltinExecuteTool(base_dir=self._base_dir))
+
+        # Fallback: include all basic tools (but not task to prevent nesting)
+        tools.append(BuiltinFileTool(work_dir=self._work_dir))
+        tools.append(BuiltinExecuteTool(work_dir=self._work_dir))
         tools.append(BuiltinWebSearchTool())
         tools.append(BuiltinFetchUrlTool())
-        
+
         return tools
 
-    async def task(self, description: str, subagent_type: str = "general") -> str:
+    async def task(self, description: str, subagent_type: str = "code") -> str:
         """Launch a subagent to handle a complex task.
 
         Args:
@@ -1244,9 +1267,8 @@ class BuiltinTaskTool(Tool):
                 Include what you want the subagent to do and what information to return.
             subagent_type: Type of subagent to use. Options:
                 - "explore": Read-only codebase exploration (fast, low context)
-                - "general": Full capabilities for complex tasks (default)
                 - "research": Web search and document analysis
-                - "code": Code generation and execution
+                - "code": Full code generation and execution (default)
 
         Returns:
             The result from the subagent after completing the task.
@@ -1255,10 +1277,10 @@ class BuiltinTaskTool(Tool):
             SubagentRegistry, SubagentRun, SubagentType,
             get_subagent_config, generate_subagent_session_key, is_subagent_session
         )
-        
+
         # Get registry
         registry = SubagentRegistry()
-        
+
         # Check if we're already in a subagent (prevent nesting)
         if self._parent_agent is not None:
             parent_session_id = getattr(self._parent_agent, 'session_id', None)
@@ -1267,14 +1289,14 @@ class BuiltinTaskTool(Tool):
                     "success": False,
                     "error": "Nested subagent spawning is not allowed. Complete your task without delegating.",
                 }, ensure_ascii=False)
-        
+
         try:
             # Get subagent configuration
             config = get_subagent_config(subagent_type)
             if config is None:
-                # Default to general if unknown type
-                config = get_subagent_config("general")
-                logger.warning(f"Unknown subagent type '{subagent_type}', using 'general'")
+                # Default to code if unknown type
+                config = get_subagent_config("code")
+                logger.warning(f"Unknown subagent type '{subagent_type}', using 'code'")
             
             # Get model from parent agent or use configured model
             model = self._model
@@ -1318,7 +1340,6 @@ class BuiltinTaskTool(Tool):
                 description=config.description,
                 system_prompt=config.system_prompt,
                 session_id=subagent_session_key,  # Isolated session
-                add_datetime_to_instructions=True,
                 tools=subagent_tools,
                 markdown=True,
                 tool_call_limit=config.max_iterations,
@@ -1584,7 +1605,7 @@ class BuiltinMemoryTool(Tool):
 
 
 def get_builtin_tools(
-        base_dir: Optional[str] = None,
+        work_dir: Optional[str] = None,
         include_file_tools: bool = True,
         include_execute: bool = True,
         include_web_search: bool = True,
@@ -1602,7 +1623,7 @@ def get_builtin_tools(
     Get the list of built-in tools for DeepAgent.
 
     Args:
-        base_dir: Base directory for file operations
+        work_dir: Work directory for file operations
         include_file_tools: Whether to include file tools (ls, read_file, write_file, edit_file, glob, grep)
         include_execute: Whether to include code execution tool
         include_web_search: Whether to include web search tool
@@ -1622,10 +1643,10 @@ def get_builtin_tools(
     tools = []
 
     if include_file_tools:
-        tools.append(BuiltinFileTool(base_dir=base_dir))
+        tools.append(BuiltinFileTool(work_dir=work_dir))
 
     if include_execute:
-        tools.append(BuiltinExecuteTool(base_dir=base_dir))
+        tools.append(BuiltinExecuteTool(work_dir=work_dir))
 
     if include_web_search:
         tools.append(BuiltinWebSearchTool())

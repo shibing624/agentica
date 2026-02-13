@@ -16,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from agentica import Agent, OpenAIChat
 from agentica import WeatherTool, ShellTool, JinaTool
+from agentica.agent.config import PromptConfig
 
 
 async def main():
@@ -25,7 +26,7 @@ async def main():
             ShellTool(),
             JinaTool(),
         ],
-        add_datetime_to_instructions=True,
+        prompt_config=PromptConfig(add_datetime_to_instructions=True),
     )
 
     print("\n" + "=" * 60)

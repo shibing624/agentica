@@ -47,7 +47,12 @@ There are no `a`-prefixed methods (`arun`, `aresponse`, etc.) — those were rem
 
 ### Agent (`agentica/agent/`)
 
-The `Agent` class uses a **mixin architecture** — base.py defines the dataclass, and functionality is split across mixins:
+The `Agent` class uses `@dataclass(init=False)` with explicit `__init__` and **direct multiple inheritance** from mixin classes. Mixins are pure method containers (no state, no `__init__`). IDE can jump directly to implementations.
+
+```python
+@dataclass(init=False)
+class Agent(PromptsMixin, RunnerMixin, SessionMixin, TeamMixin, ToolsMixin, PrinterMixin, MediaMixin):
+```
 
 - `runner.py` — `RunnerMixin`: Core `_run_impl()` (the single execution engine), `run()`, `run_stream()`, `run_sync()`, `run_stream_sync()`
 - `prompts.py` — `PromptsMixin`: System/user message construction. `get_system_message()`, `get_messages_for_run()`, and `_build_enhanced_system_message()` are **async** (they await workspace context/memory loading).
@@ -56,6 +61,8 @@ The `Agent` class uses a **mixin architecture** — base.py defines the dataclas
 - `tools.py` — `ToolsMixin`: Tool registration and management. `update_memory()` is **async**.
 - `printer.py` — `PrinterMixin`: `print_response()` (async) + `print_response_sync()`
 - `media.py` — `MediaMixin`: Image/video handling
+
+Note: Agent uses `@dataclass` (not BaseModel) deliberately — it has mutable fields (Callable, lists), complex `__init__` with alias handling, and doesn't need Pydantic validation/serialization. Data models (RunResponse, Tool, Function) use BaseModel.
 
 ### Model (`agentica/model/`)
 
@@ -72,11 +79,18 @@ Key provider notes:
 
 Three-layer hierarchy: `Tool` (container) → `Function` (schema + entrypoint) → `FunctionCall` (invocation). `FunctionCall.execute()` is async-only and auto-detects sync/async entrypoints via `inspect.iscoroutinefunction()`. Functions hold a **weakref** to their parent Agent.
 
-**Builtin Tools** (`agentica/deep_tools.py`):
-- `edit_file()` — Unified API supports both single edit and multiple edits (list)
-- File operations: `ls`, `read_file`, `write_file`, `glob`, `grep`
-- Web: `web_search`, `fetch_url`
-- Task: `write_todos`, `task` (subagent delegation)
+`_safe_validate_call()` wraps pydantic's `validate_call` to strip unresolvable forward-reference annotations (e.g., `self: "Agent"` on mixin methods) before validation.
+
+**Builtin Tools** (`agentica/deep_tools.py`) — all I/O-bound tools are **async**:
+- `edit_file(file_path, old_string, new_string, replace_all=False)` — flat params for LLM-friendly schema (no nested dict/list)
+- `read_file` — async with `aiofiles` streaming read
+- `write_file` — async with atomic write (`tempfile` + `os.replace`)
+- `ls`, `glob` — async via `run_in_executor`
+- `grep` — async ripgrep (`rg`) subprocess with pure-Python fallback
+- `execute` — async subprocess with graceful SIGTERM→SIGKILL termination
+- `web_search`, `fetch_url` — async wrappers around async backends
+- `task` — async `run_stream()` to subagent
+- `write_todos`, `read_todos` — sync (pure CPU, no I/O)
 
 Flow control exceptions: `StopAgentRun`, `RetryAgentRun`.
 
@@ -114,11 +128,13 @@ Uses **lazy loading** with thread-safe double-checked locking (`threading.Lock`)
 
 ## Key Patterns
 
-- `@dataclass(init=False)` with explicit `__init__` for Agent
-- Pydantic `BaseModel` for most data structures (Model, Tool, Function, RunResponse, Workflow)
+- `@dataclass(init=False)` with explicit `__init__` for Agent, direct multiple inheritance from mixins
+- Pydantic `BaseModel` for data structures (Model, Tool, Function, RunResponse, ToolCallInfo, Workflow)
 - `Function.from_callable()` factory to auto-generate tool definitions from Python functions
 - Token-aware message history via `AgentMemory.get_messages_from_last_n_runs()`
 - `RunResponse` with `RunEvent` enum for structured event streaming
+- `RunResponse.tool_calls` → `List[ToolCallInfo]` for flat attribute access (no nested `.get()` chains)
+- `RunResponse.tool_call_times` → `Dict[str, float]` one-liner per-tool timing
 - Langfuse integration for tracing (context manager pattern in runner)
 - `@override` decorator (Python 3.12) on model provider method overrides
 - `asyncio.TaskGroup` for structured concurrent tool execution (not `asyncio.gather`)

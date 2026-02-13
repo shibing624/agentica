@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica import Agent
+from agentica.agent.config import PromptConfig
 from agentica.tools.base import Function
 from agentica.run_response import RunResponse
 
@@ -64,7 +65,7 @@ class AgentAsToolTest(unittest.TestCase):
         """Test that tool description falls back to agent role."""
         agent = Agent(
             name="Translator",
-            role="Professional Chinese translator",
+            prompt_config=PromptConfig(role="Professional Chinese translator"),
             instructions="Translate text",
         )
         tool = agent.as_tool()
