@@ -61,7 +61,6 @@ async def demo_sqlite_memory():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         memory=memory,
-        # debug_mode=True,
     )
 
     print("\n--- First conversation ---")
@@ -227,10 +226,10 @@ def demo_direct_db_operations():
         print(f"  - {row.memory.get('memory', '')}")
 
 
-async def demo_agent_with_session():
-    """Demo using Agent with db for session persistence."""
+async def demo_agent_with_memory_db():
+    """Demo using Agent with AgentMemory(db=) for memory persistence."""
     print("\n" + "=" * 50)
-    print("Demo 5: Agent with session persistence")
+    print("Demo 5: Agent with memory persistence via AgentMemory")
     print("=" * 50)
 
     db_file = "outputs/agent_session.db"
@@ -239,24 +238,33 @@ async def demo_agent_with_session():
 
     db = SqliteDb(db_file=db_file)
 
-    agent = Agent(
-        model=OpenAIChat(id="gpt-4o-mini"),
+    # In V2, db is passed to AgentMemory, not Agent directly
+    memory = AgentMemory(
         db=db,
-        memory=AgentMemory(db=db, create_user_memories=True),
-        add_history_to_messages=True,
-        # debug_mode=True,
+        user_id="david",
+        create_user_memories=True,
+        update_user_memories_after_run=True,
+        classifier=MemoryClassifier(model=OpenAIChat(id='gpt-4o-mini')),
     )
 
-    session_id = agent.load_session()
-    print(f"Session ID: {session_id}")
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o-mini"),
+        memory=memory,
+        add_history_to_messages=True,
+    )
 
     print("\n--- Conversation ---")
     await agent.print_response("Hi, I'm David. I love programming in Python.")
     await agent.print_response("What's my name and what do I like?")
 
-    print("\n--- Stored sessions ---")
-    session_ids = db.get_all_session_ids()
-    print(f"Found {len(session_ids)} sessions: {session_ids}")
+    print("\n--- Stored memories ---")
+    memory.load_user_memories()
+    if memory.memories:
+        print(f"Found {len(memory.memories)} memories")
+        for m in memory.memories:
+            print(f"  - {m.memory}")
+    else:
+        print("No memories stored yet")
 
 
 if __name__ == "__main__":
@@ -265,6 +273,6 @@ if __name__ == "__main__":
         await demo_mysql_memory()
         await demo_redis_memory()
         demo_direct_db_operations()
-        await demo_agent_with_session()
+        await demo_agent_with_memory_db()
 
     asyncio.run(_main())

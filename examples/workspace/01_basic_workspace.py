@@ -55,11 +55,10 @@ You are a helpful AI assistant specialized in Python programming.
 """)
 
     # Create agent from workspace
+    # load_workspace_context/load_workspace_memory are in MemoryConfig, enabled by default
     agent = Agent(
         model=ZhipuAI(model="glm-4-flash"),
         workspace=workspace,
-        load_workspace_context=True,
-        load_workspace_memory=True,
     )
 
     # Run agent

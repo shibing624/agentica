@@ -22,7 +22,6 @@ see examples/memory/02_long_term_memory.py (deprecated for new projects)
 import asyncio
 import sys
 import os
-import tempfile
 from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -55,12 +54,10 @@ async def demo_workspace_memory():
 - Topics: Python, AI, Machine Learning
 """)
 
-    # Create agent with workspace
+    # Create agent with workspace (load_workspace_context/memory are in MemoryConfig, enabled by default)
     agent = Agent(
         model=OpenAIChat(model="gpt-4o-mini"),
         workspace=workspace,
-        load_workspace_context=True,
-        load_workspace_memory=True,
     )
 
     print("\n--- First conversation ---")
@@ -68,7 +65,7 @@ async def demo_workspace_memory():
     print(f"Agent: {response.content[:200]}...")
 
     # Save important information to workspace memory
-    agent.save_memory("User name: Alice, Profession: Data Scientist")
+    await agent.save_memory("User name: Alice, Profession: Data Scientist")
 
     print("\n--- Workspace memory content ---")
     memory_content = workspace.get_memory_prompt(days=1)
@@ -113,12 +110,12 @@ def demo_multi_user_workspace():
         info = ws.get_user_info(user)
         print(f"  {user}: {info['memory_count']} memories")
 
-    # Create agent for specific user
+    # Create agent for specific user (pass workspace str or Workspace with user_id)
     print("\n--- Agent for Alice ---")
+    ws_for_alice = Workspace(str(workspace_path), user_id="alice@example.com")
     agent = Agent(
         model=OpenAIChat(model="gpt-4o-mini"),
-        workspace_path=str(workspace_path),
-        user_id="alice@example.com",
+        workspace=ws_for_alice,
     )
     # Agent will automatically load Alice's memories and preferences
     print(f"Agent workspace user: {agent.workspace.user_id if agent.workspace else 'None'}")
@@ -144,8 +141,8 @@ async def demo_session_summary():
     await agent.print_response("How about a decorator with arguments?")
 
     print("\n--- Session Summary ---")
-    # Generate summary
-    summary = agent.memory.update_summary()
+    # Generate summary (async)
+    summary = await agent.memory.update_summary()
     if summary:
         print(f"Summary: {summary.summary}")
         print(f"Topics: {summary.topics}")
@@ -185,7 +182,7 @@ async def demo_combined_approach():
     print(f"Agent: {response.content[:150]}...")
 
     # Save important info to workspace
-    agent.save_memory("User: Bob, Project: FastAPI")
+    await agent.save_memory("User: Bob, Project: FastAPI")
 
     print("\n--- Saved memories (workspace) ---")
     memory = workspace.get_memory_prompt(days=1)

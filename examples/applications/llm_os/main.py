@@ -22,7 +22,6 @@ import streamlit as st
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from agentica import DeepAgent, OpenAIChat
-from agentica.db.sqlite import SqliteDb
 from agentica.document import Document
 from agentica.emb.text2vec_emb import Text2VecEmb
 from agentica.knowledge.base import Knowledge
@@ -94,15 +93,12 @@ def create_llm_os(
     )
     knowledge = Knowledge(vector_db=vector_db)
 
-    # 创建DeepAgent
+    # 创建DeepAgent (V2: db/session management removed from Agent, use AgentMemory for history)
     llm_os = DeepAgent(
         name="llm_os",
         model=OpenAIChat(id=model_id),
-        # session_id and user_id removed in V2 API
         description=SYSTEM_DESCRIPTION,
         instructions=SYSTEM_INSTRUCTIONS,
-        # 数据库用于会话持久化
-        db=SqliteDb(db_file="outputs/llm_os.db"),
         # 知识库
         knowledge=knowledge,
         # DeepAgent内置工具配置
@@ -236,26 +232,9 @@ def render_knowledge_base_controls(llm_os: DeepAgent):
 
 def render_session_controls(llm_os: DeepAgent, llm_id: str, debug_mode: bool):
     """渲染会话控制组件"""
-    if not llm_os.db:
-        return
-
     st.sidebar.markdown("### Sessions")
 
-    # 会话选择
-    session_ids: List[str] = llm_os.db.get_all_session_ids()
-    if session_ids:
-        current_session = st.session_state.get("llm_os_session_id")
-        selected_session = st.sidebar.selectbox("Session ID", options=session_ids)
-
-        if current_session and current_session != selected_session:
-            logger.info(f"Loading session: {selected_session}")
-            st.session_state["llm_os"] = create_llm_os(
-                model_id=llm_id,
-                debug_mode=debug_mode,
-            )
-            st.rerun()
-
-    # 新建会话
+    # 新建会话 (V2: session persistence removed from Agent, use Streamlit session_state)
     if st.sidebar.button("New Session"):
         restart_agent()
 
@@ -283,14 +262,7 @@ def main():
 
     llm_os: DeepAgent = st.session_state["llm_os"]
 
-    # 加载会话
-    try:
-        st.session_state["llm_os_session_id"] = llm_os.load_session()
-    except Exception as e:
-        st.warning(f"Could not load session: {e}")
-        return
-
-    # 加载聊天历史
+    # 加载聊天历史 (V2: use AgentMemory directly, no load_session)
     chat_history = llm_os.memory.get_messages()
     if chat_history:
         st.session_state["messages"] = chat_history

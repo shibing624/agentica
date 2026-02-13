@@ -132,16 +132,16 @@ def demo_agent_with_compression():
     print("Agent with Compression Demo")
     print("=" * 60)
 
-    # Method 1: Simple - enable compression via flag
+    # Method 1: Simple - enable compression via ToolConfig flag
     agent1 = Agent(
         model=OpenAIChat(id="gpt-4o"),
         tool_config=ToolConfig(compress_tool_results=True),
         name="CompressedAgent",
     )
     print("\n1. Agent with compress_tool_results=True:")
-    print(f"   Compression manager: {agent1.compression_manager is not None}")
+    print(f"   Compression enabled: {agent1.tool_config.compress_tool_results}")
 
-    # Method 2: Custom compression manager
+    # Method 2: Custom compression manager via ToolConfig
     custom_compression = CompressionManager(
         model=OpenAIChat(id="gpt-4o-mini"),
         compress_token_limit=5000,
@@ -150,7 +150,10 @@ def demo_agent_with_compression():
 
     agent2 = Agent(
         model=OpenAIChat(id="gpt-4o"),
-        compression_manager=custom_compression,
+        tool_config=ToolConfig(
+            compress_tool_results=True,
+            compression_manager=custom_compression,
+        ),
         name="CustomCompressedAgent",
     )
     print("\n2. Agent with custom CompressionManager:")

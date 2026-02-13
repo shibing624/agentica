@@ -29,12 +29,10 @@ What IS deprecated:
 import asyncio
 import sys
 import os
-from uuid import uuid4
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, SqliteDb
-from agentica.agent.config import MemoryConfig
+from agentica import Agent, OpenAIChat, AgentMemory, MemoryClassifier, MemoryRetrieval, SqliteDb
 
 
 async def main():
@@ -56,10 +54,10 @@ async def main():
     print(r)
 
     # ============================================================
-    # Part 2: Agent with Persistent User Memory (Simplified API)
+    # Part 2: Agent with Persistent User Memory via AgentMemory
     # ============================================================
     print("\n" + "=" * 60)
-    print("Part 2: Agent with Persistent User Memory (Simplified API)")
+    print("Part 2: Agent with Persistent User Memory (via AgentMemory)")
     print("=" * 60)
 
     # Setup database
@@ -69,16 +67,19 @@ async def main():
         os.remove(db_file)
     db = SqliteDb(db_file=db_file)
 
-    # Create session and user IDs
-    session_id = str(uuid4())
-    user_id = "john_doe@example.com"
+    # Create memory with db and user_id for persistence
+    memory = AgentMemory(
+        db=db,
+        user_id="john_doe@example.com",
+        create_user_memories=True,
+        update_user_memories_after_run=True,
+        classifier=MemoryClassifier(model=OpenAIChat(id="gpt-4o-mini")),
+    )
 
-    # Create agent with persistent memory - Simple API!
+    # Create agent with persistent memory
     agent = Agent(
         model=OpenAIChat(),
-        db=db,
-        # user_id and session_id removed in V2 API
-        memory_config=MemoryConfig(enable_user_memories=True),
+        memory=memory,
         add_history_to_messages=True,
     )
 
@@ -92,11 +93,14 @@ async def main():
     r = await agent.run("What are my hobbies?")
     print(r)
 
-    # Get user memories
+    # Get user memories via AgentMemory
     print("\n--- User memories ---")
-    memories = agent.get_user_memories(user_id=user_id)
-    for mem in memories:
-        print(f"  Memory: {mem.memory}")
+    memory.load_user_memories()
+    if memory.memories:
+        for mem in memory.memories:
+            print(f"  Memory: {mem.memory}")
+    else:
+        print("  No memories found yet")
 
     # Update preferences
     print("\n--- Update preferences ---")
@@ -105,9 +109,12 @@ async def main():
 
     # Check updated memories
     print("\n--- Updated memories ---")
-    memories = agent.get_user_memories(user_id=user_id)
-    for mem in memories:
-        print(f"  Memory: {mem.memory}")
+    memory.load_user_memories()
+    if memory.memories:
+        for mem in memory.memories:
+            print(f"  Memory: {mem.memory}")
+    else:
+        print("  No memories found")
 
     # ============================================================
     # Part 3: Chinese Language Example
@@ -116,14 +123,17 @@ async def main():
     print("Part 3: Chinese Language Example")
     print("=" * 60)
 
-    chinese_user_id = "zhang_san@example.com"
-    session_id_2 = str(uuid4())
+    memory2 = AgentMemory(
+        db=db,
+        user_id="zhang_san@example.com",
+        create_user_memories=True,
+        update_user_memories_after_run=True,
+        classifier=MemoryClassifier(model=OpenAIChat(id="gpt-4o-mini")),
+    )
 
     agent2 = Agent(
         model=OpenAIChat(),
-        db=db,
-        # user_id and session_id removed in V2 API
-        memory_config=MemoryConfig(enable_user_memories=True),
+        memory=memory2,
         add_history_to_messages=True,
     )
 
@@ -136,9 +146,12 @@ async def main():
     print(await agent2.run("你还记得我的职业和爱好吗？"))
 
     print("\n--- 张三的记忆 ---")
-    memories = agent2.get_user_memories(user_id=chinese_user_id)
-    for mem in memories:
-        print(f"  Memory: {mem.memory}")
+    memory2.load_user_memories()
+    if memory2.memories:
+        for mem in memory2.memories:
+            print(f"  Memory: {mem.memory}")
+    else:
+        print("  No memories found")
 
     # ============================================================
     # Part 4: Clear memories
@@ -147,9 +160,10 @@ async def main():
     print("Part 4: Clear memories")
     print("=" * 60)
 
-    print(f"Before clear: {len(agent2.get_user_memories(user_id=chinese_user_id))} memories")
-    agent2.clear_user_memories(user_id=chinese_user_id)
-    print(f"After clear: {len(agent2.get_user_memories(user_id=chinese_user_id))} memories")
+    memory2.load_user_memories()
+    print(f"Before clear: {len(memory2.memories or [])} memories")
+    memory2.clear()
+    print(f"After clear: {len(memory2.memories or [])} memories")
 
     print("\n" + "=" * 60)
     print("Demo completed!")
