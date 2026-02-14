@@ -42,12 +42,12 @@ from agentica.agent.printer import PrinterMixin
 class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     """AI Agent — defines identity and capabilities.
 
-    V2 architecture: Agent only describes "who I am, what I can do".
+    Agent only describes "who I am, what I can do".
     Session persistence is handled by external SessionManager.
 
     Parameters are organized in three layers:
     1. Core definition (~10): model, name, instructions, tools, etc.
-    2. Common config (~8): add_history_to_messages, markdown, debug_mode, etc.
+    2. Common config (~8): add_history_to_messages, markdown, debug, etc.
     3. Packed config (4): prompt_config, tool_config, memory_config, team_config
 
     Example - Minimal:
@@ -88,8 +88,8 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     output_language: Optional[str] = None
     markdown: bool = False
     structured_outputs: bool = False
-    debug_mode: bool = False
-    monitoring: bool = False
+    debug: bool = False
+    tracing: bool = False
 
     # ============================
     # Layer 3: Packed config
@@ -134,8 +134,8 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             output_language: Optional[str] = None,
             markdown: bool = False,
             structured_outputs: bool = False,
-            debug_mode: bool = False,
-            monitoring: bool = False,
+            debug: bool = False,
+            tracing: bool = False,
             # ---- Packed config ----
             prompt_config: Optional[PromptConfig] = None,
             tool_config: Optional[ToolConfig] = None,
@@ -170,8 +170,8 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         self.output_language = output_language
         self.markdown = markdown
         self.structured_outputs = structured_outputs
-        self.debug_mode = debug_mode
-        self.monitoring = monitoring
+        self.debug = debug
+        self.tracing = tracing
 
         # Packed config (use defaults if not provided)
         self.prompt_config = prompt_config or PromptConfig()
@@ -194,7 +194,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
 
     def _post_init(self):
         """Post-initialization setup."""
-        if self.debug_mode:
+        if self.debug:
             set_log_level_to_debug()
             logger.debug("Set Log level: debug")
         else:
@@ -218,16 +218,18 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
                 compress_tool_results=True,
             )
 
-        # Setup user memories (deprecated, kept for backward compat)
-        if self.memory_config.enable_user_memories:
-            import warnings
-            warnings.warn(
-                "enable_user_memories is deprecated. Use Workspace for persistent memory storage.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-            self.memory.create_user_memories = True
-            self.memory.update_user_memories_after_run = True
+        # Tracing: check Langfuse config when enabled
+        if self.tracing:
+            from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY
+            if not LANGFUSE_SECRET_KEY or not LANGFUSE_PUBLIC_KEY:
+                logger.warning(
+                    "tracing=True but Langfuse is not configured. "
+                    "Set environment variables to enable:\n"
+                    "  LANGFUSE_SECRET_KEY=sk-lf-xxx\n"
+                    "  LANGFUSE_PUBLIC_KEY=pk-lf-xxx\n"
+                    "  LANGFUSE_BASE_URL=https://cloud.langfuse.com  # or self-hosted\n"
+                    "Install: pip install langfuse"
+                )
 
     def _init_workspace(self):
         """Initialize workspace if needed."""

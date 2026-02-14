@@ -28,7 +28,7 @@ async def basic_token_tracking():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         name="TokenTracker",
-        debug_mode=True,
+        debug=True,
     )
 
     # Run a query
@@ -54,7 +54,7 @@ async def multi_turn_token_tracking():
         model=OpenAIChat(id="gpt-4o-mini"),
         name="MultiTurnTracker",
         add_history_to_messages=True,
-        debug_mode=True,
+        debug=True,
     )
 
     total_input_tokens = 0

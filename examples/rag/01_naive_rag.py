@@ -45,6 +45,3 @@ print("Naive RAG Demo: Thai Recipes")
 print("=" * 60)
 
 agent.print_response_stream_sync("咋做冬阴功汤?")
-
-print("\n" + "=" * 60)
-agent.print_response_stream_sync("有哪些泰国甜点的做法?")

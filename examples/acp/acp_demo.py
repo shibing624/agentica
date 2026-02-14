@@ -14,6 +14,7 @@ Usage:
 import json
 import sys
 import os
+import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -99,7 +100,7 @@ def demo_session_management():
     print(f"[OK] Deleted session {session2.id}")
 
 
-def demo_acp_handlers():
+async def demo_acp_handlers():
     """Demo ACP method handlers"""
     print("\n" + "=" * 60)
     print("Demo 3: ACP Handlers")
@@ -140,10 +141,10 @@ def demo_acp_handlers():
     print(f"   Sessions: {len(list_result['sessions'])}")
     print(f"   Stats: {list_result['stats']}")
     
-    # Call tool
+    # Call tool (async)
     print("\n5. Call Tool (ls)")
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    call_result = handlers.handle_tools_call({
+    call_result = await handlers.handle_tools_call({
         "name": "ls",
         "arguments": {"directory": project_root}
     })
@@ -151,7 +152,7 @@ def demo_acp_handlers():
     print(f"   Content preview: {call_result['content'][:100]}...")
 
 
-def demo_full_workflow():
+async def demo_full_workflow():
     """Demo a complete workflow"""
     print("\n" + "=" * 60)
     print("Demo 4: Complete Workflow")
@@ -181,9 +182,9 @@ def demo_full_workflow():
     session_id = session_result['sessionId']
     print(f"      [OK] Session created: {session_id}")
     
-    # Step 4: Use a tool (read file)
+    # Step 4: Use a tool (read file, async)
     print("\n[4/5] Using tool (read_file)...")
-    call_result = handlers.handle_tools_call({
+    call_result = await handlers.handle_tools_call({
         "name": "read_file",
         "arguments": {
             "file_path": os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "README.md"),
@@ -206,7 +207,7 @@ def demo_full_workflow():
     print("=" * 60)
 
 
-def main():
+async def main():
     """Run all demos"""
     print("\n" + "=" * 60)
     print("Agentica ACP Demo")
@@ -215,8 +216,8 @@ def main():
     try:
         demo_acp_types()
         demo_session_management()
-        demo_acp_handlers()
-        demo_full_workflow()
+        await demo_acp_handlers()
+        await demo_full_workflow()
         
         print("\n" + "=" * 60)
         print("[OK] All demos completed successfully!")
@@ -236,4 +237,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(asyncio.run(main()))

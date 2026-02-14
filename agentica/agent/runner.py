@@ -160,36 +160,6 @@ class RunnerMixin:
             if self.stream_intermediate_steps:
                 yield self.generic_run_response("Run started", RunEvent.run_started)
 
-            # Start memory classification in parallel for optimization
-            memory_classification_tasks = []
-            if self.memory.create_user_memories and self.memory.update_user_memories_after_run:
-                if message is not None:
-                    user_message_for_memory: Optional[Message] = None
-                    if isinstance(message, str):
-                        user_message_for_memory = Message(role=self.prompt_config.user_message_role, content=message)
-                    elif isinstance(message, Message):
-                        user_message_for_memory = message
-                    if user_message_for_memory is not None:
-                        memory_task = asyncio.create_task(
-                            self.memory.should_update_memory(input=user_message_for_memory.get_content_string())
-                        )
-                        memory_classification_tasks.append((user_message_for_memory, memory_task))
-                elif messages is not None and len(messages) > 0:
-                    for _m in messages:
-                        _um = None
-                        if isinstance(_m, Message):
-                            _um = _m
-                        elif isinstance(_m, dict):
-                            try:
-                                _um = Message(**_m)
-                            except Exception as e:
-                                logger.error(f"Error converting message to Message: {e}")
-                        if _um:
-                            memory_task = asyncio.create_task(
-                                self.memory.should_update_memory(input=_um.get_content_string())
-                            )
-                            memory_classification_tasks.append((_um, memory_task))
-
             # 4. Generate response from the Model
             model_response: ModelResponse
             self.model = cast(Model, self.model)
@@ -298,17 +268,6 @@ class RunnerMixin:
 
             agent_run = AgentRun(response=self.run_response)
 
-            # Process memory classification results that were started in parallel
-            if memory_classification_tasks and self.memory.create_user_memories and self.memory.update_user_memories_after_run:
-                for user_message, memory_task in memory_classification_tasks:
-                    try:
-                        should_update_memory = await memory_task
-                        if should_update_memory:
-                            await self.memory.update_memory(input=user_message.get_content_string())
-                    except Exception as e:
-                        logger.warning(f"Error in memory processing: {e}")
-                        await self.memory.update_memory(input=user_message.get_content_string())
-
             # Handle agent_run message assignment
             if message is not None:
                 user_message_for_memory: Optional[Message] = None
@@ -318,12 +277,6 @@ class RunnerMixin:
                     user_message_for_memory = message
                 if user_message_for_memory is not None:
                     agent_run.message = user_message_for_memory
-                    if (
-                        not memory_classification_tasks
-                        and self.memory.create_user_memories
-                        and self.memory.update_user_memories_after_run
-                    ):
-                        await self.memory.update_memory(input=user_message_for_memory.get_content_string())
             elif messages is not None and len(messages) > 0:
                 for _m in messages:
                     _um = None
@@ -341,12 +294,6 @@ class RunnerMixin:
                         if agent_run.messages is None:
                             agent_run.messages = []
                         agent_run.messages.append(_um)
-                        if (
-                            not memory_classification_tasks
-                            and self.memory.create_user_memories
-                            and self.memory.update_user_memories_after_run
-                        ):
-                            await self.memory.update_memory(input=_um.get_content_string())
                     else:
                         logger.warning("Unable to add message to memory")
             self.memory.add_run(agent_run)

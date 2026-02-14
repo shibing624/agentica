@@ -85,7 +85,7 @@ writer = Agent(
 team = Agent(
     name="News Article Team",
     team=[researcher, writer],
-    debug_mode=True,
+    debug=True,
 )
 
 

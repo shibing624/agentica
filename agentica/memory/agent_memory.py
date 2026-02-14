@@ -5,10 +5,9 @@
 """
 
 from typing import Dict, List, Any, Optional, Tuple
-from copy import deepcopy
 from pydantic import BaseModel, ConfigDict
 
-from agentica.db.base import BaseDb, BASE64_PLACEHOLDER, clean_media_placeholders
+from agentica.db.base import BASE64_PLACEHOLDER, clean_media_placeholders
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.run_response import RunResponse
@@ -16,10 +15,7 @@ from agentica.utils.tokens import count_message_tokens
 from agentica.memory.models import (
     AgentRun,
     SessionSummary,
-    Memory,
-    MemoryRetrieval,
 )
-from agentica.memory.manager import MemoryManager, MemoryClassifier
 from agentica.memory.summarizer import MemorySummarizer
 
 
@@ -156,10 +152,6 @@ class AgentMemory(BaseModel):
         >>> from agentica.workspace import Workspace
         >>> workspace = Workspace("~/.agentica/workspace")
         >>> agent = Agent(workspace=workspace)
-
-    Note:
-        The `create_user_memories` feature is DEPRECATED.
-        Use Workspace.save_memory() for persistent memory storage instead.
     """
 
     # ========== Session Management (Core Features) ==========
@@ -172,50 +164,9 @@ class AgentMemory(BaseModel):
     summary: Optional[SessionSummary] = None
     summarizer: Optional[MemorySummarizer] = None
 
-    # ========== User Memory (DEPRECATED - Use Workspace instead) ==========
-    create_user_memories: bool = False
-    update_user_memories_after_run: bool = True
-    db: Optional[BaseDb] = None
-    user_id: Optional[str] = None
-    retrieval: MemoryRetrieval = MemoryRetrieval.last_n
-    memories: Optional[List[Memory]] = None
-    num_memories: Optional[int] = None
-    classifier: Optional[MemoryClassifier] = None
-    manager: Optional[MemoryManager] = None
-
     updating_memory: bool = False
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    @classmethod
-    def with_db(
-            cls,
-            db: BaseDb,
-            user_id: Optional[str] = None,
-            retrieval: MemoryRetrieval = MemoryRetrieval.last_n,
-            num_memories: Optional[int] = None,
-            **kwargs
-    ) -> "AgentMemory":
-        """Factory method to create AgentMemory with database enabled.
-
-        .. deprecated::
-            This method is deprecated. Use Workspace for persistent memory storage.
-        """
-        import warnings
-        warnings.warn(
-            "AgentMemory.with_db() is deprecated. Use Workspace for persistent memory storage. "
-            "See: from agentica.workspace import Workspace",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return cls(
-            create_user_memories=True,
-            db=db,
-            user_id=user_id,
-            retrieval=retrieval,
-            num_memories=num_memories,
-            **kwargs
-        )
 
     @classmethod
     def with_summary(cls, **kwargs) -> "AgentMemory":
@@ -232,18 +183,11 @@ class AgentMemory(BaseModel):
             exclude={
                 "summary",
                 "summarizer",
-                "db",
                 "updating_memory",
-                "memories",
-                "classifier",
-                "manager",
-                "retrieval",
             },
         )
         if self.summary:
             _memory_dict["summary"] = self.summary.to_dict()
-        if self.memories:
-            _memory_dict["memories"] = [memory.to_dict() for memory in self.memories]
         return _memory_dict
 
     @classmethod
@@ -251,9 +195,9 @@ class AgentMemory(BaseModel):
         """Create an AgentMemory instance from a dictionary."""
         if not data:
             return cls()
-        
+
         data_copy = data.copy()
-        
+
         if "runs" in data_copy and data_copy["runs"]:
             runs = []
             for run_data in data_copy["runs"]:
@@ -268,26 +212,25 @@ class AgentMemory(BaseModel):
                 elif isinstance(run_data, AgentRun):
                     runs.append(run_data)
             data_copy["runs"] = runs
-        
+
         if "messages" in data_copy and data_copy["messages"]:
             data_copy["messages"] = [
-                Message(**m) if isinstance(m, dict) else m 
+                Message(**m) if isinstance(m, dict) else m
                 for m in data_copy["messages"]
             ]
-        
+
         if "summary" in data_copy and data_copy["summary"]:
             if isinstance(data_copy["summary"], dict):
                 data_copy["summary"] = SessionSummary(**data_copy["summary"])
-        
-        if "memories" in data_copy and data_copy["memories"]:
-            data_copy["memories"] = [
-                Memory(**m) if isinstance(m, dict) else m 
-                for m in data_copy["memories"]
-            ]
-        
-        for field_name in ["summarizer", "db", "classifier", "manager"]:
+
+        # Remove deprecated fields from old serialized data
+        for field_name in [
+            "summarizer", "db", "classifier", "manager",
+            "memories", "create_user_memories", "update_user_memories_after_run",
+            "user_id", "retrieval", "num_memories",
+        ]:
             data_copy.pop(field_name, None)
-        
+
         return cls(**data_copy)
 
     def add_run(self, agent_run: AgentRun) -> None:
@@ -438,87 +381,6 @@ class AgentMemory(BaseModel):
                         return tool_calls
         return tool_calls
 
-    def load_user_memories(self) -> None:
-        """Load memories from memory db for this user."""
-        if self.db is None:
-            return
-
-        try:
-            if self.retrieval == MemoryRetrieval.first_n:
-                memory_rows = self.db.read_memories(
-                    user_id=self.user_id,
-                    limit=self.num_memories,
-                    sort="asc",
-                )
-            else:
-                memory_rows = self.db.read_memories(
-                    user_id=self.user_id,
-                    limit=self.num_memories,
-                    sort="desc",
-                )
-        except Exception as e:
-            logger.debug(f"Error reading memory: {e}")
-            return
-
-        self.memories = []
-
-        if memory_rows is None or len(memory_rows) == 0:
-            return
-
-        for row in memory_rows:
-            try:
-                self.memories.append(Memory.model_validate(row.memory))
-            except Exception as e:
-                logger.warning(f"Error loading memory: {e}")
-                continue
-
-    async def should_update_memory(self, input: str) -> bool:
-        """Determines if a message should be added to the memory db."""
-        if self.classifier is None:
-            self.classifier = MemoryClassifier()
-        self.classifier.existing_memories = self.memories
-        classifier_response = await self.classifier.run(input)
-        return classifier_response is not None and classifier_response.strip().lower().startswith("yes")
-
-    def _prepare_memory_update(self, input: str) -> Optional[str]:
-        """Common validation logic for memory updates. Returns error message or None."""
-        if input is None or not isinstance(input, str):
-            return "Invalid message content"
-        if self.db is None:
-            logger.warning("Database not provided.")
-            return "Please provide a db to store memories"
-        return None
-
-    def _ensure_manager(self) -> None:
-        """Ensure manager is initialized with current db and user_id."""
-        if self.manager is None:
-            self.manager = MemoryManager(user_id=self.user_id, db=self.db)
-        else:
-            self.manager.db = self.db
-            self.manager.user_id = self.user_id
-
-    async def update_memory(self, input: str, force: bool = False) -> Optional[str]:
-        """Creates a memory from a message and adds it to the memory db."""
-        error = self._prepare_memory_update(input)
-        if error:
-            return error
-
-        self.updating_memory = True
-        try:
-            should_update = force or await self.should_update_memory(input=input)
-            logger.debug(f"Update memory: {should_update}")
-
-            if not should_update:
-                logger.debug("Memory update not required")
-                return "Memory update not required"
-
-            self._ensure_manager()
-            response = await self.manager.run(input)
-            self.load_user_memories()
-            return response
-        finally:
-            self.updating_memory = False
-
     async def update_summary(self) -> Optional[SessionSummary]:
         """Creates a summary of the session"""
         self.updating_memory = True
@@ -532,11 +394,6 @@ class AgentMemory(BaseModel):
 
     def clear(self) -> None:
         """Clear the AgentMemory"""
-
         self.runs = []
         self.messages = []
         self.summary = None
-        self.memories = None
-
-    def get_memories(self) -> List[Memory]:
-        return self.memories or []

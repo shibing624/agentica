@@ -34,7 +34,7 @@ def web_search_demo():
             "Always cite your sources.",
         ],
         include_web_search=True,
-        # debug_mode=True,
+        # debug=True,
     )
 
     response = agent.run_sync(
@@ -55,7 +55,7 @@ def url_fetch_demo():
         name="ContentFetcher",
         description="An assistant that can fetch and analyze web content",
         include_fetch_url=True,
-        # debug_mode=True,
+        # debug=True,
     )
 
     response = agent.run_sync(

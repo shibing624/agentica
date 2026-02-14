@@ -108,15 +108,15 @@ class TestWorkflowSessionState(unittest.TestCase):
 class TestWorkflowDebugMode(unittest.TestCase):
     """Test cases for Workflow debug mode."""
 
-    def test_debug_mode_default(self):
-        """Test debug_mode is False by default."""
+    def test_debug_default(self):
+        """Test debug is False by default."""
         workflow = SimpleWorkflow()
-        self.assertFalse(workflow.debug_mode)
+        self.assertFalse(workflow.debug)
 
-    def test_debug_mode_enabled(self):
-        """Test debug_mode can be enabled."""
-        workflow = SimpleWorkflow(debug_mode=True)
-        self.assertTrue(workflow.debug_mode)
+    def test_debug_enabled(self):
+        """Test debug can be enabled."""
+        workflow = SimpleWorkflow(debug=True)
+        self.assertTrue(workflow.debug)
 
 
 class TestWorkflowWithAgents(unittest.TestCase):

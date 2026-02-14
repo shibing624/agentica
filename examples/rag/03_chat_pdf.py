@@ -56,7 +56,7 @@ def pdf_app(new: bool = False, user: str = "user"):
         knowledge=knowledge_base,
         search_knowledge=True,
         tool_config=ToolConfig(read_chat_history=True),
-        debug_mode=True,
+        debug=True,
     )
 
     print(f"User: {user}\nRun ID: {agent.run_id}\n")

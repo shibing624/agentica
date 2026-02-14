@@ -132,20 +132,6 @@ class ToolsMixin:
         )
         return "Successfully added to knowledge base"
 
-    async def update_memory(self, task: str) -> str:
-        """Use this function to update the Agent's memory. Describe the task in detail.
-
-        Args:
-            task: The task to update the memory with.
-
-        Returns:
-            str: A string indicating the status of the task.
-        """
-        try:
-            return await self.memory.update_memory(input=task, force=True) or "Memory updated successfully"
-        except Exception as e:
-            return f"Failed to update memory: {e}"
-
     def _create_run_data(self) -> Dict[str, Any]:
         """Create and return the run data dictionary."""
         run_response_format = "text"
@@ -165,7 +151,7 @@ class ToolsMixin:
             "metrics": self.run_response.metrics if self.run_response is not None else None,
         }
 
-        if self.monitoring:
+        if self.tracing:
             run_data.update(
                 {
                     "run_input": self.run_input,

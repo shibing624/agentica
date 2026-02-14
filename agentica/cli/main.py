@@ -28,7 +28,7 @@ def main():
         "api_key": args.api_key,
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,
-        "debug_mode": args.verbose > 0,
+        "debug": args.verbose > 0,
         "work_dir": args.work_dir,
     }
     extra_tool_names = list(args.tools) if args.tools else None

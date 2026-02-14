@@ -83,7 +83,7 @@ class Workflow(BaseModel):
     db: Optional[BaseDb] = None
     _workflow_session: Optional[WorkflowSession] = None
 
-    debug_mode: bool = Field(False, validate_default=True)
+    debug: bool = Field(False, validate_default=True)
 
     # Internal run state
     run_id: Optional[str] = None
@@ -105,7 +105,7 @@ class Workflow(BaseModel):
     def set_session_id(cls, v: Optional[str]) -> str:
         return v or str(uuid4())
 
-    @field_validator("debug_mode", mode="before")
+    @field_validator("debug", mode="before")
     def set_log_level(cls, v: bool) -> bool:
         if v or getenv("AGENTICA_DEBUG", "false").lower() == "true":
             set_log_level_to_debug()

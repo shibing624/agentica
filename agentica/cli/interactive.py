@@ -529,7 +529,7 @@ def _setup_prompt_toolkit(shell_mode_ref: list, skills_registry):
 def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None,
                     workspace: Optional[Workspace] = None, skills_registry=None):
     """Run the interactive CLI with prompt_toolkit support."""
-    if not agent_config.get("debug_mode"):
+    if not agent_config.get("debug"):
         suppress_console_logging()
     
     # Shell mode: use list as mutable reference for closures

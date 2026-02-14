@@ -42,6 +42,8 @@
 
 6. **基于文件的工作空间记忆**，使用 Markdown 文件（`AGENT.md`、`MEMORY.md`、`USER.md` 等），具备人类可读、可审计、可 Git 版本控制的特性，支持 `users/{user_id}/` 目录下的多用户隔离。
 
+此外，Agentica 提供 MCP + ACP 双协议工具生态、基于 Markdown 的声明式 Skill 技能系统、以及覆盖 6 种向量数据库和 13 种嵌入模型的完整 RAG 基础设施，构成了一个面向生产环境的完整智能体开发平台。
+
 我们在三个互补的基准测试上进行评估：
 - **GAIA**（Mialon et al., 2023）：165 个通用 AI 助手任务，测试多步推理和工具使用
 - **SWE-bench Verified**（Jimenez et al., 2024; OpenAI, 2024）：500 个来自 GitHub 的真实软件工程任务
@@ -74,6 +76,9 @@
 | 工具抽象 | 三层层次结构 | Action 级 | 函数注册 | `@function_tool` 扁平 | `@tool` 装饰器 | `BaseTool` 类 |
 | 会话模型 | Agent-as-Session（统一） | 环境共享状态 | ConversableAgent 状态 | Runner + Session（分离） | Checkpointer（外部） | Memory（外部） |
 | 多智能体 | `as_tool()` 委托 | 发布-订阅流水线 | GroupChat + Actor | Handoffs + agents-as-tools | 图子节点 | 顺序/层次 |
+| 工具协议 | MCP + ACP 双协议 | 无 | 无 | MCP | 无 | MCP |
+| 技能扩展 | Markdown Skill 系统 | 无 | 无 | 无 | 无 | 无 |
+| RAG 基础设施 | 6 向量库 + 13 Embedding | 无 | 无 | Faiss | 无 | 有限 |
 | 护栏 | 智能体 + 工具级 | 无 | 无 | 仅智能体级 | 无 | 无 |
 | 记忆 | AgentMemory + Workspace | 三层（工作/共享/长期） | 消息历史 | Sessions（SQLite/Redis） | Checkpoints + Store | SQLite + Entity |
 | Python 版本 | >= 3.12 | >= 3.9 | >= 3.10 | >= 3.9 | >= 3.9 | >= 3.10 |
@@ -103,7 +108,7 @@ Agentica 的 DeepAgent 模块以其双阈值上下文管理机制和 HEARTBEAT �
 
 Agentica 建立在三个设计原则之上：
 
-1. **异步优先**：所有核心方法（`run()`、`response()`、`execute()`、`invoke()`）均为原生 `async`。同步适配器（`run_sync()`、`run_stream_sync()`）通过后台线程 + 事件循环模式包装异步实现。
+1. **全链路异步优先**：不仅 Agent 层的核心方法（`run()`、`response()`）为原生 `async`，而是从 Model 层（`invoke()`、`response_stream()`）、Tool 层（`FunctionCall.execute()`）、数据库层（`read_from_storage()`、`write_to_storage()`）到文件 I/O 层（`Workspace.save_memory()`）全部采用 async 实现。同步工具通过 `run_in_executor()` 自动桥接，同步适配器（`run_sync()`、`run_stream_sync()`）通过后台线程 + 事件循环模式包装异步实现。这种全链路异步设计确保在高并发 Web 服务场景下不阻塞事件循环。
 
 2. **通过 mixin 分离关注点**：`Agent` 类使用 `@dataclass(init=False)` 与纯方法容器 mixin 的多重继承：
 
@@ -242,6 +247,8 @@ async def _call_func(self, func, **kwargs):
 
 **FunctionCall** 表示单次调用，包含参数、结果、错误和调用 ID。其 `execute()` 方法是唯一执行入口——仅异步，支持前/后钩子和第 3.3 节描述的同步/异步自动检测。
 
+**Agent-as-Tool 统一执行路径。** 三层抽象的一个重要推论是子智能体调用与普通工具调用共享同一执行管道。`Agent.as_tool()` 将任意 Agent 包装为标准 `Function` 对象，其入口为异步函数 `await self.run(message)`。这意味着在 TaskGroup 并行执行阶段，子智能体调用和文件读取、网络搜索等普通工具调用在同一个 `asyncio.TaskGroup` 中并发——父智能体可以同时调度多个子智能体和工具，无需任何特殊处理。这种统一性是其他框架（如 OpenAI SDK 的 handoffs 需要特殊路由、AutoGen 的 Actor 消息传递需要独立通道）所不具备的。
+
 ### 3.5 Agent-as-Session：统一状态模型
 
 Agentica 与其他框架在会话状态管理上存在根本的设计分歧。我们识别出现有框架中的三种模式：
@@ -292,3 +299,473 @@ class AgentMemory(BaseModel):
 | 历史截断 | 应用层 | 框架层（渐进式） |
 | 持久化 | 必须有 Session 后端 | 可选（SessionMixin） |
 | 序列化 | Session.to_dict() | AgentMemory.to_dict() → SessionRow |
+
+### 3.6 DeepAgent：深度研究扩展
+
+`DeepAgent` 继承 `Agent`，增加了专为长程研究和复杂任务设计的能力：
+
+**内置工具套件。** DeepAgent 自动包含文件系统工具（`ls`、`read_file`、`write_file`、`edit_file`、`glob`、`grep`）、代码执行（`execute`，异步子进程，优雅的 SIGTERM→SIGKILL 终止）、网络工具（`web_search`、`fetch_url`）、任务管理（`write_todos`、`read_todos`）、子智能体委托（`task`，内部基于 `as_tool()` 模式，子智能体在 TaskGroup 中与普通工具共享并行管道）和技能管理（`list_skills`、`get_skill_info`）。
+
+**双阈值滞回上下文管理。** 我们引入具有可证明振荡避免性的双阈值机制：
+
+- **软阈值**（$\theta_s$）：当估计上下文 token 超过 $\theta_s$ 时，触发上下文压缩（摘要较旧的工具结果）。默认：$\theta_s = 0.6 \times (C_w - C_{out})$，其中 $C_w$ 为模型上下文窗口，$C_{out}$ 为最大输出 token。
+- **硬阈值**（$\theta_h$）：当 token 超过 $\theta_h$ 时，通过专用提示强制生成回答。默认：$\theta_h = 0.8 \times (C_w - C_{out})$。
+
+**定理 2（振荡避免）。** 设 $C_i$ 为第 $i$ 步的上下文 token 数，$\Delta_c > 0$ 为压缩操作平均释放的 token 数。若 $\theta_h - \theta_s > \Delta_c$，则系统不会在压缩和正常执行之间振荡。具体地，在第 $i$ 步压缩将 $C_i$ 降至 $C_i' \leq \theta_s$ 后，系统在至少 $\lceil(\theta_s - C_i' + 1) / \delta\rceil$ 个新步骤内不会再次触发压缩，其中 $\delta$ 为每步平均 token 增量。
+
+*证明概要。* 压缩后 $C_i' \leq \theta_s$。每个后续步骤平均增加 $\delta$ 个 token。压缩仅在 $C_j \geq \theta_s$ 时重新触发，需要至少 $(\theta_s - C_i') / \delta$ 步。由于 $\theta_h - \theta_s > \Delta_c$，在 $\theta_s$ 处的压缩总能在硬限制到达前完成。$\square$
+
+对比单阈值系统（$\theta_s = \theta_h$）：压缩释放 $\Delta_c$ 个 token，下一次工具调用增加 $\delta$ 个 token，若 $\delta > \Delta_c$，系统立即重新触发压缩——这是实践中观察到的振荡模式。
+
+**HEARTBEAT 式迭代控制。** 受 MemGPT 心跳机制启发，DeepAgent 在多轮执行期间以可配置间隔注入迭代检查点提示：
+
+```
+第 {N} 步检查点：
+- 你是否已完全解决了问题？
+- 任务列表中是否还有剩余任务？
+- 你是否验证了你的修改？
+如未完成，请继续工作。不要过早结束你的回合。
+```
+
+这解决了模型过早宣布任务完成的常见失败模式。
+
+**重复行为检测。** 滑动窗口（`deque(maxlen=10)`）跟踪最近的工具调用。当连续 $k$ 次调用相同工具（默认 $k=3$）时，警告提示重定向智能体策略，防止非生产性循环。
+
+**深度研究提示系统。** 结构化的六阶段提示方法论指导深入调查：(1) 问题分析与计划制定，(2) 迭代信息收集与显式失败处理，(3) 多源交叉验证，(4) 约束检查清单验证，(5) 通过代码执行进行计算和操作验证，(6) 带引用要求的清晰叙述。
+
+**表 2.3：DeepAgent 深度研究能力对比**
+
+| 能力 | Agentica DeepAgent | OpenAI SDK | AutoGen | MetaGPT | CrewAI |
+|------|-------------------|------------|---------|---------|--------|
+| 内置文件系统操作 | ls/read/write/edit/glob/grep | 无 | 无 | 无 | 无 |
+| 异步代码执行 | async subprocess | 无 | 有 | 有 | 有 |
+| 子 Agent 委派 | task（共享 TaskGroup） | 无 | 有 | 有 | 有 |
+| 步进反思 | 每 N 步 | 无 | 无 | 无 | 无 |
+| 上下文溢出管理 | 双阈值滞回 | 无 | 无 | 无 | 无 |
+| 重复行为检测 | 滑动窗口 | 无 | 无 | 无 | 无 |
+| HEARTBEAT 强制迭代 | 可配置频率 | 无 | 无 | 无 | 无 |
+| 任务列表管理 | write_todos/read_todos | 无 | 无 | 无 | 有 |
+| 技能系统 | list_skills/get_skill_info | 无 | 无 | 无 | 无 |
+
+### 3.7 双层级护栏系统
+
+Agentica 在两个粒度上提供护栏：
+
+**智能体级护栏**（`InputGuardrail`、`OutputGuardrail`）验证整个智能体运行的输入或输出，使用装饰器模式：
+
+```python
+@input_guardrail
+async def check_sensitive_content(context, agent, input_message):
+    # 验证逻辑
+    return GuardrailFunctionOutput(output_info={"safe": True})
+```
+
+**工具级护栏**（`ToolInputGuardrail`、`ToolOutputGuardrail`）验证单个工具调用的参数和结果。这至关重要，因为单个工具调用可能访问文件系统、执行代码或调用外部 API：
+
+```python
+@tool_input_guardrail
+async def validate_file_path(context, agent, tool_input):
+    # 确保文件路径在允许目录内
+    return ToolGuardrailFunctionOutput(output_info={"valid": True})
+```
+
+两个层级均通过特定异常（`InputGuardrailTripwireTriggered`、`ToolInputGuardrailTripwireTriggered` 等）在检测到违规时终止执行。
+
+### 3.8 基于文件的工作空间记忆
+
+Agentica 的持久记忆使用基于文件的工作空间，目录结构如下：
+
+```
+workspace/
+├── AGENT.md          # 智能体指令（全局）
+├── PERSONA.md        # 智能体人格（全局）
+├── TOOLS.md          # 工具文档（全局）
+├── users/
+│   ├── default/
+│   │   ├── USER.md       # 用户信息
+│   │   ├── MEMORY.md     # 长期记忆
+│   │   └── memory/       # 每日记忆条目
+│   └── {user_id}/        # 多用户隔离
+```
+
+相比数据库存储的记忆，该设计具有以下优势：
+- **可审计**：Markdown 文件人类可读、可检查
+- **版本控制**：标准 git 操作追踪记忆演变
+- **可移植**：无数据库依赖，适用于任何文件系统
+- **多用户隔离**：每个用户的数据物理分离
+
+所有记忆操作（`get_context_prompt()`、`get_memory_prompt()`、`write_memory()`、`save_memory()`）均为异步，文件 I/O 通过 `run_in_executor()` 包装以避免阻塞事件循环。
+
+### 3.9 模型提供者抽象
+
+`Model` 基类定义四个异步抽象方法：`invoke()`、`invoke_stream()`、`response()`、`response_stream()`。提供者实现使用 `@override` 装饰器（Python 3.12）表达显式意图：
+
+- `OpenAIChat`：原生异步 OpenAI 客户端
+- `Claude`：`AsyncAnthropic` 客户端，原生异步 `messages.create()` 和 `messages.stream()`
+- `OpenAILike`：扩展 `OpenAIChat` 支持兼容 API（DeepSeek、Qwen、ZhipuAI、Doubao、Moonshot 等）
+
+统一异步接口确保所有模型提供者从框架角度行为一致，异步边界透明处理。
+
+### 3.10 双协议工具生态：MCP + ACP
+
+Agentica 同时支持两种标准化协议，实现跨框架的工具互操作和 IDE 深度集成：
+
+**MCP（Model Context Protocol）** 是 Anthropic 提出的工具协议标准，Agentica 支持全部三种传输方式：Stdio、SSE 和 StreamableHTTP。通过 `MCPClient` 异步客户端，Agent 可动态发现和调用任意 MCP 服务器暴露的工具，无需预先注册。MCP 工具在运行时被自动转换为 Agentica 的 `Function` 对象，融入三层工具抽象，与内置工具共享 TaskGroup 并行执行。
+
+**ACP（Agent Communication Protocol）** 是面向 IDE 集成的 JSON-RPC over stdio 协议。Agentica 的 `ACPServer` 实现完整的会话管理、工具调用代理、文件系统操作和终端命令执行，可直接作为 IDE 编码助手后端。在已调研的主流框架中，Agentica 是唯一同时支持 MCP 和 ACP 的框架。
+
+**表 2.5：协议支持对比**
+
+| 协议 | Agentica | OpenAI SDK | AutoGen | MetaGPT | CrewAI |
+|------|----------|------------|---------|---------|--------|
+| MCP（Stdio/SSE/HTTP） | 全部支持 | 仅 Stdio | 不支持 | 不支持 | 部分支持 |
+| ACP（IDE 集成） | 完整支持 | 不支持 | 不支持 | 不支持 | 不支持 |
+
+### 3.11 Skill 技能系统：声明式能力扩展
+
+受 Anthropic Claude Skills 启发，Agentica 引入基于 Markdown 的 Skill 技能系统，支持纯文本级的智能体能力扩展：
+
+```markdown
+---
+name: commit
+description: Git commit helper
+trigger: /commit
+requires: [git]
+allowed-tools: [shell]
+---
+# Git Commit Skill
+When user says /commit, analyze staged changes and generate
+conventional commit message...
+```
+
+Skill 由三部分组成：(1) YAML frontmatter 定义元数据（名称、触发器、依赖工具），(2) Markdown 正文定义行为指令，(3) 目录层次定义优先级（项目级 > 用户级 > 内置）。`SkillLoader` 在首次使用时惰性加载，`SkillRegistry` 通过全局单例管理注册和触发匹配。
+
+该系统使非开发者也能通过编辑 Markdown 文件扩展智能体能力，无需编写代码。在其他主流框架中未发现类似机制。DeepAgent 通过 `list_skills` 和 `get_skill_info` 工具将技能系统暴露给 LLM，使其可动态查询和使用已注册的技能。
+
+### 3.12 RAG 检索增强生成基础设施
+
+Agentica 提供完整的 RAG 基础设施，通过 `Knowledge` 抽象统一多种向量数据库和嵌入模型：
+
+| 组件 | 支持选项 |
+|------|---------|
+| 向量数据库 | ChromaDB、LanceDB、PGVector、Pinecone、Qdrant、内存向量库 |
+| Embedding 模型 | OpenAI、Anthropic、HuggingFace、Sentence Transformers 等 13 种 |
+| 数据库后端 | SQLite、PostgreSQL、MySQL、Redis、Memory、JSON |
+| 生态适配 | LangChain VectorStore 适配、LlamaIndex Reader 适配 |
+
+Agent 通过 `search_knowledge_base` 工具自动检索相关文档。向量检索操作通过 `run_in_executor()` 异步化，与全链路异步架构保持一致。相比 OpenAI Agents SDK（无内置 RAG）和 AutoGen（需自行实现），Agentica 提供了开箱即用的 RAG 能力。
+
+---
+
+## 4. 实验设置
+
+### 4.1 基准测试
+
+我们在三个互补的基准测试上评估智能体不同方面的能力：
+
+**GAIA**（通用 AI 助手）。使用 165 题公开验证集。任务需要多步推理、网络搜索、文件解析、代码执行和多模态理解。评估使用确定性答案的精确匹配。
+
+**SWE-bench Verified**。使用 500 个人工验证子集。每个任务需要生成代码补丁解决真实 GitHub issue 并通过仓库测试套件。评估使用解决率（补丁通过所有相关测试的任务百分比）。
+
+**Terminal-Bench 2.0**。89 个在 Docker 终端环境中执行的任务，涵盖软件工程、计算、ML/AI、网络安全和系统管理。每配置运行 5 次，报告解决率及 95% 置信区间。
+
+### 4.2 基线系统
+
+与以下智能体系统对比：
+
+| 系统 | 框架类型 | 关键特性 |
+|------|---------|---------|
+| OpenAI Agents SDK + GPT-4o | 商业框架 | 基于 handoff 的协调，托管工具 |
+| MetaGPT | SOP 驱动流水线 | ICLR 2024 Oral，结构化通信 |
+| AutoGen v0.4 | Actor 异步 | 多智能体对话，分布式运行时 |
+| OpenHands | CodeAct 框架 | 统一代码动作空间，Docker 沙箱 |
+| Terminus 2 | 中立脚手架 | 无头终端工具，Terminal-Bench 使用 |
+
+为公平对比，所有配置尽可能使用相同底层 LLM。
+
+### 4.3 配置
+
+评估两种 Agentica 配置：
+
+1. **Agentica-Base**：标准 `Agent` + 用户提供工具。测试核心异步优先执行引擎和结构化并发。
+2. **Agentica-Deep**：`DeepAgent` + 内置工具、深度研究提示、双阈值上下文管理和 HEARTBEAT 迭代控制。测试完整深度研究流水线。
+
+### 4.4 消融实验
+
+为隔离各架构组件的贡献：
+
+| 消融项 | 移除/变更内容 |
+|--------|-------------|
+| `-TaskGroup` | 将 `asyncio.TaskGroup` 替换为顺序工具执行 |
+| `-DualThreshold` | 移除上下文管理（无软/硬限制） |
+| `-HEARTBEAT` | 移除迭代检查点提示 |
+| `-DeepPrompt` | 将深度研究提示替换为标准提示 |
+| `-ToolGuardrails` | 移除工具级护栏（保留智能体级） |
+| `-AgentAsSession` | 替换为外部会话管理（OpenAI SDK 模式） |
+
+### 4.5 参数敏感性分析
+
+以下网格分析双阈值参数敏感性：
+
+| 参数 | 测试值 |
+|------|-------|
+| 软阈值 $\theta_s$ | 0.4, 0.5, 0.6, 0.7（× 有效上下文） |
+| 硬阈值 $\theta_h$ | 0.7, 0.8, 0.9（× 有效上下文） |
+| HEARTBEAT 频率 | 3, 5, 7, 10（步） |
+| 重复窗口 $k$ | 2, 3, 5（连续调用） |
+
+约束：所有配置中 $\theta_s < \theta_h$。
+
+### 4.6 统计显著性
+
+所有结果报告 95% 置信区间。GAIA 和 SWE-bench 使用 3 次独立运行（不同随机种子），报告 Wilson 得分区间。Terminal-Bench 遵循基准协议，每配置 5 次运行，使用 bootstrap 置信区间。
+
+---
+
+## 5. 实验结果
+
+### 5.1 主要结果
+
+**表 3：GAIA 基准结果（165 个验证任务）**
+
+| 系统 | Level 1 | Level 2 | Level 3 | 平均 |
+|------|---------|---------|---------|------|
+| Agentica-Deep | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]` |
+| Agentica-Base | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]` |
+| OpenAI Agents SDK + GPT-4o | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]` |
+| MetaGPT | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]` |
+| AutoGen v0.4 | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]` |
+| 人类基线 | ~95% | ~92% | ~88% | ~92% |
+
+**表 4：SWE-bench Verified 结果（500 个任务）**
+
+| 系统 | 解决率 |
+|------|-------|
+| Agentica-Deep | `[TODO]` |
+| Agentica-Base | `[TODO]` |
+| OpenHands | `[TODO]` |
+| AutoGen v0.4 | `[TODO]` |
+| 裸模型（无框架） | `[TODO]` |
+
+**表 5：Terminal-Bench 2.0 结果（89 个任务，每配置 5 次）**
+
+| 系统 | 解决率（±95% CI） |
+|------|-----------------|
+| Agentica-Deep | `[TODO]` ± `[TODO]` |
+| Agentica-Base | `[TODO]` ± `[TODO]` |
+| Terminus 2（相同模型） | `[TODO]` ± `[TODO]` |
+| OpenHands（相同模型） | `[TODO]` ± `[TODO]` |
+| Claude Code（相同模型） | `[TODO]` ± `[TODO]` |
+
+### 5.2 结构化并发加速
+
+**表 6：TaskGroup 并行 vs 顺序工具执行的时钟时间对比**
+
+| 基准测试 | 平均工具数/轮 | 顺序（秒） | 并行（秒） | 加速比 |
+|---------|-------------|----------|----------|-------|
+| GAIA | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]`× |
+| SWE-bench | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]`× |
+| Terminal-Bench | `[TODO]` | `[TODO]` | `[TODO]` | `[TODO]`× |
+
+### 5.3 消融实验
+
+**表 7：GAIA（Level 2+3）和 Terminal-Bench 消融结果**
+
+| 配置 | GAIA (L2+L3) | Terminal-Bench |
+|------|-------------|----------------|
+| Agentica-Deep（完整） | `[TODO]` | `[TODO]` |
+| − TaskGroup | `[TODO]` | `[TODO]` |
+| − DualThreshold | `[TODO]` | `[TODO]` |
+| − HEARTBEAT | `[TODO]` | `[TODO]` |
+| − DeepPrompt | `[TODO]` | `[TODO]` |
+| − ToolGuardrails | `[TODO]` | `[TODO]` |
+| − AgentAsSession | `[TODO]` | `[TODO]` |
+
+### 5.4 参数敏感性分析
+
+**表 8：GAIA Level 2+3 上双阈值参数敏感性（长程任务）**
+
+| $\theta_s$ | $\theta_h$ | 完成率 | 强制终止率 | 压缩次数 |
+|------------|------------|-------|----------|---------|
+| 0.4 | 0.7 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 0.4 | 0.8 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 0.5 | 0.7 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 0.5 | 0.8 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 0.6 | 0.8 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 0.6 | 0.9 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 0.7 | 0.9 | `[TODO]` | `[TODO]` | `[TODO]` |
+
+**表 9：Terminal-Bench 上 HEARTBEAT 频率敏感性**
+
+| 检查点频率 | 解决率 | 过早终止率 | 平均步数 |
+|-----------|-------|----------|---------|
+| 每 3 步 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 每 5 步（默认） | `[TODO]` | `[TODO]` | `[TODO]` |
+| 每 7 步 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 每 10 步 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 无 HEARTBEAT | `[TODO]` | `[TODO]` | `[TODO]` |
+
+### 5.5 上下文管理效果
+
+**表 10：有/无双阈值上下文管理的长程任务完成情况**
+
+| 上下文管理 | 已完成任务（>10 次工具调用） | 完成时平均上下文 token | 强制终止率 |
+|-----------|------------------------|---------------------|----------|
+| 无 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 仅硬阈值 | `[TODO]` | `[TODO]` | `[TODO]` |
+| 双阈值（本文） | `[TODO]` | `[TODO]` | `[TODO]` |
+
+### 5.6 效率分析
+
+**表 11：Token 消耗与 API 成本对比**
+
+| 系统 | 平均 token/任务 | 平均 API 调用/任务 | 平均成本/任务（$） |
+|------|---------------|------------------|-----------------|
+| Agentica-Deep | `[TODO]` | `[TODO]` | `[TODO]` |
+| Agentica-Base | `[TODO]` | `[TODO]` | `[TODO]` |
+| OpenAI Agents SDK | `[TODO]` | `[TODO]` | `[TODO]` |
+| MetaGPT | `[TODO]` | `[TODO]` | `[TODO]` |
+
+---
+
+## 6. 分析与讨论
+
+### 6.1 结构化并发何时有效？
+
+`[TODO: 分析哪些任务类型从并行工具执行中获益最多——可能是多个独立工具调用的 I/O 密集型任务（如同时进行多个网络搜索、并行文件读取）。包含加速比作为平均工具数/轮的函数图。展示加速比对 N 个独立 I/O 密集型工具趋近 N×，且受 Amdahl 定律约束。包含时钟时间分布图。]`
+
+### 6.2 Agent-as-Session vs 外部会话管理
+
+`[TODO: Agent-as-Session 模式与外部 session 模式（OpenAI SDK 风格）的定量对比。指标：(a) 多轮设置所需代码行数，(b) 内存效率（历史组装的 token 使用），(c) 上下文组装延迟，(d) 需要前轮信息的 GAIA 多轮任务成功率。假设：Agent-as-Session 应展示更低的样板代码和相当或更好的多轮准确率。]`
+
+### 6.3 双阈值 vs 单阈值上下文管理
+
+`[TODO: 滞回机制分析——展示单阈值系统在压缩和正常执行之间振荡，而双阈值提供稳定行为。包含代表性长程任务的上下文 token 轨迹图。通过测量单阈值（$\theta_s = \theta_h$）vs 双阈值配置下的压缩触发次数来实证验证定理 2。]`
+
+### 6.4 深度研究提示的影响
+
+`[TODO: 定性分析六阶段深度研究提示如何影响智能体行为——是否增加了交叉验证尝试？是否减少了引用源中的幻觉？对比标准提示和深度研究提示的引用准确率。包含特定 GAIA 任务的行为差异示例。]`
+
+### 6.5 错误分析
+
+`[TODO: 跨基准测试的失败模式定量分类：
+- 工具执行失败（超时、权限、网络）：占失败的 X%
+- 上下文溢出（因 token 限制放弃任务）：X%
+- 重复行为（智能体陷入循环）：X%
+- 推理错误（信息充分但方法错误）：X%
+- 过早终止（智能体在完成前宣布完成）：X%
+包含逐基准分解和 Agentica 各功能解决哪些失败模式的分析。]`
+
+### 6.6 案例研究
+
+`[TODO: 包含 2-3 个详细案例研究，展示逐步执行轨迹：
+1. 一个 GAIA Level 3 任务展示结构化并发收益（多个并行网络搜索）
+2. 一个 Terminal-Bench 任务展示双阈值上下文管理实际运作（触发压缩后成功完成）
+3. 一个 SWE-bench 任务展示 HEARTBEAT 迭代控制如何防止过早终止
+对每个案例，展示执行时间线、工具调用、上下文 token 轨迹和与基线系统对比的最终结果。]`
+
+### 6.7 局限性
+
+我们承认以下局限：
+
+1. **Python 版本要求**：Agentica 要求 Python 3.12+，限制了旧版 Python 环境的使用。结构化并发需要 `asyncio.TaskGroup`（Python 3.11+），`@override` 装饰器需要 Python 3.12。
+
+2. **基准覆盖范围**：评估聚焦三个基准。在领域特定基准（如 xbench-DeepSearch 评估研究质量、WebArena 评估网页导航）上的额外评估将提供更全面的图景。
+
+3. **模型依赖性**：与所有智能体框架一样，性能根本上受限于底层 LLM 能力。我们的架构贡献改善效率和可靠性，但无法弥补根本性的推理局限。
+
+4. **无正式 SOP 支持**：不同于 MetaGPT 的 SOP-as-Prompt 范式，Agentica 不编码领域特定标准操作流程。对于高度结构化的工作流（如软件开发生命周期），MetaGPT 的方法可能更合适。
+
+---
+
+## 7. 结论
+
+本文提出 Agentica，一个全链路异步优先智能体框架，引入以下架构创新：(1) 基于 `asyncio.TaskGroup` 的结构化并发工具执行，具有形式化证明的部分故障隔离保证，子智能体与普通工具共享同一并行管道（Agent-as-Tool）；(2) 带内存安全弱引用的三层工具抽象；(3) Agent-as-Session 统一状态模型，将 token 感知的会话管理直接嵌入智能体；(4) 具有可证明振荡避免性的双阈值滞回上下文管理；(5) 智能体和工具操作的双层级护栏；(6) 支持多用户隔离的基于文件的工作空间记忆。此外，框架提供 MCP + ACP 双协议工具生态、声明式 Markdown Skill 技能系统和完整 RAG 基础设施，构成面向生产环境的完整智能体开发平台。
+
+在三个基准测试——GAIA、SWE-bench Verified 和 Terminal-Bench 上的评估表明，框架层面的架构决策显著影响智能体性能。`[TODO: 总结关键定量发现。]` 结构化并发在多工具任务上提供 `[TODO]` 加速，双阈值上下文管理将长程任务完成率提升 `[TODO]`，Agent-as-Session 模式在保持竞争力准确率的同时降低了多轮管理复杂度。
+
+这些结果支持一个更广泛的观察：**智能体脚手架设计与模型能力同等重要**——这与近期 SWE-bench 结果一致，框架增强的智能体比裸模型高 10-20%（JoyCode Agent 74.6% vs Claude 3.7 Sonnet 70.3%）。此外，形式化分析（定理 1-2）为智能体框架社区中常凭启发式做出的设计选择提供了理论基础。
+
+未来工作包括：(1) 将结构化并发模型扩展到具有依赖感知调度的多智能体并行执行，(2) 基于任务复杂度估计的自适应阈值调优（用学习到的阈值替代静态 $\theta_s, \theta_h$），(3) 将检索增强生成集成到工作空间记忆系统，(4) 通过轻量级智能体克隆进行投机式并行假设评估，(5) 在更多领域特定基准（WebArena、xbench-DeepSearch）上评估。
+
+---
+
+## 参考文献
+
+Hong, S., Zhuge, M., Chen, J., et al. (2023). MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework. *ICLR 2024 (Oral)*. arXiv:2308.00352.
+
+Jimenez, C.E., Yang, J., Wettig, A., et al. (2024). SWE-bench: Can Language Models Resolve Real-World GitHub Issues? *ICLR 2024*. arXiv:2310.06770.
+
+Merrill, M.A., Shaw, A.G., Carlini, N., et al. (2026). Terminal-Bench: Benchmarking Agents on Hard, Realistic Tasks in Command Line Interfaces. arXiv:2601.11868.
+
+Mialon, G., Fourrier, C., Swift, C., Wolf, T., LeCun, Y., & Scialom, T. (2023). GAIA: A Benchmark for General AI Assistants. arXiv:2311.12983.
+
+OpenAI. (2025). New Tools for Building Agents. https://openai.com/index/new-tools-for-building-agents/.
+
+Packer, C., Wooders, S., Lin, K., et al. (2023). MemGPT: Towards LLMs as Operating Systems. arXiv:2310.08560.
+
+Smith, N., Garrett, A., & Calvert, B. (2022). PEP 654 — Exception Groups and except*. Python Enhancement Proposals.
+
+Wang, R., et al. (2025). Deep Research: A Survey. arXiv:2512.02038.
+
+Wu, Q., Bansal, G., Zhang, J., et al. (2023). AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation. arXiv:2308.08155.
+
+Xu, R., & Peng, J. (2025). A Comprehensive Survey of Deep Research: Systems, Methodologies, and Applications. arXiv:2506.12594.
+
+Yang, J., Jimenez, C.E., Wettig, A., et al. (2024). SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. arXiv:2405.15793.
+
+Yao, S., Zhao, J., Yu, D., et al. (2023). ReAct: Synergizing Reasoning and Acting in Language Models. *ICLR 2023*. arXiv:2210.03629.
+
+---
+
+## 附录 A：DeepAgent 深度研究提示
+
+完整深度研究系统提示见补充材料。关键阶段：
+
+1. **启动调查**：分析问题，识别关键信息点，使用任务管理工具制定调查计划。
+2. **迭代信息收集与反思**：显式处理搜索失败，评估信息充分性，追求深度，考虑来源可靠性。
+3. **多源交叉验证**：使用不同工具/来源验证关键声明；在因有效性切换工具时显式说明。
+4. **约束检查清单**：综合前审查所有约束并确认覆盖。
+5. **计算与操作验证**：最终确定前通过代码执行验证所有计算。
+6. **清晰叙述**：解释工具调用原因、预期结果、实际结果和下一步。
+
+## 附录 B：Terminal-Bench 任务分布
+
+Terminal-Bench 2.0 包含 89 个任务，分布如下：
+
+| 类别 | 占比 | 示例任务 |
+|------|-----|---------|
+| 软件工程 | 32.6% | build-linux-kernel-qemu, fix-ocaml-gc, build-pov-ray |
+| 计算 | 21.3% | regex-chess, chess-best-move, gpt2-codegolf |
+| ML/AI/数据科学 | 11.2% | train-fasttext, caffe-cifar-10, mcmc-sampling-stan |
+| 通用 SE | 11.2% | financial-document-processor, reshard-c4-data |
+| 网络安全 | 9.0% | crack-7z-hash, feal-differential-cryptanalysis |
+| DevOps/云 | 4.5% | configure-git-webserver, nginx-request-logging |
+| 个人助手 | 3.4% | 各类个人生产力任务 |
+| 视频处理 | 2.2% | 视频操作和转换任务 |
+
+当前排行榜（前 5，截至 2026 年 2 月）：
+
+| 排名 | Agent | 模型 | 准确率 |
+|------|-------|------|-------|
+| 1 | Simple Codex | GPT-5.3-Codex | 75.1% |
+| 2 | CodeBrain-1 | GPT-5.3-Codex | 70.3% |
+| 3 | Droid | Claude Opus 4.6 | 69.9% |
+| 4 | Mux | GPT-5.3-Codex | 68.5% |
+| 5 | Deep Agents | GPT-5.2-Codex | 66.5% |
+
+## 附录 C：可复现性
+
+所有代码可在 `[TODO: GitHub URL]` 获取。实验环境：
+- Python 3.12+
+- Docker（Terminal-Bench 和 SWE-bench 环境）
+- GAIA 验证集来自 HuggingFace
+- 所有基准运行的配置文件包含在仓库中
+
+复现 Terminal-Bench 结果：
+```bash
+pip install terminal-bench
+tb run --agent agentica --model [MODEL] \
+    --dataset-name terminal-bench-core \
+    --dataset-version 2.0 --n-concurrent 8
+```

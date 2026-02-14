@@ -7,19 +7,17 @@ This module contains methods for session management, storage operations,
 and memory persistence.
 """
 
-import json
 import asyncio
 import functools
 from typing import (
     Any,
     Dict,
-    List,
     Optional,
 )
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
-from agentica.memory import AgentMemory, SessionSummary, Memory
+from agentica.memory import AgentMemory
 from agentica.agent_session import AgentSession
 from agentica.db.base import SessionRow
 
@@ -255,36 +253,6 @@ class SessionMixin:
         self._agent_session = None
         self.memory = AgentMemory()
         logger.info(f"Agent reset. New session_id: {self.session_id}")
-
-    def load_user_memories(self) -> None:
-        """Load user memories from the database"""
-        if self.memory is None:
-            return
-
-        logger.warning("load_user_memories is deprecated. Use Workspace.read_memory() instead.")
-        try:
-            self.memory.load_user_memories()
-        except Exception as e:
-            logger.warning(f"Failed to load user memories: {e}")
-
-    def get_user_memories(self) -> Optional[List[Memory]]:
-        """Get user memories from memory"""
-        if self.memory is None:
-            return None
-
-        logger.warning("get_user_memories is deprecated. Use Workspace.read_memory() instead.")
-        return self.memory.memories
-
-    def clear_user_memories(self) -> None:
-        """Clear user memories from memory and database"""
-        if self.memory is None:
-            return
-
-        logger.warning("clear_user_memories is deprecated. Memories are now managed via Workspace.")
-        try:
-            self.memory.clear_memories()
-        except Exception as e:
-            logger.warning(f"Failed to clear user memories: {e}")
 
     async def rename(self, name: str) -> None:
         """Rename the Agent and save to storage"""

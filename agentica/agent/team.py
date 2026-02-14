@@ -158,10 +158,6 @@ class TeamMixin:
             if self.tool_config.update_knowledge:
                 tools.append(self.add_to_knowledge)
 
-        # Add memory update tool if user memories are enabled
-        if self.memory_config.enable_user_memories and self.memory is not None and self.memory.create_user_memories:
-            tools.append(self.update_memory)
-
         # Add team transfer functions if team is present and transfer instructions are enabled
         if self.has_team() and self.team_config.add_transfer_instructions:
             for member in self.team:

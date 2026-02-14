@@ -48,7 +48,7 @@ def create_deep_research_agent():
         include_file_tools=True,
         # Debug
         markdown=True,
-        debug_mode=True,
+        debug=True,
     )
 
 

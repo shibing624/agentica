@@ -48,7 +48,7 @@ from agentica import DeepAgent, OpenAIChat
 agent = DeepAgent(
     model=OpenAIChat(id="gpt-4o"),
     work_dir="./project",  # 工作目录
-    debug_mode=True,       # 调试模式
+    debug=True,       # 调试模式
 )
 ```
 
@@ -253,7 +253,7 @@ export AGENTICA_WORKSPACE_DIR="~/.agentica/workspace"
 
 1. **使用 DeepAgent** - 大多数任务推荐，内置必要工具
 2. **设置 work_dir** - 控制文件操作范围
-3. **启用 debug_mode** - 开发时查看工具调用
+3. **启用 debug** - 开发时查看工具调用
 4. **使用 Workspace** - 持久化跨会话记忆
 5. **创建 Skills** - 复杂重复工作流封装为技能
 

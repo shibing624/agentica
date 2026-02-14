@@ -28,7 +28,7 @@ async def code_execution_demo():
         model=OpenAIChat(),
         name="CodeRunner",
         description="A code execution assistant",
-        debug_mode=True,
+        debug=True,
     )
 
     # Simple calculation
@@ -53,7 +53,7 @@ async def code_analysis_demo():
             "You are an expert code reviewer.",
             "Analyze code for bugs, performance issues, and best practices. last run it and fix the bug.",
         ],
-        debug_mode=True,
+        debug=True,
     )
 
     buggy_code = '''
@@ -91,7 +91,7 @@ async def code_generation_demo():
             "IMPORTANT: Use Python syntax correctly - use `None` (not `null`), `True`/`False` (not `true`/`false`).",
             "Before executing code, verify the syntax is correct Python.",
         ],
-        debug_mode=True,
+        debug=True,
     )
 
     response = await agent.run(
@@ -109,7 +109,7 @@ async def lint_fix_demo():
 
     agent = DeepAgent(
         model=OpenAIChat(),
-        debug_mode=True,
+        debug=True,
     )
 
     demo_dir = os.path.dirname(os.path.abspath(__file__))

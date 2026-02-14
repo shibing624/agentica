@@ -76,7 +76,6 @@ class MemoryConfig:
     load_workspace_context: bool = True
     load_workspace_memory: bool = True
     memory_days: int = 2
-    enable_user_memories: bool = False
 
 
 @dataclass

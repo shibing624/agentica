@@ -220,35 +220,6 @@ class PromptsMixin:
         if workspace_memory:
             system_message_lines.append(f"## Workspace Memory\n\n{workspace_memory}\n")
 
-        if self.memory.create_user_memories:
-            if self.memory.memories and len(self.memory.memories) > 0:
-                system_message_lines.append(
-                    "You have access to memories from previous interactions with the user that you can use:"
-                )
-                system_message_lines.append("### Memories from previous interactions")
-                system_message_lines.append("\n".join([f"- {memory.memory}" for memory in self.memory.memories]))
-                system_message_lines.append(
-                    "\nNote: this information is from previous interactions and may be updated in this conversation. "
-                    "You should always prefer information from this conversation over the past memories."
-                )
-                if self.tool_config.support_tool_calls:
-                    system_message_lines.append(
-                        "If you need to update the long-term memory, use the `update_memory` tool.")
-            else:
-                system_message_lines.append(
-                    "You have the capability to retain memories from previous interactions with the user, "
-                    "but have not had any interactions with the user yet."
-                )
-                if self.tool_config.support_tool_calls:
-                    system_message_lines.append(
-                        "If the user asks about previous memories, you can let them know that you dont have any memory "
-                        "about the user yet because you have not had any interactions with them yet, "
-                        "but can add new memories using the `update_memory` tool."
-                    )
-            if self.tool_config.support_tool_calls:
-                system_message_lines.append("If you use the `update_memory` tool, "
-                                            "remember to pass on the response to the user.\n")
-
         if self.memory.create_session_summary:
             if self.memory.summary is not None:
                 system_message_lines.append("Here is a brief summary of your previous interactions if it helps:")
@@ -376,14 +347,6 @@ class PromptsMixin:
         workspace_memory = await self.get_workspace_memory_prompt()
         if workspace_memory:
             system_message_lines.append(f"\n## Workspace Memory\n\n{workspace_memory}")
-
-        if self.memory.create_user_memories:
-            if self.memory.memories and len(self.memory.memories) > 0:
-                system_message_lines.append("\n## Memories from Previous Interactions")
-                system_message_lines.append("\n".join([f"- {memory.memory}" for memory in self.memory.memories]))
-                system_message_lines.append(
-                    "\n*Note: Prefer information from this conversation over past memories.*"
-                )
 
         if self.memory.create_session_summary and self.memory.summary is not None:
             system_message_lines.append("\n## Summary of Previous Interactions")
@@ -689,12 +652,6 @@ class PromptsMixin:
         workspace_memory = await self.get_workspace_memory_prompt()
         if workspace_memory:
             system_message_lines.append(f"\n## Workspace Memory\n\n{workspace_memory}")
-
-        if self.memory.create_user_memories:
-            if self.memory.memories and len(self.memory.memories) > 0:
-                system_message_lines.append("\n## Memories from Previous Interactions")
-                system_message_lines.append("\n".join([f"- {memory.memory}" for memory in self.memory.memories]))
-                system_message_lines.append("\n*Note: Prefer information from this conversation over past memories.*")
 
         if self.memory.create_session_summary and self.memory.summary is not None:
             system_message_lines.append("\n## Summary of Previous Interactions")

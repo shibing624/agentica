@@ -53,7 +53,7 @@ from agentica import Agent
 | `num_history_responses` | `int` | `3` | 历史响应数量 |
 | `add_references` | `bool` | `False` | 添加知识库引用 |
 | `markdown` | `bool` | `False` | Markdown 格式输出 |
-| `debug_mode` | `bool` | `False` | 调试模式 |
+| `debug` | `bool` | `False` | 调试模式 |
 
 #### 方法
 

@@ -557,7 +557,7 @@ if __name__ == '__main__':
         name="TestDeepAgent",
         description="A test deep agent",
         enable_deep_research=True,
-        debug_mode=True,
+        debug=True,
     )
 
     print(f"Created: {agent}")

@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.agent import Agent
 from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
-from agentica.memory import AgentMemory, Memory
+from agentica.memory import AgentMemory
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
 from agentica.run_response import RunResponse, RunEvent

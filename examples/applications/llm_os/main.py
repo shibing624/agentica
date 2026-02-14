@@ -71,13 +71,13 @@ INTRODUCTION = dedent("""\
 
 def create_llm_os(
         model_id: str = DEFAULT_MODEL,
-        debug_mode: bool = False,
+        debug: bool = False,
 ) -> DeepAgent:
     """创建LLM OS实例
 
     Args:
         model_id: 模型ID
-        debug_mode: 是否开启调试模式
+        debug: 是否开启调试模式
 
     Returns:
         DeepAgent实例
@@ -117,7 +117,7 @@ def create_llm_os(
         # 显示配置
         markdown=True,
         introduction=INTRODUCTION,
-        debug_mode=debug_mode,
+        debug=debug,
     )
 
     return llm_os
@@ -130,7 +130,7 @@ def init_session_state():
         "llm_os": None,
         "llm_os_session_id": None,
         "messages": [{"role": "assistant", "content": "Ask me questions..."}],
-        "debug_mode": False,
+        "debug": False,
         "url_scrape_key": 0,
         "file_uploader_key": 100,
     }
@@ -160,16 +160,16 @@ def render_sidebar():
         restart_agent()
 
     # Debug模式
-    debug_mode = st.sidebar.checkbox(
+    debug = st.sidebar.checkbox(
         "Debug Mode",
-        value=st.session_state["debug_mode"],
+        value=st.session_state["debug"],
         help="Enable debug mode to see detailed logs"
     )
-    if st.session_state["debug_mode"] != debug_mode:
-        st.session_state["debug_mode"] = debug_mode
+    if st.session_state["debug"] != debug:
+        st.session_state["debug"] = debug
         restart_agent()
 
-    return llm_id, debug_mode
+    return llm_id, debug
 
 
 def render_knowledge_base_controls(llm_os: DeepAgent):
@@ -230,7 +230,7 @@ def render_knowledge_base_controls(llm_os: DeepAgent):
             st.sidebar.success("Knowledge base cleared")
 
 
-def render_session_controls(llm_os: DeepAgent, llm_id: str, debug_mode: bool):
+def render_session_controls(llm_os: DeepAgent, llm_id: str, debug: bool):
     """渲染会话控制组件"""
     st.sidebar.markdown("### Sessions")
 
@@ -250,14 +250,14 @@ def main():
     init_session_state()
 
     # 侧边栏配置
-    llm_id, debug_mode = render_sidebar()
+    llm_id, debug = render_sidebar()
 
     # 获取或创建agent
     if st.session_state["llm_os"] is None:
         logger.info(f"Creating new LLM OS with model: {llm_id}")
         st.session_state["llm_os"] = create_llm_os(
             model_id=llm_id,
-            debug_mode=debug_mode,
+            debug=debug,
         )
 
     llm_os: DeepAgent = st.session_state["llm_os"]
@@ -296,7 +296,7 @@ def main():
     render_knowledge_base_controls(llm_os)
 
     # 会话控制
-    render_session_controls(llm_os, llm_id, debug_mode)
+    render_session_controls(llm_os, llm_id, debug)
 
 
 if __name__ == '__main__':

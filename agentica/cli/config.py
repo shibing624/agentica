@@ -239,7 +239,7 @@ def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
         "tools": extra_tools,
         "add_datetime_to_instructions": True,
         "add_history_to_messages": True,
-        "debug_mode": agent_config["debug_mode"],
+        "debug": agent_config["debug"],
         "workspace": workspace,
     }
 

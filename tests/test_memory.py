@@ -5,15 +5,12 @@
 """
 import sys
 import unittest
-from unittest.mock import Mock, patch
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.memory import (
     AgentMemory,
-    Memory,
-    MemoryManager,
     AgentRun,
     SessionSummary,
     WorkflowMemory,
@@ -26,36 +23,6 @@ from agentica.memory.agent_memory import (
 )
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
-
-
-class TestMemory(unittest.TestCase):
-    """Test cases for Memory model."""
-
-    def test_memory_creation(self):
-        """Test Memory creation."""
-        memory = Memory(memory="User likes Python")
-        self.assertEqual(memory.memory, "User likes Python")
-        self.assertIsNone(memory.input_text)
-
-    def test_memory_with_input_text(self):
-        """Test Memory with input_text."""
-        memory = Memory(memory="User likes Python", input_text="What do you like?")
-        self.assertEqual(memory.memory, "User likes Python")
-        self.assertEqual(memory.input_text, "What do you like?")
-
-    def test_memory_to_dict(self):
-        """Test Memory to_dict method."""
-        memory = Memory(memory="Test memory")
-        result = memory.to_dict()
-        self.assertIsInstance(result, dict)
-        self.assertEqual(result["memory"], "Test memory")
-
-    def test_memory_to_str(self):
-        """Test Memory to_str method."""
-        memory = Memory(memory="Test memory")
-        result = memory.to_str()
-        self.assertIsInstance(result, str)
-        self.assertIn("memory", result)
 
 
 class TestSessionSummary(unittest.TestCase):
@@ -123,7 +90,6 @@ class TestAgentMemory(unittest.TestCase):
         self.assertEqual(len(memory.runs), 0)
         self.assertEqual(len(memory.messages), 0)
         self.assertFalse(memory.create_session_summary)
-        self.assertFalse(memory.create_user_memories)
 
     def test_add_message(self):
         """Test adding message to AgentMemory."""
@@ -166,31 +132,6 @@ class TestAgentMemory(unittest.TestCase):
         memory.clear()
         self.assertEqual(len(memory.messages), 0)
         self.assertEqual(len(memory.runs), 0)
-
-
-class TestAgentMemoryWithDb(unittest.TestCase):
-    """Test cases for AgentMemory with database."""
-
-    def test_memory_db_attribute(self):
-        """Test AgentMemory db attribute can be set."""
-        memory = AgentMemory()
-        self.assertIsNone(memory.db)
-
-
-class TestMemoryManager(unittest.TestCase):
-    """Test cases for MemoryManager class."""
-
-    def test_default_initialization(self):
-        """Test MemoryManager default initialization."""
-        manager = MemoryManager()
-        self.assertEqual(manager.mode, "rule")
-        self.assertIsNone(manager.model)
-        self.assertIsNone(manager.db)
-
-    def test_mode_setting(self):
-        """Test MemoryManager mode setting."""
-        manager = MemoryManager(mode="model")
-        self.assertEqual(manager.mode, "model")
 
 
 class TestWorkflowMemory(unittest.TestCase):

@@ -14,6 +14,8 @@ Usage:
 """
 
 
+import asyncio
+import inspect
 import sys
 from typing import TYPE_CHECKING, Optional
 
@@ -146,7 +148,10 @@ class ACPServer:
         
         # Handle the method
         try:
-            result = handler(params)
+            if inspect.iscoroutinefunction(handler):
+                result = asyncio.get_event_loop().run_until_complete(handler(params))
+            else:
+                result = handler(params)
             self._protocol.send_success(request_id, result)
         except Exception as e:
             logger.error(f"Error handling method {method}: {e}")

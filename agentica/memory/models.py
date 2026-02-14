@@ -4,7 +4,6 @@
 @description: Memory data models
 """
 
-from enum import Enum
 from typing import Dict, List, Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -35,34 +34,3 @@ class SessionSummary(BaseModel):
 
     def to_json(self) -> str:
         return self.model_dump_json(exclude_none=True, indent=2)
-
-
-class Memory(BaseModel):
-    """Model for Model memories"""
-
-    memory: str
-    input_text: Optional[str] = None
-
-    def to_dict(self) -> Dict[str, Any]:
-        return self.model_dump(exclude_none=True)
-
-    def to_str(self) -> str:
-        attributes = self.model_dump(exclude_none=True)
-        attributes_str = ";".join(f"{key}: {value}" for key, value in attributes.items())
-        return attributes_str
-
-
-class MemorySearchResponse(BaseModel):
-    """Model for Memory Search Response used in agentic search."""
-
-    memory_ids: List[str] = Field(
-        ...,
-        description="The IDs of the memories that are most semantically similar to the query.",
-    )
-
-
-class MemoryRetrieval(str, Enum):
-    last_n = "last_n"
-    first_n = "first_n"
-    keyword = "keyword"
-    agentic = "agentic"

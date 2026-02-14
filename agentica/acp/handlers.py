@@ -222,7 +222,7 @@ class ACPHandlers:
             "tools": [tool.to_dict() for tool in self._tools],
         }
     
-    def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_tools_call(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle tools/call request"""
         if not self._initialized:
             raise RuntimeError("Server not initialized")
@@ -230,12 +230,12 @@ class ACPHandlers:
         tool_call = ACPToolCall.from_dict(params)
         
         # Execute the tool
-        result = self._execute_tool(tool_call)
+        result = await self._execute_tool(tool_call)
         
         return result.to_dict()
     
-    def _execute_tool(self, tool_call: ACPToolCall) -> ACPToolResult:
-        """Execute a tool call"""
+    async def _execute_tool(self, tool_call: ACPToolCall) -> ACPToolResult:
+        """Execute a tool call (async, since all builtin tools are async)"""
         tool_name = tool_call.name
         arguments = tool_call.arguments
         
@@ -244,19 +244,19 @@ class ACPHandlers:
             if tool_name in ("read_file", "write_file", "edit_file", "ls", "glob", "grep"):
                 file_tool = self._get_file_tool()
                 method = getattr(file_tool, tool_name)
-                result = method(**arguments)
+                result = await method(**arguments)
                 return ACPToolResult(content=result)
             
             # Shell execution
             elif tool_name == "execute":
                 execute_tool = self._get_execute_tool()
-                result = execute_tool.execute(**arguments)
+                result = await execute_tool.execute(**arguments)
                 return ACPToolResult(content=result)
             
             # Web search
             elif tool_name == "web_search":
                 web_tool = self._get_web_search_tool()
-                result = web_tool.web_search(**arguments)
+                result = await web_tool.web_search(**arguments)
                 return ACPToolResult(content=result)
             
             else:
@@ -272,7 +272,7 @@ class ACPHandlers:
                 isError=True,
             )
     
-    def handle_agent_execute(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def handle_agent_execute(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Handle agent/execute request"""
         if not self._initialized:
             raise RuntimeError("Server not initialized")
@@ -283,7 +283,7 @@ class ACPHandlers:
         
         try:
             agent = self._get_or_create_agent()
-            response = agent.run(exec_params.task)
+            response = await agent.run(exec_params.task)
             
             return {
                 "content": response.content if response else "No response",

@@ -29,7 +29,7 @@
 | `add_history_to_messages` | 5 | 多轮对话 |
 | `knowledge` | 5 | RAG |
 | `search_knowledge` | 5 | RAG 搜索 |
-| `debug_mode` | 5 | 调试 |
+| `debug` | 5 | 调试 |
 
 ### 1.3 核心问题
 
@@ -109,7 +109,7 @@ Agent V2 (~22 参数)
 │   ├── output_language          # 输出语言
 │   ├── markdown                 # Markdown 格式
 │   ├── structured_outputs       # 结构化输出模式
-│   ├── debug_mode               # 调试模式
+│   ├── debug               # 调试模式
 │   └── monitoring               # 监控（Langfuse）
 │
 ├── 第三层：打包配置（高级用户）
@@ -174,7 +174,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     output_language: Optional[str] = None
     markdown: bool = False
     structured_outputs: bool = False
-    debug_mode: bool = False
+    debug: bool = False
     monitoring: bool = False
 
     # ============================
@@ -436,7 +436,7 @@ class Agent:
 | `add_knowledge_references_to_prompt` | 兼容别名 | 用 `ToolConfig.add_references` |
 | `output_model` | 兼容别名 | 用 `response_model` |
 | `output_file` | 兼容别名 | 用 `RunConfig.save_response_to_file` |
-| `debug` | 兼容别名 | 用 `debug_mode` |
+| `debug` | 兼容别名 | 用 `debug` |
 | `enable_user_memories` | 已废弃 | Workspace 替代 |
 | `images` | 构造时不需要 | `run(images=...)` |
 | `videos` | 构造时不需要 | `run(videos=...)` |
@@ -747,7 +747,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         output_language: Optional[str] = None,
         markdown: bool = False,
         structured_outputs: bool = False,
-        debug_mode: bool = False,
+        debug: bool = False,
         monitoring: bool = False,
         # ---- 打包配置 ----
         prompt_config: Optional[PromptConfig] = None,

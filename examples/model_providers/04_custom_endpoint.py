@@ -35,7 +35,7 @@ async def main():
     
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
-        debug_mode=True,
+        debug=True,
     )
     
     await agent.print_response_stream("你是谁？详细介绍自己")

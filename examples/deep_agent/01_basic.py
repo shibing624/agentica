@@ -159,7 +159,7 @@ async def full_config_example():
         tool_call_limit=40,
         # Output
         markdown=True,
-        debug_mode=True,
+        debug=True,
     )
 
     print(f"Tools count: {len(agent.tools)}")

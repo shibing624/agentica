@@ -26,7 +26,7 @@ async def main():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         instructions="你是一个专业的中国历史专家，请用简洁的语言回答问题。",
-        debug_mode=True,
+        debug=True,
     )
 
     await agent.print_response_stream("介绍一下唐朝")
@@ -38,7 +38,7 @@ async def main():
 
     agent2 = Agent(
         model=OpenAIChat(id="gpt-4o-mini", stop="</answer>"),
-        debug_mode=True,
+        debug=True,
     )
 
     response = await agent2.run(

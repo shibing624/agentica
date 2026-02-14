@@ -66,7 +66,7 @@ def main():
     agent = Agent(
         knowledge=knowledge,
         search_knowledge=True,
-        debug_mode=True,
+        debug=True,
     )
 
     print("\n" + "=" * 60)

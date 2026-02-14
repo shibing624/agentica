@@ -41,7 +41,7 @@ async def main():
             langfuse_tags=["demo", "basic"],
         ),
         prompt_config=PromptConfig(system_prompt="You are a helpful assistant."),
-        debug_mode=True,
+        debug=True,
     )
 
     response = await agent.run("讲个笑话")
@@ -74,7 +74,7 @@ async def main():
         ),
         tools=[BaiduSearchTool()],
         prompt_config=PromptConfig(system_prompt="You are a research assistant. Use search tools to find information."),
-        debug_mode=True,
+        debug=True,
     )
 
     response = await agent_with_tools.run("What are the latest developments in AI agents in 2025? 中文回答")

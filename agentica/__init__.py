@@ -58,11 +58,6 @@ from agentica.model.response import ModelResponse, FileType
 from agentica.memory import (
     AgentRun,
     SessionSummary,
-    Memory,
-    MemorySearchResponse,
-    MemoryManager,
-    MemoryClassifier,
-    MemoryRetrieval,
     MemorySummarizer,
     AgentMemory,
     WorkflowRun,
@@ -478,11 +473,6 @@ __all__ = [
     # memory
     "AgentRun",
     "SessionSummary",
-    "Memory",
-    "MemorySearchResponse",
-    "MemoryManager",
-    "MemoryClassifier",
-    "MemoryRetrieval",
     "MemorySummarizer",
     "AgentMemory",
     "WorkflowRun",
