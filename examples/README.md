@@ -89,14 +89,15 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 
 ### 5. 记忆系统 (`memory/`)
 
-会话记忆、长期记忆和上下文压缩。
+会话记忆、长期记忆、自动记忆和上下文压缩。
 
 | # | 示例 | 描述 | 关键概念 |
 |---|------|------|----------|
-| 01 | [session_memory.py](memory/01_session_memory.py) | 会话记忆 + 用户记忆（DB 持久化） | `db=SqliteDb(...)`, `enable_user_memories` |
-| 02 | [long_term_memory.py](memory/02_long_term_memory.py) | 长期记忆 | `SqliteDb`, `session_id` |
-| 03 | [compression.py](memory/03_compression.py) | Token 压缩（对长对话自动截断） | `CompressionManager`, token budget |
-| 04 | [recommended_memory.py](memory/03_recommended_memory.py) | 推荐的记忆方案 | `Workspace` 文件记忆 |
+| 01 | [session_history.py](memory/01_session_history.py) | 会话历史：无历史 vs 多轮对话 vs 会话摘要 | `add_history_to_messages`, `AgentMemory.with_summary()` |
+| 02 | [agent_session.py](memory/02_agent_session.py) | Agent-as-Session：隔离、共享记忆、窗口控制 | `AgentMemory`, `num_history_responses`, 共享 memory |
+| 03 | [compression.py](memory/03_compression.py) | Token 压缩（对长对话自动截断） | `CompressionManager`, `ToolConfig` |
+| 04 | [workspace_memory.py](memory/04_workspace_memory.py) | Workspace 文件记忆：存取、多用户隔离、搜索 | `Workspace`, `MEMORY.md`, `save_memory()` |
+| 05 | [auto_memory.py](memory/05_auto_memory.py) | **LLM 自动记忆**：模型自主判断保存 → 新会话自动加载 | `BuiltinMemoryTool`, LLM 自主 tool call |
 
 ### 6. 工作区 (`workspace/`)
 

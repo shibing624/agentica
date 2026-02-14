@@ -1652,10 +1652,12 @@ examples/
 │   ├── 02_output_guardrail.py
 │   └── 03_tool_guardrail.py
 │
-├── memory/             # 🧠 记忆系统 (3个示例)
-│   ├── 01_session_memory.py
-│   ├── 02_long_term_memory.py
-│   └── 03_compression.py
+├── memory/             # 🧠 记忆系统 (5个示例)
+│   ├── 01_session_history.py
+│   ├── 02_agent_session.py
+│   ├── 03_compression.py
+│   ├── 04_workspace_memory.py
+│   └── 05_auto_memory.py
 │
 ├── rag/                # 📚 RAG检索增强 (5个示例)
 │   ├── 01_naive_rag.py
@@ -1718,7 +1720,7 @@ examples/
 ```
 
 **学习路径**：
-1. 入门：`basic/` → `tools/01_custom_tool.py` → `memory/01_session_memory.py`
+1. 入门：`basic/` → `tools/01_custom_tool.py` → `memory/01_session_history.py`
 2. 进阶：`agent_patterns/` → `guardrails/` → `rag/02_advanced_rag.py`
 3. 高级：`workflow/` → `temporal/` → `applications/llm_os/`
 

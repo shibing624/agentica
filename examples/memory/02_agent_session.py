@@ -1,20 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Agent-as-Session demo - Agent instance IS the session
+@description: Agent-as-Session demo — Agent instance IS the session
 
-This example demonstrates Agentica's "Agent-as-Session" pattern:
-- Agent instance holds its own AgentMemory, no separate Session object needed
-- Each run() automatically records to memory.runs
-- History injection via add_history_to_messages=True
-- Compared to OpenAI Agents SDK's Runner+Session separation, this is more elegant
-
-Key advantages over OpenAI Agents SDK:
-1. No separate Session/Runner objects - Agent IS the session
-2. Automatic history tracking via AgentMemory.runs
-3. Fine-grained control: num_history_responses, max_tokens budget
-4. Tool result truncation for older runs to save context
-5. Message injection happens transparently in get_messages_for_run()
+Demonstrates:
+1. Basic multi-turn — automatic history tracking via AgentMemory.runs
+2. Session isolation — separate Agent instances = independent sessions
+3. Resume conversation — Agent memory persists across runs
+4. Shared memory handoff — transfer context between agents
+5. History window control — sliding window for context budget
 """
 import asyncio
 import sys
@@ -238,44 +232,11 @@ async def demo5_history_control():
 
 
 async def main():
-    print("""
-+==============================================================+
-|          Agentica: Agent-as-Session Pattern Demo              |
-+==============================================================+
-| In Agentica, the Agent instance IS the session.              |
-| No separate Session/Runner objects needed.                   |
-|                                                              |
-| OpenAI SDK:  result = Runner.run(agent, input, session=...)  |
-| Agentica:    result = await agent.run(input)  # that's it!   |
-+==============================================================+
-""")
-
     await demo1_basic_session()
     await demo2_session_isolation()
     await demo3_resume_conversation()
     await demo4_shared_memory()
     await demo5_history_control()
-
-    print("\n" + "=" * 60)
-    print("Summary: Agent-as-Session vs OpenAI Runner+Session")
-    print("=" * 60)
-    print("""
-+---------------------------+-------------------------------------+
-| OpenAI Agents SDK         | Agentica                            |
-+---------------------------+-------------------------------------+
-| Runner.run(agent, input,  | agent.run(input)                    |
-|   session=Session())      |   # Agent IS the session            |
-+---------------------------+-------------------------------------+
-| Session stores messages   | AgentMemory.runs stores all history |
-| Need to pass session obj  | Memory is built into Agent          |
-| Manual message injection  | Automatic via add_history_to_messages|
-| No token budget control   | get_messages_from_last_n_runs       |
-|                           |   supports max_tokens budget        |
-| No tool result truncation | Auto-truncate old tool results      |
-| Handoff needs session mgmt| Share AgentMemory between agents    |
-+---------------------------+-------------------------------------+
-""")
-
 
 if __name__ == "__main__":
     asyncio.run(main())
