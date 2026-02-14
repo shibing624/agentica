@@ -90,20 +90,20 @@ pip install .
 
 2.  **最初のエージェントを実行しましょう！** この例では、天気をチェックできるエージェントを作成します。
 
-```python
+    ```python
+    import asyncio
     from agentica import Agent, ZhipuAI, WeatherTool
-    from agentica.agents import PromptConfig
 
-    # モデルと天気ツールでエージェントを初期化
-    agent = Agent(
-        model=ZhipuAI(),
-        tools=[WeatherTool()],
-        # 「明日」のような質問のためにエージェントに時間感覚を与える
-        prompt_config=PromptConfig(add_datetime_to_instructions=True)
-    )
+    async def main():
+        agent = Agent(
+            model=ZhipuAI(),
+            tools=[WeatherTool()],
+        )
+        result = await agent.run("明日の北京の天気はどうですか？")
+        print(result.content)
 
-    # エージェントに質問する（同期モード）
-    agent.print_response_sync("明日の北京の天気はどうですか？")
+    if __name__ == "__main__":
+        asyncio.run(main())
     ```
 
     **出力：**

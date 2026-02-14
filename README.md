@@ -91,19 +91,19 @@ pip install .
 2.  **运行您的第一个智能体！** 这个例子创建了一个可以查询天气的智能体。
 
     ```python
+    import asyncio
     from agentica import Agent, ZhipuAI, WeatherTool
-    from agentica.agents import PromptConfig
 
-    # 初始化一个带模型和天气工具的智能体
-    agent = Agent(
-        model=ZhipuAI(),
-        tools=[WeatherTool()],
-        # 为智能体提供时间概念，以便回答"明天"等问题
-        prompt_config=PromptConfig(add_datetime_to_instructions=True)
-    )
+    async def main():
+        agent = Agent(
+            model=ZhipuAI(),
+            tools=[WeatherTool()],
+        )
+        result = await agent.run("明天北京天气怎么样？")
+        print(result.content)
 
-    # 向智能体提问（同步方式）
-    agent.print_response_sync("明天北京天气怎么样？")
+    if __name__ == "__main__":
+        asyncio.run(main())
     ```
 
     **输出：**

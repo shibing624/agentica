@@ -23,15 +23,17 @@ pip install -U agentica
 ```python
 import asyncio
 from agentica import Agent, ZhipuAI, WeatherTool
-from agentica.agents import PromptConfig
 
-agent = Agent(
-    model=ZhipuAI(),  # or OpenAIChat, DeepSeek, Moonshot, etc.
-    tools=[WeatherTool()],
-    prompt_config=PromptConfig(add_datetime_to_instructions=True)
-)
+async def main():
+    agent = Agent(
+        model=ZhipuAI(),  # or OpenAIChat, DeepSeek, Moonshot, etc.
+        tools=[WeatherTool()],
+    )
+    result = await agent.run("明天北京天气怎么样？")
+    print(result.content)
 
-asyncio.run(agent.print_response("明天北京天气怎么样？"))
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## 核心组件

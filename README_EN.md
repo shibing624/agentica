@@ -90,20 +90,20 @@ pip install .
 
 2.  **Run your first agent!** This example creates an agent that can check the weather.
 
-```python
+    ```python
+    import asyncio
     from agentica import Agent, ZhipuAI, WeatherTool
-    from agentica.agents import PromptConfig
 
-    # Initialize an agent with a model and a weather tool
-    agent = Agent(
-        model=ZhipuAI(),
-        tools=[WeatherTool()],
-        # Give the agent a sense of time for questions like "tomorrow"
-        prompt_config=PromptConfig(add_datetime_to_instructions=True)
-    )
+    async def main():
+        agent = Agent(
+            model=ZhipuAI(),
+            tools=[WeatherTool()],
+        )
+        result = await agent.run("What's the weather like in Beijing tomorrow?")
+        print(result.content)
 
-    # Ask the agent a question (sync mode)
-    agent.print_response_sync("What's the weather like in Beijing tomorrow?")
+    if __name__ == "__main__":
+        asyncio.run(main())
     ```
 
     **Output:**
