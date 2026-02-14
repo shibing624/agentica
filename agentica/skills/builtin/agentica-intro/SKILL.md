@@ -23,11 +23,12 @@ pip install -U agentica
 ```python
 import asyncio
 from agentica import Agent, ZhipuAI, WeatherTool
+from agentica.agents import PromptConfig
 
 agent = Agent(
     model=ZhipuAI(),  # or OpenAIChat, DeepSeek, Moonshot, etc.
     tools=[WeatherTool()],
-    add_datetime_to_instructions=True
+    prompt_config=PromptConfig(add_datetime_to_instructions=True)
 )
 
 asyncio.run(agent.print_response("明天北京天气怎么样？"))

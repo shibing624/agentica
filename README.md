@@ -92,17 +92,18 @@ pip install .
 
     ```python
     from agentica import Agent, ZhipuAI, WeatherTool
+    from agentica.agents import PromptConfig
 
     # 初始化一个带模型和天气工具的智能体
     agent = Agent(
         model=ZhipuAI(),
         tools=[WeatherTool()],
         # 为智能体提供时间概念，以便回答"明天"等问题
-        add_datetime_to_instructions=True  
+        prompt_config=PromptConfig(add_datetime_to_instructions=True)
     )
 
-    # 向智能体提问
-    agent.print_response("明天北京天气怎么样？")
+    # 向智能体提问（同步方式）
+    agent.print_response_sync("明天北京天气怎么样？")
     ```
 
     **输出：**

@@ -610,19 +610,7 @@ agent = Agent(
 ### 6.5 高级 Prompt 定制
 
 ```python
-# V1 — 所有参数平铺
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),
-    instructions="...",
-    prevent_hallucinations=True,
-    prevent_prompt_leakage=True,
-    add_datetime_to_instructions=True,
-    output_language="zh",
-    markdown=True,
-    system_message_role="system",
-)
-
-# V2 — 常用的保留顶层，其余打包
+# V1 — 通过 prompt_config 打包
 agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
     instructions="...",
@@ -634,6 +622,14 @@ agent = Agent(
         add_datetime_to_instructions=True,
         system_message_role="system",
     ),
+)
+
+# 常用配置保留顶层
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o"),
+    instructions="...",
+    output_language="zh",
+    markdown=True,
 )
 ```
 

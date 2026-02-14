@@ -92,17 +92,18 @@ pip install .
 
 ```python
     from agentica import Agent, ZhipuAI, WeatherTool
+    from agentica.agents import PromptConfig
 
     # モデルと天気ツールでエージェントを初期化
     agent = Agent(
-        model=ZhipuAI(), 
+        model=ZhipuAI(),
         tools=[WeatherTool()],
         # 「明日」のような質問のためにエージェントに時間感覚を与える
-        add_datetime_to_instructions=True  
+        prompt_config=PromptConfig(add_datetime_to_instructions=True)
     )
 
-    # エージェントに質問する
-    agent.print_response("明日の北京の天気はどうですか？")
+    # エージェントに質問する（同期モード）
+    agent.print_response_sync("明日の北京の天気はどうですか？")
     ```
 
     **出力：**
