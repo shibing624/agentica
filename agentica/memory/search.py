@@ -77,7 +77,10 @@ class WorkspaceMemorySearch(BaseModel):
         return Path(self.workspace_path).expanduser().resolve()
 
     def index(self, patterns: Optional[List[str]] = None) -> int:
-        """Index Markdown files in the workspace."""
+        """Index Markdown files in the workspace.
+
+        Searches both workspace root and users/ subdirectories for memory files.
+        """
         if patterns is None:
             patterns = ["MEMORY.md", "memory/*.md"]
 
@@ -85,10 +88,21 @@ class WorkspaceMemorySearch(BaseModel):
         self._embeddings = {}
         workspace = self._get_path()
 
+        # Search workspace root level
         for pattern in patterns:
             for file_path in workspace.glob(pattern):
                 if file_path.is_file() and file_path.suffix == ".md":
                     self._index_file(file_path)
+
+        # Search users/ subdirectories (multi-user workspace structure)
+        users_dir = workspace / "users"
+        if users_dir.exists():
+            for user_dir in users_dir.iterdir():
+                if user_dir.is_dir():
+                    for pattern in patterns:
+                        for file_path in user_dir.glob(pattern):
+                            if file_path.is_file() and file_path.suffix == ".md":
+                                self._index_file(file_path)
 
         logger.debug(f"Indexed {len(self.chunks)} chunks from workspace {workspace}")
         return len(self.chunks)

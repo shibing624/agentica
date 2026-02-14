@@ -1,3 +1,4 @@
+aiofiles
 httpx
 loguru
 beautifulsoup4
@@ -7,11 +8,11 @@ pydantic
 requests
 sqlalchemy
 scikit-learn
-text2vec
 markdownify
 tqdm
 rich
 pyyaml
+Pillow
 mcp>=1.9.4
 puremagic
 yfinance

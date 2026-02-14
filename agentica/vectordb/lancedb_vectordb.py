@@ -19,7 +19,7 @@ except ImportError:
 from agentica.document import Document
 from agentica.emb.base import Emb
 from agentica.vectordb.base import VectorDb, Distance, SearchType
-from agentica.reranker.base import Reranker
+from agentica.rerank.base import Reranker
 from agentica.utils.log import logger
 
 

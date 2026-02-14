@@ -22,7 +22,7 @@ from agentica.document import Document
 from agentica.emb.base import Emb
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
-from agentica.reranker.base import Reranker
+from agentica.rerank.base import Reranker
 
 
 class ChromaDb(VectorDb):

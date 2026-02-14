@@ -6,7 +6,7 @@
 使用DeepAgent作为核心，内置文件操作、代码执行、网络搜索等能力。
 支持知识库管理和会话持久化。
 
-pip install streamlit agentica text2vec sqlalchemy lancedb pyarrow
+pip install streamlit agentica sqlalchemy lancedb pyarrow
 
 run:
 cd examples/applications/llm_os
@@ -23,7 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from agentica import DeepAgent, OpenAIChat
 from agentica.document import Document
-from agentica.emb.text2vec_emb import Text2VecEmb
+from agentica.emb.zhipuai_emb import ZhipuAIEmb
 from agentica.knowledge.base import Knowledge
 from agentica.utils.log import logger
 from agentica.vectordb.lancedb_vectordb import LanceDb
@@ -85,7 +85,7 @@ def create_llm_os(
     logger.info(f"Creating LLM OS with model: {model_id}")
 
     # 初始化向量数据库和知识库
-    embedder = Text2VecEmb()
+    embedder = ZhipuAIEmb()
     vector_db = LanceDb(
         uri="outputs/llm_os_lancedb",
         table_name="llm_os_documents",

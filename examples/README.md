@@ -115,7 +115,7 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 
 | # | 示例 | 描述 | 关键概念 |
 |---|------|------|----------|
-| 01 | [naive_rag.py](rag/01_naive_rag.py) | 基础 RAG（PDF 知识库） | `Knowledge`, `LanceDb`, `Text2VecEmb` |
+| 01 | [naive_rag.py](rag/01_naive_rag.py) | 基础 RAG（PDF 知识库） | `Knowledge`, `LanceDb`, `ZhipuAIEmb` |
 | 02 | [advanced_rag.py](rag/02_advanced_rag.py) | 高级 RAG（rerank + 混合检索） | `search_knowledge=True`, agentic RAG |
 | 03 | [chat_pdf.py](rag/03_chat_pdf.py) | PDF 对话应用 | 端到端 RAG 应用 |
 | 04 | [langchain_integration.py](rag/04_langchain_integration.py) | LangChain 集成 | `LangChainKnowledge` |

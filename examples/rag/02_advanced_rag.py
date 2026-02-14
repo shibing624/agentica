@@ -9,7 +9,7 @@ This example shows advanced RAG features:
 3. Hybrid search (vector + keyword)
 4. Reranking for better results
 
-pip install similarities agentica transformers torch tantivy
+pip install agentica lancedb pyarrow
 """
 import sys
 import os
@@ -20,7 +20,7 @@ from agentica import Agent, OpenAIChat
 from agentica.knowledge.base import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica import SearchType, OpenAIEmb
-from agentica.reranker.bge import BgeReranker
+from agentica.rerank.zhipuai import ZhipuAIReranker
 
 # Get the correct path to data file
 data_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -39,7 +39,7 @@ knowledge = Knowledge(
         uri='tmp/paper_lancedb',
         search_type=SearchType.vector,
         embedder=OpenAIEmb(),
-        reranker=BgeReranker(model="BAAI/bge-reranker-base"),  # Add a reranker
+        reranker=ZhipuAIReranker(),  # Add a reranker
     )
 )
 

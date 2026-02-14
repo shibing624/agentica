@@ -75,7 +75,7 @@ async def demo_auto_memory():
 
     # Show what the LLM saved (without manual intervention)
     print("\n--- What LLM auto-saved to workspace ---")
-    memory_content = ws1.get_memory_prompt(days=7)
+    memory_content = await ws1.get_memory_prompt(days=7)
     if memory_content:
         print(memory_content)
     else:
@@ -193,7 +193,7 @@ async def demo_combined():
     await agent.print_response("What are the best practices for chunking strategies?")
 
     print("\n--- Workspace memory ---")
-    print(workspace.get_memory_prompt(days=7) or "(empty)")
+    print(await workspace.get_memory_prompt(days=7) or "(empty)")
 
     print(f"\n--- Session stats ---")
     print(f"  Messages: {len(agent.memory.messages)}")

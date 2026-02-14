@@ -146,6 +146,17 @@ _LAZY_IMPORTS = {
     "TogetherEmb": "agentica.emb.together_emb",
     "FireworksEmb": "agentica.emb.fireworks_emb",
     "ZhipuAIEmb": "agentica.emb.zhipuai_emb",
+    "HttpEmb": "agentica.emb.http_emb",
+    "JinaEmb": "agentica.emb.jina_emb",
+    "GeminiEmb": "agentica.emb.gemini_emb",
+    "HuggingfaceEmb": "agentica.emb.huggingface_emb",
+    "MulanAIEmb": "agentica.emb.mulanai_emb",
+
+    # rerank
+    "Reranker": "agentica.rerank.base",
+    "CohereReranker": "agentica.rerank.cohere",
+    "JinaReranker": "agentica.rerank.jina",
+    "ZhipuAIReranker": "agentica.rerank.zhipuai",
 
     # file
     "File": "agentica.file.base",
@@ -303,6 +314,17 @@ if TYPE_CHECKING:  # noqa: F401
     from agentica.emb.together_emb import TogetherEmb  # noqa: F401
     from agentica.emb.fireworks_emb import FireworksEmb  # noqa: F401
     from agentica.emb.zhipuai_emb import ZhipuAIEmb  # noqa: F401
+    from agentica.emb.http_emb import HttpEmb  # noqa: F401
+    from agentica.emb.jina_emb import JinaEmb  # noqa: F401
+    from agentica.emb.gemini_emb import GeminiEmb  # noqa: F401
+    from agentica.emb.huggingface_emb import HuggingfaceEmb  # noqa: F401
+    from agentica.emb.mulanai_emb import MulanAIEmb  # noqa: F401
+
+    # rerank
+    from agentica.rerank.base import Reranker  # noqa: F401
+    from agentica.rerank.cohere import CohereReranker  # noqa: F401
+    from agentica.rerank.jina import JinaReranker  # noqa: F401
+    from agentica.rerank.zhipuai import ZhipuAIReranker  # noqa: F401
 
     # file
     from agentica.file.base import File  # noqa: F401

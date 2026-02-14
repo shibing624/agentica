@@ -8,9 +8,11 @@ This example shows how to:
 2. Match trigger commands and inject prompts
 3. Integrate skills with workspace-based agents
 """
+import asyncio
 import os
 import sys
 from pathlib import Path
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, ZhipuAI, Workspace
@@ -22,7 +24,7 @@ from agentica.skills import (
 )
 
 
-def demo_workspace_with_skills():
+async def demo_workspace_with_skills():
     """Demo: Create workspace-based agent with skills."""
     print("=" * 60)
     print("Demo: Workspace + Skills Integration")
@@ -46,10 +48,10 @@ def demo_workspace_with_skills():
 
     # Use default workspace path from config (~/.agentica/workspace)
     workspace = Workspace()
-    workspace.initialize()  # Create if not exists
+    workspace.initialize()
 
-    # Get workspace context
-    context = workspace.get_context_prompt()
+    # Get workspace context (async)
+    context = await workspace.get_context_prompt()
     if context:
         print(f"Workspace context loaded ({len(context)} chars)")
 
@@ -101,7 +103,7 @@ def demo_workspace_with_skills():
             print(f"'{user_input}' -> no skill trigger")
 
 
-def demo_workspace_skills_directory():
+async def demo_workspace_skills_directory():
     """Demo: Skills from workspace skills directory."""
     print("\n" + "=" * 60)
     print("Demo: Workspace Skills Directory")
@@ -120,7 +122,7 @@ def demo_workspace_skills_directory():
             print(f"\nFound {len(skill_dirs)} skill directories:")
             for sd in skill_dirs:
                 skill_md = sd / "SKILL.md"
-                status = "✓" if skill_md.exists() else "✗"
+                status = "+" if skill_md.exists() else "-"
                 print(f"  {status} {sd.name}/")
         else:
             print("No skills in workspace directory yet.")
@@ -134,6 +136,10 @@ def demo_workspace_skills_directory():
     print(f"  3. Skills will be auto-loaded on next load_skills()")
 
 
+async def main():
+    await demo_workspace_with_skills()
+    await demo_workspace_skills_directory()
+
+
 if __name__ == "__main__":
-    demo_workspace_with_skills()
-    demo_workspace_skills_directory()
+    asyncio.run(main())

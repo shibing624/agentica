@@ -4,16 +4,16 @@
 part of the code from https://github.com/phidatahq/phidata
 """
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Tuple, Any, Union
+from typing import Optional, Dict, List, Tuple, Any
 import json
 
 from agentica.emb.base import Emb
 from agentica.utils.log import logger
 
 try:
-    from huggingface_hub import InferenceClient, SentenceSimilarityInput
+    from huggingface_hub import InferenceClient
 except ImportError:
-    raise ImportError("`huggingface-hub` not installed, please run `pip install huggingface-hub`")
+    InferenceClient = None
 
 
 @dataclass
@@ -23,10 +23,13 @@ class HuggingfaceEmb(Emb):
     model: str = "jinaai/jina-embeddings-v2-base-code"
     api_key: Optional[str] = None
     client_params: Optional[Dict[str, Any]] = None
-    huggingface_client: Optional[InferenceClient] = None
+    huggingface_client: Optional[Any] = None
 
     @property
-    def client(self) -> InferenceClient:
+    def client(self):
+        if InferenceClient is None:
+            raise ImportError("`huggingface-hub` not installed, please run `pip install huggingface-hub`")
+
         if self.huggingface_client:
             return self.huggingface_client
         _client_params: Dict[str, Any] = {}

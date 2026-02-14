@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description:
+@description: Cohere Reranker implementation.
 """
 from typing import List, Dict, Any, Optional
-from agentica.reranker.base import Reranker
+from agentica.rerank.base import Reranker
 from agentica.document import Document
 from agentica.utils.log import logger
 
@@ -31,7 +31,6 @@ class CohereReranker(Reranker):
         return CohereClient(**_client_params)
 
     def _rerank(self, query: str, documents: List[Document]) -> List[Document]:
-        # Validate input documents and top_n
         if not documents:
             return []
 
@@ -48,13 +47,11 @@ class CohereReranker(Reranker):
             doc.reranking_score = r.relevance_score
             compressed_docs.append(doc)
 
-        # Order by relevance score
         compressed_docs.sort(
             key=lambda x: x.reranking_score if x.reranking_score is not None else float("-inf"),
             reverse=True,
         )
 
-        # Limit to top_n if specified
         if top_n:
             compressed_docs = compressed_docs[:top_n]
 

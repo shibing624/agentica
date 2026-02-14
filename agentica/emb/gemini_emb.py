@@ -3,7 +3,7 @@
 @description:
 part of the code from https://github.com/phidatahq/phidata
 """
-from typing import Optional, Dict, List, Tuple, Any, Union
+from typing import Optional, Dict, List, Tuple, Any
 from os import getenv
 from dataclasses import dataclass
 from agentica.emb.base import Emb
@@ -14,7 +14,9 @@ try:
     from google.genai import Client as GeminiClient
     from google.genai.types import EmbedContentResponse
 except ImportError:
-    raise ImportError("`google-genai` not installed. Please install it using `pip install google-genai`")
+    genai = None
+    GeminiClient = None
+    EmbedContentResponse = None
 
 
 @dataclass
@@ -27,10 +29,13 @@ class GeminiEmb(Emb):
     api_key: Optional[str] = None
     request_params: Optional[Dict[str, Any]] = None
     client_params: Optional[Dict[str, Any]] = None
-    gemini_client: Optional[GeminiClient] = None
+    gemini_client: Optional[Any] = None
 
     @property
     def client(self):
+        if genai is None:
+            raise ImportError("`google-genai` not installed. Please install it using `pip install google-genai`")
+
         if self.gemini_client:
             return self.gemini_client
 

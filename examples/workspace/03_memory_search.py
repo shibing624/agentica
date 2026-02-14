@@ -8,6 +8,7 @@ This example shows how to:
 2. Search through memories
 3. Get relevant context for queries
 """
+import asyncio
 import os
 import sys
 import tempfile
@@ -18,7 +19,7 @@ from agentica.workspace import Workspace
 from agentica.memory import WorkspaceMemorySearch
 
 
-def main():
+async def main():
     # Create a temporary workspace
     temp_dir = tempfile.mkdtemp()
     workspace_path = Path(temp_dir) / "workspace"
@@ -30,7 +31,7 @@ def main():
     workspace.initialize()
 
     # Add some memories
-    workspace.write_memory("""# Project Notes
+    await workspace.write_memory("""# Project Notes
 
 ## Python Project Ideas
 - Build a web scraper using Beautiful Soup
@@ -43,7 +44,7 @@ def main():
 - Study machine learning fundamentals
 """, to_daily=False)
 
-    workspace.write_memory("""# Daily Notes
+    await workspace.write_memory("""# Daily Notes
 
 ## Today's Progress
 - Finished the FastAPI tutorial
@@ -87,4 +88,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
