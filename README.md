@@ -88,18 +88,15 @@ pip install .
     export ZHIPUAI_API_KEY="your-api-key"
     ```
 
-2.  **运行您的第一个智能体！** 这个例子创建了一个可以查询天气的智能体。
+2.  **运行您的第一个智能体！**
 
     ```python
     import asyncio
-    from agentica import Agent, ZhipuAI, WeatherTool
+    from agentica import Agent, ZhipuAI
 
     async def main():
-        agent = Agent(
-            model=ZhipuAI(),
-            tools=[WeatherTool()],
-        )
-        result = await agent.run("明天北京天气怎么样？")
+        agent = Agent(model=ZhipuAI())
+        result = await agent.run("一句话介绍北京")
         print(result.content)
 
     if __name__ == "__main__":
@@ -107,15 +104,8 @@ pip install .
     ```
 
     **输出：**
-    ```markdown
-    明天北京的天气预报如下：
-
-    - 早晨：晴朗，气温约18°C，风速较小，约为3 km/h。
-    - 中午：晴朗，气温升至23°C，风速6-7 km/h。
-    - 傍晚：晴朗，气温略降至21°C，风速较大，为35-44 km/h。
-    - 夜晚：晴朗转晴，气温下降至15°C，风速32-39 km/h。
-
-    全天无降水，能见度良好。请注意傍晚时分的风速较大，外出时需注意安全。
+    ```
+    北京是中国的首都，是一座拥有三千多年历史的文化名城，也是全国的政治、文化和国际交流中心。
     ```
 
 ## 📖 核心概念

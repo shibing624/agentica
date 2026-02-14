@@ -88,18 +88,15 @@ pip install .
     export ZHIPUAI_API_KEY="your-api-key"
     ```
 
-2.  **Run your first agent!** This example creates an agent that can check the weather.
+2.  **Run your first agent!**
 
     ```python
     import asyncio
-    from agentica import Agent, ZhipuAI, WeatherTool
+    from agentica import Agent, ZhipuAI
 
     async def main():
-        agent = Agent(
-            model=ZhipuAI(),
-            tools=[WeatherTool()],
-        )
-        result = await agent.run("What's the weather like in Beijing tomorrow?")
+        agent = Agent(model=ZhipuAI())
+        result = await agent.run("Describe Beijing in one sentence")
         print(result.content)
 
     if __name__ == "__main__":
@@ -107,15 +104,8 @@ pip install .
     ```
 
     **Output:**
-    ```markdown
-    The weather forecast for Beijing tomorrow is as follows:
-
-    - Morning: Clear, temperature around 18°C, light wind at 3 km/h.
-    - Noon: Clear, temperature rises to 23°C, wind at 6-7 km/h.
-    - Evening: Clear, temperature drops slightly to 21°C, strong wind at 35-44 km/h.
-    - Night: Clear, temperature drops to 15°C, wind at 32-39 km/h.
-
-    No precipitation is expected throughout the day, and visibility is good. Please be mindful of the strong winds in the evening.
+    ```
+    Beijing is the capital of China, a historic city with over 3,000 years of history, and the nation's political, cultural, and international exchange center.
     ```
 
 ## 📖 Core Concepts

@@ -88,18 +88,15 @@ pip install .
     export ZHIPUAI_API_KEY="your-api-key"
     ```
 
-2.  **最初のエージェントを実行しましょう！** この例では、天気をチェックできるエージェントを作成します。
+2.  **最初のエージェントを実行しましょう！**
 
     ```python
     import asyncio
-    from agentica import Agent, ZhipuAI, WeatherTool
+    from agentica import Agent, ZhipuAI
 
     async def main():
-        agent = Agent(
-            model=ZhipuAI(),
-            tools=[WeatherTool()],
-        )
-        result = await agent.run("明日の北京の天気はどうですか？")
+        agent = Agent(model=ZhipuAI())
+        result = await agent.run("北京を一文で紹介してください")
         print(result.content)
 
     if __name__ == "__main__":
@@ -107,15 +104,8 @@ pip install .
     ```
 
     **出力：**
-    ```markdown
-    明日の北京の天気予報は以下の通りです：
-
-    - 朝：晴れ、気温約18℃、風速3km/hの弱風。
-    - 昼：晴れ、気温は23℃に上昇、風速6-7km/h。
-    - 夕方：晴れ、気温はわずかに21℃に低下、風速35-44km/hの強風。
-    - 夜：晴れ、気温は15℃に低下、風速32-39km/h。
-
-    一日を通して降水はなく、視界は良好です。夕方の強風にご注意ください。
+    ```
+    北京は中国の首都であり、三千年以上の歴史を持つ文化都市で、政治・文化・国際交流の中心地です。
     ```
 
 ## 📖 コアコンセプト
