@@ -154,7 +154,7 @@ async def full_config_example():
         enable_deep_research=False,
         # Memory & History
         add_history_to_messages=True,
-        num_history_responses=4,
+        history_window=4,
         # Tool config
         tool_call_limit=40,
         # Output

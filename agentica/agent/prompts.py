@@ -119,10 +119,7 @@ class PromptsMixin:
 
             return Message(role=pc.system_message_role, content=system_prompt_from_template)
 
-        # 3. Disabled
-        if not pc.use_default_system_message:
-            return None
-
+        # 3. No custom prompt → build default
         if self.model is None:
             raise Exception("model not set")
 
@@ -157,14 +154,14 @@ class PromptsMixin:
             )
         if pc.limit_tool_access and self.tools is not None:
             instructions.append("Only use the tools you are provided.")
-        if self.markdown and self.response_model is None:
+        if pc.markdown and self.response_model is None:
             instructions.append("Use markdown to format your answers.")
         if pc.add_datetime_to_instructions:
             instructions.append(f"The current time is {datetime.now()}")
         if self.name is not None and pc.add_name_to_instructions:
             instructions.append(f"Your name is: {self.name}.")
-        if self.output_language is not None:
-            instructions.append(f"Regardless of the input language, you must output text in {self.output_language}.")
+        if pc.output_language is not None:
+            instructions.append(f"Regardless of the input language, you must output text in {pc.output_language}.")
 
         system_message_lines: List[str] = []
         if self.description is not None:
@@ -220,11 +217,11 @@ class PromptsMixin:
         if workspace_memory:
             system_message_lines.append(f"## Workspace Memory\n\n{workspace_memory}\n")
 
-        if self.memory.create_session_summary:
-            if self.memory.summary is not None:
+        if self.working_memory.create_session_summary:
+            if self.working_memory.summary is not None:
                 system_message_lines.append("Here is a brief summary of your previous interactions if it helps:")
                 system_message_lines.append("### Summary of previous interactions\n")
-                system_message_lines.append(self.memory.summary.model_dump_json(indent=2))
+                system_message_lines.append(self.working_memory.summary.model_dump_json(indent=2))
                 system_message_lines.append(
                     "\nNote: this information is from previous interactions and may be outdated. "
                     "You should ALWAYS prefer information from this conversation over the past summary.\n"
@@ -335,22 +332,22 @@ class PromptsMixin:
             )
         if pc.limit_tool_access and self.tools is not None:
             system_message_lines.append("\n**Note:** Only use the tools you are provided.")
-        if self.markdown and self.response_model is None:
+        if pc.markdown and self.response_model is None:
             system_message_lines.append("\n**Formatting:** Use markdown to format your answers.")
         if pc.add_datetime_to_instructions:
             system_message_lines.append(f"\n**Current time:** {datetime.now()}")
         if self.name is not None and pc.add_name_to_instructions:
             system_message_lines.append(f"\n**Your name:** {self.name}")
-        if self.output_language is not None:
-            system_message_lines.append(f"\n**Output language:** You must output text in {self.output_language}.")
+        if pc.output_language is not None:
+            system_message_lines.append(f"\n**Output language:** You must output text in {pc.output_language}.")
 
         workspace_memory = await self.get_workspace_memory_prompt()
         if workspace_memory:
             system_message_lines.append(f"\n## Workspace Memory\n\n{workspace_memory}")
 
-        if self.memory.create_session_summary and self.memory.summary is not None:
+        if self.working_memory.create_session_summary and self.working_memory.summary is not None:
             system_message_lines.append("\n## Summary of Previous Interactions")
-            system_message_lines.append(self.memory.summary.model_dump_json(indent=2))
+            system_message_lines.append(self.working_memory.summary.model_dump_json(indent=2))
 
         if self.response_model is not None and not self.structured_outputs:
             system_message_lines.append("\n" + self.get_json_output_prompt())
@@ -505,8 +502,8 @@ class PromptsMixin:
                         self.run_response.extra_data.add_messages.extend(_add_messages)
 
         if self.add_history_to_messages:
-            history: List[Message] = self.memory.get_messages_from_last_n_runs(
-                last_n=self.num_history_responses, skip_role=pc.system_message_role
+            history: List[Message] = self.working_memory.get_messages_from_last_n_runs(
+                last_n=self.history_window, skip_role=pc.system_message_role
             )
             if len(history) > 0:
                 logger.debug(f"Adding {len(history)} messages from history")
@@ -640,22 +637,22 @@ class PromptsMixin:
             )
         if pc.limit_tool_access and self.tools is not None:
             system_message_lines.append("\n**Note:** Only use the tools you are provided.")
-        if self.markdown and self.response_model is None:
+        if pc.markdown and self.response_model is None:
             system_message_lines.append("\n**Formatting:** Use markdown to format your answers.")
         if pc.add_datetime_to_instructions:
             system_message_lines.append(f"\n**Current time:** {datetime.now()}")
         if self.name is not None and pc.add_name_to_instructions:
             system_message_lines.append(f"\n**Your name:** {self.name}")
-        if self.output_language is not None:
-            system_message_lines.append(f"\n**Output language:** You must output text in {self.output_language}.")
+        if pc.output_language is not None:
+            system_message_lines.append(f"\n**Output language:** You must output text in {pc.output_language}.")
 
         workspace_memory = await self.get_workspace_memory_prompt()
         if workspace_memory:
             system_message_lines.append(f"\n## Workspace Memory\n\n{workspace_memory}")
 
-        if self.memory.create_session_summary and self.memory.summary is not None:
+        if self.working_memory.create_session_summary and self.working_memory.summary is not None:
             system_message_lines.append("\n## Summary of Previous Interactions")
-            system_message_lines.append(self.memory.summary.model_dump_json(indent=2))
+            system_message_lines.append(self.working_memory.summary.model_dump_json(indent=2))
 
         if self.response_model is not None and not self.structured_outputs:
             system_message_lines.append("\n" + self.get_json_output_prompt())

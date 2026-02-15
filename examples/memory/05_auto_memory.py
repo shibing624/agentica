@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
-from agentica.memory import AgentMemory
+from agentica.memory import WorkingMemory
 from agentica.workspace import Workspace
 from agentica.deep_tools import BuiltinMemoryTool
 
@@ -40,7 +40,7 @@ def _create_agent(workspace: Workspace, **kwargs) -> Agent:
         workspace=workspace,
         tools=[memory_tool],
         add_history_to_messages=True,
-        num_history_responses=5,
+        history_window=5,
         **kwargs,
     )
 
@@ -144,7 +144,7 @@ async def demo_session_summary():
 
     agent = Agent(
         model=OpenAIChat(model="gpt-4o-mini"),
-        memory=AgentMemory.with_summary(),
+        working_memory=WorkingMemory.with_summary(),
         add_history_to_messages=True,
     )
 
@@ -153,7 +153,7 @@ async def demo_session_summary():
     await agent.print_response("How do I stack multiple decorators?")
 
     print("\n--- Auto-generated session summary ---")
-    summary = agent.memory.summary
+    summary = agent.working_memory.summary
     if summary:
         print(f"Summary: {summary.summary}")
         print(f"Topics: {summary.topics}")
@@ -179,7 +179,7 @@ async def demo_combined():
         model=OpenAIChat(model="gpt-4o-mini"),
         workspace=workspace,
         tools=[memory_tool],
-        memory=AgentMemory.with_summary(),
+        working_memory=WorkingMemory.with_summary(),
         add_history_to_messages=True,
     )
 
@@ -196,10 +196,10 @@ async def demo_combined():
     print(await workspace.get_memory_prompt(days=7) or "(empty)")
 
     print(f"\n--- Session stats ---")
-    print(f"  Messages: {len(agent.memory.messages)}")
-    print(f"  Runs: {len(agent.memory.runs)}")
-    if agent.memory.summary:
-        print(f"  Summary: {agent.memory.summary.summary[:100]}...")
+    print(f"  Messages: {len(agent.working_memory.messages)}")
+    print(f"  Runs: {len(agent.working_memory.runs)}")
+    if agent.working_memory.summary:
+        print(f"  Summary: {agent.working_memory.summary.summary[:100]}...")
 
 
 async def main():
@@ -209,7 +209,7 @@ async def main():
 ╠═══════════════════════════════════════════════════════════════╣
 ║  BuiltinMemoryTool → LLM decides when to save memory         ║
 ║  Workspace         → Persistent Markdown files (Git-friendly) ║
-║  AgentMemory       → Session history & auto-summary           ║
+║  WorkingMemory       → Session history & auto-summary           ║
 ║                                                               ║
 ║  Key: No manual save_memory() calls needed!                   ║
 ║  The LLM autonomously saves important info as a tool call.    ║

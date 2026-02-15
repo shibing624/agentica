@@ -6,7 +6,7 @@
 Provides layered configuration:
 - PromptConfig: Prompt engineering details
 - ToolConfig: Tool calling behavior
-- MemoryConfig: Workspace memory settings
+- WorkspaceMemoryConfig: Workspace memory settings
 - TeamConfig: Team collaboration settings
 """
 
@@ -31,7 +31,6 @@ class PromptConfig:
     # Custom system prompt (overrides default build logic)
     system_prompt: Optional[Union[str, Callable]] = None
     system_prompt_template: Optional[Any] = None  # PromptTemplate
-    use_default_system_message: bool = True
     system_message_role: str = "system"
     user_message_role: str = "user"
     user_prompt_template: Optional[Any] = None  # PromptTemplate
@@ -54,6 +53,10 @@ class PromptConfig:
     limit_tool_access: bool = False
     enable_agentic_prompt: bool = False
 
+    # Output formatting
+    output_language: Optional[str] = None
+    markdown: bool = False
+
 
 @dataclass
 class ToolConfig:
@@ -62,17 +65,22 @@ class ToolConfig:
     tool_call_limit: Optional[int] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     auto_load_mcp: bool = False
+    # Knowledge tools
+    search_knowledge: bool = True
+    update_knowledge: bool = False
+    # History tools
     read_chat_history: bool = False
     read_tool_call_history: bool = False
-    update_knowledge: bool = False
+    # References
     add_references: bool = False
+    # Compression
     compress_tool_results: bool = False
     compression_manager: Optional[Any] = None
 
 
 @dataclass
-class MemoryConfig:
-    """Workspace memory configuration."""
+class WorkspaceMemoryConfig:
+    """Workspace memory loading configuration."""
     load_workspace_context: bool = True
     load_workspace_memory: bool = True
     memory_days: int = 2

@@ -17,7 +17,7 @@ from typing import (
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
-from agentica.memory import AgentMemory
+from agentica.memory import WorkingMemory
 from agentica.agent_session import AgentSession
 from agentica.db.base import SessionRow
 
@@ -61,7 +61,7 @@ class SessionMixin:
             session_id=self.session_id,
             agent_id=self.agent_id,
             user_id=self.user_id,
-            memory=self.memory.to_dict() if self.memory else None,
+            memory=self.working_memory.to_dict() if self.working_memory else None,
             agent_data=self.get_agent_data(),
             user_data=self.user_data,
             session_data=self.get_session_data(),
@@ -74,7 +74,7 @@ class SessionMixin:
             session_id=session.session_id,
             agent_id=session.agent_id,
             user_id=session.user_id,
-            memory=AgentMemory.from_dict(session.memory) if session.memory else AgentMemory(),
+            working_memory=WorkingMemory.from_dict(session.memory) if session.memory else WorkingMemory(),
         )
 
     async def read_from_storage(self) -> Optional[AgentSession]:
@@ -91,7 +91,7 @@ class SessionMixin:
                 # Load memory from session_row
                 if session_row.memory is not None:
                     try:
-                        self.memory = AgentMemory.from_dict(session_row.memory)
+                        self.working_memory = WorkingMemory.from_dict(session_row.memory)
                     except Exception as e:
                         logger.warning(f"Failed to load memory from storage: {e}")
 
@@ -172,12 +172,12 @@ class SessionMixin:
             return
 
         # Check if introduction is already in memory
-        for message in self.memory.messages:
+        for message in self.working_memory.messages:
             if message.role == "assistant" and message.content == introduction:
                 return
 
         # Add introduction to memory
-        self.memory.add_message(Message(role="assistant", content=introduction))
+        self.working_memory.add_message(Message(role="assistant", content=introduction))
 
     async def load_session(self, session_id: Optional[str] = None, force: bool = False) -> Optional[str]:
         """Load a session from storage
@@ -207,7 +207,7 @@ class SessionMixin:
 
         # Reset memory if force is True
         if force:
-            self.memory = AgentMemory()
+            self.working_memory = WorkingMemory()
 
         # Load from storage
         await self.read_from_storage()
@@ -236,7 +236,7 @@ class SessionMixin:
         self._agent_session = None
 
         # Reset memory
-        self.memory = AgentMemory()
+        self.working_memory = WorkingMemory()
 
         return _new_session_id
 
@@ -251,7 +251,7 @@ class SessionMixin:
         # Create new session
         self.session_id = str(uuid4())
         self._agent_session = None
-        self.memory = AgentMemory()
+        self.working_memory = WorkingMemory()
         logger.info(f"Agent reset. New session_id: {self.session_id}")
 
     async def rename(self, name: str) -> None:
@@ -274,7 +274,7 @@ class SessionMixin:
         gen_session_name_prompt = "Conversation\n"
         messages_for_generating_session_name = []
         try:
-            message_pars = self.memory.get_message_pairs()
+            message_pars = self.working_memory.get_message_pairs()
             for message_pair in message_pars[:3]:
                 messages_for_generating_session_name.append(message_pair[0])
                 messages_for_generating_session_name.append(message_pair[1])

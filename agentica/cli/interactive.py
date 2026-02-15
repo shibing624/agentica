@@ -73,8 +73,8 @@ def _cmd_skills(skills_registry=None, **kwargs):
 
 
 def _cmd_memory(current_agent=None, **kwargs):
-    if hasattr(current_agent, 'memory') and current_agent.memory:
-        messages = current_agent.memory.messages if hasattr(current_agent.memory, 'messages') else []
+    if hasattr(current_agent, 'working_memory') and current_agent.working_memory:
+        messages = current_agent.working_memory.messages if hasattr(current_agent.working_memory, 'messages') else []
         if messages:
             console.print(f"[bold cyan]Conversation History ({len(messages)} messages)[/bold cyan]")
             console.print()
@@ -189,8 +189,8 @@ def _cmd_model(cmd_args="", agent_config=None, extra_tools=None,
 
 
 def _cmd_compact(current_agent=None, **kwargs):
-    if hasattr(current_agent, 'memory') and current_agent.memory:
-        messages = current_agent.memory.messages if hasattr(current_agent.memory, 'messages') else []
+    if hasattr(current_agent, 'working_memory') and current_agent.working_memory:
+        messages = current_agent.working_memory.messages if hasattr(current_agent.working_memory, 'messages') else []
         msg_count = len(messages)
         
         if msg_count > 0:
@@ -211,15 +211,15 @@ def _cmd_compact(current_agent=None, **kwargs):
                 summary = "Previous conversation summary:\n" + "\n".join(summary_parts)
                 
                 from agentica.model.message import Message
-                current_agent.memory.messages = []
+                current_agent.working_memory.messages = []
                 summary_msg = Message(
                     role="system",
                     content=f"[Context Summary]\n{summary}\n\n[Note: Previous detailed messages were compacted to save context space.]"
                 )
-                current_agent.memory.messages.append(summary_msg)
+                current_agent.working_memory.messages.append(summary_msg)
                 console.print(f"[green]Context compacted: {msg_count} messages → 1 summary.[/green]")
             else:
-                current_agent.memory.messages = []
+                current_agent.working_memory.messages = []
                 console.print(f"[green]Context cleared ({msg_count} messages).[/green]")
         else:
             console.print("[yellow]No messages to compact.[/yellow]")
@@ -235,8 +235,8 @@ def _cmd_debug(agent_config=None, current_agent=None, shell_mode=False,
     console.print(f"  Shell Mode: {'[green]ON[/green]' if shell_mode else '[dim]OFF[/dim]'}")
     console.print(f"  Work Dir: {agent_config.get('work_dir') or os.getcwd()}")
     
-    if hasattr(current_agent, 'memory') and current_agent.memory:
-        msg_count = len(current_agent.memory.messages) if hasattr(current_agent.memory, 'messages') else 0
+    if hasattr(current_agent, 'working_memory') and current_agent.working_memory:
+        msg_count = len(current_agent.working_memory.messages) if hasattr(current_agent.working_memory, 'messages') else 0
         console.print(f"  History Messages: {msg_count}")
     
     if hasattr(current_agent, 'tools') and current_agent.tools:

@@ -14,7 +14,7 @@ test_agent_team_no_circular_reference	验证 Agent team 不会创建循环引用
 test_function_agent_weakref	验证 Function._agent 使用 weakref
 test_model_functions_agent_weakref	验证 Model.functions 中的 weakref 行为
 test_run_response_no_agent_reference	验证 RunResponse 不持有 Agent 引用
-test_agent_memory_no_agent_reference	验证 AgentMemory 不持有 Agent 引用
+test_working_memory_no_agent_reference	验证 WorkingMemory 不持有 Agent 引用
 test_agent_with_real_model_no_memory_leak	验证真实 Model（不调用 API）无内存泄漏
 test_multiple_agents_no_memory_leak	验证创建/销毁多个 Agent 无内存泄漏
 test_agent_with_team_tools_no_leak	验证带 team 和 tools 的 Agent 无内存泄漏
@@ -134,13 +134,13 @@ class TestMemoryLeak(TestCase):
         self.assertNotIn('agent', fields, "RunResponse should not have agent field")
         self.assertIn('agent_id', fields, "RunResponse should have agent_id field (string)")
 
-    def test_agent_memory_no_agent_reference(self):
-        """Test that AgentMemory.runs doesn't hold Agent references."""
-        from agentica.memory import AgentMemory, AgentRun
+    def test_working_memory_no_agent_reference(self):
+        """Test that WorkingMemory.runs doesn't hold Agent references."""
+        from agentica.memory import WorkingMemory, AgentRun
         from agentica.run_response import RunResponse
         from agentica.model.message import Message
 
-        memory = AgentMemory()
+        memory = WorkingMemory()
 
         # Add a run
         run = AgentRun(

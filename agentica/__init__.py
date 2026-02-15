@@ -59,7 +59,7 @@ from agentica.memory import (
     AgentRun,
     SessionSummary,
     MemorySummarizer,
-    AgentMemory,
+    WorkingMemory,
     WorkflowRun,
     WorkflowMemory,
     MemoryChunk,
@@ -100,7 +100,7 @@ from agentica.utils.tokens import (
 
 # agent (core)
 from agentica.agent import Agent, AgentCancelledError
-from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 from agentica.run_config import RunConfig
 from agentica.deep_agent import DeepAgent
 from agentica.agent_session import AgentSession
@@ -496,7 +496,7 @@ __all__ = [
     "AgentRun",
     "SessionSummary",
     "MemorySummarizer",
-    "AgentMemory",
+    "WorkingMemory",
     "WorkflowRun",
     "WorkflowMemory",
     "MemoryChunk",
@@ -536,7 +536,7 @@ __all__ = [
     "AgentSession",
     "PromptConfig",
     "ToolConfig",
-    "MemoryConfig",
+    "WorkspaceMemoryConfig",
     "TeamConfig",
     "RunConfig",
     "Workflow",

@@ -71,7 +71,7 @@ async def main():
     print("Example 4: View Conversation History")
     print("=" * 60)
 
-    messages = agent.memory.get_messages()
+    messages = agent.working_memory.get_messages()
     print(f"Total messages in history: {len(messages)}")
     for msg in messages[-4:]:
         role = msg.get("role", "unknown")

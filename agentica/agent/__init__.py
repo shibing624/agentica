@@ -5,7 +5,7 @@
 
 V2 architecture with layered configuration:
 - base.py: Agent class definition, fields, and initialization
-- config.py: PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+- config.py: PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 - prompts.py: System and user prompt building
 - runner.py: Run execution logic
 - team.py: Team collaboration and task transfer
@@ -14,13 +14,13 @@ V2 architecture with layered configuration:
 """
 
 from agentica.agent.base import Agent, AgentCancelledError
-from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 
 __all__ = [
     "Agent",
     "AgentCancelledError",
     "PromptConfig",
     "ToolConfig",
-    "MemoryConfig",
+    "WorkspaceMemoryConfig",
     "TeamConfig",
 ]

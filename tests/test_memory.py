@@ -10,13 +10,13 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.memory import (
-    AgentMemory,
+    WorkingMemory,
     AgentRun,
     SessionSummary,
     WorkflowMemory,
     WorkflowRun,
 )
-from agentica.memory.agent_memory import (
+from agentica.memory.working_memory import (
     _clean_message_for_history,
     _is_conversation_message,
     _truncate_tool_content,
@@ -81,27 +81,27 @@ class TestAgentRun(unittest.TestCase):
         self.assertEqual(run.response.content, "Hi there!")
 
 
-class TestAgentMemory(unittest.TestCase):
-    """Test cases for AgentMemory class."""
+class TestWorkingMemory(unittest.TestCase):
+    """Test cases for WorkingMemory class."""
 
     def test_default_initialization(self):
-        """Test AgentMemory default initialization."""
-        memory = AgentMemory()
+        """Test WorkingMemory default initialization."""
+        memory = WorkingMemory()
         self.assertEqual(len(memory.runs), 0)
         self.assertEqual(len(memory.messages), 0)
         self.assertFalse(memory.create_session_summary)
 
     def test_add_message(self):
-        """Test adding message to AgentMemory."""
-        memory = AgentMemory()
+        """Test adding message to WorkingMemory."""
+        memory = WorkingMemory()
         message = Message(role="user", content="Hello")
         memory.add_message(message)
         self.assertEqual(len(memory.messages), 1)
         self.assertEqual(memory.messages[0].content, "Hello")
 
     def test_add_run(self):
-        """Test adding run to AgentMemory."""
-        memory = AgentMemory()
+        """Test adding run to WorkingMemory."""
+        memory = WorkingMemory()
         run = AgentRun(
             message=Message(role="user", content="Hello"),
             response=RunResponse(content="Hi!")
@@ -111,7 +111,7 @@ class TestAgentMemory(unittest.TestCase):
 
     def test_get_messages_from_last_n_runs(self):
         """Test getting messages from last n runs."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
 
         # Add some runs
         for i in range(5):
@@ -126,8 +126,8 @@ class TestAgentMemory(unittest.TestCase):
         self.assertIsInstance(messages, list)
 
     def test_clear_memory(self):
-        """Test clearing AgentMemory."""
-        memory = AgentMemory()
+        """Test clearing WorkingMemory."""
+        memory = WorkingMemory()
         memory.add_message(Message(role="user", content="Hello"))
         memory.clear()
         self.assertEqual(len(memory.messages), 0)
@@ -242,7 +242,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_basic_last_n(self):
         """Test basic last_n still works as before."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         for i in range(5):
             memory.add_run(self._make_run(f"Q{i}", f"A{i}"))
 
@@ -255,7 +255,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_no_last_n_returns_all(self):
         """Test None last_n returns all runs."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         for i in range(3):
             memory.add_run(self._make_run(f"Q{i}", f"A{i}"))
 
@@ -266,7 +266,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_max_tokens_limits_history(self):
         """Test max_tokens limits the number of history messages."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         # Each message has ~10 tokens, so 10 runs * 2 messages * ~10 tokens = ~200
         for i in range(10):
             memory.add_run(self._make_run(f"Question {i} about topic", f"Answer {i} about topic"))
@@ -278,7 +278,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_max_tokens_always_includes_newest(self):
         """Test max_tokens always includes at least the newest run."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         for i in range(5):
             memory.add_run(self._make_run(f"Q{i}", f"A{i}"))
 
@@ -288,7 +288,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_truncate_tool_results_in_older_runs(self):
         """Test that older runs get tool result truncation."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         # First run with long content
         long_answer = "detailed " * 200
         memory.add_run(self._make_run("Q0", long_answer))
@@ -306,7 +306,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_skip_role(self):
         """Test skip_role parameter still works."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         memory.add_run(self._make_run("Q0", "A0"))
 
         msgs = memory.get_messages_from_last_n_runs(skip_role="user")
@@ -315,7 +315,7 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
 
     def test_empty_runs(self):
         """Test with no runs returns empty list."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         msgs = memory.get_messages_from_last_n_runs(last_n=5, max_tokens=1000)
         self.assertEqual(len(msgs), 0)
 

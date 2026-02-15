@@ -152,7 +152,7 @@ class TeamMixin:
 
         # Add knowledge base tools if knowledge is configured
         if self.knowledge is not None:
-            if self.search_knowledge:
+            if self.tool_config.search_knowledge:
                 tools.append(self.search_knowledge_base)
 
             if self.tool_config.update_knowledge:

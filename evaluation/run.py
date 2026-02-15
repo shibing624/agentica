@@ -246,8 +246,8 @@ async def evaluate_instance(
         
         # Collect messages and tool calls
         messages = []
-        if agent.memory and agent.memory.messages:
-            messages = [msg.to_dict() for msg in agent.memory.messages]
+        if agent.working_memory and agent.working_memory.messages:
+            messages = [msg.to_dict() for msg in agent.working_memory.messages]
         
         # Get tool call history
         tool_calls = []

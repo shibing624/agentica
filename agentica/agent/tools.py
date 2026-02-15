@@ -44,7 +44,7 @@ class ToolsMixin:
             - To get the first chat, use num_chats=None and pick the first message.
         """
         history: List[Dict[str, Any]] = []
-        all_chats = self.memory.get_message_pairs()
+        all_chats = self.working_memory.get_message_pairs()
         if len(all_chats) == 0:
             return ""
 
@@ -71,7 +71,7 @@ class ToolsMixin:
             - To get the last tool call, use num_calls=1.
             - To get all tool calls, use num_calls=None.
         """
-        tool_calls = self.memory.get_tool_calls(num_calls)
+        tool_calls = self.working_memory.get_tool_calls(num_calls)
         if len(tool_calls) == 0:
             return ""
         logger.debug(f"tool_calls: {tool_calls}")
@@ -137,7 +137,7 @@ class ToolsMixin:
         run_response_format = "text"
         if self.response_model is not None:
             run_response_format = "json"
-        elif self.markdown:
+        elif self.prompt_config.markdown:
             run_response_format = "markdown"
 
         functions = {}

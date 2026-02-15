@@ -6,7 +6,7 @@
 Demonstrates:
 1. No history — each turn is independent
 2. With history — add_history_to_messages enables multi-turn context
-3. Session summary — AgentMemory.with_summary() for compressed history
+3. Session summary — WorkingMemory.with_summary() for compressed history
 """
 import asyncio
 import sys
@@ -14,7 +14,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, AgentMemory
+from agentica import Agent, OpenAIChat, WorkingMemory
 
 
 async def main():
@@ -46,7 +46,7 @@ async def main():
     agent2 = Agent(
         model=OpenAIChat(),
         add_history_to_messages=True,
-        num_history_responses=5,
+        history_window=5,
     )
 
     print("\n--- Multi-turn conversation ---")
@@ -61,10 +61,10 @@ async def main():
     print("Part 3: Agent with Session Summary")
     print("=" * 60)
 
-    memory = AgentMemory.with_summary()
+    memory = WorkingMemory.with_summary()
     agent3 = Agent(
         model=OpenAIChat(),
-        memory=memory,
+        working_memory=memory,
         add_history_to_messages=True,
     )
 

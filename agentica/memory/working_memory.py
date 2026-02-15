@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Agent memory for managing conversation history and session summaries
+@description: Work memory for managing conversation history and session summaries (short-term memory)
 """
 
 from typing import Dict, List, Any, Optional, Tuple
@@ -132,10 +132,10 @@ def _truncate_tool_content(msg: Message, max_chars: int = 500) -> Message:
     return truncated
 
 
-class AgentMemory(BaseModel):
-    """Agent memory for managing conversation history and session summaries.
+class WorkingMemory(BaseModel):
+    """Work memory for managing conversation history and session summaries (short-term memory).
 
-    AgentMemory focuses on runtime conversation management:
+    WorkingMemory focuses on runtime conversation management:
     - Session history (runs, messages)
     - Session summaries (optional)
 
@@ -145,7 +145,7 @@ class AgentMemory(BaseModel):
     - Easy to edit and share
 
     Example - Session management only (recommended):
-        >>> memory = AgentMemory(create_session_summary=True)
+        >>> memory = WorkingMemory(create_session_summary=True)
         >>> agent = Agent(memory=memory)
 
     Example - With Workspace for persistent memory:
@@ -169,8 +169,8 @@ class AgentMemory(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
-    def with_summary(cls, **kwargs) -> "AgentMemory":
-        """Factory method to create AgentMemory with session summary enabled."""
+    def with_summary(cls, **kwargs) -> "WorkingMemory":
+        """Factory method to create WorkingMemory with session summary enabled."""
         return cls(
             create_session_summary=True,
             update_session_summary_after_run=True,
@@ -191,8 +191,8 @@ class AgentMemory(BaseModel):
         return _memory_dict
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AgentMemory":
-        """Create an AgentMemory instance from a dictionary."""
+    def from_dict(cls, data: Dict[str, Any]) -> "WorkingMemory":
+        """Create an WorkingMemory instance from a dictionary."""
         if not data:
             return cls()
 
@@ -393,7 +393,8 @@ class AgentMemory(BaseModel):
             self.updating_memory = False
 
     def clear(self) -> None:
-        """Clear the AgentMemory"""
+        """Clear the WorkingMemory"""
         self.runs = []
         self.messages = []
         self.summary = None
+

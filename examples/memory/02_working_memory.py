@@ -4,7 +4,7 @@
 @description: Agent-as-Session demo — Agent instance IS the session
 
 Demonstrates:
-1. Basic multi-turn — automatic history tracking via AgentMemory.runs
+1. Basic multi-turn — automatic history tracking via WorkingMemory.runs
 2. Session isolation — separate Agent instances = independent sessions
 3. Resume conversation — Agent memory persists across runs
 4. Shared memory handoff — transfer context between agents
@@ -17,7 +17,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
-from agentica.memory import AgentMemory
+from agentica.memory import WorkingMemory
 
 
 async def demo1_basic_session():
@@ -32,7 +32,7 @@ async def demo1_basic_session():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         add_history_to_messages=True,
-        num_history_responses=5,
+        history_window=5,
         instructions="You are a helpful assistant. Remember what the user tells you.",
     )
 
@@ -53,11 +53,11 @@ async def demo1_basic_session():
 
     # Inspect internal state
     print(f"\n--- Internal State ---")
-    print(f"  memory.runs count: {len(agent.memory.runs)}")
-    print(f"  memory.messages count: {len(agent.memory.messages)}")
+    print(f"  memory.runs count: {len(agent.working_memory.runs)}")
+    print(f"  memory.messages count: {len(agent.working_memory.messages)}")
 
     # Get history messages that would be injected
-    history = agent.memory.get_messages_from_last_n_runs(last_n=3)
+    history = agent.working_memory.get_messages_from_last_n_runs(last_n=3)
     print(f"  History messages for next run: {len(history)}")
     for msg in history:
         role = msg.role
@@ -103,8 +103,8 @@ async def demo2_session_isolation():
 
     # Verify isolation
     print(f"\n--- Session Isolation Verified ---")
-    print(f"  Session A runs: {len(session_a.memory.runs)}, messages: {len(session_a.memory.messages)}")
-    print(f"  Session B runs: {len(session_b.memory.runs)}, messages: {len(session_b.memory.messages)}")
+    print(f"  Session A runs: {len(session_a.working_memory.runs)}, messages: {len(session_a.working_memory.messages)}")
+    print(f"  Session B runs: {len(session_b.working_memory.runs)}, messages: {len(session_b.working_memory.messages)}")
 
 
 async def demo3_resume_conversation():
@@ -117,7 +117,7 @@ async def demo3_resume_conversation():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         add_history_to_messages=True,
-        num_history_responses=10,
+        history_window=10,
         instructions="You are a coding tutor. Track the student's learning progress.",
     )
 
@@ -137,29 +137,29 @@ async def demo3_resume_conversation():
 
     # The agent automatically tracked the entire learning progression
     print(f"\n--- Learning Session Stats ---")
-    print(f"  Total turns: {len(agent.memory.runs)}")
+    print(f"  Total turns: {len(agent.working_memory.runs)}")
 
     # History retrieval with different window sizes
-    recent_3 = agent.memory.get_messages_from_last_n_runs(last_n=3)
-    recent_all = agent.memory.get_messages_from_last_n_runs()
+    recent_3 = agent.working_memory.get_messages_from_last_n_runs(last_n=3)
+    recent_all = agent.working_memory.get_messages_from_last_n_runs()
     print(f"  Messages from last 3 runs: {len(recent_3)}")
     print(f"  Messages from all runs: {len(recent_all)}")
 
 
 async def demo4_shared_memory():
-    """Demo 4: Handoff between agents sharing the same AgentMemory"""
+    """Demo 4: Handoff between agents sharing the same WorkingMemory"""
     print("\n" + "=" * 60)
     print("Demo 4: Agent Handoff via Shared Memory")
-    print("  Transfer conversation context by sharing AgentMemory instance")
+    print("  Transfer conversation context by sharing WorkingMemory instance")
     print("=" * 60)
 
     # Shared memory - this is the session state
-    shared_memory = AgentMemory()
+    shared_memory = WorkingMemory()
 
     # Agent 1: Sales agent collects requirements
     sales_agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
-        memory=shared_memory,
+        working_memory=shared_memory,
         add_history_to_messages=True,
         instructions="You are a sales agent. Collect customer requirements for a software project.",
     )
@@ -174,7 +174,7 @@ async def demo4_shared_memory():
     # Same memory = same session context, different agent personality
     tech_agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
-        memory=shared_memory,
+        working_memory=shared_memory,
         add_history_to_messages=True,
         instructions="You are a technical architect. Based on conversation history, propose a technical solution.",
     )
@@ -200,7 +200,7 @@ async def demo5_history_control():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         add_history_to_messages=True,
-        num_history_responses=2,  # only last 2 runs
+        history_window=2,  # only last 2 runs
         instructions="Answer briefly.",
     )
 
@@ -215,9 +215,9 @@ async def demo5_history_control():
     for topic in topics:
         await agent.run(f"Remember: {topic}")
 
-    print(f"Total runs recorded: {len(agent.memory.runs)}")
+    print(f"Total runs recorded: {len(agent.working_memory.runs)}")
 
-    # With num_history_responses=2, only last 2 runs are visible
+    # With history_window=2, only last 2 runs are visible
     print("\n[Query] What capitals have I told you about?")
     r = await agent.run("List ALL the capitals I've told you about")
     print(f"  Agent (window=2): {r.content[:300]}")
@@ -226,7 +226,7 @@ async def demo5_history_control():
     # Demonstrate get_messages_from_last_n_runs with different windows
     print(f"\n--- History Window Comparison ---")
     for n in [1, 2, 4, None]:
-        msgs = agent.memory.get_messages_from_last_n_runs(last_n=n)
+        msgs = agent.working_memory.get_messages_from_last_n_runs(last_n=n)
         label = f"last_{n}" if n else "all"
         print(f"  {label}: {len(msgs)} messages")
 

@@ -16,7 +16,7 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.memory import AgentMemory, AgentRun
+from agentica.memory import WorkingMemory, AgentRun
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 from agentica.db.base import BASE64_PLACEHOLDER, filter_base64_media, clean_media_placeholders
@@ -27,7 +27,7 @@ class TestVisionHistoryCleanup(unittest.TestCase):
 
     def test_clean_image_url_with_placeholder(self):
         """Test cleaning content with image_url containing placeholder."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         # Simulate a message with image_url content block containing placeholder
         # (This is what happens after base64 image is filtered and stored in DB)
@@ -53,7 +53,7 @@ class TestVisionHistoryCleanup(unittest.TestCase):
 
     def test_clean_mixed_content_with_valid_and_placeholder_urls(self):
         """Test cleaning content with both valid URLs and placeholder URLs."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         test_msg = Message(
             role='user',
@@ -86,7 +86,7 @@ class TestVisionHistoryCleanup(unittest.TestCase):
 
     def test_clean_input_audio_with_placeholder(self):
         """Test cleaning content with input_audio containing placeholder."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         test_msg = Message(
             role='user',
@@ -109,7 +109,7 @@ class TestVisionHistoryCleanup(unittest.TestCase):
 
     def test_clean_text_only_content(self):
         """Test that text-only content remains unchanged."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         test_msg = Message(
             role='user',
@@ -128,7 +128,7 @@ class TestVisionHistoryCleanup(unittest.TestCase):
 
     def test_clean_images_field_with_placeholder(self):
         """Test cleaning images field containing placeholders."""
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         test_msg = Message(
             role='user',
@@ -292,7 +292,7 @@ class TestVisionWithLocalImage(unittest.TestCase):
         if self.base64_image_with_prefix is None:
             self.skipTest("Test image not found")
         
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         # Simulate a message after base64 filtering (as stored in DB)
         filtered_content = filter_base64_media([
@@ -322,7 +322,7 @@ class TestVisionWithLocalImage(unittest.TestCase):
         if self.base64_image_with_prefix is None:
             self.skipTest("Test image not found")
         
-        memory = AgentMemory()
+        memory = WorkingMemory()
         
         # First turn: user sends image
         filtered_content_1 = filter_base64_media([

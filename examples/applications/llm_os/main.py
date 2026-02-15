@@ -93,7 +93,7 @@ def create_llm_os(
     )
     knowledge = Knowledge(vector_db=vector_db)
 
-    # 创建DeepAgent (V2: db/session management removed from Agent, use AgentMemory for history)
+    # 创建DeepAgent (V2: db/session management removed from Agent, use WorkingMemory for history)
     llm_os = DeepAgent(
         name="llm_os",
         model=OpenAIChat(id=model_id),
@@ -113,7 +113,7 @@ def create_llm_os(
         # 聊天历史
         read_chat_history=True,
         add_history_to_messages=True,
-        num_history_responses=6,
+        history_window=6,
         # 显示配置
         markdown=True,
         introduction=INTRODUCTION,
@@ -262,8 +262,8 @@ def main():
 
     llm_os: DeepAgent = st.session_state["llm_os"]
 
-    # 加载聊天历史 (V2: use AgentMemory directly, no load_session)
-    chat_history = llm_os.memory.get_messages()
+    # 加载聊天历史 (V2: use WorkingMemory directly, no load_session)
+    chat_history = llm_os.working_memory.get_messages()
     if chat_history:
         st.session_state["messages"] = chat_history
     else:

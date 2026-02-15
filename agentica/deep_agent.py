@@ -270,13 +270,13 @@ class DeepAgent(Agent):
             final_system_prompt = get_deep_research_prompt()
 
         # Enable agentic prompt by default for enhanced capabilities (heartbeat, soul, etc.)
-        # Build prompt_config, tool_config, memory_config, team_config from kwargs
-        from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+        # Build prompt_config, tool_config, long_term_memory_config, team_config from kwargs
+        from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
         import dataclasses
 
         prompt_config = kwargs.pop('prompt_config', None) or PromptConfig()
         tool_config = kwargs.pop('tool_config', None) or ToolConfig()
-        memory_config = kwargs.pop('memory_config', None) or MemoryConfig()
+        long_term_memory_config = kwargs.pop('long_term_memory_config', None) or WorkspaceMemoryConfig()
         team_config = kwargs.pop('team_config', None) or TeamConfig()
 
         # Extract config-bound kwargs and merge into config objects
@@ -284,7 +284,7 @@ class DeepAgent(Agent):
         _config_field_map = {
             'prompt_config': (prompt_config, {f.name for f in dataclasses.fields(PromptConfig)}),
             'tool_config': (tool_config, {f.name for f in dataclasses.fields(ToolConfig)}),
-            'memory_config': (memory_config, {f.name for f in dataclasses.fields(MemoryConfig)}),
+            'long_term_memory_config': (long_term_memory_config, {f.name for f in dataclasses.fields(WorkspaceMemoryConfig)}),
             'team_config': (team_config, {f.name for f in dataclasses.fields(TeamConfig)}),
         }
         for config_name, (config_obj, field_names) in _config_field_map.items():
@@ -301,7 +301,7 @@ class DeepAgent(Agent):
             instructions=instructions,
             prompt_config=prompt_config,
             tool_config=tool_config,
-            memory_config=memory_config,
+            long_term_memory_config=long_term_memory_config,
             team_config=team_config,
             **kwargs
         )

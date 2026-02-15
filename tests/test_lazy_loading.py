@@ -57,9 +57,9 @@ class TestCoreImports:
         from agentica import Workflow
         assert Workflow is not None
 
-    def test_agent_memory_importable(self):
-        from agentica import AgentMemory
-        assert AgentMemory is not None
+    def test_working_memory_importable(self):
+        from agentica import WorkingMemory
+        assert WorkingMemory is not None
 
 
 # ===========================================================================

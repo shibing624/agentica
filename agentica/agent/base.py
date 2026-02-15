@@ -4,11 +4,11 @@
 @description: Agent base class - V2 architecture with layered configuration.
 
 V2 changes from V1:
-- 57 params → ~23 params (core + common + Config objects)
+- 57 params → ~20 params (core + common + Config objects)
 - Removed: SessionMixin, MediaMixin
 - Removed: backward-compat aliases (llm, knowledge_base, output_model, etc.)
 - Removed: session fields (session_id, db, user_id, etc.) → SessionManager
-- Added: PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+- Added: PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 - Added: RunConfig support in run()/run_stream()
 """
 from typing import (
@@ -27,8 +27,8 @@ from agentica.model.openai import OpenAIChat
 from agentica.tools.base import ModelTool, Tool, Function
 from agentica.model.base import Model
 from agentica.run_response import RunResponse, AgentCancelledError
-from agentica.memory import AgentMemory
-from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
+from agentica.memory import WorkingMemory
+from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 
 # Import mixin classes — pure method containers, no state, no __init__
 from agentica.agent.prompts import PromptsMixin
@@ -47,8 +47,8 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
 
     Parameters are organized in three layers:
     1. Core definition (~10): model, name, instructions, tools, etc.
-    2. Common config (~8): add_history_to_messages, markdown, debug, etc.
-    3. Packed config (4): prompt_config, tool_config, memory_config, team_config
+    2. Common config (~5): add_history_to_messages, debug, etc.
+    3. Packed config (4): prompt_config, tool_config, long_term_memory_config, team_config
 
     Example - Minimal:
         >>> agent = Agent(instructions="You are a helpful assistant.")
@@ -83,10 +83,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     # Layer 2: Common config
     # ============================
     add_history_to_messages: bool = False
-    num_history_responses: int = 3
-    search_knowledge: bool = True
-    output_language: Optional[str] = None
-    markdown: bool = False
+    history_window: int = 3
     structured_outputs: bool = False
     debug: bool = False
     tracing: bool = False
@@ -96,13 +93,13 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     # ============================
     prompt_config: PromptConfig = field(default_factory=PromptConfig)
     tool_config: ToolConfig = field(default_factory=ToolConfig)
-    memory_config: MemoryConfig = field(default_factory=MemoryConfig)
+    long_term_memory_config: WorkspaceMemoryConfig = field(default_factory=WorkspaceMemoryConfig)
     team_config: TeamConfig = field(default_factory=TeamConfig)
 
     # ============================
-    # Runtime (internal, not in __init__ params)
+    # Runtime
     # ============================
-    memory: AgentMemory = field(default_factory=AgentMemory)
+    working_memory: WorkingMemory = field(default_factory=WorkingMemory)
     run_id: Optional[str] = field(default=None, init=False, repr=False)
     run_input: Optional[Any] = field(default=None, init=False, repr=False)
     run_response: RunResponse = field(default_factory=RunResponse, init=False, repr=False)
@@ -129,7 +126,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             response_model: Optional[Type[Any]] = None,
             # ---- Common config ----
             add_history_to_messages: bool = False,
-            num_history_responses: int = 3,
+            history_window: int = 3,
             search_knowledge: bool = True,
             output_language: Optional[str] = None,
             markdown: bool = False,
@@ -139,10 +136,10 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             # ---- Packed config ----
             prompt_config: Optional[PromptConfig] = None,
             tool_config: Optional[ToolConfig] = None,
-            memory_config: Optional[MemoryConfig] = None,
+            long_term_memory_config: Optional[WorkspaceMemoryConfig] = None,
             team_config: Optional[TeamConfig] = None,
             # ---- Runtime ----
-            memory: Optional[AgentMemory] = None,
+            working_memory: Optional[WorkingMemory] = None,
             context: Optional[Dict[str, Any]] = None,
     ):
         # Core
@@ -165,10 +162,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
 
         # Common
         self.add_history_to_messages = add_history_to_messages
-        self.num_history_responses = num_history_responses
-        self.search_knowledge = search_knowledge
-        self.output_language = output_language
-        self.markdown = markdown
+        self.history_window = history_window
         self.structured_outputs = structured_outputs
         self.debug = debug
         self.tracing = tracing
@@ -176,11 +170,20 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         # Packed config (use defaults if not provided)
         self.prompt_config = prompt_config or PromptConfig()
         self.tool_config = tool_config or ToolConfig()
-        self.memory_config = memory_config or MemoryConfig()
+        self.long_term_memory_config = long_term_memory_config or WorkspaceMemoryConfig()
         self.team_config = team_config or TeamConfig()
 
+        # Forward output_language/markdown to prompt_config (top-level convenience)
+        if output_language is not None:
+            self.prompt_config.output_language = output_language
+        if markdown:
+            self.prompt_config.markdown = markdown
+        # Forward search_knowledge to tool_config (top-level convenience)
+        if not search_knowledge:
+            self.tool_config.search_knowledge = False
+
         # Runtime
-        self.memory = memory or AgentMemory()
+        self.working_memory = working_memory or WorkingMemory()
         self.context = context
         self.run_id = None
         self.run_input = None
@@ -239,7 +242,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
 
     async def get_workspace_context_prompt(self) -> Optional[str]:
         """Dynamically load workspace context for system prompt."""
-        if not self.workspace or not self.memory_config.load_workspace_context:
+        if not self.workspace or not self.long_term_memory_config.load_workspace_context:
             return None
         if not self.workspace.exists():
             return None
@@ -248,9 +251,9 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
 
     async def get_workspace_memory_prompt(self) -> Optional[str]:
         """Dynamically load workspace memory for system prompt."""
-        if not self.workspace or not self.memory_config.load_workspace_memory:
+        if not self.workspace or not self.long_term_memory_config.load_workspace_memory:
             return None
-        memory = await self.workspace.get_memory_prompt(days=self.memory_config.memory_days)
+        memory = await self.workspace.get_memory_prompt(days=self.long_term_memory_config.memory_days)
         return memory if memory else None
 
     def _load_mcp_tools(self):
@@ -397,10 +400,10 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         from agentica.model.message import Message
         if introduction is None:
             return
-        for message in self.memory.messages:
+        for message in self.working_memory.messages:
             if message.role == "assistant" and message.content == introduction:
                 return
-        self.memory.add_message(Message(role="assistant", content=introduction))
+        self.working_memory.add_message(Message(role="assistant", content=introduction))
 
     def _resolve_context(self) -> None:
         from inspect import signature

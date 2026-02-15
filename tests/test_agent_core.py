@@ -113,9 +113,9 @@ class TestAgentRun:
     async def test_run_stores_in_memory(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")):
             agent = Agent(name="A", model=_make_model())
-            assert len(agent.memory.runs) == 0
+            assert len(agent.working_memory.runs) == 0
             await agent.run("Hi")
-            assert len(agent.memory.runs) == 1
+            assert len(agent.working_memory.runs) == 1
 
     @pytest.mark.asyncio
     async def test_run_multiple_calls_accumulate_memory(self):
@@ -123,7 +123,7 @@ class TestAgentRun:
             agent = Agent(name="A", model=_make_model())
             await agent.run("First")
             await agent.run("Second")
-            assert len(agent.memory.runs) == 2
+            assert len(agent.working_memory.runs) == 2
 
 
 # ===========================================================================

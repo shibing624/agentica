@@ -8,7 +8,7 @@ from agentica.memory.models import (
     SessionSummary,
 )
 from agentica.memory.summarizer import MemorySummarizer
-from agentica.memory.agent_memory import AgentMemory
+from agentica.memory.working_memory import WorkingMemory
 from agentica.memory.workflow import WorkflowRun, WorkflowMemory
 from agentica.memory.search import MemoryChunk, WorkspaceMemorySearch
 
@@ -16,7 +16,7 @@ __all__ = [
     "AgentRun",
     "SessionSummary",
     "MemorySummarizer",
-    "AgentMemory",
+    "WorkingMemory",
     "WorkflowRun",
     "WorkflowMemory",
     "MemoryChunk",

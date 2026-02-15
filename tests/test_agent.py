@@ -11,8 +11,8 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.agent import Agent
-from agentica.agent.config import PromptConfig, ToolConfig, MemoryConfig, TeamConfig
-from agentica.memory import AgentMemory
+from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
+from agentica.memory import WorkingMemory
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
 from agentica.run_response import RunResponse, RunEvent
@@ -28,7 +28,7 @@ class TestAgentInitialization(unittest.TestCase):
         self.assertIsNone(agent.model)
         self.assertIsNone(agent.name)
         self.assertIsNotNone(agent.agent_id)
-        self.assertIsInstance(agent.memory, AgentMemory)
+        self.assertIsInstance(agent.working_memory, WorkingMemory)
 
     def test_initialization_with_name(self):
         """Test Agent with custom name."""
@@ -85,31 +85,24 @@ class TestAgentTools(unittest.TestCase):
         self.assertGreaterEqual(len(tools), 1)
 
 
-class TestAgentMemory(unittest.TestCase):
+class TestWorkingMemory(unittest.TestCase):
     """Test cases for Agent memory management."""
 
     def test_default_memory(self):
         """Test Agent with default memory."""
         agent = Agent()
-        self.assertIsInstance(agent.memory, AgentMemory)
-        self.assertEqual(len(agent.memory.messages), 0)
-
-    def test_custom_memory(self):
-        """Test Agent with custom memory."""
-        memory = AgentMemory()
-        memory.add_message(Message(role="user", content="Hello"))
-        agent = Agent(memory=memory)
-        self.assertEqual(len(agent.memory.messages), 1)
+        self.assertIsInstance(agent.working_memory, WorkingMemory)
+        self.assertEqual(len(agent.working_memory.messages), 0)
 
     def test_add_history_to_messages(self):
         """Test add_history_to_messages setting."""
         agent = Agent(add_history_to_messages=True)
         self.assertTrue(agent.add_history_to_messages)
 
-    def test_num_history_responses(self):
-        """Test num_history_responses setting."""
-        agent = Agent(num_history_responses=5)
-        self.assertEqual(agent.num_history_responses, 5)
+    def test_history_window(self):
+        """Test history_window setting."""
+        agent = Agent(history_window=5)
+        self.assertEqual(agent.history_window, 5)
 
 
 class TestAgentRun(unittest.TestCase):

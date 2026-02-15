@@ -18,7 +18,7 @@ from agentica.tools.jina_tool import JinaTool
 @pytest.fixture
 def jina_tool():
     """Fixture to create a JinaTool instance for testing."""
-    return JinaTool(api_key="test_api_key", work_dir="./test_work_dir")
+    return JinaTool(api_key="test_api_key", work_dir="./tmp")
 
 
 def test_read_url_error():
@@ -26,7 +26,7 @@ def test_read_url_error():
         raise Exception("Test error")
 
     with patch('httpx.AsyncClient.post', new=mock_post):
-        tools = JinaTool(api_key="test_key", work_dir="./test_work_dir")
+        tools = JinaTool(api_key="test_key", work_dir="./tmp")
         result = asyncio.run(tools.jina_url_reader("https://example.com"))
 
         result_dict = json.loads(result)
@@ -40,7 +40,7 @@ def test_search_query_error():
         raise Exception("Test error")
 
     with patch('httpx.AsyncClient.get', new=mock_get):
-        tools = JinaTool(api_key="test_key", work_dir="./test_work_dir", jina_search=True)
+        tools = JinaTool(api_key="test_key", work_dir="./tmp", jina_search=True)
         result = asyncio.run(tools.jina_search("test query"))
 
         result_dict = json.loads(result)
@@ -59,7 +59,7 @@ def test_jina_url_reader():
         return mock_response
 
     with patch('httpx.AsyncClient.post', new=mock_post):
-        jina_tool = JinaTool(api_key="test_key", work_dir="./test_work_dir")
+        jina_tool = JinaTool(api_key="test_key", work_dir="./tmp")
         url = "https://abc.com/test-url"
         result = asyncio.run(jina_tool.jina_url_reader(url))
 
@@ -81,7 +81,7 @@ def test_jina_search():
 
     with patch('httpx.AsyncClient.get', new=mock_get):
         query = "苹果的最新产品是啥？"
-        jina_tool = JinaTool(api_key="test_key", work_dir="./test_work_dir", jina_search=True)
+        jina_tool = JinaTool(api_key="test_key", work_dir="./tmp", jina_search=True)
         result = asyncio.run(jina_tool.jina_search(query))
 
         result_dict = json.loads(result)
@@ -112,7 +112,7 @@ def test_jina_url_reader_by_goal(mock_openai_chat):
     mock_openai_chat.return_value = mock_openai_chat_instance
 
     with patch('httpx.AsyncClient.post', new=mock_post):
-        jina_tool = JinaTool(api_key="test_key", work_dir="./test_work_dir")
+        jina_tool = JinaTool(api_key="test_key", work_dir="./tmp")
         url = "https://example.com/ai-article"
         goal = "Learn about AI"
         result = asyncio.run(jina_tool.jina_url_reader_by_goal(url, goal))

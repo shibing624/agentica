@@ -263,8 +263,8 @@ class RunnerMixin:
                 yield self.generic_run_response("Updating memory", RunEvent.updating_memory)
 
             if system_message is not None:
-                self.memory.add_system_message(system_message, system_message_role=self.prompt_config.system_message_role)
-            self.memory.add_messages(messages=(user_messages + messages_for_model[num_input_messages:]))
+                self.working_memory.add_system_message(system_message, system_message_role=self.prompt_config.system_message_role)
+            self.working_memory.add_messages(messages=(user_messages + messages_for_model[num_input_messages:]))
 
             agent_run = AgentRun(response=self.run_response)
 
@@ -296,10 +296,10 @@ class RunnerMixin:
                         agent_run.messages.append(_um)
                     else:
                         logger.warning("Unable to add message to memory")
-            self.memory.add_run(agent_run)
+            self.working_memory.add_run(agent_run)
 
-            if self.memory.create_session_summary and self.memory.update_session_summary_after_run:
-                await self.memory.update_summary()
+            if self.working_memory.create_session_summary and self.working_memory.update_session_summary_after_run:
+                await self.working_memory.update_summary()
 
             # 7. Save output to file
             self.save_run_response_to_file(message=message, save_response_to_file=save_response_to_file)

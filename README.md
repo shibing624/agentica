@@ -2,7 +2,7 @@
 
 <div align="center">
   <a href="https://github.com/shibing624/agentica">
-    <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/logo.png" height="150" alt="Logo">
+    <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/logo.png" height="150" alt="Logo">
   </a>
 </div>
 
@@ -61,7 +61,7 @@
 ## 🏗️ 系统架构
 
 <div align="center">
-    <img src="https://github.com/shibing624/agentica/blob/main/docs/architecturev2.jpg" alt="Agentica Architecture" width="800"/>
+    <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/architecturev2.jpg" alt="Agentica Architecture" width="800"/>
 </div>
 
 Agentica 的模块化设计实现了最大的灵活性和可扩展性。其核心是 `Agent`、`Model`、`Tool` 和 `Memory` 组件，这些组件可以轻松组合和扩展，以创建强大的应用程序。
@@ -162,14 +162,14 @@ agentica --model_provider zhipuai --model_name glm-4.7-flash
 ```
 
 CLI show case (实现ClaudeCode效果):
-<img src="https://github.com/shibing624/agentica/blob/main/docs/cli_snap.png" width="800" />
+<img src="https://github.com/shibing624/agentica/blob/main/docs/assets/cli_snap.png" width="800" />
 
 ### Web UI
 
 Agentica 与 [ChatPilot](https://github.com/shibing624/ChatPilot) 完全兼容，为您的智能体提供功能丰富、基于 Gradio 的 Web 界面。
 
 <div align="center">
-    <img src="https://github.com/shibing624/ChatPilot/blob/main/docs/shot.png" width="800" />
+    <img src="https://github.com/shibing624/ChatPilot/blob/main/docs/assets/shot.png" width="800" />
 </div>
 
 请查看 [ChatPilot 仓库](https://github.com/shibing624/ChatPilot)了解设置说明。
@@ -191,7 +191,7 @@ Agentica 与 [ChatPilot](https://github.com/shibing624/ChatPilot) 完全兼容�
 *   **GitHub Issues**：有任何问题或功能请求？[提交 issue](https://github.com/shibing624/agentica/issues)。
 *   **微信**：加入我们的开发者社群！添加微信号 `xuming624`，并备注"llm"，即可加入大模型技术交流群。
 
-<img src="https://github.com/shibing624/agentica/blob/main/docs/wechat.jpeg" width="200" />
+<img src="https://github.com/shibing624/agentica/blob/main/docs/assets/wechat.jpeg" width="200" />
 
 ## 📜 引用
 
