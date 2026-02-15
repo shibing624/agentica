@@ -27,8 +27,6 @@ from agentica.model.openai.like import OpenAILike
 from agentica.model.azure.openai_chat import AzureOpenAIChat
 from agentica.model.moonshot.chat import MoonshotChat
 from agentica.model.moonshot.chat import MoonshotChat as Moonshot
-from agentica.model.kimi.chat import KimiChat
-from agentica.model.kimi.chat import KimiChat as Kimi
 from agentica.model.deepseek.chat import DeepSeekChat
 from agentica.model.deepseek.chat import DeepSeekChat as DeepSeek
 from agentica.model.doubao.chat import DoubaoChat
