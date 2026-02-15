@@ -1275,7 +1275,7 @@ class BuiltinTaskTool(Tool):
         """
         from agentica.subagent import (
             SubagentRegistry, SubagentRun, SubagentType,
-            get_subagent_config, generate_subagent_session_key, is_subagent_session
+            get_subagent_config,
         )
 
         # Get registry
@@ -1283,8 +1283,8 @@ class BuiltinTaskTool(Tool):
 
         # Check if we're already in a subagent (prevent nesting)
         if self._parent_agent is not None:
-            parent_session_id = getattr(self._parent_agent, 'session_id', None)
-            if parent_session_id and is_subagent_session(parent_session_id):
+            parent_agent_id = self._parent_agent.agent_id
+            if registry.is_subagent(parent_agent_id):
                 return json.dumps({
                     "success": False,
                     "error": "Nested subagent spawning is not allowed. Complete your task without delegating.",
@@ -1309,17 +1309,15 @@ class BuiltinTaskTool(Tool):
                     "error": "No model available for subagent. Please configure a model.",
                 }, ensure_ascii=False)
 
-            # Generate unique session key for subagent
-            parent_session_id = getattr(self._parent_agent, 'session_id', 'main') if self._parent_agent else 'main'
-            subagent_session_key = generate_subagent_session_key(parent_session_id, config.type)
+            # Generate unique run_id for subagent
+            parent_agent_id = self._parent_agent.agent_id if self._parent_agent else 'main'
             run_id = str(uuid.uuid4())
-            
+
             # Create subagent run entry
             run = SubagentRun(
                 run_id=run_id,
                 subagent_type=config.type,
-                session_key=subagent_session_key,
-                parent_session_key=parent_session_id,
+                parent_agent_id=parent_agent_id,
                 task_label=description[:50] + "..." if len(description) > 50 else description,
                 task_description=description,
                 started_at=datetime.now(),
@@ -1334,15 +1332,15 @@ class BuiltinTaskTool(Tool):
             from agentica.agent import Agent
 
             # Create subagent with isolated session
+            from agentica.agent.config import ToolConfig, PromptConfig
             subagent = Agent(
                 model=model,
                 name=f"{config.name}",
                 description=config.description,
-                system_prompt=config.system_prompt,
-                session_id=subagent_session_key,  # Isolated session
+                instructions=config.system_prompt,
                 tools=subagent_tools,
-                markdown=True,
-                tool_call_limit=config.max_iterations,
+                prompt_config=PromptConfig(markdown=True),
+                tool_config=ToolConfig(tool_call_limit=config.max_iterations),
             )
 
             logger.debug(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")

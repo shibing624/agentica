@@ -16,7 +16,6 @@ import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import (
-    TYPE_CHECKING,
     Callable,
     Dict,
     List,
@@ -74,22 +73,19 @@ class SubagentConfig:
 @dataclass
 class SubagentRun:
     """Represents a single subagent execution."""
-    
+
     # Unique run identifier
     run_id: str
-    
+
     # Subagent type
     subagent_type: SubagentType
-    
-    # Session key for the subagent (isolated from parent)
-    session_key: str
-    
-    # Parent session key (who spawned this subagent)
-    parent_session_key: str
-    
+
+    # Parent agent_id (who spawned this subagent)
+    parent_agent_id: str
+
     # Task label/description
     task_label: str
-    
+
     # Full task description
     task_description: str
     
@@ -139,12 +135,25 @@ class SubagentRegistry:
         """Get a subagent run by ID."""
         return self._runs.get(run_id)
     
-    def get_for_session(self, session_key: str) -> List[SubagentRun]:
-        """Get all subagent runs spawned by a session."""
+    def get_for_parent(self, parent_agent_id: str) -> List[SubagentRun]:
+        """Get all subagent runs spawned by a parent agent."""
         return [
             run for run in self._runs.values()
-            if run.parent_session_key == session_key
+            if run.parent_agent_id == parent_agent_id
         ]
+
+    def is_subagent(self, agent_id: str) -> bool:
+        """Check if an agent_id has an active subagent run (i.e., is itself a subagent).
+
+        This is used for nesting prevention — if the current agent is already
+        running as a subagent, it should not spawn further subagents.
+        """
+        return any(
+            run.run_id == agent_id or run.parent_agent_id == agent_id
+            for run in self._runs.values()
+            if run.status in ("pending", "running")
+            and run.run_id == agent_id
+        )
     
     def get_active(self) -> List[SubagentRun]:
         """Get all currently running subagents."""
@@ -206,50 +215,6 @@ class SubagentRegistry:
             logger.debug(f"Cleaned up {len(to_remove)} old subagent runs")
         
         return len(to_remove)
-
-
-def generate_subagent_session_key(parent_session_id: str, subagent_type: SubagentType) -> str:
-    """
-    Generate a unique session key for a subagent.
-    
-    Format: subagent:{parent_session_id}:{type}:{uuid}
-    
-    This format allows:
-    - Identifying the parent session
-    - Knowing the subagent type
-    - Having a unique identifier
-    """
-    unique_id = str(uuid.uuid4())[:8]
-    return f"subagent:{parent_session_id}:{subagent_type.value}:{unique_id}"
-
-
-def is_subagent_session(session_id: Optional[str]) -> bool:
-    """Check if a session ID belongs to a subagent."""
-    if not session_id:
-        return False
-    return session_id.startswith("subagent:")
-
-
-def parse_subagent_session(session_id: str) -> Optional[Dict[str, str]]:
-    """
-    Parse a subagent session ID.
-    
-    Returns:
-        Dict with keys: parent_session_id, subagent_type, unique_id
-        Or None if not a valid subagent session ID
-    """
-    if not is_subagent_session(session_id):
-        return None
-    
-    parts = session_id.split(":")
-    if len(parts) < 4:
-        return None
-    
-    return {
-        "parent_session_id": parts[1],
-        "subagent_type": parts[2],
-        "unique_id": parts[3],
-    }
 
 
 # ============== Default Subagent Configurations ==============

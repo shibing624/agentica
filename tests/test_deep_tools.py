@@ -456,19 +456,14 @@ class TestBuiltinTaskTool:
         """Subagent nesting should be blocked."""
         tool = BuiltinTaskTool(model=MagicMock())
 
-        # Create a mock parent agent whose session_id indicates it's already a subagent
+        # Create a mock parent agent with an agent_id
         mock_parent = MagicMock()
-        mock_parent.session_id = "subagent:main:explore:abc123"
+        mock_parent.agent_id = "test-agent-123"
         tool.set_parent_agent(mock_parent)
 
-        # Patch is_subagent_session to return True
-        with patch("agentica.deep_tools.BuiltinTaskTool.task") as orig:
-            # We need to call the real method, but mock the check
-            pass
-
-        # Actually test by calling the real method with mocked subagent check
+        # Mock SubagentRegistry.is_subagent to return True (agent is already a subagent)
         async def run():
-            with patch("agentica.subagent.is_subagent_session", return_value=True):
+            with patch("agentica.subagent.SubagentRegistry.is_subagent", return_value=True):
                 return await tool.task("nested task")
 
         result = asyncio.run(run())

@@ -243,13 +243,13 @@ def main():
     demo_explore_subagent()
     
     # Demo 3: Parallel subagents
-    # demo_parallel_subagents()
+    demo_parallel_subagents()
     
     # Demo 4: Research subagent
     # demo_research_subagent()
     
     # Demo 5: Subagent registry
-    demo_subagent_registry()
+    # demo_subagent_registry()
     
     print("\n" + "=" * 60)
     print("All demos completed!")

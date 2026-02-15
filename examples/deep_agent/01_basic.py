@@ -21,6 +21,7 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import DeepAgent, OpenAIChat
+from agentica.agent.config import ToolConfig, PromptConfig
 
 
 async def basic_example():
@@ -156,9 +157,9 @@ async def full_config_example():
         add_history_to_messages=True,
         history_window=4,
         # Tool config
-        tool_call_limit=40,
+        tool_config=ToolConfig(tool_call_limit=40),
         # Output
-        markdown=True,
+        prompt_config=PromptConfig(markdown=True),
         debug=True,
     )
 

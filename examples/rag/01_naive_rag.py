@@ -14,6 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, OpenAIEmbedding
+from agentica.agent.config import ToolConfig
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica import SearchType
@@ -36,7 +37,7 @@ knowledge.load(recreate=True)
 agent = Agent(
     model=OpenAIChat(),
     knowledge=knowledge,
-    search_knowledge=True,  # Enable agentic RAG
+    tool_config=ToolConfig(search_knowledge=True),
 )
 
 # Ask questions about the document

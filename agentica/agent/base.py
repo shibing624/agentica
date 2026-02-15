@@ -4,10 +4,11 @@
 @description: Agent base class - V2 architecture with layered configuration.
 
 V2 changes from V1:
-- 57 params → ~20 params (core + common + Config objects)
+- 57 params → ~15 params (core + common + Config objects)
 - Removed: SessionMixin, MediaMixin
 - Removed: backward-compat aliases (llm, knowledge_base, output_model, etc.)
 - Removed: session fields (session_id, db, user_id, etc.) → SessionManager
+- Removed: convenience params (search_knowledge, output_language, markdown) → use Config objects
 - Added: PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 - Added: RunConfig support in run()/run_stream()
 """
@@ -50,6 +51,9 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     2. Common config (~5): add_history_to_messages, debug, etc.
     3. Packed config (4): prompt_config, tool_config, long_term_memory_config, team_config
 
+    For output_language, markdown, search_knowledge etc., set them via
+    prompt_config=PromptConfig(...) or tool_config=ToolConfig(...).
+
     Example - Minimal:
         >>> agent = Agent(instructions="You are a helpful assistant.")
         >>> response = await agent.run("Hello!")
@@ -62,6 +66,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         ...     tools=[web_search, calculator],
         ...     knowledge=my_knowledge,
         ...     response_model=AnalysisReport,
+        ...     prompt_config=PromptConfig(markdown=True, output_language="Chinese"),
         ... )
     """
 
@@ -127,9 +132,6 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             # ---- Common config ----
             add_history_to_messages: bool = False,
             history_window: int = 3,
-            search_knowledge: bool = True,
-            output_language: Optional[str] = None,
-            markdown: bool = False,
             structured_outputs: bool = False,
             debug: bool = False,
             tracing: bool = False,
@@ -173,15 +175,6 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         self.long_term_memory_config = long_term_memory_config or WorkspaceMemoryConfig()
         self.team_config = team_config or TeamConfig()
 
-        # Forward output_language/markdown to prompt_config (top-level convenience)
-        if output_language is not None:
-            self.prompt_config.output_language = output_language
-        if markdown:
-            self.prompt_config.markdown = markdown
-        # Forward search_knowledge to tool_config (top-level convenience)
-        if not search_knowledge:
-            self.tool_config.search_knowledge = False
-
         # Runtime
         self.working_memory = working_memory or WorkingMemory()
         self.context = context
@@ -202,9 +195,6 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             logger.debug("Set Log level: debug")
         else:
             set_log_level_to_info()
-
-        # Initialize workspace
-        self._init_workspace()
 
         # Auto-load MCP tools
         if self.tool_config.auto_load_mcp:
@@ -233,12 +223,6 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
                     "  LANGFUSE_BASE_URL=https://cloud.langfuse.com  # or self-hosted\n"
                     "Install: pip install langfuse"
                 )
-
-    def _init_workspace(self):
-        """Initialize workspace if needed."""
-        # Note: workspace context and memory are loaded dynamically in
-        # get_system_message() on every run, not statically injected here.
-        pass
 
     async def get_workspace_context_prompt(self) -> Optional[str]:
         """Dynamically load workspace context for system prompt."""

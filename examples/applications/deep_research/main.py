@@ -20,6 +20,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from agentica import DeepAgent, DeepSeekChat
+from agentica.agent.config import ToolConfig, PromptConfig
 
 
 def create_deep_research_agent():
@@ -36,7 +37,7 @@ def create_deep_research_agent():
         context_soft_limit=80000,
         context_hard_limit=120000,
         enable_context_overflow_handling=True,
-        compress_tool_results=True,
+        tool_config=ToolConfig(compress_tool_results=True),
         # Repetition detection
         enable_repetition_detection=True,
         max_same_tool_calls=3,
@@ -47,7 +48,7 @@ def create_deep_research_agent():
         include_todos=True,
         include_file_tools=True,
         # Debug
-        markdown=True,
+        prompt_config=PromptConfig(markdown=True),
         debug=True,
     )
 

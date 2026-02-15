@@ -17,6 +17,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
+from agentica.agent.config import ToolConfig, PromptConfig
 from agentica.knowledge.base import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica import SearchType, OpenAIEmbedding
@@ -50,9 +51,9 @@ knowledge.load()
 agent = Agent(
     model=OpenAIChat(),
     knowledge=knowledge,
-    search_knowledge=True,
+    tool_config=ToolConfig(search_knowledge=True),
     add_history_to_messages=True,
-    markdown=True,
+    prompt_config=PromptConfig(markdown=True),
 )
 
 print("=" * 60)

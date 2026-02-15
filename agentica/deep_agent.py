@@ -136,7 +136,8 @@ class DeepAgent(Agent):
 
     def __init__(
             self,
-            # DeepAgent specific parameters
+            *,
+            # ---- DeepAgent specific parameters ----
             work_dir: Optional[str] = None,
             include_file_tools: bool = True,
             include_execute: bool = True,
@@ -147,34 +148,23 @@ class DeepAgent(Agent):
             include_skills: bool = True,
             include_user_input: bool = False,
             custom_skill_dirs: Optional[List[str]] = None,
-            # Deep Research Mode (only affects system prompt)
             enable_deep_research: bool = False,
-            # ReAct Loop Control (only used with enable_multi_round=True, disabled by default)
             enable_step_reflection: bool = False,
             reflection_frequency: int = 3,
-            # Context Management (only used with enable_multi_round=True, disabled by default)
             context_soft_limit: Optional[int] = None,
             context_hard_limit: Optional[int] = None,
             enable_context_overflow_handling: bool = False,
-            # Repetitive Behavior Detection (only used with enable_multi_round=True, disabled by default)
             enable_repetition_detection: bool = False,
             max_same_tool_calls: int = 3,
-            # HEARTBEAT-style Forced Iteration Control (only used with enable_multi_round=True, disabled by default)
             enable_forced_iteration: bool = False,
             iteration_checkpoint_frequency: int = 5,
-            # User-provided custom tools
-            tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
-            # Instructions from user
-            instructions: Optional[Union[str, List[str]]] = None,
-            # System prompt override
-            system_prompt: Optional[str] = None,
-            # Other parameters passed to Agent via kwargs
+            # ---- All other Agent parameters via kwargs ----
             **kwargs,
     ):
         """
         Initialize DeepAgent.
 
-        Args:
+        DeepAgent-specific args:
             work_dir: Working directory for file operations
             include_file_tools: Include file tools
             include_execute: Include code execution tool
@@ -185,21 +175,20 @@ class DeepAgent(Agent):
             include_skills: Include skill tools
             include_user_input: Include human-in-the-loop tool
             custom_skill_dirs: Custom skill directories to load
-            enable_deep_research: Enable deep research system prompt (does not affect multi-round)
+            enable_deep_research: Enable deep research system prompt
             enable_step_reflection: Enable reflection after steps
             reflection_frequency: How often to inject reflection prompts
-            context_soft_limit: Token count to start compression (default: model.context_window * 0.6)
-            context_hard_limit: Token count to force termination (default: model.context_window * 0.8)
+            context_soft_limit: Token count to start compression
+            context_hard_limit: Token count to force termination
             enable_context_overflow_handling: Enable context overflow handling
             enable_repetition_detection: Enable repetitive behavior detection
             max_same_tool_calls: Max consecutive calls to same tool
             enable_forced_iteration: Enable HEARTBEAT-style forced iteration control
             iteration_checkpoint_frequency: How often to inject iteration checkpoints
-            tools: User-provided custom tools list
-            instructions: User-provided instructions
-            system_prompt: Override system prompt (if not using deep research mode)
-            **kwargs: Other parameters passed to Agent (including max_rounds, enable_multi_round)
+            **kwargs: All Agent.__init__ parameters (model, name, instructions, tools, etc.)
         """
+        from agentica.agent.config import PromptConfig
+
         # Store DeepAgent specific configuration
         self.work_dir = work_dir
         self.include_file_tools = include_file_tools
@@ -212,17 +201,17 @@ class DeepAgent(Agent):
         self.include_user_input = include_user_input
         self.custom_skill_dirs = custom_skill_dirs
 
-        # Deep Research Mode (only affects system prompt)
+        # Deep Research Mode
         self.enable_deep_research = enable_deep_research
 
         # ReAct Loop Control
         self.enable_step_reflection = enable_step_reflection
         self.reflection_frequency = reflection_frequency
 
-        # Context Management - auto-derive from model capabilities if not explicitly set
-        # Effective context = context_window - max_output_tokens (reserve space for output)
-        cw = getattr(self.model, 'context_window', None) if self.model else None
-        mot = getattr(self.model, 'max_output_tokens', None) if self.model else None
+        # Context Management
+        model = kwargs.get('model')
+        cw = getattr(model, 'context_window', None) if model else None
+        mot = getattr(model, 'max_output_tokens', None) if model else None
         effective_context = (cw - (mot or 0)) if cw else None
         self.context_soft_limit = context_soft_limit if context_soft_limit is not None else (int(effective_context * 0.6) if effective_context else 80000)
         self.context_hard_limit = context_hard_limit if context_hard_limit is not None else (int(effective_context * 0.8) if effective_context else 120000)
@@ -233,7 +222,7 @@ class DeepAgent(Agent):
         self.max_same_tool_calls = max_same_tool_calls
         self._tool_call_history = deque(maxlen=10)
 
-        # HEARTBEAT-style Forced Iteration Control (Phase 3)
+        # HEARTBEAT-style Forced Iteration Control
         self.enable_forced_iteration = enable_forced_iteration
         self.iteration_checkpoint_frequency = iteration_checkpoint_frequency
 
@@ -256,54 +245,26 @@ class DeepAgent(Agent):
             builtin_tools.append(UserInputTool())
 
         # Merge user-provided tools with built-in tools
+        user_tools = kwargs.pop('tools', None)
         all_tools = list(builtin_tools)
-        if tools:
-            all_tools = self._merge_tools_with_dedup(all_tools, tools)
+        if user_tools:
+            all_tools = self._merge_tools_with_dedup(all_tools, user_tools)
 
-        custom_tool_count = len(tools) if tools else 0
+        custom_tool_count = len(user_tools) if user_tools else 0
         logger.debug(f"DeepAgent initialized with {len(builtin_tools)} builtin tools and {custom_tool_count} custom tools")
 
-        # Determine system prompt
-        final_system_prompt = system_prompt
-        if enable_deep_research and system_prompt is None:
-            # Use deep research prompt
-            final_system_prompt = get_deep_research_prompt()
-
-        # Enable agentic prompt by default for enhanced capabilities (heartbeat, soul, etc.)
-        # Build prompt_config, tool_config, long_term_memory_config, team_config from kwargs
-        from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
-        import dataclasses
-
-        prompt_config = kwargs.pop('prompt_config', None) or PromptConfig()
-        tool_config = kwargs.pop('tool_config', None) or ToolConfig()
-        long_term_memory_config = kwargs.pop('long_term_memory_config', None) or WorkspaceMemoryConfig()
-        team_config = kwargs.pop('team_config', None) or TeamConfig()
-
-        # Extract config-bound kwargs and merge into config objects
-        # This provides backward-compatible flat kwargs → Config migration
-        _config_field_map = {
-            'prompt_config': (prompt_config, {f.name for f in dataclasses.fields(PromptConfig)}),
-            'tool_config': (tool_config, {f.name for f in dataclasses.fields(ToolConfig)}),
-            'long_term_memory_config': (long_term_memory_config, {f.name for f in dataclasses.fields(WorkspaceMemoryConfig)}),
-            'team_config': (team_config, {f.name for f in dataclasses.fields(TeamConfig)}),
-        }
-        for config_name, (config_obj, field_names) in _config_field_map.items():
-            for field_name in list(field_names):
-                if field_name in kwargs:
-                    setattr(config_obj, field_name, kwargs.pop(field_name))
-
-        prompt_config.enable_agentic_prompt = kwargs.pop('enable_agentic_prompt', True)
-        if final_system_prompt is not None:
-            prompt_config.system_prompt = final_system_prompt
+        # Build prompt_config with enable_agentic_prompt
+        prompt_config = kwargs.pop('prompt_config', None)
+        if prompt_config is None:
+            prompt_config = PromptConfig()
+        prompt_config.enable_agentic_prompt = True
+        if enable_deep_research and prompt_config.system_prompt is None:
+            prompt_config.system_prompt = get_deep_research_prompt()
 
         super().__init__(
             tools=all_tools,
-            instructions=instructions,
             prompt_config=prompt_config,
-            tool_config=tool_config,
-            long_term_memory_config=long_term_memory_config,
-            team_config=team_config,
-            **kwargs
+            **kwargs,
         )
 
         # Set parent agent reference for task tool
@@ -562,4 +523,4 @@ if __name__ == '__main__':
 
     print(f"Created: {agent}")
     print(f"Builtin tools: {agent.get_builtin_tool_names()}")
-    print(f"enable_agentic_prompt: {agent.enable_agentic_prompt}")
+    print(f"enable_agentic_prompt: {agent.prompt_config.enable_agentic_prompt}")

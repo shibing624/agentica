@@ -233,11 +233,12 @@ def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
             instructions.append(f"\n# Available Skills\n{skills_summary}")
 
     # Build kwargs for DeepAgent
+    from agentica.agent.config import PromptConfig
     deep_agent_kwargs = {
         "model": model,
         "work_dir": agent_config.get("work_dir"),
         "tools": extra_tools,
-        "add_datetime_to_instructions": True,
+        "prompt_config": PromptConfig(add_datetime_to_instructions=True),
         "add_history_to_messages": True,
         "debug": agent_config["debug"],
         "workspace": workspace,

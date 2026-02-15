@@ -14,6 +14,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent
+from agentica.agent.config import ToolConfig
 from agentica.knowledge.llamaindex_knowledge import LlamaIndexKnowledge
 
 # Check if llama_index is installed
@@ -65,7 +66,7 @@ def main():
     knowledge = LlamaIndexKnowledge(retriever=retriever)
     agent = Agent(
         knowledge=knowledge,
-        search_knowledge=True,
+        tool_config=ToolConfig(search_knowledge=True),
         debug=True,
     )
 

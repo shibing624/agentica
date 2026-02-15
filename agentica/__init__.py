@@ -63,8 +63,6 @@ from agentica.memory import (
 # database - base types only (fast import)
 from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow
 
-from agentica.template import PromptTemplate
-
 # run response
 from agentica.run_response import (
     RunResponse,
@@ -215,7 +213,6 @@ _LAZY_IMPORTS = {
     "SubagentRegistry": "agentica.subagent",
     "get_subagent_config": "agentica.subagent",
     "get_available_subagent_types": "agentica.subagent",
-    "is_subagent_session": "agentica.subagent",
     "register_custom_subagent": "agentica.subagent",
     "unregister_custom_subagent": "agentica.subagent",
     "get_custom_subagent_configs": "agentica.subagent",
@@ -404,7 +401,6 @@ if TYPE_CHECKING:  # noqa: F401
         SubagentRegistry,
         get_subagent_config,
         get_available_subagent_types,
-        is_subagent_session,
         register_custom_subagent,
         unregister_custom_subagent,
         get_custom_subagent_configs,
@@ -496,8 +492,6 @@ __all__ = [
     "SessionRow",
     "MemoryRow",
     "MetricsRow",
-    # template
-    "PromptTemplate",
     # run response
     "RunResponse",
     "RunEvent",

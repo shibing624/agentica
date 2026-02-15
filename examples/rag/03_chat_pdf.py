@@ -54,8 +54,7 @@ def pdf_app(new: bool = False, user: str = "user"):
     agent = Agent(
         model=OpenAIChat(),
         knowledge=knowledge_base,
-        search_knowledge=True,
-        tool_config=ToolConfig(read_chat_history=True),
+        tool_config=ToolConfig(search_knowledge=True, read_chat_history=True),
         debug=True,
     )
 

@@ -40,6 +40,7 @@ from agentica.model.base import Model
 from agentica.model.message import UserMessage
 from agentica.model.openai.chat import OpenAIChat
 from agentica.agent import Agent
+from agentica.agent.config import PromptConfig
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.config import AGENTICA_HOME
@@ -1173,15 +1174,15 @@ class Browser:
             planning_model = planning_agent_model_backend
 
         web_agent = Agent(
-            system_prompt=WEB_AGENT_SYSTEM_PROMPT,
+            instructions=WEB_AGENT_SYSTEM_PROMPT,
             model=web_agent_model_instance,
-            output_language=self.output_language,
+            prompt_config=PromptConfig(output_language=self.output_language) if self.output_language else None,
         )
 
         planning_agent = Agent(
-            system_prompt=PLANNING_AGENT_SYSTEM_PROMPT,
+            instructions=PLANNING_AGENT_SYSTEM_PROMPT,
             model=planning_model,
-            output_language=self.output_language,
+            prompt_config=PromptConfig(output_language=self.output_language) if self.output_language else None,
         )
 
         return web_agent, planning_agent

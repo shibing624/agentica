@@ -22,6 +22,7 @@ import streamlit as st
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
 from agentica import DeepAgent, OpenAIChat
+from agentica.agent.config import ToolConfig, PromptConfig
 from agentica.document import Document
 from agentica.embedding.zhipuai import ZhipuAIEmbedding
 from agentica.knowledge.base import Knowledge
@@ -108,15 +109,13 @@ def create_llm_os(
         include_fetch_url=True,
         include_todos=True,
         include_task=True,
-        # 知识库搜索
-        search_knowledge=True,
+        # 知识库搜索 & 聊天历史
+        tool_config=ToolConfig(search_knowledge=True, read_chat_history=True),
         # 聊天历史
-        read_chat_history=True,
         add_history_to_messages=True,
         history_window=6,
         # 显示配置
-        markdown=True,
-        introduction=INTRODUCTION,
+        prompt_config=PromptConfig(markdown=True, introduction=INTRODUCTION),
         debug=debug,
     )
 
