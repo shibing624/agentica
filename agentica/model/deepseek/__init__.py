@@ -1,1 +1,1 @@
-from agentica.model.deepseek.chat import DeepSeek
+from agentica.model.deepseek.chat import DeepSeekChat

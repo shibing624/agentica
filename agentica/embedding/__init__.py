@@ -3,4 +3,4 @@
 @author:XuMing(xuming624@qq.com)
 @description: 
 """
-from .base import Emb
+from .base import Embedding

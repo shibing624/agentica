@@ -9,12 +9,12 @@ from typing import Optional, Dict, List, Tuple, Any
 
 import requests
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 
 @dataclass
-class HttpEmb(Emb):
+class HttpEmbedding(Embedding):
     """Generic HTTP Embedding adapter compatible with OpenAI embedding API schema.
 
     Works with any service that exposes an OpenAI-compatible /v1/embeddings endpoint,

@@ -9,10 +9,10 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 
 from agentica.document import Document
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 
 
 class InMemoryVectorDb(VectorDb):
@@ -27,29 +27,29 @@ class InMemoryVectorDb(VectorDb):
 
     def __init__(
             self,
-            embedder: Emb = None,
+            embedding: Embedding = None,
             distance: Distance = Distance.cosine,
-            reranker: Optional[Reranker] = None,
+            reranker: Optional[Rerank] = None,
             **kwargs,
     ):
         """
         Initialize InMemoryVectorDb.
 
         Args:
-            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            embedding: Embedding model for semantic search (default: OpenAIEmbedding)
             distance: Distance metric for vector similarity
-            reranker: Reranker for search results
+            reranker: Rerank for search results
             **kwargs: Additional arguments
         """
-        # Embedder for embedding the document contents (default to OpenAIEmb)
-        if embedder is None:
-            from agentica.emb.openai_emb import OpenAIEmb
-            embedder = OpenAIEmb()
-        self.embedder: Emb = embedder
+        # Embedding for embedding the document contents (default to OpenAIEmbedding)
+        if embedding is None:
+            from agentica.embedding.openai import OpenAIEmbedding
+            embedding = OpenAIEmbedding()
+        self.embedding: Embedding = embedding
 
         self.distance: Distance = distance
         self.documents: List[Document] = []
-        self.reranker: Optional[Reranker] = reranker
+        self.reranker: Optional[Rerank] = reranker
         self.kwargs = kwargs
 
     def create(self) -> None:
@@ -66,7 +66,7 @@ class InMemoryVectorDb(VectorDb):
     def insert(self, documents: List[Document], filters: Optional[Dict[str, Any]] = None) -> None:
         """Insert documents into the in-memory storage."""
         for document in documents:
-            document.embed(self.embedder)
+            document.embed(self.embedding)
             if not self.doc_exists(document):
                 self.documents.append(document)
 
@@ -77,12 +77,12 @@ class InMemoryVectorDb(VectorDb):
             if existing_doc_idx is not None:
                 self.documents[existing_doc_idx] = document
             else:
-                document.embed(self.embedder)
+                document.embed(self.embedding)
                 self.documents.append(document)
 
     def search(self, query: str, limit: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[Document]:
         """Search for documents that are most similar to the query."""
-        query_embedding = self.embedder.get_embedding(query)
+        query_embedding = self.embedding.get_embedding(query)
         if query_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []

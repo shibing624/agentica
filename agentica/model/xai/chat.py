@@ -4,7 +4,7 @@ from typing import Optional
 from agentica.model.openai.like import OpenAILike
 
 
-class Grok(OpenAILike):
+class GrokChat(OpenAILike):
     """
     Class for interacting with the xAI API.
 

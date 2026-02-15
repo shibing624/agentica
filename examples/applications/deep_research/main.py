@@ -19,13 +19,13 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from agentica import DeepAgent, DeepSeek
+from agentica import DeepAgent, DeepSeekChat
 
 
 def create_deep_research_agent():
     """Create a deep research agent with full capabilities."""
     return DeepAgent(
-        model=DeepSeek(),
+        model=DeepSeekChat(),
         name="DeepResearcher",
         description="A comprehensive deep research assistant with reflection and context management",
         # Enable deep research mode

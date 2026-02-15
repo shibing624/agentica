@@ -183,7 +183,7 @@ class WorkspaceMemorySearch(BaseModel):
         limit: int = 5,
         vector_weight: float = 0.7,
         keyword_weight: float = 0.3,
-        embedder: Optional[Any] = None,
+        embedding: Optional[Any] = None,
     ) -> List[MemoryChunk]:
         """Hybrid search combining vector similarity and keyword matching."""
         if not self.chunks:
@@ -194,16 +194,16 @@ class WorkspaceMemorySearch(BaseModel):
 
         vector_scores: Dict[str, float] = {}
         try:
-            if embedder is None:
-                from agentica.emb.openai_emb import OpenAIEmb
-                embedder = OpenAIEmb()
+            if embedding is None:
+                from agentica.embedding.openai import OpenAIEmbedding
+                embedding = OpenAIEmbedding()
 
-            query_embedding = embedder.get_embedding(query)
+            query_embedding = embedding.get_embedding(query)
             if not query_embedding:
                 logger.warning("Failed to get query embedding, falling back to keyword search")
                 return self.search(query, limit)
 
-            self._compute_embeddings(embedder)
+            self._compute_embeddings(embedding)
 
             for i, chunk in enumerate(self.chunks):
                 if i in self._embeddings:
@@ -237,14 +237,14 @@ class WorkspaceMemorySearch(BaseModel):
         results.sort(key=lambda x: -x.score)
         return results[:limit]
 
-    def _compute_embeddings(self, embedder: Any) -> None:
+    def _compute_embeddings(self, embedding: Any) -> None:
         """Compute and cache embeddings for all chunks."""
         for i, chunk in enumerate(self.chunks):
             if i not in self._embeddings:
                 try:
-                    embedding = embedder.get_embedding(chunk.content)
-                    if embedding:
-                        self._embeddings[i] = embedding
+                    emb = embedding.get_embedding(chunk.content)
+                    if emb:
+                        self._embeddings[i] = emb
                 except Exception as e:
                     logger.warning(f"Failed to compute embedding for chunk {i}: {e}")
 

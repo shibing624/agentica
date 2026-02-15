@@ -3,7 +3,7 @@ from typing import Optional, Dict, List, Tuple
 
 
 @dataclass
-class Emb:
+class Embedding:
     """Base class for managing embedders"""
 
     dimensions: Optional[int] = 1536

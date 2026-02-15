@@ -17,9 +17,9 @@ except ImportError:
     raise ImportError("`lancedb` not installed, please install it via `pip install lancedb`.")
 
 from agentica.document import Document
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance, SearchType
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 from agentica.utils.log import logger
 
 
@@ -36,7 +36,7 @@ class LanceDb(VectorDb):
 
     def __init__(
             self,
-            embedder: Emb = None,
+            embedding: Embedding = None,
             distance: Distance = Distance.cosine,
             connection: Optional[lancedb.db.LanceTable] = None,
             uri: Optional[str] = None,
@@ -45,14 +45,14 @@ class LanceDb(VectorDb):
             table_name: Optional[str] = "agentica",
             nprobes: Optional[int] = None,
             search_type: SearchType = SearchType.vector,
-            reranker: Optional[Reranker] = None,
+            reranker: Optional[Rerank] = None,
             use_tantivy: bool = True,
     ):
         """
         Initialize LanceDb.
 
         Args:
-            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            embedding: Embedding model for semantic search (default: OpenAIEmbedding)
             distance: Distance metric for vector similarity
             connection: Existing LanceDB connection
             uri: Path for LanceDB storage
@@ -61,15 +61,15 @@ class LanceDb(VectorDb):
             table_name: Name of the table
             nprobes: Number of probes for search
             search_type: Type of search (vector, keyword, hybrid)
-            reranker: Reranker for search results
+            reranker: Rerank for search results
             use_tantivy: Whether to use tantivy for full-text search
         """
-        # Embedder for embedding the document contents (default to OpenAIEmb)
-        if embedder is None:
-            from agentica.emb.openai_emb import OpenAIEmb
-            embedder = OpenAIEmb()
-        self.embedder: Emb = embedder
-        self.dimensions: int = self.embedder.dimensions
+        # Embedding for embedding the document contents (default to OpenAIEmbedding)
+        if embedding is None:
+            from agentica.embedding.openai import OpenAIEmbedding
+            embedding = OpenAIEmbedding()
+        self.embedding: Embedding = embedding
+        self.dimensions: int = self.embedding.dimensions
 
         # Distance metric
         self.distance: Distance = distance
@@ -107,7 +107,7 @@ class LanceDb(VectorDb):
             self._vector_col = "vector"
             self.table = self._init_table()
 
-        self.reranker: Optional[Reranker] = reranker
+        self.reranker: Optional[Rerank] = reranker
         self.nprobes: Optional[int] = nprobes
         self.search_type = search_type
         self.fts_index_exists = False
@@ -135,7 +135,7 @@ class LanceDb(VectorDb):
                     self._vector_col,
                     pa.list_(
                         pa.float32(),
-                        len(self.embedder.get_embedding("test")),  # type: ignore
+                        len(self.embedding.get_embedding("test")),  # type: ignore
                     ),
                 ),
                 pa.field(self._id, pa.string()),
@@ -172,7 +172,7 @@ class LanceDb(VectorDb):
         logger.debug(f"Inserting {len(documents)} documents")
         data = []
         for document in documents:
-            document.embed(embedder=self.embedder)
+            document.embed(embedder=self.embedding)
             cleaned_content = document.content.replace("\x00", "\ufffd")
             doc_id = str(md5(cleaned_content.encode()).hexdigest())
             payload = {
@@ -216,7 +216,7 @@ class LanceDb(VectorDb):
             return []
 
     def vector_search(self, query: str, limit: int = 5) -> List[Document]:
-        query_embedding = self.embedder.get_embedding(query)
+        query_embedding = self.embedding.get_embedding(query)
         if query_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []
@@ -238,7 +238,7 @@ class LanceDb(VectorDb):
         return search_results
 
     def hybrid_search(self, query: str, limit: int = 5) -> List[Document]:
-        query_embedding = self.embedder.get_embedding(query)
+        query_embedding = self.embedding.get_embedding(query)
         if query_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []
@@ -297,7 +297,7 @@ class LanceDb(VectorDb):
                         name=payload["name"],
                         meta_data=payload["meta_data"],
                         content=payload["content"],
-                        embedder=self.embedder,
+                        embedder=self.embedding,
                         embedding=item["vector"],
                         usage=payload["usage"],
                     )

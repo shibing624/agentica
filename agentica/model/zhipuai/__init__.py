@@ -1,1 +1,1 @@
-from agentica.model.zhipuai.chat import ZhipuAI
+from agentica.model.zhipuai.chat import ZhipuAIChat

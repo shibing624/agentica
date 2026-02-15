@@ -1,1 +1,1 @@
-from agentica.model.yi.chat import Yi
+from agentica.model.yi.chat import YiChat

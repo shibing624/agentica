@@ -16,7 +16,7 @@ from agentica.memory import (
     WorkflowMemory,
     WorkflowRun,
 )
-from agentica.memory.working_memory import (
+from agentica.memory.working import (
     _clean_message_for_history,
     _is_conversation_message,
     _truncate_tool_content,

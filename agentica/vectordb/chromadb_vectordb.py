@@ -19,10 +19,10 @@ except ImportError:
     raise ImportError("The `chromadb` package is not installed. Please install it via `pip install chromadb`.")
 
 from agentica.document import Document
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 
 
 class ChromaDb(VectorDb):
@@ -38,11 +38,11 @@ class ChromaDb(VectorDb):
     def __init__(
             self,
             collection: str = "chromadb_collection",
-            embedder: Emb = None,
+            embedding: Embedding = None,
             distance: Distance = Distance.cosine,
             path: Optional[str] = None,
             on_disk: bool = True,
-            reranker: Optional[Reranker] = None,
+            reranker: Optional[Rerank] = None,
             **kwargs,
     ):
         """
@@ -50,21 +50,21 @@ class ChromaDb(VectorDb):
 
         Args:
             collection: Name of the collection
-            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            embedding: Embedding model for semantic search (default: OpenAIEmbedding)
             distance: Distance metric for vector similarity
             path: Path for local disk storage
             on_disk: Whether to use local disk storage (default: True)
-            reranker: Reranker for search results
+            reranker: Rerank for search results
             **kwargs: Additional arguments passed to ChromaDB client
         """
         # Collection attributes
         self.collection: str = collection
 
-        # Embedder for embedding the document contents (default to OpenAIEmb)
-        if embedder is None:
-            from agentica.emb.openai_emb import OpenAIEmb
-            embedder = OpenAIEmb()
-        self.embedder: Emb = embedder
+        # Embedding for embedding the document contents (default to OpenAIEmbedding)
+        if embedding is None:
+            from agentica.embedding.openai import OpenAIEmbedding
+            embedding = OpenAIEmbedding()
+        self.embedding: Embedding = embedding
 
         # Distance metric
         self.distance: Distance = distance
@@ -86,8 +86,8 @@ class ChromaDb(VectorDb):
         # Chroma collection instance
         self._collection: Optional[Collection] = None
 
-        # Reranker instance
-        self.reranker: Optional[Reranker] = reranker
+        # Rerank instance
+        self.reranker: Optional[Rerank] = reranker
 
         # Chroma client kwargs
         self.kwargs = kwargs
@@ -167,7 +167,7 @@ class ChromaDb(VectorDb):
         docs_embeddings: List = []
 
         for document in documents:
-            document.embed(embedder=self.embedder)
+            document.embed(embedder=self.embedding)
             cleaned_content = document.content.replace("\x00", "\ufffd")
             doc_id = md5(cleaned_content.encode()).hexdigest()
             docs_embeddings.append(document.embedding)
@@ -194,7 +194,7 @@ class ChromaDb(VectorDb):
         docs_embeddings: List = []
 
         for document in documents:
-            document.embed(embedder=self.embedder)
+            document.embed(embedder=self.embedding)
             cleaned_content = document.content.replace("\x00", "\ufffd")
             doc_id = md5(cleaned_content.encode()).hexdigest()
             docs_embeddings.append(document.embedding)
@@ -219,7 +219,7 @@ class ChromaDb(VectorDb):
         Returns:
             List[Document]: List of search results.
         """
-        query_embedding = self.embedder.get_embedding(query)
+        query_embedding = self.embedding.get_embedding(query)
         if query_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []

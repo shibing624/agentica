@@ -14,7 +14,7 @@ import tempfile
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, ZhipuAI
+from agentica import Agent, ZhipuAIChat
 from agentica.skills import register_skill, get_skill_registry, reset_skill_registry
 from agentica.tools.skill_tool import SkillTool
 
@@ -269,7 +269,7 @@ When analyzing data:
         if skill:
             # Create agent with skill prompt injected
             agent = Agent(
-                model=ZhipuAI(model="glm-4-flash"),
+                model=ZhipuAIChat(model="glm-4-flash"),
                 name="Data-Analyst-Agent",
                 instructions=[
                     "You are a data analysis expert.",

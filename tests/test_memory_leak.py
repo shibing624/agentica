@@ -94,7 +94,7 @@ class TestMemoryLeak(TestCase):
         # Create agent with tool
         agent = Agent(
             name="ToolAgent",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             tools=[my_tool]
         )
         agent.update_model()
@@ -164,7 +164,7 @@ class TestMemoryLeak(TestCase):
         # Create agent with real model (but don't call run() to avoid API call)
         agent = Agent(
             name="TestAgent",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             tools=[dummy_tool]
         )
 

@@ -23,30 +23,26 @@ from agentica.utils.io import write_audio_to_file
 
 # model - core providers (fast import)
 from agentica.model.openai.chat import OpenAIChat
-from agentica.model.openai.chat import OpenAIChat as OpenAILLM
 from agentica.model.openai.like import OpenAILike
 from agentica.model.azure.openai_chat import AzureOpenAIChat
-from agentica.model.azure.openai_chat import AzureOpenAIChat as AzureOpenAILLM
-from agentica.model.moonshot import Moonshot
-from agentica.model.moonshot import Moonshot as MoonshotChat
-from agentica.model.moonshot import Moonshot as MoonshotLLM
-from agentica.model.deepseek.chat import DeepSeek
-from agentica.model.deepseek.chat import DeepSeek as DeepSeekChat
-from agentica.model.deepseek.chat import DeepSeek as DeepSeekLLM
-from agentica.model.doubao.chat import Doubao
-from agentica.model.doubao.chat import Doubao as DoubaoChat
-from agentica.model.together.together import Together
-from agentica.model.together.together import Together as TogetherChat
-from agentica.model.together.together import Together as TogetherLLM
-from agentica.model.xai.grok import Grok
-from agentica.model.xai.grok import Grok as GrokChat
-from agentica.model.yi.chat import Yi
-from agentica.model.yi.chat import Yi as YiChat
-from agentica.model.yi.chat import Yi as YiLLM
-from agentica.model.qwen.chat import Qwen
-from agentica.model.zhipuai.chat import ZhipuAI
-from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAIChat
-from agentica.model.zhipuai.chat import ZhipuAI as ZhipuAILLM
+from agentica.model.moonshot.chat import MoonshotChat
+from agentica.model.moonshot.chat import MoonshotChat as Moonshot
+from agentica.model.kimi.chat import KimiChat
+from agentica.model.kimi.chat import KimiChat as Kimi
+from agentica.model.deepseek.chat import DeepSeekChat
+from agentica.model.deepseek.chat import DeepSeekChat as DeepSeek
+from agentica.model.doubao.chat import DoubaoChat
+from agentica.model.doubao.chat import DoubaoChat as Doubao
+from agentica.model.together.chat import TogetherChat
+from agentica.model.together.chat import TogetherChat as Together
+from agentica.model.xai.chat import GrokChat
+from agentica.model.xai.chat import GrokChat as Grok
+from agentica.model.yi.chat import YiChat
+from agentica.model.yi.chat import YiChat as Yi
+from agentica.model.qwen.chat import QwenChat
+from agentica.model.qwen.chat import QwenChat as Qwen
+from agentica.model.zhipuai.chat import ZhipuAIChat
+from agentica.model.zhipuai.chat import ZhipuAIChat as ZhipuAI
 
 # model base
 from agentica.model.base import Model
@@ -124,6 +120,7 @@ _LAZY_IMPORTS = {
     "RedisDb": "agentica.db.redis",
 
     # litellm (heavy dependency)
+    "LiteLLMChat": "agentica.model.litellm.chat",
     "LiteLLM": "agentica.model.litellm.chat",
 
     # knowledge (may have heavy dependencies like llama_index, langchain)
@@ -138,25 +135,25 @@ _LAZY_IMPORTS = {
     "InMemoryVectorDb": "agentica.vectordb.memory_vectordb",
 
     # embeddings
-    "Emb": "agentica.emb.base",
-    "OpenAIEmb": "agentica.emb.openai_emb",
-    "AzureOpenAIEmb": "agentica.emb.azure_openai_emb",
-    "HashEmb": "agentica.emb.hash_emb",
-    "OllamaEmb": "agentica.emb.ollama_emb",
-    "TogetherEmb": "agentica.emb.together_emb",
-    "FireworksEmb": "agentica.emb.fireworks_emb",
-    "ZhipuAIEmb": "agentica.emb.zhipuai_emb",
-    "HttpEmb": "agentica.emb.http_emb",
-    "JinaEmb": "agentica.emb.jina_emb",
-    "GeminiEmb": "agentica.emb.gemini_emb",
-    "HuggingfaceEmb": "agentica.emb.huggingface_emb",
-    "MulanAIEmb": "agentica.emb.mulanai_emb",
+    "Embedding": "agentica.embedding.base",
+    "OpenAIEmbedding": "agentica.embedding.openai",
+    "AzureOpenAIEmbedding": "agentica.embedding.azure_openai",
+    "HashEmbedding": "agentica.embedding.hash",
+    "OllamaEmbedding": "agentica.embedding.ollama",
+    "TogetherEmbedding": "agentica.embedding.together",
+    "FireworksEmbedding": "agentica.embedding.fireworks",
+    "ZhipuAIEmbedding": "agentica.embedding.zhipuai",
+    "HttpEmbedding": "agentica.embedding.http",
+    "JinaEmbedding": "agentica.embedding.jina",
+    "GeminiEmbedding": "agentica.embedding.gemini",
+    "HuggingfaceEmbedding": "agentica.embedding.huggingface",
+    "MulanAIEmbedding": "agentica.embedding.mulanai",
 
     # rerank
-    "Reranker": "agentica.rerank.base",
-    "CohereReranker": "agentica.rerank.cohere",
-    "JinaReranker": "agentica.rerank.jina",
-    "ZhipuAIReranker": "agentica.rerank.zhipuai",
+    "Rerank": "agentica.rerank.base",
+    "CohereRerank": "agentica.rerank.cohere",
+    "JinaRerank": "agentica.rerank.jina",
+    "ZhipuAIRerank": "agentica.rerank.zhipuai",
 
     # file
     "File": "agentica.file.base",
@@ -294,7 +291,8 @@ if TYPE_CHECKING:  # noqa: F401
     from agentica.db.redis import RedisDb  # noqa: F401
 
     # litellm
-    from agentica.model.litellm.chat import LiteLLM  # noqa: F401
+    from agentica.model.litellm.chat import LiteLLMChat  # noqa: F401
+    from agentica.model.litellm.chat import LiteLLMChat as LiteLLM  # noqa: F401
 
     # knowledge
     from agentica.knowledge.base import Knowledge  # noqa: F401
@@ -306,25 +304,25 @@ if TYPE_CHECKING:  # noqa: F401
     from agentica.vectordb.memory_vectordb import InMemoryVectorDb  # noqa: F401
 
     # embeddings
-    from agentica.emb.base import Emb  # noqa: F401
-    from agentica.emb.openai_emb import OpenAIEmb  # noqa: F401
-    from agentica.emb.azure_openai_emb import AzureOpenAIEmb  # noqa: F401
-    from agentica.emb.hash_emb import HashEmb  # noqa: F401
-    from agentica.emb.ollama_emb import OllamaEmb  # noqa: F401
-    from agentica.emb.together_emb import TogetherEmb  # noqa: F401
-    from agentica.emb.fireworks_emb import FireworksEmb  # noqa: F401
-    from agentica.emb.zhipuai_emb import ZhipuAIEmb  # noqa: F401
-    from agentica.emb.http_emb import HttpEmb  # noqa: F401
-    from agentica.emb.jina_emb import JinaEmb  # noqa: F401
-    from agentica.emb.gemini_emb import GeminiEmb  # noqa: F401
-    from agentica.emb.huggingface_emb import HuggingfaceEmb  # noqa: F401
-    from agentica.emb.mulanai_emb import MulanAIEmb  # noqa: F401
+    from agentica.embedding.base import Embedding  # noqa: F401
+    from agentica.embedding.openai import OpenAIEmbedding  # noqa: F401
+    from agentica.embedding.azure_openai import AzureOpenAIEmbedding  # noqa: F401
+    from agentica.embedding.hash import HashEmbedding  # noqa: F401
+    from agentica.embedding.ollama import OllamaEmbedding  # noqa: F401
+    from agentica.embedding.together import TogetherEmbedding  # noqa: F401
+    from agentica.embedding.fireworks import FireworksEmbedding  # noqa: F401
+    from agentica.embedding.zhipuai import ZhipuAIEmbedding  # noqa: F401
+    from agentica.embedding.http import HttpEmbedding  # noqa: F401
+    from agentica.embedding.jina import JinaEmbedding  # noqa: F401
+    from agentica.embedding.gemini import GeminiEmbedding  # noqa: F401
+    from agentica.embedding.huggingface import HuggingfaceEmbedding  # noqa: F401
+    from agentica.embedding.mulanai import MulanAIEmbedding  # noqa: F401
 
     # rerank
-    from agentica.rerank.base import Reranker  # noqa: F401
-    from agentica.rerank.cohere import CohereReranker  # noqa: F401
-    from agentica.rerank.jina import JinaReranker  # noqa: F401
-    from agentica.rerank.zhipuai import ZhipuAIReranker  # noqa: F401
+    from agentica.rerank.base import Rerank  # noqa: F401
+    from agentica.rerank.cohere import CohereRerank  # noqa: F401
+    from agentica.rerank.jina import JinaRerank  # noqa: F401
+    from agentica.rerank.zhipuai import ZhipuAIRerank  # noqa: F401
 
     # file
     from agentica.file.base import File  # noqa: F401
@@ -455,30 +453,26 @@ __all__ = [
     "write_audio_to_file",
     # models
     "OpenAIChat",
-    "OpenAILLM",
     "OpenAILike",
     "AzureOpenAIChat",
-    "AzureOpenAILLM",
-    "Moonshot",
     "MoonshotChat",
-    "MoonshotLLM",
-    "DeepSeek",
+    "Moonshot",
+    "KimiChat",
+    "Kimi",
     "DeepSeekChat",
-    "DeepSeekLLM",
-    "Doubao",
+    "DeepSeek",
     "DoubaoChat",
-    "Together",
+    "Doubao",
     "TogetherChat",
-    "TogetherLLM",
-    "Grok",
+    "Together",
     "GrokChat",
-    "Yi",
+    "Grok",
     "YiChat",
-    "YiLLM",
+    "Yi",
+    "QwenChat",
     "Qwen",
-    "ZhipuAI",
     "ZhipuAIChat",
-    "ZhipuAILLM",
+    "ZhipuAI",
     "Model",
     "Message",
     "MessageReferences",

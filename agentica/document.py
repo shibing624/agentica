@@ -7,7 +7,7 @@ from typing import Optional, Dict, Any, List
 
 from pydantic import BaseModel, ConfigDict
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 
 
 class Document(BaseModel):
@@ -17,14 +17,14 @@ class Document(BaseModel):
     id: Optional[str] = None
     name: Optional[str] = None
     meta_data: Dict[str, Any] = {}
-    embedder: Optional[Emb] = None
+    embedder: Optional[Embedding] = None
     embedding: Optional[List[float]] = None
     usage: Optional[Dict[str, Any]] = None
     reranking_score: Optional[float] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def embed(self, embedder: Optional[Emb] = None) -> None:
+    def embed(self, embedder: Optional[Embedding] = None) -> None:
         """Embed the document using the provided embedder"""
 
         _embedder = embedder or self.embedder

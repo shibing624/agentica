@@ -9,11 +9,11 @@ except ImportError:
     )
 
 from agentica.document import Document
-from agentica.emb.base import Emb
-from agentica.emb.openai_emb import OpenAIEmb
+from agentica.embedding.base import Embedding
+from agentica.embedding.openai import OpenAIEmbedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 
 
 class PineconeDB(VectorDb):
@@ -33,7 +33,7 @@ class PineconeDB(VectorDb):
         config (Optional[Config], optional): The Pinecone config. Defaults to None.
         use_hybrid_search (bool): Whether to use hybrid search combining dense and sparse embeddings.
         hybrid_alpha (float): The weight for the dense embedding in hybrid search, between 0 and 1.
-        reranker (Optional[Reranker]): An optional reranker to refine search results.
+        reranker (Optional[Rerank]): An optional reranker to refine search results.
         **kwargs: Additional keyword arguments.
 
     Attributes:
@@ -58,7 +58,7 @@ class PineconeDB(VectorDb):
             name: str,
             dimension: int,
             spec: Union[Dict, ServerlessSpec, PodSpec],
-            embedder: Optional[Emb] = OpenAIEmb(),
+            embedding: Optional[Embedding] = OpenAIEmbedding(),
             metric: Optional[str] = "cosine",
             additional_headers: Optional[Dict[str, str]] = None,
             pool_threads: Optional[int] = 1,
@@ -70,10 +70,10 @@ class PineconeDB(VectorDb):
             config: Optional[Config] = None,
             use_hybrid_search: bool = False,
             hybrid_alpha: float = 0.5,
-            reranker: Optional[Reranker] = None,
+            reranker: Optional[Rerank] = None,
             **kwargs,
     ):
-        self.embedder: Emb = embedder
+        self.embedding: Embedding = embedding
         self._client = None
         self._index = None
         self.api_key: Optional[str] = api_key
@@ -101,12 +101,12 @@ class PineconeDB(VectorDb):
 
             self.sparse_encoder = BM25Encoder().default()
 
-        # Embedder for embedding the document contents
-        _embedder = embedder
-        if _embedder is None:
-            _embedder = OpenAIEmb()
-        self.embedder: Emb = _embedder
-        self.reranker: Optional[Reranker] = reranker
+        # Embedding for embedding the document contents
+        _embedding = embedding
+        if _embedding is None:
+            _embedding = OpenAIEmbedding()
+        self.embedding: Embedding = _embedding
+        self.reranker: Optional[Rerank] = reranker
 
     @property
     def client(self) -> Pinecone:
@@ -223,7 +223,7 @@ class PineconeDB(VectorDb):
         """
         vectors = []
         for document in documents:
-            document.embed(embedder=self.embedder)
+            document.embed(embedder=self.embedding)
             document.meta_data["text"] = document.content
             data_to_upsert = {
                 "id": document.id,
@@ -304,7 +304,7 @@ class PineconeDB(VectorDb):
             List[Document]: The list of matching documents.
 
         """
-        dense_embedding = self.embedder.get_embedding(query)
+        dense_embedding = self.embedding.get_embedding(query)
         sparse_embedding = None
         if self.use_hybrid_search:
             sparse_embedding = self.sparse_encoder.encode_queries(query)

@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, ZhipuAI
+from agentica import Agent, ZhipuAIChat
 from agentica.workspace import Workspace
 
 
@@ -57,7 +57,7 @@ You are a helpful AI assistant specialized in Python programming.
     # Create agent from workspace
     # load_workspace_context/load_workspace_memory are in WorkspaceMemoryConfig, enabled by default
     agent = Agent(
-        model=ZhipuAI(model="glm-4-flash"),
+        model=ZhipuAIChat(model="glm-4-flash"),
         workspace=workspace,
     )
 
@@ -78,7 +78,7 @@ You are a helpful AI assistant specialized in Python programming.
     print("\n=== Creating agent from workspace (factory method) ===")
     agent2 = Agent.from_workspace(
         workspace_path=str(workspace_path),
-        model=ZhipuAI(model="glm-4-flash"),
+        model=ZhipuAIChat(model="glm-4-flash"),
     )
     response2 = await agent2.run("你能帮我做什么？")
     print(response2.content)

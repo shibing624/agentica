@@ -13,7 +13,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, ZhipuAI
+from agentica import Agent, ZhipuAIChat
 from agentica.tools.shell_tool import ShellTool
 from agentica.skills import (
     SkillLoader,
@@ -35,7 +35,7 @@ def demo_skill_injection():
 
     # Create a basic agent
     agent = Agent(
-        model=ZhipuAI(model="glm-4-flash"),
+        model=ZhipuAIChat(model="glm-4-flash"),
         instructions="You are a helpful coding assistant.",
         tools=[ShellTool()],
     )
@@ -87,7 +87,7 @@ def demo_skill_based_agent():
 
     # Create agent with skills awareness
     agent = Agent(
-        model=ZhipuAI(model="glm-4-flash"),
+        model=ZhipuAIChat(model="glm-4-flash"),
         instructions=[
             "You are a helpful coding assistant with skill capabilities.",
             "When users use trigger commands (like /commit or /github), "
@@ -157,7 +157,7 @@ def demo_custom_skill_with_agent():
 
             # Create agent with custom skill prompt
             agent = Agent(
-                model=ZhipuAI(model="glm-4.7-flash"),
+                model=ZhipuAIChat(model="glm-4.7-flash"),
                 instructions=[
                     "You are a Python library expert.",
                     "",

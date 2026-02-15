@@ -11,7 +11,7 @@ from typing import List, Optional, Any
 
 from rich.console import Console
 
-from agentica import DeepAgent, OpenAIChat, Moonshot, AzureOpenAIChat, Yi, ZhipuAI, DeepSeek, Doubao
+from agentica import DeepAgent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, DoubaoChat
 from agentica.config import AGENTICA_HOME
 from agentica.workspace import Workspace
 
@@ -104,11 +104,11 @@ TOOL_REGISTRY = {
 MODEL_REGISTRY = {
     'openai': OpenAIChat,
     'azure': AzureOpenAIChat,
-    'moonshot': Moonshot,
-    'zhipuai': ZhipuAI,
-    'deepseek': DeepSeek,
-    'yi': Yi,
-    'doubao': Doubao,
+    'moonshot': MoonshotChat,
+    'zhipuai': ZhipuAIChat,
+    'deepseek': DeepSeekChat,
+    'yi': YiChat,
+    'doubao': DoubaoChat,
 }
 
 # Example models for each provider (for /model command display)

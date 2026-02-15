@@ -6,11 +6,11 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
 from agentica.document import Document
-from agentica.emb.base import Emb
-from agentica.emb.openai_emb import OpenAIEmb
+from agentica.embedding.base import Embedding
+from agentica.embedding.openai import OpenAIEmbedding
 from agentica.vectordb.base import VectorDb, Distance
 from agentica.utils.log import logger
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 
 
 class QdrantDb(VectorDb):
@@ -26,7 +26,7 @@ class QdrantDb(VectorDb):
     def __init__(
             self,
             collection: str = "qdrant_vec_db",
-            embedder: Emb = None,
+            embedding: Embedding = None,
             distance: Distance = Distance.cosine,
             path: Optional[str] = None,
             on_disk: bool = True,
@@ -40,7 +40,7 @@ class QdrantDb(VectorDb):
             prefix: Optional[str] = None,
             timeout: Optional[float] = None,
             host: Optional[str] = None,
-            reranker: Optional[Reranker] = None,
+            reranker: Optional[Rerank] = None,
             **kwargs,
     ):
         """
@@ -48,7 +48,7 @@ class QdrantDb(VectorDb):
 
         Args:
             collection: Name of the Qdrant collection
-            embedder: Embedding model for semantic search (default: OpenAIEmb)
+            embedding: Embedding model for semantic search (default: OpenAIEmbedding)
             distance: Distance metric for vector similarity
             path: Path for local disk storage (used when on_disk=True)
             on_disk: Whether to use local disk storage (default: True)
@@ -62,15 +62,15 @@ class QdrantDb(VectorDb):
             prefix: URL prefix for Qdrant server
             timeout: Request timeout
             host: Qdrant server host
-            reranker: Reranker for search results
+            reranker: Rerank for search results
             **kwargs: Additional arguments passed to QdrantClient
         """
         # Collection attributes
         self.collection: str = collection
 
-        # Embedder for embedding the document contents (default to OpenAIEmb)
-        self.embedder: Emb = embedder if embedder is not None else OpenAIEmb()
-        self.dimensions: Optional[int] = self.embedder.dimensions
+        # Embedding for embedding the document contents (default to OpenAIEmbedding)
+        self.embedding: Embedding = embedding if embedding is not None else OpenAIEmbedding()
+        self.dimensions: Optional[int] = self.embedding.dimensions
 
         # Distance metric
         self.distance: Distance = distance
@@ -100,7 +100,7 @@ class QdrantDb(VectorDb):
         self.prefix: Optional[str] = prefix
         self.timeout: Optional[float] = timeout
         self.host: Optional[str] = host
-        self.reranker: Optional[Reranker] = reranker
+        self.reranker: Optional[Rerank] = reranker
         self.kwargs = kwargs
 
         # Qdrant client instance (lazy initialization)
@@ -200,7 +200,7 @@ class QdrantDb(VectorDb):
         logger.debug(f"Inserting {len(documents)} documents")
         points = []
         for document in documents:
-            document.embed(embedder=self.embedder)
+            document.embed(embedder=self.embedding)
             cleaned_content = document.content.replace("\x00", "\ufffd")
             doc_id = md5(cleaned_content.encode()).hexdigest()
             points.append(
@@ -240,7 +240,7 @@ class QdrantDb(VectorDb):
             limit (int): Number of search results to return
             filters (Optional[Dict[str, Any]]): Filters to apply while searching
         """
-        query_embedding = self.embedder.get_embedding(query)
+        query_embedding = self.embedding.get_embedding(query)
         if query_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []
@@ -263,7 +263,7 @@ class QdrantDb(VectorDb):
                     name=result.payload["name"],
                     meta_data=result.payload["meta_data"],
                     content=result.payload["content"],
-                    embedder=self.embedder,
+                    embedder=self.embedding,
                     embedding=result.vector,
                     usage=result.payload["usage"],
                 )

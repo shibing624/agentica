@@ -15,7 +15,7 @@ import os
 import asyncio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, DeepSeek
+from agentica import Agent, OpenAIChat, DeepSeekChat
 
 # Example 1: Simple streaming with print_response
 print("=" * 60)
@@ -64,7 +64,7 @@ print("=" * 60)
 
 async def async_stream_demo():
     agent = Agent(
-        model=DeepSeek(id='deepseek-reasoner'),
+        model=DeepSeekChat(id='deepseek-reasoner'),
     )
     
     # Use run_stream for async streaming - this is the recommended way

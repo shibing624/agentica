@@ -4,7 +4,7 @@
 @description: Cohere Reranker implementation.
 """
 from typing import List, Dict, Any, Optional
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 from agentica.document import Document
 from agentica.utils.log import logger
 
@@ -14,7 +14,7 @@ except ImportError:
     raise ImportError("cohere not installed, please run pip install cohere")
 
 
-class CohereReranker(Reranker):
+class CohereRerank(Rerank):
     model: str = "rerank-multilingual-v3.0"
     api_key: Optional[str] = None
     cohere_client: Optional[CohereClient] = None

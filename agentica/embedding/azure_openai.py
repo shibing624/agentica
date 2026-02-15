@@ -8,43 +8,54 @@ from os import getenv
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any, Literal
 
-from openai import OpenAI as OpenAIClient
+from openai import AzureOpenAI as AzureOpenAIClient
 from openai.types.create_embedding_response import CreateEmbeddingResponse
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 
 @dataclass
-class OpenAIEmb(Emb):
+class AzureOpenAIEmbedding(Embedding):
     model: str = "text-embedding-3-small"
     dimensions: int = 1536
     encoding_format: Literal["float", "base64"] = "float"
     user: Optional[str] = None
-    api_key: Optional[str] = getenv("OPENAI_API_KEY")
+    api_key: Optional[str] = getenv("AZURE_OPENAI_API_KEY")
+    api_version: str = getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+    azure_endpoint: Optional[str] = getenv("AZURE_OPENAI_ENDPOINT")
+    azure_deployment: Optional[str] = getenv("AZURE_DEPLOYMENT")
+    base_url: Optional[str] = None
+    azure_ad_token: Optional[str] = None
+    azure_ad_token_provider: Optional[Any] = None
     organization: Optional[str] = None
-    base_url: Optional[str] = getenv("OPENAI_BASE_URL")
     request_params: Optional[Dict[str, Any]] = None
     client_params: Optional[Dict[str, Any]] = None
-    openai_client: Optional[OpenAIClient] = None
-
+    openai_client: Optional[AzureOpenAIClient] = None
 
     @property
-    def client(self) -> OpenAIClient:
+    def client(self) -> AzureOpenAIClient:
         if self.openai_client:
             return self.openai_client
 
         _client_params: Dict[str, Any] = {}
         if self.api_key:
             _client_params["api_key"] = self.api_key
+        if self.api_version:
+            _client_params["api_version"] = self.api_version
         if self.organization:
             _client_params["organization"] = self.organization
+        if self.azure_endpoint:
+            _client_params["azure_endpoint"] = self.azure_endpoint
+        if self.azure_deployment:
+            _client_params["azure_deployment"] = self.azure_deployment
         if self.base_url:
             _client_params["base_url"] = self.base_url
-        if self.client_params:
-            _client_params.update(self.client_params)
-        self.openai_client = OpenAIClient(**_client_params)
-        return self.openai_client
+        if self.azure_ad_token:
+            _client_params["azure_ad_token"] = self.azure_ad_token
+        if self.azure_ad_token_provider:
+            _client_params["azure_ad_token_provider"] = self.azure_ad_token_provider
+        return AzureOpenAIClient(**_client_params)
 
     def _response(self, text: str) -> CreateEmbeddingResponse:
         _request_params: Dict[str, Any] = {
@@ -73,21 +84,10 @@ class OpenAIEmb(Emb):
 
         embedding = response.data[0].embedding
         usage = response.usage
-        if usage:
-            return embedding, usage.model_dump()
-        return embedding, None
+        return embedding, usage.model_dump()
 
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        return [self.get_embedding(text) for text in texts]
-
-
-if __name__ == '__main__':
-    emb = OpenAIEmb()
-    text = "I love you"
-    r = emb.get_embedding(text)
-    print(r)
-    r = emb.get_embedding_and_usage(text)
-    print(r)
-    texts = ["I love you", "我喜欢你"]
-    r = emb.get_embeddings(texts)
-    print(r)
+        embeddings = []
+        for text in texts:
+            embeddings.append(self.get_embedding(text))
+        return embeddings

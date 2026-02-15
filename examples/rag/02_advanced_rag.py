@@ -19,8 +19,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from agentica import Agent, OpenAIChat
 from agentica.knowledge.base import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
-from agentica import SearchType, OpenAIEmb
-from agentica.rerank.zhipuai import ZhipuAIReranker
+from agentica import SearchType, OpenAIEmbedding
+from agentica.rerank.zhipuai import ZhipuAIRerank
 
 # Get the correct path to data file
 data_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -38,8 +38,8 @@ knowledge = Knowledge(
         table_name='paper_sample',
         uri='tmp/paper_lancedb',
         search_type=SearchType.vector,
-        embedder=OpenAIEmb(),
-        reranker=ZhipuAIReranker(),  # Add a reranker
+        embedding=OpenAIEmbedding(),
+        reranker=ZhipuAIRerank(),  # Add a reranker
     )
 )
 

@@ -8,13 +8,13 @@ Supported providers: OpenAI, Anthropic, Azure, Huggingface, Cohere, Together, Re
 Ollama, Bedrock, Vertex AI, and many more.
 
 Usage:
-    from agentica.model.litellm import LiteLLM
-    
+    from agentica.model.litellm import LiteLLMChat
+
     # Use with provider prefix
-    model = LiteLLM(id="openai/gpt-4o")
-    model = LiteLLM(id="anthropic/claude-3-opus-20240229")
-    model = LiteLLM(id="azure/gpt-4")
-    model = LiteLLM(id="ollama/llama2")
+    model = LiteLLMChat(id="openai/gpt-4o")
+    model = LiteLLMChat(id="anthropic/claude-3-opus-20240229")
+    model = LiteLLMChat(id="azure/gpt-4")
+    model = LiteLLMChat(id="ollama/llama2")
     
     # Or use the litellm/ prefix for auto-detection in Agent
     agent = Agent(model="litellm/openai/gpt-4o")
@@ -69,31 +69,31 @@ class StreamData:
     response_tool_calls: Optional[List[Any]] = None
 
 
-class LiteLLM(Model):
+class LiteLLMChat(Model):
     """
     LiteLLM Model Provider - Unified interface to 100+ LLM APIs.
-    
+
     LiteLLM allows you to call OpenAI, Anthropic, Azure, Huggingface, Ollama,
     Replicate, Together, and many more providers using a single interface.
-    
+
     Attributes:
         id (str): Model identifier with provider prefix (e.g., "openai/gpt-4o", "anthropic/claude-3-opus-20240229")
         name (str): Display name for this model instance
         provider (str): Provider name (auto-detected from id)
         api_key (str): API key for the provider (auto-detected from environment)
         base_url (str): Custom API base URL (optional)
-        
+
     Example:
         ```python
-        from agentica.model.litellm import LiteLLM
+        from agentica.model.litellm import LiteLLMChat
         from agentica import Agent
-        
+
         # Direct usage
-        model = LiteLLM(id="openai/gpt-4o")
-        
+        model = LiteLLMChat(id="openai/gpt-4o")
+
         # With Agent
         agent = Agent(
-            model=LiteLLM(id="anthropic/claude-3-opus-20240229"),
+            model=LiteLLMChat(id="anthropic/claude-3-opus-20240229"),
             instructions="You are a helpful assistant."
         )
         ```

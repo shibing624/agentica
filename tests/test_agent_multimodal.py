@@ -39,7 +39,7 @@ class TestImageInput:
     @pytest.mark.asyncio
     async def test_run_with_single_image_url(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("I see an image")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             resp = await agent.run(
                 "Describe this image",
                 images=["https://example.com/image.png"],
@@ -50,7 +50,7 @@ class TestImageInput:
     @pytest.mark.asyncio
     async def test_run_with_multiple_images(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Two images")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             resp = await agent.run(
                 "Compare these images",
                 images=[
@@ -63,7 +63,7 @@ class TestImageInput:
     @pytest.mark.asyncio
     async def test_run_with_base64_image(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Base64 image")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             # Base64-encoded 1x1 white pixel PNG
             b64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
             resp = await agent.run(
@@ -74,7 +74,7 @@ class TestImageInput:
 
     def test_run_sync_with_images(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Image OK")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             resp = agent.run_sync(
                 "Describe",
                 images=["https://example.com/img.png"],
@@ -93,7 +93,7 @@ class TestAudioInput:
     @pytest.mark.asyncio
     async def test_run_with_audio_parameter(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Audio processed")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             resp = await agent.run(
                 "Transcribe this",
                 audio={"data": "base64_audio_data", "format": "wav"},
@@ -112,7 +112,7 @@ class TestVideoInput:
     @pytest.mark.asyncio
     async def test_run_with_video_parameter(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Video processed")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             resp = await agent.run(
                 "Describe video",
                 videos=["https://example.com/video.mp4"],
@@ -131,7 +131,7 @@ class TestMultimodalCombined:
     @pytest.mark.asyncio
     async def test_text_and_image_combined(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Combined")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             resp = await agent.run(
                 "What is this?",
                 images=["https://example.com/img.png"],
@@ -144,7 +144,7 @@ class TestMultimodalCombined:
             yield ModelResponse(content="Streaming multimodal", event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             chunks = []
             async for chunk in agent.run_stream(
                 "Describe",
@@ -157,7 +157,7 @@ class TestMultimodalCombined:
     async def test_multimodal_history_multi_turn(self):
         """Multi-turn with images — second call should not fail."""
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Turn 1")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             await agent.run("Turn 1", images=["https://example.com/img.png"])
 
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Turn 2")):

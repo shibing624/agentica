@@ -34,7 +34,7 @@ class TestStreamContent:
                 yield ModelResponse(content=c, event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             chunks = []
             async for chunk in agent.run_stream("Hi"):
                 chunks.append(chunk)
@@ -49,7 +49,7 @@ class TestStreamContent:
                 yield ModelResponse(content=p, event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             collected = []
             async for chunk in agent.run_stream("Hi"):
                 if chunk.content:
@@ -65,7 +65,7 @@ class TestStreamContent:
                 yield ModelResponse(content=c, event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             chunks = []
             async for chunk in agent.run_stream("Hi"):
                 chunks.append(chunk)
@@ -87,7 +87,7 @@ class TestStreamEvents:
             yield ModelResponse(content="Hello", event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             async for chunk in agent.run_stream("Hi"):
                 if chunk.content:
                     assert chunk.event == RunEvent.run_response.value
@@ -98,7 +98,7 @@ class TestStreamEvents:
             yield ModelResponse(content="Hello", event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             events = []
             async for chunk in agent.run_stream("Hi", stream_intermediate_steps=True):
                 events.append(chunk.event)
@@ -120,7 +120,7 @@ class TestStreamEvents:
             )
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             reasoning = []
             content = []
             async for chunk in agent.run_stream("Hi"):
@@ -148,7 +148,7 @@ class TestStreamSync:
                 yield ModelResponse(content=p, event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             collected = []
             for chunk in agent.run_stream_sync("Hi"):
                 if chunk.content:
@@ -163,7 +163,7 @@ class TestStreamSync:
                 yield ModelResponse(content=c, event=ModelResponseEvent.assistant_response.value)
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini"))
+            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
             count = 0
             for _ in agent.run_stream_sync("Hi"):
                 count += 1

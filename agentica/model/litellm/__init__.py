@@ -1,1 +1,1 @@
-from agentica.model.litellm.chat import LiteLLM
+from agentica.model.litellm.chat import LiteLLMChat

@@ -7,11 +7,11 @@ from dataclasses import dataclass
 from os import getenv
 from typing import Optional
 
-from agentica.emb.openai_emb import OpenAIEmb
+from agentica.embedding.openai import OpenAIEmbedding
 
 
 @dataclass
-class FireworksEmb(OpenAIEmb):
+class FireworksEmbedding(OpenAIEmbedding):
     model: str = "nomic-ai/nomic-embed-text-v1.5"
     dimensions: int = 768
     api_key: Optional[str] = getenv("FIREWORKS_API_KEY")

@@ -26,8 +26,8 @@ from agentica.run_response import RunResponse, RunEvent
 # ---------------------------------------------------------------------------
 
 def _make_model():
-    """Create a real OpenAIChat instance (API key not needed since we patch response)."""
-    return OpenAIChat(model="gpt-4o-mini")
+    """Create a real OpenAIChat instance with fake API key (response is patched)."""
+    return OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key")
 
 
 def _mock_response(content="Mock response"):

@@ -9,7 +9,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class ZhipuAI(OpenAILike):
+class ZhipuAIChat(OpenAILike):
     """
     A model class for ZhipuAI Chat API.
 

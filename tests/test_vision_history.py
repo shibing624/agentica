@@ -409,7 +409,7 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         
         # Create agent with history enabled
         agent = Agent(
-            model=OpenAIChat(id="gpt-4o"),
+            model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"),
             add_history_to_messages=True,
         )
         
@@ -452,7 +452,7 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         
         # Create agent with history enabled
         agent = Agent(
-            model=OpenAIChat(id="gpt-4o"),
+            model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"),
             add_history_to_messages=True,
         )
         
@@ -497,7 +497,7 @@ class TestAgentWithVisionHistory(unittest.TestCase):
         
         # Create agent with history enabled
         agent = Agent(
-            model=OpenAIChat(id="gpt-4o"),
+            model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"),
             add_history_to_messages=True,
         )
         

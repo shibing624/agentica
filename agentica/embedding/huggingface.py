@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any
 import json
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 try:
@@ -17,7 +17,7 @@ except ImportError:
 
 
 @dataclass
-class HuggingfaceEmb(Emb):
+class HuggingfaceEmbedding(Embedding):
     """Huggingface Custom Embedder"""
 
     model: str = "jinaai/jina-embeddings-v2-base-code"
@@ -58,7 +58,7 @@ class HuggingfaceEmb(Emb):
 
 
 if __name__ == '__main__':
-    emb = HuggingfaceEmb(api_key="hf_xxx")
+    emb = HuggingfaceEmbedding(api_key="hf_xxx")
     text = "I love you"
     r = emb.get_embedding(text)
     print(r)

@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, ZhipuAI, Workspace
+from agentica import Agent, ZhipuAIChat, Workspace
 from agentica.skills import (
     SkillLoader,
     get_skill_registry,
@@ -60,7 +60,7 @@ async def demo_workspace_with_skills():
 
     # Create agent with workspace context + skills
     agent = Agent(
-        model=ZhipuAI(model="glm-4-flash"),
+        model=ZhipuAIChat(model="glm-4-flash"),
         name="Workspace-Skills-Agent",
         instructions=[
             "You are a helpful assistant with workspace and skill capabilities.",

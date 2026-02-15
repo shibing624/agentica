@@ -6,7 +6,7 @@ part of the code from https://github.com/phidatahq/phidata
 from typing import Optional, Dict, List, Tuple, Any
 from os import getenv
 from dataclasses import dataclass
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 try:
@@ -20,7 +20,7 @@ except ImportError:
 
 
 @dataclass
-class GeminiEmb(Emb):
+class GeminiEmbedding(Embedding):
     model: str = "text-embedding-004"
 
     task_type: str = "RETRIEVAL_QUERY"

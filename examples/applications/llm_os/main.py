@@ -23,7 +23,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
 
 from agentica import DeepAgent, OpenAIChat
 from agentica.document import Document
-from agentica.emb.zhipuai_emb import ZhipuAIEmb
+from agentica.embedding.zhipuai import ZhipuAIEmbedding
 from agentica.knowledge.base import Knowledge
 from agentica.utils.log import logger
 from agentica.vectordb.lancedb_vectordb import LanceDb
@@ -85,11 +85,11 @@ def create_llm_os(
     logger.info(f"Creating LLM OS with model: {model_id}")
 
     # 初始化向量数据库和知识库
-    embedder = ZhipuAIEmb()
+    embedder = ZhipuAIEmbedding()
     vector_db = LanceDb(
         uri="outputs/llm_os_lancedb",
         table_name="llm_os_documents",
-        embedder=embedder,
+        embedding=embedder,
     )
     knowledge = Knowledge(vector_db=vector_db)
 

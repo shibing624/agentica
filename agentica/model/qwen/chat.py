@@ -4,7 +4,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class Qwen(OpenAILike):
+class QwenChat(OpenAILike):
     """
     A model class for YI Chat API.
 

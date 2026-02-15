@@ -13,7 +13,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, OpenAIEmb
+from agentica import Agent, OpenAIChat, OpenAIEmbedding
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
 from agentica import SearchType
@@ -24,7 +24,7 @@ knowledge = Knowledge(
     vector_db=LanceDb(
         table_name="recipes",
         uri="tmp/recipes_lancedb",
-        embedder=OpenAIEmb(),
+        embedding=OpenAIEmbedding(),
         search_type=SearchType.vector,
     ),
 )

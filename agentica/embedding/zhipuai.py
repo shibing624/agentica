@@ -6,11 +6,11 @@ from os import getenv
 from dataclasses import dataclass
 from typing import Optional
 
-from agentica.emb.openai_emb import OpenAIEmb
+from agentica.embedding.openai import OpenAIEmbedding
 
 
 @dataclass
-class ZhipuAIEmb(OpenAIEmb):
+class ZhipuAIEmbedding(OpenAIEmbedding):
     model: str = "embedding-3"
     dimensions: int = 2048
     api_key: Optional[str] = getenv("ZHIPUAI_API_KEY")

@@ -15,7 +15,7 @@ import typer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, OpenAIEmb
+from agentica import Agent, OpenAIChat, OpenAIEmbedding
 from agentica.agent.config import ToolConfig
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
@@ -31,7 +31,7 @@ files = [os.path.join(pwd_path, '../data/medical_corpus.txt'), os.path.join(pwd_
 knowledge_base = Knowledge(
     data_path=files,
     vector_db=LanceDb(
-        embedder=OpenAIEmb(),
+        embedding=OpenAIEmbedding(),
         uri=f"{output_dir}/medical_corpus.lancedb",
     ),
 )

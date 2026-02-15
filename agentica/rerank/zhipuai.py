@@ -8,12 +8,12 @@ from typing import List, Optional
 
 import requests
 
-from agentica.rerank.base import Reranker
+from agentica.rerank.base import Rerank
 from agentica.document import Document
 from agentica.utils.log import logger
 
 
-class ZhipuAIReranker(Reranker):
+class ZhipuAIRerank(Rerank):
     """ZhipuAI Reranker API adapter.
 
     Args:

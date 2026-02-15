@@ -7,12 +7,12 @@ part of the code from https://github.com/phidatahq/phidata
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Any, Tuple
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 
 @dataclass
-class OllamaEmb(Emb):
+class OllamaEmbedding(Embedding):
     model: str = "quentinz/bge-base-zh-v1.5"
     dimensions: int = 384
     host: Optional[str] = "http://localhost:11434"

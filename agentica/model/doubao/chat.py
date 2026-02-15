@@ -4,7 +4,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class Doubao(OpenAILike):
+class DoubaoChat(OpenAILike):
     """
     A model class for Doubao Chat API.
 

@@ -46,7 +46,7 @@ class AgentMultiRoundTest(unittest.TestCase):
         mock_response.return_value = mock_model_response
 
         agent = Agent(
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
         )
         
         # Run the agent

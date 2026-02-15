@@ -4,7 +4,7 @@ from os import getenv
 from agentica.model.openai.like import OpenAILike
 
 
-class Moonshot(OpenAILike):
+class MoonshotChat(OpenAILike):
     """
     A model class for Moonshot Chat API.
 

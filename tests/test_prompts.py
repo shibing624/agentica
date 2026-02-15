@@ -122,7 +122,7 @@ class TestGetSystemMessage:
     async def test_system_message_includes_instructions(self):
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             instructions=["Be concise", "Be accurate"],
         )
         msg = await agent.get_system_message()
@@ -134,7 +134,7 @@ class TestGetSystemMessage:
     async def test_system_message_includes_datetime(self):
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             prompt_config=PromptConfig(add_datetime_to_instructions=True),
         )
         msg = await agent.get_system_message()
@@ -147,7 +147,7 @@ class TestGetSystemMessage:
     async def test_system_message_with_system_prompt(self):
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             prompt_config=PromptConfig(system_prompt="You are a helpful assistant."),
         )
         msg = await agent.get_system_message()
@@ -158,7 +158,7 @@ class TestGetSystemMessage:
     async def test_system_message_callable_system_prompt(self):
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             prompt_config=PromptConfig(system_prompt=lambda agent=None: "Dynamic system prompt."),
         )
         msg = await agent.get_system_message()
@@ -169,7 +169,7 @@ class TestGetSystemMessage:
     async def test_system_message_with_description(self):
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             description="A test assistant",
         )
         msg = await agent.get_system_message()
@@ -180,7 +180,7 @@ class TestGetSystemMessage:
     async def test_system_message_with_agentic_prompt(self):
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini"),
+            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
             prompt_config=PromptConfig(enable_agentic_prompt=True),
         )
         msg = await agent.get_system_message()

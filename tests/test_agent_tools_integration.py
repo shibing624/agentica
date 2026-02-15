@@ -163,7 +163,7 @@ class TestParallelToolExecution:
 
     def _make_model(self):
         from agentica.model.openai import OpenAIChat
-        m = OpenAIChat(model="gpt-4o-mini")
+        m = OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key")
         m.metrics = {}
         m.function_call_stack = None
         m.tool_call_limit = None

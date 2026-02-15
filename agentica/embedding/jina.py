@@ -10,12 +10,12 @@ from typing import Optional, Dict, List, Tuple, Any
 
 import requests
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 
 @dataclass
-class JinaEmb(Emb):
+class JinaEmbedding(Embedding):
     """Jina Embedding API adapter.
 
     Args:

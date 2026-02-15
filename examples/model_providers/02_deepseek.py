@@ -12,7 +12,7 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, Message, DeepSeek
+from agentica import Agent, Message, DeepSeekChat
 
 
 async def main():
@@ -21,7 +21,7 @@ async def main():
     print("Example 1: Direct DeepSeek Model Usage")
     print("=" * 60)
     
-    model = DeepSeek()
+    model = DeepSeekChat()
     print(f"Model: {model}")
     
     messages = [Message(role="user", content="一句话介绍北京")]
@@ -34,7 +34,7 @@ async def main():
     print("=" * 60)
     
     agent = Agent(
-        model=DeepSeek(),
+        model=DeepSeekChat(),
         instructions="You are a helpful assistant. Please respond in Chinese.",
     )
     
@@ -46,7 +46,7 @@ async def main():
     print("=" * 60)
     
     try:
-        reasoner = DeepSeek(id="deepseek-reasoner")
+        reasoner = DeepSeekChat(id="deepseek-reasoner")
         agent_reasoner = Agent(
             model=reasoner,
             instructions="You are a reasoning assistant. Think step by step.",

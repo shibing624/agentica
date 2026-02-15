@@ -4,19 +4,18 @@
 @description: MulanAI Embedding API adapter.
 Uses https://api.mulanai.com/v1/text_embedding
 """
-from ast import main
 from os import getenv
 from dataclasses import dataclass
 from typing import Optional, Dict, List, Tuple, Any
 
 import requests
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.utils.log import logger
 
 
 @dataclass
-class MulanAIEmb(Emb):
+class MulanAIEmbedding(Embedding):
     """MulanAI Embedding API adapter.
 
     Args:
@@ -81,6 +80,6 @@ class MulanAIEmb(Emb):
 
 
 if __name__ == "__main__":
-    m = MulanAIEmb()
+    m = MulanAIEmbedding()
     print(m.get_embedding("hello"))
     print(m.get_embeddings(["hello", "world"]))

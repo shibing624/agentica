@@ -17,10 +17,10 @@ except ImportError:
     raise ImportError("`pgvector` not installed, please install it via `pip install pgvector`.")
 
 from agentica.document import Document
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
-from agentica.emb.openai_emb import OpenAIEmb
-from agentica.rerank.base import Reranker
+from agentica.embedding.openai import OpenAIEmbedding
+from agentica.rerank.base import Rerank
 from agentica.utils.log import logger
 
 
@@ -51,10 +51,10 @@ class PgVectorDb(VectorDb):
             schema: Optional[str] = "ai",
             db_url: Optional[str] = None,
             db_engine: Optional[Engine] = None,
-            embedder: Optional[Emb] = None,
+            embedding: Optional[Embedding] = None,
             distance: Distance = Distance.cosine,
             index: Optional[Union[Ivfflat, HNSW]] = HNSW(),
-            reranker: Optional[Reranker] = None,
+            reranker: Optional[Rerank] = None,
     ):
         _engine: Optional[Engine] = db_engine
         if _engine is None and db_url is not None:
@@ -72,16 +72,16 @@ class PgVectorDb(VectorDb):
         self.db_engine: Engine = _engine
         self.metadata: MetaData = MetaData(schema=self.schema)
 
-        # Emb for embedding the document contents
-        _embedder = embedder
-        if _embedder is None:
-            _embedder = OpenAIEmb()
-        self.embedder: embedder = _embedder
-        self.dimensions: int = self.embedder.dimensions
+        # Embedding for embedding the document contents
+        _embedding = embedding
+        if _embedding is None:
+            _embedding = OpenAIEmbedding()
+        self.embedding: Embedding = _embedding
+        self.dimensions: int = self.embedding.dimensions
 
         # Distance metric
         self.distance: Distance = distance
-        self.reranker: Optional[Reranker] = reranker
+        self.reranker: Optional[Rerank] = reranker
 
         # Index for the collection
         self.index: Optional[Union[Ivfflat, HNSW]] = index
@@ -174,7 +174,7 @@ class PgVectorDb(VectorDb):
         with self.Session() as sess:
             counter = 0
             for document in tqdm(documents, desc="Inserting documents"):
-                document.embed(embedder=self.embedder)
+                document.embed(embedder=self.embedding)
                 cleaned_content = document.content.replace("\x00", "\ufffd")
                 content_hash = md5(cleaned_content.encode()).hexdigest()
                 _id = document.id or content_hash
@@ -217,7 +217,7 @@ class PgVectorDb(VectorDb):
         with self.Session() as sess:
             counter = 0
             for document in documents:
-                document.embed(embedder=self.embedder)
+                document.embed(embedder=self.embedding)
                 cleaned_content = document.content.replace("\x00", "\ufffd")
                 content_hash = md5(cleaned_content.encode()).hexdigest()
                 _id = document.id or content_hash
@@ -259,7 +259,7 @@ class PgVectorDb(VectorDb):
                 logger.info(f"Committed {counter} documents")
 
     def search(self, query: str, limit: int = 5, filters: Optional[Dict[str, Any]] = None) -> List[Document]:
-        query_embedding = self.embedder.get_embedding(query)
+        query_embedding = self.embedding.get_embedding(query)
         if query_embedding is None:
             logger.error(f"Error getting embedding for Query: {query}")
             return []
@@ -313,7 +313,7 @@ class PgVectorDb(VectorDb):
                     name=neighbor.name,
                     meta_data=neighbor.meta_data,
                     content=neighbor.content,
-                    embedder=self.embedder,
+                    embedder=self.embedding,
                     embedding=neighbor.embedding,
                     usage=neighbor.usage,
                 )
@@ -432,7 +432,7 @@ class PgVectorDb(VectorDb):
             if k in {"metadata", "table"}:
                 continue
             # Reuse db_engine and Session without copying
-            elif k in {"db_engine", "Session", "embedder"}:
+            elif k in {"db_engine", "Session", "embedding"}:
                 setattr(copied_obj, k, v)
             else:
                 setattr(copied_obj, k, deepcopy(v, memo))

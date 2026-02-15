@@ -12,7 +12,7 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, ZhipuAI, UserMessage
+from agentica import Agent, ZhipuAIChat, UserMessage
 
 
 async def main():
@@ -21,7 +21,7 @@ async def main():
     print("Example 1: Direct ZhipuAI Model Usage")
     print("=" * 60)
     
-    model = ZhipuAI()
+    model = ZhipuAIChat()
     print(f"Model: {model}")
     
     messages = [UserMessage("一句话介绍北京")]

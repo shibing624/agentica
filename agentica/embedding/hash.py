@@ -7,11 +7,11 @@ from dataclasses import dataclass
 import hashlib
 from typing import List
 
-from agentica.emb.base import Emb
+from agentica.embedding.base import Embedding
 
 
 @dataclass
-class HashEmb(Emb):
+class HashEmbedding(Embedding):
     """A Literal Hash Embedding Function, which hashes the input text as a list of floats."""
     model: str = "literal_hash_emb"
     dimensions: int = 32
@@ -28,7 +28,7 @@ class HashEmb(Emb):
 
 
 if __name__ == '__main__':
-    emb = HashEmb()
+    emb = HashEmbedding()
     text = "I love you"
     r = emb.get_embedding(text)
     print(r)

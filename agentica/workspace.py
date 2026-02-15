@@ -555,7 +555,7 @@ You are a helpful AI assistant.
         self,
         query: str,
         limit: int = 5,
-        embedder=None,
+        embedding=None,
     ) -> List[Dict]:
         """Hybrid memory search (vector + keyword).
 
@@ -564,7 +564,7 @@ You are a helpful AI assistant.
         Args:
             query: Search query
             limit: Maximum number of results
-            embedder: Optional embedding model instance, uses OpenAIEmb if not provided
+            embedding: Optional embedding model instance, uses OpenAIEmbedding if not provided
 
         Returns:
             List of matching memories
@@ -580,7 +580,7 @@ You are a helpful AI assistant.
         search = WorkspaceMemorySearch(workspace_path=str(self.path))
         search.index()
 
-        results = search.search_hybrid(query, limit=limit, embedder=embedder)
+        results = search.search_hybrid(query, limit=limit, embedding=embedding)
 
         # Convert MemoryChunk to dict for consistency with search_memory
         return [
