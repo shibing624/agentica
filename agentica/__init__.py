@@ -455,8 +455,6 @@ __all__ = [
     "AzureOpenAIChat",
     "MoonshotChat",
     "Moonshot",
-    "KimiChat",
-    "Kimi",
     "DeepSeekChat",
     "DeepSeek",
     "DoubaoChat",
