@@ -8,217 +8,114 @@
 
 -----------------
 
-# Agentica: 构建 AI 智能体
+# Agentica: Build AI Agents
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![python_version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](requirements.txt)
-[![MseeP.ai](https://img.shields.io/badge/mseep.ai-agentica-blue)](https://mseep.ai/app/shibing624-agentica)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
-[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#%E7%A4%BE%E5%8C%BA%E4%B8%8E%E6%94%AF%E6%8C%81)
+[![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#社区与支持)
 
-**Agentica 是一个轻量级、功能强大的 Python 框架，用于构建、管理和部署自主 AI 智能体。**
+**Agentica** 是一个轻量级 Python 框架，用于构建 AI 智能体。Async-First 架构，支持工具调用、RAG、多智能体团队、工作流编排和 MCP 协议。
 
-无论您是想创建一个简单的聊天机器人、一个复杂的研究助理，还是一个由专业智能体组成的协作团队，Agentica 都能为您提供所需的工具和抽象，助您更快实现目标。我们采用开发者优先的设计方法，简化了 RAG、多智能体工作流和长期记忆等高级功能，让每一位开发者都能轻松上手。
-
-## 🚀 为什么选择 Agentica？
-
-*   **开发者优先的 API**：简洁、直观、面向对象的接口，易于学习，使用愉快。
-*   **模块化与可扩展**：轻松替换 LLM、记忆后端和向量存储等组件。
-*   **功能完备**：开箱即用，提供丰富的内置工具（网络搜索、代码解释器、文件读写）、记忆类型和高级 RAG 功能。
-*   **高级功能，简化实现**：轻松实现多智能体协作（团队）、任务分解（工作流）和自我反思等复杂模式。
-*   **生产就绪**：通过命令行界面、Web UI 或作为服务部署您的智能体。同时支持**模型上下文协议（MCP）**，实现标准化工具集成。
-*   **Agent Skill 支持**：基于 Prompt Engineering 的技能系统，将技能说明注入 System Prompt，任何支持 tool calling 的模型都可使用。
-
-## ✨ 核心特性
-
-*   **🤖 核心智能体能力**：构建具备复杂规划、反思、短期和长期记忆以及强大工具使用能力的智能体。
-*   **🧩 高级编排**：
-    *   **多智能体团队**：创建由专业智能体组成的团队，协作解决问题。
-    *   **工作流**：将复杂任务分解为一系列步骤，由不同的智能体或工具执行。
-*   **🛡️ 安全守卫（Guardrails）**：
-    *   **输入/输出守卫**：在智能体处理前验证用户输入，在返回前检查智能体输出。
-    *   **工具守卫**：在工具执行前验证参数，在返回结果前过滤敏感数据。
-    *   **三种行为模式**：允许（allow）、拒绝并继续（reject_content）、抛出异常（raise_exception）。
-*   **🎯 Agent Skill 技能系统**：
-    *   **Prompt Engineering 技术**：Skill 是一种文本指令，不是代码级别的能力扩展。
-    *   **实现方式**：解析 SKILL.md 的元数据，将技能描述注入 System Prompt。
-    *   **执行流程**：LLM 阅读技能说明后，使用基础 tools（shell、python、file viewer）执行任务。
-    *   **模型无关**：任何支持 tool calling 的模型都可以使用，因为 skill 只是文本指令。
-    *   **优势**：可扩展、模型无关、易于维护（只需更新 Markdown 文档）。
-*   **🛠️ 丰富的工具生态**：
-    *   大量内置工具（网络搜索、OCR、图像生成、Shell 命令）。
-    *   轻松创建您自己的自定义工具。
-    *   一流的**模型上下文协议（MCP）**支持，实现标准化工具集成。
-*   **📚 灵活的 RAG 流程**：
-    *   内置知识库管理和文档解析（PDF、文本）。
-    *   混合检索策略和结果重排序，以实现最高准确性。
-    *   与 LangChain 和 LlamaIndex 等流行库集成。
-*   **🌌 多模态支持**：构建能够理解和生成文本、图像、音频和视频的智能体。
-*   **🧠 广泛的 LLM 兼容性**：支持来自 OpenAI、Azure、Deepseek、Moonshot、Anthropic、智谱AI、Ollama、Together 等提供商的数十种模型。
-*   **💡 自我进化智能体**：具备反思和记忆增强能力的智能体，能够自我进化。
-
-## 🏗️ 系统架构
-
-<div align="center">
-    <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/architecturev2.jpg" alt="Agentica Architecture" width="800"/>
-</div>
-
-Agentica 的模块化设计实现了最大的灵活性和可扩展性。其核心是 `Agent`、`Model`、`Tool` 和 `Memory` 组件，这些组件可以轻松组合和扩展，以创建强大的应用程序。
-
-## 💾 安装
+## 安装
 
 ```bash
 pip install -U agentica
 ```
 
-从源码安装：
-```bash
-git clone https://github.com/shibing624/agentica.git
-cd agentica
-pip install .
+## 快速开始
+
+```python
+import asyncio
+from agentica import Agent, ZhipuAI
+
+async def main():
+    agent = Agent(model=ZhipuAI())
+    result = await agent.run("一句话介绍北京")
+    print(result.content)
+
+asyncio.run(main())
 ```
 
-## ⚡ 快速入门
+```
+北京是中国的首都，是一座拥有三千多年历史的文化名城，也是全国的政治、文化和国际交流中心。
+```
 
-1.  **设置您的 API 密钥。** 在 `~/.agentica/.env` 路径下创建一个文件，或设置环境变量。
+需要先设置 API Key：
 
-    ```shell
-    # 智谱AI ZhipuAI, glm-4.7-flash 免费用，支持工具调用，128k
-    export ZHIPUAI_API_KEY="your-api-key"
-    ```
+```bash
+export ZHIPUAI_API_KEY="your-api-key"      # 智谱AI（glm-4.7-flash 免费）
+export OPENAI_API_KEY="sk-xxx"              # OpenAI
+export DEEPSEEK_API_KEY="your-api-key"      # DeepSeek
+```
 
-2.  **运行您的第一个智能体！**
+## 功能特性
 
-    ```python
-    import asyncio
-    from agentica import Agent, ZhipuAI
+- **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
+- **20+ 模型** — OpenAI / DeepSeek / Claude / 智谱 / Qwen / Moonshot / Ollama / LiteLLM 等
+- **40+ 内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
+- **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
+- **多智能体** — Team（动态委派）和 Workflow（确定性编排）
+- **安全守卫** — 输入/输出/工具级 Guardrails
+- **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
+- **Skill 系统** — 基于 Markdown 的技能注入，模型无关
+- **多模态** — 文本、图像、音频、视频理解
 
-    async def main():
-        agent = Agent(model=ZhipuAI())
-        result = await agent.run("一句话介绍北京")
-        print(result.content)
+## CLI
 
-    if __name__ == "__main__":
-        asyncio.run(main())
-    ```
-
-    **输出：**
-    ```
-    北京是中国的首都，是一座拥有三千多年历史的文化名城，也是全国的政治、文化和国际交流中心。
-    ```
-
-## 📖 核心概念
-
-*   **Agent**：思考、决策和执行动作的核心组件。它将模型、工具和记忆连接在一起。
-*   **Model**：智能体的"大脑"。通常是一个大型语言模型（LLM），为智能体的推理能力提供动力。
-*   **Tool**：智能体可用于与外部世界交互的功能或能力（例如，搜索网页、运行代码、访问数据库）。
-*   **Memory**：允许智能体记住过去的交互（短期记忆）并存储关键信息以供日后调用（长期记忆）。
-*   **Knowledge**：外部知识源（如文档集合），智能体可以使用检索增强生成（RAG）进行查询。
-*   **Workflow/Team**：用于编排复杂、多步骤任务或管理多个智能体之间协作的高级结构。
-
-## 📚 文档
-
-| 文档 | 描述 |
-|------|------|
-| [**API 参考文档**](https://github.com/shibing624/agentica/blob/main/docs/API_REFERENCE.md) | 完整的类和方法 API 说明，包括 Agent、Model、Memory、Tools、Knowledge 等 |
-| [**工具使用指南**](https://github.com/shibing624/agentica/blob/main/docs/TOOLS_GUIDE.md) | 40+ 内置工具的详细使用说明和示例，以及自定义工具开发方法 |
-| [**最佳实践**](https://github.com/shibing624/agentica/blob/main/docs/BEST_PRACTICES.md) | Agent 设计原则、提示词工程、性能优化、错误处理和生产部署指南 |
-| [**技术实现文档**](https://github.com/shibing624/agentica/blob/main/docs/TECH_IMPL.md) | 项目架构和代码结构详解，适合贡献者和深度用户 |
-
-## 🚀 功能展示：您可以构建什么
-
-浏览我们全面的示例，了解 Agentica 的无限可能：
-
-| 示例 | 描述 |
-|------|------|
-| [**Hello World**](https://github.com/shibing624/agentica/blob/main/examples/basic/01_hello_world.py) | 最简单的 Agent 入门示例 |
-| [**自定义工具**](https://github.com/shibing624/agentica/blob/main/examples/tools/01_custom_tool.py) | 学习如何为 Agent 添加自定义工具 |
-| [**高级 RAG**](https://github.com/shibing624/agentica/blob/main/examples/rag/02_advanced_rag.py) | 基于文档构建问答系统，具备混合检索和重排序功能 |
-| [**团队协作**](https://github.com/shibing624/agentica/blob/main/examples/agent_patterns/03_team_collaboration.py) | 组建专业智能体团队协作完成任务 |
-| [**安全护栏**](https://github.com/shibing624/agentica/blob/main/examples/guardrails/01_input_guardrail.py) | 输入/输出验证和安全检查 |
-| [**工作流编排**](https://github.com/shibing624/agentica/blob/main/examples/workflow/02_investment.py) | 自动化投资研究流程 |
-| [**视觉理解**](https://github.com/shibing624/agentica/blob/main/examples/basic/06_vision.py) | 构建能够理解图像的智能体 |
-| [**MCP 协议**](https://github.com/shibing624/agentica/blob/main/examples/mcp/01_stdio.py) | Model Context Protocol 集成示例 |
-| [**LLM OS**](https://github.com/shibing624/agentica/blob/main/examples/applications/llm_os/main.py) | 由 LLM 驱动的对话式操作系统 |
-
-[➡️ **查看所有示例**](https://github.com/shibing624/agentica/tree/main/examples)
-
-## 🖥️ 部署
-
-### 命令行界面 (CLI)
-
-直接从终端与您的智能体互动。
-
-```shell
-# 安装 agentica
-pip install -U agentica
-
-# 运行单个查询
-agentica --query "下一届奥运会在哪里举办？" --model_provider zhipuai --model_name glm-4.7-flash --tools baidu_search
-
-# 启动交互式聊天会话
+```bash
 agentica --model_provider zhipuai --model_name glm-4.7-flash
 ```
 
-CLI show case (实现ClaudeCode效果):
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/cli_snap.png" width="800" />
 
-### Web UI
+## Web UI
 
-Agentica 与 [ChatPilot](https://github.com/shibing624/ChatPilot) 完全兼容，为您的智能体提供功能丰富、基于 Gradio 的 Web 界面。
+通过 [agentica-gateway](https://github.com/shibing624/agentica-gateway) 提供 Web 页面，同时支持飞书 App、企业微信直连调用 Agentica。
 
-<div align="center">
-    <img src="https://github.com/shibing624/ChatPilot/blob/main/docs/assets/shot.png" width="800" />
-</div>
+## 示例
 
-请查看 [ChatPilot 仓库](https://github.com/shibing624/ChatPilot)了解设置说明。
+查看 [examples/](https://github.com/shibing624/agentica/tree/main/examples) 获取完整示例，涵盖：
 
-## 🤝 与其他框架的比较
+| 类别 | 内容 |
+|------|------|
+| **基础用法** | Hello World、流式输出、结构化输出、多轮对话、多模态 |
+| **工具** | 自定义工具、Async 工具、搜索、代码执行、文件操作 |
+| **Agent 模式** | Agent 作为工具、并行执行、团队协作、辩论 |
+| **RAG** | PDF 问答、高级 RAG、LangChain / LlamaIndex 集成 |
+| **工作流** | 数据管道、投资研究、新闻报道、代码审查 |
+| **MCP** | Stdio / SSE / HTTP 传输、JSON 配置 |
+| **应用** | LLM OS、深度研究、客服系统 |
 
-| 特性                | Agentica                                   | LangChain                                 | AutoGen                             | CrewAI                             |
-|------------------------|--------------------------------------------|-------------------------------------------|-------------------------------------|------------------------------------|
-| **核心设计**        | 以智能体为中心，模块化且直观      | 以链为中心，复杂的组件图    | 专注于多智能体对话    | 专注于基于角色的多智能体       |
-| **易用性**        | 高（为简洁而设计）             | 中（学习曲线陡峭）           | 中                            | 高                               |
-| **多智能体**        | 原生支持 `Team` 和 `Workflow`         | 需要自定义实现            | 核心功能                        | 核心功能                       |
-| **RAG**                | 内置高级流程                | 需要手动组装组件    | 需要外部集成       | 需要外部集成      |
-| **工具**            | 丰富的内置工具 + MCP 支持          | 生态系统庞大，可能很复杂         | 基本的工具支持                  | 基本的工具支持                 |
-| **多模态**        | ✅ 支持（文本、图像、音频、视频）         | ✅ 支持（但集成可能复杂）  | ❌ 不支持（主要基于文本）      | ❌ 不支持（主要基于文本）     |
+[→ 查看完整示例目录](https://github.com/shibing624/agentica/blob/main/examples/README.md)
 
+## 文档
 
-## 💬 社区与支持
+完整使用文档：**https://shibing624.github.io/agentica**
 
-*   **GitHub Issues**：有任何问题或功能请求？[提交 issue](https://github.com/shibing624/agentica/issues)。
-*   **微信**：加入我们的开发者社群！添加微信号 `xuming624`，并备注"llm"，即可加入大模型技术交流群。
+## 社区与支持
+
+- **GitHub Issues** — [提交 issue](https://github.com/shibing624/agentica/issues)
+- **微信群** — 添加微信号 `xuming624`，备注 "llm"，加入技术交流群
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/wechat.jpeg" width="200" />
 
-## 📜 引用
+## 引用
 
-如果您在研究中使用了 Agentica，请按以下格式引用：
+如果您在研究中使用了 Agentica，请引用：
 
-```bibtex
-@misc{agentica,
-  author = {Ming Xu},
-  title = {Agentica: Effortlessly Build Intelligent, Reflective, and Collaborative Multimodal AI Agents},
-  year = {2025},
-  publisher = {GitHub},
-  journal = {GitHub Repository},
-  howpublished = {\url{https://github.com/shibing624/agentica}},
-}
-```
+> Xu, M. (2026). Agentica: A Human-Centric Framework for Large Language Model Agent Workflows. GitHub. https://github.com/shibing624/agentica
 
-## 📄 许可证
+## 许可证
 
-Agentica 采用 [Apache License 2.0](LICENSE) 授权。
+[Apache License 2.0](LICENSE)
 
-## ❤️ 贡献
+## 贡献
 
-我们欢迎各种形式的贡献！请查看我们的[贡献指南](CONTRIBUTING.md)以开始。
+欢迎贡献！请查看 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-## 🙏 致谢
+## 致谢
 
-我们的工作受到了许多优秀项目的启发和帮助。我们在此感谢以下项目团队：
-- [langchain-ai/langchain](https://github.com/langchain-ai/langchain)
 - [phidatahq/phidata](https://github.com/phidatahq/phidata)
-- [simonmesmith/agentflow](https://github.com/simonmesmith/agentflow)
+- [openai/openai-agents-python](https://github.com/openai/openai-agents-python)

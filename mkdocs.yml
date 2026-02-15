@@ -1,5 +1,5 @@
 site_name: Agentica
-site_description: 轻量级、功能强大的 Python AI Agent 框架
+site_description: A lightweight, powerful Python framework for building autonomous AI agents
 site_url: https://shibing624.github.io/agentica
 repo_url: https://github.com/shibing624/agentica
 repo_name: shibing624/agentica
@@ -9,39 +9,44 @@ theme:
   language: zh
   palette:
     - scheme: default
-      primary: indigo
+      primary: black
       accent: indigo
       toggle:
         icon: material/brightness-7
-        name: 切换到深色模式
+        name: Switch to dark mode
     - scheme: slate
-      primary: indigo
+      primary: black
       accent: indigo
       toggle:
         icon: material/brightness-4
-        name: 切换到浅色模式
+        name: Switch to light mode
   features:
     - navigation.tabs
     - navigation.sections
     - navigation.expand
+    - navigation.path
     - navigation.top
     - search.highlight
     - content.code.copy
+    - content.code.select
 
 nav:
-  - 首页: index.md
-  - 快速入门: quickstart.md
-  - 核心概念:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts:
       - Agent: concepts/agent.md
       - Team & Workflow: concepts/team.md
-  - 使用指南:
-      - CLI 终端: guides/terminal.md
-      - 工具系统: guides/tools.md
+  - Guides:
+      - CLI Terminal: guides/terminal.md
+      - Tools: guides/tools.md
       - RAG: guides/rag.md
-      - 安全守卫: guides/guardrails.md
+      - MCP: guides/mcp.md
+      - Model Providers: guides/models.md
+      - Guardrails: guides/guardrails.md
+      - Best Practices: guides/best_practices.md
       - Benchmark: guides/benchmark.md
-  - API 参考:
-      - Agent API: api/agent.md
+  - API Reference:
+      - Agent: api/agent.md
 
 markdown_extensions:
   - pymdownx.highlight:
@@ -49,8 +54,12 @@ markdown_extensions:
   - pymdownx.superfences
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.inlinehilite
   - admonition
+  - pymdownx.details
   - tables
+  - attr_list
+  - md_in_html
   - toc:
       permalink: true
 

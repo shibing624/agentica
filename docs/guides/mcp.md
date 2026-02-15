@@ -1,0 +1,210 @@
+# Model Context Protocol (MCP) Tools
+
+This module provides a client implementation for the [Model Context Protocol (MCP)](https://spec.modelcontextprotocol.io/), allowing you to easily integrate MCP servers with your Agentica agents.
+
+## Features
+
+- Support for both stdio and SSE transport modes
+- Explicit parameter names for each transport type
+- Async context manager-based API for easy resource management
+- Tool caching for improved performance
+- Automatic tool registration with your agents
+
+## Installation
+
+Make sure you have the `mcp` package installed:
+
+```bash
+pip install mcp
+```
+
+## Basic Usage
+
+### Using the McpTool Class
+
+The `McpTool` class is the primary way to integrate MCP services with your Agentica agents:
+
+```python
+from agentica import Agent, OpenAIChat
+from agentica.tools.mcp_tool import McpTool
+from agentica import ShellTool
+
+# For SSE transport (direct connection to running server)
+mcp_tool = McpTool(
+    url="http://localhost:8081/sse",
+    sse_timeout=5.0,
+    sse_read_timeout=300.0
+)
+
+# For stdio transport (launches a subprocess)
+mcp_tool = McpTool(
+    command="python path/to/your/mcp_server.py"
+)
+
+# Use with an agent
+async with mcp_tool:
+    agent = Agent(
+        model=OpenAIChat(model="gpt-4o-mini"),
+        tools=[ShellTool(), mcp_tool]
+    )
+
+    await agent.print_response("Use the weather tool to check the forecast for Beijing")
+```
+
+### Using Low-Level MCPClient and Server Classes
+
+For more control, you can directly use the `MCPClient` and server classes:
+
+```python
+import asyncio
+from agentica.mcp.client import MCPClient
+from agentica.mcp.server import MCPServerStdio, MCPServerSse
+
+async def stdio_example():
+    """Example using stdio transport"""
+    server = MCPServerStdio(
+        name="MathTools",
+        params={
+            "command": "python",
+            "args": ["path/to/your/mcp_server.py"],
+            "env": {"VAR": "value"}
+        }
+    )
+    
+    async with MCPClient(server=server) as client:
+        # List available tools
+        tools = await client.list_tools()
+        print(f"Available tools: {[tool.name for tool in tools]}")
+        
+        # Call a tool
+        result = await client.call_tool("add", {"a": 5, "b": 7})
+        text_result = client.extract_result_text(result)
+        print(f"5 + 7 = {text_result}")
+
+async def sse_example():
+    """Example using SSE transport"""
+    server = MCPServerSse(
+        name="WeatherService",
+        params={
+            "url": "http://localhost:8081/sse",
+            "headers": {"Authorization": "Bearer your-token"},  # Optional
+            "timeout": 5.0,  # HTTP request timeout
+            "sse_read_timeout": 300.0  # SSE connection timeout
+        }
+    )
+    
+    async with MCPClient(server=server) as client:
+        # Use client as in stdio example
+        tools = await client.list_tools()
+        result = await client.call_tool("get_weather", {"city": "Beijing"})
+        print(client.extract_result_text(result))
+
+if __name__ == "__main__":
+    asyncio.run(stdio_example())
+    asyncio.run(sse_example())
+```
+
+## McpTool Configuration Options
+
+The `McpTool` class supports several configuration options:
+
+### Transport Options
+
+You must provide one of these to specify the transport method:
+
+- `stdio_command`: Command string to run the MCP server via stdio transport
+- `sse_server_url`: URL of the SSE endpoint for SSE transport
+- `server_params`: Directly provide `StdioServerParameters` for stdio transport
+- `session`: Directly provide an initialized `ClientSession`
+
+### SSE Configuration
+
+For SSE transport, you can configure:
+
+- `sse_headers`: HTTP headers for the SSE connection
+- `sse_timeout`: HTTP request timeout in seconds (default: 5.0)
+- `sse_read_timeout`: SSE connection timeout in seconds (default: 300.0)
+
+### Tool Filtering
+
+You can filter which tools are exposed to your agent:
+
+- `include_tools`: List of tool names to include (if None, includes all)
+- `exclude_tools`: List of tool names to exclude
+
+### Other Options
+
+- `env`: Environment variables to pass to the server process (for stdio transport)
+
+## Example
+
+```python
+# Create an McpTool with SSE transport
+from agentica.tools.mcp_tool import McpTool
+
+mcp_tool = McpTool(
+    url="http://localhost:8081/sse",
+    sse_headers={"Authorization": "Bearer token123"},
+    include_tools=["get_weather", "get_forecast"],
+    exclude_tools=["admin_tool"]
+)
+
+# Create an McpTool with stdio transport
+mcp_tool = McpTool(
+    command="python weather_server.py --port 8081",
+    env={"API_KEY": "your_api_key"},
+    include_tools=["get_weather"]
+)
+```
+
+## Backward Compatibility
+
+The `McpTool` class still supports environment variables for backward compatibility:
+
+```python
+from agentica.tools.mcp_tool import McpTool
+# Using environment variables for SSE configuration
+env = {
+    "MCP_SERVER_URL": "http://localhost:8081/sse",
+    "MCP_SERVER_HEADERS": '{"Authorization": "Bearer token123"}',
+    "MCP_SERVER_TIMEOUT": "5",
+    "MCP_SERVER_READ_TIMEOUT": "300"
+}
+
+mcp_tool = McpTool(env=env)
+```
+
+However, using the direct parameters is recommended for clarity and type safety.
+
+## MCP Server Implementation
+
+If you're implementing your own MCP server, you can use the `FastMCP` class from the `mcp` package:
+
+```python
+from mcp.server.fastmcp import FastMCP
+from fastapi import FastAPI
+
+# Create server
+mcp = FastMCP("My MCP Server", host="0.0.0.0", port=8081)
+
+# Define a tool
+@mcp.tool()
+def get_weather(city: str) -> str:
+    """Get weather for a city"""
+    # Implementation here
+    return f"Weather for {city}: Sunny, 25°C"
+
+# Run the server
+if __name__ == "__main__":
+    # Use 'stdio' or 'sse' transport
+    mcp.run(transport="sse")
+```
+
+## Examples
+
+Check out the examples directory for more complete examples:
+
+- `examples/41_mcp_stdio_demo.py`: Demonstrates how to use MCP with stdio transport
+- `examples/42_mcp_sse_server.py`: A simple MCP server with SSE transport
+- `examples/42_mcp_sse_client.py`: Demonstrates how to connect to an MCP SSE server
+ 
