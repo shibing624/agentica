@@ -1,12 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Tests for Agent-as-Session pattern (V2).
+@description: Tests for Agent session pattern (V2).
 
-V2 changes:
-- SessionMixin removed from Agent inheritance
+V2 architecture:
 - Agent itself IS the session via WorkingMemory
-- session_id, db, read_from_storage etc. moved to SessionManager (external)
 - Core session capability: memory.runs, add_history_to_messages, history_window
 """
 import asyncio

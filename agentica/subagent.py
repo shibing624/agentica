@@ -40,6 +40,9 @@ class SubagentType(str, Enum):
     # Code agent: code generation and execution
     CODE = "code"
 
+    # Custom agent: user-defined subagent type
+    CUSTOM = "custom"
+
 
 @dataclass
 class SubagentConfig:
@@ -63,8 +66,8 @@ class SubagentConfig:
     # Denied tools (takes precedence over allowed_tools)
     denied_tools: Optional[List[str]] = None
     
-    # Maximum iterations for this subagent
-    max_iterations: int = 10
+    # Maximum number of tool calls allowed for this subagent
+    tool_call_limit: int = 100
     
     # Whether this subagent can spawn its own subagents
     can_spawn_subagents: bool = False
@@ -127,7 +130,10 @@ class SubagentRegistry:
         return cls._instance
     
     def register(self, run: SubagentRun) -> None:
-        """Register a new subagent run."""
+        """Register a new subagent run. Auto-cleans old completed runs when exceeding threshold."""
+        # Auto-cleanup when accumulated runs exceed threshold
+        if len(self._runs) > 100:
+            self.cleanup_completed(max_age_seconds=600)
         self._runs[run.run_id] = run
         logger.debug(f"Registered subagent run: {run.run_id} ({run.subagent_type.value})")
     
@@ -143,16 +149,15 @@ class SubagentRegistry:
         ]
 
     def is_subagent(self, agent_id: str) -> bool:
-        """Check if an agent_id has an active subagent run (i.e., is itself a subagent).
+        """Check if an agent_id is currently running as a subagent.
 
         This is used for nesting prevention — if the current agent is already
         running as a subagent, it should not spawn further subagents.
         """
         return any(
-            run.run_id == agent_id or run.parent_agent_id == agent_id
+            run.run_id == agent_id
             for run in self._runs.values()
             if run.status in ("pending", "running")
-            and run.run_id == agent_id
         )
     
     def get_active(self) -> List[SubagentRun]:
@@ -250,7 +255,7 @@ Guidelines:
 Complete the user's search request efficiently and report your findings clearly.""",
     allowed_tools=["ls", "read_file", "glob", "grep"],  # Read-only tools
     denied_tools=["write_file", "edit_file", "execute", "task"],  # No write/execute/spawn
-    max_iterations=15,
+    tool_call_limit=100,
     can_spawn_subagents=False,
 )
 
@@ -276,7 +281,7 @@ Guidelines:
 Complete your research task and provide a comprehensive summary of your findings.""",
     allowed_tools=["web_search", "fetch_url", "read_file", "ls", "glob", "grep"],
     denied_tools=["write_file", "edit_file", "execute", "task"],
-    max_iterations=15,
+    tool_call_limit=100,
     can_spawn_subagents=False,
 )
 
@@ -302,7 +307,7 @@ Guidelines:
 Complete your coding task and provide a summary of the results.""",
     allowed_tools=["read_file", "write_file", "edit_file", "execute", "ls", "glob", "grep"],
     denied_tools=["task"],  # Cannot spawn nested subagents
-    max_iterations=20,
+    tool_call_limit=100,
     can_spawn_subagents=False,
 )
 
@@ -324,7 +329,7 @@ def register_custom_subagent(
     system_prompt: str,
     allowed_tools: Optional[List[str]] = None,
     denied_tools: Optional[List[str]] = None,
-    max_iterations: int = 15,
+    tool_call_limit: int = 100,
 ) -> SubagentConfig:
     """
     Register a custom subagent type.
@@ -338,7 +343,7 @@ def register_custom_subagent(
         system_prompt: System prompt for the subagent
         allowed_tools: List of allowed tool names (None = inherit from parent)
         denied_tools: List of denied tool names
-        max_iterations: Maximum iterations for this subagent
+        tool_call_limit: Maximum number of tool calls allowed for this subagent
         
     Returns:
         The created SubagentConfig
@@ -349,17 +354,17 @@ def register_custom_subagent(
         ...     description="Reviews code for quality and bugs",
         ...     system_prompt="You are a code review expert...",
         ...     allowed_tools=["read_file", "ls", "glob", "grep"],
-        ...     max_iterations=10,
+        ...     tool_call_limit=10,
         ... )
     """
     config = SubagentConfig(
-        type=SubagentType.CODE,  # Custom subagents use CODE as base type (has full tools)
+        type=SubagentType.CUSTOM,  # Custom subagents have their own type
         name=name,
         description=description,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
         denied_tools=denied_tools or ["task"],  # Prevent nesting by default
-        max_iterations=max_iterations,
+        tool_call_limit=tool_call_limit,
         can_spawn_subagents=False,
     )
     _CUSTOM_SUBAGENT_CONFIGS[name.lower()] = config

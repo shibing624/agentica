@@ -3,14 +3,16 @@
 @author:XuMing(xuming624@qq.com)
 @description: Agent base class - V2 architecture with layered configuration.
 
-V2 changes from V1:
-- 57 params → ~15 params (core + common + Config objects)
-- Removed: SessionMixin, MediaMixin
-- Removed: backward-compat aliases (llm, knowledge_base, output_model, etc.)
-- Removed: session fields (session_id, db, user_id, etc.) → SessionManager
-- Removed: convenience params (search_knowledge, output_language, markdown) → use Config objects
-- Added: PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
-- Added: RunConfig support in run()/run_stream()
+Architecture:
+- Agent defines identity and capabilities ("who I am, what I can do")
+- Mixins: PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin
+- Session state: in-memory WorkingMemory (serializable via to_dict/from_dict)
+- Multi-modal: images/videos/audio passed as run() parameters, not stored on Agent
+
+Parameters organized in three layers:
+1. Core definition (~10): model, name, instructions, tools, knowledge, etc.
+2. Common config (~5): add_history_to_messages, debug, tracing, etc.
+3. Packed config (4): PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 """
 from typing import (
     Any,

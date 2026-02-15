@@ -19,8 +19,8 @@ from loguru import logger
 from tqdm import tqdm
 import sys
 
-sys.path.append('..')
-from agentica import Agent, OpenAIChat, ZhipuAIChat, Message, JinaTool, SearchSerperTool
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from agentica import DeepAgent, OpenAIChat, ZhipuAIChat, Message, JinaTool, SearchSerperTool
 from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA
@@ -225,17 +225,22 @@ async def evaluate_instance(
                 work_dir='saved_html'
             ))
         # Always add URL crawler for visiting pages
-        tools.append(UrlCrawlerTool(base_dir='saved_html'))
+        tools.append(UrlCrawlerTool(work_dir='saved_html'))
         
-        # Create Agent with multi-round strategy
-        agent = Agent(
+        # Create DeepAgent with deep research capabilities
+        agent = DeepAgent(
             model=OpenAIChat(id=model_name),
             tools=tools,
             add_history_to_messages=False,
-            enable_multi_round=True,  # Enable multi-round deep research
-            max_rounds=max_rounds,
-            max_tokens=max_tokens,
-            debug=debug
+            enable_deep_research=True,
+            include_web_search=False,  # Use external search tools configured above
+            include_fetch_url=False,   # Use UrlCrawlerTool configured above
+            include_file_tools=False,
+            include_execute=False,
+            include_todos=False,
+            include_task=False,
+            include_skills=False,
+            debug=debug,
         )
         
         # Run the agent

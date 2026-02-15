@@ -73,7 +73,7 @@ def demo_custom_subagent():
 
 Provide clear, actionable feedback with specific line references when possible.""",
         allowed_tools=["read_file", "ls", "glob", "grep"],
-        max_iterations=10,
+        tool_call_limit=10,
     )
     
     # Show that the custom subagent is now available
@@ -104,7 +104,7 @@ def demo_explore_subagent():
     config = get_subagent_config("explore")
     print(f"\nExplore Agent Config:")
     print(f"  - Allowed tools: {config.allowed_tools}")
-    print(f"  - Max iterations: {config.max_iterations}")
+    print(f"  - Tool call limit: {config.tool_call_limit}")
     print(f"  - Can spawn subagents: {config.can_spawn_subagents}")
     
     # Create DeepAgent with task tool
@@ -177,7 +177,7 @@ def demo_research_subagent():
     config = get_subagent_config("research")
     print(f"\nResearch Agent Config:")
     print(f"  - Allowed tools: {config.allowed_tools}")
-    print(f"  - Max iterations: {config.max_iterations}")
+    print(f"  - Tool call limit: {config.tool_call_limit}")
     
     agent = DeepAgent(
         model=OpenAIChat(),

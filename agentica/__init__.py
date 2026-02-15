@@ -95,7 +95,6 @@ from agentica.agent import Agent, AgentCancelledError
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 from agentica.run_config import RunConfig
 from agentica.deep_agent import DeepAgent
-from agentica.agent_session import AgentSession
 from agentica.workflow import Workflow, WorkflowSession
 
 # workspace
@@ -517,7 +516,6 @@ __all__ = [
     "Agent",
     "AgentCancelledError",
     "DeepAgent",
-    "AgentSession",
     "PromptConfig",
     "ToolConfig",
     "WorkspaceMemoryConfig",

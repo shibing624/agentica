@@ -1159,7 +1159,7 @@ class BuiltinTaskTool(Tool):
             model: Optional["Model"] = None,
             tools: Optional[List[Any]] = None,
             work_dir: Optional[str] = None,
-            max_iterations: int = 15,
+            tool_call_limit: int = 100,
             custom_subagent_configs: Optional[Dict[str, Any]] = None,
     ):
         """
@@ -1169,14 +1169,14 @@ class BuiltinTaskTool(Tool):
             model: Model to use for subagents. If None, will use the parent agent's model.
             tools: Default tools for subagents. If None, will use basic tools based on type.
             work_dir: Work directory for file operations.
-            max_iterations: Default max iterations for subagent execution.
+            tool_call_limit: Maximum number of tool calls allowed for subagent execution.
             custom_subagent_configs: Custom subagent configurations to add/override defaults.
         """
         super().__init__(name="builtin_task_tool")
         self._model = model
         self._tools = tools
         self._work_dir = work_dir
-        self._max_iterations = max_iterations
+        self._tool_call_limit = tool_call_limit
         self._parent_agent: Optional["Agent"] = None
         self._custom_configs = custom_subagent_configs or {}
         self.register(self.task)
@@ -1340,7 +1340,7 @@ class BuiltinTaskTool(Tool):
                 instructions=config.system_prompt,
                 tools=subagent_tools,
                 prompt_config=PromptConfig(markdown=True),
-                tool_config=ToolConfig(tool_call_limit=config.max_iterations),
+                tool_config=ToolConfig(tool_call_limit=config.tool_call_limit),
             )
 
             logger.debug(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")

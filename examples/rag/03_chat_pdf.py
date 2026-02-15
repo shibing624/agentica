@@ -4,63 +4,66 @@
 @description: Chat PDF app demo - Demonstrates a CLI-based PDF Q&A application
 
 This example shows how to build a complete PDF chat application:
-1. Load multiple documents (PDF, TXT)
-2. Persistent session storage
-3. Interactive CLI interface
+1. Load multiple documents (PDF, TXT) into a knowledge base
+2. Use vector search for retrieval-augmented generation
+3. Multi-turn conversation with history
+4. Interactive CLI interface
+
+Usage:
+    python 03_chat_pdf.py
 """
 import sys
 import os
-from typing import Optional, List
-import typer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat, OpenAIEmbedding
-from agentica.agent.config import ToolConfig
+from agentica.agent.config import ToolConfig, PromptConfig
 from agentica.knowledge import Knowledge
 from agentica.vectordb.lancedb_vectordb import LanceDb
-from agentica.db.sqlite import SqliteDb
 
 pwd_path = os.path.dirname(os.path.abspath(__file__))
+data_dir = os.path.dirname(pwd_path)
+output_dir = os.path.join(pwd_path, "outputs")
 
-output_dir = "outputs"
-db_file = f"{output_dir}/medical_corpus.db"
+files = [
+    os.path.join(data_dir, 'data', 'medical_corpus.txt'),
+    os.path.join(data_dir, 'data', 'paper_sample.pdf'),
+]
 
-files = [os.path.join(pwd_path, '../data/medical_corpus.txt'), os.path.join(pwd_path, '../data/paper_sample.pdf')]
 # Create knowledge base with multiple documents
 knowledge_base = Knowledge(
     data_path=files,
     vector_db=LanceDb(
+        table_name="chat_pdf",
         embedding=OpenAIEmbedding(),
-        uri=f"{output_dir}/medical_corpus.lancedb",
+        uri=os.path.join(output_dir, "chat_pdf.lancedb"),
     ),
 )
 
 # Load knowledge base (comment out after first run)
 knowledge_base.load(recreate=True)
 
-db = SqliteDb(db_file=db_file)
+# Create agent with knowledge base and multi-turn conversation
+agent = Agent(
+    model=OpenAIChat(),
+    knowledge=knowledge_base,
+    tool_config=ToolConfig(search_knowledge=True),
+    prompt_config=PromptConfig(markdown=True),
+    add_history_to_messages=True,
+    history_window=5,
+)
 
+print("=" * 60)
+print("Chat PDF Demo: Medical Corpus & Paper Q&A")
+print("=" * 60)
 
-def pdf_app(new: bool = False, user: str = "user"):
-    """Run the PDF chat application.
+# Example query
+agent.print_response_stream_sync("糖尿病的常见症状有哪些?")
 
-    Args:
-        new: Start a new session
-        user: User identifier
-    """
-    # TODO: Session persistence (session_id, user_id, db) moved to SessionManager in V2
+print("\n" + "=" * 60)
+print("Entering interactive mode (type 'exit' to quit)")
+print("=" * 60)
 
-    agent = Agent(
-        model=OpenAIChat(),
-        knowledge=knowledge_base,
-        tool_config=ToolConfig(search_knowledge=True, read_chat_history=True),
-        debug=True,
-    )
-
-    print(f"User: {user}\nRun ID: {agent.run_id}\n")
-    agent.cli_app()
-
-
-if __name__ == "__main__":
-    typer.run_sync(pdf_app)
+# Interactive CLI
+agent.cli_app()
