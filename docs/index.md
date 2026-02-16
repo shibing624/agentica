@@ -37,9 +37,12 @@
 | [Team & Workflow](concepts/team.md) | 多智能体团队协作与工作流编排 |
 | **使用指南** | |
 | [CLI 终端](guides/terminal.md) | 命令行交互模式 |
-| [工具系统](guides/tools.md) | 内置工具、自定义工具、MCP 集成 |
+| [工具系统](guides/tools.md) | 内置工具、自定义工具 |
 | [RAG](guides/rag.md) | 知识库、向量检索、混合搜索 |
+| [MCP](guides/mcp.md) | Model Context Protocol 集成 |
+| [模型提供商](guides/models.md) | 20+ 模型提供商配置指南 |
 | [安全守卫](guides/guardrails.md) | 输入输出验证、工具级守卫 |
+| [最佳实践](guides/best_practices.md) | 设计原则、提示词工程、生产部署 |
 | [Benchmark](guides/benchmark.md) | 性能评测结果 |
 | **API 参考** | |
 | [Agent API](api/agent.md) | Agent 类完整 API |

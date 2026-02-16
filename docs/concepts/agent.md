@@ -65,9 +65,7 @@ Agent 的参数组织为三层：
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `add_history_to_messages` | `bool` | `False` | 将历史消息加入上下文 |
-| `num_history_responses` | `int` | `3` | 历史轮数 |
-| `search_knowledge` | `bool` | `True` | 允许 Agent 主动搜索知识库 |
-| `markdown` | `bool` | `False` | Markdown 格式输出 |
+| `history_window` | `int` | `3` | 历史轮数 |
 | `structured_outputs` | `bool` | `False` | 严格结构化输出 |
 | `debug` | `bool` | `False` | 调试模式 |
 
@@ -75,9 +73,9 @@ Agent 的参数组织为三层：
 
 | 参数 | 类型 | 说明 |
 |------|------|------|
-| `prompt_config` | `PromptConfig` | 提示词配置（expected_output 等） |
-| `tool_config` | `ToolConfig` | 工具配置（并发、压缩等） |
-| `memory_config` | `MemoryConfig` | 记忆配置（长期记忆开关等） |
+| `prompt_config` | `PromptConfig` | 提示词配置（system_prompt, markdown, output_language 等） |
+| `tool_config` | `ToolConfig` | 工具配置（search_knowledge, tool_call_limit, 压缩等） |
+| `long_term_memory_config` | `WorkspaceMemoryConfig` | 工作空间记忆配置 |
 | `team_config` | `TeamConfig` | 团队配置（委派策略等） |
 
 ## 运行方式
@@ -174,17 +172,16 @@ model = OpenAIChat(
 
 Agentica 提供两层记忆系统：
 
-### 运行时记忆：AgentMemory
+### 运行时记忆：WorkingMemory
 
 管理当前会话的消息历史，支持 token 感知的截断。
 
 ```python
-from agentica import Agent, AgentMemory
+from agentica import Agent
 
 agent = Agent(
-    memory=AgentMemory(),
     add_history_to_messages=True,   # 将历史加入上下文
-    num_history_responses=5,        # 保留最近 5 轮
+    history_window=5,               # 保留最近 5 轮
 )
 ```
 
@@ -216,12 +213,11 @@ agent = Agent(
 通过数据库保存会话历史：
 
 ```python
-from agentica import Agent, AgentMemory, SqliteDb
+from agentica import Agent, SqliteDb
 
 db = SqliteDb(table_name="sessions", db_file="agent.db")
 agent = Agent(
-    memory=AgentMemory(db=db),
-    session_id="user-123-session",
+    working_memory=WorkingMemory(db=db),
 )
 ```
 
@@ -281,6 +277,7 @@ Agentica 提供 40+ 开箱即用的工具，详见 [工具系统指南](../guide
 from agentica import Agent, Knowledge
 from agentica.vectordb import LanceDb
 from agentica.emb import OpenAIEmb
+from agentica.agent.config import ToolConfig
 
 knowledge = Knowledge(
     data_path="./documents",
@@ -290,7 +287,7 @@ knowledge.load(recreate=True)
 
 agent = Agent(
     knowledge=knowledge,
-    search_knowledge=True,
+    tool_config=ToolConfig(search_knowledge=True),  # Agent 可主动搜索知识库
     instructions=["基于知识库回答问题，如无相关信息则明确告知"],
 )
 ```
@@ -330,11 +327,15 @@ agent = Agent(instructions=get_instructions)
 
 ### System Prompt
 
-也可以直接设置完整的系统提示词：
+也可以通过 `PromptConfig` 设置完整的系统提示词：
 
 ```python
+from agentica.agent.config import PromptConfig
+
 agent = Agent(
-    system_prompt="你是一个友好的中文助手，回答简洁准确。",
+    prompt_config=PromptConfig(
+        system_prompt="你是一个友好的中文助手，回答简洁准确。",
+    ),
 )
 ```
 

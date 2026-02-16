@@ -314,7 +314,6 @@ if TYPE_CHECKING:  # noqa: F401
 
     # rerank
     from agentica.rerank.base import Rerank  # noqa: F401
-    from agentica.rerank.cohere import CohereRerank  # noqa: F401
     from agentica.rerank.jina import JinaRerank  # noqa: F401
     from agentica.rerank.zhipuai import ZhipuAIRerank  # noqa: F401
 

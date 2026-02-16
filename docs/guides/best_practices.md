@@ -113,22 +113,23 @@ agent = Agent(
 ### 2. 使用系统提示词
 
 ```python
+from agentica.agent.config import PromptConfig
+
 # 静态系统提示词
 agent = Agent(
-    system_prompt="你是一个友好的助手，使用简洁的语言回答问题。",
+    prompt_config=PromptConfig(
+        system_prompt="你是一个友好的助手，使用简洁的语言回答问题。",
+    ),
 )
 
 # 动态系统提示词
 def get_system_prompt(agent):
-    return f"""
-    当前时间: {datetime.now()}
-    用户ID: {agent.user_id}
-    会话ID: {agent.session_id}
-    
-    你是一个智能助手。
-    """
+    from datetime import datetime
+    return f"当前时间: {datetime.now()}\n你是一个智能助手。"
 
-agent = Agent(system_prompt=get_system_prompt)
+agent = Agent(
+    prompt_config=PromptConfig(system_prompt=get_system_prompt),
+)
 ```
 
 ### 3. 动态指令
@@ -233,9 +234,11 @@ def safe_api_call(url: str) -> str:
 ### 4. 工具限制
 
 ```python
+from agentica.agent.config import ToolConfig
+
 agent = Agent(
     tools=[...],
-    tool_call_limit=10,  # 限制工具调用次数
+    tool_config=ToolConfig(tool_call_limit=10),  # 限制工具调用次数
 )
 ```
 
@@ -279,7 +282,7 @@ agent = Agent(
 ```python
 agent = Agent(
     add_history_to_messages=True,  # 添加历史到上下文
-    num_history_responses=5,       # 最近 5 轮对话
+    history_window=5,              # 最近 5 轮对话
 )
 ```
 
@@ -324,9 +327,11 @@ knowledge.load(recreate=False, upsert=True)
 ### 2. 检索增强
 
 ```python
+from agentica.agent.config import ToolConfig
+
 agent = Agent(
     knowledge=knowledge,
-    add_references=True,  # 添加引用到响应
+    tool_config=ToolConfig(add_references=True),  # 添加引用到响应
     instructions=[
         "基于知识库回答问题",
         "如果知识库中没有相关信息，明确告知用户",
@@ -340,9 +345,11 @@ agent = Agent(
 让 Agent 主动搜索知识库。
 
 ```python
+from agentica.agent.config import ToolConfig
+
 agent = Agent(
     knowledge=knowledge,
-    search_knowledge=True,  # Agent 可以主动搜索
+    tool_config=ToolConfig(search_knowledge=True),  # Agent 可以主动搜索
     instructions=[
         "遇到专业问题时，先搜索知识库",
         "综合多个来源的信息回答",
@@ -391,13 +398,15 @@ async for response in agent.run_stream("复杂任务"):
 
 ```python
 from agentica import CompressionManager
+from agentica.agent.config import ToolConfig
 
 agent = Agent(
-    compression_manager=CompressionManager(
+    tool_config=ToolConfig(
         compress_tool_results=True,
-        compress_token_limit=50000,
+        compression_manager=CompressionManager(
+            compress_token_limit=50000,
+        ),
     ),
-    compress_tool_results=True,
 )
 ```
 
@@ -505,12 +514,12 @@ results = asyncio.run(process_queries(["问题1", "问题2", "问题3"]))
 ```python
 # 简单任务用小模型
 simple_agent = Agent(
-    model=OpenAIChat(model="gpt-4o-mini"),
+    model=OpenAIChat(id="gpt-4o-mini"),
 )
 
 # 复杂任务用大模型
 complex_agent = Agent(
-    model=OpenAIChat(model="gpt-4o"),
+    model=OpenAIChat(id="gpt-4o"),
 )
 ```
 
@@ -689,7 +698,6 @@ def validate_input(message: str) -> str:
 agent = Agent(
     tools=[my_tool],
     instructions=["使用 my_tool 工具完成任务"],
-    support_tool_calls=True,
 )
 ```
 
@@ -719,4 +727,4 @@ agent = Agent(
 
 ---
 
-*文档最后更新: 2025-12-20*
+*文档最后更新: 2026-02-16*

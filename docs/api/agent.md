@@ -32,10 +32,7 @@ from agentica import Agent
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `add_history_to_messages` | `bool` | `False` | 将历史消息加入上下文 |
-| `num_history_responses` | `int` | `3` | 保留的历史轮数 |
-| `search_knowledge` | `bool` | `True` | 允许 Agent 主动搜索知识库 |
-| `output_language` | `str` | `None` | 指定输出语言 |
-| `markdown` | `bool` | `False` | Markdown 格式输出 |
+| `history_window` | `int` | `3` | 保留的历史轮数 |
 | `structured_outputs` | `bool` | `False` | 使用 OpenAI 严格结构化输出模式 |
 | `debug` | `bool` | `False` | 调试模式（详细日志） |
 | `tracing` | `bool` | `False` | 启用 Langfuse 追踪 |
@@ -46,14 +43,14 @@ from agentica import Agent
 |------|------|--------|------|
 | `prompt_config` | `PromptConfig` | `PromptConfig()` | 提示词构建配置 |
 | `tool_config` | `ToolConfig` | `ToolConfig()` | 工具调用配置 |
-| `memory_config` | `MemoryConfig` | `MemoryConfig()` | 记忆配置 |
+| `long_term_memory_config` | `WorkspaceMemoryConfig` | `WorkspaceMemoryConfig()` | 工作空间记忆配置 |
 | `team_config` | `TeamConfig` | `TeamConfig()` | 团队配置 |
 
 #### 运行时
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `memory` | `AgentMemory` | `AgentMemory()` | 内存管理器 |
+| `working_memory` | `WorkingMemory` | `WorkingMemory()` | 工作记忆（会话消息历史） |
 | `context` | `Dict[str, Any]` | `None` | 运行时上下文，传递给工具和动态指令 |
 
 ### 方法
@@ -215,6 +212,8 @@ from agentica.agent.config import PromptConfig
 | `prevent_hallucinations` | `bool` | `False` | 添加防幻觉指令 |
 | `prevent_prompt_leakage` | `bool` | `False` | 防止 prompt 泄露 |
 | `enable_agentic_prompt` | `bool` | `False` | 启用增强 prompt（适合 DeepAgent） |
+| `output_language` | `str` | `None` | 指定输出语言 |
+| `markdown` | `bool` | `False` | Markdown 格式输出 |
 
 ## ToolConfig
 
@@ -227,14 +226,15 @@ from agentica.agent.config import ToolConfig
 | `support_tool_calls` | `bool` | `True` | 是否支持工具调用 |
 | `tool_call_limit` | `int` | `None` | 工具调用次数限制 |
 | `tool_choice` | `str \| Dict` | `None` | 工具选择策略 |
+| `search_knowledge` | `bool` | `True` | 允许 Agent 主动搜索知识库 |
 | `add_references` | `bool` | `False` | 添加知识库引用 |
 | `compress_tool_results` | `bool` | `False` | 压缩工具结果 |
 | `compression_manager` | `CompressionManager` | `None` | 压缩管理器实例 |
 
-## MemoryConfig
+## WorkspaceMemoryConfig
 
 ```python
-from agentica.agent.config import MemoryConfig
+from agentica.agent.config import WorkspaceMemoryConfig
 ```
 
 | 参数 | 类型 | 默认值 | 说明 |
@@ -422,13 +422,13 @@ from agentica import Model
 
 ---
 
-## AgentMemory
+## WorkingMemory
 
 ```python
-from agentica import AgentMemory
+from agentica.memory import WorkingMemory
 ```
 
-运行时内存管理，维护会话消息历史。
+运行时工作记忆，维护会话消息历史。
 
 ### 构造参数
 

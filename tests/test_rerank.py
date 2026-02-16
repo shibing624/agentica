@@ -13,6 +13,18 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.document import Document
 from agentica.rerank.base import Rerank
 
+# Pre-inject a mock 'cohere' package into sys.modules so that
+# `from cohere import Client as CohereClient` in agentica/rerank/cohere.py
+# does not raise ImportError when the real cohere package is not installed.
+_mock_cohere_module = MagicMock()
+sys.modules.setdefault("cohere", _mock_cohere_module)
+
+# Import submodules so that @patch("agentica.rerank.xxx.YYY") paths resolve correctly.
+# Python sets submodules as attributes on the parent package only after they are imported.
+import agentica.rerank.jina  # noqa: E402
+import agentica.rerank.zhipuai  # noqa: E402
+import agentica.rerank.cohere  # noqa: E402
+
 
 class TestRerankBase(unittest.TestCase):
     def test_rerank_interface(self):

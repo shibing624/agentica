@@ -173,14 +173,14 @@ agentica --tools baidu_search shell
 
 ## 选择模型
 
-Agentica 支持 20+ 模型提供商：
+Agentica 支持 20+ 模型提供商，详见 [模型提供商指南](guides/models.md)：
 
 ```python
 from agentica import (
     OpenAIChat,       # GPT-4o, GPT-4o-mini
     DeepSeek,         # deepseek-chat, deepseek-reasoner
     ZhipuAI,          # glm-4.7-flash (免费)
-    Claude,           # claude-3.5-sonnet
+    Claude,           # claude-sonnet-4-20250514
     Qwen,             # qwen-plus, qwen-turbo
     Moonshot,         # moonshot-v1-128k
     Doubao,           # doubao-pro-32k
@@ -199,5 +199,8 @@ agent = Agent(model=Ollama(id="llama3.1"))
 - [Agent 核心概念](concepts/agent.md) — 深入理解 Agent 的组成
 - [Team & Workflow](concepts/team.md) — 多智能体协作
 - [工具系统](guides/tools.md) — 内置工具与自定义工具
+- [MCP 集成](guides/mcp.md) — Model Context Protocol
+- [模型提供商](guides/models.md) — 全部模型配置
 - [CLI 终端指南](guides/terminal.md) — CLI 完整功能
+- [最佳实践](guides/best_practices.md) — 设计原则与生产部署
 - [API 参考](api/agent.md) — 完整 API 文档
