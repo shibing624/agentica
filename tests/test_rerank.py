@@ -12,18 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.document import Document
 from agentica.rerank.base import Rerank
-
-# Pre-inject a mock 'cohere' package into sys.modules so that
-# `from cohere import Client as CohereClient` in agentica/rerank/cohere.py
-# does not raise ImportError when the real cohere package is not installed.
-_mock_cohere_module = MagicMock()
-sys.modules.setdefault("cohere", _mock_cohere_module)
-
-# Import submodules so that @patch("agentica.rerank.xxx.YYY") paths resolve correctly.
-# Python sets submodules as attributes on the parent package only after they are imported.
 import agentica.rerank.jina  # noqa: E402
 import agentica.rerank.zhipuai  # noqa: E402
-import agentica.rerank.cohere  # noqa: E402
 
 
 class TestRerankBase(unittest.TestCase):
@@ -155,37 +145,6 @@ class TestZhipuAIRerank(unittest.TestCase):
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0].content, "Doc A")
         mock_logger.error.assert_called_once()
-
-
-class TestCohereRerank(unittest.TestCase):
-    @patch("agentica.rerank.cohere.CohereClient")
-    def test_rerank_basic(self, mock_cohere_client_cls):
-        """Test CohereRerank with mocked Cohere client."""
-        from agentica.rerank.cohere import CohereRerank
-
-        mock_client = MagicMock()
-        mock_result_0 = MagicMock()
-        mock_result_0.index = 1
-        mock_result_0.relevance_score = 0.95
-        mock_result_1 = MagicMock()
-        mock_result_1.index = 0
-        mock_result_1.relevance_score = 0.75
-
-        mock_response = MagicMock()
-        mock_response.results = [mock_result_0, mock_result_1]
-        mock_client.rerank.return_value = mock_response
-        mock_cohere_client_cls.return_value = mock_client
-
-        reranker = CohereRerank(api_key="fake_cohere_key")
-        documents = [
-            Document(content="First doc"),
-            Document(content="Second doc"),
-        ]
-        result = reranker.rerank(query="test", documents=documents)
-
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0].content, "Second doc")
-        self.assertAlmostEqual(result[0].reranking_score, 0.95)
 
 
 if __name__ == "__main__":

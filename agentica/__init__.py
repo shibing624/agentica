@@ -146,7 +146,6 @@ _LAZY_IMPORTS = {
 
     # rerank
     "Rerank": "agentica.rerank.base",
-    "CohereRerank": "agentica.rerank.cohere",
     "JinaRerank": "agentica.rerank.jina",
     "ZhipuAIRerank": "agentica.rerank.zhipuai",
 
