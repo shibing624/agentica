@@ -2,7 +2,7 @@ aiofiles
 httpx
 loguru
 beautifulsoup4
-openai>=1.52.0
+openai
 python-dotenv
 pydantic
 pydantic_settings
@@ -13,7 +13,7 @@ markdownify
 tqdm
 rich
 pyyaml
-mcp>=1.9.4
+mcp
 puremagic
 qdrant-client
 langfuse
