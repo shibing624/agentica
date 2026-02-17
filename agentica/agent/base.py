@@ -288,27 +288,41 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             logger.warning(f"Failed to auto-load MCP tools: {e}")
 
     def _merge_tool_system_prompts(self) -> None:
-        """Collect system prompts from all tools and merge into instructions."""
+        """Collect system prompts from all tools and merge into instructions.
+
+        Separates skill-related prompts from tool usage prompts,
+        and formats them as markdown sections instead of XML tags.
+        """
         if not self.tools:
             return
 
-        tool_prompts_map: Dict[str, str] = {}
+        from agentica.tools.skill_tool import SkillTool
+
+        tool_prompts = []
+        skill_prompts = []
+
         for tool in self.tools:
             if isinstance(tool, Tool) and hasattr(tool, 'get_system_prompt'):
                 prompt = tool.get_system_prompt()
-                if prompt:
-                    tool_class_name = tool.__class__.__name__
-                    if tool_class_name not in tool_prompts_map or len(prompt) > len(tool_prompts_map[tool_class_name]):
-                        tool_prompts_map[tool_class_name] = prompt
+                if not prompt:
+                    continue
+                if isinstance(tool, SkillTool):
+                    skill_prompts.append(prompt)
+                else:
+                    tool_prompts.append(prompt)
 
-        if not tool_prompts_map:
+        if not tool_prompts and not skill_prompts:
             return
 
-        tool_sections = []
-        for tool_name, prompt in tool_prompts_map.items():
-            tool_sections.append(f"<tool_instructions name=\"{tool_name}\">\n{prompt}\n</tool_instructions>")
+        merged_parts = []
 
-        merged_prompt = "<tool_system_prompts>\n" + "\n\n".join(tool_sections) + "\n</tool_system_prompts>"
+        if tool_prompts:
+            merged_parts.append("## Tool Usage Guide\n\n" + "\n\n".join(tool_prompts))
+
+        if skill_prompts:
+            merged_parts.append("\n".join(skill_prompts))
+
+        merged_prompt = "\n\n---\n\n".join(merged_parts)
 
         if self.instructions is None:
             self.instructions = [merged_prompt]
@@ -317,7 +331,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         elif isinstance(self.instructions, list):
             self.instructions = list(self.instructions) + [merged_prompt]
 
-        logger.debug(f"Merged {len(tool_prompts_map)} tool system prompts into instructions: {list(tool_prompts_map.keys())}")
+        logger.debug(f"Merged {len(tool_prompts)} tool prompts and {len(skill_prompts)} skill prompts into instructions")
 
     def cancel(self):
         """Cancel the current run. Can be called from another thread/task."""

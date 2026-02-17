@@ -106,20 +106,16 @@ async def add_custom_tools_example():
     await agent.print_response("What is 123 * 456? What's the weather in Tokyo?")
 
 
-async def deep_research_example():
-    """Example: Enable deep research mode."""
+async def web_research_example():
+    """Example: Web research with DeepAgent."""
     print("\n" + "=" * 60)
-    print("Example: Deep Research Mode")
+    print("Example: Web Research")
     print("=" * 60)
 
-    # Enable deep research prompt optimization
     agent = DeepAgent(
         model=OpenAIChat(id="gpt-4o"),
-        enable_deep_research=True,  # Optimized system prompt for research
         include_todos=False,
     )
-
-    print(f"Deep research mode: {agent.enable_deep_research}")
 
     await agent.print_response(
         "Research the latest developments in AI agents in 2025",
@@ -152,7 +148,6 @@ async def full_config_example():
         include_todos=True,
         include_task=True,
         include_skills=True,
-        enable_deep_research=False,
         # Memory & History
         add_history_to_messages=True,
         history_window=4,
@@ -201,6 +196,6 @@ if __name__ == '__main__':
     # asyncio.run(workdir_example())
     # asyncio.run(disable_tools_example())
     # asyncio.run(add_custom_tools_example())
-    # asyncio.run(deep_research_example())
+    # asyncio.run(web_research_example())
     # asyncio.run(full_config_example())
     # asyncio.run(parallel_subagent_example())

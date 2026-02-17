@@ -11,7 +11,7 @@ import base64
 from types import GeneratorType
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationInfo
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, ValidationInfo
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
@@ -57,6 +57,19 @@ class Model(BaseModel):
     run_tools: bool = True
     # Maximum number of tool calls allowed.
     tool_call_limit: Optional[int] = None
+    # Maximum number of tools to execute concurrently.
+    # Controls the asyncio.Semaphore limit in run_function_calls().
+    max_concurrent_tools: int = 10
+
+    # --- Optional hooks for subclasses to inject behavior into the recursive tool-calling loop ---
+    # Called before tool execution: (function_call_results) -> (should_stop: bool, optional_msg: str|None)
+    _pre_tool_hook: Optional[Callable] = PrivateAttr(default=None)
+    # Called per tool call: (tool_name) -> Optional[warning_message]
+    _tool_call_hook: Optional[Callable] = PrivateAttr(default=None)
+    # Called after all tool executions: (function_call_results) -> None
+    _post_tool_hook: Optional[Callable] = PrivateAttr(default=None)
+    # Reference to the current messages list (set during tool handling for hook access)
+    _current_messages: Optional[List[Message]] = PrivateAttr(default=None)
 
     # -*- Functions available to the Model to call -*-
     # Functions extracted from the tools.
@@ -295,15 +308,33 @@ class Model(BaseModel):
     ) -> AsyncIterator[ModelResponse]:
         """Execute tool calls with parallel execution, sequential result reporting.
 
+        Phase 0: Pre-execution hook (context overflow check)
         Phase 1: Emit all tool_call_started events (in order)
-        Phase 2: Execute all tools in parallel via asyncio.gather
+        Phase 2: Execute all tools in parallel via TaskGroup (with concurrency limit)
         Phase 3: Process results sequentially (preserving message order)
+        Phase 4: Post-execution hook (reflection/iteration checkpoint)
         """
         if self.function_call_stack is None:
             self.function_call_stack = []
 
+        # Phase 0: Pre-execution hook (e.g., context overflow check)
+        if self._pre_tool_hook is not None:
+            force_answer, system_msg = self._pre_tool_hook(function_call_results)
+            if force_answer:
+                # Context hard limit reached — skip tool execution, inject force-answer message
+                if system_msg:
+                    function_call_results.append(Message(role="system", content=system_msg))
+                logger.info("Pre-tool hook triggered force_answer — skipping tool execution")
+                return
+
         # Phase 1: Emit started events for all function calls
         for function_call in function_calls:
+            # Per-tool hook (e.g., repetition detection)
+            if self._tool_call_hook is not None:
+                warning = self._tool_call_hook(function_call.function.name)
+                if warning:
+                    function_call_results.append(Message(role="system", content=warning))
+
             yield ModelResponse(
                 content=function_call.get_call_str(),
                 tool_call={
@@ -315,22 +346,24 @@ class Model(BaseModel):
                 event=ModelResponseEvent.tool_call_started.value,
             )
 
-        # Phase 2: Execute all tools in parallel
+        # Phase 2: Execute all tools in parallel (with concurrency limit)
         timers = [Timer() for _ in function_calls]
         exceptions: List[Optional[BaseException]] = [None] * len(function_calls)
+        semaphore = asyncio.Semaphore(self.max_concurrent_tools)
 
         async def _execute_one(idx: int, fc: FunctionCall) -> bool:
-            timers[idx].start()
-            try:
-                return await fc.execute()
-            except ToolCallException as tce:
-                exceptions[idx] = tce
-                return False
-            except Exception as exc:
-                exceptions[idx] = exc
-                return False
-            finally:
-                timers[idx].stop()
+            async with semaphore:
+                timers[idx].start()
+                try:
+                    return await fc.execute()
+                except ToolCallException as tce:
+                    exceptions[idx] = tce
+                    return False
+                except Exception as exc:
+                    exceptions[idx] = exc
+                    return False
+                finally:
+                    timers[idx].stop()
 
         async with asyncio.TaskGroup() as tg:
             tasks = [tg.create_task(_execute_one(i, fc)) for i, fc in enumerate(function_calls)]
@@ -427,9 +460,15 @@ class Model(BaseModel):
                 function_call_results.extend(additional_messages_from_function_call)
             self.function_call_stack.append(function_call)
 
-            if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
-                self.deactivate_function_calls()
-                break
+        # Check tool_call_limit after processing all results in the current batch.
+        # Moving this outside the loop ensures every tool_call_id from the assistant
+        # message gets a corresponding tool result message (required by OpenAI API).
+        if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
+            self.deactivate_function_calls()
+
+        # Phase 4: Post-execution hook (e.g., reflection/iteration checkpoint)
+        if self._post_tool_hook is not None:
+            self._post_tool_hook(function_call_results)
 
     async def handle_post_tool_call_messages(self, messages: List[Message], model_response: ModelResponse) -> ModelResponse:
         """Handle messages after tool calls (async-only, single implementation)."""

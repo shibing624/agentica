@@ -29,8 +29,6 @@ def create_deep_research_agent():
         model=DeepSeekChat(),
         name="DeepResearcher",
         description="A comprehensive deep research assistant with reflection and context management",
-        # Enable deep research mode
-        enable_deep_research=True,
         enable_step_reflection=True,
         reflection_frequency=3,
         # Context management

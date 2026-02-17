@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: SOUL module - Behavioral guidelines and professional objectivity
+@description: SOUL module - Core behavioral guidelines
 
 This module provides prompts for agent behavior:
-1. Professional objectivity - prioritize accuracy over validation
+1. Technical accuracy and objectivity
 2. Tone and style - concise, direct communication
-3. No time estimates - focus on what, not how long
-4. Genuine helpfulness - skip pleasantries, just help
+3. Think before acting - consider scope and dependencies
+4. Avoid over-engineering - only change what's needed
 """
 
 from agentica.prompts.base.utils import load_prompt as _load_prompt

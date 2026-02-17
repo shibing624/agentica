@@ -52,7 +52,6 @@ class TestPromptBuilder:
         result = PromptBuilder.build_system_prompt(
             enable_soul=True,
             enable_heartbeat=False,
-            enable_task_management=False,
             enable_tools_guide=False,
             enable_self_verification=False,
         )
@@ -91,11 +90,31 @@ class TestPromptModules:
         assert isinstance(content, str)
         assert len(content) > 0
 
-    def test_task_management_module_content(self):
-        from agentica.prompts.base.task_management import get_task_management_prompt
-        content = get_task_management_prompt()
+    def test_tools_module_with_active_tools(self):
+        from agentica.prompts.base.tools import get_tools_prompt
+        content = get_tools_prompt(active_tools=["read_file", "edit_file", "execute"])
         assert isinstance(content, str)
-        assert len(content) > 0
+        assert "read_file" in content
+        assert "execute" in content
+
+    def test_tools_module_with_descriptions(self):
+        from agentica.prompts.base.tools import get_tools_prompt
+        descs = {"read_file": "Read a file from disk", "execute": "Run shell commands"}
+        content = get_tools_prompt(
+            active_tools=["read_file", "execute"],
+            tool_descriptions=descs,
+        )
+        assert "Read a file from disk" in content
+        assert "Run shell commands" in content
+
+    def test_builder_with_tool_descriptions(self):
+        from agentica.prompts.builder import PromptBuilder
+        descs = {"read_file": "Read file content"}
+        result = PromptBuilder.build_system_prompt(
+            active_tools=["read_file"],
+            tool_descriptions=descs,
+        )
+        assert "Read file content" in result
 
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt

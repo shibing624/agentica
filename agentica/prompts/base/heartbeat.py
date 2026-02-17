@@ -1,16 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: HEARTBEAT module - Forced iteration mechanism
+@description: HEARTBEAT module - Iteration control mechanism
 
-This is the CORE module for improving task completion rates.
-It instructs the model to:
+Core module for task completion. Instructs the model to:
 1. Keep iterating until the problem is completely solved
 2. Never end prematurely without verification
-3. Follow a self-driven workflow
-4. Verify changes before marking complete
-
-Based on OpenCode's batch.txt and tool guidelines
+3. Degrade strategy after persistent failures
 """
 
 from agentica.prompts.base.utils import load_prompt as _load_prompt

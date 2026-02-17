@@ -34,7 +34,7 @@ def web_search_demo():
             "Always cite your sources.",
         ],
         include_web_search=True,
-        # debug=True,
+        debug=True,
     )
 
     response = agent.run_sync(

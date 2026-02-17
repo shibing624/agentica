@@ -47,30 +47,40 @@ class SubagentType(str, Enum):
 @dataclass
 class SubagentConfig:
     """Configuration for a subagent type."""
-    
+
     # Subagent type identifier
     type: SubagentType
-    
+
     # Human-readable name
     name: str
-    
+
     # Description of the subagent's capabilities
     description: str
-    
+
     # System prompt for this subagent type
     system_prompt: str
-    
+
     # Allowed tools (None means all tools from parent, empty list means no tools)
     allowed_tools: Optional[List[str]] = None
-    
+
     # Denied tools (takes precedence over allowed_tools)
     denied_tools: Optional[List[str]] = None
-    
+
     # Maximum number of tool calls allowed for this subagent
     tool_call_limit: int = 100
-    
+
     # Whether this subagent can spawn its own subagents
     can_spawn_subagents: bool = False
+
+    # --- Permission isolation ---
+    # Whether the subagent inherits the parent agent's workspace memory
+    inherit_workspace: bool = False
+    # Whether the subagent inherits the parent agent's knowledge base
+    inherit_knowledge: bool = False
+    # Whether the parent agent's current context summary is prepended to the task
+    inherit_context: bool = False
+    # Timeout for subagent execution in seconds (0 = no timeout)
+    timeout: int = 300
 
 
 @dataclass
@@ -309,6 +319,7 @@ Complete your coding task and provide a summary of the results.""",
     denied_tools=["task"],  # Cannot spawn nested subagents
     tool_call_limit=100,
     can_spawn_subagents=False,
+    inherit_context=True,  # Code tasks benefit from parent context
 )
 
 

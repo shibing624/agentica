@@ -3,10 +3,10 @@
 @author:XuMing(xuming624@qq.com)
 @description: Modular prompt system for Agentica
 
-This module provides a modular prompt system inspired by OpenCode and OpenClaw.
+This module provides a modular prompt system.
 Key components:
 
-- base/: Core prompt modules (heartbeat, task_management, tools, soul)
+- base/: Core prompt modules (heartbeat, tools, soul, self_verification)
 - builder.py: PromptBuilder for assembling system prompts
 
 Usage:
@@ -15,7 +15,7 @@ Usage:
     system_prompt = PromptBuilder.build_system_prompt(
         identity="You are a helpful coding assistant",
         enable_heartbeat=True,
-        enable_task_management=True,
+        active_tools=["read_file", "edit_file", "execute"],
     )
 """
 

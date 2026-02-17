@@ -29,17 +29,7 @@ class TestDeepAgent(unittest.TestCase):
         )
 
         self.assertEqual(agent.name, "TestAgent")
-        self.assertFalse(agent.enable_deep_research)
         self.assertTrue(agent.prompt_config.enable_agentic_prompt)  # Default is True for DeepAgent
-
-    def test_deep_agent_with_deep_research(self):
-        """Test DeepAgent with deep research mode enabled."""
-        agent = DeepAgent(
-            name="ResearchAgent",
-            enable_deep_research=True,
-        )
-
-        self.assertTrue(agent.enable_deep_research)
 
     def test_builtin_tools(self):
         """Test that builtin tools are correctly configured."""
@@ -137,7 +127,6 @@ class TestDeepAgent(unittest.TestCase):
         """Test string representation."""
         agent = DeepAgent(
             name="TestAgent",
-            enable_deep_research=True,
         )
 
         repr_str = repr(agent)

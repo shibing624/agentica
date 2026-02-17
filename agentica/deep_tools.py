@@ -8,6 +8,7 @@ Built-in tool set for DeepAgent, including:
 - read_file: Read file content
 - write_file: Write file content
 - edit_file: Edit file (string replacement)
+- multi_edit_file: Apply multiple edits to a file atomically
 - glob: File pattern matching
 - grep: Search file content
 - execute: Execute command
@@ -43,7 +44,7 @@ if TYPE_CHECKING:
 
 class BuiltinFileTool(Tool):
     """
-    Built-in file system tool providing ls, read_file, write_file, edit_file, glob, grep functions.
+    Built-in file system tool providing ls, read_file, write_file, edit_file, multi_edit_file, glob, grep functions.
     """
 
     def __init__(
@@ -64,12 +65,14 @@ class BuiltinFileTool(Tool):
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
         self.max_read_lines = max_read_lines
         self.max_line_length = max_line_length
+        self._file_locks: Dict[str, asyncio.Lock] = {}
 
         # Register all file operation functions
         self.register(self.ls)
         self.register(self.read_file)
         self.register(self.write_file, sanitize_arguments=False)
         self.register(self.edit_file, sanitize_arguments=False)
+        self.register(self.multi_edit_file, sanitize_arguments=False)
         self.register(self.glob)
         self.register(self.grep)
 
@@ -87,6 +90,12 @@ class BuiltinFileTool(Tool):
         if p.is_absolute():
             return p
         return self.work_dir / p
+
+    def _get_file_lock(self, path: str) -> asyncio.Lock:
+        """Get or create a per-file asyncio.Lock to serialize concurrent edits."""
+        if path not in self._file_locks:
+            self._file_locks[path] = asyncio.Lock()
+        return self._file_locks[path]
 
     def _validate_path(self, path: str) -> str:
         """Validate path - currently no restrictions, work_dir is just the default."""
@@ -272,8 +281,9 @@ class BuiltinFileTool(Tool):
         Uses literal string matching (NOT regex). Multi-line strings are supported.
         Prefer this tool over write_file or shell `sed` for targeted changes.
 
-        For multiple edits, call this tool multiple times (framework runs them in parallel
-        when they are independent).
+        For multiple edits to the SAME file, prefer `multi_edit_file` to apply them
+        atomically in one call. If you call `edit_file` multiple times on the same file
+        in parallel, they will be serialized automatically to avoid race conditions.
 
         Args:
             file_path: The path to the file to edit. Absolute paths required for files
@@ -294,34 +304,37 @@ class BuiltinFileTool(Tool):
         try:
             self._validate_path(file_path)
             path = self._resolve_path(file_path)
+            path_key = str(path)
 
             if not path.exists():
                 return f"Error: File not found: {file_path}"
             if not path.is_file():
                 return f"Error: Not a file: {file_path}"
 
-            # Async read
-            async with aiofiles.open(path, 'r', encoding='utf-8') as f:
-                content = await f.read()
+            # Per-file lock to serialize concurrent edits on the same file
+            lock = self._get_file_lock(path_key)
+            async with lock:
+                async with aiofiles.open(path, 'r', encoding='utf-8') as f:
+                    content = await f.read()
 
-            result = self._str_replace(content, old_string, new_string, replace_all)
+                result = self._str_replace(content, old_string, new_string, replace_all)
 
-            if not result["success"]:
-                return f"Error: {result['error']}"
+                if not result["success"]:
+                    return f"Error: {result['error']}"
 
-            # Atomic write back
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-            try:
-                os.close(tmp_fd)
-                async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
-                    await f.write(result["new_content"])
-                os.replace(tmp_path, str(path))
-            except Exception:
+                # Atomic write back
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
                 try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+                    os.close(tmp_fd)
+                    async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
+                        await f.write(result["new_content"])
+                    os.replace(tmp_path, str(path))
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
 
             logger.debug(f"Replaced {result['count']} occurrence(s) in {file_path}")
             return f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"
@@ -329,6 +342,92 @@ class BuiltinFileTool(Tool):
         except Exception as e:
             logger.error(f"Error editing file {file_path}: {e}")
             return f"Error editing file: {e}"
+
+    async def multi_edit_file(
+            self,
+            file_path: str,
+            edits: List[Dict[str, Any]],
+    ) -> str:
+        """Apply multiple edits to a single file atomically.
+
+        All edits are applied sequentially on the same in-memory content,
+        then written back once. If any edit fails, no changes are made.
+
+        This is preferred over multiple parallel `edit_file` calls when you need
+        to make several changes to the same file — it is faster, uses fewer tokens,
+        and guarantees atomicity.
+
+        Args:
+            file_path: Path to the file to edit.
+            edits: List of edit operations. Each dict must contain:
+                - old_string (str): The existing text to find
+                - new_string (str): The replacement text
+                - replace_all (bool, optional): Replace all occurrences. Default: False
+
+        Returns:
+            Summary of all applied edits, or error message if any edit fails.
+
+        Examples:
+            multi_edit_file("app.py", [
+                {"old_string": "foo", "new_string": "bar"},
+                {"old_string": "DEBUG = True", "new_string": "DEBUG = False"},
+            ])
+        """
+        try:
+            self._validate_path(file_path)
+            path = self._resolve_path(file_path)
+            path_key = str(path)
+
+            if not path.exists():
+                return f"Error: File not found: {file_path}"
+            if not path.is_file():
+                return f"Error: Not a file: {file_path}"
+            if not edits:
+                return "Error: 'edits' list cannot be empty."
+
+            lock = self._get_file_lock(path_key)
+            async with lock:
+                async with aiofiles.open(path, 'r', encoding='utf-8') as f:
+                    content = await f.read()
+
+                # Apply edits sequentially on in-memory content
+                results = []
+                for i, edit in enumerate(edits):
+                    old_string = edit.get("old_string", "")
+                    new_string = edit.get("new_string", "")
+                    replace_all = edit.get("replace_all", False)
+
+                    if not old_string:
+                        return f"Error: Edit {i + 1} has empty old_string. No changes were made."
+
+                    result = self._str_replace(content, old_string, new_string, replace_all)
+                    if not result["success"]:
+                        return f"Error in edit {i + 1}/{len(edits)}: {result['error']}. No changes were made."
+
+                    content = result["new_content"]
+                    results.append(f"Edit {i + 1}: replaced {result['count']} occurrence(s)")
+
+                # Atomic write (once)
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+                try:
+                    os.close(tmp_fd)
+                    async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
+                        await f.write(content)
+                    os.replace(tmp_path, str(path))
+                except Exception:
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    raise
+
+            summary = f"Successfully applied {len(edits)} edits to '{file_path}':\n" + "\n".join(results)
+            logger.debug(summary)
+            return summary
+
+        except Exception as e:
+            logger.error(f"Error multi-editing file {file_path}: {e}")
+            return f"Error multi-editing file: {e}"
 
     def _str_replace(
             self,
@@ -1217,8 +1316,12 @@ class BuiltinTaskTool(Tool):
             self._work_dir = agent.work_dir
 
     def _get_tools_for_subagent(self, subagent_type: str) -> List[Any]:
-        """Get appropriate tools for a subagent type."""
-        from agentica.subagent import get_subagent_config, SubagentType
+        """Get appropriate tools for a subagent type based on config.allowed_tools.
+
+        Uses SubagentConfig.allowed_tools as the single source of truth.
+        Each allowed tool name is mapped to the Tool class that provides it.
+        """
+        from agentica.subagent import get_subagent_config
 
         config = get_subagent_config(subagent_type)
 
@@ -1230,34 +1333,97 @@ class BuiltinTaskTool(Tool):
                 BuiltinFetchUrlTool(),
             ]
 
-        # Build tool list based on config type
+        # If allowed_tools is None, give all basic tools (except task)
+        if config.allowed_tools is None:
+            tools: List[Any] = [
+                BuiltinFileTool(work_dir=self._work_dir),
+                BuiltinExecuteTool(work_dir=self._work_dir),
+                BuiltinWebSearchTool(),
+                BuiltinFetchUrlTool(),
+                BuiltinTodoTool(),
+            ]
+            return tools
+
+        # Map function names to the Tool class that provides them
+        # Each Tool class registers multiple functions; we track which classes are needed
+        FILE_TOOL_FUNCTIONS = {"ls", "read_file", "write_file", "edit_file", "multi_edit_file", "glob", "grep"}
+        EXECUTE_FUNCTIONS = {"execute"}
+        WEB_SEARCH_FUNCTIONS = {"web_search"}
+        FETCH_URL_FUNCTIONS = {"fetch_url"}
+        TODO_FUNCTIONS = {"write_todos", "read_todos"}
+
+        allowed = set(config.allowed_tools)
         tools = []
 
-        # For explore type, only include file tools (read-only)
-        if config.type == SubagentType.EXPLORE:
+        if allowed & FILE_TOOL_FUNCTIONS:
             tools.append(BuiltinFileTool(work_dir=self._work_dir))
-            return tools
-
-        # For research type, include search and fetch tools
-        if config.type == SubagentType.RESEARCH:
-            tools.append(BuiltinFileTool(work_dir=self._work_dir))
-            tools.append(BuiltinWebSearchTool())
-            tools.append(BuiltinFetchUrlTool())
-            return tools
-
-        # For code type, include file and execute tools
-        if config.type == SubagentType.CODE:
-            tools.append(BuiltinFileTool(work_dir=self._work_dir))
+        if allowed & EXECUTE_FUNCTIONS:
             tools.append(BuiltinExecuteTool(work_dir=self._work_dir))
-            return tools
-
-        # Fallback: include all basic tools (but not task to prevent nesting)
-        tools.append(BuiltinFileTool(work_dir=self._work_dir))
-        tools.append(BuiltinExecuteTool(work_dir=self._work_dir))
-        tools.append(BuiltinWebSearchTool())
-        tools.append(BuiltinFetchUrlTool())
+        if allowed & WEB_SEARCH_FUNCTIONS:
+            tools.append(BuiltinWebSearchTool())
+        if allowed & FETCH_URL_FUNCTIONS:
+            tools.append(BuiltinFetchUrlTool())
+        if allowed & TODO_FUNCTIONS:
+            tools.append(BuiltinTodoTool())
 
         return tools
+
+    def _get_parent_context_summary(self, max_chars: int = 2000) -> str:
+        """Extract a brief context summary from the parent agent's recent conversation."""
+        if self._parent_agent is None:
+            return ""
+        memory = getattr(self._parent_agent, 'working_memory', None)
+        if memory is None:
+            return ""
+        messages = getattr(memory, 'messages', None)
+        if not messages:
+            return ""
+        # Take last few messages, extract content
+        summary_parts = []
+        total = 0
+        for msg in reversed(messages[-6:]):
+            content = getattr(msg, 'content', None)
+            if content and isinstance(content, str):
+                snippet = content[:500]
+                summary_parts.append(f"[{getattr(msg, 'role', '?')}] {snippet}")
+                total += len(snippet)
+                if total > max_chars:
+                    break
+        summary_parts.reverse()
+        return "\n".join(summary_parts)
+
+    async def _run_subagent_stream(
+        self, subagent: Any, task_description: str, tool_calls_log: List[Dict[str, Any]]
+    ) -> str:
+        """Run a subagent with streaming, collecting tool usage info."""
+        final_content = ""
+        async for chunk in subagent.run_stream(task_description, stream_intermediate_steps=True):
+            if chunk is None:
+                continue
+            # Collect tool call info from intermediate events
+            if chunk.event in ("ToolCallStarted", "ToolCallCompleted",
+                               "MultiRoundToolCall", "MultiRoundToolResult"):
+                if chunk.tools:
+                    for tool_info in chunk.tools:
+                        tool_name = tool_info.get("tool_name") or tool_info.get("name", "")
+                        if not tool_name:
+                            continue
+                        tool_args = tool_info.get("tool_args") or tool_info.get("arguments", {})
+                        content = tool_info.get("content")
+                        brief = self._format_tool_brief(tool_name, tool_args, content)
+                        entry = {"name": tool_name, "info": brief}
+                        if chunk.event in ("ToolCallCompleted", "MultiRoundToolResult"):
+                            for i in range(len(tool_calls_log) - 1, -1, -1):
+                                if tool_calls_log[i]["name"] == tool_name and "result" not in tool_calls_log[i]:
+                                    tool_calls_log[i]["info"] = brief
+                                    tool_calls_log[i]["result"] = True
+                                    break
+                        else:
+                            tool_calls_log.append(entry)
+            # Accumulate final content
+            if chunk.event in ("RunResponse",) and chunk.content:
+                final_content += str(chunk.content)
+        return final_content
 
     async def task(self, description: str, subagent_type: str = "code") -> str:
         """Launch a subagent to handle a complex task.
@@ -1298,16 +1464,38 @@ class BuiltinTaskTool(Tool):
                 config = get_subagent_config("code")
                 logger.warning(f"Unknown subagent type '{subagent_type}', using 'code'")
             
-            # Get model from parent agent or use configured model
-            model = self._model
-            if model is None and self._parent_agent is not None:
-                model = self._parent_agent.model
+            # Get model from parent agent or use configured model.
+            # IMPORTANT: Create an isolated copy to avoid sharing mutable state (tools,
+            # functions, function_call_stack, tool_choice, client) between parent and
+            # subagent. We use shallow model_copy and manually reset runtime fields;
+            # deep=True would fail because the HTTP client contains unpicklable locks.
+            source_model = self._model
+            if source_model is None and self._parent_agent is not None:
+                source_model = self._parent_agent.model
 
-            if model is None:
+            if source_model is None:
                 return json.dumps({
                     "success": False,
                     "error": "No model available for subagent. Please configure a model.",
                 }, ensure_ascii=False)
+
+            model = source_model.model_copy()
+            # Reset runtime state so Agent.__init__ registers subagent's own tools cleanly
+            model.tools = None
+            model.functions = None
+            model.function_call_stack = None
+            model.tool_choice = None
+            model.metrics = {}
+            # Force a fresh HTTP client (the old one belongs to the parent)
+            model.client = None
+            model.http_client = None
+            # Clear parent DeepAgent's hooks — the subagent is a plain Agent,
+            # and inheriting closures that reference the parent's state causes
+            # context-overflow false positives and race conditions in parallel runs.
+            model._pre_tool_hook = None
+            model._tool_call_hook = None
+            model._post_tool_hook = None
+            model._current_messages = None
 
             # Generate unique run_id for subagent
             parent_agent_id = self._parent_agent.agent_id if self._parent_agent else 'main'
@@ -1333,7 +1521,9 @@ class BuiltinTaskTool(Tool):
 
             # Create subagent with isolated session
             from agentica.agent.config import ToolConfig, PromptConfig
-            subagent = Agent(
+
+            # Apply permission isolation from config
+            subagent_kwargs: Dict[str, Any] = dict(
                 model=model,
                 name=f"{config.name}",
                 description=config.description,
@@ -1343,43 +1533,48 @@ class BuiltinTaskTool(Tool):
                 tool_config=ToolConfig(tool_call_limit=config.tool_call_limit),
             )
 
+            # Conditionally inherit workspace from parent
+            if config.inherit_workspace and self._parent_agent is not None:
+                parent_workspace = getattr(self._parent_agent, 'workspace', None)
+                if parent_workspace is not None:
+                    subagent_kwargs['workspace'] = parent_workspace
+
+            # Conditionally inherit knowledge base from parent
+            if config.inherit_knowledge and self._parent_agent is not None:
+                parent_knowledge = getattr(self._parent_agent, 'knowledge', None)
+                if parent_knowledge is not None:
+                    subagent_kwargs['knowledge'] = parent_knowledge
+                    subagent_kwargs['search_knowledge'] = True
+
+            subagent = Agent(**subagent_kwargs)
+
+            # Optionally prepend parent context summary to the task description
+            task_description = description
+            if config.inherit_context and self._parent_agent is not None:
+                context_summary = self._get_parent_context_summary()
+                if context_summary:
+                    task_description = f"Parent agent context:\n{context_summary}\n\nTask:\n{description}"
+
             logger.debug(f"Launching {config.name} [{config.type.value}] for task: {description[:100]}...")
             
             # Run subagent with async streaming to collect tool usage info
+            subagent_timeout = config.timeout if config.timeout > 0 else None
             start_time = time.time()
             tool_calls_log = []
             final_content = ""
 
-            async for chunk in subagent.run_stream(description, stream_intermediate_steps=True):
-                if chunk is None:
-                    continue
-                # Collect tool call info from intermediate events
-                if chunk.event in ("ToolCallStarted", "ToolCallCompleted", 
-                                   "MultiRoundToolCall", "MultiRoundToolResult"):
-                    if chunk.tools:
-                        for tool_info in chunk.tools:
-                            tool_name = tool_info.get("tool_name") or tool_info.get("name", "")
-                            if not tool_name:
-                                continue
-                            # Build a brief info string
-                            tool_args = tool_info.get("tool_args") or tool_info.get("arguments", {})
-                            content = tool_info.get("content")
-                            brief = self._format_tool_brief(tool_name, tool_args, content)
-                            entry = {"name": tool_name, "info": brief}
-                            # Deduplicate: update existing entry for same tool or add new
-                            if chunk.event in ("ToolCallCompleted", "MultiRoundToolResult"):
-                                # Update the last entry with same tool name (add result info)
-                                for i in range(len(tool_calls_log) - 1, -1, -1):
-                                    if tool_calls_log[i]["name"] == tool_name and "result" not in tool_calls_log[i]:
-                                        tool_calls_log[i]["info"] = brief
-                                        tool_calls_log[i]["result"] = True
-                                        break
-                            else:
-                                tool_calls_log.append(entry)
-                # Accumulate final content
-                if chunk.event in ("RunResponse",) and chunk.content:
-                    final_content += str(chunk.content)
-            
+            try:
+                coro = self._run_subagent_stream(
+                    subagent, task_description, tool_calls_log
+                )
+                if subagent_timeout:
+                    final_content = await asyncio.wait_for(coro, timeout=subagent_timeout)
+                else:
+                    final_content = await coro
+            except asyncio.TimeoutError:
+                logger.warning(f"Subagent timed out after {subagent_timeout}s")
+                final_content = f"[Subagent timed out after {subagent_timeout} seconds. Partial results may be available above.]"
+
             elapsed = time.time() - start_time
             result = final_content if final_content else "Subagent completed but returned no content."
             
@@ -1469,6 +1664,11 @@ class BuiltinTaskTool(Tool):
         elif tool_name == "edit_file":
             fp = tool_args.get("file_path", "")
             return fp.rsplit("/", 1)[-1] if "/" in fp else fp
+        elif tool_name == "multi_edit_file":
+            fp = tool_args.get("file_path", "")
+            edits = tool_args.get("edits", [])
+            fname = fp.rsplit("/", 1)[-1] if "/" in fp else fp
+            return f"{fname} ({len(edits)} edits)"
         elif tool_name == "web_search":
             queries = tool_args.get("queries", "")
             if isinstance(queries, list):

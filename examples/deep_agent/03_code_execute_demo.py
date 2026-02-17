@@ -26,6 +26,7 @@ async def code_execution_demo():
 
     agent = DeepAgent(
         model=OpenAIChat(),
+        work_dir='./tmp/',
         name="CodeRunner",
         description="A code execution assistant",
         debug=True,
@@ -82,6 +83,7 @@ async def code_generation_demo():
 
     agent = DeepAgent(
         model=OpenAIChat(),
+        work_dir='./tmp/',
         name="CodeGenerator",
         description="A code generation assistant",
         instructions=[
@@ -95,7 +97,7 @@ async def code_generation_demo():
     )
 
     response = await agent.run(
-        "Write a Python function that implements binary search. "
+        "Write a Python function that implements binary search, file under ./tmp/ directory. "
         "Include type hints, docstring, and test cases. Then execute the tests. output the test results."
     )
     print(f"\nResponse:\n{response}")
@@ -149,5 +151,5 @@ z=3
 if __name__ == "__main__":
     asyncio.run(code_execution_demo())
     asyncio.run(code_analysis_demo())
-    # asyncio.run(code_generation_demo())
+    asyncio.run(code_generation_demo())
     asyncio.run(lint_fix_demo())

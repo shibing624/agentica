@@ -465,6 +465,7 @@ class OpenAIChat(Model):
             Optional[ModelResponse]: The model response after handling tool calls.
         """
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
+            self._current_messages = messages  # expose for hooks (context estimation)
             if model_response.content is None:
                 model_response.content = ""
             function_call_results: List[Message] = []
@@ -750,6 +751,7 @@ class OpenAIChat(Model):
             AsyncIterator[ModelResponse]: An async iterator of the model response.
         """
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
+            self._current_messages = messages  # expose for hooks (context estimation)
             function_calls_to_run: List[FunctionCall] = []
             function_call_results: List[Message] = []
             for tool_call in assistant_message.tool_calls:

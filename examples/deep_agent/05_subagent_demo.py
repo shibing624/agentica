@@ -237,7 +237,7 @@ def main():
     print("=" * 60)
     
     # Demo 1: Custom subagent registration (no LLM call, just shows registration)
-    demo_custom_subagent()
+    # demo_custom_subagent()
     
     # Demo 2: Explore subagent
     demo_explore_subagent()
@@ -246,10 +246,10 @@ def main():
     demo_parallel_subagents()
     
     # Demo 4: Research subagent
-    # demo_research_subagent()
+    demo_research_subagent()
     
     # Demo 5: Subagent registry
-    # demo_subagent_registry()
+    demo_subagent_registry()
     
     print("\n" + "=" * 60)
     print("All demos completed!")

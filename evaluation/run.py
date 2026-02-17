@@ -20,10 +20,8 @@ from tqdm import tqdm
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agentica import DeepAgent, OpenAIChat, ZhipuAIChat, Message, JinaTool, SearchSerperTool
-from agentica.tools.baidu_search_tool import BaiduSearchTool
-from agentica.tools.url_crawler_tool import UrlCrawlerTool
-from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA
+from agentica import DeepAgent, OpenAIChat, ZhipuAIChat, Message, PromptConfig
+from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA, SYSTEM_PROMPT_MULTI
 
 pwd_path = os.path.abspath(os.path.dirname(__file__))
 
@@ -79,7 +77,7 @@ async def call_llm_judge(item: Dict, judge_prompt: str, dataset: str) -> Dict[st
             response=prediction  # Some prompts use {response} instead of {prediction}
         )
         
-        judge_model = ZhipuAIChat(model='glm-4-flash')
+        judge_model = OpenAIChat(id='gpt-4o-mini')
         response = await judge_model.response([Message(role="user", content=prompt)])
         judgement = response.content
 
@@ -188,10 +186,7 @@ def calculate_statistics(results: List[Dict]) -> Dict[str, Any]:
 async def evaluate_instance(
     model_name: str,
     instance: Dict,
-    max_rounds: int = 100,
-    max_tokens: int = 128000,
     debug: bool = False,
-    tools_config: str = "baidu"
 ) -> Dict[str, Any]:
     """
     Evaluate a single instance using multi-round Agent.
@@ -199,10 +194,7 @@ async def evaluate_instance(
     Args:
         model_name: Model ID to use
         instance: Test instance with 'question' and 'answer'
-        max_rounds: Maximum rounds for multi-round strategy
-        max_tokens: Maximum tokens limit
         debug: Enable debug mode
-        tools_config: Tool configuration ("baidu", "serper", "jina", "all")
     
     Returns:
         Evaluation result dict
@@ -211,36 +203,26 @@ async def evaluate_instance(
     ground_truth = instance.get('Answer', instance.get('answer', ''))
 
     try:
-        # Configure tools based on setting
-        tools = []
-        if tools_config in ["baidu", "all"]:
-            tools.append(BaiduSearchTool())
-        if tools_config in ["serper", "all"]:
-            tools.append(SearchSerperTool())
-        if tools_config in ["jina", "all"]:
-            tools.append(JinaTool(
-                jina_search=False,
-                jina_reader_by_goal=True,
-                jina_reader=True,
-                work_dir='saved_html'
-            ))
-        # Always add URL crawler for visiting pages
-        tools.append(UrlCrawlerTool(work_dir='saved_html'))
-        
-        # Create DeepAgent with deep research capabilities
+        # Create DeepAgent
         agent = DeepAgent(
             model=OpenAIChat(id=model_name),
-            tools=tools,
-            add_history_to_messages=False,
-            enable_deep_research=True,
-            include_web_search=False,  # Use external search tools configured above
-            include_fetch_url=False,   # Use UrlCrawlerTool configured above
-            include_file_tools=False,
-            include_execute=False,
-            include_todos=False,
-            include_task=False,
-            include_skills=False,
             debug=debug,
+            enable_step_reflection=True,
+            reflection_frequency=3,
+            enable_context_overflow_handling=True,
+            # tool_config=ToolConfig(compress_tool_results=True),
+            # Repetition detection
+            enable_repetition_detection=True,
+            max_same_tool_calls=8,
+            # Tools
+            include_web_search=True,
+            include_fetch_url=True,
+            include_execute=True,
+            include_todos=True,
+            include_file_tools=True,
+            prompt_config=PromptConfig(markdown=True, enable_agentic_prompt=True),
+            work_dir="./tmp/",
+            instructions=SYSTEM_PROMPT_MULTI,
         )
         
         # Run the agent
@@ -300,14 +282,7 @@ async def main():
                         help='Evaluation dataset')
     parser.add_argument('--eval_n_limit', type=int, default=3,
                         help='Number of instances to evaluate (0 for all)')
-    parser.add_argument('--max_rounds', type=int, default=100,
-                        help='Maximum rounds for multi-round strategy')
-    parser.add_argument('--max_tokens', type=int, default=128000,
-                        help='Maximum tokens limit')
-    parser.add_argument('--tools', type=str, default='baidu',
-                        choices=['baidu', 'serper', 'jina', 'all'],
-                        help='Search tools to use')
-    parser.add_argument('--debug', type=int, default=0,
+    parser.add_argument('--debug', type=int, default=1,
                         help='Debug mode (0=off, 1=on)')
     parser.add_argument('--output_dir', type=str, default='outputs',
                         help='Output directory')
@@ -346,8 +321,6 @@ async def main():
     logger.info("=" * 60)
     logger.info(f"Model: {args.model}")
     logger.info(f"Dataset: {args.dataset}")
-    logger.info(f"Multi-round: max_rounds={args.max_rounds}, max_tokens={args.max_tokens}")
-    logger.info(f"Tools: {args.tools}")
     logger.info("=" * 60)
 
     results = []
@@ -357,10 +330,7 @@ async def main():
         result = await evaluate_instance(
             model_name=args.model,
             instance=instance,
-            max_rounds=args.max_rounds,
-            max_tokens=args.max_tokens,
             debug=debug,
-            tools_config=args.tools
         )
         results.append(result)
 
@@ -419,9 +389,6 @@ async def main():
         "dataset": args.dataset,
         "model": args.model,
         "config": {
-            "max_rounds": args.max_rounds,
-            "max_tokens": args.max_tokens,
-            "tools": args.tools,
             "eval_n_limit": args.eval_n_limit
         },
         "accuracy": accuracy if not args.skip_judge else None,

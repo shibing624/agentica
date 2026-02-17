@@ -1,37 +1,19 @@
 # Code Verification
 
-After completing code changes, verify your code by running appropriate validation commands.
+After completing code changes, verify correctness by running validation commands.
 
-## Requirements
+## Process
 
-**IMPORTANT**: When writing or modifying code, run lint and typecheck commands to ensure correctness.
+1. **Discover commands** (first time only) from project config:
+   - `package.json` scripts (lint, test, typecheck)
+   - `pyproject.toml` / `Makefile` targets
+   - Reuse discovered commands for subsequent verifications
 
-## Verification Process
+2. **Run validation**: lint -> type check -> test
 
-1. **Find Commands** - Check project configuration:
-   - README.md or CONTRIBUTING.md for instructions
-   - package.json for Node.js (`npm run lint`, `npm run test`)
-   - pyproject.toml or setup.py for Python (`ruff check`, `pytest`)
-   - Makefile for common targets
+3. **Fix issues**: Read errors, fix, re-run until passing
 
-2. **Execute Validation**:
-   - Lint: `npm run lint`, `ruff check .`, `eslint .`
-   - Type check: `npm run typecheck`, `tsc --noEmit`, `mypy .`
-   - Test: `npm test`, `pytest`, `cargo test`
-
-3. **Fix Issues** - Read errors, fix issues, re-run until passing
-
-## Language-Specific Commands
-
-| Language | Lint | Type Check | Test |
-|----------|------|------------|------|
-| Python | `ruff check .` | `mypy .` | `pytest` |
-| JS/TS | `npm run lint` | `tsc --noEmit` | `npm test` |
-| Rust | `cargo clippy` | - | `cargo test` |
-| Go | `golangci-lint run` | - | `go test ./...` |
-
-## Important
-
-- Never assume specific test frameworks
+## Rules
+- Never assume specific lint/test frameworks - check project config first
 - Never skip verification for non-trivial changes
 - Run verification frequently, not just at the end

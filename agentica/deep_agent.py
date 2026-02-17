@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: DeepAgent - Enhanced Agent with built-in tools and deep research capabilities
+@description: DeepAgent - Enhanced Agent with built-in tools and agentic capabilities
 
 DeepAgent is an enhanced version of Agent that automatically includes built-in tools:
 - ls: List directory contents
@@ -25,33 +25,28 @@ Key Features:
 2. Smart Context Management: Two-threshold hysteresis mechanism
 3. Forced Termination: Auto-stop when context limit reached
 4. Reflection & Strategy Adjustment: Detect repetitive behavior
-5. Deep Research System Prompt: Optimized for thorough investigation
-6. Enhanced Iteration Control: HEARTBEAT-style forced iteration (Phase 3)
+5. Forced Iteration Control: Checkpoint reminders
 """
 
 from collections import deque
 from typing import (
     Any,
-    Callable,
-    Dict,
     List,
     Optional,
-    Union,
 )
 from dataclasses import dataclass, field
 
 from agentica.agent import Agent
-from agentica.tools.base import ModelTool, Tool, Function
 from agentica.deep_tools import get_builtin_tools, BuiltinTaskTool
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_message_tokens
 
 from agentica.prompts.base.deep_agent import (
-    get_deep_research_prompt,
     get_step_reflection_prompt,
     get_force_answer_prompt,
     get_repetitive_behavior_prompt,
+    get_force_strategy_change_prompt,
     get_iteration_checkpoint_prompt,
 )
 
@@ -59,7 +54,7 @@ from agentica.prompts.base.deep_agent import (
 @dataclass(init=False)
 class DeepAgent(Agent):
     """
-    DeepAgent - Enhanced Agent with built-in tools and deep research capabilities.
+    DeepAgent - Enhanced Agent with built-in tools and agentic capabilities.
 
     DeepAgent inherits from Agent and automatically adds the following built-in tools:
     - File system tools: ls, read_file, write_file, edit_file, glob, grep
@@ -75,17 +70,15 @@ class DeepAgent(Agent):
     2. Smart Context Management: Two-threshold mechanism for context overflow
     3. Forced Termination: Auto-stop when context limit reached
     4. Reflection & Strategy Adjustment: Detect and handle repetitive behavior
-    5. Deep Research System Prompt: Optimized for thorough investigation (optional)
+    5. Forced Iteration Control: Checkpoint reminders
 
     Example:
         ```python
         from agentica import DeepAgent, OpenAIChat
 
-        # Create DeepAgent with deep research mode
         agent = DeepAgent(
             model=OpenAIChat(id="gpt-4o"),
             description="A powerful research assistant",
-            enable_deep_research=True,
         )
 
         # Run the agent
@@ -106,33 +99,30 @@ class DeepAgent(Agent):
     include_user_input: bool = False
     custom_skill_dirs: Optional[List[str]] = None
 
-    # Deep Research Mode (only affects system prompt)
-    # NOTE: Does NOT require enable_multi_round=True anymore!
-    # Model layer has built-in recursive tool calling that works better.
-    enable_deep_research: bool = False
+    # These hooks are injected into the Model layer's recursive tool-calling loop
+    # via _pre_tool_hook / _tool_call_hook / _post_tool_hook on the Model instance.
+    # They only affect DeepAgent — plain Agent never sets these hooks.
 
-    # The following options only take effect when enable_multi_round=True
-    # They are kept for backward compatibility but NOT recommended for most use cases
-    
-    # ReAct Loop Control (only used with enable_multi_round=True)
-    enable_step_reflection: bool = False  # Disabled by default - may interfere with model reasoning
+    # ReAct Loop Control
+    enable_step_reflection: bool = False  # May interfere with model reasoning
     reflection_frequency: int = 3  # Inject reflection prompt every N steps
 
-    # Context Management (only used with enable_multi_round=True)
+    # Context Management (dual-threshold hysteresis)
     context_soft_limit: Optional[int] = None  # Soft threshold: start compression (default: model.context_window * 0.6)
     context_hard_limit: Optional[int] = None  # Hard threshold: force termination (default: model.context_window * 0.8)
-    enable_context_overflow_handling: bool = False  # Disabled by default
+    enable_context_overflow_handling: bool = True  # Enabled by default
 
-    # Repetitive Behavior Detection (only used with enable_multi_round=True)
-    enable_repetition_detection: bool = False  # Disabled by default - may block necessary searches
+    # Repetitive Behavior Detection
+    enable_repetition_detection: bool = True  # Enabled by default
     max_same_tool_calls: int = 3  # Max consecutive calls to same tool
 
-    # HEARTBEAT-style Forced Iteration Control (only used with enable_multi_round=True)
-    enable_forced_iteration: bool = False  # Disabled by default - may cause premature termination
+    # Forced Iteration Control (checkpoint + must-continue reminders)
+    enable_forced_iteration: bool = True  # Enabled by default
     iteration_checkpoint_frequency: int = 5  # Inject iteration checkpoint every N steps
 
-    # Tool call history for repetition detection
+    # Internal state
     _tool_call_history: deque = field(default_factory=lambda: deque(maxlen=10))
+    _hook_step_counter: int = field(default=0, init=False, repr=False)
 
     def __init__(
             self,
@@ -148,15 +138,14 @@ class DeepAgent(Agent):
             include_skills: bool = True,
             include_user_input: bool = False,
             custom_skill_dirs: Optional[List[str]] = None,
-            enable_deep_research: bool = False,
             enable_step_reflection: bool = False,
             reflection_frequency: int = 3,
             context_soft_limit: Optional[int] = None,
             context_hard_limit: Optional[int] = None,
-            enable_context_overflow_handling: bool = False,
-            enable_repetition_detection: bool = False,
-            max_same_tool_calls: int = 3,
-            enable_forced_iteration: bool = False,
+            enable_context_overflow_handling: bool = True,
+            enable_repetition_detection: bool = True,
+            max_same_tool_calls: int = 5,
+            enable_forced_iteration: bool = True,
             iteration_checkpoint_frequency: int = 5,
             # ---- All other Agent parameters via kwargs ----
             **kwargs,
@@ -175,7 +164,6 @@ class DeepAgent(Agent):
             include_skills: Include skill tools
             include_user_input: Include human-in-the-loop tool
             custom_skill_dirs: Custom skill directories to load
-            enable_deep_research: Enable deep research system prompt
             enable_step_reflection: Enable reflection after steps
             reflection_frequency: How often to inject reflection prompts
             context_soft_limit: Token count to start compression
@@ -183,7 +171,7 @@ class DeepAgent(Agent):
             enable_context_overflow_handling: Enable context overflow handling
             enable_repetition_detection: Enable repetitive behavior detection
             max_same_tool_calls: Max consecutive calls to same tool
-            enable_forced_iteration: Enable HEARTBEAT-style forced iteration control
+            enable_forced_iteration: Enable forced iteration control (checkpoint + must-continue)
             iteration_checkpoint_frequency: How often to inject iteration checkpoints
             **kwargs: All Agent.__init__ parameters (model, name, instructions, tools, etc.)
         """
@@ -200,9 +188,6 @@ class DeepAgent(Agent):
         self.include_skills = include_skills
         self.include_user_input = include_user_input
         self.custom_skill_dirs = custom_skill_dirs
-
-        # Deep Research Mode
-        self.enable_deep_research = enable_deep_research
 
         # ReAct Loop Control
         self.enable_step_reflection = enable_step_reflection
@@ -222,9 +207,10 @@ class DeepAgent(Agent):
         self.max_same_tool_calls = max_same_tool_calls
         self._tool_call_history = deque(maxlen=10)
 
-        # HEARTBEAT-style Forced Iteration Control
+        # Forced Iteration Control
         self.enable_forced_iteration = enable_forced_iteration
         self.iteration_checkpoint_frequency = iteration_checkpoint_frequency
+        self._hook_step_counter = 0
 
         # Get built-in tools
         builtin_tools = get_builtin_tools(
@@ -258,8 +244,6 @@ class DeepAgent(Agent):
         if prompt_config is None:
             prompt_config = PromptConfig()
         prompt_config.enable_agentic_prompt = True
-        if enable_deep_research and prompt_config.system_prompt is None:
-            prompt_config.system_prompt = get_deep_research_prompt()
 
         super().__init__(
             tools=all_tools,
@@ -269,9 +253,12 @@ class DeepAgent(Agent):
 
         # Set parent agent reference for task tool
         self._setup_task_tool()
-        
+
         # Set workspace for memory tool (workspace is initialized in parent class)
         self._setup_memory_tool()
+
+        # Bind DeepAgent hooks into the Model layer's recursive tool-calling loop
+        self._bind_hooks_to_model()
 
     def _merge_tools_with_dedup(
             self,
@@ -305,6 +292,58 @@ class DeepAgent(Agent):
                     logger.debug(f"Memory tool configured with workspace: {self.workspace.path}")
                 break
 
+    def _bind_hooks_to_model(self) -> None:
+        """Bind DeepAgent hooks into the Model layer's recursive tool-calling loop.
+
+        The Model layer handles multi-round tool calling via recursive response() calls.
+        By setting _pre_tool_hook / _tool_call_hook / _post_tool_hook on the Model,
+        DeepAgent's context management, repetition detection, and iteration checkpoint
+        features become active within that recursive loop.
+
+        These hooks only affect DeepAgent instances — plain Agent never sets them.
+        """
+        if self.model is None:
+            return
+
+        agent = self  # capture for closures
+
+        def pre_tool_hook(function_call_results: list) -> tuple:
+            """Called before tool execution. Returns (should_force_answer, optional_msg)."""
+            agent._hook_step_counter += 1
+            if not agent.enable_context_overflow_handling:
+                return False, None
+            model_messages = getattr(agent.model, '_current_messages', None)
+            if model_messages is None:
+                return False, None
+            current_tokens = agent._estimate_context_tokens(model_messages)
+            return agent._handle_context_overflow(model_messages, current_tokens)
+
+        def tool_call_hook(tool_name: str):
+            """Called per tool call. Returns optional warning message."""
+            return agent._check_repetitive_behavior(tool_name)
+
+        def post_tool_hook(function_call_results: list) -> None:
+            """Called after tool execution. Injects reflection/checkpoint/must-continue prompts."""
+            step = agent._hook_step_counter
+            # Inject reflection prompt
+            if agent.enable_step_reflection and step > 0 and step % agent.reflection_frequency == 0:
+                function_call_results.append(Message(
+                    role="system",
+                    content=get_step_reflection_prompt()
+                ))
+                logger.debug(f"Injected reflection prompt at step {step}")
+            # Iteration checkpoint
+            if agent.enable_forced_iteration and step > 0 and step % agent.iteration_checkpoint_frequency == 0:
+                function_call_results.append(Message(
+                    role="system",
+                    content=get_iteration_checkpoint_prompt(step)
+                ))
+                logger.debug(f"Injected iteration checkpoint at step {step}")
+
+        self.model._pre_tool_hook = pre_tool_hook
+        self.model._tool_call_hook = tool_call_hook
+        self.model._post_tool_hook = post_tool_hook
+
     def _estimate_context_tokens(self, messages: List[Message]) -> int:
         """Estimate the current context token count using tokens.py utilities."""
         model_id = getattr(self.model, 'id', 'gpt-4o') if self.model else 'gpt-4o'
@@ -314,10 +353,10 @@ class DeepAgent(Agent):
         return total
 
     def _check_repetitive_behavior(self, tool_name: str) -> Optional[str]:
-        """
-        Check for repetitive tool call patterns.
+        """Check for repetitive tool call patterns.
         
         Returns a warning message if repetitive behavior is detected.
+        Returns a stronger force-change message if repetition persists beyond 2x threshold.
         """
         if not self.enable_repetition_detection:
             return None
@@ -330,6 +369,13 @@ class DeepAgent(Agent):
         # Check if the last N calls are all the same tool
         recent_calls = list(self._tool_call_history)[-self.max_same_tool_calls:]
         if len(set(recent_calls)) == 1:
+            # Check for persistent repetition (2x threshold) -> force strategy change
+            double_threshold = self.max_same_tool_calls * 2
+            if len(self._tool_call_history) >= double_threshold:
+                extended = list(self._tool_call_history)[-double_threshold:]
+                if len(set(extended)) == 1:
+                    logger.warning(f"Persistent repetition detected: {tool_name} called {double_threshold} times")
+                    return get_force_strategy_change_prompt(tool_name, double_threshold)
             return get_repetitive_behavior_prompt(tool_name, self.max_same_tool_calls)
 
         return None
@@ -370,18 +416,6 @@ class DeepAgent(Agent):
 
         return False, None
 
-    def _inject_reflection_prompt(self, messages: List[Message], step: int) -> None:
-        """Inject reflection prompt at appropriate intervals."""
-        if not self.enable_step_reflection:
-            return
-
-        if step > 0 and step % self.reflection_frequency == 0:
-            messages.append(Message(
-                role="system",
-                content=get_step_reflection_prompt()
-            ))
-            logger.debug(f"Injected reflection prompt at step {step}")
-
     def get_builtin_tool_names(self) -> List[str]:
         """Get list of currently enabled built-in tool names."""
         tool_names = []
@@ -412,93 +446,43 @@ class DeepAgent(Agent):
 
         return tool_names
 
+    def get_builtin_tool_descriptions(self) -> dict:
+        """Get descriptions for built-in tools from the actual registered tool instances.
+
+        Extracts descriptions dynamically from tool.functions (Dict[str, Function])
+        rather than relying on a hardcoded static mapping.
+
+        Returns:
+            Dict mapping tool_name -> description string
+        """
+        descriptions = {}
+        if not self.tools:
+            return descriptions
+
+        for tool in self.tools:
+            if not hasattr(tool, 'functions'):
+                continue
+            for func_name, func_obj in tool.functions.items():
+                desc = getattr(func_obj, 'description', None)
+                if desc:
+                    # Extract first non-empty line as short description
+                    first_line = ""
+                    for line in desc.split("\n"):
+                        stripped = line.strip()
+                        if stripped:
+                            first_line = stripped
+                            break
+                    if len(first_line) > 80:
+                        first_line = first_line[:77] + "..."
+                    if first_line:
+                        descriptions[func_name] = first_line
+
+        return descriptions
+
     def reset_tool_history(self) -> None:
         """Reset the tool call history for repetition detection."""
         self._tool_call_history.clear()
-
-    # =============================================================================
-    # Override Hook Methods from Agent
-    # =============================================================================
-
-    def _on_pre_step(
-            self,
-            step: int,
-            messages: List[Message]
-    ) -> tuple[bool, Optional[str]]:
-        """
-        Pre-step hook: Handle context overflow using two-threshold mechanism.
-        
-        Args:
-            step: Current step number
-            messages: Current message list
-            
-        Returns:
-            (should_force_answer, optional_warning_message)
-        """
-        if not self.enable_context_overflow_handling:
-            return False, None
-
-        current_tokens = self._estimate_context_tokens(messages)
-        return self._handle_context_overflow(messages, current_tokens)
-
-    def _on_tool_call(self, tool_name: str, step: int) -> Optional[str]:
-        """
-        Tool call hook: Check for repetitive behavior patterns.
-        
-        Args:
-            tool_name: Name of the tool being called
-            step: Current step number
-            
-        Returns:
-            Optional warning message if repetitive behavior detected
-        """
-        return self._check_repetitive_behavior(tool_name)
-
-    def _on_post_step(self, step: int, messages: List[Message]) -> None:
-        """
-        Post-step hook: Inject reflection and iteration checkpoint prompts.
-
-        Enhanced in Phase 3 with HEARTBEAT-style iteration control:
-        - Inject reflection prompts at regular intervals
-        - Inject iteration checkpoint prompts to ensure task completion
-
-        Args:
-            step: Current step number
-            messages: Current message list (modified in place)
-        """
-        # Original reflection prompt injection
-        self._inject_reflection_prompt(messages, step)
-
-        # HEARTBEAT-style iteration checkpoint (Phase 3 Enhancement)
-        if self.enable_forced_iteration and step > 0:
-            if step % self.iteration_checkpoint_frequency == 0:
-                checkpoint_prompt = get_iteration_checkpoint_prompt(step)
-                messages.append(Message(
-                    role="system",
-                    content=checkpoint_prompt
-                ))
-                logger.debug(f"Injected iteration checkpoint at step {step}")
-
-    def _get_iteration_reminder(self, step: int) -> str:
-        """Generate an iteration reminder message for the current step.
-
-        This is used by the PromptBuilder integration to provide
-        HEARTBEAT-style reminders during multi-round execution.
-
-        Args:
-            step: Current step number
-
-        Returns:
-            Iteration reminder message
-        """
-        return f"""
-Step {step} checkpoint:
-- Have you fully solved the problem?
-- Are there any remaining tasks in the task list?
-- Did you verify your changes?
-
-If not complete, continue working. Do NOT end your turn prematurely.
-"""
+        self._hook_step_counter = 0
 
     def __repr__(self) -> str:
         """Return string representation of DeepAgent."""
@@ -506,18 +490,15 @@ If not complete, continue working. Do NOT end your turn prematurely.
         mot = getattr(self.model, 'max_output_tokens', None) if self.model else None
         return (
             f"DeepAgent(name={self.name}, "
-            f"deep_research={self.enable_deep_research}, "
             f"max_output_tokens={mot}, "
             f"builtin_tools={len(builtin_tools)})"
         )
 
 
 if __name__ == '__main__':
-    # Create DeepAgent with deep research mode
     agent = DeepAgent(
         name="TestDeepAgent",
         description="A test deep agent",
-        enable_deep_research=True,
         debug=True,
     )
 
