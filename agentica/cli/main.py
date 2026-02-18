@@ -28,7 +28,7 @@ def main():
         "api_key": args.api_key,
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,
-        "debug": args.verbose > 0,
+        "debug": args.debug > 0,
         "work_dir": args.work_dir,
     }
     extra_tool_names = list(args.tools) if args.tools else None
@@ -48,7 +48,7 @@ def main():
     skills_registry = None
     if not args.no_skills:
         # Suppress logging during skill loading for cleaner output
-        if args.verbose == 0:
+        if args.debug == 0:
             suppress_console_logging()
         load_skills()
         skills_registry = get_skill_registry()

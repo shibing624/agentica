@@ -147,7 +147,7 @@ def parse_args():
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
     parser.add_argument('--temperature', type=float, help='Temperature for the LLM')
-    parser.add_argument('--verbose', type=int, help='enable verbose mode', default=0)
+    parser.add_argument('--debug', type=int, help='enable verbose mode', default=0)
     parser.add_argument('--work_dir', type=str, help='Working directory for file operations', default=None)
     parser.add_argument('--tools', nargs='*',
                         choices=list(TOOL_REGISTRY.keys()),
