@@ -323,17 +323,20 @@ class Model(BaseModel):
             if force_answer:
                 # Context hard limit reached — skip tool execution, inject force-answer message
                 if system_msg:
-                    function_call_results.append(Message(role="system", content=system_msg))
+                    function_call_results.append(Message(role="user", content=system_msg))
                 logger.info("Pre-tool hook triggered force_answer — skipping tool execution")
                 return
 
         # Phase 1: Emit started events for all function calls
+        # Collect hook warnings to append AFTER tool results (Phase 3),
+        # so we never break the required assistant(tool_calls) → tool sequence.
+        deferred_warnings: List[Message] = []
         for function_call in function_calls:
             # Per-tool hook (e.g., repetition detection)
             if self._tool_call_hook is not None:
                 warning = self._tool_call_hook(function_call.function.name)
                 if warning:
-                    function_call_results.append(Message(role="system", content=warning))
+                    deferred_warnings.append(Message(role="user", content=warning))
 
             yield ModelResponse(
                 content=function_call.get_call_str(),
@@ -465,6 +468,11 @@ class Model(BaseModel):
         # message gets a corresponding tool result message (required by OpenAI API).
         if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
             self.deactivate_function_calls()
+
+        # Append deferred hook warnings AFTER all tool results,
+        # preserving the required assistant(tool_calls) → tool result sequence.
+        if deferred_warnings:
+            function_call_results.extend(deferred_warnings)
 
         # Phase 4: Post-execution hook (e.g., reflection/iteration checkpoint)
         if self._post_tool_hook is not None:

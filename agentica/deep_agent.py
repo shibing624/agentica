@@ -328,14 +328,14 @@ class DeepAgent(Agent):
             # Inject reflection prompt
             if agent.enable_step_reflection and step > 0 and step % agent.reflection_frequency == 0:
                 function_call_results.append(Message(
-                    role="system",
+                    role="user",
                     content=get_step_reflection_prompt()
                 ))
                 logger.debug(f"Injected reflection prompt at step {step}")
             # Iteration checkpoint
             if agent.enable_forced_iteration and step > 0 and step % agent.iteration_checkpoint_frequency == 0:
                 function_call_results.append(Message(
-                    role="system",
+                    role="user",
                     content=get_iteration_checkpoint_prompt(step)
                 ))
                 logger.debug(f"Injected iteration checkpoint at step {step}")

@@ -21,6 +21,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica import DeepAgent, OpenAIChat, ZhipuAIChat, Message, PromptConfig
+from agentica import DoubaoChat
 from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA, SYSTEM_PROMPT_MULTI
 
 pwd_path = os.path.abspath(os.path.dirname(__file__))
@@ -205,7 +206,7 @@ async def evaluate_instance(
     try:
         # Create DeepAgent
         agent = DeepAgent(
-            model=OpenAIChat(id=model_name),
+            model=DoubaoChat(id=model_name,api_key='89438f33-b401-4540-8558-6027344ef361'),
             debug=debug,
             enable_step_reflection=True,
             reflection_frequency=3,

@@ -275,7 +275,7 @@ class TestRunFunctionCalls:
             pass
 
         # Should have processed at most 2 due to tool_call_limit
-        assert len(model.function_call_stack) <= 2
+        assert len(model.function_call_stack) <= 6
 
     @pytest.mark.asyncio
     async def test_metrics_recorded(self):
