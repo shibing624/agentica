@@ -344,6 +344,16 @@ class Groq(Model):
                 assistant_message.metrics["total_time"] = response_usage.total_time
                 self.metrics["total_time"] = self.metrics.get("total_time", 0) + response_usage.total_time
 
+            # Build structured RequestUsage entry
+            from agentica.model.usage import RequestUsage
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+            self.usage.add(entry)
+
     def create_assistant_message(
             self,
             response_message: ChatCompletionMessage,

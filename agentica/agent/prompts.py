@@ -26,16 +26,14 @@ class PromptsMixin:
         """Return the JSON output prompt for the Agent."""
         from pydantic import BaseModel
 
-        json_output_prompt = "Provide your output as a JSON containing the following fields:"
+        json_output_prompt = ""
         if self.response_model is not None:
             if isinstance(self.response_model, str):
-                json_output_prompt += "\n<json_fields>"
-                json_output_prompt += f"\n{self.response_model}"
-                json_output_prompt += "\n</json_fields>"
+                json_output_prompt += "Respond with a JSON object containing the following fields:\n"
+                json_output_prompt += f"{self.response_model}\n"
             elif isinstance(self.response_model, list):
-                json_output_prompt += "\n<json_fields>"
-                json_output_prompt += f"\n{json.dumps(self.response_model, ensure_ascii=False)}"
-                json_output_prompt += "\n</json_fields>"
+                json_output_prompt += "Respond with a JSON object containing the following fields:\n"
+                json_output_prompt += f"{json.dumps(self.response_model, ensure_ascii=False)}\n"
             elif issubclass(self.response_model, BaseModel):
                 json_schema = self.response_model.model_json_schema()
                 if json_schema is not None:
@@ -67,22 +65,26 @@ class PromptsMixin:
                                 response_model_properties["$defs"][def_name] = formatted_def_properties
 
                     if len(response_model_properties) > 0:
-                        json_output_prompt += "\n<json_fields>"
-                        json_data = [key for key in response_model_properties.keys() if key != '$defs']
-                        json_output_prompt += (f"\n{json.dumps(json_data, ensure_ascii=False)}")
-                        json_output_prompt += "\n</json_fields>"
-                        json_output_prompt += "\nHere are the properties for each field:"
-                        json_output_prompt += "\n<json_field_properties>"
-                        json_output_prompt += f"\n{json.dumps(response_model_properties, indent=2, ensure_ascii=False)}"
-                        json_output_prompt += "\n</json_field_properties>"
+                        field_names = [key for key in response_model_properties.keys() if key != '$defs']
+                        json_output_prompt += "Respond with a JSON object containing these exact fields:\n"
+                        json_output_prompt += f"{json.dumps(field_names, ensure_ascii=False)}\n\n"
+                        json_output_prompt += "Field schemas:\n"
+                        json_output_prompt += f"{json.dumps(response_model_properties, indent=2, ensure_ascii=False)}\n"
             else:
                 logger.warning(f"Could not build json schema for {self.response_model}")
         else:
-            json_output_prompt += "Provide the output as JSON."
+            json_output_prompt += "Respond with a JSON object.\n"
 
-        json_output_prompt += "\nStart your response with `{` and end it with `}`."
-        json_output_prompt += "\nYour output will be passed to json.loads() to convert it to a Python object."
-        json_output_prompt += "\nMake sure it only contains valid JSON."
+        json_output_prompt += (
+            "\nIMPORTANT JSON formatting rules:\n"
+            "- Output ONLY the JSON object, nothing else.\n"
+            "- Start with { and end with }.\n"
+            "- Use the EXACT field names shown above (snake_case).\n"
+            "- Escape special characters in string values properly "
+            '(e.g. use \\" for quotes, \\n for newlines inside strings).\n'
+            "- Do NOT wrap the JSON in markdown code blocks.\n"
+            "- Your output will be parsed by json.loads(), so it must be valid JSON."
+        )
         return json_output_prompt
 
     async def get_system_message(self) -> Optional[Message]:

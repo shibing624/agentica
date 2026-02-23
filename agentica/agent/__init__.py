@@ -15,6 +15,7 @@ V2 architecture with layered configuration:
 
 from agentica.agent.base import Agent, AgentCancelledError
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
+from agentica.hooks import AgentHooks, RunHooks
 
 __all__ = [
     "Agent",
@@ -23,4 +24,6 @@ __all__ = [
     "ToolConfig",
     "WorkspaceMemoryConfig",
     "TeamConfig",
+    "AgentHooks",
+    "RunHooks",
 ]

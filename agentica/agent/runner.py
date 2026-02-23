@@ -43,6 +43,7 @@ from agentica.run_response import RunEvent, RunResponse
 from agentica.memory import AgentRun
 from agentica.utils.string import parse_structured_output
 from agentica.utils.langfuse_integration import langfuse_trace_context
+from agentica.hooks import RunHooks
 
 
 class RunnerMixin:
@@ -121,6 +122,7 @@ class RunnerMixin:
         save_response_to_file: Optional[str] = None,
         run_timeout: Optional[float] = None,
         first_token_timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
         """Unified execution engine.
@@ -140,6 +142,10 @@ class RunnerMixin:
             self.run_id = str(uuid4())
             self.run_response = RunResponse(run_id=self.run_id, agent_id=self.agent_id)
 
+            # Store run-level hooks for access by team.py
+            if hooks is not None:
+                self._run_hooks = hooks
+
             # 1. Setup
             self.update_model()
             self.run_response.model = self.model.id if self.model is not None else None
@@ -149,6 +155,12 @@ class RunnerMixin:
             # Add introduction if provided
             if self.prompt_config.introduction is not None:
                 self.add_introduction(self.prompt_config.introduction)
+
+            # --- Lifecycle: agent start ---
+            if self.hooks is not None:
+                await self.hooks.on_start(agent=self)
+            if self._run_hooks is not None:
+                await self._run_hooks.on_agent_start(agent=self)
 
             # 3. Prepare messages
             system_message, user_messages, messages_for_model = await self.get_messages_for_run(
@@ -164,6 +176,10 @@ class RunnerMixin:
             model_response: ModelResponse
             self.model = cast(Model, self.model)
             if stream and self.is_streamable:
+                # --- Lifecycle: LLM start (stream) ---
+                if self._run_hooks is not None:
+                    await self._run_hooks.on_llm_start(agent=self, messages=messages_for_model)
+
                 model_response = ModelResponse(content="", reasoning_content="")
                 model_response_stream = self.model.response_stream(messages=messages_for_model)
                 self._cancelled = False
@@ -211,10 +227,23 @@ class RunnerMixin:
                                 f"Tool completed: {tool_call_dict.get('name') if tool_call_dict else 'Unknown'}",
                                 RunEvent.tool_call_completed,
                             )
+
+                # --- Lifecycle: LLM end (stream) ---
+                if self._run_hooks is not None:
+                    await self._run_hooks.on_llm_end(agent=self, response=model_response)
             else:
                 self._cancelled = False
                 self._check_cancelled()
+
+                # --- Lifecycle: LLM start (non-stream) ---
+                if self._run_hooks is not None:
+                    await self._run_hooks.on_llm_start(agent=self, messages=messages_for_model)
+
                 model_response = await self.model.response(messages=messages_for_model)
+
+                # --- Lifecycle: LLM end (non-stream) ---
+                if self._run_hooks is not None:
+                    await self._run_hooks.on_llm_end(agent=self, response=model_response)
                 if self.response_model is not None and self.structured_outputs and model_response.parsed is not None:
                     self.run_response.content = model_response.parsed
                     self.run_response.content_type = self.response_model.__name__
@@ -253,6 +282,7 @@ class RunnerMixin:
                 run_messages.insert(0, system_message)
             self.run_response.messages = run_messages
             self.run_response.metrics = self._aggregate_metrics_from_run_messages(run_messages)
+            self.run_response.usage = self.model.usage if self.model else None
             if self.stream:
                 self.run_response.content = model_response.content
                 if model_response.reasoning_content:
@@ -317,6 +347,13 @@ class RunnerMixin:
 
             if self.stream_intermediate_steps:
                 yield self.generic_run_response(self.run_response.content, RunEvent.run_completed)
+
+            # --- Lifecycle: agent end ---
+            _output = self.run_response.content
+            if self.hooks is not None:
+                await self.hooks.on_end(agent=self, output=_output)
+            if self._run_hooks is not None:
+                await self._run_hooks.on_agent_end(agent=self, output=_output)
 
             if not self.stream:
                 yield self.run_response
@@ -476,6 +513,7 @@ class RunnerMixin:
         run_timeout: Optional[float] = None,
         first_token_timeout: Optional[float] = None,
         save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Run the Agent and return the final response (non-streaming).
@@ -487,6 +525,7 @@ class RunnerMixin:
             first_token_timeout: Maximum time to wait for first token (in seconds). From RunConfig.
             save_response_to_file: File path pattern to save response. From RunConfig.
             add_messages: Whether to add messages to memory.
+            hooks: Optional RunHooks for observing lifecycle events during this run.
         """
         if run_timeout is not None:
             return await self._run_with_timeout(
@@ -498,6 +537,7 @@ class RunnerMixin:
                 run_timeout=run_timeout,
                 add_messages=add_messages,
                 save_response_to_file=save_response_to_file,
+                hooks=hooks,
                 **kwargs,
             )
 
@@ -511,6 +551,7 @@ class RunnerMixin:
                 messages=messages,
                 add_messages=add_messages,
                 save_response_to_file=save_response_to_file,
+                hooks=hooks,
                 **kwargs,
             )
 
@@ -524,6 +565,7 @@ class RunnerMixin:
             messages=messages,
             add_messages=add_messages,
             save_response_to_file=save_response_to_file,
+            hooks=hooks,
             **kwargs,
         ):
             final_response = response
@@ -542,6 +584,7 @@ class RunnerMixin:
         run_timeout: Optional[float] = None,
         first_token_timeout: Optional[float] = None,
         save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
         """Run the Agent and stream incremental responses.
@@ -563,6 +606,7 @@ class RunnerMixin:
             add_messages=add_messages,
             stream_intermediate_steps=stream_intermediate_steps,
             save_response_to_file=save_response_to_file,
+            hooks=hooks,
             **kwargs,
         )
         if run_timeout is not None or first_token_timeout is not None:
@@ -585,6 +629,7 @@ class RunnerMixin:
         run_timeout: Optional[float] = None,
         first_token_timeout: Optional[float] = None,
         save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Synchronous wrapper for `run()` (non-streaming only)."""
@@ -599,6 +644,7 @@ class RunnerMixin:
                 run_timeout=run_timeout,
                 first_token_timeout=first_token_timeout,
                 save_response_to_file=save_response_to_file,
+                hooks=hooks,
                 **kwargs,
             )
         )
@@ -616,6 +662,7 @@ class RunnerMixin:
         run_timeout: Optional[float] = None,
         first_token_timeout: Optional[float] = None,
         save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
         **kwargs: Any,
     ) -> Iterator[RunResponse]:
         """Synchronous wrapper for `run_stream()`.
@@ -670,6 +717,7 @@ class RunnerMixin:
                 run_timeout=run_timeout,
                 first_token_timeout=first_token_timeout,
                 save_response_to_file=save_response_to_file,
+                hooks=hooks,
                 **kwargs,
             )
         )

@@ -32,6 +32,7 @@ from agentica.model.base import Model
 from agentica.run_response import RunResponse, AgentCancelledError
 from agentica.memory import WorkingMemory
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
+from agentica.hooks import AgentHooks, RunHooks
 
 # Import mixin classes — pure method containers, no state, no __init__
 from agentica.agent.prompts import PromptsMixin
@@ -95,6 +96,9 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     debug: bool = False
     tracing: bool = False
 
+    # Lifecycle hooks (per-agent)
+    hooks: Optional[AgentHooks] = None
+
     # ============================
     # Layer 3: Packed config
     # ============================
@@ -113,6 +117,9 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
     stream: Optional[bool] = field(default=None, init=False, repr=False)
     stream_intermediate_steps: bool = field(default=False, init=False, repr=False)
     _cancelled: bool = field(default=False, init=False, repr=False)
+
+    # Run-level hooks (set per-run via run(hooks=...))
+    _run_hooks: Optional[RunHooks] = field(default=None, init=False, repr=False)
 
     # Context for tools and prompt functions (runtime input)
     context: Optional[Dict[str, Any]] = None
@@ -137,6 +144,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             structured_outputs: bool = False,
             debug: bool = False,
             tracing: bool = False,
+            hooks: Optional[AgentHooks] = None,
             # ---- Packed config ----
             prompt_config: Optional[PromptConfig] = None,
             tool_config: Optional[ToolConfig] = None,
@@ -170,6 +178,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         self.structured_outputs = structured_outputs
         self.debug = debug
         self.tracing = tracing
+        self.hooks = hooks
 
         # Packed config (use defaults if not provided)
         self.prompt_config = prompt_config or PromptConfig()
@@ -186,6 +195,7 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         self.stream = None
         self.stream_intermediate_steps = False
         self._cancelled = False
+        self._run_hooks = None
 
         # Post-init setup
         self._post_init()
@@ -431,6 +441,10 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
             logger.debug("Model not set, Using OpenAIChat as default")
             self.model = OpenAIChat()
         logger.debug(f"Agent, using model: {self.model}")
+
+        # Set agent reference on model (for lifecycle hooks in tool execution)
+        import weakref
+        self.model._agent_ref = weakref.ref(self)
 
         # Set response_format
         if self.response_model is not None and self.model.response_format is None:

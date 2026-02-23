@@ -12,6 +12,7 @@ from typing import Optional, Any, Dict, List, Union, Iterable, Coroutine
 from pydantic import BaseModel, ConfigDict, Field
 
 from agentica.model.content import Video, Image, Audio
+from agentica.model.usage import Usage
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 from agentica.model.message import Message, MessageReferences
@@ -86,6 +87,7 @@ class RunResponse(BaseModel):
     event: str = RunEvent.run_response.value
     messages: Optional[List[Message]] = None
     metrics: Optional[Dict[str, Any]] = None
+    usage: Optional[Usage] = None
 
     model: Optional[str] = None
     run_id: Optional[str] = None

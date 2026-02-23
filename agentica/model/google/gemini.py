@@ -472,7 +472,6 @@ class Gemini(Model):
         Args:
             assistant_message (Message): The assistant message.
             usage (ResultGenerateContentResponse): The usage metrics.
-            stream_usage (Optional[StreamUsageData]): The stream usage metrics.
         """
         assistant_message.metrics["time"] = metrics.response_timer.elapsed
         self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
@@ -493,6 +492,16 @@ class Gemini(Model):
             if metrics.time_to_first_token is not None:
                 assistant_message.metrics["time_to_first_token"] = metrics.time_to_first_token
                 self.metrics["time_to_first_token"] = metrics.time_to_first_token
+
+            # Build structured RequestUsage entry
+            from agentica.model.usage import RequestUsage
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+            self.usage.add(entry)
 
     def create_assistant_message(self, response: GenerateContentResponse, metrics: Metrics) -> Message:
         """

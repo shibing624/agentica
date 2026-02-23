@@ -27,53 +27,117 @@ def hash_string_sha256(input_string):
 
 
 def parse_structured_output(content: str, response_model: Type[BaseModel]) -> Optional[BaseModel]:
-    structured_output = None
-    try:
-        # First attempt: direct JSON validation
-        structured_output = response_model.model_validate_json(content)
-    except (ValidationError, json.JSONDecodeError):
-        # Second attempt: Extract JSON from markdown code blocks and clean
-        content = content
+    """Parse LLM text output into a Pydantic model.
 
-        # Handle code blocks
-        if "```json" in content:
-            content = content.split("```json")[-1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].strip()
+    Attempts multiple parsing strategies:
+    1. Direct JSON validation (model_validate_json + json.loads fallback)
+    2. Extract JSON from markdown code blocks
+    3. Find the outermost JSON object via brace matching
+    4. Last resort: json.loads on original content
+    """
 
-        # Clean the JSON string
-        # Remove markdown formatting
-        content = re.sub(r"[*_`#]", "", content)
+    def _try_parse(text: str) -> Optional[BaseModel]:
+        """Try parsing text as JSON into the response model.
 
-        # Handle newlines and control characters
-        content = content.replace("\n", " ").replace("\r", "")
-        content = re.sub(r"[\x00-\x1F\x7F]", "", content)
-
-        # Escape quotes only in values, not keys
-        def escape_quotes_in_values(match):
-            key = match.group(1)
-            value = match.group(2)
-            # Escape quotes in the value portion only
-            escaped_value = value.replace('"', '\\"')
-            return f'"{key}": "{escaped_value}'
-
-        # Find and escape quotes in field values
-        content = re.sub(r'"(?P<key>[^"]+)"\s*:\s*"(?P<value>.*?)(?="\s*(?:,|\}))', escape_quotes_in_values, content)
-
+        Uses model_validate_json first (strict), then json.loads + model_validate
+        which supports populate_by_name / alias.
+        """
+        # Strict JSON parsing
         try:
-            # Try parsing the cleaned JSON
-            structured_output = response_model.model_validate_json(content)
-        except (ValidationError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to parse cleaned JSON: {e}")
+            return response_model.model_validate_json(text)
+        except (ValidationError, json.JSONDecodeError):
+            pass
+        # Relaxed: json.loads + model_validate (supports alias / populate_by_name)
+        try:
+            data = json.loads(text)
+            return response_model.model_validate(data)
+        except (ValidationError, json.JSONDecodeError):
+            pass
+        return None
 
-            try:
-                # Final attempt: Try parsing as Python dict
-                data = json.loads(content)
-                structured_output = response_model.model_validate(data)
-            except (ValidationError, json.JSONDecodeError) as e:
-                logger.warning(f"Failed to parse as Python dict: {e}")
+    # ---- Attempt 1: direct parse ----
+    result = _try_parse(content)
+    if result is not None:
+        return result
 
-    return structured_output
+    # ---- Attempt 2: extract JSON from markdown code blocks ----
+    cleaned = content
+    if "```json" in cleaned:
+        cleaned = cleaned.split("```json")[-1].split("```")[0].strip()
+    elif "```" in cleaned:
+        parts = cleaned.split("```")
+        if len(parts) >= 3:
+            cleaned = parts[1].strip()
+
+    if cleaned != content:
+        result = _try_parse(cleaned)
+        if result is not None:
+            return result
+
+    # ---- Attempt 3: find the outermost { ... } via brace matching ----
+    json_str = _extract_outermost_json(cleaned)
+    if json_str is None:
+        json_str = _extract_outermost_json(content)
+
+    if json_str is not None:
+        result = _try_parse(json_str)
+        if result is not None:
+            return result
+        logger.warning(f"Failed to parse extracted JSON into {response_model.__name__}")
+
+    # ---- Attempt 4: last resort ----
+    try:
+        data = json.loads(content)
+        return response_model.model_validate(data)
+    except (ValidationError, json.JSONDecodeError) as e:
+        logger.warning(f"Failed to parse structured output: {e}")
+
+    return None
+
+
+def _extract_outermost_json(text: str) -> Optional[str]:
+    """Extract the outermost JSON object from text using brace matching.
+
+    This avoids destructive regex cleaning that can corrupt JSON values
+    containing markdown characters like #, *, _, etc.
+    """
+    start = text.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_string = False
+    escape_next = False
+    end = start
+
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\":
+            if in_string:
+                escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                end = i
+                return text[start:end + 1]
+
+    # If braces are unbalanced, return from start to last '}'
+    last_brace = text.rfind("}")
+    if last_brace > start:
+        return text[start:last_brace + 1]
+
+    return None
 
 
 def truncate_if_too_long(result: list[str] | str) -> list[str] | str:

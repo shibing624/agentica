@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
+from agentica.model.usage import RequestUsage, TokenDetails
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
@@ -542,6 +543,16 @@ class OpenAIChat(Model):
                 metrics.total_tokens = total_tokens
                 assistant_message.metrics["total_tokens"] = total_tokens
                 self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + total_tokens
+
+            # Build structured RequestUsage entry
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+
+            # Parse prompt_tokens_details (cached_tokens, etc.)
             if response_usage.prompt_tokens_details is not None:
                 if isinstance(response_usage.prompt_tokens_details, dict):
                     metrics.prompt_tokens_details = response_usage.prompt_tokens_details
@@ -549,8 +560,18 @@ class OpenAIChat(Model):
                     metrics.prompt_tokens_details = response_usage.prompt_tokens_details.model_dump(exclude_none=True)
                 assistant_message.metrics["prompt_tokens_details"] = metrics.prompt_tokens_details
                 if metrics.prompt_tokens_details is not None:
+                    entry.input_tokens_details = TokenDetails(
+                        cached_tokens=metrics.prompt_tokens_details.get("cached_tokens", 0),
+                    )
+                    # Accumulate into legacy self.metrics dict
+                    if "prompt_tokens_details" not in self.metrics:
+                        self.metrics["prompt_tokens_details"] = {}
                     for k, v in metrics.prompt_tokens_details.items():
-                        self.metrics.get("prompt_tokens_details", {}).get(k, 0) + v
+                        self.metrics["prompt_tokens_details"][k] = (
+                            self.metrics["prompt_tokens_details"].get(k, 0) + v
+                        )
+
+            # Parse completion_tokens_details (reasoning_tokens, etc.)
             if response_usage.completion_tokens_details is not None:
                 if isinstance(response_usage.completion_tokens_details, dict):
                     metrics.completion_tokens_details = response_usage.completion_tokens_details
@@ -560,8 +581,19 @@ class OpenAIChat(Model):
                     )
                 assistant_message.metrics["completion_tokens_details"] = metrics.completion_tokens_details
                 if metrics.completion_tokens_details is not None:
+                    entry.output_tokens_details = TokenDetails(
+                        reasoning_tokens=metrics.completion_tokens_details.get("reasoning_tokens", 0),
+                    )
+                    # Accumulate into legacy self.metrics dict
+                    if "completion_tokens_details" not in self.metrics:
+                        self.metrics["completion_tokens_details"] = {}
                     for k, v in metrics.completion_tokens_details.items():
-                        self.metrics.get("completion_tokens_details", {}).get(k, 0) + v
+                        self.metrics["completion_tokens_details"][k] = (
+                            self.metrics["completion_tokens_details"].get(k, 0) + v
+                        )
+
+            # Add to structured usage
+            self.usage.add(entry)
 
     def create_assistant_message(
             self,
@@ -705,14 +737,37 @@ class OpenAIChat(Model):
         if metrics.total_tokens is not None:
             assistant_message.metrics["total_tokens"] = metrics.total_tokens
             self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + metrics.total_tokens
+
+        # Build structured RequestUsage entry
+        entry = RequestUsage(
+            input_tokens=metrics.input_tokens,
+            output_tokens=metrics.output_tokens,
+            total_tokens=metrics.total_tokens,
+            response_time=metrics.response_timer.elapsed,
+        )
         if metrics.prompt_tokens_details is not None:
             assistant_message.metrics["prompt_tokens_details"] = metrics.prompt_tokens_details
+            entry.input_tokens_details = TokenDetails(
+                cached_tokens=metrics.prompt_tokens_details.get("cached_tokens", 0),
+            )
+            if "prompt_tokens_details" not in self.metrics:
+                self.metrics["prompt_tokens_details"] = {}
             for k, v in metrics.prompt_tokens_details.items():
-                self.metrics.get("prompt_tokens_details", {}).get(k, 0) + v
+                self.metrics["prompt_tokens_details"][k] = (
+                    self.metrics["prompt_tokens_details"].get(k, 0) + v
+                )
         if metrics.completion_tokens_details is not None:
             assistant_message.metrics["completion_tokens_details"] = metrics.completion_tokens_details
+            entry.output_tokens_details = TokenDetails(
+                reasoning_tokens=metrics.completion_tokens_details.get("reasoning_tokens", 0),
+            )
+            if "completion_tokens_details" not in self.metrics:
+                self.metrics["completion_tokens_details"] = {}
             for k, v in metrics.completion_tokens_details.items():
-                self.metrics.get("completion_tokens_details", {}).get(k, 0) + v
+                self.metrics["completion_tokens_details"][k] = (
+                    self.metrics["completion_tokens_details"].get(k, 0) + v
+                )
+        self.usage.add(entry)
 
     def add_response_usage_to_metrics(self, metrics: Metrics, response_usage: CompletionUsage):
         metrics.input_tokens = response_usage.prompt_tokens

@@ -294,12 +294,12 @@ class LiteLLMChat(Model):
         """Update usage metrics from response."""
         assistant_message.metrics["time"] = metrics.response_timer.elapsed
         self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
-        
+
         if response_usage:
             prompt_tokens = getattr(response_usage, 'prompt_tokens', 0)
             completion_tokens = getattr(response_usage, 'completion_tokens', 0)
             total_tokens = getattr(response_usage, 'total_tokens', 0)
-            
+
             if prompt_tokens:
                 metrics.input_tokens = prompt_tokens
                 metrics.prompt_tokens = prompt_tokens
@@ -314,6 +314,16 @@ class LiteLLMChat(Model):
                 metrics.total_tokens = total_tokens
                 assistant_message.metrics["total_tokens"] = total_tokens
                 self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + total_tokens
+
+            # Build structured RequestUsage entry
+            from agentica.model.usage import RequestUsage
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+            self.usage.add(entry)
     
     def _create_assistant_message(
             self,
@@ -440,11 +450,11 @@ class LiteLLMChat(Model):
         """Update metrics for streaming response."""
         assistant_message.metrics["time"] = metrics.response_timer.elapsed
         self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
-        
+
         if metrics.time_to_first_token is not None:
             assistant_message.metrics["time_to_first_token"] = metrics.time_to_first_token
             self.metrics.setdefault("time_to_first_token", []).append(metrics.time_to_first_token)
-        
+
         if metrics.input_tokens:
             assistant_message.metrics["input_tokens"] = metrics.input_tokens
             self.metrics["input_tokens"] = self.metrics.get("input_tokens", 0) + metrics.input_tokens
@@ -454,6 +464,16 @@ class LiteLLMChat(Model):
         if metrics.total_tokens:
             assistant_message.metrics["total_tokens"] = metrics.total_tokens
             self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + metrics.total_tokens
+
+        # Build structured RequestUsage entry
+        from agentica.model.usage import RequestUsage
+        entry = RequestUsage(
+            input_tokens=metrics.input_tokens,
+            output_tokens=metrics.output_tokens,
+            total_tokens=metrics.total_tokens,
+            response_time=metrics.response_timer.elapsed,
+        )
+        self.usage.add(entry)
     
     async def _handle_stream_tool_calls(
             self,

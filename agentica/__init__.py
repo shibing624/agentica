@@ -47,6 +47,7 @@ from agentica.model.base import Model
 from agentica.model.message import Message, MessageReferences, UserMessage, AssistantMessage, SystemMessage, ToolMessage
 from agentica.model.content import Media, Video, Audio, Image
 from agentica.model.response import ModelResponse, FileType
+from agentica.model.usage import Usage, RequestUsage, TokenDetails
 
 # memory
 from agentica.memory import (
@@ -96,6 +97,7 @@ from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfi
 from agentica.run_config import RunConfig
 from agentica.deep_agent import DeepAgent
 from agentica.workflow import Workflow, WorkflowSession
+from agentica.hooks import AgentHooks, RunHooks
 
 # workspace
 from agentica.workspace import Workspace, WorkspaceConfig
@@ -521,6 +523,8 @@ __all__ = [
     "RunConfig",
     "Workflow",
     "WorkflowSession",
+    "AgentHooks",
+    "RunHooks",
     # workspace
     "Workspace",
     "WorkspaceConfig",

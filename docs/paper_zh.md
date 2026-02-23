@@ -769,3 +769,166 @@ tb run --agent agentica --model [MODEL] \
     --dataset-name terminal-bench-core \
     --dataset-version 2.0 --n-concurrent 8
 ```
+
+---
+
+## 附录 D：改进方向与论文创新性分析
+
+> 本附录记录了框架当前需要改进的地方、Benchmark 效果提升的具体策略，以及论文创新性的优先级排序，供后续实验和写作参考。
+
+### D.1 当前框架需要改进的地方
+
+#### D.1.1 高优先级（直接影响论文实验结果）
+
+| # | 问题 | 影响 | 建议 |
+|---|------|------|------|
+| 1 | **搜索工具太弱** | 从已有评测结果看，`web_search` 返回空结果（0% 准确率），搜索是 agent 任务的核心依赖 | 集成 Serper/Tavily API 作为主搜索，百度作为 fallback；增加搜索结果的后处理（去重、排序、snippet 提取） |
+| 2 | **缺少 SWE-bench 执行环境** | 论文规划了 SWE-bench 但代码里没有 Docker 沙箱集成 | 需要写一个 `SWEBenchRunner`，在 Docker 容器中执行 git apply patch + pytest |
+| 3 | **evaluation/run.py 只跑 Deep Research 任务** | 当前评测脚本只适用于搜索类任务，不支持代码生成/编辑类 | 需要分别写 GAIA/SWE-bench/Terminal-Bench 的 runner |
+| 4 | **CompressionManager 未充分测试** | 上下文压缩是论文核心 contribution 之一，但没有独立的压缩效果测试 | 添加压缩前后的信息保留率测试（如 ROUGE、关键实体保留率） |
+
+#### D.1.2 中优先级（提升论文质量）
+
+| # | 问题 | 建议 |
+|---|------|------|
+| 5 | **Guardrails 未接入 runner** | `guardrails/` 代码完整但 `runner.py` 没有调用点。需要在 `_run_impl()` 中加入 guardrail 执行 |
+| 6 | **缺少 Cost tracking** | 论文 Table 11 需要 token consumption 和 API cost 对比，当前 `metrics` 只记录工具执行时间 |
+| 7 | **缺少 reproducibility 支持** | 评测没有 seed 控制、temperature 固定、结果缓存机制 |
+| 8 | **Workflow 缺少条件路由** | 当前 Workflow 是纯线性的，对比 LangGraph 的有向图编排弱 |
+
+### D.2 论文 Benchmark 效果提升的具体策略
+
+#### D.2.1 策略 1：GAIA benchmark（最容易出成绩）
+
+GAIA 评测的关键是**多步推理 + 工具使用**。Agentica 的优势：
+
+```
+提升点 = 并行搜索加速 + 上下文管理防崩溃 + 反思防死循环
+```
+
+具体操作：
+1. 用 **Serper API** 替换百度搜索，确保搜索结果质量
+2. 配置 `DeepAgent` 的 `enable_forced_iteration=True` + `enable_step_reflection=True`
+3. 确保 `context_soft_limit=0.6` + `context_hard_limit=0.8`
+4. 用 **GPT-4o** 或 **Claude 3.5 Sonnet** 作为底模型
+5. 对 Level 3（最难）任务，子代理并行执行多路搜索
+
+**预期**：GAIA 上对比同底模型 + 简单框架（如裸 OpenAI function calling），DeepAgent 应该在 Level 2/3 上有 **5-15% 的 pass rate 提升**（主要来自长链任务不崩溃 + 不死循环）。
+
+#### D.2.2 策略 2：消融实验（最出论文）
+
+消融实验是区分"框架贡献"和"底模型能力"的关键：
+
+```python
+# 实验矩阵
+configs = {
+    "full":           "DeepAgent(全部开启)",
+    "-TaskGroup":     "Agent(串行工具执行)",
+    "-DualThreshold": "DeepAgent(disable context management)",
+    "-HEARTBEAT":     "DeepAgent(disable iteration checkpoint)",
+    "-Reflection":    "DeepAgent(disable step reflection)",
+    "-Repetition":    "DeepAgent(disable repetition detection)",
+    "-DeepPrompt":    "Agent(标准 prompt，无 soul/heartbeat)",
+}
+```
+
+每个 config 跑 GAIA Level 2+3（约 80 题），对比 pass rate。**差异就是框架的 contribution**。
+
+#### D.2.3 策略 3：Wall-clock 加速比（最直观）
+
+设计实验：
+1. 统计每轮 tool calls 数量的分布
+2. 对比 sequential vs parallel 的 wall-clock time
+3. 画加速比曲线（x=并行工具数，y=speedup）
+
+预期结果：2-3 个工具并行时 ~2×，5+ 工具并行时接近 5×。这在 SWE-bench（同时读多个文件 + grep）和 GAIA（同时搜索多个关键词）中很常见。
+
+#### D.2.4 策略 4：Context Token 轨迹图（最有说服力）
+
+对 long-horizon 任务（>15 步），画 context token 随步数变化的折线图：
+- **无压缩**：单调递增 → overflow → 崩溃
+- **单阈值压缩**：锯齿状振荡
+- **双阈值（ours）**：平稳压缩 → 继续执行 → 成功完成
+
+这类图在 reviewer 眼中非常直观，建议放在正文 §6.3 中。
+
+### D.3 论文创新性优先级排序
+
+建议论文的 **5 个 contributions** 按以下优先级排列：
+
+| 排序 | Contribution | 学术新颖性 | 可量化程度 | 论文对应章节 |
+|------|-------------|-----------|-----------|------------|
+| **1** | 双阈值滞回上下文管理 + 收敛证明 | **高** — 形式化的控制论方法应用于 LLM agent | **高** — 完成率、强制终止率、压缩次数 | §3.6, §5.5, §6.3 |
+| **2** | 结构化并发工具执行 + 异常隔离形式化 | **高** — 首个用 TaskGroup 的 agent 框架 | **高** — wall-clock speedup | §3.3, §5.2, §6.1 |
+| **3** | 分级自我纠正（重复检测→反思→检查点→强制策略变更） | **中高** — 类似 ReAct 的改进，但有分级机制 | **高** — 消融实验 | §3.6, §5.3 |
+| **4** | Agent-as-Session 统一状态模型 + token-aware 历史管理 | **中** — 架构设计贡献 | **中** — 代码量对比、multi-turn accuracy | §3.5, §6.2 |
+| **5** | 双层护栏（Agent+Tool 级） | **中** — 工程贡献 | **低** — 安全性难以量化 | §3.7 |
+
+### D.4 创新点详细分析
+
+#### D.4.1 创新点 1：结构化并发工具执行（最强 contribution）
+
+**现状**：`asyncio.TaskGroup` + `Semaphore` 并行执行，Phase 0-4 四阶段流水线，per-task 异常隔离。
+
+**论文怎么写**：
+- **形式化**：定义 Partial Failure Isolation 属性，证明 `TaskGroup` 满足而 `asyncio.gather` 不满足
+- **实验**：对比 sequential vs parallel 在不同 tool 数量下的 wall-clock speedup
+- **指标**：speedup ratio、Amdahl's law bound、tail latency
+
+**benchmark 提升点**：在 GAIA 多工具任务中，并行搜索 N 个网页 vs 串行搜索，直接拿到 **N× speedup**（I/O-bound 场景接近线性加速）。这会体现在 **任务完成时间** 和 **相同时间预算下的 pass rate** 上。
+
+#### D.4.2 创新点 2：双阈值滞回上下文管理（最有学术价值）
+
+**现状**：`context_soft_limit`（60%→压缩）+ `context_hard_limit`（80%→强制终止），LLM-driven 压缩。
+
+**论文怎么写**：
+- **形式化**：滞回控制器的收敛性证明（论文正文 Theorem 2 的框架）
+- **消融实验**：
+  - None（无上下文管理）→ 长任务 context overflow 崩溃
+  - Hard threshold only → 压缩振荡（在阈值边缘反复触发）
+  - **Dual threshold (ours)** → 稳定运行
+- **指标**：long-horizon task completion rate、forced termination rate、compression trigger count
+
+**benchmark 提升点**：GAIA Level 3 和 Terminal-Bench 的**长链任务完成率**。这类任务工具调用 >10 次，其他框架到后面 context overflow 直接挂掉，Agentica 可以压缩继续。这是一个 **明显可量化的差距**。
+
+#### D.4.3 创新点 3：分级自我纠正机制
+
+**现状**：重复检测（N次 → 警告 → 2N次 → 强制策略变更）+ 步骤反思 + 迭代检查点。
+
+**论文怎么写**：
+- **消融实验**：
+  - `-HEARTBEAT`（去掉迭代检查点）→ 过早终止率上升
+  - `-RepetitionDetection`（去掉重复检测）→ 死循环率上升
+  - `-StepReflection`（去掉反思）→ 冗余搜索增加
+- **指标**：premature termination rate、repetition loop rate、avg tool calls to completion
+
+**benchmark 提升点**：直接体现在 **pass rate 提升**，特别是在模型容易陷入循环的场景（如 BrowseComp 反复搜索同一关键词）。
+
+#### D.4.4 创新点 4：子代理类型系统（安全隔离 + 权限分级）
+
+**现状**：explore/research/code 三种类型，模型浅拷贝 + 状态重置，嵌套防护。
+
+**论文怎么写**：
+- 强调 **privilege separation**（最小权限原则）
+- explore 子代理只能读，不能写/执行 → 安全
+- 子代理上下文与父代理隔离 → 避免状态污染
+
+#### D.4.5 创新点 5：双层护栏系统
+
+**现状**：Agent 级 + Tool 级，Tool 级有三种行为（allow/reject_content/raise_exception）。
+
+**论文怎么写**：首个提供 per-tool-call 级别安全验证的框架。对比 OpenAI Agents SDK 只有 Agent 级 tripwire。
+
+### D.5 最紧急的行动项
+
+按优先级排序，论文实验要跑通需要以下行动：
+
+1. **修好搜索工具**（换 Serper API）— 这是 GAIA 评测的前置依赖
+2. **跑 GAIA 165 题** full + 6 个消融 config — 填充 Table 3, 7
+3. **统计并行加速比** — 填充 Table 6
+4. **画 context token 轨迹图** — 填充 §6.3
+5. **添加 cost tracking** — 填充 Table 11
+6. **写 SWE-bench runner + Docker 沙箱** — 填充 Table 4
+7. **写 Terminal-Bench runner** — 填充 Table 5
+
+有了以上 7 组数据，论文的实验部分（§5 和 §6）就可以完整填充。

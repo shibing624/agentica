@@ -1486,6 +1486,8 @@ class BuiltinTaskTool(Tool):
             model.function_call_stack = None
             model.tool_choice = None
             model.metrics = {}
+            from agentica.model.usage import Usage
+            model.usage = Usage()
             # Force a fresh HTTP client (the old one belongs to the parent)
             model.client = None
             model.http_client = None
@@ -1589,6 +1591,12 @@ class BuiltinTaskTool(Tool):
                 status="completed",
                 result=result,
             )
+
+            # Merge subagent usage into parent
+            if (self._parent_agent is not None
+                    and hasattr(subagent, 'model') and subagent.model is not None
+                    and hasattr(self._parent_agent, 'model') and self._parent_agent.model is not None):
+                self._parent_agent.model.usage.merge(subagent.model.usage)
             
             logger.debug(f"{config.name} [{config.type.value}] completed task.")
             

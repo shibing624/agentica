@@ -8,6 +8,7 @@ import asyncio
 import collections.abc
 import io
 import base64
+import weakref
 from types import GeneratorType
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
 
@@ -16,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator,
 from agentica.utils.log import logger
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
+from agentica.model.usage import Usage, RequestUsage, TokenDetails
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException
 from agentica.utils.timer import Timer
 
@@ -29,6 +31,8 @@ class Model(BaseModel):
     provider: Optional[str] = Field(None, validate_default=True)
     # Metrics collected for this Model. This is not sent to the Model API.
     metrics: Dict[str, Any] = Field(default_factory=dict)
+    # Structured usage tracking (cross-request aggregation).
+    usage: Usage = Field(default_factory=Usage)
     response_format: Optional[Any] = None
 
     # -*- Model capability limits (not sent to the API) -*-
@@ -70,6 +74,8 @@ class Model(BaseModel):
     _post_tool_hook: Optional[Callable] = PrivateAttr(default=None)
     # Reference to the current messages list (set during tool handling for hook access)
     _current_messages: Optional[List[Message]] = PrivateAttr(default=None)
+    # Weak reference to the owning Agent (for lifecycle hooks)
+    _agent_ref: Optional[weakref.ref] = PrivateAttr(default=None)
 
     # -*- Functions available to the Model to call -*-
     # Functions extracted from the tools.
@@ -331,12 +337,22 @@ class Model(BaseModel):
         # Collect hook warnings to append AFTER tool results (Phase 3),
         # so we never break the required assistant(tool_calls) → tool sequence.
         deferred_warnings: List[Message] = []
+        _agent = self._agent_ref() if self._agent_ref is not None else None
         for function_call in function_calls:
             # Per-tool hook (e.g., repetition detection)
             if self._tool_call_hook is not None:
                 warning = self._tool_call_hook(function_call.function.name)
                 if warning:
                     deferred_warnings.append(Message(role="user", content=warning))
+
+            # --- Lifecycle: tool start ---
+            if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
+                await _agent._run_hooks.on_tool_start(
+                    agent=_agent,
+                    tool_name=function_call.function.name,
+                    tool_call_id=function_call.call_id or "",
+                    tool_args=function_call.arguments,
+                )
 
             yield ModelResponse(
                 content=function_call.get_call_str(),
@@ -422,6 +438,9 @@ class Model(BaseModel):
                         yield ModelResponse(content=item)
             else:
                 function_call_output = function_call.result
+                # Ensure output is str or list for Message.content validation
+                if function_call_output is not None and not isinstance(function_call_output, (str, list)):
+                    function_call_output = str(function_call_output)
                 if function_call.function.show_result:
                     yield ModelResponse(content=function_call_output)
 
@@ -451,6 +470,18 @@ class Model(BaseModel):
                 ),
                 event=ModelResponseEvent.tool_call_completed.value,
             )
+
+            # --- Lifecycle: tool end ---
+            if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
+                await _agent._run_hooks.on_tool_end(
+                    agent=_agent,
+                    tool_name=function_call.function.name,
+                    tool_call_id=function_call.call_id or "",
+                    tool_args=function_call.arguments,
+                    result=function_call_output if function_call_success else function_call.error,
+                    is_error=not function_call_success,
+                    elapsed=timers[i].elapsed,
+                )
 
             if "tool_call_times" not in self.metrics:
                 self.metrics["tool_call_times"] = {}
@@ -660,6 +691,7 @@ class Model(BaseModel):
     def clear(self) -> None:
         """Clears the Model's state."""
         self.metrics = {}
+        self.usage = Usage()
         self.functions = None
         self.function_call_stack = None
         self.session_id = None

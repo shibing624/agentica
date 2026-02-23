@@ -334,6 +334,16 @@ class Gemini(Model):
                 assistant_message.metrics["time_to_first_token"] = metrics.time_to_first_token
                 self.metrics.setdefault("time_to_first_token", []).append(metrics.time_to_first_token)
 
+            # Build structured RequestUsage entry
+            from agentica.model.usage import RequestUsage
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+            self.usage.add(entry)
+
     def create_assistant_message(self, response: GenerationResponse, metrics: Metrics) -> Message:
         """
         Create an assistant message from the GenerationResponse.

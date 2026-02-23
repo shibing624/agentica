@@ -92,6 +92,13 @@ class TeamMixin:
             Returns:
                 The response from the agent.
             """
+            # --- Lifecycle: agent transfer ---
+            # Access parent agent's _run_hooks via closure (self is the target agent)
+            # The caller (parent) stores _run_hooks; we trigger from there
+            caller = getattr(self, '_transfer_caller', None)
+            if caller is not None and hasattr(caller, '_run_hooks') and caller._run_hooks is not None:
+                await caller._run_hooks.on_agent_transfer(from_agent=caller, to_agent=self)
+
             logger.info(f"Transferring task to {agent_name}: {task}")
             response = await self.run(message=task)
             if response and response.content:
@@ -161,6 +168,8 @@ class TeamMixin:
         # Add team transfer functions if team is present and transfer instructions are enabled
         if self.has_team() and self.team_config.add_transfer_instructions:
             for member in self.team:
+                # Set caller reference for lifecycle hooks
+                member._transfer_caller = self
                 transfer_func = member.get_transfer_function()
                 tools.append(transfer_func)
 

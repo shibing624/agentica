@@ -351,6 +351,20 @@ class Claude(Model):
                 assistant_message.metrics["time_to_first_token"] = metrics.time_to_first_token
                 self.metrics.setdefault("time_to_first_token", []).append(metrics.time_to_first_token)
 
+            # Build structured RequestUsage entry
+            from agentica.model.usage import RequestUsage, TokenDetails
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+            # Anthropic cache_creation_input_tokens / cache_read_input_tokens
+            cache_read = getattr(usage, 'cache_read_input_tokens', None)
+            if cache_read:
+                entry.input_tokens_details = TokenDetails(cached_tokens=cache_read)
+            self.usage.add(entry)
+
     def create_assistant_message(self, response: AnthropicMessage, metrics: Metrics) -> Tuple[Message, str, List[str]]:
         """
         Create an assistant message from the response.

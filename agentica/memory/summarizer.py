@@ -51,7 +51,7 @@ class MemorySummarizer(BaseModel):
         system_prompt += "\n".join(conversation)
 
         if not self.use_structured_outputs:
-            system_prompt += "\n\nProvide your output as a JSON containing the following fields:"
+            system_prompt += "\n\nRespond with a JSON object containing the following fields:"
             json_schema = SessionSummary.model_json_schema()
             response_model_properties = {}
             json_schema_properties = json_schema.get("properties")
@@ -65,17 +65,19 @@ class MemorySummarizer(BaseModel):
                     response_model_properties[field_name] = formatted_field_properties
 
             if len(response_model_properties) > 0:
-                system_prompt += "\n<json_fields>"
-                system_prompt += f"\n{json.dumps([key for key in response_model_properties.keys() if key != '$defs'])}"
-                system_prompt += "\n</json_fields>"
-                system_prompt += "\nHere are the properties for each field:"
-                system_prompt += "\n<json_field_properties>"
-                system_prompt += f"\n{json.dumps(response_model_properties, indent=2, ensure_ascii=False)}"
-                system_prompt += "\n</json_field_properties>"
+                field_names = [key for key in response_model_properties.keys() if key != '$defs']
+                system_prompt += f"\n{json.dumps(field_names, ensure_ascii=False)}\n"
+                system_prompt += "\nField schemas:\n"
+                system_prompt += f"{json.dumps(response_model_properties, indent=2, ensure_ascii=False)}\n"
 
-            system_prompt += "\nStart your response with `{` and end it with `}`."
-            system_prompt += "\nYour output will be passed to json.loads() to convert it to a Python object."
-            system_prompt += "\nMake sure it only contains valid JSON."
+            system_prompt += (
+                "\nIMPORTANT JSON formatting rules:\n"
+                "- Output ONLY the JSON object, nothing else.\n"
+                "- Start with { and end with }.\n"
+                "- Use the EXACT field names shown above (snake_case).\n"
+                "- Do NOT wrap the JSON in markdown code blocks.\n"
+                "- Your output will be parsed by json.loads(), so it must be valid JSON."
+            )
         return Message(role="system", content=system_prompt)
 
     def _prepare_messages(
