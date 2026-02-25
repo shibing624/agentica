@@ -352,41 +352,63 @@ All core methods (`run`, `response`, `execute`, `invoke`) are **async by default
 
 There are no `a`-prefixed methods (`arun`, `aresponse`, etc.) — those were removed. Sync tools are executed via `loop.run_in_executor()` inside async context. Sync DB calls (session read/write) and file I/O (workspace) are wrapped in `loop.run_in_executor()` to avoid blocking the event loop.
 
-### Agent (`agentica/agent/`)
+### Agent (`agentica/agent/`) + Runner (`agentica/runner.py`)
 
-The `Agent` class uses `@dataclass(init=False)` with explicit `__init__` and **direct multiple inheritance** from mixin classes. Mixins are pure method containers (no state, no `__init__`). IDE can jump directly to implementations.
+The `Agent` class uses `@dataclass(init=False)` with explicit `__init__` and **direct multiple inheritance** from mixin classes. Execution is delegated to an independent `Runner` class.
 
 ```python
 @dataclass(init=False)
-class Agent(PromptsMixin, RunnerMixin, SessionMixin, TeamMixin, ToolsMixin, PrinterMixin, MediaMixin):
+class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
+    def __init__(self, ...):
+        ...
+        self._runner = Runner(self)
+
+    async def run(self, message, **kw) -> RunResponse:
+        return await self._runner.run(message, **kw)
 ```
 
-- `runner.py` — `RunnerMixin`: Core `_run_impl()` (the single execution engine), `run()`, `run_stream()`, `run_sync()`, `run_stream_sync()`
-- `prompts.py` — `PromptsMixin`: System/user message construction. `get_system_message()`, `get_messages_for_run()`, and `_build_enhanced_system_message()` are **async** (they await workspace context/memory loading).
-- `session.py` — `SessionMixin`: Session persistence. `read_from_storage()`, `write_to_storage()`, `load_session()`, `rename()`, `rename_session()`, `delete_session()`, `generate_session_name()`, `auto_rename_session()` are all **async** with DB calls wrapped in `run_in_executor`.
-- `team.py` — `TeamMixin`: Multi-agent delegation. `as_tool()` creates **async** entrypoints that `await self.run()`. `get_transfer_function()` also uses async entrypoints.
-- `tools.py` — `ToolsMixin`: Tool registration and management. `update_memory()` is **async**.
-- `printer.py` — `PrinterMixin`: `print_response()` (async) + `print_response_sync()`
-- `media.py` — `MediaMixin`: Image/video handling
+- `runner.py` — `Runner`: Independent execution engine (holds `self.agent` reference). Core `_run_impl()`, `run()`, `run_stream()`, `run_sync()`, `run_stream_sync()`
+- `prompts.py` — `PromptsMixin`: System/user message construction
+- `team.py` — `TeamMixin`: Multi-agent delegation
+- `tools.py` — `ToolsMixin`: Tool registration and management
+- `printer.py` — `PrinterMixin`: Response printing utilities
 
-Note: Agent uses `@dataclass` (not BaseModel) deliberately — it has mutable fields (Callable, lists), complex `__init__` with alias handling, and doesn't need Pydantic validation/serialization. Data models (RunResponse, Tool, Function) use BaseModel.
+Note: Agent uses `@dataclass` (not BaseModel). The entire Model hierarchy also uses `@dataclass` (converted from Pydantic in v3).
 
 ### Model (`agentica/model/`)
 
-`Model` base class (`base.py`) defines four abstract async methods: `invoke()`, `invoke_stream()`, `response()`, `response_stream()`. Tool calls are executed in parallel via `asyncio.TaskGroup` in `run_function_calls()` (structured concurrency, each task catches its own exceptions to prevent sibling cancellation).
+`Model` base class (`base.py`) is a `@dataclass` with `ABC`, defining abstract async methods: `invoke()`, `invoke_stream()`, `response()`, `response_stream()`. All Model subclasses use `@dataclass` (not Pydantic BaseModel).
 
-Providers are in subdirectories (e.g., `openai/`, `anthropic/`, `deepseek/`, `zhipuai/`). All extend the same async-only interface. Provider overrides use `@override` decorator (Python 3.12+) for `invoke()`, `invoke_stream()`, `response()`, `response_stream()`.
+**Core providers** (5 directories): `openai/`, `anthropic/`, `ollama/`, `litellm/`, `azure/`
 
-Key provider notes:
-- `openai/chat.py` (`OpenAIChat`) — Uses native async OpenAI client
-- `anthropic/claude.py` (`Claude`) — Uses `AsyncAnthropic` client with native async `messages.create()` and `messages.stream()`. `add_image()` and `format_messages()` are async.
-- `openai/like.py` (`OpenAILike`) — Extends `OpenAIChat` for OpenAI-compatible APIs. Subclassed by DeepSeek, Doubao, Moonshot, Nvidia, Qwen, Yi, ZhipuAI, etc.
+**OpenAI-compatible providers** via registry factory (`model/providers.py`):
+```python
+from agentica.model.providers import create_provider
+model = create_provider("deepseek", api_key="...")  # Returns OpenAILike with correct config
+```
+Registered providers: deepseek, qwen, zhipuai, moonshot, doubao, together, xai, yi, nvidia, sambanova, groq, cerebras, mistral
 
-### Tools (`agentica/tools/base.py`)
+**Structured output**: Each provider implements native structured output:
+- OpenAI: `beta.chat.completions.parse` with `response_format`
+- Claude: synthetic tool_use mode
+- LiteLLM: `response_format={"type": "json_schema", ...}`
+- Ollama: `format=schema`
 
-Three-layer hierarchy: `Tool` (container) → `Function` (schema + entrypoint) → `FunctionCall` (invocation). `FunctionCall.execute()` is async-only and auto-detects sync/async entrypoints via `inspect.iscoroutinefunction()`. Functions hold a **weakref** to their parent Agent.
+### Tools (`agentica/tools/`)
 
-`_safe_validate_call()` wraps pydantic's `validate_call` to strip unresolvable forward-reference annotations (e.g., `self: "Agent"` on mixin methods) before validation.
+Three-layer hierarchy: `Tool` (container) → `Function` (schema + entrypoint) → `FunctionCall` (invocation). `FunctionCall.execute()` is async-only.
+
+**`@tool` decorator** (`tools/decorators.py`): Attach metadata to functions for auto-registration:
+```python
+from agentica.tools import tool
+@tool(name="add", description="Add two numbers")
+def add(a: int, b: int) -> int:
+    return a + b
+```
+
+**Global tool registry** (`tools/registry.py`): `register_tool()`, `get_tool()`, `list_tools()`, `unregister_tool()`, `clear_registry()`
+
+`Function.from_callable()` auto-detects `_tool_metadata` from `@tool` decorator.
 
 **Builtin Tools** (`agentica/deep_tools.py`) — all I/O-bound tools are **async**:
 - `edit_file(file_path, old_string, new_string, replace_all=False)` — flat params for LLM-friendly schema (no nested dict/list)
@@ -403,11 +425,12 @@ Flow control exceptions: `StopAgentRun`, `RetryAgentRun`.
 
 ### Guardrails (`agentica/guardrails/`)
 
-Unified package for input/output validation at two levels:
-- **Agent-level**: `InputGuardrail`, `OutputGuardrail` — validate entire agent runs
-- **Tool-level**: `ToolInputGuardrail`, `ToolOutputGuardrail` — validate individual tool calls
+Three-layer unified architecture:
+- **`core.py`**: `GuardrailTriggered` (base exception), `GuardrailOutput` (allow/block), `BaseGuardrail` (base class with `_invoke()`), `run_guardrails_seq()` (execution engine)
+- **`agent.py`**: `InputGuardrail`, `OutputGuardrail` — validate entire agent runs. `@input_guardrail`, `@output_guardrail` decorators
+- **`tool.py`**: `ToolInputGuardrail`, `ToolOutputGuardrail` — validate individual tool calls with three-way behavior (allow/reject_content/raise_exception)
 
-Both use decorator pattern (`@input_guardrail`, `@tool_input_guardrail`) and support async functions.
+All guardrail functions support both sync and async. `GuardrailFunctionOutput` is a backward-compatible alias for `GuardrailOutput`.
 
 ### Memory
 
@@ -448,9 +471,28 @@ Uses **lazy loading** with thread-safe double-checked locking (`threading.Lock`)
 - All blocking I/O (DB, file system) wrapped in `loop.run_in_executor()` within async methods
 - Tests for async methods use `asyncio.run()` and `unittest.mock.AsyncMock`
 
-## Recent Changes (2026-02-14)
+## Recent Changes (2026-02-25)
 
-### Examples V2 API Migration
+### V3 Architecture Refactoring
+
+Eight-phase refactoring to simplify and modernize the codebase:
+
+| Phase | Description | Key Changes |
+|-------|-------------|-------------|
+| 1 | Model layer simplification | Remove 19 provider dirs → `providers.py` registry/factory |
+| 2 | Model @dataclass conversion | Pydantic BaseModel → stdlib @dataclass for all Model classes |
+| 3 | Async consistency + structured output | ABC/@abstractmethod, unified structured output for all providers |
+| 4 | Tool registration mechanism | `@tool` decorator + global tool registry |
+| 5 | Runner extraction | RunnerMixin → independent `Runner` class, Agent delegates via `_runner` |
+| 6 | Guardrails unification | New `core.py` abstraction layer, base.py → agent.py |
+| 7 | `__init__.py` simplification | 594 → 399 lines, streamlined lazy loading |
+| 8 | Tests + cleanup | 35 new tests covering all phases, CLAUDE.md update |
+
+**Test result**: 622 tests pass (587 original + 35 new v3 tests)
+
+**Testing convention**: All tests MUST mock LLM API keys (use `api_key="fake_openai_key"` or mock `agent._runner.run`). No real API calls in tests.
+
+## Previous Changes (2026-02-18)
 
 Fixed 6 example files to align with V2 async-first API:
 
