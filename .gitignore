@@ -185,8 +185,6 @@ test_work_dir/
 
 tmp/
 
-CLAUDE.md
-CLAUDE copy.md
 .codebuddy/*
 .codebuddy/
 update_tech_v3.md
