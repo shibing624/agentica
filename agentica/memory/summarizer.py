@@ -6,9 +6,10 @@
 
 import json
 import re
+from dataclasses import dataclass
 from textwrap import dedent
 from typing import Dict, List, Any, Optional, cast, Tuple
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 from agentica.model.openai import OpenAIChat
 from agentica.model.base import Model
@@ -17,7 +18,8 @@ from agentica.utils.log import logger
 from agentica.memory.models import SessionSummary
 
 
-class MemorySummarizer(BaseModel):
+@dataclass
+class MemorySummarizer:
     model: Optional[Model] = None
     use_structured_outputs: bool = False
 

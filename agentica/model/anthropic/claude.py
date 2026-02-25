@@ -52,6 +52,7 @@ class Metrics:
         logger.debug(f"* Total tokens:                {self.total_tokens}")
 
 
+@dataclass
 class Claude(Model):
     """
     A class representing Anthropic Claude model.

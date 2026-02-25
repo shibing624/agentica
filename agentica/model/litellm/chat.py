@@ -69,6 +69,7 @@ class StreamData:
     response_tool_calls: Optional[List[Any]] = None
 
 
+@dataclass
 class LiteLLMChat(Model):
     """
     LiteLLM Model Provider - Unified interface to 100+ LLM APIs.
@@ -152,7 +153,8 @@ class LiteLLMChat(Model):
     supports_structured_outputs: bool = True
     
     def __post_init__(self):
-        """Validate LiteLLM is installed."""
+        """Validate LiteLLM is installed and initialize base."""
+        super().__post_init__()
         try:
             from litellm import completion, acompletion
         except ImportError:

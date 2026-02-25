@@ -36,14 +36,14 @@ class TestSessionPersistence:
 
     def test_memory_initialized_by_default(self):
         """Agent should have WorkingMemory by default, no db needed."""
-        agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         assert isinstance(agent.working_memory, WorkingMemory)
         assert len(agent.working_memory.runs) == 0
         assert len(agent.working_memory.messages) == 0
 
     def test_memory_add_run(self):
         """WorkingMemory.add_run stores AgentRun entries."""
-        agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         run = AgentRun(
             message=Message(role="user", content="hello"),
             response=RunResponse(content="hi"),
@@ -54,7 +54,7 @@ class TestSessionPersistence:
 
     def test_memory_add_messages(self):
         """WorkingMemory.add_messages stores message history."""
-        agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         agent.working_memory.add_message(Message(role="user", content="test"))
         agent.working_memory.add_message(Message(role="assistant", content="reply"))
         assert len(agent.working_memory.messages) == 2
@@ -105,14 +105,14 @@ class TestSessionPersistence:
         """Agent respects add_history_to_messages configuration."""
         agent_no_hist = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
             add_history_to_messages=False,
         )
         assert agent_no_hist.add_history_to_messages is False
 
         agent_with_hist = Agent(
             name="B",
-            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
             add_history_to_messages=True,
             history_window=5,
         )
@@ -135,7 +135,7 @@ class TestSessionState:
 
     def test_memory_state_accessible(self):
         """Agent memory should be accessible and properly typed."""
-        agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         assert agent.working_memory is not None
         assert isinstance(agent.working_memory, WorkingMemory)
         assert isinstance(agent.working_memory.runs, list)
@@ -153,7 +153,7 @@ class TestSessionState:
 
         agent = Agent(
             name="A",
-            model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"),
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
         )
         agent.working_memory = custom_memory
         assert agent.working_memory is custom_memory
@@ -162,9 +162,9 @@ class TestSessionState:
     def test_shared_memory_between_agents(self):
         """Two agents can share the same WorkingMemory (session handoff)."""
         shared = WorkingMemory()
-        agent_a = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent_a = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         agent_a.working_memory = shared
-        agent_b = Agent(name="B", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent_b = Agent(name="B", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         agent_b.working_memory = shared
 
         # Agent A records a run
@@ -184,7 +184,7 @@ class TestSessionState:
 
     def test_clear_memory(self):
         """Clearing memory resets session state."""
-        agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
         agent.working_memory.add_message(Message(role="user", content="test"))
         agent.working_memory.add_run(AgentRun(response=RunResponse(content="r")))
         assert len(agent.working_memory.messages) == 1
@@ -197,8 +197,8 @@ class TestSessionState:
 
     def test_independent_sessions_via_separate_agents(self):
         """Each Agent instance has independent session state."""
-        agent_a = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
-        agent_b = Agent(name="B", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+        agent_a = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
+        agent_b = Agent(name="B", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
 
         agent_a.working_memory.add_message(Message(role="user", content="a_msg"))
         agent_b.working_memory.add_message(Message(role="user", content="b_msg"))

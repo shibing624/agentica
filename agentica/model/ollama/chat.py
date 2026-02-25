@@ -48,6 +48,7 @@ class MessageData:
     response_usage: Optional[Mapping[str, Any]] = None
 
 
+@dataclass
 class Ollama(Model):
     """
     A class for interacting with Ollama models.

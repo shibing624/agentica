@@ -36,7 +36,7 @@ def _create_agent(workspace: Workspace, **kwargs) -> Agent:
     """Helper: create an Agent with BuiltinMemoryTool (LLM can auto-save memory)."""
     memory_tool = BuiltinMemoryTool(workspace=workspace)
     return Agent(
-        model=OpenAIChat(model="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o-mini"),
         workspace=workspace,
         tools=[memory_tool],
         add_history_to_messages=True,
@@ -143,7 +143,7 @@ async def demo_session_summary():
     print("=" * 60)
 
     agent = Agent(
-        model=OpenAIChat(model="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o-mini"),
         working_memory=WorkingMemory.with_summary(),
         add_history_to_messages=True,
     )
@@ -176,7 +176,7 @@ async def demo_combined():
 
     memory_tool = BuiltinMemoryTool(workspace=workspace)
     agent = Agent(
-        model=OpenAIChat(model="gpt-4o-mini"),
+        model=OpenAIChat(id="gpt-4o-mini"),
         workspace=workspace,
         tools=[memory_tool],
         working_memory=WorkingMemory.with_summary(),

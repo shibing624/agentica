@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from os import getenv
 from typing import Optional, Dict, Any
 from agentica.model.openai.like import OpenAILike
@@ -6,6 +7,7 @@ from openai import AzureOpenAI as AzureOpenAIClient
 from openai import AsyncAzureOpenAI as AsyncAzureOpenAIClient
 
 
+@dataclass
 class AzureOpenAIChat(OpenAILike):
     """
     Azure OpenAI Chat model

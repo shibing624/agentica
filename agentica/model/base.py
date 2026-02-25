@@ -9,10 +9,9 @@ import collections.abc
 import io
 import base64
 import weakref
+from dataclasses import dataclass, field
 from types import GeneratorType
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
-
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, ValidationInfo
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
@@ -22,66 +21,33 @@ from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCal
 from agentica.utils.timer import Timer
 
 
-class Model(BaseModel):
+@dataclass
+class Model:
     # ID of the model to use.
-    id: str = Field(..., alias="model")
+    id: str = "not-provided"
     # Name for this Model. This is not sent to the Model API.
     name: Optional[str] = None
     # Provider for this Model. This is not sent to the Model API.
-    provider: Optional[str] = Field(None, validate_default=True)
+    provider: Optional[str] = None
     # Metrics collected for this Model. This is not sent to the Model API.
-    metrics: Dict[str, Any] = Field(default_factory=dict)
+    metrics: Dict[str, Any] = field(default_factory=dict)
     # Structured usage tracking (cross-request aggregation).
-    usage: Usage = Field(default_factory=Usage)
+    usage: Usage = field(default_factory=Usage)
     response_format: Optional[Any] = None
 
     # -*- Model capability limits (not sent to the API) -*-
-    # Maximum context window size in tokens. Subclasses should override with model-specific values.
-    # Used by Agent/DeepAgent for context management decisions.
     context_window: int = 128000
-    # Maximum number of tokens the model can generate in a single response.
-    # This declares the model's output capability, NOT the per-request budget.
-    # Per-request budget is controlled by each subclass's `max_tokens` or equivalent parameter.
-    # Subclasses should override with model-specific values.
     max_output_tokens: Optional[int] = None
 
     # A list of tools provided to the Model.
-    # Tools are functions the model may generate JSON inputs for.
-    # If you provide a dict, it is not called by the model.
-    # Always add tools using the add_tool() method.
     tools: Optional[List[Union[ModelTool, Dict]]] = None
-    # Controls which (if any) function is called by the model.
-    # "none" means the model will not call a function and instead generates a message.
-    # "auto" means the model can pick between generating a message or calling a function.
-    # Specifying a particular function via {"type: "function", "function": {"name": "my_function"}}
-    #   forces the model to call that function.
-    # "none" is the default when no functions are present. "auto" is the default if functions are present.
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
-    # If True, runs the tool before sending back the response content.
     run_tools: bool = True
-    # Maximum number of tool calls allowed.
     tool_call_limit: Optional[int] = None
-    # Maximum number of tools to execute concurrently.
-    # Controls the asyncio.Semaphore limit in run_function_calls().
     max_concurrent_tools: int = 10
 
-    # --- Optional hooks for subclasses to inject behavior into the recursive tool-calling loop ---
-    # Called before tool execution: (function_call_results) -> (should_stop: bool, optional_msg: str|None)
-    _pre_tool_hook: Optional[Callable] = PrivateAttr(default=None)
-    # Called per tool call: (tool_name) -> Optional[warning_message]
-    _tool_call_hook: Optional[Callable] = PrivateAttr(default=None)
-    # Called after all tool executions: (function_call_results) -> None
-    _post_tool_hook: Optional[Callable] = PrivateAttr(default=None)
-    # Reference to the current messages list (set during tool handling for hook access)
-    _current_messages: Optional[List[Message]] = PrivateAttr(default=None)
-    # Weak reference to the owning Agent (for lifecycle hooks)
-    _agent_ref: Optional[weakref.ref] = PrivateAttr(default=None)
-
     # -*- Functions available to the Model to call -*-
-    # Functions extracted from the tools.
-    # Note: These are not sent to the Model API and are only used for execution + deduplication.
     functions: Optional[Dict[str, Function]] = None
-    # Function call stack.
     function_call_stack: Optional[List[FunctionCall]] = None
 
     # System prompt from the model added to the Agent.
@@ -100,20 +66,24 @@ class Model(BaseModel):
     # Whether the Model supports structured outputs.
     supports_structured_outputs: bool = False
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
+    # --- Private fields (not in __init__ signature, used internally) ---
+    _pre_tool_hook: Optional[Callable] = field(init=False, repr=False, default=None)
+    _tool_call_hook: Optional[Callable] = field(init=False, repr=False, default=None)
+    _post_tool_hook: Optional[Callable] = field(init=False, repr=False, default=None)
+    _current_messages: Optional[List[Message]] = field(init=False, repr=False, default=None)
+    _agent_ref: Optional[weakref.ref] = field(init=False, repr=False, default=None)
 
-    @field_validator("provider", mode="before")
-    def set_provider(cls, v: Optional[str], info: ValidationInfo) -> str:
-        model_name = info.data.get("name")
-        model_id = info.data.get("id")
-        return v or f"{model_name} ({model_id})"
+    def __post_init__(self):
+        # Auto-set provider if not provided
+        if self.provider is None:
+            self.provider = f"{self.name} ({self.id})" if self.name else self.id
 
     @property
     def request_kwargs(self) -> Dict[str, Any]:
         raise NotImplementedError
 
     def to_dict(self) -> Dict[str, Any]:
-        _dict = self.model_dump(include={"name", "id", "provider", "metrics"})
+        _dict = {"name": self.name, "id": self.id, "provider": self.provider, "metrics": self.metrics}
         if self.functions:
             _dict["functions"] = {k: v.to_dict() for k, v in self.functions.items()}
             _dict["tool_call_limit"] = self.tool_call_limit

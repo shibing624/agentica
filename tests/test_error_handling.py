@@ -106,7 +106,7 @@ class TestModelErrors:
     async def test_model_response_exception_handled(self):
         """Agent should handle model exception gracefully."""
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, side_effect=Exception("API error")):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+            agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
             with pytest.raises(Exception, match="API error"):
                 await agent.run("Hi")
 
@@ -118,7 +118,7 @@ class TestModelErrors:
             yield  # noqa – make it an async generator
 
         with patch.object(OpenAIChat, 'response_stream', side_effect=bad_stream):
-            agent = Agent(name="A", model=OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key"))
+            agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
             with pytest.raises(Exception, match="Stream error"):
                 async for _ in agent.run_stream("Hi"):
                     pass
