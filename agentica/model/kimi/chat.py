@@ -5,6 +5,7 @@
 
 Uses anthropic SDK with custom base_url pointing to Kimi API.
 """
+from dataclasses import dataclass
 from typing import Optional
 from os import getenv
 
@@ -17,6 +18,7 @@ except (ModuleNotFoundError, ImportError):
     raise ImportError("`anthropic` not installed. Please install using `pip install anthropic`")
 
 
+@dataclass
 class KimiChat(Claude):
     """Kimi for Coding model, compatible with Anthropic Claude API.
 

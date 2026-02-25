@@ -48,6 +48,7 @@ class MessageData:
     response_usage: Optional[Mapping[str, Any]] = None
 
 
+@dataclass
 class Ollama(Model):
     """
     A class for interacting with Ollama models.
@@ -299,11 +300,12 @@ class Ollama(Model):
             if (
                 self.response_format is not None
                 and self.structured_outputs
+                and isinstance(self.response_format, type)
                 and issubclass(self.response_format, BaseModel)
             ):
                 parsed_object = self.response_format.model_validate_json(response.get("message", {}).get("content", ""))
                 if parsed_object is not None:
-                    model_response.parsed = parsed_object.model_dump_json()
+                    model_response.parsed = parsed_object
         except Exception as e:
             logger.warning(f"Error parsing structured outputs: {e}")
 

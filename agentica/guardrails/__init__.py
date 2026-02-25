@@ -1,56 +1,43 @@
 # -*- coding: utf-8 -*-
 """
-@author: XuMing(xuming624@qq.com)
+@author:XuMing(xuming624@qq.com)
 @description: Guardrails package for Agentica.
 
-Guardrails are validation mechanisms that can be applied at different stages:
-- Agent level: Input/Output guardrails for the entire agent
-- Tool level: Input/Output guardrails for individual tool calls
-
-Example:
-    >>> from agentica.guardrails import (
-    ...     InputGuardrail, OutputGuardrail,
-    ...     ToolInputGuardrail, ToolOutputGuardrail,
-    ... )
-    >>>
-    >>> # Agent-level guardrail
-    >>> @input_guardrail
-    ... def check_input(context, agent, input_message):
-    ...     return GuardrailFunctionOutput(output_info={"checked": True})
-    >>>
-    >>> # Tool-level guardrail
-    >>> @tool_input_guardrail
-    ... def validate_tool_input(context, agent, tool_input):
-    ...     return ToolGuardrailFunctionOutput(output_info={"validated": True})
+Unified guardrail abstraction with three layers:
+- core.py: Base exception, output, guard class, execution engine
+- agent.py: Agent-level Input/Output guardrails (inherits core)
+- tool.py: Tool-level Input/Output guardrails (inherits core)
 """
 
-# Agent-level guardrails (from base.py)
-from agentica.guardrails.base import (
-    # Exceptions
+# Core abstractions
+from agentica.guardrails.core import (
+    GuardrailTriggered,
+    GuardrailOutput,
+    BaseGuardrail,
+    run_guardrails_seq,
+)
+
+# Agent-level guardrails (from agent.py, backward-compatible with old base.py)
+from agentica.guardrails.agent import (
     GuardrailTripwireTriggered,
     InputGuardrailTripwireTriggered,
     OutputGuardrailTripwireTriggered,
-    # Data classes
     InputGuardrail,
     OutputGuardrail,
     GuardrailFunctionOutput,
     InputGuardrailResult,
     OutputGuardrailResult,
-    # Functions
     run_input_guardrails,
     run_output_guardrails,
-    # Decorators
     input_guardrail,
     output_guardrail,
 )
 
-# Tool-level guardrails (from tool.py)
+# Tool-level guardrails
 from agentica.guardrails.tool import (
-    # Exceptions
     ToolGuardrailTripwireTriggered,
     ToolInputGuardrailTripwireTriggered,
     ToolOutputGuardrailTripwireTriggered,
-    # Data classes
     ToolInputGuardrail,
     ToolOutputGuardrail,
     ToolGuardrailFunctionOutput,
@@ -59,15 +46,18 @@ from agentica.guardrails.tool import (
     ToolOutputGuardrailData,
     ToolInputGuardrailResult,
     ToolOutputGuardrailResult,
-    # Functions
     run_tool_input_guardrails,
     run_tool_output_guardrails,
-    # Decorators
     tool_input_guardrail,
     tool_output_guardrail,
 )
 
 __all__ = [
+    # Core
+    "GuardrailTriggered",
+    "GuardrailOutput",
+    "BaseGuardrail",
+    "run_guardrails_seq",
     # Agent-level
     "GuardrailTripwireTriggered",
     "InputGuardrailTripwireTriggered",

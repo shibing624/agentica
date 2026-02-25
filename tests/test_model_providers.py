@@ -37,18 +37,8 @@ def _get_provider_classes():
     except ImportError:
         pass
     try:
-        from agentica.model.google.gemini import Gemini
-        providers.append(("Gemini", Gemini))
-    except ImportError:
-        pass
-    try:
         from agentica.model.ollama.chat import OllamaChat
         providers.append(("OllamaChat", OllamaChat))
-    except ImportError:
-        pass
-    try:
-        from agentica.model.groq.groq import GroqChat
-        providers.append(("GroqChat", GroqChat))
     except ImportError:
         pass
     return providers

@@ -29,6 +29,7 @@ class MessageData:
     tool_calls_counter = 0
 
 
+@dataclass
 class OllamaTools(Ollama):
     """
     An Ollama class that uses XML tags for tool calls.

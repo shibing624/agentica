@@ -199,14 +199,16 @@ class TestUsageOnModel(unittest.TestCase):
 
     def test_model_has_usage_field(self):
         """Test that Model base class has a usage field."""
+        from dataclasses import fields as dc_fields
         from agentica.model.base import Model
-        # Model is abstract-ish, but we can check the field exists
-        self.assertIn("usage", Model.model_fields)
+        # Model is now a dataclass, check the field exists
+        field_names = {f.name for f in dc_fields(Model)}
+        self.assertIn("usage", field_names)
 
     def test_model_clear_resets_usage(self):
         """Test that Model.clear() resets usage."""
         from agentica.model.openai.chat import OpenAIChat
-        model = OpenAIChat(model="gpt-4o")
+        model = OpenAIChat(id="gpt-4o")
         # Simulate adding usage
         model.usage.add(RequestUsage(input_tokens=100, output_tokens=50, total_tokens=150))
         self.assertEqual(model.usage.requests, 1)

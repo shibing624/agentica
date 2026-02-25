@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Run execution methods for Agent (Async-First)
+@description: Runner - Independent execution engine for Agent (Async-First)
+
+Runner is decoupled from Agent:
+- Agent defines identity and capabilities ("who I am, what I can do")
+- Runner handles execution (LLM calls, tool calls, streaming, memory updates)
 
 Async-first public API:
 - async: run(), run_stream()
@@ -9,8 +13,8 @@ Async-first public API:
 
 Notes:
 - `run(stream=True)` is intentionally not supported. Streaming is an explicit method.
-- Multi-round execution is NOT part of the base Agent runtime. If needed, implement it in
-  specialized subclasses (e.g. DeepAgent).
+- Multi-round execution is NOT part of the base Runner. If needed, implement it in
+  specialized subclasses (e.g. DeepRunner via DeepAgent).
 """
 
 import asyncio
@@ -28,6 +32,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    TYPE_CHECKING,
     Union,
 )
 from uuid import uuid4
@@ -45,13 +50,19 @@ from agentica.utils.string import parse_structured_output
 from agentica.utils.langfuse_integration import langfuse_trace_context
 from agentica.hooks import RunHooks
 
+if TYPE_CHECKING:
+    from agentica.agent import Agent
 
-class RunnerMixin:
-    """Mixin class containing run execution methods for Agent.
 
-    All core methods are async. Synchronous wrappers (run_sync, run_stream_sync, print_response)
+class Runner:
+    """Independent execution engine for Agent.
+
+    All core methods are async. Synchronous wrappers (run_sync, run_stream_sync)
     delegate to the async implementations via `run_sync()`.
     """
+
+    def __init__(self, agent: "Agent"):
+        self.agent = agent
 
     def save_run_response_to_file(
         self,
@@ -59,7 +70,7 @@ class RunnerMixin:
         save_response_to_file: Optional[str] = None,
     ) -> None:
         _save_path = save_response_to_file
-        if _save_path is None or self.run_response is None:
+        if _save_path is None or self.agent.run_response is None:
             return
         message_str = None
         if message is not None:
@@ -69,15 +80,15 @@ class RunnerMixin:
                 logger.warning("Did not use message in output file name: message is not a string")
         try:
             fn = _save_path.format(
-                name=self.name, message=message_str
+                name=self.agent.name, message=message_str
             )
             fn_path = Path(fn)
             if not fn_path.parent.exists():
                 fn_path.parent.mkdir(parents=True, exist_ok=True)
-            if isinstance(self.run_response.content, str):
-                fn_path.write_text(self.run_response.content)
+            if isinstance(self.agent.run_response.content, str):
+                fn_path.write_text(self.agent.run_response.content)
             else:
-                fn_path.write_text(json.dumps(self.run_response.content, indent=2, ensure_ascii=False))
+                fn_path.write_text(json.dumps(self.agent.run_response.content, indent=2, ensure_ascii=False))
         except Exception as e:
             logger.warning(f"Failed to save output to file: {e}")
 
@@ -91,16 +102,16 @@ class RunnerMixin:
 
     def generic_run_response(self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response) -> RunResponse:
         return RunResponse(
-            run_id=self.run_id,
-            agent_id=self.agent_id,
+            run_id=self.agent.run_id,
+            agent_id=self.agent.agent_id,
             content=content,
-            tools=self.run_response.tools,
-            images=self.run_response.images,
-            videos=self.run_response.videos,
-            model=self.run_response.model,
-            messages=self.run_response.messages,
-            reasoning_content=self.run_response.reasoning_content,
-            extra_data=self.run_response.extra_data,
+            tools=self.agent.run_response.tools,
+            images=self.agent.run_response.images,
+            videos=self.agent.run_response.videos,
+            model=self.agent.run_response.model,
+            messages=self.agent.run_response.messages,
+            reasoning_content=self.agent.run_response.reasoning_content,
+            extra_data=self.agent.run_response.extra_data,
             event=event.value,
         )
 
@@ -134,57 +145,57 @@ class RunnerMixin:
 
         All LLM calls within this run are grouped under a single Langfuse trace (if enabled).
         """
+        agent = self.agent
 
         async def _run_core() -> AsyncIterator[RunResponse]:
-            # NOTE: this is the previous single-round implementation.
-            self.stream = stream and self.is_streamable
-            self.stream_intermediate_steps = stream_intermediate_steps and self.stream
-            self.run_id = str(uuid4())
-            self.run_response = RunResponse(run_id=self.run_id, agent_id=self.agent_id)
+            agent.stream = stream and agent.is_streamable
+            agent.stream_intermediate_steps = stream_intermediate_steps and agent.stream
+            agent.run_id = str(uuid4())
+            agent.run_response = RunResponse(run_id=agent.run_id, agent_id=agent.agent_id)
 
             # Store run-level hooks for access by team.py
             if hooks is not None:
-                self._run_hooks = hooks
+                agent._run_hooks = hooks
 
             # 1. Setup
-            self.update_model()
-            self.run_response.model = self.model.id if self.model is not None else None
-            if self.context is not None:
-                self._resolve_context()
+            agent.update_model()
+            agent.run_response.model = agent.model.id if agent.model is not None else None
+            if agent.context is not None:
+                agent._resolve_context()
 
             # Add introduction if provided
-            if self.prompt_config.introduction is not None:
-                self.add_introduction(self.prompt_config.introduction)
+            if agent.prompt_config.introduction is not None:
+                agent.add_introduction(agent.prompt_config.introduction)
 
             # --- Lifecycle: agent start ---
-            if self.hooks is not None:
-                await self.hooks.on_start(agent=self)
-            if self._run_hooks is not None:
-                await self._run_hooks.on_agent_start(agent=self)
+            if agent.hooks is not None:
+                await agent.hooks.on_start(agent=agent)
+            if agent._run_hooks is not None:
+                await agent._run_hooks.on_agent_start(agent=agent)
 
             # 3. Prepare messages
-            system_message, user_messages, messages_for_model = await self.get_messages_for_run(
+            system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
                 message=message, audio=audio, images=images, videos=videos,
                 messages=messages, add_messages=add_messages, **kwargs
             )
             num_input_messages = len(messages_for_model)
 
-            if self.stream_intermediate_steps:
+            if agent.stream_intermediate_steps:
                 yield self.generic_run_response("Run started", RunEvent.run_started)
 
             # 4. Generate response from the Model
             model_response: ModelResponse
-            self.model = cast(Model, self.model)
-            if stream and self.is_streamable:
+            agent.model = cast(Model, agent.model)
+            if stream and agent.is_streamable:
                 # --- Lifecycle: LLM start (stream) ---
-                if self._run_hooks is not None:
-                    await self._run_hooks.on_llm_start(agent=self, messages=messages_for_model)
+                if agent._run_hooks is not None:
+                    await agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model)
 
                 model_response = ModelResponse(content="", reasoning_content="")
-                model_response_stream = self.model.response_stream(messages=messages_for_model)
-                self._cancelled = False
+                model_response_stream = agent.model.response_stream(messages=messages_for_model)
+                agent._cancelled = False
                 async for model_response_chunk in model_response_stream:
-                    self._check_cancelled()
+                    agent._check_cancelled()
                     if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
                         if model_response_chunk.reasoning_content is not None:
                             if model_response.reasoning_content is None:
@@ -193,68 +204,68 @@ class RunnerMixin:
                             yield RunResponse(
                                 event=RunEvent.run_response,
                                 reasoning_content=model_response_chunk.reasoning_content,
-                                run_id=self.run_id,
-                                agent_id=self.agent_id,
+                                run_id=agent.run_id,
+                                agent_id=agent.agent_id,
                             )
                         if model_response_chunk.content is not None and model_response.content is not None:
                             model_response.content += model_response_chunk.content
                             yield RunResponse(
                                 event=RunEvent.run_response,
                                 content=model_response_chunk.content,
-                                run_id=self.run_id,
-                                agent_id=self.agent_id,
+                                run_id=agent.run_id,
+                                agent_id=agent.agent_id,
                             )
                     elif model_response_chunk.event == ModelResponseEvent.tool_call_started.value:
                         tool_call_dict = model_response_chunk.tool_call
                         if tool_call_dict is not None:
-                            if self.run_response.tools is None:
-                                self.run_response.tools = []
-                            self.run_response.tools.append(tool_call_dict)
-                        if self.stream_intermediate_steps:
+                            if agent.run_response.tools is None:
+                                agent.run_response.tools = []
+                            agent.run_response.tools.append(tool_call_dict)
+                        if agent.stream_intermediate_steps:
                             yield self.generic_run_response(
                                 f"Running tool: {tool_call_dict.get('name') if tool_call_dict else 'Unknown'}",
                                 RunEvent.tool_call_started,
                             )
                     elif model_response_chunk.event == ModelResponseEvent.tool_call_completed.value:
                         tool_call_dict = model_response_chunk.tool_call
-                        if tool_call_dict is not None and self.run_response.tools:
-                            for tool_call in self.run_response.tools:
+                        if tool_call_dict is not None and agent.run_response.tools:
+                            for tool_call in agent.run_response.tools:
                                 if tool_call.get("id") == tool_call_dict.get("id"):
                                     tool_call.update(tool_call_dict)
                                     break
-                        if self.stream_intermediate_steps:
+                        if agent.stream_intermediate_steps:
                             yield self.generic_run_response(
                                 f"Tool completed: {tool_call_dict.get('name') if tool_call_dict else 'Unknown'}",
                                 RunEvent.tool_call_completed,
                             )
 
                 # --- Lifecycle: LLM end (stream) ---
-                if self._run_hooks is not None:
-                    await self._run_hooks.on_llm_end(agent=self, response=model_response)
+                if agent._run_hooks is not None:
+                    await agent._run_hooks.on_llm_end(agent=agent, response=model_response)
             else:
-                self._cancelled = False
-                self._check_cancelled()
+                agent._cancelled = False
+                agent._check_cancelled()
 
                 # --- Lifecycle: LLM start (non-stream) ---
-                if self._run_hooks is not None:
-                    await self._run_hooks.on_llm_start(agent=self, messages=messages_for_model)
+                if agent._run_hooks is not None:
+                    await agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model)
 
-                model_response = await self.model.response(messages=messages_for_model)
+                model_response = await agent.model.response(messages=messages_for_model)
 
                 # --- Lifecycle: LLM end (non-stream) ---
-                if self._run_hooks is not None:
-                    await self._run_hooks.on_llm_end(agent=self, response=model_response)
-                if self.response_model is not None and self.structured_outputs and model_response.parsed is not None:
-                    self.run_response.content = model_response.parsed
-                    self.run_response.content_type = self.response_model.__name__
+                if agent._run_hooks is not None:
+                    await agent._run_hooks.on_llm_end(agent=agent, response=model_response)
+                if agent.response_model is not None and agent.structured_outputs and model_response.parsed is not None:
+                    agent.run_response.content = model_response.parsed
+                    agent.run_response.content_type = agent.response_model.__name__
                 else:
-                    self.run_response.content = model_response.content
+                    agent.run_response.content = model_response.content
                 if model_response.audio is not None:
-                    self.run_response.audio = model_response.audio
+                    agent.run_response.audio = model_response.audio
                 if model_response.reasoning_content is not None:
-                    self.run_response.reasoning_content = model_response.reasoning_content
-                self.run_response.messages = messages_for_model
-                self.run_response.created_at = model_response.created_at
+                    agent.run_response.reasoning_content = model_response.reasoning_content
+                agent.run_response.messages = messages_for_model
+                agent.run_response.created_at = model_response.created_at
 
                 # Extract tool call info from messages for non-streaming mode
                 tool_calls_data = []
@@ -274,35 +285,35 @@ class RunnerMixin:
                             }
                         )
                 if tool_calls_data:
-                    self.run_response.tools = tool_calls_data
+                    agent.run_response.tools = tool_calls_data
 
             # Build run messages
             run_messages = user_messages + messages_for_model[num_input_messages:]
             if system_message is not None:
                 run_messages.insert(0, system_message)
-            self.run_response.messages = run_messages
-            self.run_response.metrics = self._aggregate_metrics_from_run_messages(run_messages)
-            self.run_response.usage = self.model.usage if self.model else None
-            if self.stream:
-                self.run_response.content = model_response.content
+            agent.run_response.messages = run_messages
+            agent.run_response.metrics = self._aggregate_metrics_from_run_messages(run_messages)
+            agent.run_response.usage = agent.model.usage if agent.model else None
+            if agent.stream:
+                agent.run_response.content = model_response.content
                 if model_response.reasoning_content:
-                    self.run_response.reasoning_content = model_response.reasoning_content
+                    agent.run_response.reasoning_content = model_response.reasoning_content
 
             # 5. Update Memory
-            if self.stream_intermediate_steps:
+            if agent.stream_intermediate_steps:
                 yield self.generic_run_response("Updating memory", RunEvent.updating_memory)
 
             if system_message is not None:
-                self.working_memory.add_system_message(system_message, system_message_role=self.prompt_config.system_message_role)
-            self.working_memory.add_messages(messages=(user_messages + messages_for_model[num_input_messages:]))
+                agent.working_memory.add_system_message(system_message, system_message_role=agent.prompt_config.system_message_role)
+            agent.working_memory.add_messages(messages=(user_messages + messages_for_model[num_input_messages:]))
 
-            agent_run = AgentRun(response=self.run_response)
+            agent_run = AgentRun(response=agent.run_response)
 
             # Handle agent_run message assignment
             if message is not None:
                 user_message_for_memory: Optional[Message] = None
                 if isinstance(message, str):
-                    user_message_for_memory = Message(role=self.prompt_config.user_message_role, content=message)
+                    user_message_for_memory = Message(role=agent.prompt_config.user_message_role, content=message)
                 elif isinstance(message, Message):
                     user_message_for_memory = message
                 if user_message_for_memory is not None:
@@ -326,10 +337,10 @@ class RunnerMixin:
                         agent_run.messages.append(_um)
                     else:
                         logger.warning("Unable to add message to memory")
-            self.working_memory.add_run(agent_run)
+            agent.working_memory.add_run(agent_run)
 
-            if self.working_memory.create_session_summary and self.working_memory.update_session_summary_after_run:
-                await self.working_memory.update_summary()
+            if agent.working_memory.create_session_summary and agent.working_memory.update_session_summary_after_run:
+                await agent.working_memory.update_summary()
 
             # 7. Save output to file
             self.save_run_response_to_file(message=message, save_response_to_file=save_response_to_file)
@@ -337,33 +348,33 @@ class RunnerMixin:
             # 8. Set run_input
             if message is not None:
                 if isinstance(message, str):
-                    self.run_input = message
+                    agent.run_input = message
                 elif isinstance(message, Message):
-                    self.run_input = message.to_dict()
+                    agent.run_input = message.to_dict()
                 else:
-                    self.run_input = message
+                    agent.run_input = message
             elif messages is not None:
-                self.run_input = [m.to_dict() if isinstance(m, Message) else m for m in messages]
+                agent.run_input = [m.to_dict() if isinstance(m, Message) else m for m in messages]
 
-            if self.stream_intermediate_steps:
-                yield self.generic_run_response(self.run_response.content, RunEvent.run_completed)
+            if agent.stream_intermediate_steps:
+                yield self.generic_run_response(agent.run_response.content, RunEvent.run_completed)
 
             # --- Lifecycle: agent end ---
-            _output = self.run_response.content
-            if self.hooks is not None:
-                await self.hooks.on_end(agent=self, output=_output)
-            if self._run_hooks is not None:
-                await self._run_hooks.on_agent_end(agent=self, output=_output)
+            _output = agent.run_response.content
+            if agent.hooks is not None:
+                await agent.hooks.on_end(agent=agent, output=_output)
+            if agent._run_hooks is not None:
+                await agent._run_hooks.on_agent_end(agent=agent, output=_output)
 
-            if not self.stream:
-                yield self.run_response
+            if not agent.stream:
+                yield agent.run_response
 
         trace_input = message if isinstance(message, str) else str(message) if message else None
-        trace_name = self.name or "agent-run"
+        trace_name = agent.name or "agent-run"
 
         langfuse_tags = None
-        if self.model and hasattr(self.model, "langfuse_tags"):
-            langfuse_tags = self.model.langfuse_tags
+        if agent.model and hasattr(agent.model, "langfuse_tags"):
+            langfuse_tags = agent.model.langfuse_tags
 
         with langfuse_trace_context(
             name=trace_name,
@@ -466,6 +477,7 @@ class RunnerMixin:
         **kwargs,
     ) -> RunResponse:
         """Consume the _run_impl async generator and return the final response."""
+        agent = self.agent
         run_response = None
         async for response in self._run_impl(
             message=message,
@@ -478,20 +490,20 @@ class RunnerMixin:
         ):
             run_response = response
 
-        if self.response_model is not None:
-            if self.structured_outputs:
-                if isinstance(run_response.content, self.response_model):
+        if agent.response_model is not None:
+            if agent.structured_outputs:
+                if isinstance(run_response.content, agent.response_model):
                     return run_response
 
             if isinstance(run_response.content, str):
                 try:
-                    structured_output = parse_structured_output(run_response.content, self.response_model)
+                    structured_output = parse_structured_output(run_response.content, agent.response_model)
                     if structured_output is not None:
                         run_response.content = structured_output
-                        run_response.content_type = self.response_model.__name__
-                        if self.run_response is not None:
-                            self.run_response.content = structured_output
-                            self.run_response.content_type = self.response_model.__name__
+                        run_response.content_type = agent.response_model.__name__
+                        if agent.run_response is not None:
+                            agent.run_response.content = structured_output
+                            agent.run_response.content_type = agent.response_model.__name__
                 except Exception as e:
                     logger.warning(f"Failed to convert response to output model: {e}")
 
@@ -542,7 +554,7 @@ class RunnerMixin:
             )
 
         # Structured output path
-        if self.response_model is not None:
+        if self.agent.response_model is not None:
             return await self._consume_run(
                 message=message,
                 audio=audio,
@@ -590,10 +602,10 @@ class RunnerMixin:
         """Run the Agent and stream incremental responses.
 
         Usage:
-            async for chunk in agent.run_stream("..."):
+            async for chunk in runner.run_stream("..."):
                 ...
         """
-        if self.response_model is not None:
+        if self.agent.response_model is not None:
             raise ValueError("Structured output does not support streaming. Use run() instead.")
 
         resp: AsyncIterator[RunResponse] = self._run_impl(

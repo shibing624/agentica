@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Optional, List, AsyncIterator, Dict, Any, Mapping, Tuple
 
 from agentica.model.message import Message
+
 from agentica.model.response import ModelResponse
 from agentica.model.ollama.chat import Ollama, Metrics
 from agentica.utils.log import logger
@@ -23,6 +24,7 @@ class MessageData:
     response_usage: Optional[Mapping[str, Any]] = None
 
 
+@dataclass
 class Hermes(Ollama):
     """
     A class for interacting with the Hermes model via Ollama. This is a subclass of the Ollama model,

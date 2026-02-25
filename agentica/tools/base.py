@@ -136,6 +136,47 @@ class Function(BaseModel):
         from inspect import getdoc, signature
         from agentica.utils.json_util import get_json_schema
 
+        # Check for @tool decorator metadata first
+        metadata = getattr(c, "_tool_metadata", None)
+        if metadata:
+            function_name = metadata["name"]
+            parameters = {"type": "object", "properties": {}, "required": []}
+            try:
+                sig = signature(c)
+                try:
+                    type_hints = get_type_hints(c)
+                except NameError:
+                    type_hints = {}
+                if "agent" in sig.parameters:
+                    type_hints.pop("agent", None)
+                param_type_hints = {
+                    name: type_hints[name]
+                    for name in sig.parameters
+                    if name in type_hints and name != "return" and name != "agent"
+                }
+                parameters = get_json_schema(type_hints=param_type_hints, strict=strict)
+                if strict:
+                    parameters["required"] = [name for name in parameters["properties"] if name != "agent"]
+                else:
+                    parameters["required"] = [
+                        name
+                        for name, param in sig.parameters.items()
+                        if param.default == param.empty and name != "self" and name != "agent"
+                    ]
+            except Exception as e:
+                logger.warning(f"Could not parse args for {function_name}: {e}", exc_info=True)
+
+            return cls(
+                name=function_name,
+                description=metadata.get("description") or getdoc(c),
+                parameters=parameters,
+                entrypoint=_safe_validate_call(c),
+                show_result=metadata.get("show_result", False),
+                sanitize_arguments=metadata.get("sanitize_arguments", True),
+                stop_after_tool_call=metadata.get("stop_after_tool_call", False),
+            )
+
+        # Standard path: parse from docstring + type hints
         function_name = c.__name__
         parameters = {"type": "object", "properties": {}, "required": []}
         try:

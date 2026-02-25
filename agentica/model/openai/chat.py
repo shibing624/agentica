@@ -90,6 +90,7 @@ class OpenAIImageType(Enum, metaclass=OpenAIImageTypeMeta):
     GIF = "gif"
 
 
+@dataclass
 class OpenAIChat(Model):
     """
     A class for interacting with OpenAI models.
@@ -282,9 +283,9 @@ class OpenAIChat(Model):
         if self.store is not None:
             model_dict["store"] = self.store
         if self.reasoning_effort is not None:
-            request_params["reasoning_effort"] = self.reasoning_effort
+            model_dict["reasoning_effort"] = self.reasoning_effort
         if self.verbosity is not None:
-            request_params["verbosity"] = self.verbosity
+            model_dict["verbosity"] = self.verbosity
         if self.frequency_penalty is not None:
             model_dict["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias is not None:

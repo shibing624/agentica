@@ -27,7 +27,7 @@ from agentica.run_response import RunResponse, RunEvent
 
 def _make_model():
     """Create a real OpenAIChat instance with fake API key (response is patched)."""
-    return OpenAIChat(model="gpt-4o-mini", api_key="fake_openai_key")
+    return OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
 
 
 def _mock_response(content="Mock response"):
@@ -148,12 +148,12 @@ class TestAgentRunSync:
             assert isinstance(resp, RunResponse)
 
     def test_run_sync_bridges_to_async_run(self):
-        """run_sync should internally call the async run()."""
+        """run_sync should internally call the runner's async run()."""
         agent = Agent(name="A", model=_make_model())
-        agent.run = AsyncMock(return_value=RunResponse(content="Mocked"))
+        agent._runner.run = AsyncMock(return_value=RunResponse(content="Mocked"))
         resp = agent.run_sync("test")
         assert resp.content == "Mocked"
-        agent.run.assert_called_once()
+        agent._runner.run.assert_called_once()
 
 
 # ===========================================================================
