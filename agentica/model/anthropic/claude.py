@@ -5,6 +5,8 @@ from typing import Optional, List, AsyncIterator, Dict, Any, Union, Tuple, overr
 
 import asyncio
 
+from pydantic import BaseModel
+
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -80,6 +82,28 @@ class Claude(Model):
 
     # Anthropic client
     client: Optional[AnthropicClient] = None
+
+    # Structured output support
+    structured_outputs: bool = False
+    supports_structured_outputs: bool = True
+
+    def _get_structured_output_tool(self) -> Optional[Dict[str, Any]]:
+        """Build a synthetic tool from response_format for structured output via tool_use."""
+        if (
+            self.response_format is not None
+            and self.structured_outputs
+            and isinstance(self.response_format, type)
+            and issubclass(self.response_format, BaseModel)
+        ):
+            schema = self.response_format.model_json_schema()
+            # Remove $defs at top level, inline refs not needed for Anthropic tool schema
+            schema.pop("$defs", None)
+            return {
+                "name": "structured_output",
+                "description": f"Return structured output as {self.response_format.__name__}",
+                "input_schema": schema,
+            }
+        return None
 
     def get_client(self) -> AnthropicClient:
         """
@@ -235,8 +259,16 @@ class Claude(Model):
         request_kwargs = self.request_kwargs.copy()
         request_kwargs["system"] = system_message
 
-        if self.tools:
+        # Structured output via tool_use: inject synthetic tool and force tool_choice
+        structured_tool = self._get_structured_output_tool()
+        if structured_tool is not None:
+            tools = request_kwargs.get("tools") or []
+            tools = list(tools) + [structured_tool]
+            request_kwargs["tools"] = tools
+            request_kwargs["tool_choice"] = {"type": "tool", "name": "structured_output"}
+        elif self.tools:
             request_kwargs["tools"] = self.get_tools()
+
         return request_kwargs
 
     def get_tools(self) -> Optional[List[Dict[str, Any]]]:
@@ -537,6 +569,34 @@ class Claude(Model):
         assistant_message, response_content, tool_ids = self.create_assistant_message(
             response=response, metrics=metrics
         )
+
+        # -*- Extract structured output from tool_use block if response_format is set
+        if (
+            self.response_format is not None
+            and self.structured_outputs
+            and isinstance(self.response_format, type)
+            and issubclass(self.response_format, BaseModel)
+            and response.stop_reason == "tool_use"
+        ):
+            try:
+                for block in response.content:
+                    if isinstance(block, ToolUseBlock) and block.name == "structured_output":
+                        parsed_object = self.response_format.model_validate(block.input)
+                        model_response.parsed = parsed_object
+                        # Use the parsed JSON as content
+                        model_response.content = parsed_object.model_dump_json()
+                        break
+            except Exception as e:
+                logger.warning(f"Error parsing structured output from Claude tool_use: {e}")
+
+            # Don't treat structured_output tool_use as a real tool call
+            # Add assistant message and return
+            messages.append(assistant_message)
+            assistant_message.log()
+            metrics.log()
+            if model_response.content is None and assistant_message.content is not None:
+                model_response.content = assistant_message.get_content_string()
+            return model_response
 
         # -*- Add assistant message to messages
         messages.append(assistant_message)

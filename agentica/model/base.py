@@ -9,6 +9,7 @@ import collections.abc
 import io
 import base64
 import weakref
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from types import GeneratorType
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
@@ -22,7 +23,9 @@ from agentica.utils.timer import Timer
 
 
 @dataclass
-class Model:
+class Model(ABC):
+    """LLM 模型抽象基类。子类必须实现 invoke/invoke_stream/response/response_stream。"""
+
     # ID of the model to use.
     id: str = "not-provided"
     # Name for this Model. This is not sent to the Model API.
@@ -79,8 +82,10 @@ class Model:
             self.provider = f"{self.name} ({self.id})" if self.name else self.id
 
     @property
+    @abstractmethod
     def request_kwargs(self) -> Dict[str, Any]:
-        raise NotImplementedError
+        """构建 API 请求参数字典，子类必须实现。"""
+        ...
 
     def to_dict(self) -> Dict[str, Any]:
         _dict = {"name": self.name, "id": self.id, "provider": self.provider, "metrics": self.metrics}
@@ -115,17 +120,25 @@ class Model:
 
     # --- Async-only abstract methods (subclasses must implement) ---
 
-    async def invoke(self, *args, **kwargs) -> Any:
-        raise NotImplementedError
+    @abstractmethod
+    async def invoke(self, messages: List[Message]) -> Any:
+        """调用 LLM API，返回原始 SDK 响应。"""
+        ...
 
-    async def invoke_stream(self, *args, **kwargs) -> Any:
-        raise NotImplementedError
+    @abstractmethod
+    async def invoke_stream(self, messages: List[Message]) -> Any:
+        """流式调用 LLM API，yield 原始 SDK chunk。"""
+        ...
 
+    @abstractmethod
     async def response(self, messages: List[Message]) -> ModelResponse:
-        raise NotImplementedError
+        """完整响应（含工具调用循环），返回 ModelResponse。"""
+        ...
 
+    @abstractmethod
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
-        raise NotImplementedError
+        """流式响应（含工具调用循环），yield ModelResponse。"""
+        ...
 
     @staticmethod
     def sanitize_messages(messages: List[Message]) -> List[Message]:

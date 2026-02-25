@@ -25,6 +25,8 @@ from os import getenv
 from dataclasses import dataclass, field
 from typing import Optional, List, AsyncIterator, Dict, Any, Union
 
+from pydantic import BaseModel
+
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
@@ -227,7 +229,25 @@ class LiteLLMChat(Model):
             params["thinking"] = self.thinking
         if self.reasoning_effort is not None:
             params["reasoning_effort"] = self.reasoning_effort
-            
+
+        # Structured output via response_format (json_schema)
+        if (
+            self.response_format is not None
+            and self.structured_outputs
+            and isinstance(self.response_format, type)
+            and issubclass(self.response_format, BaseModel)
+        ):
+            schema = self.response_format.model_json_schema()
+            params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": self.response_format.__name__,
+                    "schema": schema,
+                },
+            }
+        elif self.response_format is not None:
+            params["response_format"] = self.response_format
+
         # Add tools if present
         if self.tools is not None:
             tools_for_api = self.get_tools_for_api()
@@ -361,7 +381,7 @@ class LiteLLMChat(Model):
         self._update_usage_metrics(assistant_message, metrics, response_usage)
         return assistant_message
     
-    async def _handle_tool_calls(
+    async def handle_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
@@ -436,9 +456,24 @@ class LiteLLMChat(Model):
             model_response.content = assistant_message.get_content_string()
         if assistant_message.reasoning_content is not None:
             model_response.reasoning_content = assistant_message.reasoning_content
-        
+
+        # Parse structured output
+        if (
+            self.response_format is not None
+            and self.structured_outputs
+            and isinstance(self.response_format, type)
+            and issubclass(self.response_format, BaseModel)
+            and assistant_message.content
+        ):
+            try:
+                content_str = assistant_message.get_content_string()
+                parsed_object = self.response_format.model_validate_json(content_str)
+                model_response.parsed = parsed_object
+            except Exception as e:
+                logger.warning(f"Error parsing structured output from LiteLLM: {e}")
+
         tool_role = "tool"
-        if await self._handle_tool_calls(
+        if await self.handle_tool_calls(
                 assistant_message=assistant_message,
                 messages=messages,
                 model_response=model_response,
@@ -477,7 +512,7 @@ class LiteLLMChat(Model):
         )
         self.usage.add(entry)
     
-    async def _handle_stream_tool_calls(
+    async def handle_stream_tool_calls(
             self,
             assistant_message: Message,
             messages: List[Message],
@@ -602,7 +637,7 @@ class LiteLLMChat(Model):
         # Handle tool calls
         if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
             tool_role = "tool"
-            async for tool_call_response in self._handle_stream_tool_calls(
+            async for tool_call_response in self.handle_stream_tool_calls(
                 assistant_message=assistant_message,
                 messages=messages,
                 tool_role=tool_role
