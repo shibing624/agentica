@@ -104,6 +104,8 @@ class PrinterMixin:
         Usage:
             await agent.print_response_stream("...")
         """
+        from agentica.run_config import RunConfig
+
         if self.response_model is not None:
             logger.warning("Structured output does not support streaming. Falling back to non-streaming.")
             return await self.print_response(
@@ -131,10 +133,19 @@ class PrinterMixin:
         _reasoning_content = ""
         _reasoning_displayed = False
 
+        # Build RunConfig from kwargs that belong to it
+        _save = kwargs.pop("save_response_to_file", None)
+        _cfg = kwargs.pop("config", None) or RunConfig(
+            stream_intermediate_steps=stream_intermediate_steps or show_tool_calls,
+            save_response_to_file=_save,
+        )
+        if not _cfg.stream_intermediate_steps and (stream_intermediate_steps or show_tool_calls):
+            _cfg.stream_intermediate_steps = True
+
         async for run_response in self.run_stream(
             message=message,
             messages=messages,
-            stream_intermediate_steps=stream_intermediate_steps or show_tool_calls,
+            config=_cfg,
             **kwargs,
         ):
             event = getattr(run_response, "event", "")
@@ -229,6 +240,9 @@ class PrinterMixin:
                 **kwargs,
             )
         )
+
+    # Keep backward-compatible save_response_to_file in print_response_stream
+    # by extracting it from **kwargs and packing into RunConfig.
 
     def cli_app(
         self,

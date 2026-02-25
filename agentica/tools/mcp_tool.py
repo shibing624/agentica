@@ -536,11 +536,15 @@ class McpTool(Tool):
         return CompositeMultiMcpTool(tools)
 
 
-class CompositeMultiMcpTool(McpTool):
-    """Combines multiple McpTool instances into one."""
+class CompositeMultiMcpTool(Tool):
+    """Combines multiple McpTool instances into one.
+
+    Uses composition (not inheritance from McpTool) since it manages
+    multiple MCP connections rather than a single one.
+    """
 
     def __init__(self, tools: list[McpTool]):
-        super().__init__(command="dummy")  # Dummy command to satisfy parent init
+        super().__init__(name="composite_mcp", description="Multi-MCP tool aggregator")
         self.tools = tools
         self.functions = {}
         self._initialized = False

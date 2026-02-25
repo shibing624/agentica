@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from agentica.model.base import Model
 from agentica.model.message import Message
+from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
@@ -34,24 +35,6 @@ class MessageData:
     response_usage: Optional[Usage] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     tool_ids: List[str] = field(default_factory=list)
-
-
-@dataclass
-class Metrics:
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    time_to_first_token: Optional[float] = None
-    response_timer: Timer = field(default_factory=Timer)
-
-    def log(self):
-        if self.time_to_first_token is not None:
-            logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
-        logger.debug(f"* Time to generate response:   {self.response_timer.elapsed:.4f}s")
-        logger.debug(f"* Tokens per second:           {self.output_tokens / self.response_timer.elapsed:.4f} tokens/s")
-        logger.debug(f"* Input tokens:                {self.input_tokens}")
-        logger.debug(f"* Output tokens:               {self.output_tokens}")
-        logger.debug(f"* Total tokens:                {self.total_tokens}")
 
 
 @dataclass

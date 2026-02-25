@@ -29,46 +29,11 @@ from pydantic import BaseModel
 
 from agentica.model.base import Model
 from agentica.model.message import Message
+from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
-
-
-@dataclass
-class Metrics:
-    """Metrics for tracking LLM response performance."""
-    input_tokens: int = 0
-    output_tokens: int = 0
-    total_tokens: int = 0
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    time_to_first_token: Optional[float] = None
-    response_timer: Timer = field(default_factory=Timer)
-
-    def log(self):
-        """Log metrics with null checks and safe calculations."""
-        if self.time_to_first_token is not None:
-            logger.debug(f"* Time to first token:         {self.time_to_first_token:.4f}s")
-        elapsed = self.response_timer.elapsed or 0
-        logger.debug(f"* Time to generate response:   {elapsed:.4f}s")
-        output_tokens = self.output_tokens or self.completion_tokens or 0
-        if elapsed > 0 and output_tokens > 0:
-            tokens_per_second = output_tokens / elapsed
-            logger.debug(f"* Tokens per second:           {tokens_per_second:.4f} tokens/s")
-        input_tokens = self.input_tokens or self.prompt_tokens or 0
-        logger.debug(f"* Input tokens:                {input_tokens}")
-        logger.debug(f"* Output tokens:               {output_tokens}")
-        total = self.total_tokens or (input_tokens + output_tokens) or 0
-        logger.debug(f"* Total tokens:                {total}")
-
-
-@dataclass
-class StreamData:
-    """Data accumulated during streaming response."""
-    response_content: str = ""
-    response_reasoning_content: str = ""
-    response_tool_calls: Optional[List[Any]] = None
 
 
 @dataclass
@@ -309,44 +274,10 @@ class LiteLLMChat(Model):
         )
         async for chunk in response:
             yield chunk
-    
-    def _update_usage_metrics(
-            self, assistant_message: Message, metrics: Metrics, response_usage: Any
-    ) -> None:
-        """Update usage metrics from response."""
-        assistant_message.metrics["time"] = metrics.response_timer.elapsed
-        self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
 
-        if response_usage:
-            prompt_tokens = getattr(response_usage, 'prompt_tokens', 0)
-            completion_tokens = getattr(response_usage, 'completion_tokens', 0)
-            total_tokens = getattr(response_usage, 'total_tokens', 0)
+    # handle_tool_calls, handle_stream_tool_calls, update_usage_metrics,
+    # update_stream_metrics are all inherited from Model base class.
 
-            if prompt_tokens:
-                metrics.input_tokens = prompt_tokens
-                metrics.prompt_tokens = prompt_tokens
-                assistant_message.metrics["input_tokens"] = prompt_tokens
-                self.metrics["input_tokens"] = self.metrics.get("input_tokens", 0) + prompt_tokens
-            if completion_tokens:
-                metrics.output_tokens = completion_tokens
-                metrics.completion_tokens = completion_tokens
-                assistant_message.metrics["output_tokens"] = completion_tokens
-                self.metrics["output_tokens"] = self.metrics.get("output_tokens", 0) + completion_tokens
-            if total_tokens:
-                metrics.total_tokens = total_tokens
-                assistant_message.metrics["total_tokens"] = total_tokens
-                self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + total_tokens
-
-            # Build structured RequestUsage entry
-            from agentica.model.usage import RequestUsage
-            entry = RequestUsage(
-                input_tokens=metrics.input_tokens,
-                output_tokens=metrics.output_tokens,
-                total_tokens=metrics.total_tokens,
-                response_time=metrics.response_timer.elapsed,
-            )
-            self.usage.add(entry)
-    
     def _create_assistant_message(
             self,
             response_message: Any,
@@ -378,55 +309,34 @@ class LiteLLMChat(Model):
                 for tc in tool_calls
             ]
         
-        self._update_usage_metrics(assistant_message, metrics, response_usage)
+        self.update_usage_metrics(assistant_message, metrics, response_usage)
         return assistant_message
-    
-    async def handle_tool_calls(
-            self,
-            assistant_message: Message,
-            messages: List[Message],
-            model_response: ModelResponse,
-            tool_role: str = "tool",
-    ) -> Optional[ModelResponse]:
-        """Handle tool calls in assistant message (async-only)."""
-        if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            if model_response.content is None:
-                model_response.content = ""
+
+    def _merge_tool_call_deltas(self, deltas: List[Any]) -> List[Dict[str, Any]]:
+        """Merge streaming tool call deltas into complete tool calls."""
+        tool_calls_by_index: Dict[int, Dict[str, Any]] = {}
+        
+        for delta in deltas:
+            idx = getattr(delta, "index", 0)
             
-            function_call_results: List[Message] = []
-            function_calls_to_run: List[FunctionCall] = []
+            if idx not in tool_calls_by_index:
+                tool_calls_by_index[idx] = {
+                    "id": "",
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""}
+                }
             
-            for tool_call in assistant_message.tool_calls:
-                _tool_call_id = tool_call.get("id")
-                _function_call = get_function_call_for_tool_call(tool_call, self.functions)
-                if _function_call is None:
-                    messages.append(Message(
-                        role=tool_role,
-                        tool_call_id=_tool_call_id,
-                        content="Could not find function to call.",
-                    ))
-                    continue
-                if _function_call.error is not None:
-                    messages.append(Message(
-                        role=tool_role,
-                        tool_call_id=_tool_call_id,
-                        content=_function_call.error,
-                    ))
-                    continue
-                function_calls_to_run.append(_function_call)
+            tc = tool_calls_by_index[idx]
             
-            async for _ in self.run_function_calls(
-                    function_calls=function_calls_to_run,
-                    function_call_results=function_call_results,
-                    tool_role=tool_role
-            ):
-                pass
-            
-            if len(function_call_results) > 0:
-                messages.extend(function_call_results)
-            
-            return model_response
-        return None
+            if hasattr(delta, "id") and delta.id:
+                tc["id"] = delta.id
+            if hasattr(delta, "function"):
+                if hasattr(delta.function, "name") and delta.function.name:
+                    tc["function"]["name"] += delta.function.name
+                if hasattr(delta.function, "arguments") and delta.function.arguments:
+                    tc["function"]["arguments"] += delta.function.arguments
+        
+        return list(tool_calls_by_index.values())
     
     async def response(self, messages: List[Message]) -> ModelResponse:
         """Generate a response from the model (async-only)."""
@@ -483,101 +393,6 @@ class LiteLLMChat(Model):
         
         return model_response
     
-    def _update_stream_metrics(self, assistant_message: Message, metrics: Metrics):
-        """Update metrics for streaming response."""
-        assistant_message.metrics["time"] = metrics.response_timer.elapsed
-        self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
-
-        if metrics.time_to_first_token is not None:
-            assistant_message.metrics["time_to_first_token"] = metrics.time_to_first_token
-            self.metrics.setdefault("time_to_first_token", []).append(metrics.time_to_first_token)
-
-        if metrics.input_tokens:
-            assistant_message.metrics["input_tokens"] = metrics.input_tokens
-            self.metrics["input_tokens"] = self.metrics.get("input_tokens", 0) + metrics.input_tokens
-        if metrics.output_tokens:
-            assistant_message.metrics["output_tokens"] = metrics.output_tokens
-            self.metrics["output_tokens"] = self.metrics.get("output_tokens", 0) + metrics.output_tokens
-        if metrics.total_tokens:
-            assistant_message.metrics["total_tokens"] = metrics.total_tokens
-            self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + metrics.total_tokens
-
-        # Build structured RequestUsage entry
-        from agentica.model.usage import RequestUsage
-        entry = RequestUsage(
-            input_tokens=metrics.input_tokens,
-            output_tokens=metrics.output_tokens,
-            total_tokens=metrics.total_tokens,
-            response_time=metrics.response_timer.elapsed,
-        )
-        self.usage.add(entry)
-    
-    async def handle_stream_tool_calls(
-            self,
-            assistant_message: Message,
-            messages: List[Message],
-            tool_role: str = "tool",
-    ) -> AsyncIterator[ModelResponse]:
-        """Handle tool calls for streaming response (async-only)."""
-        if assistant_message.tool_calls and len(assistant_message.tool_calls) > 0 and self.run_tools:
-            function_calls_to_run: List[FunctionCall] = []
-            function_call_results: List[Message] = []
-            
-            for tool_call in assistant_message.tool_calls:
-                _tool_call_id = tool_call.get("id")
-                _function_call = get_function_call_for_tool_call(tool_call, self.functions)
-                if _function_call is None:
-                    messages.append(Message(
-                        role=tool_role,
-                        tool_call_id=_tool_call_id,
-                        content="Could not find function to call.",
-                    ))
-                    continue
-                if _function_call.error is not None:
-                    messages.append(Message(
-                        role=tool_role,
-                        tool_call_id=_tool_call_id,
-                        content=_function_call.error,
-                    ))
-                    continue
-                function_calls_to_run.append(_function_call)
-            
-            async for function_call_response in self.run_function_calls(
-                    function_calls=function_calls_to_run,
-                    function_call_results=function_call_results,
-                    tool_role=tool_role
-            ):
-                yield function_call_response
-            
-            if len(function_call_results) > 0:
-                messages.extend(function_call_results)
-    
-    def _merge_tool_call_deltas(self, deltas: List[Any]) -> List[Dict[str, Any]]:
-        """Merge streaming tool call deltas into complete tool calls."""
-        tool_calls_by_index: Dict[int, Dict[str, Any]] = {}
-        
-        for delta in deltas:
-            idx = getattr(delta, "index", 0)
-            
-            if idx not in tool_calls_by_index:
-                tool_calls_by_index[idx] = {
-                    "id": "",
-                    "type": "function",
-                    "function": {"name": "", "arguments": ""}
-                }
-            
-            tc = tool_calls_by_index[idx]
-            
-            if hasattr(delta, "id") and delta.id:
-                tc["id"] = delta.id
-            if hasattr(delta, "function"):
-                if hasattr(delta.function, "name") and delta.function.name:
-                    tc["function"]["name"] += delta.function.name
-                if hasattr(delta.function, "arguments") and delta.function.arguments:
-                    tc["function"]["arguments"] += delta.function.arguments
-        
-        return list(tool_calls_by_index.values())
-    
     async def response_stream(self, messages: List[Message]) -> AsyncIterator[ModelResponse]:
         """Generate a streaming response from the model (async-only)."""
         self.sanitize_messages(messages)
@@ -628,7 +443,7 @@ class LiteLLMChat(Model):
         if stream_data.response_tool_calls:
             assistant_message.tool_calls = self._merge_tool_call_deltas(stream_data.response_tool_calls)
         
-        self._update_stream_metrics(assistant_message=assistant_message, metrics=metrics)
+        self.update_stream_metrics(assistant_message=assistant_message, metrics=metrics)
         
         messages.append(assistant_message)
         assistant_message.log()

@@ -35,6 +35,7 @@ from agentica.model.message import Message
 from agentica.tools.base import ModelTool, Tool, Function
 from agentica.model.base import Model
 from agentica.run_response import RunResponse, AgentCancelledError
+from agentica.run_config import RunConfig
 from agentica.memory import WorkingMemory
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 from agentica.hooks import AgentHooks, RunHooks
@@ -501,10 +502,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Run the Agent and return the final response (non-streaming)."""
@@ -515,10 +513,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
             videos=videos,
             messages=messages,
             add_messages=add_messages,
-            run_timeout=run_timeout,
-            first_token_timeout=first_token_timeout,
-            save_response_to_file=save_response_to_file,
-            hooks=hooks,
+            config=config,
             **kwargs,
         )
 
@@ -531,11 +526,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        stream_intermediate_steps: bool = False,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
         """Run the Agent and stream incremental responses."""
@@ -546,11 +537,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
             videos=videos,
             messages=messages,
             add_messages=add_messages,
-            stream_intermediate_steps=stream_intermediate_steps,
-            run_timeout=run_timeout,
-            first_token_timeout=first_token_timeout,
-            save_response_to_file=save_response_to_file,
-            hooks=hooks,
+            config=config,
             **kwargs,
         ):
             yield chunk
@@ -564,10 +551,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Synchronous wrapper for `run()` (non-streaming only)."""
@@ -578,10 +562,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
             videos=videos,
             messages=messages,
             add_messages=add_messages,
-            run_timeout=run_timeout,
-            first_token_timeout=first_token_timeout,
-            save_response_to_file=save_response_to_file,
-            hooks=hooks,
+            config=config,
             **kwargs,
         )
 
@@ -594,11 +575,7 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        stream_intermediate_steps: bool = False,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> Iterator[RunResponse]:
         """Synchronous wrapper for `run_stream()`."""
@@ -609,10 +586,6 @@ class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
             videos=videos,
             messages=messages,
             add_messages=add_messages,
-            stream_intermediate_steps=stream_intermediate_steps,
-            run_timeout=run_timeout,
-            first_token_timeout=first_token_timeout,
-            save_response_to_file=save_response_to_file,
-            hooks=hooks,
+            config=config,
             **kwargs,
         )

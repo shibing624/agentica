@@ -11,7 +11,7 @@ import inspect
 import json
 import weakref
 from collections import OrderedDict
-from typing import Callable, get_type_hints, Any, Dict, Union, get_args, get_origin, Optional, Type, TypeVar, List
+from typing import Callable, get_type_hints, Any, Dict, Union, Optional, Type, TypeVar, List
 from pydantic import BaseModel, Field, validate_call
 from agentica.model.message import Message
 from agentica.utils.log import logger
@@ -131,43 +131,58 @@ class Function(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True, include={"name", "description", "parameters", "strict"})
 
-    @classmethod
-    def from_callable(cls, c: Callable, strict: bool = False) -> "Function":
-        from inspect import getdoc, signature
+    @staticmethod
+    def _parse_parameters(entrypoint: Callable, strict: bool = False) -> Dict[str, Any]:
+        """Parse callable's type hints into JSON Schema parameters.
+
+        Shared logic for from_callable() and process_entrypoint().
+        """
+        from inspect import signature
         from agentica.utils.json_util import get_json_schema
 
-        # Check for @tool decorator metadata first
+        parameters: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
+        sig = signature(entrypoint)
+        try:
+            type_hints = get_type_hints(entrypoint)
+        except NameError:
+            type_hints = {}
+
+        if "agent" in sig.parameters:
+            type_hints.pop("agent", None)
+
+        param_type_hints = {
+            name: type_hints[name]
+            for name in sig.parameters
+            if name in type_hints and name != "return" and name != "agent"
+        }
+        parameters = get_json_schema(type_hints=param_type_hints, strict=strict)
+
+        if strict:
+            parameters["required"] = [name for name in parameters["properties"] if name != "agent"]
+        else:
+            parameters["required"] = [
+                name
+                for name, param in sig.parameters.items()
+                if param.default == param.empty and name != "self" and name != "agent"
+            ]
+        return parameters
+
+    @classmethod
+    def from_callable(cls, c: Callable, strict: bool = False) -> "Function":
+        from inspect import getdoc
+
+        function_name = c.__name__
+        try:
+            parameters = cls._parse_parameters(c, strict=strict)
+        except Exception as e:
+            logger.warning(f"Could not parse args for {function_name}: {e}", exc_info=True)
+            parameters = {"type": "object", "properties": {}, "required": []}
+
+        # Check for @tool decorator metadata
         metadata = getattr(c, "_tool_metadata", None)
         if metadata:
-            function_name = metadata["name"]
-            parameters = {"type": "object", "properties": {}, "required": []}
-            try:
-                sig = signature(c)
-                try:
-                    type_hints = get_type_hints(c)
-                except NameError:
-                    type_hints = {}
-                if "agent" in sig.parameters:
-                    type_hints.pop("agent", None)
-                param_type_hints = {
-                    name: type_hints[name]
-                    for name in sig.parameters
-                    if name in type_hints and name != "return" and name != "agent"
-                }
-                parameters = get_json_schema(type_hints=param_type_hints, strict=strict)
-                if strict:
-                    parameters["required"] = [name for name in parameters["properties"] if name != "agent"]
-                else:
-                    parameters["required"] = [
-                        name
-                        for name, param in sig.parameters.items()
-                        if param.default == param.empty and name != "self" and name != "agent"
-                    ]
-            except Exception as e:
-                logger.warning(f"Could not parse args for {function_name}: {e}", exc_info=True)
-
             return cls(
-                name=function_name,
+                name=metadata["name"],
                 description=metadata.get("description") or getdoc(c),
                 parameters=parameters,
                 entrypoint=_safe_validate_call(c),
@@ -175,50 +190,6 @@ class Function(BaseModel):
                 sanitize_arguments=metadata.get("sanitize_arguments", True),
                 stop_after_tool_call=metadata.get("stop_after_tool_call", False),
             )
-
-        # Standard path: parse from docstring + type hints
-        function_name = c.__name__
-        parameters = {"type": "object", "properties": {}, "required": []}
-        try:
-            sig = signature(c)
-            # Try to get type hints, but handle forward reference errors gracefully
-            try:
-                type_hints = get_type_hints(c)
-            except NameError:
-                # Forward reference (e.g., "Agent") not yet defined, skip type hints
-                type_hints = {}
-
-            # If function has an the agent argument, remove the agent parameter from the type hints
-            if "agent" in sig.parameters:
-                type_hints.pop("agent", None)
-            # logger.info(f"Type hints for {function_name}: {type_hints}")
-
-            # Filter out return type and only process parameters
-            param_type_hints = {
-                name: type_hints[name]
-                for name in sig.parameters
-                if name in type_hints and name != "return" and name != "agent"
-            }
-            # logger.info(f"Arguments for {function_name}: {param_type_hints}")
-
-            # Get JSON schema for parameters only
-            parameters = get_json_schema(type_hints=param_type_hints, strict=strict)
-
-            # If strict=True mark all fields as required
-            # See: https://platform.openai.com/docs/guides/structured-outputs/supported-schemas#all-fields-must-be-required
-            if strict:
-                parameters["required"] = [name for name in parameters["properties"] if name != "agent"]
-            else:
-                # Mark a field as required if it has no default value
-                parameters["required"] = [
-                    name
-                    for name, param in sig.parameters.items()
-                    if param.default == param.empty and name != "self" and name != "agent"
-                ]
-
-            # logger.debug(f"JSON schema for {function_name}: {parameters}")
-        except Exception as e:
-            logger.warning(f"Could not parse args for {function_name}: {e}", exc_info=True)
 
         return cls(
             name=function_name,
@@ -229,55 +200,18 @@ class Function(BaseModel):
 
     def process_entrypoint(self, strict: bool = False):
         """Process the entrypoint and make it ready for use by an agent."""
-        from inspect import getdoc, signature
-        from agentica.utils.json_util import get_json_schema
+        from inspect import getdoc
         if self.skip_entrypoint_processing:
             return
         if self.entrypoint is None:
             return
 
-        parameters = {"type": "object", "properties": {}, "required": []}
         try:
-            sig = signature(self.entrypoint)
-            # Try to get type hints, but handle forward reference errors gracefully
-            try:
-                type_hints = get_type_hints(self.entrypoint)
-            except NameError:
-                # Forward reference (e.g., "Agent") not yet defined, skip type hints
-                type_hints = {}
-
-            # If function has an the agent argument, remove the agent parameter from the type hints
-            if "agent" in sig.parameters:
-                type_hints.pop("agent", None)
-
-            # Filter out return type and only process parameters
-            param_type_hints = {
-                name: type_hints[name]
-                for name in sig.parameters
-                if name in type_hints and name != "return" and name != "agent"
-            }
-            # logger.info(f"Arguments for {self.name}: {param_type_hints}")
-
-            # Get JSON schema for parameters only
-            parameters = get_json_schema(type_hints=param_type_hints, strict=strict)
-            # If strict=True mark all fields as required
-            # See: https://platform.openai.com/docs/guides/structured-outputs/supported-schemas#all-fields-must-be-required
-            if strict:
-                parameters["required"] = [name for name in parameters["properties"] if name != "agent"]
-            else:
-                # Mark a field as required if it has no default value
-                parameters["required"] = [
-                    name
-                    for name, param in sig.parameters.items()
-                    if param.default == param.empty and name != "self" and name != "agent"
-                ]
-
-            # logger.debug(f"JSON schema for {self.name}: {parameters}")
+            self.parameters = self._parse_parameters(self.entrypoint, strict=strict)
         except Exception as e:
             logger.warning(f"Could not parse args for {self.name}: {e}", exc_info=True)
 
         self.description = getdoc(self.entrypoint) or self.description
-        self.parameters = parameters
         self.entrypoint = _safe_validate_call(self.entrypoint)
 
     def get_type_name(self, t: Type[T]):
@@ -442,61 +376,6 @@ class ModelTool(BaseModel):
 
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump(exclude_none=True)
-
-
-def get_json_type_for_py_type(arg: str) -> str:
-    """
-    Get the JSON schema type for a given type.
-    :param arg: The type to get the JSON schema type for.
-    :return: The JSON schema type.
-
-    See: https://json-schema.org/understanding-json-schema/reference/type.html#type-specific-keywords
-    """
-    # logger.info(f"Getting JSON type for: {arg}")
-    if arg in ("int", "float"):
-        return "number"
-    elif arg == "str":
-        return "string"
-    elif arg == "bool":
-        return "boolean"
-    elif arg in ("NoneType", "None"):
-        return "null"
-    return arg
-
-
-def get_json_schema_for_arg(t: Any) -> Optional[Any]:
-    # logger.info(f"Getting JSON schema for arg: {t}")
-    json_schema = None
-    type_args = get_args(t)
-    # logger.info(f"Type args: {type_args}")
-    type_origin = get_origin(t)
-    # logger.info(f"Type origin: {type_origin}")
-    if type_origin is not None:
-        if type_origin == list:
-            json_schema_for_items = get_json_schema_for_arg(type_args[0])
-            json_schema = {"type": "array", "items": json_schema_for_items}
-        elif type_origin == dict:
-            json_schema = {"type": "object", "properties": {}}
-        elif type_origin == Union:
-            json_schema = {"type": [get_json_type_for_py_type(arg.__name__) for arg in type_args]}
-    else:
-        json_schema = {"type": get_json_type_for_py_type(t.__name__)}
-    return json_schema
-
-
-def get_json_schema(type_hints: Dict[str, Any]) -> Dict[str, Any]:
-    json_schema: Dict[str, Any] = {"type": "object", "properties": {}}
-    for k, v in type_hints.items():
-        # logger.info(f"Parsing arg: {k} | {v}")
-        if k == "return":
-            continue
-        arg_json_schema = get_json_schema_for_arg(v)
-        if arg_json_schema is not None:
-            # logger.info(f"json_schema: {arg_json_schema}")
-            json_schema["properties"][k] = arg_json_schema
-        else:
-            logger.warning(f"Could not parse argument {k} of type {v}")
-    return json_schema
 
 
 def get_function_call(

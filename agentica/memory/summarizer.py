@@ -11,7 +11,6 @@ from textwrap import dedent
 from typing import Dict, List, Any, Optional, cast, Tuple
 from pydantic import ValidationError
 
-from agentica.model.openai import OpenAIChat
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.utils.log import logger
@@ -25,6 +24,7 @@ class MemorySummarizer:
 
     def update_model(self) -> None:
         if self.model is None:
+            from agentica.model.openai import OpenAIChat
             self.model = OpenAIChat()
 
         if self.use_structured_outputs:

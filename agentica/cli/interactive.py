@@ -298,7 +298,8 @@ def _process_stream_response(current_agent, final_input: str) -> None:
     spinner_active = True
     
     try:
-        response_stream = current_agent.run_stream_sync(final_input, stream_intermediate_steps=True)
+        from agentica.run_config import RunConfig
+        response_stream = current_agent.run_stream_sync(final_input, config=RunConfig(stream_intermediate_steps=True))
         
         display = StreamDisplayManager(console)
         shown_tool_count = 0

@@ -7,7 +7,7 @@ Separates "each run may differ" parameters from Agent construction.
 Agent fields are defaults; RunConfig overrides them for a specific run.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Dict,
@@ -16,10 +16,15 @@ from typing import (
     Union,
 )
 
+from agentica.hooks import RunHooks
+
 
 @dataclass
 class RunConfig:
     """Per-run configuration. Overrides Agent defaults when provided.
+
+    Packs run-level parameters that would otherwise be repeated across
+    run()/run_stream()/run_sync()/run_stream_sync() signatures.
 
     Example:
         >>> response = await agent.run("Analyze data", config=RunConfig(
@@ -34,3 +39,4 @@ class RunConfig:
     first_token_timeout: Optional[float] = None
     save_response_to_file: Optional[str] = None
     stream_intermediate_steps: bool = False
+    hooks: Optional[RunHooks] = None

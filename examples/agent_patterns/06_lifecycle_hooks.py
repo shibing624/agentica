@@ -136,9 +136,10 @@ async def main():
     print("=" * 60)
     print("Demo 1: Single agent with tool calls")
     print("=" * 60)
+    from agentica.run_config import RunConfig
     response = await math_agent.run(
         "What is 3 + 5 and 4 * 7? Use the tools to compute.",
-        hooks=run_hooks,
+        config=RunConfig(hooks=run_hooks),
     )
     print(f"\nFinal response: {response.content}\n")
 
@@ -149,7 +150,7 @@ async def main():
     run_hooks_2 = MyRunHooks()
     response = await coordinator.run(
         "Please calculate 12 + 8 for me.",
-        hooks=run_hooks_2,
+        config=RunConfig(hooks=run_hooks_2),
     )
     print(f"\nFinal response: {response.content}\n")
 

@@ -1,4 +1,3 @@
-import hashlib
 import json
 import re
 from typing import Optional, Type
@@ -9,21 +8,6 @@ from agentica.utils.log import logger
 TOOL_RESULT_TOKEN_LIMIT = 16000  # Same threshold as eviction
 TRUNCATION_GUIDANCE = "... [results truncated, try being more specific with your parameters]"
 
-
-def hash_string_sha256(input_string):
-    # Encode the input string to bytes
-    encoded_string = input_string.encode("utf-8")
-
-    # Create a SHA-256 hash object
-    sha256_hash = hashlib.sha256()
-
-    # Update the hash object with the encoded string
-    sha256_hash.update(encoded_string)
-
-    # Get the hexadecimal digest of the hash
-    hex_digest = sha256_hash.hexdigest()
-
-    return hex_digest
 
 
 def parse_structured_output(content: str, response_model: Type[BaseModel]) -> Optional[BaseModel]:

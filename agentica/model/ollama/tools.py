@@ -8,7 +8,8 @@ from typing import Optional, List, AsyncIterator, Dict, Any, Mapping
 
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
-from agentica.model.ollama.chat import Ollama, Metrics
+from agentica.model.ollama.chat import Ollama
+from agentica.model.metrics import Metrics
 from agentica.utils.log import logger
 from agentica.tools.base import (
     extract_tool_call_from_string,

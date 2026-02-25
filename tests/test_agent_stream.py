@@ -100,7 +100,8 @@ class TestStreamEvents:
         with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
             agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
             events = []
-            async for chunk in agent.run_stream("Hi", stream_intermediate_steps=True):
+            from agentica.run_config import RunConfig
+            async for chunk in agent.run_stream("Hi", config=RunConfig(stream_intermediate_steps=True)):
                 events.append(chunk.event)
             # With intermediate steps, should have RunStarted at minimum
             assert RunEvent.run_started.value in events

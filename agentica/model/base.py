@@ -16,9 +16,10 @@ from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable,
 
 from agentica.utils.log import logger
 from agentica.model.message import Message
+from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.model.usage import Usage, RequestUsage, TokenDetails
-from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException
+from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
 from agentica.utils.timer import Timer
 
 
@@ -531,6 +532,226 @@ class Model(ABC):
         else:
             async for model_response in self.response_stream(messages=messages):
                 yield model_response
+
+    # ── Default tool call handling (OpenAI-compatible protocol) ──────────────
+    # Providers using a different protocol (e.g. Anthropic) override these.
+
+    async def handle_tool_calls(
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            model_response: ModelResponse,
+            tool_role: str = "tool",
+    ) -> Optional[ModelResponse]:
+        """Handle tool calls in the assistant message (OpenAI-compatible default).
+
+        Providers with a different tool-call protocol (e.g. Claude) should override.
+        """
+        if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
+            self._current_messages = messages
+            if model_response.content is None:
+                model_response.content = ""
+            function_call_results: List[Message] = []
+            function_calls_to_run: List[FunctionCall] = []
+            for tool_call in assistant_message.tool_calls:
+                _tool_call_id = tool_call.get("id")
+                _function_call = get_function_call_for_tool_call(tool_call, self.functions)
+                if _function_call is None:
+                    messages.append(
+                        Message(role=tool_role, tool_call_id=_tool_call_id, content="Could not find function to call.")
+                    )
+                    continue
+                if _function_call.error is not None:
+                    messages.append(
+                        Message(role=tool_role, tool_call_id=_tool_call_id, content=_function_call.error)
+                    )
+                    continue
+                function_calls_to_run.append(_function_call)
+
+            async for tool_response in self.run_function_calls(
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
+            ):
+                pass
+
+            if len(function_call_results) > 0:
+                messages.extend(function_call_results)
+
+            return model_response
+        return None
+
+    async def handle_stream_tool_calls(
+            self,
+            assistant_message: Message,
+            messages: List[Message],
+            tool_role: str = "tool",
+    ) -> AsyncIterator[ModelResponse]:
+        """Handle tool calls for response stream (OpenAI-compatible default).
+
+        Providers with a different tool-call protocol (e.g. Claude, Ollama) should override.
+        """
+        if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
+            self._current_messages = messages
+            function_calls_to_run: List[FunctionCall] = []
+            function_call_results: List[Message] = []
+            for tool_call in assistant_message.tool_calls:
+                _tool_call_id = tool_call.get("id")
+                _function_call = get_function_call_for_tool_call(tool_call, self.functions)
+                if _function_call is None:
+                    messages.append(
+                        Message(role=tool_role, tool_call_id=_tool_call_id, content="Could not find function to call.")
+                    )
+                    continue
+                if _function_call.error is not None:
+                    messages.append(
+                        Message(role=tool_role, tool_call_id=_tool_call_id, content=_function_call.error)
+                    )
+                    continue
+                function_calls_to_run.append(_function_call)
+
+            async for function_call_response in self.run_function_calls(
+                    function_calls=function_calls_to_run, function_call_results=function_call_results,
+                    tool_role=tool_role
+            ):
+                yield function_call_response
+
+            if len(function_call_results) > 0:
+                messages.extend(function_call_results)
+
+    # ── Default usage metrics update (shared across providers) ───────────────
+
+    def update_usage_metrics(
+            self, assistant_message: Message, metrics: Metrics, response_usage: Optional[Any]
+    ) -> None:
+        """Update usage metrics from a non-streaming response.
+
+        Default implementation handles OpenAI-style CompletionUsage.
+        Providers with different usage formats (Anthropic, Ollama) override this.
+        """
+        assistant_message.metrics["time"] = metrics.response_timer.elapsed
+        self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
+        if response_usage:
+            prompt_tokens = getattr(response_usage, 'prompt_tokens', None) or response_usage.get("prompt_eval_count", 0) if isinstance(response_usage, dict) else getattr(response_usage, 'prompt_tokens', 0)
+            completion_tokens = getattr(response_usage, 'completion_tokens', None) or response_usage.get("eval_count", 0) if isinstance(response_usage, dict) else getattr(response_usage, 'completion_tokens', 0)
+            total_tokens = getattr(response_usage, 'total_tokens', None) or (prompt_tokens + completion_tokens)
+
+            if prompt_tokens:
+                metrics.input_tokens = prompt_tokens
+                metrics.prompt_tokens = prompt_tokens
+                assistant_message.metrics["input_tokens"] = prompt_tokens
+                assistant_message.metrics["prompt_tokens"] = prompt_tokens
+                self.metrics["input_tokens"] = self.metrics.get("input_tokens", 0) + prompt_tokens
+                self.metrics["prompt_tokens"] = self.metrics.get("prompt_tokens", 0) + prompt_tokens
+            if completion_tokens:
+                metrics.output_tokens = completion_tokens
+                metrics.completion_tokens = completion_tokens
+                assistant_message.metrics["output_tokens"] = completion_tokens
+                assistant_message.metrics["completion_tokens"] = completion_tokens
+                self.metrics["output_tokens"] = self.metrics.get("output_tokens", 0) + completion_tokens
+                self.metrics["completion_tokens"] = self.metrics.get("completion_tokens", 0) + completion_tokens
+            if total_tokens:
+                metrics.total_tokens = total_tokens
+                assistant_message.metrics["total_tokens"] = total_tokens
+                self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + total_tokens
+
+            entry = RequestUsage(
+                input_tokens=metrics.input_tokens,
+                output_tokens=metrics.output_tokens,
+                total_tokens=metrics.total_tokens,
+                response_time=metrics.response_timer.elapsed,
+            )
+
+            # Parse prompt_tokens_details
+            prompt_details = getattr(response_usage, 'prompt_tokens_details', None)
+            if prompt_details is not None:
+                from pydantic import BaseModel as PydanticBaseModel
+                if isinstance(prompt_details, dict):
+                    metrics.prompt_tokens_details = prompt_details
+                elif isinstance(prompt_details, PydanticBaseModel):
+                    metrics.prompt_tokens_details = prompt_details.model_dump(exclude_none=True)
+                assistant_message.metrics["prompt_tokens_details"] = metrics.prompt_tokens_details
+                if metrics.prompt_tokens_details is not None:
+                    entry.input_tokens_details = TokenDetails(
+                        cached_tokens=metrics.prompt_tokens_details.get("cached_tokens", 0),
+                    )
+                    if "prompt_tokens_details" not in self.metrics:
+                        self.metrics["prompt_tokens_details"] = {}
+                    for k, v in metrics.prompt_tokens_details.items():
+                        self.metrics["prompt_tokens_details"][k] = self.metrics["prompt_tokens_details"].get(k, 0) + v
+
+            # Parse completion_tokens_details
+            completion_details = getattr(response_usage, 'completion_tokens_details', None)
+            if completion_details is not None:
+                from pydantic import BaseModel as PydanticBaseModel
+                if isinstance(completion_details, dict):
+                    metrics.completion_tokens_details = completion_details
+                elif isinstance(completion_details, PydanticBaseModel):
+                    metrics.completion_tokens_details = completion_details.model_dump(exclude_none=True)
+                assistant_message.metrics["completion_tokens_details"] = metrics.completion_tokens_details
+                if metrics.completion_tokens_details is not None:
+                    entry.output_tokens_details = TokenDetails(
+                        reasoning_tokens=metrics.completion_tokens_details.get("reasoning_tokens", 0),
+                    )
+                    if "completion_tokens_details" not in self.metrics:
+                        self.metrics["completion_tokens_details"] = {}
+                    for k, v in metrics.completion_tokens_details.items():
+                        self.metrics["completion_tokens_details"][k] = self.metrics["completion_tokens_details"].get(k, 0) + v
+
+            self.usage.add(entry)
+
+    def update_stream_metrics(self, assistant_message: Message, metrics: Metrics) -> None:
+        """Update usage metrics from a streaming response.
+
+        Shared across all providers that use streaming.
+        """
+        assistant_message.metrics["time"] = metrics.response_timer.elapsed
+        self.metrics.setdefault("response_times", []).append(metrics.response_timer.elapsed)
+
+        if metrics.time_to_first_token is not None:
+            assistant_message.metrics["time_to_first_token"] = metrics.time_to_first_token
+            self.metrics.setdefault("time_to_first_token", []).append(metrics.time_to_first_token)
+
+        if metrics.input_tokens:
+            assistant_message.metrics["input_tokens"] = metrics.input_tokens
+            self.metrics["input_tokens"] = self.metrics.get("input_tokens", 0) + metrics.input_tokens
+        if metrics.output_tokens:
+            assistant_message.metrics["output_tokens"] = metrics.output_tokens
+            self.metrics["output_tokens"] = self.metrics.get("output_tokens", 0) + metrics.output_tokens
+        if metrics.prompt_tokens:
+            assistant_message.metrics["prompt_tokens"] = metrics.prompt_tokens
+            self.metrics["prompt_tokens"] = self.metrics.get("prompt_tokens", 0) + metrics.prompt_tokens
+        if metrics.completion_tokens:
+            assistant_message.metrics["completion_tokens"] = metrics.completion_tokens
+            self.metrics["completion_tokens"] = self.metrics.get("completion_tokens", 0) + metrics.completion_tokens
+        if metrics.total_tokens:
+            assistant_message.metrics["total_tokens"] = metrics.total_tokens
+            self.metrics["total_tokens"] = self.metrics.get("total_tokens", 0) + metrics.total_tokens
+
+        entry = RequestUsage(
+            input_tokens=metrics.input_tokens,
+            output_tokens=metrics.output_tokens,
+            total_tokens=metrics.total_tokens,
+            response_time=metrics.response_timer.elapsed,
+        )
+        if metrics.prompt_tokens_details is not None:
+            assistant_message.metrics["prompt_tokens_details"] = metrics.prompt_tokens_details
+            entry.input_tokens_details = TokenDetails(
+                cached_tokens=metrics.prompt_tokens_details.get("cached_tokens", 0),
+            )
+            if "prompt_tokens_details" not in self.metrics:
+                self.metrics["prompt_tokens_details"] = {}
+            for k, v in metrics.prompt_tokens_details.items():
+                self.metrics["prompt_tokens_details"][k] = self.metrics["prompt_tokens_details"].get(k, 0) + v
+        if metrics.completion_tokens_details is not None:
+            assistant_message.metrics["completion_tokens_details"] = metrics.completion_tokens_details
+            entry.output_tokens_details = TokenDetails(
+                reasoning_tokens=metrics.completion_tokens_details.get("reasoning_tokens", 0),
+            )
+            if "completion_tokens_details" not in self.metrics:
+                self.metrics["completion_tokens_details"] = {}
+            for k, v in metrics.completion_tokens_details.items():
+                self.metrics["completion_tokens_details"][k] = self.metrics["completion_tokens_details"].get(k, 0) + v
+        self.usage.add(entry)
 
     def _process_string_image(self, image: str) -> Dict[str, Any]:
         """Process string-based image (base64, URL, or file path)."""

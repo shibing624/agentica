@@ -6,7 +6,7 @@
 
 import math
 from typing import Dict, List, Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from agentica.utils.log import logger
 
@@ -63,13 +63,9 @@ class WorkspaceMemorySearch(BaseModel):
     chunk_lines: int = Field(default=20, description="Number of lines per chunk")
     overlap_lines: int = Field(default=4, description="Number of overlap lines between chunks")
     chunks: List[MemoryChunk] = Field(default_factory=list, description="Indexed memory chunks")
-    _embeddings: Dict[int, List[float]] = {}
+    _embeddings: Dict[int, List[float]] = PrivateAttr(default_factory=dict)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    def model_post_init(self, __context: Any) -> None:
-        """Initialize per-instance _embeddings to avoid class-variable sharing."""
-        self._embeddings = {}
 
     def _get_path(self) -> "Path":
         """Get workspace path as Path object."""

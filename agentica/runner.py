@@ -45,6 +45,7 @@ from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.run_response import RunEvent, RunResponse
+from agentica.run_config import RunConfig
 from agentica.memory import AgentRun
 from agentica.utils.string import parse_structured_output
 from agentica.utils.langfuse_integration import langfuse_trace_context
@@ -522,10 +523,7 @@ class Runner:
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Run the Agent and return the final response (non-streaming).
@@ -533,12 +531,15 @@ class Runner:
         This is the primary async API.
 
         Args:
-            run_timeout: Maximum total execution time (in seconds). From RunConfig.
-            first_token_timeout: Maximum time to wait for first token (in seconds). From RunConfig.
-            save_response_to_file: File path pattern to save response. From RunConfig.
-            add_messages: Whether to add messages to memory.
-            hooks: Optional RunHooks for observing lifecycle events during this run.
+            config: Per-run configuration (run_timeout, first_token_timeout,
+                    save_response_to_file, hooks, etc.).
         """
+        config = config or RunConfig()
+        run_timeout = config.run_timeout
+        first_token_timeout = config.first_token_timeout
+        save_response_to_file = config.save_response_to_file
+        hooks = config.hooks
+
         if run_timeout is not None:
             return await self._run_with_timeout(
                 message=message,
@@ -592,11 +593,7 @@ class Runner:
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        stream_intermediate_steps: bool = False,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
         """Run the Agent and stream incremental responses.
@@ -605,6 +602,13 @@ class Runner:
             async for chunk in runner.run_stream("..."):
                 ...
         """
+        config = config or RunConfig()
+        stream_intermediate_steps = config.stream_intermediate_steps
+        run_timeout = config.run_timeout
+        first_token_timeout = config.first_token_timeout
+        save_response_to_file = config.save_response_to_file
+        hooks = config.hooks
+
         if self.agent.response_model is not None:
             raise ValueError("Structured output does not support streaming. Use run() instead.")
 
@@ -638,10 +642,7 @@ class Runner:
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Synchronous wrapper for `run()` (non-streaming only)."""
@@ -653,10 +654,7 @@ class Runner:
                 videos=videos,
                 messages=messages,
                 add_messages=add_messages,
-                run_timeout=run_timeout,
-                first_token_timeout=first_token_timeout,
-                save_response_to_file=save_response_to_file,
-                hooks=hooks,
+                config=config,
                 **kwargs,
             )
         )
@@ -670,11 +668,7 @@ class Runner:
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
         add_messages: Optional[List[Union[Dict, Message]]] = None,
-        stream_intermediate_steps: bool = False,
-        run_timeout: Optional[float] = None,
-        first_token_timeout: Optional[float] = None,
-        save_response_to_file: Optional[str] = None,
-        hooks: Optional[RunHooks] = None,
+        config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> Iterator[RunResponse]:
         """Synchronous wrapper for `run_stream()`.
@@ -725,11 +719,7 @@ class Runner:
                 videos=videos,
                 messages=messages,
                 add_messages=add_messages,
-                stream_intermediate_steps=stream_intermediate_steps,
-                run_timeout=run_timeout,
-                first_token_timeout=first_token_timeout,
-                save_response_to_file=save_response_to_file,
-                hooks=hooks,
+                config=config,
                 **kwargs,
             )
         )

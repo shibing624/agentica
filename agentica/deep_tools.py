@@ -1397,7 +1397,8 @@ class BuiltinTaskTool(Tool):
     ) -> str:
         """Run a subagent with streaming, collecting tool usage info."""
         final_content = ""
-        async for chunk in subagent.run_stream(task_description, stream_intermediate_steps=True):
+        from agentica.run_config import RunConfig
+        async for chunk in subagent.run_stream(task_description, config=RunConfig(stream_intermediate_steps=True)):
             if chunk is None:
                 continue
             # Collect tool call info from intermediate events

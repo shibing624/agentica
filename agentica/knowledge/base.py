@@ -99,81 +99,45 @@ class Knowledge(BaseModel):
             start = end
         return chunked_documents
 
+    def _convert_to_documents(self, name: str, content: str) -> List[Document]:
+        """Convert content into Document list, optionally chunking."""
+        documents = [Document(name=name, id=name, content=content)]
+        if self.chunk:
+            chunked_documents = []
+            for document in documents:
+                chunked_documents.extend(self.chunk_document(document, self.chunk_size))
+            return chunked_documents
+        return documents
+
     def read_file(self, path: Union[Path, str]) -> List[Document]:
-        """
-        Reads a file and returns a list of documents.
-        """
+        """Reads a file and returns a list of documents."""
         path = Path(path) if isinstance(path, str) else path
         if not path:
             raise ValueError("No path provided")
-
         if not path.exists():
             raise FileNotFoundError(f"Could not find file: {path}")
-
         try:
             file_name = path.name.split("/")[-1].split(".")[0].replace("/", "_").replace(" ", "_")
-            file_contents = MarkdownConverter().convert(str(path)).text_content
-
-            documents = [
-                Document(
-                    name=file_name,
-                    id=file_name,
-                    content=file_contents,
-                )
-            ]
-            if self.chunk:
-                chunked_documents = []
-                for document in documents:
-                    chunked_documents.extend(self.chunk_document(document, self.chunk_size))
-                return chunked_documents
-            return documents
+            content = MarkdownConverter().convert(str(path)).text_content
+            return self._convert_to_documents(file_name, content)
         except Exception as e:
             logger.error(f"Error reading: {path}: {e}")
         return []
 
     def read_pdf_url(self, path: str) -> List[Document]:
-        """
-        Reads a pdf from a URL and returns a list of documents.
-        """
+        """Reads a pdf from a URL and returns a list of documents."""
         try:
-            file_contents = MarkdownConverter().convert(str(path)).text_content
-            documents = [
-                Document(
-                    name=path,
-                    id=path,
-                    content=file_contents,
-                )
-            ]
-            if self.chunk:
-                chunked_documents = []
-                for document in documents:
-                    chunked_documents.extend(self.chunk_document(document, self.chunk_size))
-                return chunked_documents
-            return documents
+            content = MarkdownConverter().convert(str(path)).text_content
+            return self._convert_to_documents(path, content)
         except Exception as e:
             logger.error(f"Error reading: {path}: {e}")
         return []
 
     def read_url(self, url: str) -> List[Document]:
-        """
-        Reads a website and returns a list of documents.
-        """
+        """Reads a website and returns a list of documents."""
         try:
             content = MarkdownConverter().convert(url).text_content
-
-            documents = [
-                Document(
-                    name=url,
-                    id=url,
-                    content=content,
-                )
-            ]
-            if self.chunk:
-                chunked_documents = []
-                for document in documents:
-                    chunked_documents.extend(self.chunk_document(document, self.chunk_size))
-                return chunked_documents
-            return documents
+            return self._convert_to_documents(url, content)
         except Exception as e:
             logger.error(f"Error reading: {url}: {e}")
         return []
