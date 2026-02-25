@@ -25,22 +25,64 @@ from agentica.utils.io import write_audio_to_file
 from agentica.model.openai.chat import OpenAIChat
 from agentica.model.openai.like import OpenAILike
 from agentica.model.azure.openai_chat import AzureOpenAIChat
-from agentica.model.moonshot.chat import MoonshotChat
-from agentica.model.moonshot.chat import MoonshotChat as Moonshot
-from agentica.model.deepseek.chat import DeepSeekChat
-from agentica.model.deepseek.chat import DeepSeekChat as DeepSeek
-from agentica.model.doubao.chat import DoubaoChat
-from agentica.model.doubao.chat import DoubaoChat as Doubao
-from agentica.model.together.chat import TogetherChat
-from agentica.model.together.chat import TogetherChat as Together
-from agentica.model.xai.chat import GrokChat
-from agentica.model.xai.chat import GrokChat as Grok
-from agentica.model.yi.chat import YiChat
-from agentica.model.yi.chat import YiChat as Yi
-from agentica.model.qwen.chat import QwenChat
-from agentica.model.qwen.chat import QwenChat as Qwen
-from agentica.model.zhipuai.chat import ZhipuAIChat
-from agentica.model.zhipuai.chat import ZhipuAIChat as ZhipuAI
+from agentica.model.providers import create_provider, list_providers
+
+
+# Backward-compatible aliases for removed provider classes
+def DeepSeekChat(**kwargs):
+    return create_provider("deepseek", **kwargs)
+
+
+DeepSeek = DeepSeekChat
+
+
+def MoonshotChat(**kwargs):
+    return create_provider("moonshot", **kwargs)
+
+
+Moonshot = MoonshotChat
+
+
+def DoubaoChat(**kwargs):
+    return create_provider("doubao", **kwargs)
+
+
+Doubao = DoubaoChat
+
+
+def TogetherChat(**kwargs):
+    return create_provider("together", **kwargs)
+
+
+Together = TogetherChat
+
+
+def GrokChat(**kwargs):
+    return create_provider("xai", **kwargs)
+
+
+Grok = GrokChat
+
+
+def YiChat(**kwargs):
+    return create_provider("yi", **kwargs)
+
+
+Yi = YiChat
+
+
+def QwenChat(**kwargs):
+    return create_provider("qwen", **kwargs)
+
+
+Qwen = QwenChat
+
+
+def ZhipuAIChat(**kwargs):
+    return create_provider("zhipuai", **kwargs)
+
+
+ZhipuAI = ZhipuAIChat
 
 # model base
 from agentica.model.base import Model
@@ -119,6 +161,15 @@ _LAZY_IMPORTS = {
     # litellm (heavy dependency)
     "LiteLLMChat": "agentica.model.litellm.chat",
     "LiteLLM": "agentica.model.litellm.chat",
+
+    # kimi (depends on anthropic SDK, inherits Claude)
+    "KimiChat": "agentica.model.kimi.chat",
+
+    # anthropic (depends on anthropic SDK)
+    "Claude": "agentica.model.anthropic.claude",
+
+    # ollama (depends on ollama SDK)
+    "OllamaChat": "agentica.model.ollama.chat",
 
     # knowledge (may have heavy dependencies like llama_index, langchain)
     "Knowledge": "agentica.knowledge.base",
@@ -288,6 +339,15 @@ if TYPE_CHECKING:  # noqa: F401
     # litellm
     from agentica.model.litellm.chat import LiteLLMChat  # noqa: F401
     from agentica.model.litellm.chat import LiteLLMChat as LiteLLM  # noqa: F401
+
+    # kimi (Anthropic protocol)
+    from agentica.model.kimi.chat import KimiChat  # noqa: F401
+
+    # anthropic
+    from agentica.model.anthropic.claude import Claude  # noqa: F401
+
+    # ollama
+    from agentica.model.ollama.chat import OllamaChat  # noqa: F401
 
     # knowledge
     from agentica.knowledge.base import Knowledge  # noqa: F401
