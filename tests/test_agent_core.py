@@ -148,12 +148,12 @@ class TestAgentRunSync:
             assert isinstance(resp, RunResponse)
 
     def test_run_sync_bridges_to_async_run(self):
-        """run_sync should internally call the async run()."""
+        """run_sync should internally call the runner's async run()."""
         agent = Agent(name="A", model=_make_model())
-        agent.run = AsyncMock(return_value=RunResponse(content="Mocked"))
+        agent._runner.run = AsyncMock(return_value=RunResponse(content="Mocked"))
         resp = agent.run_sync("test")
         assert resp.content == "Mocked"
-        agent.run.assert_called_once()
+        agent._runner.run.assert_called_once()
 
 
 # ===========================================================================

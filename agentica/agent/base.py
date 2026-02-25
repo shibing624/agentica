@@ -5,7 +5,8 @@
 
 Architecture:
 - Agent defines identity and capabilities ("who I am, what I can do")
-- Mixins: PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin
+- Runner handles execution (LLM calls, tool calls, streaming, memory updates)
+- Mixins: PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin
 - Session state: in-memory WorkingMemory (serializable via to_dict/from_dict)
 - Multi-modal: images/videos/audio passed as run() parameters, not stored on Agent
 
@@ -16,10 +17,13 @@ Parameters organized in three layers:
 """
 from typing import (
     Any,
+    AsyncIterator,
     Callable,
     Dict,
+    Iterator,
     List,
     Optional,
+    Sequence,
     Type,
     Union,
 )
@@ -27,23 +31,24 @@ from uuid import uuid4
 from dataclasses import dataclass, field
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.model.openai import OpenAIChat
+from agentica.model.message import Message
 from agentica.tools.base import ModelTool, Tool, Function
 from agentica.model.base import Model
 from agentica.run_response import RunResponse, AgentCancelledError
 from agentica.memory import WorkingMemory
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 from agentica.hooks import AgentHooks, RunHooks
+from agentica.runner import Runner
 
 # Import mixin classes — pure method containers, no state, no __init__
 from agentica.agent.prompts import PromptsMixin
-from agentica.agent.runner import RunnerMixin
 from agentica.agent.team import TeamMixin
 from agentica.agent.tools import ToolsMixin
 from agentica.agent.printer import PrinterMixin
 
 
 @dataclass(init=False)
-class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
+class Agent(PromptsMixin, TeamMixin, ToolsMixin, PrinterMixin):
     """AI Agent — defines identity and capabilities.
 
     Agent only describes "who I am, what I can do".
@@ -196,6 +201,9 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         self.stream_intermediate_steps = False
         self._cancelled = False
         self._run_hooks = None
+
+        # Create Runner instance
+        self._runner = Runner(self)
 
         # Post-init setup
         self._post_init()
@@ -479,3 +487,132 @@ class Agent(PromptsMixin, RunnerMixin, TeamMixin, ToolsMixin, PrinterMixin):
         # Add agent name to the Model for Langfuse tracing
         if self.name is not None:
             self.model.agent_name = self.name
+
+    # =========================================================================
+    # Run API — delegates to self._runner (public API unchanged)
+    # =========================================================================
+
+    async def run(
+        self,
+        message: Optional[Union[str, List, Dict, Message]] = None,
+        *,
+        audio: Optional[Any] = None,
+        images: Optional[Sequence[Any]] = None,
+        videos: Optional[Sequence[Any]] = None,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
+        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        run_timeout: Optional[float] = None,
+        first_token_timeout: Optional[float] = None,
+        save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
+        **kwargs: Any,
+    ) -> RunResponse:
+        """Run the Agent and return the final response (non-streaming)."""
+        return await self._runner.run(
+            message=message,
+            audio=audio,
+            images=images,
+            videos=videos,
+            messages=messages,
+            add_messages=add_messages,
+            run_timeout=run_timeout,
+            first_token_timeout=first_token_timeout,
+            save_response_to_file=save_response_to_file,
+            hooks=hooks,
+            **kwargs,
+        )
+
+    async def run_stream(
+        self,
+        message: Optional[Union[str, List, Dict, Message]] = None,
+        *,
+        audio: Optional[Any] = None,
+        images: Optional[Sequence[Any]] = None,
+        videos: Optional[Sequence[Any]] = None,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
+        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        stream_intermediate_steps: bool = False,
+        run_timeout: Optional[float] = None,
+        first_token_timeout: Optional[float] = None,
+        save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[RunResponse]:
+        """Run the Agent and stream incremental responses."""
+        async for chunk in self._runner.run_stream(
+            message=message,
+            audio=audio,
+            images=images,
+            videos=videos,
+            messages=messages,
+            add_messages=add_messages,
+            stream_intermediate_steps=stream_intermediate_steps,
+            run_timeout=run_timeout,
+            first_token_timeout=first_token_timeout,
+            save_response_to_file=save_response_to_file,
+            hooks=hooks,
+            **kwargs,
+        ):
+            yield chunk
+
+    def run_sync(
+        self,
+        message: Optional[Union[str, List, Dict, Message]] = None,
+        *,
+        audio: Optional[Any] = None,
+        images: Optional[Sequence[Any]] = None,
+        videos: Optional[Sequence[Any]] = None,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
+        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        run_timeout: Optional[float] = None,
+        first_token_timeout: Optional[float] = None,
+        save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
+        **kwargs: Any,
+    ) -> RunResponse:
+        """Synchronous wrapper for `run()` (non-streaming only)."""
+        return self._runner.run_sync(
+            message=message,
+            audio=audio,
+            images=images,
+            videos=videos,
+            messages=messages,
+            add_messages=add_messages,
+            run_timeout=run_timeout,
+            first_token_timeout=first_token_timeout,
+            save_response_to_file=save_response_to_file,
+            hooks=hooks,
+            **kwargs,
+        )
+
+    def run_stream_sync(
+        self,
+        message: Optional[Union[str, List, Dict, Message]] = None,
+        *,
+        audio: Optional[Any] = None,
+        images: Optional[Sequence[Any]] = None,
+        videos: Optional[Sequence[Any]] = None,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
+        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        stream_intermediate_steps: bool = False,
+        run_timeout: Optional[float] = None,
+        first_token_timeout: Optional[float] = None,
+        save_response_to_file: Optional[str] = None,
+        hooks: Optional[RunHooks] = None,
+        **kwargs: Any,
+    ) -> Iterator[RunResponse]:
+        """Synchronous wrapper for `run_stream()`."""
+        return self._runner.run_stream_sync(
+            message=message,
+            audio=audio,
+            images=images,
+            videos=videos,
+            messages=messages,
+            add_messages=add_messages,
+            stream_intermediate_steps=stream_intermediate_steps,
+            run_timeout=run_timeout,
+            first_token_timeout=first_token_timeout,
+            save_response_to_file=save_response_to_file,
+            hooks=hooks,
+            **kwargs,
+        )

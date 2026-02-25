@@ -122,15 +122,9 @@ class TestAgentRun(unittest.TestCase):
     @patch('agentica.agent.Agent.update_model')
     def test_run_returns_run_response(self, mock_update):
         """Test that run returns a RunResponse."""
-        # Create mock response (ModelResponse is a dataclass without 'id' field)
-        mock_response = ModelResponse(
-            content="Hello, I'm an AI assistant."
-        )
-        self.mock_model.response = Mock(return_value=mock_response)
-
         agent = Agent(model=self.mock_model)
-        # Mock async run() and verify run_sync bridges correctly
-        agent.run = AsyncMock(return_value=RunResponse(content="Test response"))
+        # Mock the runner's run() to verify run_sync bridges correctly
+        agent._runner.run = AsyncMock(return_value=RunResponse(content="Test response"))
         response = agent.run_sync("Hello")
         self.assertIsInstance(response, RunResponse)
 
@@ -195,12 +189,12 @@ class TestAgentTimeout(unittest.TestCase):
     """Test cases for Agent timeout settings (now passed to run()/run_stream())."""
 
     def test_timeout_wrapper_methods_exist(self):
-        """Test that timeout wrapper methods exist on Agent."""
+        """Test that timeout wrapper methods exist on Agent's runner."""
         agent = Agent()
-        self.assertTrue(hasattr(agent, '_run_with_timeout'))
-        self.assertTrue(callable(agent._run_with_timeout))
-        self.assertTrue(hasattr(agent, '_wrap_stream_with_timeout'))
-        self.assertTrue(callable(agent._wrap_stream_with_timeout))
+        self.assertTrue(hasattr(agent._runner, '_run_with_timeout'))
+        self.assertTrue(callable(agent._runner._run_with_timeout))
+        self.assertTrue(hasattr(agent._runner, '_wrap_stream_with_timeout'))
+        self.assertTrue(callable(agent._runner._wrap_stream_with_timeout))
 
     def test_run_timeout_triggers_timeout_response(self):
         """Test that timeout produces correct RunResponse event."""
@@ -212,7 +206,7 @@ class TestAgentTimeout(unittest.TestCase):
             await asyncio.sleep(1)  # Sleep longer than timeout
             return RunResponse(content="Should not reach here")
 
-        with patch.object(agent, "_consume_run", slow_consume):
+        with patch.object(agent._runner, "_consume_run", slow_consume):
             agent.model = Mock()
             agent.model.id = "test-model"
             agent.response_model = None
@@ -233,7 +227,7 @@ class TestAgentTimeout(unittest.TestCase):
             yield RunResponse(content="Should not reach here")
 
         async def get_first():
-            async for item in agent._wrap_stream_with_timeout(
+            async for item in agent._runner._wrap_stream_with_timeout(
                 slow_async_iterator(), first_token_timeout=0.001
             ):
                 return item
@@ -257,7 +251,7 @@ class TestAgentTimeout(unittest.TestCase):
 
         async def collect():
             out = []
-            async for item in agent._wrap_stream_with_timeout(
+            async for item in agent._runner._wrap_stream_with_timeout(
                 slow_async_iterator(), run_timeout=0.05
             ):
                 out.append(item)
