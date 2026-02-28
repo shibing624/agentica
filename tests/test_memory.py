@@ -18,7 +18,7 @@ from agentica.memory import (
 )
 from agentica.memory.working import (
     _clean_message_for_history,
-    _is_conversation_message,
+    _is_history_message,
     _truncate_tool_content,
 )
 from agentica.model.message import Message
@@ -175,36 +175,41 @@ class TestWorkflowRun(unittest.TestCase):
 class TestHelperFunctions(unittest.TestCase):
     """Test cases for module-level helper functions."""
 
-    def test_is_conversation_message_user(self):
-        """Test _is_conversation_message keeps user messages."""
+    def test_is_history_message_user(self):
+        """Test _is_history_message keeps user messages."""
         msg = Message(role="user", content="Hello")
-        self.assertTrue(_is_conversation_message(msg))
+        self.assertTrue(_is_history_message(msg))
 
-    def test_is_conversation_message_assistant(self):
-        """Test _is_conversation_message keeps assistant messages."""
+    def test_is_history_message_assistant(self):
+        """Test _is_history_message keeps assistant messages."""
         msg = Message(role="assistant", content="Hi there")
-        self.assertTrue(_is_conversation_message(msg))
+        self.assertTrue(_is_history_message(msg))
 
-    def test_is_conversation_message_tool(self):
-        """Test _is_conversation_message filters tool messages."""
+    def test_is_history_message_tool(self):
+        """Test _is_history_message keeps tool messages for context preservation."""
         msg = Message(role="tool", content="result")
-        self.assertFalse(_is_conversation_message(msg))
+        self.assertTrue(_is_history_message(msg))
 
-    def test_is_conversation_message_assistant_with_tool_calls(self):
-        """Test _is_conversation_message filters assistant with tool_calls."""
+    def test_is_history_message_assistant_with_tool_calls(self):
+        """Test _is_history_message keeps assistant with tool_calls."""
         msg = Message(role="assistant", content="calling", tool_calls=[{"id": "1"}])
-        self.assertFalse(_is_conversation_message(msg))
+        self.assertTrue(_is_history_message(msg))
+
+    def test_is_history_message_system(self):
+        """Test _is_history_message filters system messages."""
+        msg = Message(role="system", content="You are helpful")
+        self.assertFalse(_is_history_message(msg))
 
     def test_truncate_tool_content_short(self):
-        """Test _truncate_tool_content keeps short content unchanged."""
-        msg = Message(role="assistant", content="short text")
+        """Test _truncate_tool_content keeps short tool content unchanged."""
+        msg = Message(role="tool", content="short text")
         result = _truncate_tool_content(msg, max_chars=500)
         self.assertEqual(result.content, "short text")
 
     def test_truncate_tool_content_long(self):
-        """Test _truncate_tool_content truncates long content."""
+        """Test _truncate_tool_content truncates long tool content."""
         long_text = "a" * 1000
-        msg = Message(role="assistant", content=long_text)
+        msg = Message(role="tool", content=long_text)
         result = _truncate_tool_content(msg, max_chars=200)
         self.assertIn("truncated", result.content)
         self.assertLess(len(result.content), len(long_text))
@@ -212,14 +217,21 @@ class TestHelperFunctions(unittest.TestCase):
     def test_truncate_tool_content_preserves_head_tail(self):
         """Test _truncate_tool_content keeps head and tail of content."""
         content = "HEAD_" + "x" * 1000 + "_TAIL"
-        msg = Message(role="assistant", content=content)
+        msg = Message(role="tool", content=content)
         result = _truncate_tool_content(msg, max_chars=200)
         self.assertTrue(result.content.startswith("HEAD_"))
         self.assertTrue(result.content.endswith("_TAIL"))
 
+    def test_truncate_tool_content_skips_non_tool(self):
+        """Test _truncate_tool_content skips non-tool messages."""
+        long_text = "a" * 1000
+        msg = Message(role="assistant", content=long_text)
+        result = _truncate_tool_content(msg, max_chars=200)
+        self.assertEqual(result.content, long_text)
+
     def test_truncate_tool_content_non_string(self):
         """Test _truncate_tool_content handles non-string content."""
-        msg = Message(role="assistant", content=[{"type": "text", "text": "data"}])
+        msg = Message(role="tool", content=[{"type": "text", "text": "data"}])
         result = _truncate_tool_content(msg, max_chars=10)
         self.assertEqual(result.content, msg.content)
 
@@ -289,9 +301,21 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
     def test_truncate_tool_results_in_older_runs(self):
         """Test that older runs get tool result truncation."""
         memory = WorkingMemory()
-        # First run with long content
-        long_answer = "detailed " * 200
-        memory.add_run(self._make_run("Q0", long_answer))
+        # First run with long tool response
+        long_tool_result = "detailed " * 200
+        run_with_tool = AgentRun(
+            message=Message(role="user", content="Q0"),
+            response=RunResponse(
+                content="A0",
+                messages=[
+                    Message(role="user", content="Q0"),
+                    Message(role="assistant", content=None, tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "{}"}}]),
+                    Message(role="tool", content=long_tool_result, tool_call_id="call_1"),
+                    Message(role="assistant", content="A0"),
+                ]
+            )
+        )
+        memory.add_run(run_with_tool)
         # Recent run with short content
         memory.add_run(self._make_run("Q1", "short"))
 
@@ -299,9 +323,9 @@ class TestGetMessagesTokenBudget(unittest.TestCase):
             truncate_tool_results=True,
             tool_result_max_chars=50,
         )
-        # The older run's long assistant message should be truncated
+        # The older run's tool response should be truncated
         for m in msgs:
-            if "detailed" in str(m.content):
+            if m.role == "tool" and "detailed" in str(m.content):
                 self.assertIn("truncated", m.content)
 
     def test_skip_role(self):

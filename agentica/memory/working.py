@@ -101,21 +101,26 @@ def _clean_message_for_history(msg: Message) -> Message:
     return cleaned_msg
 
 
-def _is_conversation_message(msg: Message) -> bool:
-    """Check if a message is a user/assistant conversation message (not tool-related)."""
-    if msg.role == "tool":
+def _is_history_message(msg: Message) -> bool:
+    """Check if a message should be included in history for multi-turn conversations.
+
+    Includes tool-related messages (assistant tool_calls, tool responses) to preserve
+    tool call context across turns, preventing the model from forgetting tool usage.
+    """
+    if msg.role == "system":
         return False
-    if msg.role == "assistant" and msg.tool_calls:
-        return False
-    if msg.tool_call_id:
-        return False
-    if msg.role in ("user", "assistant") and msg.content:
+    if msg.role in ("user", "assistant", "tool"):
         return True
     return False
 
 
 def _truncate_tool_content(msg: Message, max_chars: int = 500) -> Message:
-    """Truncate long content in a message to save token space."""
+    """Truncate long content in tool response messages to save token space.
+
+    Only truncates tool role messages; user/assistant messages are kept intact.
+    """
+    if msg.role != "tool":
+        return msg
     if not msg.content or not isinstance(msg.content, str):
         return msg
     if len(msg.content) <= max_chars:
@@ -288,7 +293,7 @@ class WorkingMemory(BaseModel):
             if prev_run.response and prev_run.response.messages:
                 run_msgs = [
                     m for m in prev_run.response.messages
-                    if _is_conversation_message(m) and (not skip_role or m.role != skip_role)
+                    if _is_history_message(m) and (not skip_role or m.role != skip_role)
                 ]
                 cleaned = [_clean_message_for_history(m) for m in run_msgs]
                 if cleaned:
