@@ -1,0 +1,2280 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A lightweight, powerful Python framework for building autonomous AI agents">
+      
+      
+      
+        <link rel="canonical" href="https://shibing624.github.io/agentica/tests/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>Agentica 单元测试重构方案 - Agentica</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agentica" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="Agentica" class="md-header__button md-logo" aria-label="Agentica" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentica
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Agentica 单元测试重构方案
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/shibing624/agentica" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    shibing624/agentica
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../concepts/agent/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../guides/terminal/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/agent/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentica" class="md-nav__button md-logo" aria-label="Agentica" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentica
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/shibing624/agentica" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    shibing624/agentica
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Team & Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/terminal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Terminal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/rag/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RAG
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/best_practices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Best Practices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        一、现状分析
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="一、现状分析">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.1 当前测试覆盖情况
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1.2 关键缺口
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        二、测试架构设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="二、测试架构设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 统一规范
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 文件结构
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        三、新增测试用例详细设计
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="三、新增测试用例详细设计">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#30-conftestpy-fixtures" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.0 conftest.py — 共享 Fixtures
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#31-test_agent_corepy-agent-p0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 test_agent_core.py — Agent 四件套核心路径（P0）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-test_agent_streampy-p0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 test_agent_stream.py — 流式输出完整测试（P0）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-test_agent_tools_integrationpy-p0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 test_agent_tools_integration.py — 工具调用回路（P0）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-test_model_basepy-model-p0" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 test_model_base.py — Model 基类 + 并行工具执行（P0）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-test_agent_multimodalpy-p1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 test_agent_multimodal.py — 多模态输入（P1）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-test_model_providerspy-provider-p1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 test_model_providers.py — Provider 接口一致性（P1）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-test_promptspy-promptbuilder-p1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 test_prompts.py — PromptBuilder + 模块（P1）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-test_sessionpy-sessionmixin-async-p1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 test_session.py — SessionMixin async 持久化（P1）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-test_run_responsepy-runresponseruneventp1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 test_run_response.py — RunResponse/RunEvent（P1）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#310-test_workflow_advancedpy-workflow-p2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.10 test_workflow_advanced.py — Workflow 多步编排（P2）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#311-test_error_handlingpy-p2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.11 test_error_handling.py — 异常和恢复路径（P2）
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#312-test_lazy_loadingpy-__init__py-p2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.12 test_lazy_loading.py — __init__.py 懒加载（P2）
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        四、核心架构优势覆盖矩阵
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        五、执行策略
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="五、执行策略">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 优先级排序
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 现有测试处理
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-mock" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Mock 策略总结
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 运行命令
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        六、实际结果
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agentica">Agentica 单元测试重构方案<a class="headerlink" href="#agentica" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>目标：基于 async-first 架构，重新设计测试用例，覆盖框架核心优势和全部关键能力。</p>
+</blockquote>
+<p><strong>日期</strong>: 2026-02-12
+<strong>状态</strong>: 设计中
+<strong>基线</strong>: 当前 tests/ 共 23 个文件，~4849 行</p>
+<hr />
+<h2 id="_1">一、现状分析<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<h3 id="11">1.1 当前测试覆盖情况<a class="headerlink" href="#11" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>测试文件</th>
+<th>行数</th>
+<th>覆盖模块</th>
+<th>评估</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_agent.py</code></td>
+<td>315</td>
+<td>Agent 初始化、属性、超时</td>
+<td>初始化覆盖良好，<strong>缺少 run/run_stream 核心路径测试</strong></td>
+</tr>
+<tr>
+<td><code>test_async_tool.py</code></td>
+<td>219</td>
+<td>FunctionCall async execute</td>
+<td>基本覆盖，缺少并行执行测试</td>
+</tr>
+<tr>
+<td><code>test_agent_as_tool.py</code></td>
+<td>274</td>
+<td>Agent.as_tool()</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_workflow.py</code></td>
+<td>143</td>
+<td>Workflow 初始化和简单 run</td>
+<td><strong>缺少多步编排、错误处理</strong></td>
+</tr>
+<tr>
+<td><code>test_memory.py</code></td>
+<td>383</td>
+<td>AgentMemory, Memory, token 截断</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_memory_leak.py</code></td>
+<td>259</td>
+<td>weakref / GC 无泄漏</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_workspace.py</code></td>
+<td>267</td>
+<td>Workspace 文件读写、记忆</td>
+<td>覆盖良好，缺少并发安全测试</td>
+</tr>
+<tr>
+<td><code>test_sanitize_messages.py</code></td>
+<td>189</td>
+<td>Model.sanitize_messages</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_vision_history.py</code></td>
+<td>531</td>
+<td>多模态视觉历史清理</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_guardrails.py</code></td>
+<td>420</td>
+<td>输入/输出/工具守卫</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_cli.py</code></td>
+<td>130</td>
+<td>CLI 配置和导入</td>
+<td>仅配置测试，<strong>缺少交互流程</strong></td>
+</tr>
+<tr>
+<td><code>test_deep_agent.py</code></td>
+<td>187</td>
+<td>DeepAgent 初始化</td>
+<td>仅属性测试，<strong>缺少运行时行为</strong></td>
+</tr>
+<tr>
+<td><code>test_react_agent.py</code></td>
+<td>57</td>
+<td>Agent 基本 run</td>
+<td>过于简单</td>
+</tr>
+<tr>
+<td><code>test_llm.py</code></td>
+<td>30</td>
+<td>Model mock response</td>
+<td>过于简单</td>
+</tr>
+<tr>
+<td><code>test_patch_tool.py</code></td>
+<td>229</td>
+<td>PatchTool diff 应用</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_acp.py</code></td>
+<td>410</td>
+<td>ACP 协议类型和会话</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td><code>test_guardrails.py</code></td>
+<td>420</td>
+<td>Guardrails 装饰器和执行</td>
+<td>覆盖良好</td>
+</tr>
+<tr>
+<td>其他（5 个）</td>
+<td>~590</td>
+<td>外部工具/知识库</td>
+<td>需要外部依赖，保留</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12">1.2 关键缺口<a class="headerlink" href="#12" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>缺口</th>
+<th>优先级</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Agent.run() 完整路径</strong></td>
+<td>P0</td>
+<td>缺少 mock 模型下的完整 run/run_stream/run_sync/run_stream_sync 测试</td>
+</tr>
+<tr>
+<td><strong>并行工具执行</strong></td>
+<td>P0</td>
+<td><code>run_function_calls</code> 的 <code>asyncio.gather</code> 并行执行完全未测试</td>
+</tr>
+<tr>
+<td><strong>流式输出</strong></td>
+<td>P0</td>
+<td><code>run_stream()</code> / <code>run_stream_sync()</code> 未测试 chunk 正确性</td>
+</tr>
+<tr>
+<td><strong>多工具调用回路</strong></td>
+<td>P1</td>
+<td>模型返回 tool_calls → 执行工具 → 返回结果 → 模型再响应的完整循环</td>
+</tr>
+<tr>
+<td><strong>Model 基类</strong></td>
+<td>P1</td>
+<td><code>response()</code>/<code>response_stream()</code> 抽象接口、<code>add_tool()</code>、<code>get_tools_for_api()</code></td>
+</tr>
+<tr>
+<td><strong>PromptsMixin</strong></td>
+<td>P1</td>
+<td><code>get_system_message()</code> 和 <code>get_messages_for_run()</code> 的 async 路径</td>
+</tr>
+<tr>
+<td><strong>SessionMixin</strong></td>
+<td>P1</td>
+<td><code>read_from_storage()</code>/<code>write_to_storage()</code> 的 async 路径</td>
+</tr>
+<tr>
+<td><strong>多模态输入</strong></td>
+<td>P1</td>
+<td>images/audio/videos 参数传递和消息构建</td>
+</tr>
+<tr>
+<td><strong>RunResponse 事件流</strong></td>
+<td>P1</td>
+<td>RunEvent 枚举在流式场景下的完整性</td>
+</tr>
+<tr>
+<td><strong>Workflow 多步</strong></td>
+<td>P2</td>
+<td>多 Agent 编排、步骤间状态传递</td>
+</tr>
+<tr>
+<td><strong>错误恢复</strong></td>
+<td>P2</td>
+<td>工具异常 (StopAgentRun/RetryAgentRun)、模型超时、网络异常</td>
+</tr>
+<tr>
+<td><strong><code>__init__.py</code> 懒加载</strong></td>
+<td>P2</td>
+<td>线程安全懒加载、模块不存在时 fallback</td>
+</tr>
+<tr>
+<td><strong>Prompt 模块</strong></td>
+<td>P3</td>
+<td>PromptBuilder 组装、各模块 MD 加载</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_2">二、测试架构设计<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<h3 id="21">2.1 统一规范<a class="headerlink" href="#21" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 所有新测试统一使用 pytest + pytest-asyncio</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="kn">from</span><span class="w"> </span><span class="nn">unittest.mock</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncMock</span><span class="p">,</span> <span class="n">MagicMock</span><span class="p">,</span> <span class="n">patch</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># 异步测试标记</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">asyncio</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_example</span><span class="p">():</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>    <span class="o">...</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># 同步测试不需要标记</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="k">def</span><span class="w"> </span><span class="nf">test_sync_example</span><span class="p">():</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>    <span class="o">...</span>
+</code></pre></div>
+<p><strong>命名规范</strong>：
+- 文件：<code>test_{module}.py</code>
+- 类：<code>Test{Module}{Feature}</code>（可选，用 class 分组相关测试）
+- 方法：<code>test_{action}_{scenario}_{expected_result}</code></p>
+<p><strong>Mock 策略</strong>：
+- Model 层：统一使用 <code>AsyncMock</code> mock <code>response()</code> / <code>response_stream()</code>
+- 工具层：真实执行简单函数，mock 外部依赖
+- DB/文件 I/O：使用 <code>tempfile</code> + <code>shutil.rmtree</code> 清理</p>
+<h3 id="22">2.2 文件结构<a class="headerlink" href="#22" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>tests/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── conftest.py                      # 共享 fixtures（mock model、mock agent 等）
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>├── test_agent_core.py               # [新] Agent 四件套核心路径
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── test_agent_stream.py             # [新] 流式输出完整测试
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>├── test_agent_tools_integration.py  # [新] 工具调用回路（mock LLM）
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>├── test_agent_multimodal.py         # [新] 多模态输入（images/audio/videos）
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>├── test_model_base.py               # [新] Model 基类 + 并行工具执行
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>├── test_model_providers.py          # [新] 各 Provider 接口一致性
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>├── test_prompts.py                  # [新] PromptBuilder + 各模块
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>├── test_session.py                  # [新] SessionMixin async 持久化
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>├── test_run_response.py             # [新] RunResponse/RunEvent 序列化
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>├── test_workflow_advanced.py        # [新] Workflow 多步编排
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>├── test_lazy_loading.py             # [新] __init__.py 懒加载
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>├── test_error_handling.py           # [新] 异常和恢复路径
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>├── test_agent.py                    # [保留] Agent 初始化和属性
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>├── test_async_tool.py               # [保留] 工具 async execute
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>├── test_agent_as_tool.py            # [保留] Agent.as_tool()
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>├── test_memory.py                   # [保留] AgentMemory
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>├── test_memory_leak.py              # [保留] weakref / GC
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>├── test_workspace.py                # [保留] Workspace 文件操作
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>├── test_sanitize_messages.py        # [保留] sanitize_messages
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>├── test_vision_history.py           # [保留] 多模态视觉历史
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>├── test_guardrails.py               # [保留] 守卫系统
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>├── test_patch_tool.py               # [保留] PatchTool
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>├── test_acp.py                      # [保留] ACP 协议
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>├── test_cli.py                      # [保留] CLI 配置
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>├── test_deep_agent.py               # [保留+增强] DeepAgent
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>└── ...                              # 其他外部工具测试保留
+</code></pre></div>
+<hr />
+<h2 id="_3">三、新增测试用例详细设计<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<h3 id="30-conftestpy-fixtures">3.0 conftest.py — 共享 Fixtures<a class="headerlink" href="#30-conftestpy-fixtures" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># tests/conftest.py</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="sd">&quot;&quot;&quot;Shared fixtures for all test modules.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="kn">from</span><span class="w"> </span><span class="nn">unittest.mock</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncMock</span><span class="p">,</span> <span class="n">MagicMock</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.agent</span><span class="w"> </span><span class="kn">import</span> <span class="n">Agent</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.model.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Model</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.model.message</span><span class="w"> </span><span class="kn">import</span> <span class="n">Message</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.model.response</span><span class="w"> </span><span class="kn">import</span> <span class="n">ModelResponse</span><span class="p">,</span> <span class="n">ModelResponseEvent</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.run_response</span><span class="w"> </span><span class="kn">import</span> <span class="n">RunResponse</span><span class="p">,</span> <span class="n">RunEvent</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.tools.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Function</span><span class="p">,</span> <span class="n">FunctionCall</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="k">def</span><span class="w"> </span><span class="nf">mock_model</span><span class="p">():</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a mock Model that returns a simple text response.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>    <span class="n">model</span> <span class="o">=</span> <span class="n">MagicMock</span><span class="p">(</span><span class="n">spec</span><span class="o">=</span><span class="n">Model</span><span class="p">)</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>    <span class="n">model</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="s2">&quot;mock-model&quot;</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="n">model</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;MockModel&quot;</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="n">model</span><span class="o">.</span><span class="n">provider</span> <span class="o">=</span> <span class="s2">&quot;mock&quot;</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>    <span class="n">model</span><span class="o">.</span><span class="n">tools</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>    <span class="n">model</span><span class="o">.</span><span class="n">functions</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>    <span class="n">model</span><span class="o">.</span><span class="n">function_call_stack</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="n">model</span><span class="o">.</span><span class="n">run_tools</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>    <span class="n">model</span><span class="o">.</span><span class="n">tool_call_limit</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>    <span class="n">model</span><span class="o">.</span><span class="n">system_prompt</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    <span class="n">model</span><span class="o">.</span><span class="n">instructions</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    <span class="n">model</span><span class="o">.</span><span class="n">structured_outputs</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>    <span class="n">model</span><span class="o">.</span><span class="n">supports_structured_outputs</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>    <span class="n">model</span><span class="o">.</span><span class="n">context_window</span> <span class="o">=</span> <span class="mi">128000</span>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    <span class="n">model</span><span class="o">.</span><span class="n">max_output_tokens</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>    <span class="c1"># Default async response</span>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>    <span class="n">mock_resp</span> <span class="o">=</span> <span class="n">ModelResponse</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="s2">&quot;Hello from mock model!&quot;</span><span class="p">)</span>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a>    <span class="n">model</span><span class="o">.</span><span class="n">response</span> <span class="o">=</span> <span class="n">AsyncMock</span><span class="p">(</span><span class="n">return_value</span><span class="o">=</span><span class="n">mock_resp</span><span class="p">)</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a>    <span class="n">model</span><span class="o">.</span><span class="n">response_stream</span> <span class="o">=</span> <span class="n">AsyncMock</span><span class="p">()</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a>    <span class="n">model</span><span class="o">.</span><span class="n">get_tools_for_api</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>    <span class="n">model</span><span class="o">.</span><span class="n">add_tool</span> <span class="o">=</span> <span class="n">MagicMock</span><span class="p">()</span>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>    <span class="n">model</span><span class="o">.</span><span class="n">sanitize_messages</span> <span class="o">=</span> <span class="n">Model</span><span class="o">.</span><span class="n">sanitize_messages</span>  <span class="c1"># Use real impl</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>    <span class="n">model</span><span class="o">.</span><span class="n">to_dict</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;mock-model&quot;</span><span class="p">}</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    <span class="k">return</span> <span class="n">model</span>
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a>
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a>
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<a id="__codelineno-2-45" name="__codelineno-2-45" href="#__codelineno-2-45"></a><span class="k">def</span><span class="w"> </span><span class="nf">mock_model_with_tools</span><span class="p">():</span>
+<a id="__codelineno-2-46" name="__codelineno-2-46" href="#__codelineno-2-46"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a mock Model that returns tool_calls on first response,</span>
+<a id="__codelineno-2-47" name="__codelineno-2-47" href="#__codelineno-2-47"></a><span class="sd">    then text on second response (simulating a tool-call round trip).&quot;&quot;&quot;</span>
+<a id="__codelineno-2-48" name="__codelineno-2-48" href="#__codelineno-2-48"></a>    <span class="n">model</span> <span class="o">=</span> <span class="n">MagicMock</span><span class="p">(</span><span class="n">spec</span><span class="o">=</span><span class="n">Model</span><span class="p">)</span>
+<a id="__codelineno-2-49" name="__codelineno-2-49" href="#__codelineno-2-49"></a>    <span class="n">model</span><span class="o">.</span><span class="n">id</span> <span class="o">=</span> <span class="s2">&quot;mock-tool-model&quot;</span>
+<a id="__codelineno-2-50" name="__codelineno-2-50" href="#__codelineno-2-50"></a>    <span class="n">model</span><span class="o">.</span><span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;MockToolModel&quot;</span>
+<a id="__codelineno-2-51" name="__codelineno-2-51" href="#__codelineno-2-51"></a>    <span class="n">model</span><span class="o">.</span><span class="n">provider</span> <span class="o">=</span> <span class="s2">&quot;mock&quot;</span>
+<a id="__codelineno-2-52" name="__codelineno-2-52" href="#__codelineno-2-52"></a>    <span class="n">model</span><span class="o">.</span><span class="n">tools</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-2-53" name="__codelineno-2-53" href="#__codelineno-2-53"></a>    <span class="n">model</span><span class="o">.</span><span class="n">functions</span> <span class="o">=</span> <span class="p">{}</span>
+<a id="__codelineno-2-54" name="__codelineno-2-54" href="#__codelineno-2-54"></a>    <span class="n">model</span><span class="o">.</span><span class="n">function_call_stack</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-55" name="__codelineno-2-55" href="#__codelineno-2-55"></a>    <span class="n">model</span><span class="o">.</span><span class="n">run_tools</span> <span class="o">=</span> <span class="kc">True</span>
+<a id="__codelineno-2-56" name="__codelineno-2-56" href="#__codelineno-2-56"></a>    <span class="n">model</span><span class="o">.</span><span class="n">tool_call_limit</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-57" name="__codelineno-2-57" href="#__codelineno-2-57"></a>    <span class="n">model</span><span class="o">.</span><span class="n">system_prompt</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-58" name="__codelineno-2-58" href="#__codelineno-2-58"></a>    <span class="n">model</span><span class="o">.</span><span class="n">instructions</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-59" name="__codelineno-2-59" href="#__codelineno-2-59"></a>    <span class="n">model</span><span class="o">.</span><span class="n">structured_outputs</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-60" name="__codelineno-2-60" href="#__codelineno-2-60"></a>    <span class="n">model</span><span class="o">.</span><span class="n">supports_structured_outputs</span> <span class="o">=</span> <span class="kc">False</span>
+<a id="__codelineno-2-61" name="__codelineno-2-61" href="#__codelineno-2-61"></a>    <span class="n">model</span><span class="o">.</span><span class="n">context_window</span> <span class="o">=</span> <span class="mi">128000</span>
+<a id="__codelineno-2-62" name="__codelineno-2-62" href="#__codelineno-2-62"></a>    <span class="n">model</span><span class="o">.</span><span class="n">max_output_tokens</span> <span class="o">=</span> <span class="kc">None</span>
+<a id="__codelineno-2-63" name="__codelineno-2-63" href="#__codelineno-2-63"></a>    <span class="n">model</span><span class="o">.</span><span class="n">get_tools_for_api</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-2-64" name="__codelineno-2-64" href="#__codelineno-2-64"></a>    <span class="n">model</span><span class="o">.</span><span class="n">add_tool</span> <span class="o">=</span> <span class="n">MagicMock</span><span class="p">()</span>
+<a id="__codelineno-2-65" name="__codelineno-2-65" href="#__codelineno-2-65"></a>    <span class="n">model</span><span class="o">.</span><span class="n">sanitize_messages</span> <span class="o">=</span> <span class="n">Model</span><span class="o">.</span><span class="n">sanitize_messages</span>
+<a id="__codelineno-2-66" name="__codelineno-2-66" href="#__codelineno-2-66"></a>    <span class="n">model</span><span class="o">.</span><span class="n">to_dict</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;id&quot;</span><span class="p">:</span> <span class="s2">&quot;mock-tool-model&quot;</span><span class="p">}</span>
+<a id="__codelineno-2-67" name="__codelineno-2-67" href="#__codelineno-2-67"></a>    <span class="k">return</span> <span class="n">model</span>
+<a id="__codelineno-2-68" name="__codelineno-2-68" href="#__codelineno-2-68"></a>
+<a id="__codelineno-2-69" name="__codelineno-2-69" href="#__codelineno-2-69"></a>
+<a id="__codelineno-2-70" name="__codelineno-2-70" href="#__codelineno-2-70"></a><span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
+<a id="__codelineno-2-71" name="__codelineno-2-71" href="#__codelineno-2-71"></a><span class="k">def</span><span class="w"> </span><span class="nf">simple_agent</span><span class="p">(</span><span class="n">mock_model</span><span class="p">):</span>
+<a id="__codelineno-2-72" name="__codelineno-2-72" href="#__codelineno-2-72"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a simple Agent with a mock model.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-73" name="__codelineno-2-73" href="#__codelineno-2-73"></a>    <span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;TestAgent&quot;</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="n">mock_model</span><span class="p">)</span>
+<a id="__codelineno-2-74" name="__codelineno-2-74" href="#__codelineno-2-74"></a>    <span class="k">return</span> <span class="n">agent</span>
+<a id="__codelineno-2-75" name="__codelineno-2-75" href="#__codelineno-2-75"></a>
+<a id="__codelineno-2-76" name="__codelineno-2-76" href="#__codelineno-2-76"></a>
+<a id="__codelineno-2-77" name="__codelineno-2-77" href="#__codelineno-2-77"></a><span class="k">def</span><span class="w"> </span><span class="nf">make_sync_tool</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;add&quot;</span><span class="p">):</span>
+<a id="__codelineno-2-78" name="__codelineno-2-78" href="#__codelineno-2-78"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a simple sync tool function.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-79" name="__codelineno-2-79" href="#__codelineno-2-79"></a>    <span class="k">def</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="n">a</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">b</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-2-80" name="__codelineno-2-80" href="#__codelineno-2-80"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Add two numbers.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-81" name="__codelineno-2-81" href="#__codelineno-2-81"></a>        <span class="k">return</span> <span class="nb">str</span><span class="p">(</span><span class="n">a</span> <span class="o">+</span> <span class="n">b</span><span class="p">)</span>
+<a id="__codelineno-2-82" name="__codelineno-2-82" href="#__codelineno-2-82"></a>    <span class="n">add</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="n">name</span>
+<a id="__codelineno-2-83" name="__codelineno-2-83" href="#__codelineno-2-83"></a>    <span class="k">return</span> <span class="n">add</span>
+<a id="__codelineno-2-84" name="__codelineno-2-84" href="#__codelineno-2-84"></a>
+<a id="__codelineno-2-85" name="__codelineno-2-85" href="#__codelineno-2-85"></a>
+<a id="__codelineno-2-86" name="__codelineno-2-86" href="#__codelineno-2-86"></a><span class="k">def</span><span class="w"> </span><span class="nf">make_async_tool</span><span class="p">(</span><span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;async_search&quot;</span><span class="p">):</span>
+<a id="__codelineno-2-87" name="__codelineno-2-87" href="#__codelineno-2-87"></a><span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a simple async tool function.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-88" name="__codelineno-2-88" href="#__codelineno-2-88"></a>    <span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span>
+<a id="__codelineno-2-89" name="__codelineno-2-89" href="#__codelineno-2-89"></a>    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">async_search</span><span class="p">(</span><span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<a id="__codelineno-2-90" name="__codelineno-2-90" href="#__codelineno-2-90"></a><span class="w">        </span><span class="sd">&quot;&quot;&quot;Search for something.&quot;&quot;&quot;</span>
+<a id="__codelineno-2-91" name="__codelineno-2-91" href="#__codelineno-2-91"></a>        <span class="k">await</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.01</span><span class="p">)</span>
+<a id="__codelineno-2-92" name="__codelineno-2-92" href="#__codelineno-2-92"></a>        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Result for: </span><span class="si">{</span><span class="n">query</span><span class="si">}</span><span class="s2">&quot;</span>
+<a id="__codelineno-2-93" name="__codelineno-2-93" href="#__codelineno-2-93"></a>    <span class="n">async_search</span><span class="o">.</span><span class="vm">__name__</span> <span class="o">=</span> <span class="n">name</span>
+<a id="__codelineno-2-94" name="__codelineno-2-94" href="#__codelineno-2-94"></a>    <span class="k">return</span> <span class="n">async_search</span>
+</code></pre></div>
+<h3 id="31-test_agent_corepy-agent-p0">3.1 test_agent_core.py — Agent 四件套核心路径（P0）<a class="headerlink" href="#31-test_agent_corepy-agent-p0" title="Permanent link">&para;</a></h3>
+<p>覆盖 <strong>async-first 架构的核心优势</strong>：<code>run()</code> / <code>run_stream()</code> / <code>run_sync()</code> / <code>run_stream_sync()</code>。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>TestAgentRun
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>├── test_run_async_returns_run_response          # await agent.run(&quot;Hello&quot;) 返回 RunResponse
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>├── test_run_async_content_matches_model_output   # content 与 model.response 一致
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>├── test_run_async_populates_run_id               # run_id 自动生成
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>├── test_run_async_populates_session_id           # session_id 正确传递
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>├── test_run_async_populates_agent_id             # agent_id 正确传递
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>├── test_run_async_populates_model_id             # model 字段正确设置
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>├── test_run_async_with_message_object            # 传入 Message 对象
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>├── test_run_async_with_dict_message              # 传入 dict 消息
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>├── test_run_async_with_messages_list             # 传入 messages 列表
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>├── test_run_async_no_message_no_error            # 空消息不报错
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a>├── test_run_async_with_images                    # 带 images 参数
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>├── test_run_async_with_audio                     # 带 audio 参数
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a>├── test_run_async_with_videos                    # 带 videos 参数
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a>├── test_run_async_stores_in_memory               # 运行后 memory.runs 增加
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>├── test_run_async_history_messages               # add_history_to_messages=True 时历史消息传给 model
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>TestAgentRunSync
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a>├── test_run_sync_returns_run_response            # run_sync 返回与 run 相同结果
+<a id="__codelineno-3-20" name="__codelineno-3-20" href="#__codelineno-3-20"></a>├── test_run_sync_bridges_to_async_run            # run_sync 内部调用 async run
+<a id="__codelineno-3-21" name="__codelineno-3-21" href="#__codelineno-3-21"></a>├── test_run_sync_works_without_event_loop        # 在无事件循环的同步上下文中正常工作
+<a id="__codelineno-3-22" name="__codelineno-3-22" href="#__codelineno-3-22"></a>├── test_run_sync_with_all_params                 # run_sync 支持完整参数传递
+<a id="__codelineno-3-23" name="__codelineno-3-23" href="#__codelineno-3-23"></a>
+<a id="__codelineno-3-24" name="__codelineno-3-24" href="#__codelineno-3-24"></a>TestAgentRunStream
+<a id="__codelineno-3-25" name="__codelineno-3-25" href="#__codelineno-3-25"></a>├── test_run_stream_yields_multiple_chunks        # run_stream 产生多个 chunk
+<a id="__codelineno-3-26" name="__codelineno-3-26" href="#__codelineno-3-26"></a>├── test_run_stream_first_chunk_has_event         # 每个 chunk 有正确的 event
+<a id="__codelineno-3-27" name="__codelineno-3-27" href="#__codelineno-3-27"></a>├── test_run_stream_final_content_complete        # 最终拼接内容与完整响应一致
+<a id="__codelineno-3-28" name="__codelineno-3-28" href="#__codelineno-3-28"></a>├── test_run_stream_intermediate_steps            # stream_intermediate_steps=True 时产生额外事件
+<a id="__codelineno-3-29" name="__codelineno-3-29" href="#__codelineno-3-29"></a>
+<a id="__codelineno-3-30" name="__codelineno-3-30" href="#__codelineno-3-30"></a>TestAgentRunStreamSync
+<a id="__codelineno-3-31" name="__codelineno-3-31" href="#__codelineno-3-31"></a>├── test_run_stream_sync_returns_iterator         # 返回同步 Iterator
+<a id="__codelineno-3-32" name="__codelineno-3-32" href="#__codelineno-3-32"></a>├── test_run_stream_sync_yields_chunks            # 产生与 run_stream 相同的 chunk
+<a id="__codelineno-3-33" name="__codelineno-3-33" href="#__codelineno-3-33"></a>├── test_run_stream_sync_in_for_loop              # 可在普通 for 循环中使用
+<a id="__codelineno-3-34" name="__codelineno-3-34" href="#__codelineno-3-34"></a>├── test_run_stream_sync_thread_safe              # 后台线程模式安全退出
+<a id="__codelineno-3-35" name="__codelineno-3-35" href="#__codelineno-3-35"></a>
+<a id="__codelineno-3-36" name="__codelineno-3-36" href="#__codelineno-3-36"></a>TestAgentTimeout
+<a id="__codelineno-3-37" name="__codelineno-3-37" href="#__codelineno-3-37"></a>├── test_run_timeout_triggers_timeout_event        # [现有] 保留增强
+<a id="__codelineno-3-38" name="__codelineno-3-38" href="#__codelineno-3-38"></a>├── test_first_token_timeout_in_stream             # [现有] 保留增强
+<a id="__codelineno-3-39" name="__codelineno-3-39" href="#__codelineno-3-39"></a>├── test_run_timeout_in_stream                     # [现有] 保留增强
+<a id="__codelineno-3-40" name="__codelineno-3-40" href="#__codelineno-3-40"></a>├── test_run_timeout_returns_partial_content        # 超时前的部分内容被保留
+</code></pre></div>
+<h3 id="32-test_agent_streampy-p0">3.2 test_agent_stream.py — 流式输出完整测试（P0）<a class="headerlink" href="#32-test_agent_streampy-p0" title="Permanent link">&para;</a></h3>
+<p>覆盖 streaming 的 <strong>RunEvent 状态机</strong>。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>TestStreamEvents
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>├── test_stream_emits_run_started                 # 第一个 event 为 RunStarted
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>├── test_stream_emits_run_response_for_content    # 内容 chunk 为 RunResponse event
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>├── test_stream_emits_tool_call_started           # 工具开始时发出 ToolCallStarted
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>├── test_stream_emits_tool_call_completed         # 工具完成时发出 ToolCallCompleted
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>├── test_stream_emits_run_completed               # 最后一个 event 为 RunCompleted
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>├── test_stream_reasoning_events                  # 推理内容产生 ReasoningStarted/Step/Completed
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>TestStreamContent
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>├── test_stream_content_accumulates               # 多个 chunk 的 content 拼接后等于完整响应
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>├── test_stream_reasoning_content_separate        # reasoning_content 与 content 分离
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>├── test_stream_empty_content_skipped             # 空 content chunk 不产生输出
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>TestStreamToolCalls
+<a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>├── test_stream_tool_call_then_text               # 工具调用后继续输出文本
+<a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>├── test_stream_multiple_tool_calls               # 多个工具调用在流中正确报告
+<a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>├── test_stream_tool_error_reported               # 工具失败在流中报告
+<a id="__codelineno-4-18" name="__codelineno-4-18" href="#__codelineno-4-18"></a>
+<a id="__codelineno-4-19" name="__codelineno-4-19" href="#__codelineno-4-19"></a>TestStreamSync
+<a id="__codelineno-4-20" name="__codelineno-4-20" href="#__codelineno-4-20"></a>├── test_stream_sync_matches_async                # run_stream_sync 输出与 run_stream 一致
+<a id="__codelineno-4-21" name="__codelineno-4-21" href="#__codelineno-4-21"></a>├── test_stream_sync_queue_backpressure           # 后台线程产生速度 &gt; 消费速度时不丢数据
+</code></pre></div>
+<h3 id="33-test_agent_tools_integrationpy-p0">3.3 test_agent_tools_integration.py — 工具调用回路（P0）<a class="headerlink" href="#33-test_agent_tools_integrationpy-p0" title="Permanent link">&para;</a></h3>
+<p>覆盖 Agent + Model + Tool 的<strong>完整调用链</strong>（mock LLM，真实工具执行）。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>TestSingleToolCall
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>├── test_sync_tool_called_and_result_returned     # 同步工具正确执行，结果送回 model
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>├── test_async_tool_called_and_result_returned    # 异步工具正确执行
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>├── test_tool_result_in_final_response            # 最终 RunResponse 包含工具调用信息
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>├── test_tool_call_metrics_recorded               # 工具执行时间被记录
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>TestMultipleToolCalls
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>├── test_parallel_tools_executed_concurrently     # 多工具并行执行（验证时间 &lt; 串行时间）
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>├── test_parallel_tools_results_ordered           # 并行执行结果按原始顺序返回
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>├── test_parallel_mixed_sync_async_tools          # 混合 sync/async 工具并行执行
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>├── test_tool_call_limit_respected                # tool_call_limit 限制生效
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>TestToolErrors
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>├── test_tool_exception_sets_error_field          # 工具抛异常时 FunctionCall.error 被设置
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>├── test_tool_exception_does_not_crash_agent      # 工具异常不导致 Agent 崩溃
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>├── test_stop_agent_run_stops_execution           # StopAgentRun 终止执行
+<a id="__codelineno-5-17" name="__codelineno-5-17" href="#__codelineno-5-17"></a>├── test_retry_agent_run_triggers_retry           # RetryAgentRun 触发重试
+<a id="__codelineno-5-18" name="__codelineno-5-18" href="#__codelineno-5-18"></a>├── test_partial_tool_failure_others_succeed      # 部分工具失败不影响其他工具
+<a id="__codelineno-5-19" name="__codelineno-5-19" href="#__codelineno-5-19"></a>
+<a id="__codelineno-5-20" name="__codelineno-5-20" href="#__codelineno-5-20"></a>TestToolHooks
+<a id="__codelineno-5-21" name="__codelineno-5-21" href="#__codelineno-5-21"></a>├── test_pre_hook_called_before_execution         # pre_hook 在工具执行前调用
+<a id="__codelineno-5-22" name="__codelineno-5-22" href="#__codelineno-5-22"></a>├── test_post_hook_called_after_execution         # post_hook 在工具执行后调用
+<a id="__codelineno-5-23" name="__codelineno-5-23" href="#__codelineno-5-23"></a>├── test_async_pre_hook_with_sync_tool            # async pre_hook + sync 工具
+<a id="__codelineno-5-24" name="__codelineno-5-24" href="#__codelineno-5-24"></a>├── test_sync_pre_hook_with_async_tool            # [现有] sync pre_hook + async 工具
+<a id="__codelineno-5-25" name="__codelineno-5-25" href="#__codelineno-5-25"></a>
+<a id="__codelineno-5-26" name="__codelineno-5-26" href="#__codelineno-5-26"></a>TestToolCallRoundTrip
+<a id="__codelineno-5-27" name="__codelineno-5-27" href="#__codelineno-5-27"></a>├── test_model_returns_tool_call_agent_executes   # model 返回 tool_calls → agent 执行 → 结果送回
+<a id="__codelineno-5-28" name="__codelineno-5-28" href="#__codelineno-5-28"></a>├── test_multi_round_tool_calls                   # 多轮工具调用（model 连续请求工具）
+<a id="__codelineno-5-29" name="__codelineno-5-29" href="#__codelineno-5-29"></a>├── test_tool_call_with_streaming                 # 流式模式下的工具调用
+</code></pre></div>
+<h3 id="34-test_model_basepy-model-p0">3.4 test_model_base.py — Model 基类 + 并行工具执行（P0）<a class="headerlink" href="#34-test_model_basepy-model-p0" title="Permanent link">&para;</a></h3>
+<p>覆盖 <strong>asyncio.gather 并行执行</strong> 这一核心架构优势。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>TestModelInterface
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>├── test_invoke_is_async                          # invoke() 是 coroutine
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>├── test_invoke_stream_is_async                   # invoke_stream() 是 coroutine
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>├── test_response_is_async                        # response() 是 coroutine
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>├── test_response_stream_is_async                 # response_stream() 是 coroutine
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>├── test_no_sync_response_method                  # 不存在同步的 response 方法
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>├── test_no_a_prefix_methods                      # 不存在 arun/aresponse/ainvoke 等旧方法
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>TestModelAddTool
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>├── test_add_callable_tool                        # add_tool(callable) 正确注册
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>├── test_add_tool_class                           # add_tool(Tool) 正确注册
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a>├── test_add_function_object                      # add_tool(Function) 正确注册
+<a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>├── test_add_dict_tool                            # add_tool(dict) 作为 raw schema
+<a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>├── test_duplicate_tool_deduplicated              # 同名工具不重复注册
+<a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>├── test_get_tools_for_api_format                 # get_tools_for_api() 返回 OpenAI 格式
+<a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>
+<a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>TestRunFunctionCalls
+<a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>├── test_single_tool_execution                    # 单个工具正确执行
+<a id="__codelineno-6-19" name="__codelineno-6-19" href="#__codelineno-6-19"></a>├── test_parallel_execution_faster_than_serial    # N 个 sleep(0.1) 工具并行 &lt; N*0.1s
+<a id="__codelineno-6-20" name="__codelineno-6-20" href="#__codelineno-6-20"></a>├── test_parallel_execution_preserves_order       # 结果顺序与输入顺序一致
+<a id="__codelineno-6-21" name="__codelineno-6-21" href="#__codelineno-6-21"></a>├── test_tool_started_events_emitted_first        # 先发出所有 started 事件，再执行
+<a id="__codelineno-6-22" name="__codelineno-6-22" href="#__codelineno-6-22"></a>├── test_tool_completed_events_in_order           # completed 事件按顺序发出
+<a id="__codelineno-6-23" name="__codelineno-6-23" href="#__codelineno-6-23"></a>├── test_tool_exception_isolated                  # 单个工具异常不取消其他工具
+<a id="__codelineno-6-24" name="__codelineno-6-24" href="#__codelineno-6-24"></a>├── test_tool_call_exception_propagated           # ToolCallException 向上传播
+<a id="__codelineno-6-25" name="__codelineno-6-25" href="#__codelineno-6-25"></a>├── test_function_call_stack_tracked              # function_call_stack 正确记录
+<a id="__codelineno-6-26" name="__codelineno-6-26" href="#__codelineno-6-26"></a>
+<a id="__codelineno-6-27" name="__codelineno-6-27" href="#__codelineno-6-27"></a>TestSanitizeMessages
+<a id="__codelineno-6-28" name="__codelineno-6-28" href="#__codelineno-6-28"></a>├── [现有 test_sanitize_messages.py 的全部用例保留]
+</code></pre></div>
+<h3 id="35-test_agent_multimodalpy-p1">3.5 test_agent_multimodal.py — 多模态输入（P1）<a class="headerlink" href="#35-test_agent_multimodalpy-p1" title="Permanent link">&para;</a></h3>
+<p>覆盖 <strong>images / audio / videos</strong> 参数在整个链路中的传递。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>TestImageInput
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>├── test_run_with_single_image_url                # 单个 URL 图片
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>├── test_run_with_base64_image                    # base64 编码图片
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>├── test_run_with_multiple_images                 # 多张图片
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>├── test_image_added_to_user_message_content      # 图片被添加到 user message 的 content 列表
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>├── test_image_history_cleanup                    # [整合现有] 历史中 base64 被清理
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>TestAudioInput
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>├── test_run_with_audio_parameter                 # 音频参数传递
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>├── test_audio_message_format                     # 音频消息格式正确
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a>├── test_audio_history_cleanup                    # 历史中音频数据被清理
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>TestVideoInput
+<a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a>├── test_run_with_video_parameter                 # 视频参数传递
+<a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>├── test_video_message_format                     # 视频消息格式正确
+<a id="__codelineno-7-16" name="__codelineno-7-16" href="#__codelineno-7-16"></a>
+<a id="__codelineno-7-17" name="__codelineno-7-17" href="#__codelineno-7-17"></a>TestMultimodalCombined
+<a id="__codelineno-7-18" name="__codelineno-7-18" href="#__codelineno-7-18"></a>├── test_text_and_image_combined                  # 文本 + 图片组合
+<a id="__codelineno-7-19" name="__codelineno-7-19" href="#__codelineno-7-19"></a>├── test_text_image_audio_combined                # 文本 + 图片 + 音频组合
+<a id="__codelineno-7-20" name="__codelineno-7-20" href="#__codelineno-7-20"></a>├── test_multimodal_in_stream_mode                # 流式模式下的多模态
+<a id="__codelineno-7-21" name="__codelineno-7-21" href="#__codelineno-7-21"></a>├── test_multimodal_history_multi_turn            # 多轮对话中的多模态历史
+</code></pre></div>
+<h3 id="36-test_model_providerspy-provider-p1">3.6 test_model_providers.py — Provider 接口一致性（P1）<a class="headerlink" href="#36-test_model_providerspy-provider-p1" title="Permanent link">&para;</a></h3>
+<p>验证各 Provider 都实现了相同的 async-only 接口。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>TestProviderInterface
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>├── test_openai_chat_has_async_response           # OpenAIChat.response 是 async
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>├── test_openai_chat_has_async_response_stream    # OpenAIChat.response_stream 是 async
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>├── test_openai_chat_has_async_invoke             # OpenAIChat.invoke 是 async
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>├── test_openai_like_inherits_interface           # OpenAILike 继承 OpenAIChat 接口
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>├── test_claude_has_async_response                # Claude.response 是 async
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>├── test_gemini_has_async_response                # Gemini.response 是 async
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>├── test_ollama_has_async_response                # OllamaChat.response 是 async
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>├── test_groq_has_async_response                  # GroqChat.response 是 async
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>├── test_all_providers_no_sync_response           # 所有 provider 无同步 response 方法
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a>├── test_all_providers_use_override_decorator     # 所有 provider 方法使用 @override
+</code></pre></div>
+<h3 id="37-test_promptspy-promptbuilder-p1">3.7 test_prompts.py — PromptBuilder + 模块（P1）<a class="headerlink" href="#37-test_promptspy-promptbuilder-p1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>TestPromptBuilder
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── test_builder_default_modules                  # 默认加载所有基础模块
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── test_builder_custom_modules                   # 自定义模块列表
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>├── test_builder_build_produces_string            # build() 返回非空字符串
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>├── test_builder_includes_soul                    # 包含 soul 模块内容
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>├── test_builder_includes_tools_when_present      # 有工具时包含 tools 模块
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>├── test_builder_includes_heartbeat               # 包含 heartbeat 模块
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>TestPromptModules
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>├── test_load_prompt_reads_md_file                # load_prompt() 正确加载 .md 文件
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>├── test_soul_module_content                      # soul 模块返回有效内容
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>├── test_tools_module_content                     # tools 模块返回有效内容
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>├── test_task_management_module_content            # task_management 模块返回有效内容
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>├── test_self_verification_module_content          # self_verification 模块返回有效内容
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a>TestGetSystemMessage
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>├── test_system_message_includes_instructions     # instructions 被包含在系统消息中
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>├── test_system_message_includes_datetime         # add_datetime_to_instructions 生效
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>├── test_system_message_includes_workspace        # workspace context 被包含
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>├── test_system_message_callable_prompt           # callable system_prompt 被调用
+</code></pre></div>
+<h3 id="38-test_sessionpy-sessionmixin-async-p1">3.8 test_session.py — SessionMixin async 持久化（P1）<a class="headerlink" href="#38-test_sessionpy-sessionmixin-async-p1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>TestSessionPersistence
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>├── test_read_from_storage_no_db_noop             # 无 db 时 read_from_storage 不报错
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>├── test_write_to_storage_no_db_noop              # 无 db 时 write_to_storage 不报错
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>├── test_read_from_storage_async                  # read_from_storage 是 async
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>├── test_write_to_storage_async                   # write_to_storage 是 async
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>├── test_load_session_creates_new_if_not_exist    # load_session 创建新会话
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>├── test_session_state_persisted_across_runs      # session_state 跨 run 持久化
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>├── test_generate_session_name_async              # generate_session_name 是 async
+</code></pre></div>
+<h3 id="39-test_run_responsepy-runresponseruneventp1">3.9 test_run_response.py — RunResponse/RunEvent（P1）<a class="headerlink" href="#39-test_run_responsepy-runresponseruneventp1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>TestRunResponse
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>├── test_run_response_creation                    # 基本创建
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>├── test_run_response_default_event               # 默认 event 为 RunResponse
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>├── test_run_response_to_json                     # to_json 序列化
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>├── test_run_response_to_dict                     # to_dict 序列化
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>├── test_run_response_with_tools                  # 包含 tools 列表
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>├── test_run_response_with_images                 # 包含 images
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>├── test_run_response_with_reasoning_content      # 包含 reasoning_content
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>├── test_run_response_extra_data                  # extra_data 字段
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>TestRunEvent
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>├── test_all_events_defined                       # 所有预期事件都已定义
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>├── test_event_values_are_strings                 # 事件值为字符串
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a>├── test_event_names_unique                       # 事件名不重复
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a>├── test_tool_call_events_present                 # 工具调用相关事件存在
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a>├── test_reasoning_events_present                 # 推理相关事件存在
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a>├── test_workflow_events_present                  # 工作流相关事件存在
+</code></pre></div>
+<h3 id="310-test_workflow_advancedpy-workflow-p2">3.10 test_workflow_advanced.py — Workflow 多步编排（P2）<a class="headerlink" href="#310-test_workflow_advancedpy-workflow-p2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>TestWorkflowMultiStep
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>├── test_sequential_agents_workflow               # 多 Agent 顺序执行
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>├── test_workflow_passes_state_between_steps      # 步骤间状态传递
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>├── test_workflow_run_is_async                    # run() 是 async
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>├── test_workflow_run_sync_adapter                # run_sync() 正确包装
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>├── test_workflow_with_conditional_branching      # 条件分支执行
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>├── test_workflow_error_in_step_propagates        # 步骤异常向上传播
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>├── test_workflow_session_state_across_runs       # session_state 跨运行保持
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>TestWorkflowMemory
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>├── test_workflow_memory_records_runs             # memory.runs 记录每次运行
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>├── test_workflow_memory_custom                   # 自定义 WorkflowMemory
+</code></pre></div>
+<h3 id="311-test_error_handlingpy-p2">3.11 test_error_handling.py — 异常和恢复路径（P2）<a class="headerlink" href="#311-test_error_handlingpy-p2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>TestModelErrors
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>├── test_model_response_exception_handled         # model.response() 抛异常被 Agent 捕获
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>├── test_model_stream_exception_handled           # model.response_stream() 异常被捕获
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>├── test_model_timeout_handled                    # model 超时返回超时响应
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>TestToolErrors
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>├── test_tool_value_error_captured                # ValueError 被捕获为 FunctionCall.error
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>├── test_tool_runtime_error_captured              # RuntimeError 被捕获
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>├── test_stop_agent_run_with_user_message         # StopAgentRun 携带 user_message
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>├── test_retry_agent_run_messages_injected        # RetryAgentRun 的 messages 被注入
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>TestCancellation
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>├── test_agent_cancel_during_run                  # 运行中取消
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a>├── test_agent_cancel_during_stream               # 流式中取消
+</code></pre></div>
+<h3 id="312-test_lazy_loadingpy-__init__py-p2">3.12 test_lazy_loading.py — <code>__init__.py</code> 懒加载（P2）<a class="headerlink" href="#312-test_lazy_loadingpy-__init__py-p2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>TestLazyLoading
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>├── test_core_modules_imported_eagerly            # Agent, Model, Tool 等直接可用
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>├── test_optional_module_lazy_loaded              # 数据库后端等按需加载
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>├── test_missing_optional_module_graceful_error   # 缺少可选依赖时友好报错
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>├── test_lazy_loading_thread_safe                 # 并发 import 不出错
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>├── test_all_public_names_accessible              # __all__ 中的名称都可访问
+</code></pre></div>
+<hr />
+<h2 id="_4">四、核心架构优势覆盖矩阵<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>将测试与 async-first 架构的核心优势对应：</p>
+<table>
+<thead>
+<tr>
+<th>架构优势</th>
+<th>测试覆盖文件</th>
+<th>关键测试用例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Async-Native 四件套</strong></td>
+<td><code>test_agent_core.py</code></td>
+<td><code>run</code>/<code>run_stream</code>/<code>run_sync</code>/<code>run_stream_sync</code></td>
+</tr>
+<tr>
+<td><strong>唯一执行引擎 <code>_run_impl</code></strong></td>
+<td><code>test_agent_core.py</code></td>
+<td>所有 run 变体共享相同行为</td>
+</tr>
+<tr>
+<td><strong>并行工具执行 asyncio.gather</strong></td>
+<td><code>test_model_base.py</code>, <code>test_agent_tools_integration.py</code></td>
+<td><code>test_parallel_execution_faster_than_serial</code></td>
+</tr>
+<tr>
+<td><strong>流式原语 AsyncIterator</strong></td>
+<td><code>test_agent_stream.py</code></td>
+<td>RunEvent 状态机测试</td>
+</tr>
+<tr>
+<td><strong>同步适配器薄包装</strong></td>
+<td><code>test_agent_core.py</code></td>
+<td><code>test_run_sync_bridges_to_async_run</code></td>
+</tr>
+<tr>
+<td><strong>sync 工具 run_in_executor</strong></td>
+<td><code>test_async_tool.py</code>, <code>test_agent_tools_integration.py</code></td>
+<td>混合 sync/async 工具测试</td>
+</tr>
+<tr>
+<td><strong>weakref 无内存泄漏</strong></td>
+<td><code>test_memory_leak.py</code></td>
+<td>[现有] 已覆盖</td>
+</tr>
+<tr>
+<td><strong>Mixin 架构</strong></td>
+<td><code>test_prompts.py</code>, <code>test_session.py</code></td>
+<td>各 Mixin 独立测试</td>
+</tr>
+<tr>
+<td><strong>多模态支持</strong></td>
+<td><code>test_agent_multimodal.py</code>, <code>test_vision_history.py</code></td>
+<td>images/audio/videos 全链路</td>
+</tr>
+<tr>
+<td><strong>Guardrails 守卫</strong></td>
+<td><code>test_guardrails.py</code></td>
+<td>[现有] 已覆盖</td>
+</tr>
+<tr>
+<td><strong>Workflow async 编排</strong></td>
+<td><code>test_workflow_advanced.py</code></td>
+<td>多步编排 + 状态传递</td>
+</tr>
+<tr>
+<td><strong>Provider 一致性</strong></td>
+<td><code>test_model_providers.py</code></td>
+<td>所有 Provider async-only 接口</td>
+</tr>
+<tr>
+<td><strong>懒加载线程安全</strong></td>
+<td><code>test_lazy_loading.py</code></td>
+<td>并发 import 测试</td>
+</tr>
+<tr>
+<td><strong>Token 感知截断</strong></td>
+<td><code>test_memory.py</code></td>
+<td>[现有] max_tokens 测试</td>
+</tr>
+<tr>
+<td><strong>工具异常控制流</strong></td>
+<td><code>test_error_handling.py</code></td>
+<td>StopAgentRun/RetryAgentRun</td>
+</tr>
+<tr>
+<td><strong>ACP 协议</strong></td>
+<td><code>test_acp.py</code></td>
+<td>[现有] 已覆盖</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_5">五、执行策略<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="51">5.1 优先级排序<a class="headerlink" href="#51" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>P0（必须）: 覆盖框架核心差异化能力
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>  ├── conftest.py                        — 共享 fixtures
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>  ├── test_agent_core.py                 — 四件套核心路径
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>  ├── test_agent_stream.py               — 流式输出
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>  ├── test_agent_tools_integration.py    — 工具调用回路
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>  └── test_model_base.py                 — Model 基类 + 并行执行
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>P1（重要）: 覆盖二级核心能力
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>  ├── test_agent_multimodal.py           — 多模态
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>  ├── test_model_providers.py            — Provider 一致性
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>  ├── test_prompts.py                    — Prompt 构建
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>  ├── test_session.py                    — 会话持久化
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>  └── test_run_response.py              — 响应模型
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>P2（增强）: 边缘场景和健壮性
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>  ├── test_workflow_advanced.py          — Workflow 增强
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>  ├── test_error_handling.py             — 错误恢复
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>  └── test_lazy_loading.py              — 懒加载
+</code></pre></div>
+<h3 id="52">5.2 现有测试处理<a class="headerlink" href="#52" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>文件</th>
+<th>处理方式</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_agent.py</code></td>
+<td><strong>保留</strong></td>
+<td>初始化和属性测试依然有效</td>
+</tr>
+<tr>
+<td><code>test_async_tool.py</code></td>
+<td><strong>保留</strong></td>
+<td>FunctionCall 测试依然有效</td>
+</tr>
+<tr>
+<td><code>test_agent_as_tool.py</code></td>
+<td><strong>保留</strong></td>
+<td>as_tool 测试依然有效</td>
+</tr>
+<tr>
+<td><code>test_memory.py</code></td>
+<td><strong>保留</strong></td>
+<td>Memory 测试依然有效</td>
+</tr>
+<tr>
+<td><code>test_memory_leak.py</code></td>
+<td><strong>保留</strong></td>
+<td>weakref 测试依然有效</td>
+</tr>
+<tr>
+<td><code>test_workspace.py</code></td>
+<td><strong>保留</strong></td>
+<td>Workspace 测试依然有效</td>
+</tr>
+<tr>
+<td><code>test_sanitize_messages.py</code></td>
+<td><strong>保留，整合到 test_model_base.py</strong></td>
+<td>可作为 Model 测试的一部分</td>
+</tr>
+<tr>
+<td><code>test_vision_history.py</code></td>
+<td><strong>保留</strong></td>
+<td>多模态历史测试独立</td>
+</tr>
+<tr>
+<td><code>test_guardrails.py</code></td>
+<td><strong>保留</strong></td>
+<td>守卫测试独立</td>
+</tr>
+<tr>
+<td><code>test_patch_tool.py</code></td>
+<td><strong>保留</strong></td>
+<td>工具测试独立</td>
+</tr>
+<tr>
+<td><code>test_acp.py</code></td>
+<td><strong>保留</strong></td>
+<td>ACP 测试独立</td>
+</tr>
+<tr>
+<td><code>test_cli.py</code></td>
+<td><strong>保留</strong></td>
+<td>CLI 配置测试独立</td>
+</tr>
+<tr>
+<td><code>test_deep_agent.py</code></td>
+<td><strong>保留</strong></td>
+<td>DeepAgent 测试独立</td>
+</tr>
+<tr>
+<td><code>test_react_agent.py</code></td>
+<td><strong>合并到 test_agent_core.py</strong></td>
+<td>功能重叠</td>
+</tr>
+<tr>
+<td><code>test_llm.py</code></td>
+<td><strong>合并到 test_model_base.py</strong></td>
+<td>功能重叠</td>
+</tr>
+<tr>
+<td><code>test_edit_tool.py</code></td>
+<td><strong>删除</strong></td>
+<td>引用已重命名模块（已在 gitignore）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-mock">5.3 Mock 策略总结<a class="headerlink" href="#53-mock" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>层级</th>
+<th>Mock 方式</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Model.response()</td>
+<td><code>AsyncMock</code></td>
+<td>避免真实 API 调用</td>
+</tr>
+<tr>
+<td>Model.response_stream()</td>
+<td><code>AsyncMock</code> 返回 async generator</td>
+<td>控制流式输出 chunk</td>
+</tr>
+<tr>
+<td>FunctionCall.execute()</td>
+<td><strong>真实执行</strong>（简单工具函数）</td>
+<td>验证实际 async 行为</td>
+</tr>
+<tr>
+<td>DB/Storage</td>
+<td><code>AsyncMock</code> 或 <code>tempfile</code></td>
+<td>避免外部依赖</td>
+</tr>
+<tr>
+<td>Workspace</td>
+<td><code>tempfile</code> + 真实文件操作</td>
+<td>验证文件 I/O</td>
+</tr>
+</tbody>
+</table>
+<h3 id="54">5.4 运行命令<a class="headerlink" href="#54" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># 运行全部测试</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/<span class="w"> </span>-v<span class="w"> </span>--tb<span class="o">=</span>short<span class="w"> </span>--ignore<span class="o">=</span>tests/test_edit_tool.py
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># 运行新增测试</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_agent_core.py<span class="w"> </span>tests/test_agent_stream.py<span class="w"> </span>tests/test_agent_tools_integration.py<span class="w"> </span>tests/test_model_base.py<span class="w"> </span>-v
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="c1"># 运行 P0 测试</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_agent_core.py<span class="w"> </span>tests/test_agent_stream.py<span class="w"> </span>tests/test_agent_tools_integration.py<span class="w"> </span>tests/test_model_base.py<span class="w"> </span>-v<span class="w"> </span>--tb<span class="o">=</span>short
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="c1"># 运行并发测试（验证并行工具执行性能）</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>tests/test_model_base.py::TestRunFunctionCalls::test_parallel_execution_faster_than_serial<span class="w"> </span>-v<span class="w"> </span>-s
+</code></pre></div>
+<hr />
+<h2 id="_6">六、实际结果<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>指标</th>
+<th>重构前</th>
+<th>重构后</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>测试文件数</td>
+<td>23</td>
+<td>35</td>
+</tr>
+<tr>
+<td>测试用例数</td>
+<td>~316</td>
+<td><strong>500</strong></td>
+</tr>
+<tr>
+<td>代码行数</td>
+<td>~4849</td>
+<td><strong>~7157</strong></td>
+</tr>
+<tr>
+<td>Agent 核心路径覆盖</td>
+<td>低</td>
+<td>完整（四件套 + 流式 + 工具调用）</td>
+</tr>
+<tr>
+<td>并行执行覆盖</td>
+<td>无</td>
+<td>有（性能断言 &lt; 0.25s）</td>
+</tr>
+<tr>
+<td>多模态覆盖</td>
+<td>仅视觉历史</td>
+<td>images/audio/videos 全链路</td>
+</tr>
+<tr>
+<td>Provider 一致性覆盖</td>
+<td>无</td>
+<td>有（6 provider async 检查）</td>
+</tr>
+<tr>
+<td>错误处理覆盖</td>
+<td>部分</td>
+<td>完整（异常/超时/取消）</td>
+</tr>
+<tr>
+<td>运行时间</td>
+<td>~3s</td>
+<td><strong>~5s</strong></td>
+</tr>
+<tr>
+<td>全部通过</td>
+<td>✓</td>
+<td><strong>✓（500 passed）</strong></td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "search.highlight", "content.code.copy", "content.code.select"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2609 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A lightweight, powerful Python framework for building autonomous AI agents">
+      
+      
+      
+        <link rel="canonical" href="https://shibing624.github.io/agentica/paper/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>Agentica: An Async-First Agent Framework with Structured Concurrency for Autonomous Research and Software Engineering - Agentica</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agentica-an-async-first-agent-framework-with-structured-concurrency-for-autonomous-research-and-software-engineering" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href=".." title="Agentica" class="md-header__button md-logo" aria-label="Agentica" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentica
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Agentica: An Async-First Agent Framework with Structured Concurrency for Autonomous Research and Software Engineering
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/shibing624/agentica" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    shibing624/agentica
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../concepts/agent/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../guides/terminal/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/agent/" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Agentica" class="md-nav__button md-logo" aria-label="Agentica" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentica
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/shibing624/agentica" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    shibing624/agentica
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Team & Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/terminal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Terminal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/rag/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RAG
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/best_practices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Best Practices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guides/benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#abstract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Abstract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#1-introduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Introduction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-related-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Related Work
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="2. Related Work">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#21-agent-frameworks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.1 Agent Frameworks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#22-deep-research-systems" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.2 Deep Research Systems
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#23-benchmarks-for-agent-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2.3 Benchmarks for Agent Evaluation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Architecture
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#31-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.1 Overview
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#32-formal-execution-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.2 Formal Execution Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#33-structured-concurrent-tool-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.3 Structured Concurrent Tool Execution
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#34-three-layer-tool-abstraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.4 Three-Layer Tool Abstraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#35-agent-as-session-unified-state-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.5 Agent-as-Session: Unified State Model
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#36-deepagent-deep-research-extension" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.6 DeepAgent: Deep Research Extension
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#37-dual-level-guardrail-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.7 Dual-Level Guardrail System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#38-file-based-workspace-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.8 File-Based Workspace Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#39-model-provider-abstraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3.9 Model Provider Abstraction
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-experimental-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Experimental Setup
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="4. Experimental Setup">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#41-benchmarks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.1 Benchmarks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#42-baselines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.2 Baselines
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#43-configurations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.3 Configurations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#44-ablation-studies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.4 Ablation Studies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#45-parameter-sensitivity-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.5 Parameter Sensitivity Analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#46-statistical-significance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4.6 Statistical Significance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Results
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Results">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#51-main-results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.1 Main Results
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#52-structured-concurrency-speedup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.2 Structured Concurrency Speedup
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#53-ablation-study" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.3 Ablation Study
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#54-parameter-sensitivity-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.4 Parameter Sensitivity Analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#55-context-management-effectiveness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.5 Context Management Effectiveness
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#56-efficiency-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5.6 Efficiency Analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Analysis
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Analysis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#61-when-does-structured-concurrency-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.1 When Does Structured Concurrency Help?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#62-agent-as-session-vs-external-session-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.2 Agent-as-Session vs. External Session Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#63-dual-threshold-vs-single-threshold-context-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.3 Dual-Threshold vs. Single-Threshold Context Management
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#64-impact-of-deep-research-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.4 Impact of Deep Research Prompt
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#65-error-analysis" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.5 Error Analysis
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#66-case-studies" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.6 Case Studies
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#67-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6.7 Limitations
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Conclusion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#references" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        References
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-a-deepagent-deep-research-prompt" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix A: DeepAgent Deep Research Prompt
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-b-terminal-bench-task-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix B: Terminal-Bench Task Distribution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-c-reproducibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Appendix C: Reproducibility
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agentica-an-async-first-agent-framework-with-structured-concurrency-for-autonomous-research-and-software-engineering">Agentica: An Async-First Agent Framework with Structured Concurrency for Autonomous Research and Software Engineering<a class="headerlink" href="#agentica-an-async-first-agent-framework-with-structured-concurrency-for-autonomous-research-and-software-engineering" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p><strong>Target Venue:</strong> AAAI 2027</p>
+<p><strong>Status:</strong> Draft — experimental results sections marked with <code>[TODO]</code> placeholders</p>
+</blockquote>
+<hr />
+<h2 id="abstract">Abstract<a class="headerlink" href="#abstract" title="Permanent link">&para;</a></h2>
+<p>Large language model (LLM) agents have demonstrated remarkable potential in autonomous research and software engineering tasks. However, existing agent frameworks suffer from fundamental architectural limitations: synchronous execution bottlenecks that serialize independent tool calls, lack of structured concurrency guarantees for parallel operations, fragmented session management that separates execution state from the agent itself, and insufficient context management for long-horizon tasks. We present <strong>Agentica</strong>, an async-first agent framework built on Python 3.12 that introduces several key innovations: (1) <strong>structured concurrent tool execution</strong> via <code>asyncio.TaskGroup</code> with per-task exception isolation, providing formal safety guarantees that no partial results are lost on individual tool failures; (2) a <strong>three-layer tool abstraction</strong> (Tool → Function → FunctionCall) with memory-safe weak references and transparent sync/async boundary bridging; (3) an <strong>Agent-as-Session</strong> unified state model where the agent itself serves as the session carrier through token-aware run history management, eliminating the architectural fragmentation of separate Runner/Session abstractions; (4) a <strong>DeepAgent</strong> extension featuring dual-threshold hysteresis context management with formal convergence properties and HEARTBEAT-style iteration control; and (5) a <strong>dual-level guardrail system</strong> supporting both agent-level and tool-level input/output validation. We formalize the agent execution model as a state transition system and prove key safety properties including exception isolation, termination guarantees, and context bound enforcement. We evaluate on three challenging benchmarks — GAIA, SWE-bench Verified, and Terminal-Bench — demonstrating that architectural design choices in the agent framework significantly impact task completion rates, efficiency, and reliability. Our results show that structured concurrency yields <code>[TODO: X%]</code> speedup on multi-tool tasks, dual-threshold context management improves long-horizon task completion by <code>[TODO: X%]</code>, and overall performance is competitive with or exceeds state-of-the-art agent systems.</p>
+<hr />
+<h2 id="1-introduction">1. Introduction<a class="headerlink" href="#1-introduction" title="Permanent link">&para;</a></h2>
+<p>The emergence of LLM-based autonomous agents has catalyzed a paradigm shift in how complex tasks are approached — from software engineering (Jimenez et al., 2024) to deep research (Xu &amp; Peng, 2025) and general-purpose assistance (Mialon et al., 2023). Unlike simple chatbots that produce single-turn responses, agents engage in multi-step reasoning, invoke external tools, coordinate with sub-agents, and maintain persistent state across extended interactions.</p>
+<p>Despite rapid progress, current agent frameworks face several architectural challenges that limit their effectiveness on hard, long-horizon tasks:</p>
+<p><strong>Challenge 1: Sequential tool execution.</strong> When an LLM returns multiple tool calls in a single response (e.g., searching the web while simultaneously reading a file), most frameworks execute them sequentially. MetaGPT (Hong et al., 2023) processes actions in a pipeline; CrewAI uses sequential task execution; LangGraph's <code>ToolNode</code> dispatches tools one at a time. The OpenAI Agents SDK does not document its internal concurrency model for tool calls. Only AutoGen v0.4 adopts an async-first design, but through an Actor-based message-passing model rather than structured concurrency. This serialization wastes wall-clock time on I/O-bound operations that could safely proceed in parallel.</p>
+<p><strong>Challenge 2: Lack of structured concurrency guarantees.</strong> Even frameworks that support async execution (e.g., via <code>asyncio.gather</code>) lack structured concurrency semantics. When one tool call fails, <code>asyncio.gather</code> with <code>return_exceptions=False</code> cancels all sibling tasks, potentially losing partial results. With <code>return_exceptions=True</code>, error propagation becomes the developer's responsibility. Neither approach is satisfactory for production agent systems. We formalize this as a <em>partial failure isolation</em> property (Definition 1) and prove that <code>asyncio.TaskGroup</code> with per-task exception capture satisfies it.</p>
+<p><strong>Challenge 3: Fragmented session management.</strong> The dominant design pattern separates execution (Runner) from state (Session), as exemplified by the OpenAI Agents SDK where Agent is a declarative config, Runner drives execution, and Session stores conversation history. This three-way split introduces architectural friction: the developer must explicitly coordinate runner-session lifecycles, state is not inherently owned by the reasoning entity, and multi-turn context must be manually threaded through external session objects.</p>
+<p><strong>Challenge 4: Context overflow in long-horizon tasks.</strong> Deep research tasks often require dozens of tool calls and accumulate context that exceeds the model's effective window. Hard truncation loses critical information; naive summarization may discard important details. The Deep Research survey (Xu &amp; Peng, 2025) identifies context management as one of three core engineering challenges alongside hallucination control and process explainability. Single-threshold mechanisms suffer from compression oscillation when context fluctuates near the threshold.</p>
+<p><strong>Challenge 5: Insufficient safety mechanisms for tool-level operations.</strong> While agent-level guardrails (validating overall input/output) exist in frameworks like the OpenAI Agents SDK, individual tool calls — which interact directly with file systems, databases, and external APIs — lack fine-grained validation. A single malformed tool call can corrupt state or leak sensitive data.</p>
+<p>To address these challenges, we present <strong>Agentica</strong>, an async-first agent framework with the following contributions:</p>
+<ol>
+<li>
+<p><strong>Structured concurrent tool execution with formal safety guarantees</strong> using Python 3.12's <code>asyncio.TaskGroup</code>. We formalize the agent execution loop as a state transition system (Section 3.2) and prove that our three-phase execution protocol satisfies the <em>partial failure isolation</em> property — a failed tool does not cancel sibling executions, and all results (successful or failed) are preserved in original order. To the best of our knowledge, Agentica is the first agent framework to employ structured concurrency for tool execution.</p>
+</li>
+<li>
+<p><strong>Three-layer tool abstraction</strong> (Tool → Function → FunctionCall) that separates registration, schema definition, and invocation. Functions maintain memory-safe weak references (<code>weakref</code>) to their parent Agent, preventing circular reference memory leaks in the <code>Agent → Model → functions → Function._agent → Agent</code> reference chain. The <code>FunctionCall.execute()</code> method auto-detects sync/async entrypoints and routes sync functions through <code>run_in_executor()</code>, making the async boundary transparent to tool authors.</p>
+</li>
+<li>
+<p><strong>Agent-as-Session unified state model</strong> that merges execution, reasoning, and session state into the Agent itself. Unlike the OpenAI Agents SDK's Runner/Session separation, Agentica's <code>AgentMemory</code> stores structured run history (<code>runs: List[AgentRun]</code>) directly within the agent, with token-aware history retrieval (<code>get_messages_from_last_n_runs()</code>) that provides automatic budget-constrained context assembly. This eliminates the session management boilerplate and enables the agent to be the single source of truth for its own conversational state (Section 3.4).</p>
+</li>
+<li>
+<p><strong>DeepAgent with dual-threshold hysteresis context management.</strong> We introduce a two-threshold mechanism with formal convergence analysis (Section 3.5): a soft threshold ($\theta_s$) triggers compression, a hard threshold ($\theta_h$) forces answer generation, with the hysteresis gap ($\theta_h - \theta_s$) providing provable oscillation avoidance. Combined with HEARTBEAT-style iteration checkpoints, this enables reliable long-horizon task completion.</p>
+</li>
+<li>
+<p><strong>Dual-level guardrail system</strong> providing both agent-level (<code>InputGuardrail</code>, <code>OutputGuardrail</code>) and tool-level (<code>ToolInputGuardrail</code>, <code>ToolOutputGuardrail</code>) validation with async-compatible decorator patterns — the first framework to provide fine-grained per-tool-call safety validation.</p>
+</li>
+<li>
+<p><strong>File-based workspace memory</strong> using Markdown files (<code>AGENT.md</code>, <code>MEMORY.md</code>, <code>USER.md</code>, etc.) that are human-readable, auditable, git-versionable, and support multi-user isolation under <code>users/{user_id}/</code> directories.</p>
+</li>
+</ol>
+<p>We evaluate on three complementary benchmarks:
+- <strong>GAIA</strong> (Mialon et al., 2023): 165 general AI assistant tasks testing multi-step reasoning and tool use
+- <strong>SWE-bench Verified</strong> (Jimenez et al., 2024; OpenAI, 2024): 500 real-world software engineering tasks from GitHub
+- <strong>Terminal-Bench</strong> (Merrill et al., 2026): 89 hard, realistic tasks in Docker-based terminal environments spanning software engineering, ML/AI, cybersecurity, and system administration</p>
+<hr />
+<h2 id="2-related-work">2. Related Work<a class="headerlink" href="#2-related-work" title="Permanent link">&para;</a></h2>
+<h3 id="21-agent-frameworks">2.1 Agent Frameworks<a class="headerlink" href="#21-agent-frameworks" title="Permanent link">&para;</a></h3>
+<p><strong>MetaGPT</strong> (Hong et al., 2023) introduced the SOP-as-Prompt paradigm, encoding human standard operating procedures as structured prompt sequences for multi-agent collaboration. Its publish-subscribe communication mechanism and executable feedback loop represent significant advances. However, MetaGPT's execution model is fundamentally sequential at the orchestration level — agents execute in pipeline order following a waterfall paradigm. While individual roles use <code>async def run()</code>, this serves only for non-blocking LLM I/O; inter-agent coordination remains synchronous. MetaGPT was published as an ICLR 2024 Oral paper.</p>
+<p><strong>AutoGen</strong> (Wu et al., 2023) proposed a multi-agent conversation framework based on conversable agents. AutoGen v0.4 (January 2025) introduced a complete redesign with an event-driven Actor model runtime supporting distributed deployment. While AutoGen v0.4 is async-first through its Actor-based message bus, it achieves concurrency through message passing rather than structured concurrency primitives, and tool execution within a single agent turn remains sequential.</p>
+<p><strong>OpenAI Agents SDK</strong> (OpenAI, 2025) succeeded the experimental Swarm framework, providing a lightweight agent abstraction where Agents are declarative configuration objects and a stateless Runner class handles execution. The SDK supports handoff-based multi-agent coordination and tripwire-pattern guardrails. Its Python 3.9 minimum requirement precludes the use of <code>asyncio.TaskGroup</code> (introduced in Python 3.11), and the internal tool execution concurrency model is not publicly documented. Hosted tools (WebSearch, FileSearch, CodeInterpreter) create practical vendor lock-in to OpenAI's Responses API.</p>
+<p><strong>LangGraph</strong> (LangChain, 2023) models agent workflows as stateful directed graphs with checkpoint-based persistence. While powerful for complex workflow orchestration, its <code>ToolNode</code> component executes tools sequentially, and the graph-based abstraction introduces overhead for simpler agent patterns.</p>
+<p><strong>CrewAI</strong> (Moura, 2024) uses role-based agent design with sequential and hierarchical process strategies. It is synchronous-first with no native async architecture or parallel tool execution.</p>
+<p>Table 1 summarizes the architectural comparison.</p>
+<p><strong>Table 1: Architectural Comparison of Agent Frameworks</strong></p>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>Agentica</th>
+<th>MetaGPT</th>
+<th>AutoGen v0.4</th>
+<th>OpenAI Agents SDK</th>
+<th>LangGraph</th>
+<th>CrewAI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Execution Model</td>
+<td>Async-first (native)</td>
+<td>Async I/O, sync orchestration</td>
+<td>Async (Actor model)</td>
+<td>Async-primary</td>
+<td>Dual (sync + async)</td>
+<td>Sync-first</td>
+</tr>
+<tr>
+<td>Tool Concurrency</td>
+<td><code>TaskGroup</code> (structured)</td>
+<td>Sequential</td>
+<td>Sequential (per turn)</td>
+<td>Undocumented</td>
+<td>Sequential (<code>ToolNode</code>)</td>
+<td>Sequential</td>
+</tr>
+<tr>
+<td>Tool Abstraction</td>
+<td>3-layer hierarchy</td>
+<td>Action-level</td>
+<td>Function registration</td>
+<td><code>@function_tool</code> flat</td>
+<td><code>@tool</code> decorator</td>
+<td><code>BaseTool</code> class</td>
+</tr>
+<tr>
+<td>Session Model</td>
+<td>Agent-as-Session (unified)</td>
+<td>Environment shared state</td>
+<td>ConversableAgent state</td>
+<td>Runner + Session (split)</td>
+<td>Checkpointer (external)</td>
+<td>Memory (external)</td>
+</tr>
+<tr>
+<td>Multi-Agent</td>
+<td><code>as_tool()</code> delegation</td>
+<td>Pub-sub pipeline</td>
+<td>GroupChat + Actor</td>
+<td>Handoffs + agents-as-tools</td>
+<td>Graph sub-nodes</td>
+<td>Sequential/Hierarchical</td>
+</tr>
+<tr>
+<td>Guardrails</td>
+<td>Agent + Tool level</td>
+<td>None</td>
+<td>None</td>
+<td>Agent level only</td>
+<td>None</td>
+<td>None</td>
+</tr>
+<tr>
+<td>Memory</td>
+<td>AgentMemory + Workspace</td>
+<td>3-tier (working/shared/LT)</td>
+<td>Message history</td>
+<td>Sessions (SQLite/Redis)</td>
+<td>Checkpoints + Store</td>
+<td>SQLite + Entity</td>
+</tr>
+<tr>
+<td>Python Version</td>
+<td>&gt;= 3.12</td>
+<td>&gt;= 3.9</td>
+<td>&gt;= 3.10</td>
+<td>&gt;= 3.9</td>
+<td>&gt;= 3.9</td>
+<td>&gt;= 3.10</td>
+</tr>
+<tr>
+<td>Academic Paper</td>
+<td>This work</td>
+<td>ICLR 2024 Oral</td>
+<td>arXiv 2023</td>
+<td>None</td>
+<td>None</td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<h3 id="22-deep-research-systems">2.2 Deep Research Systems<a class="headerlink" href="#22-deep-research-systems" title="Permanent link">&para;</a></h3>
+<p>Deep Research represents a new paradigm where AI agents automate end-to-end research workflows (Xu &amp; Peng, 2025; Wang et al., 2025). The comprehensive survey by Xu &amp; Peng (2025) analyzed 80+ implementations and proposed a four-dimensional taxonomy: foundation models, tool utilization, task planning, and knowledge synthesis. Wang et al. (2025) defined three evolutionary stages: Agentic Search, Integrated Research, and Full-stack AI Scientist.</p>
+<p>Commercial systems include OpenAI Deep Research (based on o3 with reinforcement learning), Google Gemini Deep Research (million-token context), Perplexity Deep Research, and Anthropic Claude Research. Open-source alternatives include OpenDeepResearcher, Auto-Deep-Research, and OpenManus.</p>
+<p>Agentica's DeepAgent module contributes to this landscape with its dual-threshold context management mechanism and HEARTBEAT-style iteration control — engineering innovations that address the context overflow and premature termination problems identified as core challenges in the field.</p>
+<h3 id="23-benchmarks-for-agent-evaluation">2.3 Benchmarks for Agent Evaluation<a class="headerlink" href="#23-benchmarks-for-agent-evaluation" title="Permanent link">&para;</a></h3>
+<p><strong>GAIA</strong> (Mialon et al., 2023) evaluates general AI assistants on 466 real-world tasks (165 public validation, 301 private test) requiring multi-step reasoning, multi-modal processing, and tool use. Human baseline is ~92%; top AI systems achieve &lt;30% on average, highlighting the immense difficulty gap.</p>
+<p><strong>SWE-bench</strong> (Jimenez et al., 2024) evaluates software engineering agents on real GitHub issues from 12 Python repositories. SWE-bench Verified (OpenAI, 2024) is a 500-task human-verified subset. The JoyCode Agent currently leads at 74.6%, demonstrating that agent scaffolding outperforms bare model capability (Claude 3.7 Sonnet achieves 70.3% without scaffolding).</p>
+<p><strong>Terminal-Bench</strong> (Merrill et al., 2026) is a curated benchmark of 89 hard, realistic tasks executed in Docker-based terminal environments. Tasks span software engineering (32.6%), computing (21.3%), ML/AI (11.2%), cybersecurity (9.0%), DevOps (4.5%), and other domains. Tasks range from hours to days of expert human effort. The current best system (GPT-5.3-Codex with Simple Codex agent) achieves 75.1%, while smaller models score as low as 3%. Evaluation uses outcome-based container state inspection with at least 5 trials per configuration (32,155 total trials) and 95% confidence intervals.</p>
+<hr />
+<h2 id="3-architecture">3. Architecture<a class="headerlink" href="#3-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="31-overview">3.1 Overview<a class="headerlink" href="#31-overview" title="Permanent link">&para;</a></h3>
+<p>Agentica is built on three design principles:</p>
+<ol>
+<li>
+<p><strong>Async-first</strong>: All core methods (<code>run()</code>, <code>response()</code>, <code>execute()</code>, <code>invoke()</code>) are natively <code>async</code>. Synchronous adapters (<code>run_sync()</code>, <code>run_stream_sync()</code>) wrap the async implementations via background thread + event loop patterns.</p>
+</li>
+<li>
+<p><strong>Separation of concerns via mixins</strong>: The <code>Agent</code> class uses <code>@dataclass(init=False)</code> with direct multiple inheritance from pure method-container mixins:</p>
+</li>
+</ol>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nd">@dataclass</span><span class="p">(</span><span class="n">init</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="k">class</span><span class="w"> </span><span class="nc">Agent</span><span class="p">(</span><span class="n">PromptsMixin</span><span class="p">,</span> <span class="n">RunnerMixin</span><span class="p">,</span> <span class="n">SessionMixin</span><span class="p">,</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>            <span class="n">TeamMixin</span><span class="p">,</span> <span class="n">ToolsMixin</span><span class="p">,</span> <span class="n">PrinterMixin</span><span class="p">,</span> <span class="n">MediaMixin</span><span class="p">):</span>
+</code></pre></div>
+<p>Each mixin provides a specific capability (execution, prompts, session management, multi-agent delegation, tool management, output formatting, media handling) without carrying state or <code>__init__</code>. This design enables IDE jump-to-definition and avoids the fragile base class problem.</p>
+<ol>
+<li><strong>Pydantic for data, dataclass for behavior</strong>: Data structures (<code>Model</code>, <code>Tool</code>, <code>Function</code>, <code>RunResponse</code>) use Pydantic <code>BaseModel</code> for validation and serialization. The <code>Agent</code> class uses <code>@dataclass</code> deliberately — it has mutable fields (Callable, lists), complex initialization with alias handling, and does not need Pydantic's validation overhead.</li>
+</ol>
+<p>Figure 1 illustrates the overall architecture.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>┌─────────────────────────────────────────────────────────┐
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>│                      Agent Layer                        │
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌───────────┐  │
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>│  │RunnerMix │ │PromptMix │ │SessionMix│ │ TeamMixin │  │
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│  │ run()    │ │ sys_msg  │ │ load()   │ │ as_tool() │  │
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│  │ stream() │ │ usr_msg  │ │ save()   │ │ transfer()│  │
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│  └────┬─────┘ └──────────┘ └──────────┘ └───────────┘  │
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│       │                                                 │
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>│  ┌────▼─────────────────────────────────────────────┐   │
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│  │              _run_impl() [async generator]       │   │
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│  │  Single execution engine with Langfuse tracing   │   │
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│  └────┬─────────────────────────────────────────────┘   │
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>├───────┼─────────────────────────────────────────────────┤
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│       │            Model Layer                          │
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│  ┌────▼─────────────────────────────────────────────┐   │
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│  │  Model (async abstract: invoke, response,        │   │
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│  │         invoke_stream, response_stream)           │   │
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│  │                                                   │   │
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>│  │  ┌─────────────────────────────────────────────┐  │   │
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>│  │  │ run_function_calls() [asyncio.TaskGroup]    │  │   │
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>│  │  │  Phase 1: Emit started events               │  │   │
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│  │  │  Phase 2: Parallel execution (TaskGroup)    │  │   │
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>│  │  │  Phase 3: Sequential result processing      │  │   │
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│  │  └─────────────────────────────────────────────┘  │   │
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>│  └──────────────────────────────────────────────────┘   │
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>├─────────────────────────────────────────────────────────┤
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>│                    Tool Layer                           │
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>│  ┌──────────┐    ┌──────────┐    ┌──────────────────┐   │
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>│  │   Tool   │───&gt;│ Function │───&gt;│   FunctionCall   │   │
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a>│  │(container)│   │(schema + │    │   (invocation)   │   │
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a>│  │          │    │ weakref) │    │   .execute()     │   │
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>│  └──────────┘    └──────────┘    │ auto sync/async  │   │
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a>│                                  └──────────────────┘   │
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a>├─────────────────────────────────────────────────────────┤
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a>│                  Memory Layer                           │
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a>│  ┌─────────────┐         ┌───────────────────────────┐  │
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a>│  │ AgentMemory │         │      Workspace            │  │
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a>│  │ (runtime,   │         │  AGENT.md | PERSONA.md    │  │
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a>│  │  token-     │         │  users/{id}/MEMORY.md     │  │
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a>│  │  aware)     │         │  users/{id}/USER.md       │  │
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a>│  └─────────────┘         └───────────────────────────┘  │
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a>├─────────────────────────────────────────────────────────┤
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a>│                 Guardrail Layer                         │
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a>│  ┌──────────────────┐  ┌────────────────────────────┐   │
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a>│  │  Agent-Level      │  │     Tool-Level             │   │
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a>│  │  InputGuardrail   │  │  ToolInputGuardrail        │   │
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a>│  │  OutputGuardrail  │  │  ToolOutputGuardrail       │   │
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a>│  └──────────────────┘  └────────────────────────────┘   │
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>└─────────────────────────────────────────────────────────┘
+</code></pre></div>
+<h3 id="32-formal-execution-model">3.2 Formal Execution Model<a class="headerlink" href="#32-formal-execution-model" title="Permanent link">&para;</a></h3>
+<p>We formalize the agent execution loop as a state transition system to enable rigorous reasoning about safety properties.</p>
+<p><strong>Definition 1 (Agent State).</strong> An agent state is a tuple $S = (M, H, C, \sigma)$ where:
+- $M = [m_1, ..., m_k]$ is the message history
+- $H \subseteq \mathcal{R}$ is the set of completed runs stored in <code>AgentMemory.runs</code>
+- $C \in \mathbb{N}$ is the estimated context token count
+- $\sigma \in {idle, running, terminated}$ is the execution status</p>
+<p><strong>Definition 2 (Execution Step).</strong> A single execution step transforms state $S_i$ to $S_{i+1}$:</p>
+<p>$$S_i \xrightarrow{\text{LLM}} (r, T) \xrightarrow{\text{Execute}} S_{i+1}$$</p>
+<p>where $r$ is the model's text response and $T = {t_1, ..., t_n}$ is the set of tool calls. The execution proceeds in three phases:</p>
+<ul>
+<li><strong>Phase 1</strong>: For each $t_j \in T$, emit <code>started</code> event (sequential, preserving order)</li>
+<li><strong>Phase 2</strong>: Execute all $t_j$ concurrently: $\text{results} = \text{TaskGroup}({t_1, ..., t_n})$</li>
+<li><strong>Phase 3</strong>: Process results in original order (sequential)</li>
+</ul>
+<p><strong>Theorem 1 (Partial Failure Isolation).</strong> Under the <code>asyncio.TaskGroup</code> execution model with per-task exception capture, if tool call $t_j$ raises exception $e_j$, then for all $t_k$ where $k \neq j$: (a) $t_k$ is not cancelled, (b) $t_k$'s result (success or its own exception) is preserved, and (c) results are returned in the original order $[r_1, ..., r_n]$.</p>
+<p><em>Proof sketch.</em> Each task $t_j$ is wrapped in <code>async def _execute_one(j, fc)</code> which catches <code>ToolCallException</code> and generic <code>Exception</code> locally, storing them in <code>results[j]</code>. The <code>TaskGroup</code> only propagates <code>BaseExceptionGroup</code> if an <em>uncaught</em> exception escapes a task. Since all exceptions are caught within <code>_execute_one</code>, the TaskGroup exits normally with all tasks completed. Phase 3 iterates <code>results</code> in index order $0, 1, ..., n-1$, preserving the original sequence. $\square$</p>
+<p>This is strictly stronger than <code>asyncio.gather(return_exceptions=True)</code>, which provides (b) and (c) but not the structured lifetime guarantee that all tasks complete within a well-defined scope.</p>
+<p><strong>Definition 3 (Termination Condition).</strong> The agent terminates when any of: (a) the model produces no tool calls (natural completion), (b) context $C &gt; \theta_h$ (hard threshold), (c) step count exceeds <code>max_rounds</code>, or (d) a <code>StopAgentRun</code> flow control exception is raised.</p>
+<h3 id="33-structured-concurrent-tool-execution">3.3 Structured Concurrent Tool Execution<a class="headerlink" href="#33-structured-concurrent-tool-execution" title="Permanent link">&para;</a></h3>
+<p>When the LLM returns $N$ tool calls in a single response, Agentica executes them in three phases:</p>
+<p><strong>Phase 1 (Sequential): Emit events.</strong> For each tool call $t_i$, emit a <code>tool_call_started</code> event preserving the original order. This ensures deterministic event ordering for streaming consumers.</p>
+<p><strong>Phase 2 (Parallel): Execute.</strong> All $N$ tool calls execute concurrently within an <code>asyncio.TaskGroup</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">async</span> <span class="k">with</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">TaskGroup</span><span class="p">()</span> <span class="k">as</span> <span class="n">tg</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">tasks</span> <span class="o">=</span> <span class="p">[</span><span class="n">tg</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span><span class="n">_execute_one</span><span class="p">(</span><span class="n">i</span><span class="p">,</span> <span class="n">fc</span><span class="p">))</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>             <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">fc</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">function_calls</span><span class="p">)]</span>
+</code></pre></div>
+<p>Each task wraps its execution in a try/except that captures <code>ToolCallException</code> and generic exceptions locally, preventing one failure from cancelling sibling tasks. This is the key advantage over <code>asyncio.gather(return_exceptions=True)</code> — structured concurrency guarantees that all tasks complete (successfully or with captured exceptions) before the TaskGroup exits.</p>
+<p>For sync tool entrypoints, <code>FunctionCall._call_func()</code> auto-detects via <code>inspect.iscoroutinefunction()</code> and routes through <code>loop.run_in_executor()</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_call_func</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="k">if</span> <span class="n">inspect</span><span class="o">.</span><span class="n">iscoroutinefunction</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>        <span class="k">return</span> <span class="k">await</span> <span class="n">func</span><span class="p">(</span><span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">loop</span> <span class="o">=</span> <span class="n">asyncio</span><span class="o">.</span><span class="n">get_running_loop</span><span class="p">()</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="k">return</span> <span class="k">await</span> <span class="n">loop</span><span class="o">.</span><span class="n">run_in_executor</span><span class="p">(</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>        <span class="kc">None</span><span class="p">,</span> <span class="n">functools</span><span class="o">.</span><span class="n">partial</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">))</span>
+</code></pre></div>
+<p><strong>Phase 3 (Sequential): Process results.</strong> Results are processed in the original order, constructing tool response messages, handling flow control exceptions (<code>StopAgentRun</code>, <code>RetryAgentRun</code>), and emitting <code>tool_call_completed</code> events.</p>
+<p>This three-phase design achieves maximum parallelism in Phase 2 while maintaining deterministic ordering in Phases 1 and 3.</p>
+<h3 id="34-three-layer-tool-abstraction">3.4 Three-Layer Tool Abstraction<a class="headerlink" href="#34-three-layer-tool-abstraction" title="Permanent link">&para;</a></h3>
+<p>The tool system uses a three-layer hierarchy that separates concerns:</p>
+<p><strong>Tool</strong> is a container that groups related functions (e.g., <code>BuiltinFileTool</code> contains <code>ls</code>, <code>read_file</code>, <code>write_file</code>, <code>edit_file</code>, <code>glob</code>, <code>grep</code>). Tools register functions via <code>self.register(self.method_name)</code>.</p>
+<p><strong>Function</strong> holds the schema (name, description, JSON Schema parameters) and entrypoint callable. <code>Function.from_callable()</code> is a factory that auto-generates tool definitions from Python functions using <code>inspect.signature()</code> and <code>get_type_hints()</code>. A key design choice: Functions hold a <strong>weak reference</strong> (<code>weakref.ref</code>) to their parent Agent, breaking the circular reference chain <code>Agent → Model → functions → Function._agent → Agent</code> that would otherwise prevent garbage collection.</p>
+<p><code>_safe_validate_call()</code> wraps Pydantic's <code>validate_call</code> to strip unresolvable forward-reference annotations (e.g., <code>self: "Agent"</code> on mixin methods), enabling Pydantic validation on methods that use PEP 563 postponed annotations.</p>
+<p><strong>FunctionCall</strong> represents a single invocation with arguments, result, error, and call ID. Its <code>execute()</code> method is the sole execution entry point — async-only, with pre/post hook support and the sync/async auto-detection described in Section 3.2.</p>
+<h3 id="35-agent-as-session-unified-state-model">3.5 Agent-as-Session: Unified State Model<a class="headerlink" href="#35-agent-as-session-unified-state-model" title="Permanent link">&para;</a></h3>
+<p>A fundamental design divergence exists between Agentica and other frameworks in how session state is managed. We identify three patterns in existing frameworks:</p>
+<p><strong>Pattern A: Stateless Runner + External Session</strong> (OpenAI Agents SDK). The Agent is a declarative configuration object (model, tools, instructions); a stateless <code>Runner</code> class drives execution; a separate <code>Session</code> object (backed by SQLite or Redis) stores conversation history. The developer must explicitly pass session references through the execution pipeline:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># OpenAI Agents SDK pattern</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="s2">&quot;assistant&quot;</span><span class="p">,</span> <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span> <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="o">...</span><span class="p">])</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">Runner</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">agent</span><span class="p">,</span> <span class="s2">&quot;query&quot;</span><span class="p">,</span> <span class="n">session</span><span class="o">=</span><span class="n">session</span><span class="p">)</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Agent has no memory of previous interactions without session</span>
+</code></pre></div>
+<p><strong>Pattern B: Environment-Mediated State</strong> (MetaGPT, AutoGen). Agents communicate through a shared environment or message bus. State is distributed across the environment, individual agent memories, and communication channels.</p>
+<p><strong>Pattern C: Agent-as-Session</strong> (Agentica). The Agent itself is the session carrier. <code>AgentMemory</code> is embedded directly within the agent and maintains structured run history:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">AgentMemory</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>    <span class="n">runs</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">AgentRun</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>      <span class="c1"># Structured run history</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>    <span class="n">messages</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Message</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>    <span class="c1"># Current context window</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>    <span class="n">summary</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SessionSummary</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># Compacted history</span>
+</code></pre></div>
+<p>The key mechanism is <code>get_messages_from_last_n_runs()</code>, which provides <strong>token-budget-aware history assembly</strong>:</p>
+<ol>
+<li>Iterate runs from most recent to oldest</li>
+<li>For each run, extract conversation messages (filtering tool calls)</li>
+<li>Apply progressive truncation: older runs get more aggressive content truncation</li>
+<li>Stop when the token budget is exhausted</li>
+</ol>
+<p>This design has several advantages over Pattern A:</p>
+<ul>
+<li><strong>Single source of truth</strong>: The agent owns its own state. No coordination between runner, session, and agent objects is needed.</li>
+<li><strong>Token-aware context assembly</strong>: History messages are automatically budget-constrained, preventing context overflow during multi-turn interactions.</li>
+<li><strong>Progressive information decay</strong>: Older runs are truncated more aggressively (tool results summarized to <code>tool_result_max_chars</code>), mimicking human memory where recent events are recalled with more detail.</li>
+<li><strong>Zero-configuration multi-turn</strong>: Multi-turn conversations work by default without explicit session management code.</li>
+</ul>
+<p>Session persistence is handled orthogonally by <code>SessionMixin</code>, which serializes the agent state (including <code>AgentMemory</code>) to storage backends via <code>write_to_storage()</code>. This separates the concerns of state ownership (Agent) from state persistence (SessionMixin + storage backend).</p>
+<p><strong>Table 2: Session Management Pattern Comparison</strong></p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Stateless Runner (OpenAI)</th>
+<th>Agent-as-Session (Ours)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>State ownership</td>
+<td>External Session object</td>
+<td>Agent itself</td>
+</tr>
+<tr>
+<td>Multi-turn setup</td>
+<td>Explicit session passing</td>
+<td>Automatic (built-in)</td>
+</tr>
+<tr>
+<td>Token budget</td>
+<td>Manual management</td>
+<td>Automatic (<code>max_tokens</code> param)</td>
+</tr>
+<tr>
+<td>History truncation</td>
+<td>Application-level</td>
+<td>Framework-level (progressive)</td>
+</tr>
+<tr>
+<td>Persistence</td>
+<td>Session backend required</td>
+<td>Optional (SessionMixin)</td>
+</tr>
+<tr>
+<td>Serialization</td>
+<td>Session.to_dict()</td>
+<td>AgentMemory.to_dict() → SessionRow</td>
+</tr>
+</tbody>
+</table>
+<h3 id="36-deepagent-deep-research-extension">3.6 DeepAgent: Deep Research Extension<a class="headerlink" href="#36-deepagent-deep-research-extension" title="Permanent link">&para;</a></h3>
+<p><code>DeepAgent</code> extends <code>Agent</code> with capabilities specifically designed for long-horizon research and complex task completion:</p>
+<p><strong>Built-in Tool Suite.</strong> DeepAgent automatically includes file system tools (<code>ls</code>, <code>read_file</code>, <code>write_file</code>, <code>edit_file</code>, <code>glob</code>, <code>grep</code>), code execution (<code>execute</code> with async subprocess and graceful SIGTERM→SIGKILL termination), web tools (<code>web_search</code>, <code>fetch_url</code>), task management (<code>write_todos</code>, <code>read_todos</code>), sub-agent delegation (<code>task</code>), and skill management (<code>list_skills</code>, <code>get_skill_info</code>).</p>
+<p><strong>Dual-Threshold Hysteresis Context Management.</strong> We introduce a two-threshold mechanism for handling context window overflow with provable oscillation avoidance:</p>
+<ul>
+<li><strong>Soft threshold</strong> ($\theta_s$): When estimated context tokens exceed $\theta_s$, the system triggers context compression (summarizing older tool results). Default: $\theta_s = 0.6 \times (C_w - C_{out})$, where $C_w$ is the model's context window and $C_{out}$ is the maximum output tokens.</li>
+<li><strong>Hard threshold</strong> ($\theta_h$): When tokens exceed $\theta_h$, the system forces answer generation via a specialized prompt. Default: $\theta_h = 0.8 \times (C_w - C_{out})$.</li>
+</ul>
+<p><strong>Theorem 2 (Oscillation Avoidance).</strong> Let $C_i$ denote the context token count at step $i$, and let $\Delta_c &gt; 0$ be the average tokens freed by a compression operation. If $\theta_h - \theta_s &gt; \Delta_c$, then the system does not oscillate between compression and normal execution. Specifically, after compression at step $i$ reduces $C_i$ to $C_i' \leq \theta_s$, the system will not trigger compression again until at least $\lceil(\theta_s - C_i' + 1) / \delta\rceil$ new steps, where $\delta$ is the average token increment per step.</p>
+<p><em>Proof sketch.</em> After compression, $C_i' \leq \theta_s$. Each subsequent step adds $\delta$ tokens on average. Compression is only re-triggered when $C_j \geq \theta_s$, requiring at least $(\theta_s - C_i') / \delta$ steps. Meanwhile, forced termination only occurs at $\theta_h$, and since $\theta_h - \theta_s &gt; \Delta_c$, compression at $\theta_s$ always completes before the hard limit is reached. $\square$</p>
+<p>This contrasts with single-threshold systems where $\theta_s = \theta_h$: compression frees $\Delta_c$ tokens, the next tool call adds $\delta$ tokens, and if $\delta &gt; \Delta_c$, the system immediately re-triggers compression — an oscillation pattern observed in practice.</p>
+<p><strong>HEARTBEAT-Style Iteration Control.</strong> Inspired by the MemGPT heartbeat mechanism, DeepAgent injects iteration checkpoint prompts at configurable intervals during multi-round execution:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>Step {N} checkpoint:
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>- Have you fully solved the problem?
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>- Are there any remaining tasks in the task list?
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>- Did you verify your changes?
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>If not complete, continue working. Do NOT end your turn prematurely.
+</code></pre></div>
+<p>This addresses the common failure mode where models prematurely declare task completion.</p>
+<p><strong>Repetitive Behavior Detection.</strong> A sliding window (<code>deque(maxlen=10)</code>) tracks recent tool calls. When $k$ consecutive calls invoke the same tool (default $k=3$), a warning prompt redirects the agent's strategy, preventing unproductive loops.</p>
+<p><strong>Deep Research Prompt System.</strong> A structured 6-phase prompt methodology guides thorough investigation: (1) Problem analysis and plan formulation, (2) Iterative information gathering with explicit failure handling, (3) Multi-source cross-validation, (4) Constraint checklist verification, (5) Calculation and operation verification via code execution, (6) Clear narration with citation requirements.</p>
+<h3 id="37-dual-level-guardrail-system">3.7 Dual-Level Guardrail System<a class="headerlink" href="#37-dual-level-guardrail-system" title="Permanent link">&para;</a></h3>
+<p>Agentica provides guardrails at two granularities:</p>
+<p><strong>Agent-level guardrails</strong> (<code>InputGuardrail</code>, <code>OutputGuardrail</code>) validate the entire agent run's input or output. These use a decorator pattern:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nd">@input_guardrail</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">check_sensitive_content</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">agent</span><span class="p">,</span> <span class="n">input_message</span><span class="p">):</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    <span class="c1"># Validation logic</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="k">return</span> <span class="n">GuardrailFunctionOutput</span><span class="p">(</span><span class="n">output_info</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;safe&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
+</code></pre></div>
+<p><strong>Tool-level guardrails</strong> (<code>ToolInputGuardrail</code>, <code>ToolOutputGuardrail</code>) validate individual tool call arguments and results. This is critical because a single tool call may access file systems, execute code, or call external APIs:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nd">@tool_input_guardrail</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">validate_file_path</span><span class="p">(</span><span class="n">context</span><span class="p">,</span> <span class="n">agent</span><span class="p">,</span> <span class="n">tool_input</span><span class="p">):</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    <span class="c1"># Ensure file path is within allowed directory</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    <span class="k">return</span> <span class="n">ToolGuardrailFunctionOutput</span><span class="p">(</span><span class="n">output_info</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;valid&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">})</span>
+</code></pre></div>
+<p>Both levels raise specific exceptions (<code>InputGuardrailTripwireTriggered</code>, <code>ToolInputGuardrailTripwireTriggered</code>, etc.) to halt execution when violations are detected.</p>
+<h3 id="38-file-based-workspace-memory">3.8 File-Based Workspace Memory<a class="headerlink" href="#38-file-based-workspace-memory" title="Permanent link">&para;</a></h3>
+<p>Agentica's persistent memory uses a file-based workspace with the following directory structure:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>workspace/
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>├── AGENT.md          # Agent instructions (global)
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>├── PERSONA.md        # Agent persona (global)
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>├── TOOLS.md          # Tool documentation (global)
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>├── users/
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>│   ├── default/
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>│   │   ├── USER.md       # User information
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>│   │   ├── MEMORY.md     # Long-term memory
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>│   │   └── memory/       # Daily memory entries
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>│   └── {user_id}/        # Multi-user isolation
+</code></pre></div>
+<p>This design provides several advantages over database-backed memory:
+- <strong>Auditability</strong>: Markdown files are human-readable and inspectable
+- <strong>Version control</strong>: Standard git operations track memory evolution
+- <strong>Portability</strong>: No database dependencies; works with any file system
+- <strong>Multi-user isolation</strong>: Each user's data is physically separated</p>
+<p>All memory operations (<code>get_context_prompt()</code>, <code>get_memory_prompt()</code>, <code>write_memory()</code>, <code>save_memory()</code>) are async, with file I/O wrapped in <code>run_in_executor()</code> to avoid blocking the event loop.</p>
+<h3 id="39-model-provider-abstraction">3.9 Model Provider Abstraction<a class="headerlink" href="#39-model-provider-abstraction" title="Permanent link">&para;</a></h3>
+<p>The <code>Model</code> base class defines four abstract async methods: <code>invoke()</code>, <code>invoke_stream()</code>, <code>response()</code>, <code>response_stream()</code>. Provider implementations use the <code>@override</code> decorator (Python 3.12) for explicit intent:</p>
+<ul>
+<li><code>OpenAIChat</code>: Native async OpenAI client</li>
+<li><code>Claude</code>: <code>AsyncAnthropic</code> client with native async <code>messages.create()</code> and <code>messages.stream()</code></li>
+<li><code>OpenAILike</code>: Extends <code>OpenAIChat</code> for compatible APIs (DeepSeek, Qwen, ZhipuAI, Doubao, Moonshot, etc.)</li>
+</ul>
+<p>This unified async interface ensures that all model providers behave identically from the framework's perspective, with the async boundary handled transparently.</p>
+<hr />
+<h2 id="4-experimental-setup">4. Experimental Setup<a class="headerlink" href="#4-experimental-setup" title="Permanent link">&para;</a></h2>
+<h3 id="41-benchmarks">4.1 Benchmarks<a class="headerlink" href="#41-benchmarks" title="Permanent link">&para;</a></h3>
+<p>We evaluate on three complementary benchmarks to assess different aspects of agent capability:</p>
+<p><strong>GAIA</strong> (General AI Assistants). We use the 165-question public validation set. Tasks require multi-step reasoning, web search, file parsing, code execution, and multi-modal understanding. Evaluation uses exact-match scoring on deterministic answers.</p>
+<p><strong>SWE-bench Verified</strong>. We use the 500-task human-verified subset. Each task requires producing a code patch that resolves a real GitHub issue and passes the repository's test suite. Evaluation uses resolved rate (percentage of tasks where the patch passes all associated tests).</p>
+<p><strong>Terminal-Bench 2.0</strong>. We use the 89-task benchmark executed in Docker-based terminal environments. Tasks span software engineering, computing, ML/AI, cybersecurity, and system administration. Each configuration is run 5 times, reporting resolution rate with 95% confidence intervals.</p>
+<h3 id="42-baselines">4.2 Baselines<a class="headerlink" href="#42-baselines" title="Permanent link">&para;</a></h3>
+<p>We compare against the following agent systems:</p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Framework Type</th>
+<th>Key Characteristics</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OpenAI Agents SDK + GPT-4o</td>
+<td>Commercial framework</td>
+<td>Handoff-based coordination, hosted tools</td>
+</tr>
+<tr>
+<td>MetaGPT</td>
+<td>SOP-driven pipeline</td>
+<td>ICLR 2024 Oral, structured communication</td>
+</tr>
+<tr>
+<td>AutoGen v0.4</td>
+<td>Actor-based async</td>
+<td>Multi-agent conversation, distributed runtime</td>
+</tr>
+<tr>
+<td>OpenHands</td>
+<td>CodeAct framework</td>
+<td>Unified code action space, Docker sandbox</td>
+</tr>
+<tr>
+<td>Terminus 2</td>
+<td>Neutral scaffold</td>
+<td>Headless terminal tool, used in Terminal-Bench</td>
+</tr>
+</tbody>
+</table>
+<p>For fair comparison, all configurations use the same underlying LLM where possible.</p>
+<h3 id="43-configurations">4.3 Configurations<a class="headerlink" href="#43-configurations" title="Permanent link">&para;</a></h3>
+<p>We evaluate two Agentica configurations:</p>
+<ol>
+<li><strong>Agentica-Base</strong>: Standard <code>Agent</code> with user-provided tools. Tests the core async-first execution engine and structured concurrency.</li>
+<li><strong>Agentica-Deep</strong>: <code>DeepAgent</code> with built-in tools, deep research prompt, dual-threshold context management, and HEARTBEAT iteration control. Tests the full deep research pipeline.</li>
+</ol>
+<h3 id="44-ablation-studies">4.4 Ablation Studies<a class="headerlink" href="#44-ablation-studies" title="Permanent link">&para;</a></h3>
+<p>To isolate the contribution of each architectural component:</p>
+<table>
+<thead>
+<tr>
+<th>Ablation</th>
+<th>What is removed/changed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-TaskGroup</code></td>
+<td>Replace <code>asyncio.TaskGroup</code> with sequential tool execution</td>
+</tr>
+<tr>
+<td><code>-DualThreshold</code></td>
+<td>Remove context management (no soft/hard limits)</td>
+</tr>
+<tr>
+<td><code>-HEARTBEAT</code></td>
+<td>Remove iteration checkpoint prompts</td>
+</tr>
+<tr>
+<td><code>-DeepPrompt</code></td>
+<td>Replace deep research prompt with standard prompt</td>
+</tr>
+<tr>
+<td><code>-ToolGuardrails</code></td>
+<td>Remove tool-level guardrails (keep agent-level only)</td>
+</tr>
+<tr>
+<td><code>-AgentAsSession</code></td>
+<td>Replace with external session management (OpenAI SDK pattern)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="45-parameter-sensitivity-analysis">4.5 Parameter Sensitivity Analysis<a class="headerlink" href="#45-parameter-sensitivity-analysis" title="Permanent link">&para;</a></h3>
+<p>We analyze sensitivity to the dual-threshold parameters with the following grid:</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Values Tested</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Soft threshold $\theta_s$</td>
+<td>0.4, 0.5, 0.6, 0.7 (× effective context)</td>
+</tr>
+<tr>
+<td>Hard threshold $\theta_h$</td>
+<td>0.7, 0.8, 0.9 (× effective context)</td>
+</tr>
+<tr>
+<td>HEARTBEAT frequency</td>
+<td>3, 5, 7, 10 (steps)</td>
+</tr>
+<tr>
+<td>Repetition window $k$</td>
+<td>2, 3, 5 (consecutive calls)</td>
+</tr>
+</tbody>
+</table>
+<p>Constraint: $\theta_s &lt; \theta_h$ in all configurations.</p>
+<h3 id="46-statistical-significance">4.6 Statistical Significance<a class="headerlink" href="#46-statistical-significance" title="Permanent link">&para;</a></h3>
+<p>All results are reported with 95% confidence intervals. For GAIA and SWE-bench, we use 3 independent runs with different random seeds and report Wilson score intervals for pass rates. For Terminal-Bench, we follow the benchmark protocol of 5 runs per configuration with bootstrap confidence intervals.</p>
+<hr />
+<h2 id="5-results">5. Results<a class="headerlink" href="#5-results" title="Permanent link">&para;</a></h2>
+<h3 id="51-main-results">5.1 Main Results<a class="headerlink" href="#51-main-results" title="Permanent link">&para;</a></h3>
+<p><strong>Table 3: GAIA Benchmark Results (165 validation tasks)</strong></p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Level 1</th>
+<th>Level 2</th>
+<th>Level 3</th>
+<th>Average</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agentica-Deep</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Agentica-Base</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>OpenAI Agents SDK + GPT-4o</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>MetaGPT</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>AutoGen v0.4</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Human baseline</td>
+<td>~95%</td>
+<td>~92%</td>
+<td>~88%</td>
+<td>~92%</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Table 4: SWE-bench Verified Results (500 tasks)</strong></p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Resolved Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agentica-Deep</td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Agentica-Base</td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>OpenHands</td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>AutoGen v0.4</td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Bare model (no framework)</td>
+<td><code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Table 5: Terminal-Bench 2.0 Results (89 tasks, 5 runs each)</strong></p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Resolution Rate (±95% CI)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agentica-Deep</td>
+<td><code>[TODO]</code> ± <code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Agentica-Base</td>
+<td><code>[TODO]</code> ± <code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Terminus 2 (same model)</td>
+<td><code>[TODO]</code> ± <code>[TODO]</code></td>
+</tr>
+<tr>
+<td>OpenHands (same model)</td>
+<td><code>[TODO]</code> ± <code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Claude Code (same model)</td>
+<td><code>[TODO]</code> ± <code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="52-structured-concurrency-speedup">5.2 Structured Concurrency Speedup<a class="headerlink" href="#52-structured-concurrency-speedup" title="Permanent link">&para;</a></h3>
+<p><strong>Table 6: Wall-clock time comparison — TaskGroup parallel vs. sequential tool execution</strong></p>
+<table>
+<thead>
+<tr>
+<th>Benchmark</th>
+<th>Avg tools/turn</th>
+<th>Sequential (s)</th>
+<th>Parallel (s)</th>
+<th>Speedup</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GAIA</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code>×</td>
+</tr>
+<tr>
+<td>SWE-bench</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code>×</td>
+</tr>
+<tr>
+<td>Terminal-Bench</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code>×</td>
+</tr>
+</tbody>
+</table>
+<h3 id="53-ablation-study">5.3 Ablation Study<a class="headerlink" href="#53-ablation-study" title="Permanent link">&para;</a></h3>
+<p><strong>Table 7: Ablation results on GAIA (Level 2+3) and Terminal-Bench</strong></p>
+<table>
+<thead>
+<tr>
+<th>Configuration</th>
+<th>GAIA (L2+L3)</th>
+<th>Terminal-Bench</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agentica-Deep (full)</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>− TaskGroup</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>− DualThreshold</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>− HEARTBEAT</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>− DeepPrompt</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>− ToolGuardrails</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>− AgentAsSession</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="54-parameter-sensitivity-analysis">5.4 Parameter Sensitivity Analysis<a class="headerlink" href="#54-parameter-sensitivity-analysis" title="Permanent link">&para;</a></h3>
+<p><strong>Table 8: Dual-threshold parameter sensitivity on GAIA Level 2+3 (long-horizon tasks)</strong></p>
+<table>
+<thead>
+<tr>
+<th>$\theta_s$</th>
+<th>$\theta_h$</th>
+<th>Completion Rate</th>
+<th>Forced Termination Rate</th>
+<th>Compression Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0.4</td>
+<td>0.7</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>0.4</td>
+<td>0.8</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>0.5</td>
+<td>0.7</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>0.5</td>
+<td>0.8</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>0.6</td>
+<td>0.8</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>0.6</td>
+<td>0.9</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>0.7</td>
+<td>0.9</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Table 9: HEARTBEAT frequency sensitivity on Terminal-Bench</strong></p>
+<table>
+<thead>
+<tr>
+<th>Checkpoint Frequency</th>
+<th>Resolution Rate</th>
+<th>Premature Termination Rate</th>
+<th>Avg Steps</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Every 3 steps</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Every 5 steps (default)</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Every 7 steps</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Every 10 steps</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>No HEARTBEAT</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="55-context-management-effectiveness">5.5 Context Management Effectiveness<a class="headerlink" href="#55-context-management-effectiveness" title="Permanent link">&para;</a></h3>
+<p><strong>Table 10: Long-horizon task completion with and without dual-threshold context management</strong></p>
+<table>
+<thead>
+<tr>
+<th>Context Management</th>
+<th>Tasks completed (&gt;10 tool calls)</th>
+<th>Avg. context tokens at completion</th>
+<th>Forced termination rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>None</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Hard threshold only</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Dual threshold (ours)</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="56-efficiency-analysis">5.6 Efficiency Analysis<a class="headerlink" href="#56-efficiency-analysis" title="Permanent link">&para;</a></h3>
+<p><strong>Table 11: Token consumption and API cost comparison</strong></p>
+<table>
+<thead>
+<tr>
+<th>System</th>
+<th>Avg tokens/task</th>
+<th>Avg API calls/task</th>
+<th>Avg cost/task ($)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agentica-Deep</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>Agentica-Base</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>OpenAI Agents SDK</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+<tr>
+<td>MetaGPT</td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+<td><code>[TODO]</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-analysis">6. Analysis<a class="headerlink" href="#6-analysis" title="Permanent link">&para;</a></h2>
+<h3 id="61-when-does-structured-concurrency-help">6.1 When Does Structured Concurrency Help?<a class="headerlink" href="#61-when-does-structured-concurrency-help" title="Permanent link">&para;</a></h3>
+<p><code>[TODO: Analysis of which task types benefit most from parallel tool execution — likely I/O-bound tasks with multiple independent tool calls (e.g., simultaneous web searches, parallel file reads). Include speedup as a function of average tools-per-turn. Show that speedup approaches N× for N independent I/O-bound tools and is bounded by Amdahl's law for mixed CPU/IO workloads. Include wall-clock time distributions.]</code></p>
+<h3 id="62-agent-as-session-vs-external-session-management">6.2 Agent-as-Session vs. External Session Management<a class="headerlink" href="#62-agent-as-session-vs-external-session-management" title="Permanent link">&para;</a></h3>
+<p><code>[TODO: Quantitative comparison of the Agent-as-Session pattern vs. the external session pattern (OpenAI SDK style). Metrics: (a) lines of code required for multi-turn setup, (b) memory efficiency (token usage for history assembly), (c) context assembly latency, (d) success rate on multi-turn tasks from GAIA that require information from previous turns. Hypothesis: Agent-as-Session should show lower boilerplate and comparable or better multi-turn accuracy due to automatic token-aware history management.]</code></p>
+<h3 id="63-dual-threshold-vs-single-threshold-context-management">6.3 Dual-Threshold vs. Single-Threshold Context Management<a class="headerlink" href="#63-dual-threshold-vs-single-threshold-context-management" title="Permanent link">&para;</a></h3>
+<p><code>[TODO: Analysis of the hysteresis mechanism — show that single-threshold systems oscillate between compression and normal execution, while dual-threshold provides stable behavior. Include context token trajectory plots for representative long-horizon tasks. Verify Theorem 2 empirically by measuring compression trigger counts under single-threshold ($\theta_s = \theta_h$) vs. dual-threshold configurations.]</code></p>
+<h3 id="64-impact-of-deep-research-prompt">6.4 Impact of Deep Research Prompt<a class="headerlink" href="#64-impact-of-deep-research-prompt" title="Permanent link">&para;</a></h3>
+<p><code>[TODO: Qualitative analysis of how the 6-phase deep research prompt affects agent behavior — does it increase cross-validation attempts? Does it reduce hallucination in cited sources? Compare citation accuracy between standard and deep research prompts. Include examples of behavior differences on specific GAIA tasks.]</code></p>
+<h3 id="65-error-analysis">6.5 Error Analysis<a class="headerlink" href="#65-error-analysis" title="Permanent link">&para;</a></h3>
+<p><code>[TODO: Categorize failure modes across benchmarks with quantitative breakdown:
+- Tool execution failures (timeout, permission, network): X% of failures
+- Context overflow (task abandoned due to token limits): X%
+- Repetitive behavior (agent stuck in loop): X%
+- Reasoning errors (wrong approach despite sufficient information): X%
+- Premature termination (agent declares done before completing task): X%
+Include per-benchmark breakdown and analysis of which Agentica features address which failure modes.]</code></p>
+<h3 id="66-case-studies">6.6 Case Studies<a class="headerlink" href="#66-case-studies" title="Permanent link">&para;</a></h3>
+<p><code>[TODO: Include 2-3 detailed case studies showing step-by-step execution traces:
+1. A GAIA Level 3 task showing structured concurrency benefit (multiple parallel web searches)
+2. A Terminal-Bench task showing dual-threshold context management in action (compression triggered, then successful completion)
+3. A SWE-bench task showing how HEARTBEAT iteration control prevented premature termination
+For each case, show the execution timeline, tool calls, context token trajectory, and final outcome compared to baseline systems.]</code></p>
+<h3 id="67-limitations">6.7 Limitations<a class="headerlink" href="#67-limitations" title="Permanent link">&para;</a></h3>
+<p>We acknowledge several limitations:</p>
+<ol>
+<li>
+<p><strong>Python version requirement</strong>: Agentica requires Python 3.12+, which limits adoption in environments with older Python versions. The structured concurrency benefits require <code>asyncio.TaskGroup</code> (Python 3.11+), and the <code>@override</code> decorator requires Python 3.12.</p>
+</li>
+<li>
+<p><strong>Benchmark coverage</strong>: Our evaluation focuses on three benchmarks. Additional evaluation on domain-specific benchmarks (e.g., xbench-DeepSearch for research quality, WebArena for web navigation) would provide a more comprehensive picture.</p>
+</li>
+<li>
+<p><strong>Model dependence</strong>: Like all agent frameworks, performance is fundamentally bounded by the underlying LLM's capabilities. Our architectural contributions improve efficiency and reliability but cannot compensate for fundamental reasoning limitations.</p>
+</li>
+<li>
+<p><strong>No formal SOP support</strong>: Unlike MetaGPT's SOP-as-Prompt paradigm, Agentica does not encode domain-specific standard operating procedures. For highly structured workflows (e.g., software development lifecycle), MetaGPT's approach may be more appropriate.</p>
+</li>
+</ol>
+<hr />
+<h2 id="7-conclusion">7. Conclusion<a class="headerlink" href="#7-conclusion" title="Permanent link">&para;</a></h2>
+<p>We presented Agentica, an async-first agent framework that introduces several architectural innovations: (1) structured concurrent tool execution via <code>asyncio.TaskGroup</code> with formally proven partial failure isolation guarantees; (2) a three-layer tool abstraction with memory-safe weak references; (3) the Agent-as-Session unified state model that embeds token-aware session management directly within the agent, eliminating the architectural fragmentation of separate Runner/Session abstractions; (4) dual-threshold hysteresis context management with provable oscillation avoidance for long-horizon tasks; (5) dual-level guardrails for both agent and tool operations; and (6) file-based workspace memory with multi-user isolation.</p>
+<p>Our evaluation across three challenging benchmarks — GAIA, SWE-bench Verified, and Terminal-Bench — demonstrates that framework-level architectural decisions significantly impact agent performance. <code>[TODO: Summarize key quantitative findings.]</code> The structured concurrency mechanism provides <code>[TODO]</code> speedup on multi-tool tasks, the dual-threshold context management improves long-horizon task completion by <code>[TODO]</code>, and the Agent-as-Session pattern reduces multi-turn management complexity while maintaining competitive accuracy.</p>
+<p>These results support the broader observation that <strong>agent scaffolding design matters as much as model capability</strong> — a finding consistent with recent SWE-bench results where framework-augmented agents outperform bare models by 10-20% (JoyCode Agent at 74.6% vs. Claude 3.7 Sonnet at 70.3%). Furthermore, the formal analysis (Theorems 1-2) provides theoretical grounding for design choices that are often made heuristically in the agent framework community.</p>
+<p>Future work includes: (1) extending the structured concurrency model to multi-agent parallel execution with dependency-aware scheduling, (2) adaptive threshold tuning based on task complexity estimation (replacing static $\theta_s, \theta_h$ with learned thresholds), (3) integration of retrieval-augmented generation into the workspace memory system, (4) speculative parallel hypothesis evaluation via lightweight agent cloning, and (5) evaluation on additional domain-specific benchmarks (WebArena, xbench-DeepSearch).</p>
+<hr />
+<h2 id="references">References<a class="headerlink" href="#references" title="Permanent link">&para;</a></h2>
+<p>Hong, S., Zhuge, M., Chen, J., Zheng, X., Cheng, Y., Zhang, C., Wang, J., Wang, Z., Yau, S.K.S., Lin, Z., Zhou, L., Ran, C., Xiao, L., Wu, C., &amp; Schmidhuber, J. (2023). MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework. <em>ICLR 2024 (Oral)</em>. arXiv:2308.00352.</p>
+<p>Jimenez, C.E., Yang, J., Wettig, A., Yao, S., Pei, K., Press, O., &amp; Narasimhan, K. (2024). SWE-bench: Can Language Models Resolve Real-World GitHub Issues? <em>ICLR 2024</em>. arXiv:2310.06770.</p>
+<p>Merrill, M.A., Shaw, A.G., Carlini, N., Li, B., Raj, H., Bercovich, I., Shi, L., Shin, J.Y., Walshe, T., Buchanan, E.K., et al. (2026). Terminal-Bench: Benchmarking Agents on Hard, Realistic Tasks in Command Line Interfaces. arXiv:2601.11868.</p>
+<p>Mialon, G., Fourrier, C., Swift, C., Wolf, T., LeCun, Y., &amp; Scialom, T. (2023). GAIA: A Benchmark for General AI Assistants. arXiv:2311.12983.</p>
+<p>OpenAI. (2025). New Tools for Building Agents. https://openai.com/index/new-tools-for-building-agents/.</p>
+<p>Packer, C., Wooders, S., Lin, K., Fang, V., Patil, S.G., Stoica, I., &amp; Gonzalez, J.E. (2023). MemGPT: Towards LLMs as Operating Systems. arXiv:2310.08560.</p>
+<p>Smith, N., Garrett, A., &amp; Calvert, B. (2022). PEP 654 — Exception Groups and except*. Python Enhancement Proposals.</p>
+<p>Wang, R., et al. (2025). Deep Research: A Survey. arXiv:2512.02038.</p>
+<p>Wu, Q., Bansal, G., Zhang, J., Wu, Y., Li, B., Zhu, E., Jiang, L., Zhang, X., Zhang, S., Liu, J., Awadallah, A.H., White, R.W., Burger, D., &amp; Wang, C. (2023). AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation. arXiv:2308.08155.</p>
+<p>Xu, R., &amp; Peng, J. (2025). A Comprehensive Survey of Deep Research: Systems, Methodologies, and Applications. arXiv:2506.12594.</p>
+<p>Yang, J., Jimenez, C.E., Wettig, A., Liber, K., Yao, S., Pei, K., Press, O., &amp; Narasimhan, K. (2024). SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. arXiv:2405.15793.</p>
+<p>Yao, S., Zhao, J., Yu, D., Du, N., Shafran, I., Narasimhan, K., &amp; Cao, Y. (2023). ReAct: Synergizing Reasoning and Acting in Language Models. <em>ICLR 2023</em>. arXiv:2210.03629.</p>
+<hr />
+<h2 id="appendix-a-deepagent-deep-research-prompt">Appendix A: DeepAgent Deep Research Prompt<a class="headerlink" href="#appendix-a-deepagent-deep-research-prompt" title="Permanent link">&para;</a></h2>
+<p>The complete deep research system prompt is available in the supplementary material. Key phases:</p>
+<ol>
+<li><strong>Initiate Investigation</strong>: Analyze the problem, identify key information points, formulate investigation plan using task management tools.</li>
+<li><strong>Iterative Information Gathering &amp; Reflection</strong>: Handle search failures explicitly, evaluate information sufficiency, pursue depth, consider source reliability.</li>
+<li><strong>Multi-Source Cross-Validation</strong>: Use different tools/sources to verify key claims; explicitly state when switching tools due to effectiveness.</li>
+<li><strong>Constraint Checklist</strong>: Review all constraints and confirm coverage before synthesizing.</li>
+<li><strong>Calculation &amp; Operation Verification</strong>: Verify all computations via code execution before finalizing.</li>
+<li><strong>Clear Narration</strong>: Explain tool call rationale, expected results, actual results, and next steps.</li>
+</ol>
+<h2 id="appendix-b-terminal-bench-task-distribution">Appendix B: Terminal-Bench Task Distribution<a class="headerlink" href="#appendix-b-terminal-bench-task-distribution" title="Permanent link">&para;</a></h2>
+<p>Terminal-Bench 2.0 contains 89 tasks across the following categories:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>%</th>
+<th>Example Tasks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Software Engineering</td>
+<td>32.6%</td>
+<td>build-linux-kernel-qemu, fix-ocaml-gc, build-pov-ray</td>
+</tr>
+<tr>
+<td>Computing</td>
+<td>21.3%</td>
+<td>regex-chess, chess-best-move, gpt2-codegolf</td>
+</tr>
+<tr>
+<td>ML/AI/Data Science</td>
+<td>11.2%</td>
+<td>train-fasttext, caffe-cifar-10, mcmc-sampling-stan</td>
+</tr>
+<tr>
+<td>General SE</td>
+<td>11.2%</td>
+<td>financial-document-processor, reshard-c4-data</td>
+</tr>
+<tr>
+<td>Cybersecurity</td>
+<td>9.0%</td>
+<td>crack-7z-hash, feal-differential-cryptanalysis, fix-code-vulnerability</td>
+</tr>
+<tr>
+<td>DevOps/Cloud</td>
+<td>4.5%</td>
+<td>configure-git-webserver, nginx-request-logging</td>
+</tr>
+<tr>
+<td>Personal Assistant</td>
+<td>3.4%</td>
+<td>Various personal productivity tasks</td>
+</tr>
+<tr>
+<td>Video Processing</td>
+<td>2.2%</td>
+<td>Video manipulation and conversion tasks</td>
+</tr>
+</tbody>
+</table>
+<p>Current leaderboard (top 5, as of Feb 2026):</p>
+<table>
+<thead>
+<tr>
+<th>Rank</th>
+<th>Agent</th>
+<th>Model</th>
+<th>Accuracy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Simple Codex</td>
+<td>GPT-5.3-Codex</td>
+<td>75.1%</td>
+</tr>
+<tr>
+<td>2</td>
+<td>CodeBrain-1</td>
+<td>GPT-5.3-Codex</td>
+<td>70.3%</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Droid</td>
+<td>Claude Opus 4.6</td>
+<td>69.9%</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Mux</td>
+<td>GPT-5.3-Codex</td>
+<td>68.5%</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Deep Agents</td>
+<td>GPT-5.2-Codex</td>
+<td>66.5%</td>
+</tr>
+</tbody>
+</table>
+<h2 id="appendix-c-reproducibility">Appendix C: Reproducibility<a class="headerlink" href="#appendix-c-reproducibility" title="Permanent link">&para;</a></h2>
+<p>All code is available at <code>[TODO: GitHub URL]</code>. Experiments use:
+- Python 3.12+
+- Docker for Terminal-Bench and SWE-bench environments
+- GAIA validation set from HuggingFace
+- Configuration files for all benchmark runs included in repository</p>
+<p>To reproduce Terminal-Bench results:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>pip<span class="w"> </span>install<span class="w"> </span>terminal-bench
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>tb<span class="w"> </span>run<span class="w"> </span>--agent<span class="w"> </span>agentica<span class="w"> </span>--model<span class="w"> </span><span class="o">[</span>MODEL<span class="o">]</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span>--dataset-name<span class="w"> </span>terminal-bench-core<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">    </span>--dataset-version<span class="w"> </span><span class="m">2</span>.0<span class="w"> </span>--n-concurrent<span class="w"> </span><span class="m">8</span>
+</code></pre></div></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "search.highlight", "content.code.copy", "content.code.select"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>

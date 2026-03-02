@@ -1,0 +1,3276 @@
+
+<!doctype html>
+<html lang="zh" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A lightweight, powerful Python framework for building autonomous AI agents">
+      
+      
+      
+        <link rel="canonical" href="https://shibing624.github.io/agentica/api/agent/">
+      
+      
+        <link rel="prev" href="../../guides/benchmark/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
+    
+    
+      
+        <title>Agent - Agentica</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#agent-api" class="md-skip">
+          跳转至
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="页眉">
+    <a href="../.." title="Agentica" class="md-header__button md-logo" aria-label="Agentica" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Agentica
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Agent
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="搜索" placeholder="搜索" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="查找">
+        
+        <button type="reset" class="md-search__icon md-icon" title="清空当前内容" aria-label="清空当前内容" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            正在初始化搜索引擎
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/shibing624/agentica" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    shibing624/agentica
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="标签" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../quickstart/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quickstart
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/agent/" class="md-tabs__link">
+          
+  
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guides/terminal/" class="md-tabs__link">
+          
+  
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="./" class="md-tabs__link">
+          
+  
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="导航栏" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Agentica" class="md-nav__button md-logo" aria-label="Agentica" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Agentica
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/shibing624/agentica" title="前往仓库" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    shibing624/agentica
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/team/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Team & Workflow
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/terminal/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Terminal
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/rag/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    RAG
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/mcp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Providers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/guardrails/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guardrails
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/best_practices/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Best Practices
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guides/benchmark/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmark
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构造参数
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="构造参数">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第一层：核心定义
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二层：通用配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第三层：打包配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行时
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方法
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="方法">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#async-runmessage-kwargs-runresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async run(message, **kwargs) -&gt; RunResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-run_streammessage-kwargs-asynciteratorrunresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async run_stream(message, **kwargs) -&gt; AsyncIterator[RunResponse]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run_syncmessage-kwargs-runresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_sync(message, **kwargs) -&gt; RunResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run_stream_syncmessage-kwargs-iteratorrunresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_stream_sync(message, **kwargs) -&gt; Iterator[RunResponse]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-print_responsemessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async print_response(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-print_response_streammessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async print_response_stream(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#print_response_syncmessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        print_response_sync(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#print_response_stream_syncmessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        print_response_stream_sync(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#as_tooltool_namenone-tool_descriptionnone-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        as_tool(tool_name=None, tool_description=None) -&gt; Function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cancel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cancel()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get_chat_history-listmessage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_chat_history() -&gt; List[Message]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search_knowledge_basequery-num_documentsnone-str" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        search_knowledge_base(query, num_documents=None) -&gt; str
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#promptconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PromptConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toolconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workspacememoryconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WorkspaceMemoryConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#teamconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TeamConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deepagent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DeepAgent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DeepAgent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构造参数
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        内置工具
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RunResponse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RunResponse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runevent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RunEvent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toolcallinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolCallInfo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通用参数
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        内置模型
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workingmemory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WorkingMemory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WorkingMemory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构造参数
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-function-functioncall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool / Function / FunctionCall
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tool / Function / FunctionCall">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functionfrom_callable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Function.from_callable
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实用工具
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="实用工具">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token 计数
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        日志
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        格式化打印
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="目录">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      目录
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Agent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构造参数
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="构造参数">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第一层：核心定义
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第二层：通用配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        第三层：打包配置
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        运行时
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方法
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="方法">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#async-runmessage-kwargs-runresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async run(message, **kwargs) -&gt; RunResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-run_streammessage-kwargs-asynciteratorrunresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async run_stream(message, **kwargs) -&gt; AsyncIterator[RunResponse]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run_syncmessage-kwargs-runresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_sync(message, **kwargs) -&gt; RunResponse
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run_stream_syncmessage-kwargs-iteratorrunresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        run_stream_sync(message, **kwargs) -&gt; Iterator[RunResponse]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-print_responsemessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async print_response(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#async-print_response_streammessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        async print_response_stream(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#print_response_syncmessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        print_response_sync(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#print_response_stream_syncmessage-kwargs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        print_response_stream_sync(message, **kwargs)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#as_tooltool_namenone-tool_descriptionnone-function" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        as_tool(tool_name=None, tool_description=None) -&gt; Function
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cancel" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        cancel()
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get_chat_history-listmessage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_chat_history() -&gt; List[Message]
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#search_knowledge_basequery-num_documentsnone-str" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        search_knowledge_base(query, num_documents=None) -&gt; str
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#promptconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PromptConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toolconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workspacememoryconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WorkspaceMemoryConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#teamconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TeamConfig
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deepagent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DeepAgent
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="DeepAgent">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构造参数
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        内置工具
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runresponse" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RunResponse
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="RunResponse">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_9" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        属性
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_10" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#runevent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RunEvent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#toolcallinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ToolCallInfo
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_11" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        方法
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_12" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通用参数
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        内置模型
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workingmemory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WorkingMemory
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="WorkingMemory">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#_14" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        构造参数
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-function-functioncall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool / Function / FunctionCall
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tool / Function / FunctionCall">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#functionfrom_callable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Function.from_callable
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_15" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        数据库
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_16" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        实用工具
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="实用工具">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#token" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Token 计数
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_17" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        日志
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_18" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        格式化打印
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="导航栏" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="./" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="agent-api">Agent API 参考<a class="headerlink" href="#agent-api" title="Permanent link">&para;</a></h1>
+<blockquote>
+<p>基于源码的完整 API 文档。后续将通过 docstring 自动生成。</p>
+</blockquote>
+<h2 id="agent">Agent<a class="headerlink" href="#agent" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">Agent</span>
+</code></pre></div>
+<p>核心 Agent 类，将模型、工具和记忆连接在一起。使用 <code>@dataclass(init=False)</code> + mixin 多继承架构。</p>
+<h3 id="_1">构造参数<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h3>
+<h4 id="_2">第一层：核心定义<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>model</code></td>
+<td><code>Model</code></td>
+<td><code>None</code></td>
+<td>LLM 模型实例。未指定时使用默认 OpenAI 模型</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>Agent 名称，用于日志和团队标识</td>
+</tr>
+<tr>
+<td><code>agent_id</code></td>
+<td><code>str</code></td>
+<td>自动 UUID</td>
+<td>Agent 唯一标识</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>Agent 描述，在 Team 模式下帮助协调者理解成员能力</td>
+</tr>
+<tr>
+<td><code>instructions</code></td>
+<td><code>str \| List[str] \| Callable</code></td>
+<td><code>None</code></td>
+<td>行为指令，注入到 system prompt</td>
+</tr>
+<tr>
+<td><code>tools</code></td>
+<td><code>List[Tool \| Callable]</code></td>
+<td><code>None</code></td>
+<td>工具列表</td>
+</tr>
+<tr>
+<td><code>knowledge</code></td>
+<td><code>Knowledge</code></td>
+<td><code>None</code></td>
+<td>知识库实例 (RAG)</td>
+</tr>
+<tr>
+<td><code>team</code></td>
+<td><code>List[Agent]</code></td>
+<td><code>None</code></td>
+<td>团队成员列表</td>
+</tr>
+<tr>
+<td><code>workspace</code></td>
+<td><code>Workspace \| str</code></td>
+<td><code>None</code></td>
+<td>工作空间（传 str 会自动创建 Workspace）</td>
+</tr>
+<tr>
+<td><code>response_model</code></td>
+<td><code>Type[BaseModel]</code></td>
+<td><code>None</code></td>
+<td>Pydantic 模型，启用结构化输出</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_3">第二层：通用配置<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>add_history_to_messages</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>将历史消息加入上下文</td>
+</tr>
+<tr>
+<td><code>history_window</code></td>
+<td><code>int</code></td>
+<td><code>3</code></td>
+<td>保留的历史轮数</td>
+</tr>
+<tr>
+<td><code>structured_outputs</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>使用 OpenAI 严格结构化输出模式</td>
+</tr>
+<tr>
+<td><code>debug</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>调试模式（详细日志）</td>
+</tr>
+<tr>
+<td><code>tracing</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>启用 Langfuse 追踪</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_4">第三层：打包配置<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prompt_config</code></td>
+<td><code>PromptConfig</code></td>
+<td><code>PromptConfig()</code></td>
+<td>提示词构建配置</td>
+</tr>
+<tr>
+<td><code>tool_config</code></td>
+<td><code>ToolConfig</code></td>
+<td><code>ToolConfig()</code></td>
+<td>工具调用配置</td>
+</tr>
+<tr>
+<td><code>long_term_memory_config</code></td>
+<td><code>WorkspaceMemoryConfig</code></td>
+<td><code>WorkspaceMemoryConfig()</code></td>
+<td>工作空间记忆配置</td>
+</tr>
+<tr>
+<td><code>team_config</code></td>
+<td><code>TeamConfig</code></td>
+<td><code>TeamConfig()</code></td>
+<td>团队配置</td>
+</tr>
+</tbody>
+</table>
+<h4 id="_5">运行时<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h4>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>working_memory</code></td>
+<td><code>WorkingMemory</code></td>
+<td><code>WorkingMemory()</code></td>
+<td>工作记忆（会话消息历史）</td>
+</tr>
+<tr>
+<td><code>context</code></td>
+<td><code>Dict[str, Any]</code></td>
+<td><code>None</code></td>
+<td>运行时上下文，传递给工具和动态指令</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_6">方法<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<h4 id="async-runmessage-kwargs-runresponse"><code>async run(message, **kwargs) -&gt; RunResponse</code><a class="headerlink" href="#async-runmessage-kwargs-runresponse" title="Permanent link">&para;</a></h4>
+<p>异步非流式运行。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">agent</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="s2">&quot;你好&quot;</span><span class="p">)</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>参数：</strong></p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>message</code></td>
+<td><code>str \| List \| Dict \| Message</code></td>
+<td>输入消息</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td><code>bool</code></td>
+<td>是否流式（内部使用）</td>
+</tr>
+<tr>
+<td><code>stream_intermediate_steps</code></td>
+<td><code>bool</code></td>
+<td>流式中间步骤</td>
+</tr>
+<tr>
+<td><code>session_id</code></td>
+<td><code>str</code></td>
+<td>会话 ID</td>
+</tr>
+<tr>
+<td><code>user_id</code></td>
+<td><code>str</code></td>
+<td>用户 ID</td>
+</tr>
+<tr>
+<td><code>save_response_to_file</code></td>
+<td><code>str</code></td>
+<td>保存响应到文件</td>
+</tr>
+<tr>
+<td><code>**kwargs</code></td>
+<td></td>
+<td>传递给模型的额外参数</td>
+</tr>
+</tbody>
+</table>
+<p><strong>返回：</strong> <code>RunResponse</code></p>
+<hr />
+<h4 id="async-run_streammessage-kwargs-asynciteratorrunresponse"><code>async run_stream(message, **kwargs) -&gt; AsyncIterator[RunResponse]</code><a class="headerlink" href="#async-run_streammessage-kwargs-asynciteratorrunresponse" title="Permanent link">&para;</a></h4>
+<p>异步流式运行。返回异步生成器。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="k">async</span> <span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="s2">&quot;你好&quot;</span><span class="p">):</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="k">if</span> <span class="n">chunk</span><span class="o">.</span><span class="n">content</span><span class="p">:</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">chunk</span><span class="o">.</span><span class="n">content</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+</code></pre></div>
+<p>参数与 <code>run()</code> 相同。</p>
+<hr />
+<h4 id="run_syncmessage-kwargs-runresponse"><code>run_sync(message, **kwargs) -&gt; RunResponse</code><a class="headerlink" href="#run_syncmessage-kwargs-runresponse" title="Permanent link">&para;</a></h4>
+<p>同步非流式运行。内部通过 <code>asyncio</code> 适配器调用 <code>run()</code>。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">result</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">run_sync</span><span class="p">(</span><span class="s2">&quot;你好&quot;</span><span class="p">)</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">content</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="run_stream_syncmessage-kwargs-iteratorrunresponse"><code>run_stream_sync(message, **kwargs) -&gt; Iterator[RunResponse]</code><a class="headerlink" href="#run_stream_syncmessage-kwargs-iteratorrunresponse" title="Permanent link">&para;</a></h4>
+<p>同步流式运行。通过后台线程驱动异步迭代器。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">for</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">run_stream_sync</span><span class="p">(</span><span class="s2">&quot;你好&quot;</span><span class="p">):</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="k">if</span> <span class="n">chunk</span><span class="o">.</span><span class="n">content</span><span class="p">:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>        <span class="nb">print</span><span class="p">(</span><span class="n">chunk</span><span class="o">.</span><span class="n">content</span><span class="p">,</span> <span class="n">end</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="async-print_responsemessage-kwargs"><code>async print_response(message, **kwargs)</code><a class="headerlink" href="#async-print_responsemessage-kwargs" title="Permanent link">&para;</a></h4>
+<p>异步非流式打印格式化响应。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="k">await</span> <span class="n">agent</span><span class="o">.</span><span class="n">print_response</span><span class="p">(</span><span class="s2">&quot;解释量子计算&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="async-print_response_streammessage-kwargs"><code>async print_response_stream(message, **kwargs)</code><a class="headerlink" href="#async-print_response_streammessage-kwargs" title="Permanent link">&para;</a></h4>
+<p>异步流式打印格式化响应。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">await</span> <span class="n">agent</span><span class="o">.</span><span class="n">print_response_stream</span><span class="p">(</span><span class="s2">&quot;解释量子计算&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="print_response_syncmessage-kwargs"><code>print_response_sync(message, **kwargs)</code><a class="headerlink" href="#print_response_syncmessage-kwargs" title="Permanent link">&para;</a></h4>
+<p>同步非流式打印。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">agent</span><span class="o">.</span><span class="n">print_response_sync</span><span class="p">(</span><span class="s2">&quot;解释量子计算&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="print_response_stream_syncmessage-kwargs"><code>print_response_stream_sync(message, **kwargs)</code><a class="headerlink" href="#print_response_stream_syncmessage-kwargs" title="Permanent link">&para;</a></h4>
+<p>同步流式打印。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">agent</span><span class="o">.</span><span class="n">print_response_stream_sync</span><span class="p">(</span><span class="s2">&quot;解释量子计算&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="as_tooltool_namenone-tool_descriptionnone-function"><code>as_tool(tool_name=None, tool_description=None) -&gt; Function</code><a class="headerlink" href="#as_tooltool_namenone-tool_descriptionnone-function" title="Permanent link">&para;</a></h4>
+<p>将 Agent 转换为工具，供其他 Agent 使用。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">tool</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">as_tool</span><span class="p">(</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">tool_name</span><span class="o">=</span><span class="s2">&quot;research&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">tool_description</span><span class="o">=</span><span class="s2">&quot;深度研究指定主题&quot;</span><span class="p">,</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h4 id="cancel"><code>cancel()</code><a class="headerlink" href="#cancel" title="Permanent link">&para;</a></h4>
+<p>取消当前运行。通过协作式取消通知 Agent 在下一个检查点停止。</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">agent</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+</code></pre></div>
+<hr />
+<h4 id="get_chat_history-listmessage"><code>get_chat_history() -&gt; List[Message]</code><a class="headerlink" href="#get_chat_history-listmessage" title="Permanent link">&para;</a></h4>
+<p>获取聊天历史。</p>
+<hr />
+<h4 id="search_knowledge_basequery-num_documentsnone-str"><code>search_knowledge_base(query, num_documents=None) -&gt; str</code><a class="headerlink" href="#search_knowledge_basequery-num_documentsnone-str" title="Permanent link">&para;</a></h4>
+<p>搜索知识库。</p>
+<hr />
+<h2 id="promptconfig">PromptConfig<a class="headerlink" href="#promptconfig" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.agent.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">PromptConfig</span>
+</code></pre></div>
+<p>提示词构建的高级配置。大多数场景只需 <code>Agent.instructions</code>。</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>system_prompt</code></td>
+<td><code>str \| Callable</code></td>
+<td><code>None</code></td>
+<td>自定义 system prompt（覆盖默认构建）</td>
+</tr>
+<tr>
+<td><code>task</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>任务描述</td>
+</tr>
+<tr>
+<td><code>role</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>角色描述</td>
+</tr>
+<tr>
+<td><code>guidelines</code></td>
+<td><code>List[str]</code></td>
+<td><code>None</code></td>
+<td>行为准则</td>
+</tr>
+<tr>
+<td><code>expected_output</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>期望输出格式</td>
+</tr>
+<tr>
+<td><code>additional_context</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>额外上下文</td>
+</tr>
+<tr>
+<td><code>add_datetime_to_instructions</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>注入当前时间</td>
+</tr>
+<tr>
+<td><code>prevent_hallucinations</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>添加防幻觉指令</td>
+</tr>
+<tr>
+<td><code>prevent_prompt_leakage</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>防止 prompt 泄露</td>
+</tr>
+<tr>
+<td><code>enable_agentic_prompt</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>启用增强 prompt（适合 DeepAgent）</td>
+</tr>
+<tr>
+<td><code>output_language</code></td>
+<td><code>str</code></td>
+<td><code>None</code></td>
+<td>指定输出语言</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>Markdown 格式输出</td>
+</tr>
+</tbody>
+</table>
+<h2 id="toolconfig">ToolConfig<a class="headerlink" href="#toolconfig" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.agent.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolConfig</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>support_tool_calls</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>是否支持工具调用</td>
+</tr>
+<tr>
+<td><code>tool_call_limit</code></td>
+<td><code>int</code></td>
+<td><code>None</code></td>
+<td>工具调用次数限制</td>
+</tr>
+<tr>
+<td><code>tool_choice</code></td>
+<td><code>str \| Dict</code></td>
+<td><code>None</code></td>
+<td>工具选择策略</td>
+</tr>
+<tr>
+<td><code>search_knowledge</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>允许 Agent 主动搜索知识库</td>
+</tr>
+<tr>
+<td><code>add_references</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>添加知识库引用</td>
+</tr>
+<tr>
+<td><code>compress_tool_results</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>压缩工具结果</td>
+</tr>
+<tr>
+<td><code>compression_manager</code></td>
+<td><code>CompressionManager</code></td>
+<td><code>None</code></td>
+<td>压缩管理器实例</td>
+</tr>
+</tbody>
+</table>
+<h2 id="workspacememoryconfig">WorkspaceMemoryConfig<a class="headerlink" href="#workspacememoryconfig" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.agent.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">WorkspaceMemoryConfig</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>load_workspace_context</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>加载 workspace 上下文</td>
+</tr>
+<tr>
+<td><code>load_workspace_memory</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>加载 workspace 记忆</td>
+</tr>
+<tr>
+<td><code>memory_days</code></td>
+<td><code>int</code></td>
+<td><code>2</code></td>
+<td>记忆回溯天数</td>
+</tr>
+</tbody>
+</table>
+<h2 id="teamconfig">TeamConfig<a class="headerlink" href="#teamconfig" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.agent.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">TeamConfig</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>respond_directly</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>团队成员直接回复（不经协调者）</td>
+</tr>
+<tr>
+<td><code>add_transfer_instructions</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>自动添加委派指令</td>
+</tr>
+<tr>
+<td><code>team_response_separator</code></td>
+<td><code>str</code></td>
+<td><code>"\n"</code></td>
+<td>团队响应分隔符</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="deepagent">DeepAgent<a class="headerlink" href="#deepagent" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">DeepAgent</span>
+</code></pre></div>
+<p>预配置的 Agent，继承自 <code>Agent</code>，内置文件操作、命令执行、网页搜索等工具。</p>
+<h3 id="_7">构造参数<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h3>
+<p>继承 Agent 所有参数，额外提供：</p>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enable_file_tools</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>启用文件操作工具</td>
+</tr>
+<tr>
+<td><code>enable_execute_tools</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>启用命令执行工具</td>
+</tr>
+<tr>
+<td><code>enable_web_tools</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>启用网页搜索工具</td>
+</tr>
+<tr>
+<td><code>enable_todo_tools</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>启用 TODO 管理</td>
+</tr>
+<tr>
+<td><code>enable_task_tools</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>启用子任务委派</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_8">内置工具<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>工具</th>
+<th>函数</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>文件</td>
+<td><code>ls</code>, <code>glob</code>, <code>grep</code>, <code>read_file</code>, <code>write_file</code>, <code>edit_file</code></td>
+<td>文件系统操作</td>
+</tr>
+<tr>
+<td>执行</td>
+<td><code>execute</code></td>
+<td>运行 Shell 命令</td>
+</tr>
+<tr>
+<td>搜索</td>
+<td><code>web_search</code>, <code>fetch_url</code></td>
+<td>网页搜索和抓取</td>
+</tr>
+<tr>
+<td>任务</td>
+<td><code>task</code></td>
+<td>委派子任务给子 Agent</td>
+</tr>
+<tr>
+<td>TODO</td>
+<td><code>read_todos</code>, <code>write_todos</code></td>
+<td>任务列表管理</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="runresponse">RunResponse<a class="headerlink" href="#runresponse" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">RunResponse</span>
+</code></pre></div>
+<p>Agent 运行的返回值。</p>
+<h3 id="_9">属性<a class="headerlink" href="#_9" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>属性</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content</code></td>
+<td><code>Any</code></td>
+<td>响应内容（str 或 BaseModel）</td>
+</tr>
+<tr>
+<td><code>event</code></td>
+<td><code>RunEvent</code></td>
+<td>事件类型</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td><code>str</code></td>
+<td>模型名称</td>
+</tr>
+<tr>
+<td><code>run_id</code></td>
+<td><code>str</code></td>
+<td>运行 ID</td>
+</tr>
+<tr>
+<td><code>session_id</code></td>
+<td><code>str</code></td>
+<td>会话 ID</td>
+</tr>
+<tr>
+<td><code>messages</code></td>
+<td><code>List[Message]</code></td>
+<td>消息列表</td>
+</tr>
+<tr>
+<td><code>metrics</code></td>
+<td><code>Dict</code></td>
+<td>指标（token 用量、耗时）</td>
+</tr>
+<tr>
+<td><code>tool_calls</code></td>
+<td><code>List[ToolCallInfo]</code></td>
+<td>工具调用详情</td>
+</tr>
+<tr>
+<td><code>tool_call_times</code></td>
+<td><code>Dict[str, float]</code></td>
+<td>各工具耗时</td>
+</tr>
+<tr>
+<td><code>reasoning_content</code></td>
+<td><code>str</code></td>
+<td>推理内容（思考过程）</td>
+</tr>
+<tr>
+<td><code>images</code></td>
+<td><code>List[Image]</code></td>
+<td>生成的图片</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_10">方法<a class="headerlink" href="#_10" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>返回</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>to_json()</code></td>
+<td><code>str</code></td>
+<td>转为 JSON 字符串</td>
+</tr>
+<tr>
+<td><code>to_dict()</code></td>
+<td><code>Dict</code></td>
+<td>转为字典</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="runevent">RunEvent<a class="headerlink" href="#runevent" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">RunEvent</span>
+</code></pre></div>
+<p>运行事件枚举：</p>
+<table>
+<thead>
+<tr>
+<th>事件</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run_started</code></td>
+<td>运行开始</td>
+</tr>
+<tr>
+<td><code>run_response</code></td>
+<td>正常响应内容</td>
+</tr>
+<tr>
+<td><code>run_completed</code></td>
+<td>运行完成</td>
+</tr>
+<tr>
+<td><code>tool_call_started</code></td>
+<td>工具调用开始</td>
+</tr>
+<tr>
+<td><code>tool_call_completed</code></td>
+<td>工具调用完成</td>
+</tr>
+<tr>
+<td><code>multi_round_turn</code></td>
+<td>多轮对话轮次</td>
+</tr>
+<tr>
+<td><code>multi_round_completed</code></td>
+<td>多轮对话完成</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="toolcallinfo">ToolCallInfo<a class="headerlink" href="#toolcallinfo" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">ToolCallInfo</span>
+</code></pre></div>
+<p>工具调用信息的扁平化访问：</p>
+<table>
+<thead>
+<tr>
+<th>属性</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tool_name</code></td>
+<td><code>str</code></td>
+<td>工具名称</td>
+</tr>
+<tr>
+<td><code>tool_args</code></td>
+<td><code>Dict</code></td>
+<td>调用参数</td>
+</tr>
+<tr>
+<td><code>tool_result</code></td>
+<td><code>str</code></td>
+<td>返回结果</td>
+</tr>
+<tr>
+<td><code>call_id</code></td>
+<td><code>str</code></td>
+<td>调用 ID</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="workflow">Workflow<a class="headerlink" href="#workflow" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">Workflow</span>
+</code></pre></div>
+<p>确定性工作流引擎。子类实现 <code>run()</code> 方法编排步骤。</p>
+<h3 id="_11">方法<a class="headerlink" href="#_11" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>run()</code></td>
+<td>async</td>
+<td>子类实现的运行逻辑</td>
+</tr>
+<tr>
+<td><code>run_sync()</code></td>
+<td>sync</td>
+<td>同步适配器</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="model">Model<a class="headerlink" href="#model" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">Model</span>
+</code></pre></div>
+<p>所有模型的抽象基类，定义四个 async 抽象方法：</p>
+<table>
+<thead>
+<tr>
+<th>方法</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>invoke()</code></td>
+<td>单次调用（不处理工具）</td>
+</tr>
+<tr>
+<td><code>invoke_stream()</code></td>
+<td>流式调用</td>
+</tr>
+<tr>
+<td><code>response()</code></td>
+<td>完整响应（含工具循环）</td>
+</tr>
+<tr>
+<td><code>response_stream()</code></td>
+<td>流式响应（含工具循环）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_12">通用参数<a class="headerlink" href="#_12" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td><code>str</code></td>
+<td>模型 ID</td>
+</tr>
+<tr>
+<td><code>api_key</code></td>
+<td><code>str</code></td>
+<td>API 密钥</td>
+</tr>
+<tr>
+<td><code>base_url</code></td>
+<td><code>str</code></td>
+<td>API 地址</td>
+</tr>
+<tr>
+<td><code>temperature</code></td>
+<td><code>float</code></td>
+<td>温度</td>
+</tr>
+<tr>
+<td><code>max_tokens</code></td>
+<td><code>int</code></td>
+<td>最大输出 token</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td><code>int</code></td>
+<td>超时秒数</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_13">内置模型<a class="headerlink" href="#_13" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>类</th>
+<th>提供商</th>
+<th>默认模型</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OpenAIChat</code></td>
+<td>OpenAI</td>
+<td>gpt-4o-mini</td>
+</tr>
+<tr>
+<td><code>AzureOpenAIChat</code></td>
+<td>Azure OpenAI</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>DeepSeek</code></td>
+<td>DeepSeek</td>
+<td>deepseek-chat</td>
+</tr>
+<tr>
+<td><code>Claude</code></td>
+<td>Anthropic</td>
+<td>claude-3.5-sonnet</td>
+</tr>
+<tr>
+<td><code>ZhipuAI</code></td>
+<td>智谱 AI</td>
+<td>glm-4.7-flash</td>
+</tr>
+<tr>
+<td><code>Qwen</code></td>
+<td>通义千问</td>
+<td>qwen-plus</td>
+</tr>
+<tr>
+<td><code>Moonshot</code></td>
+<td>月之暗面</td>
+<td>moonshot-v1-128k</td>
+</tr>
+<tr>
+<td><code>Doubao</code></td>
+<td>豆包</td>
+<td>doubao-pro-32k</td>
+</tr>
+<tr>
+<td><code>Yi</code></td>
+<td>零一万物</td>
+<td>yi-large</td>
+</tr>
+<tr>
+<td><code>Grok</code></td>
+<td>xAI</td>
+<td>grok-beta</td>
+</tr>
+<tr>
+<td><code>Ollama</code></td>
+<td>本地</td>
+<td>llama3</td>
+</tr>
+<tr>
+<td><code>Together</code></td>
+<td>Together AI</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>OpenAILike</code></td>
+<td>通用适配</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="workingmemory">WorkingMemory<a class="headerlink" href="#workingmemory" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">WorkingMemory</span>
+</code></pre></div>
+<p>运行时工作记忆，维护会话消息历史。</p>
+<h3 id="_14">构造参数<a class="headerlink" href="#_14" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>参数</th>
+<th>类型</th>
+<th>默认值</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>db</code></td>
+<td><code>BaseDb</code></td>
+<td><code>None</code></td>
+<td>持久化数据库</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="tool-function-functioncall">Tool / Function / FunctionCall<a class="headerlink" href="#tool-function-functioncall" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">Tool</span><span class="p">,</span> <span class="n">Function</span><span class="p">,</span> <span class="n">FunctionCall</span>
+</code></pre></div>
+<p>三层工具架构：</p>
+<table>
+<thead>
+<tr>
+<th>类</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Tool</code></td>
+<td>工具容器，注册多个 Function</td>
+</tr>
+<tr>
+<td><code>Function</code></td>
+<td>函数定义（schema + 入口点）</td>
+</tr>
+<tr>
+<td><code>FunctionCall</code></td>
+<td>单次函数调用实例</td>
+</tr>
+</tbody>
+</table>
+<h3 id="functionfrom_callable">Function.from_callable<a class="headerlink" href="#functionfrom_callable" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="n">func</span> <span class="o">=</span> <span class="n">Function</span><span class="o">.</span><span class="n">from_callable</span><span class="p">(</span><span class="n">my_function</span><span class="p">,</span> <span class="n">strict</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+<p>从 Python 函数自动生成工具定义。</p>
+<hr />
+<h2 id="_15">数据库<a class="headerlink" href="#_15" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">SqliteDb</span><span class="p">,</span> <span class="n">PostgresDb</span><span class="p">,</span> <span class="n">InMemoryDb</span><span class="p">,</span> <span class="n">JsonDb</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>类</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SqliteDb</code></td>
+<td>SQLite 持久化</td>
+</tr>
+<tr>
+<td><code>PostgresDb</code></td>
+<td>PostgreSQL</td>
+</tr>
+<tr>
+<td><code>InMemoryDb</code></td>
+<td>内存（测试用）</td>
+</tr>
+<tr>
+<td><code>JsonDb</code></td>
+<td>JSON 文件</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="n">db</span> <span class="o">=</span> <span class="n">SqliteDb</span><span class="p">(</span><span class="n">table_name</span><span class="o">=</span><span class="s2">&quot;sessions&quot;</span><span class="p">,</span> <span class="n">db_file</span><span class="o">=</span><span class="s2">&quot;agent.db&quot;</span><span class="p">)</span>
+</code></pre></div>
+<hr />
+<h2 id="_16">实用工具<a class="headerlink" href="#_16" title="Permanent link">&para;</a></h2>
+<h3 id="token">Token 计数<a class="headerlink" href="#token" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">count_tokens</span><span class="p">,</span> <span class="n">count_text_tokens</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="n">tokens</span> <span class="o">=</span> <span class="n">count_text_tokens</span><span class="p">(</span><span class="s2">&quot;Hello, world!&quot;</span><span class="p">,</span> <span class="n">model_id</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">)</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="n">tokens</span> <span class="o">=</span> <span class="n">count_tokens</span><span class="p">(</span><span class="n">messages</span><span class="p">,</span> <span class="n">tools</span><span class="o">=</span><span class="n">tools</span><span class="p">,</span> <span class="n">model_id</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="_17">日志<a class="headerlink" href="#_17" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">set_log_level_to_debug</span><span class="p">,</span> <span class="n">set_log_level_to_info</span><span class="p">,</span> <span class="n">logger</span>
+</code></pre></div>
+<h3 id="_18">格式化打印<a class="headerlink" href="#_18" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">agentica</span><span class="w"> </span><span class="kn">import</span> <span class="n">pprint_run_response</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="n">pprint_run_response</span><span class="p">(</span><span class="n">response</span><span class="p">,</span> <span class="n">markdown</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  回到页面顶部
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.path", "navigation.top", "search.highlight", "content.code.copy", "content.code.select"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "\u5df2\u590d\u5236", "clipboard.copy": "\u590d\u5236", "search.result.more.one": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.more.other": "\u5728\u8be5\u9875\u4e0a\u8fd8\u6709 # \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.none": "\u6ca1\u6709\u627e\u5230\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.one": "\u627e\u5230 1 \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.other": "# \u4e2a\u7b26\u5408\u6761\u4ef6\u7684\u7ed3\u679c", "search.result.placeholder": "\u952e\u5165\u4ee5\u5f00\u59cb\u641c\u7d22", "search.result.term.missing": "\u7f3a\u5c11", "select.version": "\u9009\u62e9\u5f53\u524d\u7248\u672c"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
