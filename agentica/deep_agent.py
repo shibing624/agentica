@@ -37,7 +37,7 @@ from typing import (
 from dataclasses import dataclass, field
 
 from agentica.agent import Agent
-from agentica.deep_tools import get_builtin_tools, BuiltinTaskTool
+from agentica.tools.buildin_tools import get_builtin_tools, BuiltinTaskTool
 from agentica.model.message import Message
 from agentica.utils.log import logger
 from agentica.utils.tokens import count_message_tokens
@@ -282,7 +282,7 @@ class DeepAgent(Agent):
 
     def _setup_memory_tool(self) -> None:
         """Set up the memory tool with workspace reference."""
-        from agentica.deep_tools import BuiltinMemoryTool
+        from agentica.tools.buildin_tools import BuiltinMemoryTool
         
         # Find and configure the memory tool with workspace
         for tool in self.tools or []:

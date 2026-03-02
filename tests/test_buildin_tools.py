@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Tests for deep_tools.py built-in tools (async-first).
+@description: Tests for buildin_tools.py built-in tools (async-first).
 
-All tools in deep_tools.py are async. Tests use asyncio.run() to drive them.
+All tools in buildin_tools.py are async. Tests use asyncio.run() to drive them.
 LLM-dependent tools (BuiltinTaskTool) are tested with mocked Agent/Model.
 """
 
@@ -21,7 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-from agentica.deep_tools import (
+from agentica.tools.buildin_tools import (
     BuiltinFileTool,
     BuiltinExecuteTool,
     BuiltinWebSearchTool,
@@ -40,7 +40,7 @@ from agentica.deep_tools import (
 @pytest.fixture
 def tmp_dir():
     """Create a temporary directory for file operation tests."""
-    d = tempfile.mkdtemp(prefix="test_deep_tools_")
+    d = tempfile.mkdtemp(prefix="test_buildin_tools_")
     yield d
     shutil.rmtree(d, ignore_errors=True)
 

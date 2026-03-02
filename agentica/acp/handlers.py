@@ -50,21 +50,21 @@ class ACPHandlers:
     def _get_file_tool(self):
         """Get or create file tool instance (singleton pattern)"""
         if self._file_tool is None:
-            from agentica.deep_tools import BuiltinFileTool
+            from agentica.tools.buildin_tools import BuiltinFileTool
             self._file_tool = BuiltinFileTool()
         return self._file_tool
     
     def _get_execute_tool(self):
         """Get or create execute tool instance"""
         if self._execute_tool_instance is None:
-            from agentica.deep_tools import BuiltinExecuteTool
+            from agentica.tools.buildin_tools import BuiltinExecuteTool
             self._execute_tool_instance = BuiltinExecuteTool()
         return self._execute_tool_instance
     
     def _get_web_search_tool(self):
         """Get or create web search tool instance"""
         if self._web_search_tool is None:
-            from agentica.deep_tools import BuiltinWebSearchTool
+            from agentica.tools.buildin_tools import BuiltinWebSearchTool
             self._web_search_tool = BuiltinWebSearchTool()
         return self._web_search_tool
     

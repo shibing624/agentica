@@ -61,6 +61,7 @@ class Claude(Model):
 
     # Client parameters
     api_key: Optional[str] = None
+    timeout: Optional[float] = None
     client_params: Optional[Dict[str, Any]] = None
 
     # Anthropic client
@@ -106,6 +107,8 @@ class Claude(Model):
         # Set client parameters if they are provided
         if self.api_key:
             _client_params["api_key"] = self.api_key
+        if self.timeout is not None:
+            _client_params["timeout"] = self.timeout
         if self.client_params:
             _client_params.update(self.client_params)
         return AnthropicClient(**_client_params)

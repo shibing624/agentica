@@ -29,7 +29,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from agentica import Agent, OpenAIChat
 from agentica.memory import WorkingMemory
 from agentica.workspace import Workspace
-from agentica.deep_tools import BuiltinMemoryTool
+from agentica.tools.buildin_tools import BuiltinMemoryTool
 
 
 def _create_agent(workspace: Workspace, **kwargs) -> Agent:

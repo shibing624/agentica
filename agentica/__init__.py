@@ -231,13 +231,13 @@ _LAZY_IMPORTS = {
     "PatchTool": "agentica.tools.patch_tool",
 
     # built-in tools for DeepAgent
-    "BuiltinFileTool": "agentica.deep_tools",
-    "BuiltinExecuteTool": "agentica.deep_tools",
-    "BuiltinWebSearchTool": "agentica.deep_tools",
-    "BuiltinFetchUrlTool": "agentica.deep_tools",
-    "BuiltinTodoTool": "agentica.deep_tools",
-    "BuiltinTaskTool": "agentica.deep_tools",
-    "get_builtin_tools": "agentica.deep_tools",
+    "BuiltinFileTool": "agentica.tools.buildin_tools",
+    "BuiltinExecuteTool": "agentica.tools.buildin_tools",
+    "BuiltinWebSearchTool": "agentica.tools.buildin_tools",
+    "BuiltinFetchUrlTool": "agentica.tools.buildin_tools",
+    "BuiltinTodoTool": "agentica.tools.buildin_tools",
+    "BuiltinTaskTool": "agentica.tools.buildin_tools",
+    "get_builtin_tools": "agentica.tools.buildin_tools",
 
     # subagent system
     "SubagentType": "agentica.subagent",

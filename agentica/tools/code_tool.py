@@ -28,7 +28,7 @@ class CodeTool(Tool):
     Code analysis tool - provides code understanding, formatting, and quality checking.
 
     Difference from built-in tools:
-    - BuiltinFileTool (deep_tools.py): File read/write, string-based edit
+    - BuiltinFileTool (buildin_tools.py): File read/write, string-based edit
     - CodeTool: Code semantic analysis, formatting, linting (code-specific features)
 
     This tool does NOT edit files directly - it analyzes code and optionally

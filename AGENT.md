@@ -38,7 +38,7 @@ agentica --tools calculator shell wikipedia   # Enable specific tools
 |------|---------|
 | `agent.py` | Core `Agent` class - main entry point for building agents |
 | `deep_agent.py` | `DeepAgent` - Agent with built-in file/execute/search tools |
-| `deep_tools.py` | Built-in tools for DeepAgent (ls, read_file, execute, web_search, etc.) |
+| `tools/buildin_tools.py` | Built-in tools for DeepAgent (ls, read_file, execute, web_search, etc.) |
 | `workspace.py` | `Workspace` - Agent workspace with AGENT.md, PERSONA.md, memory management |
 | `memory/` | `AgentMemory`, `MemoryManager`, `WorkspaceMemorySearch` - session and long-term memory |
 | `guardrails.py` | Input/output validation and filtering for agents |
@@ -143,8 +143,8 @@ agentica acp  # Start ACP server mode
 ### subagent model 浅拷贝 + 运行时状态重置（前次提交）
 
 - **问题**：parent 和 subagent 共享同一个 `Model` 实例，导致多种共享可变状态问题（hooks 闭包引用 parent DeepAgent、HTTP client 含 RLock 不可深拷贝、function_call_stack 累计等）
-- **解决方案**：`deep_tools.py` subagent 创建时用 `model_copy()` 浅拷贝并逐个重置运行时字段（tools, functions, function_call_stack, tool_choice, metrics, client, http_client, _pre_tool_hook, _tool_call_hook, _post_tool_hook, _current_messages）
-- **修改文件**：`agentica/deep_tools.py`
+- **解决方案**：`tools/buildin_tools.py` subagent 创建时用 `model_copy()` 浅拷贝并逐个重置运行时字段（tools, functions, function_call_stack, tool_choice, metrics, client, http_client, _pre_tool_hook, _tool_call_hook, _post_tool_hook, _current_messages）
+- **修改文件**：`agentica/tools/buildin_tools.py`
 
 **涉及文件**：
 
@@ -152,7 +152,7 @@ agentica acp  # Start ACP server mode
 |---------|---------|
 | `agentica/model/base.py` | 修改（deferred warnings + role 改 user） |
 | `agentica/deep_agent.py` | 修改（post_tool_hook role 改 user） |
-| `agentica/deep_tools.py` | 修改（subagent model 浅拷贝 + 状态重置） |
+| `agentica/tools/buildin_tools.py` | 修改（subagent model 浅拷贝 + 状态重置） |
 
 ---
 
@@ -214,17 +214,17 @@ agentica acp  # Start ACP server mode
 
 - **问题**：subagent 执行时，主 agent 的 CLI 端完全无法感知子代理内部进度，只显示一个阻塞的 `task` 工具调用
 - **解决方案**：
-  - `deep_tools.py` 的 `task()` 方法改为流式调用 `subagent.run(stream=True, stream_intermediate_steps=True)`，遍历子代理事件收集工具使用信息
+  - `tools/buildin_tools.py` 的 `task()` 方法改为流式调用 `subagent.run(stream=True, stream_intermediate_steps=True)`，遍历子代理事件收集工具使用信息
   - 返回 JSON 新增 `tool_calls_summary`（工具名+简要信息列表）、`execution_time`（耗时秒）、`tool_count`
   - 新增 `_format_tool_brief()` 静态方法：针对不同工具类型生成可读简要信息
   - `cli.py` 新增 `_display_task_result()` 方法，对 `task` 工具做特殊展示：内部工具调用列表 + `Execution Summary: N tool uses, cost: X.Xs`
-- **修改文件**：`agentica/deep_tools.py`、`agentica/cli.py`
+- **修改文件**：`agentica/tools/buildin_tools.py`、`agentica/cli.py`
 
 #### 2. 修复 Prompt 负面示例导致模型错误调用工具格式
 
 - **问题**：`BuiltinTaskTool` 的 system prompt 中包含负面示例 `DO NOT use XML-style tags like <tool_call>task<arg_key>...</arg_key></tool_call>`，弱模型（如 GLM-4-flash）反而会模仿这个 XML 格式来调用工具
 - **解决方案**：删除负面示例，替换为简洁的正面指引 `Use your standard function calling mechanism to invoke task(...)`
-- **修改文件**：`agentica/deep_tools.py`（`TASK_SYSTEM_PROMPT_TEMPLATE`）
+- **修改文件**：`agentica/tools/buildin_tools.py`（`TASK_SYSTEM_PROMPT_TEMPLATE`）
 
 ---
 
@@ -410,7 +410,7 @@ def add(a: int, b: int) -> int:
 
 `Function.from_callable()` auto-detects `_tool_metadata` from `@tool` decorator.
 
-**Builtin Tools** (`agentica/deep_tools.py`) — all I/O-bound tools are **async**:
+**Builtin Tools** (`agentica/tools/buildin_tools.py`) — all I/O-bound tools are **async**:
 - `edit_file(file_path, old_string, new_string, replace_all=False)` — flat params for LLM-friendly schema (no nested dict/list)
 - `read_file` — async with `aiofiles` streaming read
 - `write_file` — async with atomic write (`tempfile` + `os.replace`)

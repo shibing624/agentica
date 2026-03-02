@@ -5,6 +5,7 @@
 
 Available tools:
 - Base: Tool base class
+- Builtin tools: File, Execute, WebSearch, FetchUrl, Todo, Task, Memory (used by DeepAgent)
 - CodeTool: Code analysis, formatting, and linting
 - LspTool: LSP-based code navigation (goto definition, find references)
 - PatchTool: Apply diff/patch files (V4A and unified diff formats)
@@ -14,6 +15,15 @@ Available tools:
 from agentica.tools.base import Tool, Function, FunctionCall
 from agentica.tools.decorators import tool
 from agentica.tools.registry import register_tool, get_tool, list_tools, unregister_tool, clear_registry
+from agentica.tools.buildin_tools import (
+    BuiltinFileTool,
+    BuiltinExecuteTool,
+    BuiltinWebSearchTool,
+    BuiltinFetchUrlTool,
+    BuiltinTodoTool,
+    BuiltinTaskTool,
+    BuiltinMemoryTool,
+)
 from agentica.tools.code_tool import CodeTool
 from agentica.tools.lsp_tool import LspTool
 from agentica.tools.patch_tool import PatchTool
@@ -31,7 +41,15 @@ __all__ = [
     "list_tools",
     "unregister_tool",
     "clear_registry",
-    # Built-in tools
+    # Builtin tools (DeepAgent)
+    "BuiltinFileTool",       # File read/write/search/list
+    "BuiltinExecuteTool",    # Shell command execution
+    "BuiltinWebSearchTool",  # Web search
+    "BuiltinFetchUrlTool",   # URL content fetching
+    "BuiltinTodoTool",       # Task list management
+    "BuiltinTaskTool",       # Sub-agent task delegation
+    "BuiltinMemoryTool",     # Persistent memory
+    # Extended tools
     "CodeTool",      # Code analysis, formatting, linting
     "LspTool",       # LSP-based code navigation
     "PatchTool",     # Apply diff/patch files
