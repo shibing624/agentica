@@ -17,7 +17,10 @@ from agentica.utils.timer import Timer
 
 try:
     from anthropic import AsyncAnthropic as AnthropicClient
-    from anthropic.types import Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta
+    from anthropic.types import (
+        Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta,
+        ThinkingBlock, RedactedThinkingBlock, ThinkingDelta, SignatureDelta,
+    )
     from anthropic.lib.streaming._types import (
         MessageStopEvent,
         RawContentBlockDeltaEvent,
@@ -30,8 +33,9 @@ except (ModuleNotFoundError, ImportError):
 @dataclass
 class MessageData:
     response_content: str = ""
-    response_block: List[Union[TextBlock, ToolUseBlock]] = field(default_factory=list)
-    response_block_content: Optional[Union[TextBlock, ToolUseBlock]] = None
+    response_reasoning_content: str = ""
+    response_block: List[Any] = field(default_factory=list)
+    response_block_content: Optional[Any] = None
     response_usage: Optional[Usage] = None
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     tool_ids: List[str] = field(default_factory=list)
@@ -57,6 +61,8 @@ class Claude(Model):
     stop_sequences: Optional[List[str]] = None
     top_p: Optional[float] = None
     top_k: Optional[int] = None
+    # Extended thinking: {"type": "enabled", "budget_tokens": 10000}
+    thinking: Optional[Dict[str, Any]] = None
     request_params: Optional[Dict[str, Any]] = None
 
     # Client parameters
@@ -131,6 +137,8 @@ class Claude(Model):
             _request_params["top_p"] = self.top_p
         if self.top_k:
             _request_params["top_k"] = self.top_k
+        if self.thinking:
+            _request_params["thinking"] = self.thinking
         if self.request_params:
             _request_params.update(self.request_params)
         return _request_params
@@ -399,25 +407,36 @@ class Claude(Model):
 
         if response.content:
             message_data.response_block = response.content
-            message_data.response_block_content = response.content[0]
             message_data.response_usage = response.usage
 
-        # -*- Extract response content
-        if message_data.response_block_content is not None:
-            if isinstance(message_data.response_block_content, TextBlock):
-                message_data.response_content = message_data.response_block_content.text
-            elif isinstance(message_data.response_block_content, ToolUseBlock):
-                tool_block_input = message_data.response_block_content.input
-                if tool_block_input and isinstance(tool_block_input, dict):
-                    message_data.response_content = tool_block_input.get("query", "")
+            # Find the first non-thinking content block
+            for block in response.content:
+                if isinstance(block, ThinkingBlock):
+                    message_data.response_reasoning_content += block.thinking
+                elif isinstance(block, RedactedThinkingBlock):
+                    pass
+                elif isinstance(block, TextBlock):
+                    if not message_data.response_content:
+                        message_data.response_content = block.text
+                    else:
+                        message_data.response_content += block.text
+                elif isinstance(block, ToolUseBlock):
+                    if not message_data.response_content:
+                        tool_block_input = block.input
+                        if tool_block_input and isinstance(tool_block_input, dict):
+                            message_data.response_content = tool_block_input.get("query", "")
 
-        # -*- Create assistant message
+        # Create assistant message
         assistant_message = Message(
             role=response.role or "assistant",
             content=message_data.response_content,
         )
 
-        # -*- Extract tool calls from the response
+        # Set reasoning_content from thinking blocks
+        if message_data.response_reasoning_content:
+            assistant_message.reasoning_content = message_data.response_reasoning_content
+
+        # Extract tool calls from the response
         if response.stop_reason == "tool_use":
             for block in message_data.response_block:
                 if isinstance(block, ToolUseBlock):
@@ -436,12 +455,12 @@ class Claude(Model):
                         }
                     )
 
-        # -*- Update assistant message if tool calls are present
+        # Update assistant message if tool calls are present
         if len(message_data.tool_calls) > 0:
             assistant_message.tool_calls = message_data.tool_calls
             assistant_message.content = message_data.response_block
 
-        # -*- Update usage metrics
+        # Update usage metrics
         self.update_usage_metrics(assistant_message, message_data.response_usage, metrics)
 
         return assistant_message, message_data.response_content, message_data.tool_ids
@@ -603,6 +622,8 @@ class Claude(Model):
         # -*- Update model response
         if assistant_message.content is not None:
             model_response.content = assistant_message.get_content_string()
+        if assistant_message.reasoning_content:
+            model_response.reasoning_content = assistant_message.reasoning_content
 
         return model_response
 
@@ -642,7 +663,7 @@ class Claude(Model):
         message_data = MessageData()
         metrics = Metrics()
 
-        # -*- Generate response
+        # Generate response
         metrics.response_timer.start()
         response = await self.invoke_stream(messages=messages)
         async with response as stream:
@@ -654,6 +675,11 @@ class Claude(Model):
                         metrics.output_tokens += 1
                         if metrics.output_tokens == 1:
                             metrics.time_to_first_token = metrics.response_timer.elapsed
+                    elif isinstance(delta.delta, ThinkingDelta):
+                        yield ModelResponse(reasoning_content=delta.delta.thinking)
+                        message_data.response_reasoning_content += delta.delta.thinking
+                    elif isinstance(delta.delta, SignatureDelta):
+                        pass
 
                 if isinstance(delta, ContentBlockStopEvent):
                     if isinstance(delta.content_block, ToolUseBlock):
@@ -679,24 +705,26 @@ class Claude(Model):
 
         metrics.response_timer.stop()
 
-        # -*- Create assistant message
+        # Create assistant message
         assistant_message = Message(
             role="assistant",
             content=message_data.response_content,
         )
+        if message_data.response_reasoning_content:
+            assistant_message.reasoning_content = message_data.response_reasoning_content
 
-        # -*- Update assistant message if tool calls are present
+        # Update assistant message if tool calls are present
         if len(message_data.tool_calls) > 0:
             assistant_message.content = message_data.response_block
             assistant_message.tool_calls = message_data.tool_calls
 
-        # -*- Update usage metrics
+        # Update usage metrics
         self.update_usage_metrics(assistant_message, message_data.response_usage, metrics)
 
-        # -*- Add assistant message to messages
+        # Add assistant message to messages
         messages.append(assistant_message)
 
-        # -*- Log response and metrics
+        # Log response and metrics
         assistant_message.log()
         metrics.log()
 
