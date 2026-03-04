@@ -15,7 +15,7 @@ from agentica.utils.log import logger
 try:
     from anthropic import AsyncAnthropic as AnthropicClient
 except (ModuleNotFoundError, ImportError):
-    raise ImportError("`anthropic` not installed. Please install using `pip install anthropic`")
+    AnthropicClient = None
 
 
 @dataclass

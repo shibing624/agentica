@@ -27,7 +27,19 @@ try:
         ContentBlockStopEvent,
     )
 except (ModuleNotFoundError, ImportError):
-    raise ImportError("`anthropic` not installed. Please install using `pip install anthropic`")
+    AnthropicClient = None
+    AnthropicMessage = None
+    TextBlock = None
+    ToolUseBlock = None
+    Usage = None
+    TextDelta = None
+    ThinkingBlock = None
+    RedactedThinkingBlock = None
+    ThinkingDelta = None
+    SignatureDelta = None
+    MessageStopEvent = None
+    RawContentBlockDeltaEvent = None
+    ContentBlockStopEvent = None
 
 
 @dataclass
@@ -102,6 +114,9 @@ class Claude(Model):
         Returns:
             AnthropicClient: An instance of the Anthropic client
         """
+        if AnthropicClient is None:
+            raise ImportError("`anthropic` not installed. Please install using `pip install anthropic`")
+
         if self.client:
             return self.client
 

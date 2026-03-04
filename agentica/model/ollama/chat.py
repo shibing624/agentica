@@ -15,7 +15,7 @@ from agentica.utils.timer import Timer
 try:
     from ollama import AsyncClient as AsyncOllamaClient
 except (ModuleNotFoundError, ImportError):
-    raise ImportError("`ollama` not installed. Please install using `pip install ollama`")
+    AsyncOllamaClient = None
 
 
 @dataclass
@@ -75,6 +75,8 @@ class Ollama(Model):
 
     def get_async_client(self) -> AsyncOllamaClient:
         """Returns an asynchronous Ollama client."""
+        if AsyncOllamaClient is None:
+            raise ImportError("`ollama` not installed. Please install using `pip install ollama`")
         if self.async_client is not None:
             return self.async_client
         return AsyncOllamaClient(**self.get_client_params())
