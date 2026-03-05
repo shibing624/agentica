@@ -114,6 +114,7 @@ from agentica.agent import Agent, AgentCancelledError
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 from agentica.run_config import RunConfig
 from agentica.deep_agent import DeepAgent
+from agentica.web_search_agent import WebSearchAgent
 from agentica.workflow import Workflow, WorkflowSession
 from agentica.hooks import AgentHooks, RunHooks
 
@@ -249,6 +250,15 @@ _LAZY_IMPORTS = {
     "register_custom_subagent": "agentica.subagent",
     "unregister_custom_subagent": "agentica.subagent",
     "get_custom_subagent_configs": "agentica.subagent",
+
+    # search enhancement modules
+    "QueryDecomposer": "agentica.search.query_decomposer",
+    "EvidenceStore": "agentica.search.evidence_store",
+    "Evidence": "agentica.search.evidence_store",
+    "SearchResult": "agentica.search.evidence_store",
+    "AnswerVerifier": "agentica.search.answer_verifier",
+    "VerificationResult": "agentica.search.answer_verifier",
+    "SearchOrchestrator": "agentica.search.orchestrator",
 
     # acp system
     "ACPServer": "agentica.acp",
@@ -389,7 +399,7 @@ __all__ = [
     "count_tokens", "count_text_tokens", "count_image_tokens",
     "count_message_tokens", "count_tool_tokens",
     # agent
-    "Agent", "AgentCancelledError", "DeepAgent",
+    "Agent", "AgentCancelledError", "DeepAgent", "WebSearchAgent",
     "PromptConfig", "ToolConfig", "WorkspaceMemoryConfig", "TeamConfig",
     "RunConfig", "Workflow", "WorkflowSession", "AgentHooks", "RunHooks",
     # workspace
