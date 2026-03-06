@@ -368,9 +368,12 @@ class Model(ABC):
                 finally:
                     timers[idx].stop()
 
-        async with asyncio.TaskGroup() as tg:
-            tasks = [tg.create_task(_execute_one(i, fc)) for i, fc in enumerate(function_calls)]
-        results = [t.result() for t in tasks]
+        tasks = [asyncio.ensure_future(_execute_one(i, fc)) for i, fc in enumerate(function_calls)]
+        results = list(await asyncio.gather(*tasks, return_exceptions=True))
+        # Normalize: gather with return_exceptions wraps exceptions as results.
+        # _execute_one already catches exceptions and stores them in exceptions[],
+        # so a result here that's an Exception means an unexpected error — treat as False.
+        results = [r if not isinstance(r, BaseException) else False for r in results]
 
         # Phase 3: Process results in original order
         for i, function_call in enumerate(function_calls):

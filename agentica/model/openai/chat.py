@@ -1,6 +1,12 @@
 from os import getenv
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal, override
+import sys
+from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from typing_extensions import override
 
 import httpx
 from enum import Enum, EnumMeta

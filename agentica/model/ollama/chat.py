@@ -1,6 +1,12 @@
 import json
 from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator, Dict, Any, Mapping, Union, override
+import sys
+from typing import Optional, List, AsyncIterator, Dict, Any, Mapping, Union
+
+if sys.version_info >= (3, 12):
+    from typing import override
+else:
+    from typing_extensions import override
 
 from pydantic import BaseModel
 

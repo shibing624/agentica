@@ -312,7 +312,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 Agentica is a Python AI agent framework for building, managing, and deploying autonomous AI agents. It supports multi-agent teams, workflows, RAG, MCP tools, and a file-based workspace memory system. The project uses an **async-first** architecture where all core methods are natively async, with `_sync()` adapters for synchronous callers.
 
-**Python >= 3.12 required.**
+**Python >= 3.10 required.**
 
 
 ## Common Commands
@@ -335,7 +335,7 @@ python -m pytest tests/test_agent.py::TestAgentInitialization::test_default_init
 agentica
 ```
 
-No Makefile, linter config, or type-checker is configured in this repo. CI runs `pytest` on Python 3.12.
+No Makefile, linter config, or type-checker is configured in this repo. CI runs `pytest` on Python 3.10+.
 
 ## Architecture
 
@@ -466,8 +466,8 @@ Uses **lazy loading** with thread-safe double-checked locking (`threading.Lock`)
 - `RunResponse.tool_calls` → `List[ToolCallInfo]` for flat attribute access (no nested `.get()` chains)
 - `RunResponse.tool_call_times` → `Dict[str, float]` one-liner per-tool timing
 - Langfuse integration for tracing (context manager pattern in runner)
-- `@override` decorator (Python 3.12) on model provider method overrides
-- `asyncio.TaskGroup` for structured concurrent tool execution (not `asyncio.gather`)
+- `@override` decorator (from `typing_extensions` on Python < 3.12) on model provider method overrides
+- `asyncio.gather` with `return_exceptions=True` for structured concurrent tool execution
 - All blocking I/O (DB, file system) wrapped in `loop.run_in_executor()` within async methods
 - Tests for async methods use `asyncio.run()` and `unittest.mock.AsyncMock`
 
