@@ -271,8 +271,6 @@ _LAZY_IMPORTS = {
     "McpTool": "agentica.tools.mcp_tool",
     "CompositeMultiMcpTool": "agentica.tools.mcp_tool",
 
-    # web search agent
-    "WebSearchAgent": "agentica.web_search_agent",
 }
 
 _LAZY_CACHE = {}

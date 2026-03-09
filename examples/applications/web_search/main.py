@@ -1,30 +1,29 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: WebSearchAgent Demo
+@description: Web Search Agent Demo
 
-WebSearchAgent is a simple Agent subclass that auto-configures web_search
-and fetch_url tools with an optimized search strategy prompt (ReAct pattern).
+Uses Agent with BuiltinWebSearchTool and BuiltinFetchUrlTool for deep research tasks.
 """
 import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import OpenAIChat
-from agentica.web_search_agent import WebSearchAgent
+from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFetchUrlTool
 
 
 def main():
-    """Demo: WebSearchAgent for deep research tasks."""
+    """Demo: Agent with web search tools for deep research tasks."""
     print("=" * 60)
-    print("WebSearchAgent Demo")
+    print("Web Search Agent Demo")
     print("=" * 60)
 
-    agent = WebSearchAgent(
+    agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         name="Researcher",
         description="A deep research agent that finds precise answers.",
+        tools=[BuiltinWebSearchTool(), BuiltinFetchUrlTool()],
         debug=True,
     )
 

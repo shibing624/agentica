@@ -191,3 +191,5 @@ update_tech_v3.md
 prompt_update.md
 site/
 CLAUDE.md
+evaluation/browsecomp_plus/runs/*
+evaluation/browsecomp_plus/data/*
