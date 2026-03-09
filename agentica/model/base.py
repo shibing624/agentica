@@ -464,6 +464,21 @@ class Model(ABC):
         if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
             self.deactivate_function_calls()
 
+    async def _maybe_compress_messages(self, messages: List[Message]) -> None:
+        """Check and run compression on messages if a CompressionManager is configured on the Agent."""
+        agent = self._agent_ref() if self._agent_ref else None
+        if agent is None:
+            return
+        tool_config = getattr(agent, 'tool_config', None)
+        if tool_config is None or not getattr(tool_config, 'compress_tool_results', False):
+            return
+        cm = getattr(tool_config, 'compression_manager', None)
+        if cm is None:
+            return
+        if cm.should_compress(messages, tools=self.tools, model=self):
+            logger.info("Compressing tool results to reduce context size")
+            await cm.compress(messages, tools=self.tools, model=self)
+
     async def handle_post_tool_call_messages(self, messages: List[Message], model_response: ModelResponse) -> ModelResponse:
         """Handle messages after tool calls (async-only, single implementation)."""
         last_message = messages[-1]
@@ -478,6 +493,7 @@ class Model(ABC):
                     model_response.content = ""
                 model_response.content += last_message.content
         else:
+            await self._maybe_compress_messages(messages)
             response_after_tool_calls = await self.response(messages=messages)
             if response_after_tool_calls.content is not None:
                 if model_response.content is None:
@@ -501,6 +517,7 @@ class Model(ABC):
             ):
                 yield ModelResponse(content=last_message.content)
         else:
+            await self._maybe_compress_messages(messages)
             async for model_response in self.response_stream(messages=messages):
                 yield model_response
 

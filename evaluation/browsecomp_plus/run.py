@@ -1089,6 +1089,10 @@ async def main() -> None:
                     model=OpenAIChat(id=args.model),
                     compress_tool_results=True,
                     compress_token_limit=compress_token_limit,
+                    compress_target_token_limit=int(main_model.context_window * 0.5),
+                    truncate_head_chars=200,
+                    keep_recent_rounds=3,
+                    use_llm_compression=True,
                 ),
             ),
         )
