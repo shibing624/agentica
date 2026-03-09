@@ -8,7 +8,6 @@ Core prompt components:
 - tools: Tool usage strategy (parallel, file ops, execution)
 - soul: Professional objectivity and tone guidelines
 - self_verification: Code validation after changes (lint/test/typecheck)
-- deep_agent: DeepAgent specific prompts (reflection, repetition, etc.)
 """
 
 from agentica.prompts.base.heartbeat import (
@@ -28,18 +27,6 @@ from agentica.prompts.base.self_verification import (
     SELF_VERIFICATION_PROMPT,
     get_self_verification_prompt,
 )
-from agentica.prompts.base.deep_agent import (
-    STEP_REFLECTION_PROMPT,
-    FORCE_ANSWER_PROMPT,
-    REPETITIVE_BEHAVIOR_PROMPT,
-    FORCE_STRATEGY_CHANGE_PROMPT,
-    ITERATION_CHECKPOINT_PROMPT,
-    get_step_reflection_prompt,
-    get_force_answer_prompt,
-    get_repetitive_behavior_prompt,
-    get_force_strategy_change_prompt,
-    get_iteration_checkpoint_prompt,
-)
 
 __all__ = [
     "HEARTBEAT_PROMPT",
@@ -52,15 +39,4 @@ __all__ = [
     # Self Verification prompts
     "SELF_VERIFICATION_PROMPT",
     "get_self_verification_prompt",
-    # Deep Agent prompts
-    "STEP_REFLECTION_PROMPT",
-    "FORCE_ANSWER_PROMPT",
-    "REPETITIVE_BEHAVIOR_PROMPT",
-    "FORCE_STRATEGY_CHANGE_PROMPT",
-    "ITERATION_CHECKPOINT_PROMPT",
-    "get_step_reflection_prompt",
-    "get_force_answer_prompt",
-    "get_repetitive_behavior_prompt",
-    "get_force_strategy_change_prompt",
-    "get_iteration_checkpoint_prompt",
 ]

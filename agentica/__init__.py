@@ -113,8 +113,6 @@ from agentica.utils.tokens import count_tokens, count_text_tokens, count_image_t
 from agentica.agent import Agent, AgentCancelledError
 from agentica.agent.config import PromptConfig, ToolConfig, WorkspaceMemoryConfig, TeamConfig
 from agentica.run_config import RunConfig
-from agentica.deep_agent import DeepAgent
-from agentica.web_search_agent import WebSearchAgent
 from agentica.workflow import Workflow, WorkflowSession
 from agentica.hooks import AgentHooks, RunHooks
 
@@ -231,7 +229,7 @@ _LAZY_IMPORTS = {
     "CodeTool": "agentica.tools.code_tool",
     "PatchTool": "agentica.tools.patch_tool",
 
-    # built-in tools for DeepAgent
+    # built-in tools
     "BuiltinFileTool": "agentica.tools.buildin_tools",
     "BuiltinExecuteTool": "agentica.tools.buildin_tools",
     "BuiltinWebSearchTool": "agentica.tools.buildin_tools",
@@ -250,15 +248,6 @@ _LAZY_IMPORTS = {
     "register_custom_subagent": "agentica.subagent",
     "unregister_custom_subagent": "agentica.subagent",
     "get_custom_subagent_configs": "agentica.subagent",
-
-    # search enhancement modules
-    "QueryDecomposer": "agentica.search.query_decomposer",
-    "EvidenceStore": "agentica.search.evidence_store",
-    "Evidence": "agentica.search.evidence_store",
-    "SearchResult": "agentica.search.evidence_store",
-    "AnswerVerifier": "agentica.search.answer_verifier",
-    "VerificationResult": "agentica.search.answer_verifier",
-    "SearchOrchestrator": "agentica.search.orchestrator",
 
     # acp system
     "ACPServer": "agentica.acp",
@@ -281,6 +270,9 @@ _LAZY_IMPORTS = {
     "MCPConfig": "agentica.mcp.config",
     "McpTool": "agentica.tools.mcp_tool",
     "CompositeMultiMcpTool": "agentica.tools.mcp_tool",
+
+    # web search agent
+    "WebSearchAgent": "agentica.web_search_agent",
 }
 
 _LAZY_CACHE = {}
@@ -399,7 +391,7 @@ __all__ = [
     "count_tokens", "count_text_tokens", "count_image_tokens",
     "count_message_tokens", "count_tool_tokens",
     # agent
-    "Agent", "AgentCancelledError", "DeepAgent", "WebSearchAgent",
+    "Agent", "AgentCancelledError",
     "PromptConfig", "ToolConfig", "WorkspaceMemoryConfig", "TeamConfig",
     "RunConfig", "Workflow", "WorkflowSession", "AgentHooks", "RunHooks",
     # workspace

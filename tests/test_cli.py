@@ -85,13 +85,13 @@ class TestCLIImports(unittest.TestCase):
         except ImportError as e:
             self.fail(f"Failed to import cli module: {e}")
 
-    def test_can_import_deep_agent(self):
-        """Test DeepAgent can be imported from CLI."""
+    def test_can_import_agent(self):
+        """Test Agent can be imported from CLI."""
         try:
-            from agentica import DeepAgent
+            from agentica import Agent
             self.assertTrue(True)
         except ImportError as e:
-            self.fail(f"Failed to import DeepAgent: {e}")
+            self.fail(f"Failed to import Agent: {e}")
 
 
 class TestCLIConfiguration(unittest.TestCase):

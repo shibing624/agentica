@@ -276,7 +276,7 @@ class PromptsMixin:
         if self.workspace and self.workspace.exists():
             workspace_context = await self.workspace.get_context_prompt()
 
-        # Dynamic tool list + descriptions from DeepAgent or None for plain Agent
+        # Dynamic tool list + descriptions from built-in tools or None for plain Agent
         active_tools = None
         tool_descriptions = None
         if hasattr(self, 'get_builtin_tool_names'):

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: DeepAgent Code Assistant Demo
+@description: Agent Code Assistant Demo
 
-This example demonstrates DeepAgent as a coding assistant:
+This example demonstrates Agent as a coding assistant:
 - Code execution with the 'execute' tool
 - Code analysis and debugging
 - Code generation and refactoring
@@ -15,7 +15,8 @@ import asyncio
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, OpenAIChat
+from agentica import Agent, OpenAIChat
+from agentica.tools.buildin_tools import get_builtin_tools
 
 
 async def code_execution_demo():
@@ -24,15 +25,15 @@ async def code_execution_demo():
     print("Demo 1: Code Execution")
     print("=" * 60)
 
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
         work_dir='./tmp/',
         name="CodeRunner",
         description="A code execution assistant",
+        tools=get_builtin_tools(),
         debug=True,
     )
 
-    # Simple calculation
     response = await agent.run(
         "Write and execute Python code to calculate the first 10 Fibonacci numbers, "
         "and judge each num is even or odd. give me the result after execution."
@@ -46,7 +47,7 @@ async def code_analysis_demo():
     print("Demo 2: Code Analysis")
     print("=" * 60)
 
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
         name="CodeAnalyzer",
         description="A code analysis assistant",
@@ -54,6 +55,7 @@ async def code_analysis_demo():
             "You are an expert code reviewer.",
             "Analyze code for bugs, performance issues, and best practices. last run it and fix the bug.",
         ],
+        tools=get_builtin_tools(),
         debug=True,
     )
 
@@ -81,7 +83,7 @@ async def code_generation_demo():
     print("Demo 3: Code Generation")
     print("=" * 60)
 
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
         work_dir='./tmp/',
         name="CodeGenerator",
@@ -93,6 +95,7 @@ async def code_generation_demo():
             "IMPORTANT: Use Python syntax correctly - use `None` (not `null`), `True`/`False` (not `true`/`false`).",
             "Before executing code, verify the syntax is correct Python.",
         ],
+        tools=get_builtin_tools(),
         debug=True,
     )
 
@@ -109,8 +112,9 @@ async def lint_fix_demo():
     print("Demo 4: Lint Fix - Detect and Fix Code Issues")
     print("=" * 60)
 
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
+        tools=get_builtin_tools(),
         debug=True,
     )
 
@@ -118,7 +122,6 @@ async def lint_fix_demo():
     output_dir = os.path.join(demo_dir, "tmp")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Create a file with intentional lint issues
     bad_code = '''
 import os
 import sys

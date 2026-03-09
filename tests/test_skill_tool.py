@@ -188,7 +188,7 @@ Added dynamically.
 
 
 class TestSkillToolIntegration(unittest.TestCase):
-    """Integration tests for SkillTool with DeepAgent."""
+    """Integration tests for SkillTool with Agent."""
 
     def setUp(self):
         """Reset skill registry."""
@@ -198,8 +198,8 @@ class TestSkillToolIntegration(unittest.TestCase):
         """Clean up."""
         reset_skill_registry()
 
-    def test_skill_tool_with_deep_agent_empty_skills(self):
-        """Test SkillTool works with DeepAgent when no skills are available."""
+    def test_skill_tool_with_agent_empty_skills(self):
+        """Test SkillTool works with Agent when no skills are available."""
         # Create SkillTool with no skills
         skill_tool = SkillTool(auto_load=False)
         

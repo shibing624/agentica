@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: DeepAgent Web Search Demo
+@description: Agent Web Search Demo
 
-This example demonstrates DeepAgent's web capabilities:
+This example demonstrates Agent's web capabilities:
 - Web search for information gathering
 - URL fetching for detailed content
-
-For comprehensive deep research with reflection and context management,
-see: examples/applications/deep_research/main.py
 """
 import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, OpenAIChat
+from agentica import Agent, OpenAIChat
+from agentica.tools.buildin_tools import get_builtin_tools
 
 
 def web_search_demo():
@@ -24,7 +22,7 @@ def web_search_demo():
     print("Demo 1: Web Search")
     print("=" * 60)
 
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         name="WebSearcher",
         description="An assistant with web search capabilities",
@@ -33,7 +31,7 @@ def web_search_demo():
             "Search the web for accurate, up-to-date information.",
             "Always cite your sources.",
         ],
-        include_web_search=True,
+        tools=get_builtin_tools(include_web_search=True, include_fetch_url=True),
         debug=True,
     )
 
@@ -50,12 +48,11 @@ def url_fetch_demo():
     print("Demo 2: URL Content Fetching")
     print("=" * 60)
 
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(id="gpt-4o"),
         name="ContentFetcher",
         description="An assistant that can fetch and analyze web content",
-        include_fetch_url=True,
-        # debug=True,
+        tools=get_builtin_tools(include_fetch_url=True),
     )
 
     response = agent.run_sync(

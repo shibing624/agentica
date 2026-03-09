@@ -11,7 +11,8 @@ from typing import List, Optional, Any
 
 from rich.console import Console
 
-from agentica import DeepAgent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, DoubaoChat
+from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, DoubaoChat
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.config import AGENTICA_HOME
 from agentica.workspace import Workspace
 
@@ -151,7 +152,7 @@ def parse_args():
     parser.add_argument('--work_dir', type=str, help='Working directory for file operations', default=None)
     parser.add_argument('--tools', nargs='*',
                         choices=list(TOOL_REGISTRY.keys()),
-                        help='Additional tools to enable (on top of DeepAgent built-in tools)')
+                        help='Additional tools to enable (on top of built-in tools)')
     parser.add_argument('--workspace', type=str, default=None,
                         help='Workspace directory path (default: ~/.agentica/workspace)')
     parser.add_argument('--no-workspace', action='store_true',
@@ -213,7 +214,7 @@ def get_model(model_provider, model_name, base_url=None, api_key=None, max_token
 
 def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
                  workspace: Optional[Workspace] = None, skills_registry=None):
-    """Helper to create or recreate a DeepAgent with current config."""
+    """Helper to create or recreate an Agent with built-in tools and current config."""
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -232,13 +233,16 @@ def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
         if skills_summary:
             instructions.append(f"\n# Available Skills\n{skills_summary}")
 
-    # Build kwargs for DeepAgent
+    # Build tools list: built-in tools + extra tools
     from agentica.agent.config import PromptConfig
-    deep_agent_kwargs = {
+    builtin_tools = get_builtin_tools()
+    all_tools = builtin_tools + (extra_tools or [])
+
+    agent_kwargs = {
         "model": model,
         "work_dir": agent_config.get("work_dir"),
-        "tools": extra_tools,
-        "prompt_config": PromptConfig(add_datetime_to_instructions=True),
+        "tools": all_tools,
+        "prompt_config": PromptConfig(add_datetime_to_instructions=True, enable_agentic_prompt=True),
         "add_history_to_messages": True,
         "debug": agent_config["debug"],
         "workspace": workspace,
@@ -246,8 +250,7 @@ def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
 
     # Add instructions if we have any
     if instructions:
-        deep_agent_kwargs["instructions"] = instructions
+        agent_kwargs["instructions"] = instructions
 
-
-    new_agent = DeepAgent(**deep_agent_kwargs)
+    new_agent = Agent(**agent_kwargs)
     return new_agent

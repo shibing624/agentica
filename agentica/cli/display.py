@@ -29,7 +29,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     """Print the application header with version and model information"""
     box_width = 70
     console.print("=" * box_width, style="bright_cyan")
-    console.print("  Agentica CLI - Interactive AI Assistant with DeepAgent")
+    console.print("  Agentica CLI - Interactive AI Assistant")
     console.print(f"  Model: [bright_green]{model_provider}/{model_name}[/bright_green]")
 
     # Working directory
@@ -198,7 +198,7 @@ Shell Mode (Ctrl+X to toggle):
 
 Tips:
   - Type @ followed by a filename to reference files
-  - DeepAgent has built-in tools: ls, read_file, write_file, edit_file, glob, grep,
+  - Agent has built-in tools: ls, read_file, write_file, edit_file, glob, grep,
     execute, web_search, fetch_url, write_todos, read_todos, task, save_memory
   - Use --tools to add extra tools, e.g.: --tools calculator shell wikipedia
   - Say "remember this" or "save this" to trigger memory saving

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: LLM OS - AI助手系统，基于DeepAgent实现
+@description: LLM OS - AI助手系统，基于Agent + 内置工具实现
 
-使用DeepAgent作为核心，内置文件操作、代码执行、网络搜索等能力。
+使用Agent + get_builtin_tools()作为核心，内置文件操作、代码执行、网络搜索等能力。
 支持知识库管理和会话持久化。
 
 pip install streamlit agentica sqlalchemy lancedb pyarrow
@@ -21,7 +21,8 @@ import streamlit as st
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from agentica import DeepAgent, OpenAIChat
+from agentica import Agent, OpenAIChat
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.agent.config import ToolConfig, PromptConfig
 from agentica.document import Document
 from agentica.embedding.zhipuai import ZhipuAIEmbedding
@@ -73,7 +74,7 @@ INTRODUCTION = dedent("""\
 def create_llm_os(
         model_id: str = DEFAULT_MODEL,
         debug: bool = False,
-) -> DeepAgent:
+) -> Agent:
     """创建LLM OS实例
 
     Args:
@@ -81,7 +82,7 @@ def create_llm_os(
         debug: 是否开启调试模式
 
     Returns:
-        DeepAgent实例
+        Agent实例
     """
     logger.info(f"Creating LLM OS with model: {model_id}")
 
@@ -94,28 +95,23 @@ def create_llm_os(
     )
     knowledge = Knowledge(vector_db=vector_db)
 
-    # 创建DeepAgent (V2: db/session management removed from Agent, use WorkingMemory for history)
-    llm_os = DeepAgent(
+    # 创建Agent with built-in tools
+    llm_os = Agent(
         name="llm_os",
         model=OpenAIChat(id=model_id),
         description=SYSTEM_DESCRIPTION,
         instructions=SYSTEM_INSTRUCTIONS,
         # 知识库
         knowledge=knowledge,
-        # DeepAgent内置工具配置
-        include_file_tools=True,
-        include_execute=True,
-        include_web_search=True,
-        include_fetch_url=True,
-        include_todos=True,
-        include_task=True,
+        # 内置工具
+        tools=get_builtin_tools(),
         # 知识库搜索 & 聊天历史
         tool_config=ToolConfig(search_knowledge=True, read_chat_history=True),
         # 聊天历史
         add_history_to_messages=True,
         history_window=6,
         # 显示配置
-        prompt_config=PromptConfig(markdown=True, introduction=INTRODUCTION),
+        prompt_config=PromptConfig(markdown=True, introduction=INTRODUCTION, enable_agentic_prompt=True),
         debug=debug,
     )
 
@@ -171,7 +167,7 @@ def render_sidebar():
     return llm_id, debug
 
 
-def render_knowledge_base_controls(llm_os: DeepAgent):
+def render_knowledge_base_controls(llm_os: Agent):
     """渲染知识库控制组件"""
     if not llm_os.knowledge:
         return
@@ -229,29 +225,24 @@ def render_knowledge_base_controls(llm_os: DeepAgent):
             st.sidebar.success("Knowledge base cleared")
 
 
-def render_session_controls(llm_os: DeepAgent, llm_id: str, debug: bool):
+def render_session_controls(llm_os: Agent, llm_id: str, debug: bool):
     """渲染会话控制组件"""
     st.sidebar.markdown("### Sessions")
 
-    # 新建会话 (V2: session persistence removed from Agent, use Streamlit session_state)
     if st.sidebar.button("New Session"):
         restart_agent()
 
 
 def main():
     """主函数"""
-    # 页面配置
     st.set_page_config(page_title=PAGE_TITLE, page_icon=PAGE_ICON)
     st.title(PAGE_TITLE)
     st.markdown("##### :orange_heart: built using [agentica](https://github.com/shibing624/agentica)")
 
-    # 初始化
     init_session_state()
 
-    # 侧边栏配置
     llm_id, debug = render_sidebar()
 
-    # 获取或创建agent
     if st.session_state["llm_os"] is None:
         logger.info(f"Creating new LLM OS with model: {llm_id}")
         st.session_state["llm_os"] = create_llm_os(
@@ -259,27 +250,23 @@ def main():
             debug=debug,
         )
 
-    llm_os: DeepAgent = st.session_state["llm_os"]
+    llm_os: Agent = st.session_state["llm_os"]
 
-    # 加载聊天历史 (V2: use WorkingMemory directly, no load_session)
     chat_history = llm_os.working_memory.get_messages()
     if chat_history:
         st.session_state["messages"] = chat_history
     else:
         st.session_state["messages"] = [{"role": "assistant", "content": "Ask me questions..."}]
 
-    # 用户输入
     if prompt := st.chat_input("Ask me anything..."):
         st.session_state["messages"].append({"role": "user", "content": prompt})
 
-    # 显示消息
     for message in st.session_state["messages"]:
         if message["role"] == "system":
             continue
         with st.chat_message(message["role"]):
             st.write(message.get("content", ""))
 
-    # 生成回复
     last_message = st.session_state["messages"][-1]
     if last_message.get("role") == "user":
         question = last_message["content"]
@@ -291,10 +278,7 @@ def main():
                 resp_container.markdown(response)
             st.session_state["messages"].append({"role": "assistant", "content": response})
 
-    # 知识库控制
     render_knowledge_base_controls(llm_os)
-
-    # 会话控制
     render_session_controls(llm_os, llm_id, debug)
 
 

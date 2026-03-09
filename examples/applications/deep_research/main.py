@@ -1,15 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Deep Research Application using DeepAgent
+@description: Deep Research Application using Agent with built-in tools
 
 This application demonstrates comprehensive deep research capabilities:
 1. Search the web for information with iterative refinement
 2. Cross-validate findings from multiple sources
 3. Generate comprehensive reports with citations
-4. Handle context overflow intelligently
-5. Step reflection for quality improvement
-6. Repetition detection to avoid redundant searches
 
 Usage:
     python main.py
@@ -19,34 +16,20 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 
-from agentica import DeepAgent, DeepSeekChat
+from agentica import Agent, DeepSeekChat
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.agent.config import ToolConfig, PromptConfig
 
 
 def create_deep_research_agent():
     """Create a deep research agent with full capabilities."""
-    return DeepAgent(
+    return Agent(
         model=DeepSeekChat(),
         name="DeepResearcher",
-        description="A comprehensive deep research assistant with reflection and context management",
-        enable_step_reflection=True,
-        reflection_frequency=3,
-        # Context management
-        context_soft_limit=80000,
-        context_hard_limit=120000,
-        enable_context_overflow_handling=True,
+        description="A comprehensive deep research assistant",
+        tools=get_builtin_tools(),
         tool_config=ToolConfig(compress_tool_results=True),
-        # Repetition detection
-        enable_repetition_detection=True,
-        max_same_tool_calls=3,
-        # Tools
-        include_web_search=True,
-        include_fetch_url=True,
-        include_execute=True,
-        include_todos=True,
-        include_file_tools=True,
-        # Debug
-        prompt_config=PromptConfig(markdown=True),
+        prompt_config=PromptConfig(markdown=True, enable_agentic_prompt=True),
         debug=True,
     )
 
@@ -75,21 +58,14 @@ def main():
     print("Deep Research Application")
     print("=" * 60)
 
-    # Create the deep research agent
     agent = create_deep_research_agent()
     print(f"Agent created: {agent}")
-    print(f"Builtin tools: {agent.get_builtin_tool_names()}")
     print()
 
-    # Example research topics - uncomment one to run
     examples = [
-        # "AI Agent框架的发展趋势和主流框架对比分析",
-        # "2024年大语言模型的最新进展",
         "RAG技术的原理和最佳实践",
-        # "Multi-Agent系统的设计模式",
     ]
 
-    # Run the first example
     topic = examples[0]
     report = research_topic(agent, topic)
     print(f"\n{report}")

@@ -20,8 +20,9 @@ from tqdm import tqdm
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from agentica import DeepAgent, OpenAIChat, ZhipuAIChat, Message, PromptConfig
+from agentica import Agent, OpenAIChat, ZhipuAIChat, Message, PromptConfig
 from agentica import DoubaoChat
+from agentica.tools.buildin_tools import get_builtin_tools
 from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA, SYSTEM_PROMPT_MULTI
 
 pwd_path = os.path.abspath(os.path.dirname(__file__))
@@ -204,23 +205,17 @@ async def evaluate_instance(
     ground_truth = instance.get('Answer', instance.get('answer', ''))
 
     try:
-        # Create DeepAgent
-        agent = DeepAgent(
+        # Create Agent with built-in tools
+        agent = Agent(
             model=DoubaoChat(id=model_name,api_key='89438f33-b401-4540-8558-6027344ef361'),
             debug=debug,
-            enable_step_reflection=True,
-            reflection_frequency=3,
-            enable_context_overflow_handling=True,
-            # tool_config=ToolConfig(compress_tool_results=True),
-            # Repetition detection
-            enable_repetition_detection=True,
-            max_same_tool_calls=8,
-            # Tools
-            include_web_search=True,
-            include_fetch_url=True,
-            include_execute=True,
-            include_todos=True,
-            include_file_tools=True,
+            tools=get_builtin_tools(
+                include_web_search=True,
+                include_fetch_url=True,
+                include_execute=True,
+                include_todos=True,
+                include_file_tools=True,
+            ),
             prompt_config=PromptConfig(markdown=True, enable_agentic_prompt=True),
             work_dir="./tmp/",
             instructions=SYSTEM_PROMPT_MULTI,

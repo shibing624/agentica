@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Built-in tools for DeepAgent
+@description: Built-in tools for Agent
 
-Built-in tool set for DeepAgent, including:
+Built-in tool set for Agent, including:
 - ls: List directory contents
 - read_file: Read file content
 - write_file: Write file content
@@ -795,7 +795,7 @@ class BuiltinFileTool(Tool):
 class BuiltinExecuteTool(Tool):
     """
     Built-in command execution tool using async subprocess.
-    Exposed as execute function for consistent naming in DeepAgent.
+    Exposed as execute function for consistent naming in Agent.
     """
 
     def __init__(self, work_dir: Optional[str] = None, timeout: int = 120, max_output_length: int = 20000):
@@ -965,7 +965,7 @@ class BuiltinWebSearchTool(Tool):
 class BuiltinFetchUrlTool(Tool):
     """
     Built-in URL fetching tool that wraps UrlCrawlerTool.
-    Exposed as fetch_url function for consistent naming in DeepAgent.
+    Exposed as fetch_url function for consistent naming in Agent.
     """
 
     def __init__(self, max_content_length: int = 16000):
@@ -1492,13 +1492,6 @@ class BuiltinTaskTool(Tool):
             # Force a fresh HTTP client (the old one belongs to the parent)
             model.client = None
             model.http_client = None
-            # Clear parent DeepAgent's hooks — the subagent is a plain Agent,
-            # and inheriting closures that reference the parent's state causes
-            # context-overflow false positives and race conditions in parallel runs.
-            model._pre_tool_hook = None
-            model._tool_call_hook = None
-            model._post_tool_hook = None
-            model._current_messages = None
 
             # Generate unique run_id for subagent
             parent_agent_id = self._parent_agent.agent_id if self._parent_agent else 'main'
@@ -1827,7 +1820,7 @@ def get_builtin_tools(
         workspace=None,
     ) -> List[Tool]:
     """
-    Get the list of built-in tools for DeepAgent.
+    Get the list of built-in tools for Agent.
 
     Args:
         work_dir: Work directory for file operations

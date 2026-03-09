@@ -38,7 +38,7 @@ Interactive Commands:
     /tools          List available additional tools
     /exit, /quit    Exit the CLI
 
-DeepAgent Built-in Tools:
+Built-in Tools:
     - ls: List directory contents
     - read_file: Read file content
     - write_file: Write file content

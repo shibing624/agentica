@@ -42,14 +42,15 @@ if __name__ == "__main__":
 
 | Agent | 用途 |
 |-------|------|
-| `Agent` | 基础智能体，支持工具调用和记忆 |
-| `DeepAgent` | 增强智能体，内置文件、Shell、Web 等工具 |
+| `Agent` | 智能体，支持工具调用和记忆 |
 
 ```python
-from agentica import DeepAgent, OpenAIChat
+from agentica import Agent, OpenAIChat
+from agentica.tools.buildin_tools import get_builtin_tools
 
-agent = DeepAgent(
+agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
+    tools=get_builtin_tools(),  # 内置文件、Shell、Web等工具
     work_dir="./project",  # 工作目录
     debug=True,       # 调试模式
 )
@@ -92,14 +93,15 @@ agent = Agent(model=model, tools=[ShellTool(), CalculatorTool()])
 ### 4. Workspace 与 Memory
 
 ```python
-from agentica import DeepAgent
+from agentica import Agent
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.workspace import Workspace
 
 # 创建 Workspace 持久化记忆
 workspace = Workspace(user_id="alice")
 workspace.initialize()
 
-agent = DeepAgent(model=model, workspace=workspace)
+agent = Agent(model=model, tools=get_builtin_tools(), workspace=workspace)
 # Agent 自动保存/加载记忆
 ```
 
@@ -159,7 +161,8 @@ CLI 快捷键：
 ### 多 Agent 协作
 
 ```python
-from agentica import DeepAgent
+from agentica import Agent
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.subagent import Subagent
 
 # 创建专业子 Agent
@@ -170,8 +173,9 @@ researcher = Subagent(
 )
 
 # 主 Agent 通过 'task' 工具委派任务
-main_agent = DeepAgent(
+main_agent = Agent(
     model=model,
+    tools=get_builtin_tools(),
     description="Coordinator",
 )
 ```
@@ -254,7 +258,7 @@ export AGENTICA_WORKSPACE_DIR="~/.agentica/workspace"
 
 ## 最佳实践
 
-1. **使用 DeepAgent** - 大多数任务推荐，内置必要工具
+1. **使用 Agent + get_builtin_tools()** - 大多数任务推荐，按需加载内置工具
 2. **设置 work_dir** - 控制文件操作范围
 3. **启用 debug** - 开发时查看工具调用
 4. **使用 Workspace** - 持久化跨会话记忆

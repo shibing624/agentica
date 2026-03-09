@@ -71,9 +71,6 @@ class Model(ABC):
     supports_structured_outputs: bool = False
 
     # --- Private fields (not in __init__ signature, used internally) ---
-    _pre_tool_hook: Optional[Callable] = field(init=False, repr=False, default=None)
-    _tool_call_hook: Optional[Callable] = field(init=False, repr=False, default=None)
-    _post_tool_hook: Optional[Callable] = field(init=False, repr=False, default=None)
     _current_messages: Optional[List[Message]] = field(init=False, repr=False, default=None)
     _agent_ref: Optional[weakref.ref] = field(init=False, repr=False, default=None)
 
@@ -298,36 +295,16 @@ class Model(ABC):
     ) -> AsyncIterator[ModelResponse]:
         """Execute tool calls with parallel execution, sequential result reporting.
 
-        Phase 0: Pre-execution hook (context overflow check)
         Phase 1: Emit all tool_call_started events (in order)
         Phase 2: Execute all tools in parallel via TaskGroup (with concurrency limit)
         Phase 3: Process results sequentially (preserving message order)
-        Phase 4: Post-execution hook (reflection/iteration checkpoint)
         """
         if self.function_call_stack is None:
             self.function_call_stack = []
 
-        # Phase 0: Pre-execution hook (e.g., context overflow check)
-        if self._pre_tool_hook is not None:
-            force_answer, system_msg = self._pre_tool_hook(function_call_results)
-            if force_answer:
-                # Context hard limit reached — skip tool execution, inject force-answer message
-                if system_msg:
-                    function_call_results.append(Message(role="user", content=system_msg))
-                logger.info("Pre-tool hook triggered force_answer — skipping tool execution")
-                return
-
         # Phase 1: Emit started events for all function calls
-        # Collect hook warnings to append AFTER tool results (Phase 3),
-        # so we never break the required assistant(tool_calls) → tool sequence.
-        deferred_warnings: List[Message] = []
         _agent = self._agent_ref() if self._agent_ref is not None else None
         for function_call in function_calls:
-            # Per-tool hook (e.g., repetition detection)
-            if self._tool_call_hook is not None:
-                warning = self._tool_call_hook(function_call.function.name)
-                if warning:
-                    deferred_warnings.append(Message(role="user", content=warning))
 
             # --- Lifecycle: tool start ---
             if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
@@ -486,15 +463,6 @@ class Model(ABC):
         # message gets a corresponding tool result message (required by OpenAI API).
         if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
             self.deactivate_function_calls()
-
-        # Append deferred hook warnings AFTER all tool results,
-        # preserving the required assistant(tool_calls) → tool result sequence.
-        if deferred_warnings:
-            function_call_results.extend(deferred_warnings)
-
-        # Phase 4: Post-execution hook (e.g., reflection/iteration checkpoint)
-        if self._post_tool_hook is not None:
-            self._post_tool_hook(function_call_results)
 
     async def handle_post_tool_call_messages(self, messages: List[Message], model_response: ModelResponse) -> ModelResponse:
         """Handle messages after tool calls (async-only, single implementation)."""

@@ -14,7 +14,7 @@ Async-first public API:
 Notes:
 - `run(stream=True)` is intentionally not supported. Streaming is an explicit method.
 - Multi-round execution is NOT part of the base Runner. If needed, implement it in
-  specialized subclasses (e.g. DeepRunner via DeepAgent).
+  specialized subclasses (e.g. DeepRunner).
 """
 
 import asyncio

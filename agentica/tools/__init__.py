@@ -5,7 +5,7 @@
 
 Available tools:
 - Base: Tool base class
-- Builtin tools: File, Execute, WebSearch, FetchUrl, Todo, Task, Memory (used by DeepAgent)
+- Builtin tools: File, Execute, WebSearch, FetchUrl, Todo, Task, Memory (used by Agent)
 - CodeTool: Code analysis, formatting, and linting
 - LspTool: LSP-based code navigation (goto definition, find references)
 - PatchTool: Apply diff/patch files (V4A and unified diff formats)
@@ -41,7 +41,7 @@ __all__ = [
     "list_tools",
     "unregister_tool",
     "clear_registry",
-    # Builtin tools (DeepAgent)
+    # Builtin tools
     "BuiltinFileTool",       # File read/write/search/list
     "BuiltinExecuteTool",    # Shell command execution
     "BuiltinWebSearchTool",  # Web search

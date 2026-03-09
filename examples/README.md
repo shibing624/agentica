@@ -166,13 +166,13 @@ Model Context Protocol 集成。
 | 03 | [custom_skill.py](skills/03_custom_skill.py) | 自定义技能 |
 | 04 | [skills_with_agent.py](skills/04_skills_with_agent.py) | 技能与 Agent 集成 |
 
-### 12. DeepAgent (`deep_agent/`)
+### 12. Agent with Built-in Tools (`deep_agent/`)
 
-内置工具的增强版 Agent，支持代码执行、文件操作、网页搜索、子任务委派。
+Agent + get_builtin_tools()，支持代码执行、文件操作、网页搜索、子任务委派。
 
 | # | 示例 | 描述 | 关键概念 |
 |---|------|------|----------|
-| 01 | [basic.py](deep_agent/01_basic.py) | 基础用法 | `DeepAgent`, 内置工具 |
+| 01 | [basic.py](deep_agent/01_basic.py) | 基础用法 | `Agent + get_builtin_tools()`, 内置工具 |
 | 02 | [file_operations.py](deep_agent/02_file_operations.py) | 文件操作 | `BuiltinFileTool` |
 | 03 | [code_execute_demo.py](deep_agent/03_code_execute_demo.py) | 代码执行 | `BuiltinExecuteTool` |
 | 04 | [web_search_demo.py](deep_agent/04_web_search_demo.py) | 网页搜索 | `BuiltinWebSearchTool` |

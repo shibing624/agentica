@@ -70,10 +70,6 @@ class TestCoreImports:
 class TestLazyLoadOptional:
     """Test that optional modules use lazy loading."""
 
-    def test_deep_agent_importable(self):
-        from agentica import DeepAgent
-        assert DeepAgent is not None
-
     def test_guardrails_importable(self):
         """Guardrails should be accessible."""
         try:

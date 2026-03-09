@@ -11,10 +11,10 @@ It supports various interaction modes:
 
 Example:
     ```python
-    from agentica import DeepAgent
+    from agentica import Agent
     from agentica.tools.user_input_tool import UserInputTool
     
-    agent = DeepAgent(
+    agent = Agent(
         tools=[UserInputTool()],
         instructions="When uncertain, ask the user for confirmation.",
     )

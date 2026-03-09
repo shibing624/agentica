@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: Web Research Skill Demo
 
-This demo shows how to use skills with DeepAgent for web research tasks.
+This demo shows how to use skills with Agent for web research tasks.
 The web-research skill provides structured instructions for conducting
 comprehensive research using subagents.
 """
@@ -12,7 +12,8 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, OpenAIChat
+from agentica import Agent, OpenAIChat
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.skills import register_skill, get_skill_registry
 
 pwd_path = os.path.dirname(os.path.abspath(__file__))
@@ -60,8 +61,8 @@ def demo_research_agent():
         skill = register_skill(skill_dir, location="project")
 
     if skill:
-        # Create DeepAgent with skill instructions
-        agent = DeepAgent(
+        # Create Agent with skill instructions and built-in tools
+        agent = Agent(
             model=OpenAIChat(id="gpt-4o-mini"),
             name="Research-Assistant",
             instructions=[
@@ -70,6 +71,7 @@ def demo_research_agent():
                 "# Research Skill Instructions",
                 skill.get_prompt(),
             ],
+            tools=get_builtin_tools(),
         )
 
         print(f"\nAgent: {agent.name}")

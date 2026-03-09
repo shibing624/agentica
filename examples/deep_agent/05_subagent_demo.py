@@ -26,7 +26,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import DeepAgent, OpenAIChat
+from agentica import Agent, OpenAIChat
+from agentica.tools.buildin_tools import get_builtin_tools
 from agentica.subagent import (
     SubagentRegistry,
     get_available_subagent_types,
@@ -50,18 +51,11 @@ def show_available_subagent_types():
 
 
 def demo_custom_subagent():
-    """
-    Demo: Registering and using a custom subagent type.
-    
-    This demonstrates how users can define their own subagent types
-    without modifying the library code. Custom subagents are automatically
-    included in the task tool's system prompt.
-    """
+    """Demo: Registering and using a custom subagent type."""
     print("\n" + "=" * 60)
     print("Demo 1: Custom Subagent Registration")
     print("=" * 60)
     
-    # Register a custom subagent for code review
     register_custom_subagent(
         name="code-reviewer",
         description="Reviews code for quality, bugs, security issues, and best practices",
@@ -76,46 +70,34 @@ Provide clear, actionable feedback with specific line references when possible."
         tool_call_limit=10,
     )
     
-    # Show that the custom subagent is now available
     print("\nAfter registration, available subagent types:")
     for st in get_available_subagent_types():
         custom_flag = " (custom)" if st.get("is_custom") else ""
         print(f"  - {st['type']}: {st['name']}{custom_flag}")
     
-    # Show custom configs
     custom_configs = get_custom_subagent_configs()
     print(f"\nCustom subagent configs registered: {list(custom_configs.keys())}")
 
 
 def demo_explore_subagent():
-    """
-    Demo: Using explore subagent for codebase exploration.
-    
-    The explore subagent is read-only and specialized for:
-    - Finding files using glob patterns
-    - Searching code with regex
-    - Reading and analyzing source code
-    """
+    """Demo: Using explore subagent for codebase exploration."""
     print("\n" + "=" * 60)
     print("Demo 2: Explore Subagent (Codebase Exploration)")
     print("=" * 60)
     
-    # Get explore subagent config to show its capabilities
     config = get_subagent_config("explore")
     print(f"\nExplore Agent Config:")
     print(f"  - Allowed tools: {config.allowed_tools}")
     print(f"  - Tool call limit: {config.tool_call_limit}")
     print(f"  - Can spawn subagents: {config.can_spawn_subagents}")
     
-    # Create DeepAgent with task tool
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
         name="Explorer",
-        include_task=True,
+        tools=get_builtin_tools(include_task=True),
         work_dir=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     )
     
-    # Ask the agent to explore the codebase
     query = """Use the task tool with subagent_type='explore' to find all Python files 
     in the agentica/tools directory that contain the word 'Tool' in their class names.
     Return a summary of what tools are available."""
@@ -127,24 +109,18 @@ def demo_explore_subagent():
 
 
 def demo_parallel_subagents():
-    """
-    Demo: Using multiple subagents in parallel.
-    
-    This demonstrates launching multiple independent subagents
-    to work on different aspects of a task simultaneously.
-    """
+    """Demo: Using multiple subagents in parallel."""
     print("\n" + "=" * 60)
     print("Demo 3: Parallel Subagent Execution")
     print("=" * 60)
     
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
         name="Coordinator",
-        include_task=True,
+        tools=get_builtin_tools(include_task=True),
         work_dir=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     )
     
-    # Ask the agent to use multiple subagents in parallel
     query = """I need to understand this project better. Please launch explore subagents 
     IN PARALLEL (multiple task tool calls in one response) to:
     
@@ -161,30 +137,20 @@ def demo_parallel_subagents():
 
 
 def demo_research_subagent():
-    """
-    Demo: Using research subagent for web research.
-    
-    The research subagent is specialized for:
-    - Web search
-    - Fetching and analyzing web pages
-    - Synthesizing research findings
-    """
+    """Demo: Using research subagent for web research."""
     print("\n" + "=" * 60)
     print("Demo 4: Research Subagent (Web Research)")
     print("=" * 60)
     
-    # Get research subagent config
     config = get_subagent_config("research")
     print(f"\nResearch Agent Config:")
     print(f"  - Allowed tools: {config.allowed_tools}")
     print(f"  - Tool call limit: {config.tool_call_limit}")
     
-    agent = DeepAgent(
+    agent = Agent(
         model=OpenAIChat(),
         name="Researcher",
-        include_task=True,
-        include_web_search=True,
-        include_fetch_url=True,
+        tools=get_builtin_tools(include_task=True, include_web_search=True, include_fetch_url=True),
     )
     
     query = """Use the task tool with subagent_type='research' to find information about 
@@ -198,19 +164,13 @@ def demo_research_subagent():
 
 
 def demo_subagent_registry():
-    """
-    Demo: Using SubagentRegistry to track subagent runs.
-    
-    The registry keeps track of all subagent executions,
-    allowing monitoring and management of background tasks.
-    """
+    """Demo: Using SubagentRegistry to track subagent runs."""
     print("\n" + "=" * 60)
     print("Demo 5: Subagent Registry")
     print("=" * 60)
     
     registry = SubagentRegistry()
     
-    # Get all runs (from previous demos if any)
     all_runs = list(registry._runs.values())
     print(f"\nTotal subagent runs tracked: {len(all_runs)}")
     
@@ -221,23 +181,17 @@ def demo_subagent_registry():
             print(f"  {status_icon} [{run.subagent_type.value}] {run.task_label}")
             print(f"       Status: {run.status}, Started: {run.started_at.strftime('%H:%M:%S')}")
     
-    # Cleanup old completed runs
     cleaned = registry.cleanup_completed(max_age_seconds=3600)
     print(f"\nCleaned up {cleaned} old runs")
 
 
 def main():
     """Run all demos."""
-    # Show available subagent types first
     show_available_subagent_types()
     
-    # Run demos (comment out ones you don't want to run)
     print("\n" + "=" * 60)
     print("Running Subagent Demos")
     print("=" * 60)
-    
-    # Demo 1: Custom subagent registration (no LLM call, just shows registration)
-    # demo_custom_subagent()
     
     # Demo 2: Explore subagent
     demo_explore_subagent()
