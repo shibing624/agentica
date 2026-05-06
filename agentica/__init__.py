@@ -176,6 +176,9 @@ from agentica.workspace import Workspace, WorkspaceConfig
 from agentica.critic import (
     Critic,
     CritiqueResult,
+    CritiqueStyle,
+    RefineResult,
+    RefineRound,
     SchemaCritic,
     AgentCritic,
     refine,

@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
-"""Critic protocol + refine() composer for actor-critic patterns.
+"""
+@author:XuMing(xuming624@qq.com)
+@description: 
+
+Critic protocol + refine() composer for actor-critic patterns.
 
 Design philosophy
 =================
@@ -66,7 +70,8 @@ Example
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, List, Protocol, Type
 
 from pydantic import BaseModel, ValidationError
@@ -79,8 +84,39 @@ if TYPE_CHECKING:
 
 _APPROVAL_TOKEN = "APPROVED"
 
+
+class CritiqueStyle(str, Enum):
+    """Reviewing temperament for an LLM-based critic.
+
+    The CarePilot paper (arXiv:2603.24157) found that strict / neutral /
+    lenient styles materially change downstream task accuracy and that
+    *neutral* is the safest default — strict critics over-reject good
+    drafts and burn revision tokens, lenient critics under-catch issues.
+    """
+
+    STRICT = "strict"
+    NEUTRAL = "neutral"
+    LENIENT = "lenient"
+
+
+_STYLE_GUIDANCE = {
+    CritiqueStyle.STRICT: (
+        "Apply a strict standard. Demand evidence, precise definitions, and "
+        "completeness. Reject any meaningful gap; never approve out of politeness."
+    ),
+    CritiqueStyle.NEUTRAL: (
+        "Apply a balanced standard. Reject only material gaps that would "
+        "mislead a reasonable reader; minor wording issues alone do not warrant rejection."
+    ),
+    CritiqueStyle.LENIENT: (
+        "Apply a lenient standard. Approve drafts that broadly address the task "
+        "even if incomplete in detail; reject only on serious factual or relevance failures."
+    ),
+}
+
 _CRITIC_PROMPT_TEMPLATE = (
     "Critique the following draft produced for the task.\n\n"
+    "Reviewing style: {style_guidance}\n\n"
     "Task: {task}\n\n"
     "Draft:\n{draft}\n\n"
     f"If the draft fully addresses the task with no material issues, reply "
@@ -191,14 +227,31 @@ class AgentCritic:
     reply with the literal token ``APPROVED`` or list actionable issues.
     The wrapper handles the prompting; the user controls the critic agent's
     model, temperature, and rubric.
+
+    Args:
+        agent: The Agent to wrap as a critic.
+        name: Identifier surfaced in logs and CritiqueResult.
+        style: :class:`CritiqueStyle` controlling reviewing temperament
+            (strict / neutral / lenient). Defaults to NEUTRAL — see
+            :class:`CritiqueStyle` docstring for rationale.
     """
 
-    def __init__(self, agent: "Agent", name: str = "agent_critic") -> None:
+    def __init__(
+        self,
+        agent: "Agent",
+        name: str = "agent_critic",
+        style: CritiqueStyle = CritiqueStyle.NEUTRAL,
+    ) -> None:
         self.agent = agent
         self.name = name
+        self.style = style
 
     async def __call__(self, task: str, answer: str) -> CritiqueResult:
-        prompt = _CRITIC_PROMPT_TEMPLATE.format(task=task, draft=answer)
+        prompt = _CRITIC_PROMPT_TEMPLATE.format(
+            style_guidance=_STYLE_GUIDANCE[self.style],
+            task=task,
+            draft=answer,
+        )
         resp = await self.agent.run(prompt)
         text = resp.content or ""
         if not isinstance(text, str):
@@ -213,23 +266,67 @@ class AgentCritic:
         )
 
 
+@dataclass
+class RefineRound:
+    """One round of the actor-critic loop.
+
+    Captures the draft submitted to critics and every verdict produced.
+    The first round records the initial draft (no revision yet); subsequent
+    rounds record the post-revision draft.
+    """
+
+    draft: str
+    verdicts: List[CritiqueResult] = field(default_factory=list)
+
+
+@dataclass
+class RefineResult:
+    """Structured outcome of :func:`refine`.
+
+    Attributes:
+        final_draft: The actor's last produced draft.
+        approved: True iff every critic approved on the final round.
+        iterations: Number of critique rounds actually executed
+            (initial review + revisions). Always ``len(history)``.
+        stopped_reason: One of ``"approved"``, ``"max_iter"``, ``"loop_detected"``,
+            or ``"no_critics"`` (no critics or max_iter=0; trivial pass-through).
+        history: Full trail — one :class:`RefineRound` per critique round.
+    """
+
+    final_draft: str
+    approved: bool
+    iterations: int
+    stopped_reason: str
+    history: List[RefineRound] = field(default_factory=list)
+
+
+def _verdicts_signature(verdicts: List[CritiqueResult]) -> tuple:
+    """Stable hash key for detecting that critics gave the same verdict twice.
+
+    A round is considered identical to the previous one if every critic
+    returned the same approval flag and the same issues text. When that
+    happens twice in a row, revision is unlikely to make further progress
+    and we stop early.
+    """
+    return tuple((v.critic_name, v.approved, v.issues.strip()) for v in verdicts)
+
+
 async def refine(
     actor: "Agent",
     task: str,
     critics: List[Critic],
     max_iter: int = 1,
-) -> str:
-    """Actor-critic composer with parallel critic execution.
+) -> RefineResult:
+    """Actor-critic composer with parallel critics and loop early-stop.
 
-    Runs ``actor`` once, then up to ``max_iter`` revision rounds. Each round:
-
-    1. All critics evaluate the current draft **in parallel** (asyncio.gather).
-    2. Each verdict is emitted to ``logger.chat()`` for trace.
-    3. If every critic approves, return the draft.
-    4. Otherwise, concatenate all rejecter feedback and ask the actor to revise.
+    Each round runs all critics in parallel; if every critic approves, the
+    loop stops. Otherwise the actor revises against concatenated feedback.
+    Inspired by the CarePilot paper (arXiv:2603.24157), the loop also exits
+    early when two consecutive rounds produce identical verdicts — a signal
+    that further revisions are unlikely to help and would only burn tokens.
 
     With ``max_iter=0`` or ``critics=[]`` the function degenerates to a single
-    actor call and returns immediately — no critic-induced cost.
+    actor call and returns ``stopped_reason="no_critics"``.
 
     Args:
         actor: The agent producing the draft.
@@ -238,7 +335,8 @@ async def refine(
         max_iter: Max revision rounds. ``0`` skips the critic loop.
 
     Returns:
-        The final draft string (after revisions, or unmodified if no critics).
+        :class:`RefineResult` with the final draft, approval flag, iteration
+        count, stop reason, and full per-round history.
     """
     actor_name = actor.name or "actor"
 
@@ -249,17 +347,40 @@ async def refine(
     _log_draft(actor_name, "draft", draft)
 
     if not critics or max_iter <= 0:
-        return draft
+        return RefineResult(
+            final_draft=draft,
+            approved=True,
+            iterations=0,
+            stopped_reason="no_critics",
+            history=[],
+        )
+
+    history: List[RefineRound] = []
+    last_signature: tuple | None = None
+    final_approved = False
+    stopped_reason = "max_iter"
 
     for _ in range(max_iter):
         verdicts = await asyncio.gather(*[c(task, draft) for c in critics])
+        history.append(RefineRound(draft=draft, verdicts=list(verdicts)))
         for v in verdicts:
             status = "APPROVED" if v.approved else "REJECTED"
             issue_preview = (v.issues[:120] + "...") if len(v.issues) > 120 else v.issues
             logger.chat(f"[critic:{v.critic_name}] {status}{(' - ' + issue_preview) if issue_preview else ''}")
 
         if all(v.approved for v in verdicts):
+            final_approved = True
+            stopped_reason = "approved"
             break
+
+        signature = _verdicts_signature(verdicts)
+        if last_signature is not None and signature == last_signature:
+            stopped_reason = "loop_detected"
+            logger.chat(
+                f"[refine] loop detected — verdicts unchanged for 2 rounds, stopping early"
+            )
+            break
+        last_signature = signature
 
         all_issues = "\n".join(
             f"- ({v.critic_name}) {v.issues}"
@@ -277,4 +398,10 @@ async def refine(
         draft = revised
         _log_draft(actor_name, "revised", draft)
 
-    return draft
+    return RefineResult(
+        final_draft=draft,
+        approved=final_approved,
+        iterations=len(history),
+        stopped_reason=stopped_reason,
+        history=history,
+    )
