@@ -266,6 +266,7 @@ EAGER_PUBLIC_EXPORTS = [
     "ConversationArchiveHooks", "MemoryExtractHooks", "ExperienceCaptureHooks",
     "ExperienceEventStore", "ExperienceCompiler", "CompiledExperienceStore", "SkillEvolutionManager",
     "Workspace", "WorkspaceConfig",
+    "Critic", "CritiqueResult", "SchemaCritic", "AgentCritic", "refine",
 ]
 
 PUBLIC_API_ALL = [

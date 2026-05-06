@@ -172,6 +172,15 @@ from agentica.experience import ExperienceEventStore, ExperienceCompiler, Compil
 # ── Workspace ──
 from agentica.workspace import Workspace, WorkspaceConfig
 
+# ── Critic (actor-critic protocol + refine composer) ──
+from agentica.critic import (
+    Critic,
+    CritiqueResult,
+    SchemaCritic,
+    AgentCritic,
+    refine,
+)
+
 _LAZY_CACHE = {}
 _LAZY_LOCK = threading.Lock()
 
