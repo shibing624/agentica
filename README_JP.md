@@ -168,62 +168,11 @@ Agentica は「事実を覚える」だけでなく、**「やり方を覚える
 
 ### フロー図
 
-```mermaid
-flowchart TB
-    subgraph Run["Agent.run() – 単一実行"]
-        Loop["Runner: LLM ↔ Tools ループ"]
-    end
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />
+</div>
 
-    subgraph Capture["イベント収集 ExperienceCaptureHooks"]
-        E1["tool_error<br/>(決定論的 / 0 LLM)"]
-        E2["tool_success / tool_recovery<br/>(決定論的 / 0 LLM)"]
-        E3["user_correction<br/>(auxiliary_model 分類)"]
-    end
-
-    Loop -- on_tool_end / on_agent_end --> E1
-    Loop -- on_tool_end --> E2
-    Loop -- on_user_prompt --> E3
-
-    Store[("events.jsonl<br/>append-only")]
-    E1 --> Store
-    E2 --> Store
-    E3 --> Store
-
-    Compiler["ExperienceCompiler<br/>_rule_to_title でマージ / 重複排除"]
-    Store --> Compiler
-
-    Cards[("experiences/*.md<br/>cards: repeat_count / tier")]
-    Compiler --> Cards
-
-    subgraph Lifecycle["ライフサイクル CompiledExperienceStore"]
-        L1["promotion: warm → hot<br/>(window 内で N 回ヒット)"]
-        L2["demotion: 長期未使用 → cold"]
-        L3["archive"]
-    end
-    Cards --> Lifecycle
-
-    Gate{{"SkillEvolutionManager<br/>min_repeat_count + min_tier<br/>+ min_success_applications"}}
-    Cards -- maybe_spawn_skill --> Gate
-
-    Judge["LLM 判定 (auxiliary_model)<br/>keep / promote / revise / rollback"]
-    Gate -->|候補通過| Judge
-
-    Skill[("generated_skills/&lt;slug&gt;/<br/>SKILL.md + meta.json")]
-    Judge -->|approve| Skill
-
-    subgraph Next["次のセッション（新しい Agent）"]
-        ST["SkillTool.auto_load<br/>generated_skills/ を検出"]
-        Apply["LLM: get_skill_info →<br/>SKILL.md の手順で実行"]
-    end
-    Skill --> ST --> Apply
-
-    classDef ev fill:#fef3c7,stroke:#d97706
-    classDef store fill:#dbeafe,stroke:#2563eb
-    classDef llm fill:#fce7f3,stroke:#be185d
-    class E1,E2,E3 ev
-    class Store,Cards,Skill store
-    class E3,Judge llm
-```
+イベント収集（黄）→ 経験コンパイルとライフサイクル（青ストレージ + 破線グレー枠）→ スキル生成ゲート + LLM 判定（ピンク）→ 次セッションでの自動再利用。全工程が監査可能で外部依存ゼロ。
 
 ### 有効化の方法
 

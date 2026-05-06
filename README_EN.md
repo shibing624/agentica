@@ -182,62 +182,11 @@ The whole pipeline is local, auditable, and dependency-free. Deterministic captu
 
 ### Pipeline
 
-```mermaid
-flowchart TB
-    subgraph Run["Agent.run() – single execution"]
-        Loop["Runner: LLM ↔ Tools loop"]
-    end
+<div align="center">
+  <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />
+</div>
 
-    subgraph Capture["ExperienceCaptureHooks"]
-        E1["tool_error<br/>(deterministic / 0 LLM)"]
-        E2["tool_success / tool_recovery<br/>(deterministic / 0 LLM)"]
-        E3["user_correction<br/>(auxiliary_model classify)"]
-    end
-
-    Loop -- on_tool_end / on_agent_end --> E1
-    Loop -- on_tool_end --> E2
-    Loop -- on_user_prompt --> E3
-
-    Store[("events.jsonl<br/>append-only")]
-    E1 --> Store
-    E2 --> Store
-    E3 --> Store
-
-    Compiler["ExperienceCompiler<br/>_rule_to_title – merge / dedupe"]
-    Store --> Compiler
-
-    Cards[("experiences/*.md<br/>cards: repeat_count / tier")]
-    Compiler --> Cards
-
-    subgraph Lifecycle["CompiledExperienceStore lifecycle"]
-        L1["promotion: warm → hot<br/>(N hits within window)"]
-        L2["demotion: idle → cold"]
-        L3["archive"]
-    end
-    Cards --> Lifecycle
-
-    Gate{{"SkillEvolutionManager<br/>min_repeat_count + min_tier<br/>+ min_success_applications"}}
-    Cards -- maybe_spawn_skill --> Gate
-
-    Judge["LLM judge (auxiliary_model)<br/>keep / promote / revise / rollback"]
-    Gate -->|candidate passes| Judge
-
-    Skill[("generated_skills/&lt;slug&gt;/<br/>SKILL.md + meta.json")]
-    Judge -->|approve| Skill
-
-    subgraph Next["Next session – fresh Agent"]
-        ST["SkillTool.auto_load<br/>discovers generated_skills/"]
-        Apply["LLM: get_skill_info →<br/>follow SKILL.md procedure"]
-    end
-    Skill --> ST --> Apply
-
-    classDef ev fill:#fef3c7,stroke:#d97706
-    classDef store fill:#dbeafe,stroke:#2563eb
-    classDef llm fill:#fce7f3,stroke:#be185d
-    class E1,E2,E3 ev
-    class Store,Cards,Skill store
-    class E3,Judge llm
-```
+Event capture (amber) → experience compilation & lifecycle (blue stores + dashed grey frame) → skill-spawn gate + LLM judgement (pink) → automatic reuse in the next session — fully auditable, zero external dependency.
 
 ### How to enable
 
