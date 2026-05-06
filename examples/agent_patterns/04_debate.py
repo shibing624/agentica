@@ -1,21 +1,28 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Multi-agent debate using ``refine()`` actor-critic loop.
+@description: Multi-agent debate — explicit 3-round pipeline with full output.
 
-This rewrite demonstrates how :mod:`agentica.critic` maps onto a classic
-debate scenario:
+Design
+======
 
-* Each debater takes a position on the topic.
-* The opposing debater is wrapped as a ``Critic`` — its rebuttals surface
-  as the ``issues`` field of :class:`CritiqueResult`.
-* ``refine()`` iterates: position -> opponent's rebuttal -> revised position,
-  for ``max_iter`` rounds.
-* A moderator agent synthesises both refined positions into a balanced
-  summary.
+Debate is fundamentally **two-way adversarial dialogue**, not the one-way
+``actor -> critic -> revise`` flow that ``refine()`` models. So this demo
+hand-rolls the pipeline (so every utterance is visible to the user) while
+still leveraging :class:`agentica.critic.AgentCritic` to wrap each side as
+the other's critic and extract their rebuttal as a structured
+:class:`CritiqueResult`.
 
-The CHAT log channel surfaces every rebuttal/approval verdict, so the
-dialectic is visible without scrolling through framework chatter.
+Three rounds:
+
+1. **Opening** — both debaters state their position independently.
+2. **Cross-examination** — each side acts as ``AgentCritic`` over the
+   opposing position; the rebuttal lands in ``CritiqueResult.issues``.
+3. **Refinement** — each side revises their position in light of the
+   rebuttal received.
+
+A moderator agent then synthesises both refined positions into a balanced
+summary. All content is printed in full (no log truncation).
 """
 import sys
 import os
@@ -25,28 +32,29 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import asyncio
 
 from agentica import Agent, OpenAIChat
-from agentica.critic import AgentCritic, refine
-from agentica.utils.log import logger, CHAT_LEVEL
+from agentica.critic import AgentCritic
 
 
-def _enable_chat_only_logging() -> None:
-    """Show CHAT-level events only, hiding routine framework INFO lines."""
-    logger.setLevel(CHAT_LEVEL)
-    for h in logger.handlers:
-        h.setLevel(CHAT_LEVEL)
+def _section(title: str) -> None:
+    print("\n" + "=" * 60)
+    print(title)
+    print("=" * 60)
+
+
+def _utterance(speaker: str, content: str) -> None:
+    print(f"\n--- {speaker} ---")
+    print(content.strip())
 
 
 async def main():
-    _enable_chat_only_logging()
-
     optimist = Agent(
         name="Optimist",
         model=OpenAIChat(id="gpt-4o"),
         instructions=(
-            "你是乐观主义者，看到AI技术积极的一面。在阐述立场时，"
-            "用具体案例支持你的观点，保持坚定但理性。\n"
-            "当作为评审者评估对方观点时，请始终给出有力反驳——"
-            "不要回复 APPROVED，逐条列出对方论点的薄弱之处。"
+            "你是乐观主义者，看到 AI 技术积极的一面。"
+            "在阐述立场时用具体案例支持，保持坚定但理性。\n"
+            "当作为评审者反驳对方观点时，请逐条列出对方论点的薄弱之处和忽视的好处，"
+            "不要回复 APPROVED。"
         ),
     )
 
@@ -54,10 +62,10 @@ async def main():
         name="Pessimist",
         model=OpenAIChat(id="gpt-4o"),
         instructions=(
-            "你是谨慎的批评者，关注AI技术潜在的风险和问题。在阐述立场时，"
-            "用具体案例支持你的观点，保持建设性。\n"
-            "当作为评审者评估对方观点时，请始终给出有力反驳——"
-            "不要回复 APPROVED，逐条列出对方论点的盲区与风险。"
+            "你是谨慎的批评者，关注 AI 技术潜在的风险与代价。"
+            "在阐述立场时用具体案例支持，保持建设性。\n"
+            "当作为评审者反驳对方观点时，请逐条列出对方论点的盲区与风险，"
+            "不要回复 APPROVED。"
         ),
     )
 
@@ -69,50 +77,53 @@ async def main():
 
     topic = "人工智能是否会取代大部分人类工作"
 
-    print("=" * 60)
-    print(f"辩论主题: {topic}")
-    print("=" * 60)
-    print(
-        "\n[本 demo 使用 refine() 让每位辩手的立场被对方挑战后再修订。\n"
-        " CHAT 行展示每轮反驳，最终输出经过对抗精炼的立场。]\n"
+    _section(f"辩论主题: {topic}")
+
+    # Round 1: opening positions, run in parallel since they are independent.
+    _section("第一轮 · 开场陈述")
+    opening_prompt = f"就'{topic}'阐述你的立场（约200字）。"
+    opt_open, pes_open = await asyncio.gather(
+        optimist.run(opening_prompt),
+        pessimist.run(opening_prompt),
     )
+    _utterance("Optimist 开场", opt_open.content)
+    _utterance("Pessimist 开场", pes_open.content)
 
-    optimist_position = await refine(
-        actor=optimist,
-        task=f"就'{topic}'阐述你的立场（约200字）。",
-        critics=[AgentCritic(pessimist, name="pessimist_rebuttal")],
-        max_iter=2,
+    # Round 2: each side critiques the opposing opening. AgentCritic returns
+    # a CritiqueResult whose `.issues` field is the structured rebuttal.
+    _section("第二轮 · 交叉反驳")
+    pes_as_critic = AgentCritic(pessimist, name="pessimist_rebuttal")
+    opt_as_critic = AgentCritic(optimist, name="optimist_rebuttal")
+    pes_rebut, opt_rebut = await asyncio.gather(
+        pes_as_critic(topic, opt_open.content),
+        opt_as_critic(topic, pes_open.content),
     )
+    _utterance("Pessimist 反驳 Optimist", pes_rebut.issues)
+    _utterance("Optimist 反驳 Pessimist", opt_rebut.issues)
 
-    pessimist_position = await refine(
-        actor=pessimist,
-        task=f"就'{topic}'阐述你的立场（约200字）。",
-        critics=[AgentCritic(optimist, name="optimist_rebuttal")],
-        max_iter=2,
+    # Round 3: each side refines their position in light of rebuttal received.
+    _section("第三轮 · 精炼立场")
+    refine_template = (
+        "对方对你前述立场的反驳如下：\n{rebuttal}\n\n"
+        "请基于这些反驳，重新阐述你的立场（约250字），"
+        "正面回应对方关切，但坚持你的核心观点。"
     )
+    opt_final, pes_final = await asyncio.gather(
+        optimist.run(refine_template.format(rebuttal=pes_rebut.issues)),
+        pessimist.run(refine_template.format(rebuttal=opt_rebut.issues)),
+    )
+    _utterance("Optimist 精炼立场", opt_final.content)
+    _utterance("Pessimist 精炼立场", pes_final.content)
 
-    print("\n【乐观派的最终立场（经过 2 轮反驳后精炼）】")
-    print("-" * 40)
-    print(optimist_position)
-
-    print("\n【谨慎派的最终立场（经过 2 轮反驳后精炼）】")
-    print("-" * 40)
-    print(pessimist_position)
-
+    # Moderator synthesises the final two refined positions.
+    _section("主持人总结")
     summary = await moderator.run(
-        f"""请综合以下两位辩手在'{topic}'议题上的立场，给出平衡的总结（约300字）：
-
-【乐观派立场】
-{optimist_position}
-
-【谨慎派立场】
-{pessimist_position}
-"""
+        f"""综合以下两位辩手在'{topic}'议题上经过交叉反驳后的精炼立场，"""
+        f"""给出平衡客观的总结（约300字）：\n\n"""
+        f"""【乐观派立场】\n{opt_final.content}\n\n"""
+        f"""【谨慎派立场】\n{pes_final.content}\n"""
     )
-
-    print("\n【主持人总结】")
-    print("-" * 40)
-    print(summary.content)
+    print(summary.content.strip())
 
 
 if __name__ == "__main__":
