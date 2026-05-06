@@ -265,37 +265,52 @@ agentica 的设计原则是 **"SDK 提供协议而非能力"**：基模型的自
 - **异构组合**：便宜 Actor + 强 Critic、多 Critic 并行评审、确定性 + LLM 验证混搭，仅 SDK 层能表达
 
 ```python
-from pydantic import BaseModel
+import asyncio
+from typing import Literal
+from pydantic import BaseModel, Field
+
 from agentica import Agent, OpenAIChat
 from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
 
-class Reply(BaseModel):
-    intent: str
-    confidence: float
 
-actor = Agent(name="writer", model=OpenAIChat(id="gpt-4o-mini"))
-reviewer = Agent(
-    name="reviewer",
-    model=OpenAIChat(id="gpt-4o"),
-    instructions="检查输出正确性，符合则回复 APPROVED，否则逐条列出问题。",
-)
+class IntentReply(BaseModel):
+    intent: Literal["question", "command", "complaint", "smalltalk"]
+    confidence: float = Field(ge=0.0, le=1.0)
 
-result = await refine(
-    actor,
-    task="分类: '公交车几点开?'",
-    critics=[
-        SchemaCritic(Reply),                                  # 程序级 schema 验证（零成本）
-        AgentCritic(reviewer, style=CritiqueStyle.STRICT),    # LLM 级语义审核（可调风格）
-    ],
-    max_iter=3,
-)
 
-print(result.final_draft)        # 最终草稿
-print(result.approved)           # True / False
-print(result.stopped_reason)     # approved / max_iter / loop_detected / no_critics
-print(result.iterations)         # 实际评审轮数
-for round_ in result.history:    # 每轮 draft + 每个 critic 的 verdict（可审计）
-    print(round_.draft, [v.approved for v in round_.verdicts])
+async def main():
+    actor = Agent(
+        name="classifier",
+        model=OpenAIChat(id="gpt-4o-mini"),
+        instructions=(
+            "把用户消息分类为 question/command/complaint/smalltalk 之一。"
+            '只输出 JSON: {"intent": "<四类之一>", "confidence": <0~1 浮点数>}。'
+            "不要解释，不要 markdown 代码块。"
+        ),
+    )
+    reviewer = Agent(
+        name="reviewer",
+        model=OpenAIChat(id="gpt-4o"),
+        instructions="检查分类是否合理，合理回复 APPROVED，否则列出问题。",
+    )
+
+    result = await refine(
+        actor,
+        task='分类下列消息:\n"我的手机一直死机，请帮我退款!"',
+        critics=[
+            SchemaCritic(IntentReply),                              # 程序级 schema 验证（零 LLM 成本）
+            AgentCritic(reviewer, style=CritiqueStyle.STRICT),      # LLM 级语义审核（可调风格）
+        ],
+        max_iter=3,
+    )
+
+    print(result.final_draft)        # 例: {"intent": "complaint", "confidence": 0.95}
+    print(result.approved, result.stopped_reason, result.iterations)
+    for r in result.history:         # 每轮 draft + 每个 critic 的 verdict（可审计）
+        print(r.draft, [(v.critic_name, v.approved) for v in r.verdicts])
+
+
+asyncio.run(main())
 ```
 
 **关键特性**：

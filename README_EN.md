@@ -269,37 +269,52 @@ agentica's design principle here is **"the SDK provides protocol, not capability
 - **Heterogeneous composition** — cheap Actor + strong Critic, parallel multi-critic review, mixing deterministic and LLM-based verifiers — only the SDK layer can express this
 
 ```python
-from pydantic import BaseModel
+import asyncio
+from typing import Literal
+from pydantic import BaseModel, Field
+
 from agentica import Agent, OpenAIChat
 from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
 
-class Reply(BaseModel):
-    intent: str
-    confidence: float
 
-actor = Agent(name="writer", model=OpenAIChat(id="gpt-4o-mini"))
-reviewer = Agent(
-    name="reviewer",
-    model=OpenAIChat(id="gpt-4o"),
-    instructions="Check correctness; reply APPROVED or list issues.",
-)
+class IntentReply(BaseModel):
+    intent: Literal["question", "command", "complaint", "smalltalk"]
+    confidence: float = Field(ge=0.0, le=1.0)
 
-result = await refine(
-    actor,
-    task="Classify: 'when does the bus leave?'",
-    critics=[
-        SchemaCritic(Reply),                                  # program-level (zero cost)
-        AgentCritic(reviewer, style=CritiqueStyle.STRICT),    # LLM-level (style-aware)
-    ],
-    max_iter=3,
-)
 
-print(result.final_draft)        # final draft
-print(result.approved)           # True / False
-print(result.stopped_reason)     # approved / max_iter / loop_detected / no_critics
-print(result.iterations)         # actual review rounds
-for round_ in result.history:    # full per-round trail (auditable)
-    print(round_.draft, [v.approved for v in round_.verdicts])
+async def main():
+    actor = Agent(
+        name="classifier",
+        model=OpenAIChat(id="gpt-4o-mini"),
+        instructions=(
+            "Classify the user message as one of: question / command / complaint / smalltalk. "
+            'Output JSON only: {"intent": "<one_of_the_four>", "confidence": <float in 0..1>}. '
+            "No prose, no markdown code fences."
+        ),
+    )
+    reviewer = Agent(
+        name="reviewer",
+        model=OpenAIChat(id="gpt-4o"),
+        instructions="Check whether the classification is reasonable. Reply APPROVED if so, otherwise list issues.",
+    )
+
+    result = await refine(
+        actor,
+        task='Classify the following user message:\n"My phone keeps freezing, please refund me!"',
+        critics=[
+            SchemaCritic(IntentReply),                              # program-level (zero LLM cost)
+            AgentCritic(reviewer, style=CritiqueStyle.STRICT),      # LLM-level (style-aware)
+        ],
+        max_iter=3,
+    )
+
+    print(result.final_draft)        # e.g. {"intent": "complaint", "confidence": 0.95}
+    print(result.approved, result.stopped_reason, result.iterations)
+    for r in result.history:         # per-round draft + each critic's verdict (auditable)
+        print(r.draft, [(v.critic_name, v.approved) for v in r.verdicts])
+
+
+asyncio.run(main())
 ```
 
 **Key features**:
