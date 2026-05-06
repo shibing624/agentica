@@ -320,7 +320,10 @@ asyncio.run(main())
 - `CritiqueStyle.STRICT/NEUTRAL/LENIENT` — 控制 LLM critic 的评审温度（论文建议默认 NEUTRAL）
 
 
-完整示例见 [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py)（多 agent 辩论用 `AgentCritic` 拿结构化反驳）。
+完整示例：
+
+- [`examples/agent_patterns/13_actor_critic_refine.py`](examples/agent_patterns/13_actor_critic_refine.py) — `refine()` 标准用法，`SchemaCritic` + `AgentCritic` 并行混搭，可审计 history trail
+- [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py) — 多 agent 辩论场景，用 `AgentCritic` 把对方包装成结构化反驳者
 
 ## Agent 配方（Recipes）
 

@@ -313,7 +313,10 @@ asyncio.run(main())
 
 **使うべきでない場合**：基盤モデルが GPT-5+ クラスでタスクにビジネス固有の制約がない場合、`refine()` は限られたゲインのためにトークンを浪費します。使うべきは：(1) 出力がプログラム的スキーマを満たす必要がある、(2) 異種 actor + critic（安価な actor + 強力な critic）が欲しい、(3) 汎用的な自己批判では強制できないビジネス上のレッドラインがある場合。
 
-完全なサンプル：[`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py)（`AgentCritic` で構造化反論を抽出するマルチエージェント討論）。
+完全なサンプル：
+
+- [`examples/agent_patterns/13_actor_critic_refine.py`](examples/agent_patterns/13_actor_critic_refine.py) — `refine()` の標準的な使い方、`SchemaCritic` と `AgentCritic` を並列混在、ラウンドごとの監査 trail 付き
+- [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py) — `AgentCritic` で構造化反論を抽出するマルチエージェント討論
 
 ## Agent レシピ（Recipes）
 

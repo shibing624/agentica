@@ -88,6 +88,7 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 10 | [subagent_demo.py](agent_patterns/10_subagent_demo.py) | 子 Agent 委派：explore/general/research/code 四类 | `Subagent`, `register_custom_subagent()` |
 | 11 | [model_hooks.py](agent_patterns/11_model_hooks.py) | 模型层钩子：上下文溢出保护（先压缩再驱逐） | `context_overflow_threshold` |
 | 12 | [session_resume.py](agent_patterns/12_session_resume.py) | 会话恢复：JSONL 持久化 + 断点续传 | `SessionLog`, `session_id`, compact boundary |
+| 13 | [actor_critic_refine.py](agent_patterns/13_actor_critic_refine.py) | Actor-Critic 精炼：Schema + Agent 多 critic 并行评审 | `refine()`, `SchemaCritic`, `AgentCritic`, `RefineResult` |
 
 ### 4. 安全护栏 (`guardrails/`)
 

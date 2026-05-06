@@ -327,7 +327,10 @@ asyncio.run(main())
 
 **When NOT to use**: if the base model is GPT-5+ class and the task has no business-specific constraints, `refine()` will burn tokens for marginal gain. Use it when (1) output must satisfy a programmatic schema, (2) you want a heterogeneous actor + critic (cheap actor, strong critic), or (3) you have business red-lines that generic self-critique cannot enforce.
 
-Full example: [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py) (multi-agent debate using `AgentCritic` to extract structured rebuttals).
+Full examples:
+
+- [`examples/agent_patterns/13_actor_critic_refine.py`](examples/agent_patterns/13_actor_critic_refine.py) — canonical `refine()` usage with parallel `SchemaCritic` + `AgentCritic` and a per-round audit trail
+- [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py) — multi-agent debate using `AgentCritic` to extract structured rebuttals
 
 ## Agent Recipes
 
