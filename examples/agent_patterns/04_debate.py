@@ -1,10 +1,21 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Debate demo - Demonstrates multi-agent debate pattern
+@description: Multi-agent debate using ``refine()`` actor-critic loop.
 
-This example shows how to create agents that debate with each other,
-demonstrating different perspectives on a topic.
+This rewrite demonstrates how :mod:`agentica.critic` maps onto a classic
+debate scenario:
+
+* Each debater takes a position on the topic.
+* The opposing debater is wrapped as a ``Critic`` — its rebuttals surface
+  as the ``issues`` field of :class:`CritiqueResult`.
+* ``refine()`` iterates: position -> opponent's rebuttal -> revised position,
+  for ``max_iter`` rounds.
+* A moderator agent synthesises both refined positions into a balanced
+  summary.
+
+The CHAT log channel surfaces every rebuttal/approval verdict, so the
+dialectic is visible without scrolling through framework chatter.
 """
 import sys
 import os
@@ -14,91 +25,94 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 import asyncio
 
 from agentica import Agent, OpenAIChat
+from agentica.critic import AgentCritic, refine
+from agentica.utils.log import logger, CHAT_LEVEL
+
+
+def _enable_chat_only_logging() -> None:
+    """Show CHAT-level events only, hiding routine framework INFO lines."""
+    logger.setLevel(CHAT_LEVEL)
+    for h in logger.handlers:
+        h.setLevel(CHAT_LEVEL)
 
 
 async def main():
-    # Create debater agents with different perspectives
+    _enable_chat_only_logging()
+
     optimist = Agent(
         name="Optimist",
         model=OpenAIChat(id="gpt-4o"),
-        instructions="""你是一个乐观主义者，总是看到事物积极的一面。
-在辩论中，你需要：
-1. 强调AI技术带来的好处和机遇
-2. 用具体例子支持你的观点
-3. 保持礼貌但坚定的态度
-4. 回应对方的观点并提出反驳""",
+        instructions=(
+            "你是乐观主义者，看到AI技术积极的一面。在阐述立场时，"
+            "用具体案例支持你的观点，保持坚定但理性。\n"
+            "当作为评审者评估对方观点时，请始终给出有力反驳——"
+            "不要回复 APPROVED，逐条列出对方论点的薄弱之处。"
+        ),
     )
-    
+
     pessimist = Agent(
         name="Pessimist",
         model=OpenAIChat(id="gpt-4o"),
-        instructions="""你是一个谨慎的批评者，关注潜在的风险和问题。
-在辩论中，你需要：
-1. 指出AI技术可能带来的风险和挑战
-2. 用具体例子支持你的观点
-3. 保持理性和建设性的态度
-4. 回应对方的观点并提出质疑""",
+        instructions=(
+            "你是谨慎的批评者，关注AI技术潜在的风险和问题。在阐述立场时，"
+            "用具体案例支持你的观点，保持建设性。\n"
+            "当作为评审者评估对方观点时，请始终给出有力反驳——"
+            "不要回复 APPROVED，逐条列出对方论点的盲区与风险。"
+        ),
     )
-    
+
     moderator = Agent(
         name="Moderator",
         model=OpenAIChat(id="gpt-4o"),
-        instructions="""你是辩论的主持人，负责：
-1. 引导辩论的进行
-2. 总结双方观点
-3. 提出新的讨论角度
-4. 最后给出平衡的总结""",
+        instructions="你是辩论主持人。综合双方立场，给出平衡客观的总结。",
     )
 
     topic = "人工智能是否会取代大部分人类工作"
-    
+
     print("=" * 60)
     print(f"辩论主题: {topic}")
     print("=" * 60)
-    
-    # Opening statements
-    print("\n【开场陈述】")
-    print("-" * 40)
-    
-    print("\n乐观派观点:")
-    optimist_opening = await optimist.run(f"请就'{topic}'这个话题发表你的开场陈述（约200字）")
-    print(optimist_opening)
-    
-    print("\n谨慎派观点:")
-    pessimist_opening = await pessimist.run(f"请就'{topic}'这个话题发表你的开场陈述（约200字）")
-    print(pessimist_opening)
-    
-    # Rebuttal round
-    print("\n【反驳环节】")
-    print("-" * 40)
-    
-    print("\n乐观派反驳:")
-    optimist_rebuttal = await optimist.run(
-        f"对方的观点是：{pessimist_opening.content}\n请进行反驳（约150字）"
+    print(
+        "\n[本 demo 使用 refine() 让每位辩手的立场被对方挑战后再修订。\n"
+        " CHAT 行展示每轮反驳，最终输出经过对抗精炼的立场。]\n"
     )
-    print(optimist_rebuttal)
-    
-    print("\n谨慎派反驳:")
-    pessimist_rebuttal = await pessimist.run(
-        f"对方的观点是：{optimist_opening.content}\n请进行反驳（约150字）"
+
+    optimist_position = await refine(
+        actor=optimist,
+        task=f"就'{topic}'阐述你的立场（约200字）。",
+        critics=[AgentCritic(pessimist, name="pessimist_rebuttal")],
+        max_iter=2,
     )
-    print(pessimist_rebuttal)
-    
-    # Moderator summary
+
+    pessimist_position = await refine(
+        actor=pessimist,
+        task=f"就'{topic}'阐述你的立场（约200字）。",
+        critics=[AgentCritic(optimist, name="optimist_rebuttal")],
+        max_iter=2,
+    )
+
+    print("\n【乐观派的最终立场（经过 2 轮反驳后精炼）】")
+    print("-" * 40)
+    print(optimist_position)
+
+    print("\n【谨慎派的最终立场（经过 2 轮反驳后精炼）】")
+    print("-" * 40)
+    print(pessimist_position)
+
+    summary = await moderator.run(
+        f"""请综合以下两位辩手在'{topic}'议题上的立场，给出平衡的总结（约300字）：
+
+【乐观派立场】
+{optimist_position}
+
+【谨慎派立场】
+{pessimist_position}
+"""
+    )
+
     print("\n【主持人总结】")
     print("-" * 40)
-    
-    summary = await moderator.run(
-        f"""请总结这场关于'{topic}'的辩论：
-        
-乐观派开场：{optimist_opening.content}
-谨慎派开场：{pessimist_opening.content}
-乐观派反驳：{optimist_rebuttal.content}
-谨慎派反驳：{pessimist_rebuttal.content}
-
-请给出平衡的总结和你的看法（约300字）"""
-    )
-    print(summary)
+    print(summary.content)
 
 
 if __name__ == "__main__":
