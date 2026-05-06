@@ -70,9 +70,10 @@ Example
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, List, Protocol, Type
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Protocol, Type, Union
 
 from pydantic import BaseModel, ValidationError
 
@@ -218,6 +219,83 @@ class SchemaCritic:
                 issues=f"unparseable: {e}",
                 critic_name=self.name,
             )
+
+
+VerifyFnReturn = Union[bool, "CritiqueResult", Awaitable[Union[bool, "CritiqueResult"]]]
+VerifyFn = Callable[[str, str], VerifyFnReturn]
+
+
+class ExecCritic:
+    """Behavioural verifier — runs a user-supplied predicate against the answer.
+
+    Where :class:`SchemaCritic` checks structural validity (does the answer
+    parse as the schema?) and :class:`AgentCritic` asks an LLM for a verbal
+    judgement, ``ExecCritic`` verifies *actual behaviour*: execute the
+    candidate output (e.g. generated code, a candidate skill, a tool plan)
+    in a sandbox and observe whether it produces the expected result.
+
+    The verifier supplied by the user owns the sandboxing strategy — running
+    in a subprocess, container, restricted exec, or network call — so the
+    SDK stays neutral about isolation policy. The Critic Protocol contract
+    is what the SDK provides; the user plugs in any verification logic.
+
+    The predicate is given ``(task, answer)`` and may return:
+
+    * ``bool`` — ``True`` approves; ``False`` rejects with a generic message.
+    * :class:`CritiqueResult` — full verdict; ``critic_name`` is overridden
+      to ``self.name`` so the trail stays consistent.
+    * any of the above wrapped in a coroutine (async predicates are awaited).
+
+    Any exception raised by the predicate is caught and surfaced as a
+    rejection with the exception type and message, so a flaky sandbox
+    cannot crash the refine loop.
+
+    Example::
+
+        def run_in_sandbox(task: str, code: str) -> bool:
+            namespace: dict = {}
+            try:
+                exec(code, namespace)
+                return namespace.get("solve")(*task_inputs) == expected
+            except Exception:
+                return False
+
+        critic = ExecCritic(run_in_sandbox, name="sandbox_replay")
+    """
+
+    def __init__(self, verify_fn: VerifyFn, name: str = "exec") -> None:
+        self.verify_fn = verify_fn
+        self.name = name
+
+    async def __call__(self, task: str, answer: str) -> CritiqueResult:
+        try:
+            result: Any = self.verify_fn(task, answer)
+            if inspect.isawaitable(result):
+                result = await result
+        except Exception as e:
+            return CritiqueResult(
+                approved=False,
+                issues=f"verify_fn raised {type(e).__name__}: {e}",
+                critic_name=self.name,
+            )
+
+        if isinstance(result, CritiqueResult):
+            return CritiqueResult(
+                approved=result.approved,
+                issues=result.issues,
+                critic_name=self.name,
+            )
+        if isinstance(result, bool):
+            return CritiqueResult(
+                approved=result,
+                issues="" if result else "verify_fn returned False",
+                critic_name=self.name,
+            )
+        return CritiqueResult(
+            approved=False,
+            issues=f"verify_fn returned non-bool, non-CritiqueResult value: {result!r}",
+            critic_name=self.name,
+        )
 
 
 class AgentCritic:

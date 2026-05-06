@@ -267,7 +267,7 @@ EAGER_PUBLIC_EXPORTS = [
     "ExperienceEventStore", "ExperienceCompiler", "CompiledExperienceStore", "SkillEvolutionManager",
     "Workspace", "WorkspaceConfig",
     "Critic", "CritiqueResult", "CritiqueStyle", "RefineResult", "RefineRound",
-    "SchemaCritic", "AgentCritic", "refine",
+    "SchemaCritic", "ExecCritic", "AgentCritic", "refine",
 ]
 
 PUBLIC_API_ALL = [

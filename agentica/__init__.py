@@ -180,6 +180,7 @@ from agentica.critic import (
     RefineResult,
     RefineRound,
     SchemaCritic,
+    ExecCritic,
     AgentCritic,
     refine,
 )

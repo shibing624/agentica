@@ -66,12 +66,19 @@ print(result.content)
 北京是中国的首都，是一座拥有三千多年历史的文化名城，也是全国的政治、文化和国际交流中心。
 ```
 
-需要先设置 API Key：
+需要先设置 LLM 提供商的 API Key：
 
 ```bash
-export OPENAI_API_KEY="sk-xxx"              # OpenAI
-export ZHIPUAI_API_KEY="your-api-key"       # 智谱AI（glm-4.7-flash 免费）
-export DEEPSEEK_API_KEY="your-api-key"      # DeepSeek
+export OPENAI_API_KEY="sk-xxx"                      # OpenAI API Key
+export OPENAI_BASE_URL="https://api.openai.com/v1"  # OpenAI API Base URL
+```
+
+可选设置 DeepSeek API Key、Zhipu API Key、Claude API Key 等：
+
+```bash
+export DEEPSEEK_API_KEY="your-api-key"              # DeepSeek API Key
+export ZHIPUAI_API_KEY="your-api-key"               # Zhipu API Key
+export ANTHROPIC_API_KEY="your-api-key"             # Claude API Key
 ```
 
 ### 同步 vs 异步

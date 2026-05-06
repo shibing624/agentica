@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from agentica.critic import (
     CritiqueResult,
     CritiqueStyle,
+    ExecCritic,
     RefineResult,
     SchemaCritic,
     AgentCritic,
@@ -231,6 +232,70 @@ class TestCritiqueStyle(unittest.TestCase):
         asyncio.run(c("task", "answer"))
         sent_prompt = critic_agent.run.call_args.args[0]
         self.assertIn("lenient", sent_prompt.lower())
+
+
+# ---- ExecCritic ----
+
+class TestExecCritic(unittest.TestCase):
+    def test_sync_bool_true_approves(self):
+        c = ExecCritic(lambda task, ans: True, name="sandbox")
+        verdict = asyncio.run(c("t", "a"))
+        self.assertTrue(verdict.approved)
+        self.assertEqual(verdict.critic_name, "sandbox")
+        self.assertEqual(verdict.issues, "")
+
+    def test_sync_bool_false_rejects_with_default_message(self):
+        c = ExecCritic(lambda task, ans: False)
+        verdict = asyncio.run(c("t", "a"))
+        self.assertFalse(verdict.approved)
+        self.assertEqual(verdict.critic_name, "exec")
+        self.assertIn("False", verdict.issues)
+
+    def test_async_bool_is_awaited(self):
+        async def verify(task, ans):
+            await asyncio.sleep(0)
+            return ans == "good"
+
+        c = ExecCritic(verify)
+        self.assertTrue(asyncio.run(c("t", "good")).approved)
+        self.assertFalse(asyncio.run(c("t", "bad")).approved)
+
+    def test_returning_critique_result_overrides_name(self):
+        def verify(task, ans):
+            return CritiqueResult(approved=False, issues="fail at idx 3", critic_name="ignored")
+
+        c = ExecCritic(verify, name="my_sandbox")
+        verdict = asyncio.run(c("t", "a"))
+        self.assertFalse(verdict.approved)
+        self.assertEqual(verdict.issues, "fail at idx 3")
+        self.assertEqual(verdict.critic_name, "my_sandbox")
+
+    def test_predicate_exception_is_captured_as_rejection(self):
+        def boom(task, ans):
+            raise RuntimeError("sandbox blew up")
+
+        c = ExecCritic(boom)
+        verdict = asyncio.run(c("t", "a"))
+        self.assertFalse(verdict.approved)
+        self.assertIn("RuntimeError", verdict.issues)
+        self.assertIn("sandbox blew up", verdict.issues)
+
+    def test_unexpected_return_type_is_rejected(self):
+        c = ExecCritic(lambda task, ans: 42)
+        verdict = asyncio.run(c("t", "a"))
+        self.assertFalse(verdict.approved)
+        self.assertIn("42", verdict.issues)
+
+    def test_exec_critic_works_inside_refine(self):
+        actor = _mock_agent(["nope", "yes"])
+
+        def verify(task, ans):
+            return ans == "yes"
+
+        result = asyncio.run(refine(actor, "task", [ExecCritic(verify)], max_iter=2))
+        self.assertTrue(result.approved)
+        self.assertEqual(result.iterations, 2)
+        self.assertEqual(result.final_draft, "yes")
 
 
 if __name__ == "__main__":
