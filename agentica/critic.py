@@ -96,6 +96,23 @@ _REVISE_PROMPT_TEMPLATE = (
     "Return only the revised draft."
 )
 
+_DRAFT_PREVIEW_CHARS = 200
+
+
+def _log_draft(actor_name: str, label: str, draft: str) -> None:
+    """Emit the actor's draft as a CHAT line so the dialogue is auditable.
+
+    Long drafts are truncated and newlines collapsed to a glyph for one-line
+    log readability; full drafts remain in the actor's RunResponse.
+    """
+    preview = draft[:_DRAFT_PREVIEW_CHARS]
+    if len(draft) > _DRAFT_PREVIEW_CHARS:
+        preview += "..."
+    preview = preview.replace("\n", " \u23ce ")
+    # stacklevel=3 skips _log_draft itself + the chat helper, so the log
+    # record points at refine() — the meaningful call site.
+    logger.chat(f"[actor:{actor_name}] {label}: {preview}", stacklevel=3)
+
 
 @dataclass
 class CritiqueResult:
@@ -223,10 +240,13 @@ async def refine(
     Returns:
         The final draft string (after revisions, or unmodified if no critics).
     """
+    actor_name = actor.name or "actor"
+
     draft_resp = await actor.run(task)
     draft = draft_resp.content or ""
     if not isinstance(draft, str):
         draft = str(draft)
+    _log_draft(actor_name, "draft", draft)
 
     if not critics or max_iter <= 0:
         return draft
@@ -255,5 +275,6 @@ async def refine(
         if not isinstance(revised, str):
             revised = str(revised)
         draft = revised
+        _log_draft(actor_name, "revised", draft)
 
     return draft
