@@ -12,6 +12,25 @@ from typing import Optional
 from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
 
 
+# CHAT_LEVEL is a custom log level dedicated to inter-agent conversation
+# (semantic dialog flow), distinct from system-level INFO/DEBUG. Sits between
+# INFO (20) and WARNING (30) so it surfaces above routine info logs but below
+# real warnings. Used by Runner turn boundaries, Swarm assignments, and
+# Subagent spawn/return so multi-agent debugging shows the conversation flow
+# without being drowned in framework chatter.
+CHAT_LEVEL = 25
+logging.addLevelName(CHAT_LEVEL, "CHAT")
+
+
+def _logger_chat(self, message, *args, **kwargs):
+    """Log an inter-agent conversation event at the CHAT level."""
+    if self.isEnabledFor(CHAT_LEVEL):
+        self._log(CHAT_LEVEL, message, args, **kwargs)
+
+
+logging.Logger.chat = _logger_chat  # type: ignore[attr-defined]
+
+
 @lru_cache(maxsize=4096)
 def _dotted_module_from_path(pathname: str) -> str:
     """Convert a source file path to a loguru-style dotted module name.
@@ -58,6 +77,7 @@ class LoguruStyleFormatter(logging.Formatter):
     COLORS = {
         'DEBUG': '\033[34m',  # Blue
         'INFO': '\033[32m',  # Green
+        'CHAT': '\033[36m',  # Cyan — distinct from INFO so dialog stands out
         'WARNING': '\033[33m',  # Yellow
         'ERROR': '\033[31m',  # Red
         'CRITICAL': '\033[35m',  # Magenta
