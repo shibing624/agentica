@@ -1,6 +1,7 @@
-# agentica/utils/json_parse.py
 # -*- coding: utf-8 -*-
-"""Robust JSON extraction from LLM text responses.
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Robust JSON extraction from LLM text responses.
 
 LLMs that don't go through the OpenAI tool-call protocol often return JSON
 wrapped in prose, markdown code fences, or with a stray trailing token.
