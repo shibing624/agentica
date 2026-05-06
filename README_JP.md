@@ -117,6 +117,7 @@ from agentica.tools.shell_tool import ShellTool
 - **40以上の組み込みツール** — 検索、コード実行、ファイル操作、ブラウザ、OCR、画像生成
 - **RAG** — ナレッジベース管理、ハイブリッド検索、Rerank、LangChain / LlamaIndex 統合
 - **マルチエージェント** — `Agent.as_tool()`（軽量合成）、Swarm（並列 / 自律）、Workflow（確定的オーケストレーション）
+- **Actor-Critic 精錬** — `refine()` による複数 Critic 並列レビュー、`SchemaCritic` のゼロコストプログラム検証 / `AgentCritic` の異種強モデル監査、ループ検出による自動早期停止
 - **ガードレール** — 入力 / 出力 / ツールレベルのガードレール、ストリーミングリアルタイム検出
 - **MCP / ACP** — Model Context Protocol と Agent Communication Protocol のサポート
 - **スキルシステム** — Markdown ベースのスキル注入、モデル非依存
@@ -293,6 +294,62 @@ workspace/users/alice/
 完全な e2e demo（Session 1 で自己進化により skill 生成 → Session 2 で全く新しい Agent がクロスセッションで再利用）：[`examples/workspace/03_self_evolution_e2e.py`](examples/workspace/03_self_evolution_e2e.py)。
 
 > **トレードオフ**：`mode="shadow"` は workspace ローカルに自動インストールされ、他ユーザーには影響しません。`mode="draft"` はドラフトのみ生成しインストールせず、人間レビュー向きです。`mode="off"` は skill 自動生成を無効化（経験カードの収集は継続）。`min_success_applications` は「最低 N 回の `tool_recovery` イベントが必要」という安全ゲート — Agent が永遠に解決できないタスクから skill を生成するのを防ぎます。コールドスタート demo のときのみ `0` に設定してください。
+
+## Actor-Critic 精錬（refine）
+
+Agentica は **プロトコルレベルの Actor-Critic パターン** を提供します：Actor がドラフトを生成し、複数の Critic が並列でレビュー、却下されたドラフトはフィードバックに基づいて修正され、全 Critic 承認またはループ早期停止で終了します。これは [CarePilot 論文（arXiv:2603.24157）](https://arxiv.org/abs/2603.24157) で検証されたアーキテクチャ — 7B のファインチューニングモデル + Actor-Critic フレームワークが医療 GUI ベンチマークで 48.9% のタスク完了率を達成し、ゼロショット GPT-5 を約 13 ポイント上回りました。アブレーションでは Critic ループを除外するとタスク精度が 48.9% → 12.5% に急落しています。
+
+agentica の設計原則は **「SDK は能力ではなくプロトコルを提供する」** です。基盤モデル内の汎用的な自己批判は LLM 自体に任せ、SDK は LLM では代替不可能な 3 つを担当します —
+
+- **ビジネス制約の注入** — `SchemaCritic` は Pydantic スキーマ検証によるゼロ LLM コストの決定論的検証器（スキーマ適合性ではいかなる LLM critic にも勝つ）
+- **監査可能なリフレクション trail** — `RefineResult.history` は各ラウンドのドラフトと critic ごとの verdict を記録、全プロセスが観測・再現可能
+- **異種構成** — 安価な Actor + 強力な Critic、複数 Critic 並列レビュー、決定論的検証器と LLM 検証器の混在 — SDK レイヤだけが表現可能
+
+```python
+from pydantic import BaseModel
+from agentica import Agent, OpenAIChat
+from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
+
+class Reply(BaseModel):
+    intent: str
+    confidence: float
+
+actor = Agent(name="writer", model=OpenAIChat(id="gpt-4o-mini"))
+reviewer = Agent(
+    name="reviewer",
+    model=OpenAIChat(id="gpt-4o"),
+    instructions="正しさを確認し、問題なければ APPROVED と返答、そうでなければ問題を箇条書きしてください。",
+)
+
+result = await refine(
+    actor,
+    task="分類: 'バスは何時に出発しますか？'",
+    critics=[
+        SchemaCritic(Reply),                                  # プログラムレベル（ゼロコスト）
+        AgentCritic(reviewer, style=CritiqueStyle.STRICT),    # LLM レベル（スタイル指定可）
+    ],
+    max_iter=3,
+)
+
+print(result.final_draft)        # 最終ドラフト
+print(result.approved)           # True / False
+print(result.stopped_reason)     # approved / max_iter / loop_detected / no_critics
+print(result.iterations)         # 実際のレビュー回数
+for round_ in result.history:    # ラウンドごとの完全 trail（監査可能）
+    print(round_.draft, [v.approved for v in round_.verdicts])
+```
+
+**主な特徴**：
+
+- `Critic` Protocol — duck-typed、カスタム critic（regex / API call / 任意のビジネスルール）は 20 行未満で実装可能
+- 複数 Critic 並列実行（`asyncio.gather`）、LLM critic とゼロコストプログラム critic を自由に混在
+- `CritiqueStyle.STRICT/NEUTRAL/LENIENT` — LLM critic のレビュー温度を制御（論文ではデフォルト NEUTRAL を推奨）
+- **ループ検出による早期停止** — 連続 2 ラウンドで同じ verdict が出た場合、自動的に終了しトークンの浪費を防止
+- `RefineResult.history` は完全なリフレクション trail を提供し、CHAT ログ（`logger.chat`）と連携してマルチエージェントの可観測性を実現
+
+**使うべきでない場合**：基盤モデルが GPT-5+ クラスでタスクにビジネス固有の制約がない場合、`refine()` は限られたゲインのためにトークンを浪費します。使うべきは：(1) 出力がプログラム的スキーマを満たす必要がある、(2) 異種 actor + critic（安価な actor + 強力な critic）が欲しい、(3) 汎用的な自己批判では強制できないビジネス上のレッドラインがある場合。
+
+完全なサンプル：[`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py)（`AgentCritic` で構造化反論を抽出するマルチエージェント討論）。
 
 ## Agent レシピ（Recipes）
 

@@ -123,6 +123,7 @@ from agentica.tools.shell_tool import ShellTool
 - **40+ 内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
 - **多智能体** — `Agent.as_tool()`（轻量组合）、Swarm（并行/自治）和 Workflow（确定性编排）
+- **Actor-Critic 精炼** — `refine()` + 多 Critic 并行评审，`SchemaCritic` 程序级零成本验证 / `AgentCritic` 异构强模型把关，循环检测自动早停
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
@@ -303,6 +304,62 @@ workspace/users/alice/
 完整 e2e demo（Session 1 自进化生成技能 → Session 2 全新 Agent 跨会话复用）：[`examples/workspace/03_self_evolution_e2e.py`](examples/workspace/03_self_evolution_e2e.py)。
 
 > **配置取舍**：`mode="shadow"` 自动安装到 workspace 本地不影响其他用户；`mode="draft"` 只生成草稿不安装，适合人审；`mode="off"` 等价于不开启 skill 自动生成（但仍采集经验卡片）。`min_success_applications` 是"必须先有 ≥N 次 tool_recovery 才允许生成 skill"的安全闸——避免给 Agent 永远做不对的事情生成技能；冷启动 demo 把它设成 `0`。
+
+## Actor-Critic 精炼（refine）
+
+Agentica 提供 **协议级 Actor-Critic 范式**：Actor 出草稿，多个 Critic 并行评审，不通过则反馈让 Actor 修订，直到所有 Critic 同意或触发早停。这是 [CarePilot 论文（arXiv:2603.24157）](https://arxiv.org/abs/2603.24157) 验证过的"小模型 + 好框架 > 大模型零样本"路径——在医疗 GUI 任务上 7B 微调模型 48.9% 任务完成率，比 GPT-5 高近 13 个百分点；其消融数据显示去掉 Critic 闭环 → 任务准确率从 48.9% 暴跌到 12.5%。
+
+agentica 的设计原则是 **"SDK 提供协议而非能力"**：基模型的自我反思能力交给 LLM 本身，SDK 负责无 LLM 能替代的三件事——
+
+- **业务约束注入**：`SchemaCritic` 用 Pydantic 做程序级零成本验证（任何 LLM 都打不过的硬约束）
+- **审计反思 trail**：`RefineResult.history` 记录每轮 draft + verdicts，全流程可观测、可重放
+- **异构组合**：便宜 Actor + 强 Critic、多 Critic 并行评审、确定性 + LLM 验证混搭，仅 SDK 层能表达
+
+```python
+from pydantic import BaseModel
+from agentica import Agent, OpenAIChat
+from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
+
+class Reply(BaseModel):
+    intent: str
+    confidence: float
+
+actor = Agent(name="writer", model=OpenAIChat(id="gpt-4o-mini"))
+reviewer = Agent(
+    name="reviewer",
+    model=OpenAIChat(id="gpt-4o"),
+    instructions="检查输出正确性，符合则回复 APPROVED，否则逐条列出问题。",
+)
+
+result = await refine(
+    actor,
+    task="分类: '公交车几点开?'",
+    critics=[
+        SchemaCritic(Reply),                                  # 程序级 schema 验证（零成本）
+        AgentCritic(reviewer, style=CritiqueStyle.STRICT),    # LLM 级语义审核（可调风格）
+    ],
+    max_iter=3,
+)
+
+print(result.final_draft)        # 最终草稿
+print(result.approved)           # True / False
+print(result.stopped_reason)     # approved / max_iter / loop_detected / no_critics
+print(result.iterations)         # 实际评审轮数
+for round_ in result.history:    # 每轮 draft + 每个 critic 的 verdict（可审计）
+    print(round_.draft, [v.approved for v in round_.verdicts])
+```
+
+**关键特性**：
+
+- `Critic` Protocol — duck-typed 接口，自定义 critic 不到 20 行（regex / API call / 任何业务规则）
+- 多 Critic 并行（`asyncio.gather`），强模型 critic 与零成本程序 critic 自由混搭
+- `CritiqueStyle.STRICT/NEUTRAL/LENIENT` — 控制 LLM critic 的评审温度（论文建议默认 NEUTRAL）
+- **循环检测早停** — 连续两轮 critic 给出相同 verdict 时自动终止，避免烧 token
+- `RefineResult.history` 提供完整反思 trail，与 CHAT 日志（`logger.chat`）联动，多 agent 调试一眼可见
+
+**何时不该用**：基模型 GPT-5+ 类、任务无业务硬约束时，`refine()` 会烧 token 换边际收益。该用的场景：(1) 输出必须满足程序化 schema；(2) 想做异构 actor+critic（便宜 actor + 强 critic）；(3) 有自我反思无法保证的业务红线。
+
+完整示例见 [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py)（多 agent 辩论用 `AgentCritic` 拿结构化反驳）。
 
 ## Agent 配方（Recipes）
 

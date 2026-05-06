@@ -127,6 +127,7 @@ from agentica.tools.shell_tool import ShellTool
 - **40+ Built-in Tools** — Search, code execution, file operations, browser, OCR, image generation
 - **RAG** — Knowledge base management, hybrid retrieval, Rerank, LangChain / LlamaIndex integration
 - **Multi-Agent** — `Agent.as_tool()` (lightweight composition), Swarm (parallel / autonomous), and Workflow (deterministic orchestration)
+- **Actor-Critic Refinement** — `refine()` with parallel multi-critic review, `SchemaCritic` for zero-cost program-level validation, `AgentCritic` for heterogeneous strong-model gating, and automatic loop-detection early-stop
 - **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
 - **MCP / ACP** — Model Context Protocol and Agent Communication Protocol support
 - **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
@@ -307,6 +308,62 @@ workspace/users/alice/
 Full e2e demo (Session 1 evolves a skill → Session 2 uses a fresh agent that consumes it across sessions): [`examples/workspace/03_self_evolution_e2e.py`](examples/workspace/03_self_evolution_e2e.py).
 
 > **Trade-offs**: `mode="shadow"` installs locally to the workspace without affecting other users; `mode="draft"` only writes a draft for human review; `mode="off"` disables auto-skill generation but still captures experience cards. `min_success_applications` is the *"need ≥N tool_recovery events first"* safety gate — it prevents the loop from generating skills for tasks the agent never actually solved. Set to `0` only for cold-start demos.
+
+## Actor-Critic Refinement (refine)
+
+Agentica ships a **protocol-level Actor-Critic pattern**: an Actor produces a draft, multiple Critics review it in parallel, rejected drafts are revised against feedback, and the loop terminates either on unanimous approval or via early-stop. This is the same architecture validated by the [CarePilot paper (arXiv:2603.24157)](https://arxiv.org/abs/2603.24157) — a 7B fine-tuned model + Actor-Critic framework hit 48.9% task accuracy on a medical-GUI benchmark, ~13 points above zero-shot GPT-5; the ablation showed dropping the critic loop collapses task accuracy from 48.9% to 12.5%.
+
+agentica's design principle here is **"the SDK provides protocol, not capability"**. Generic self-critique inside a strong base model belongs to the LLM; the SDK owns the three things no LLM can replace —
+
+- **Business-constraint injection** — `SchemaCritic` enforces Pydantic schema validation as a deterministic, zero-LLM-cost verifier that beats any LLM critic on schema conformance
+- **Auditable reflection trail** — `RefineResult.history` records every round's draft + per-critic verdict; the full process is observable and replayable
+- **Heterogeneous composition** — cheap Actor + strong Critic, parallel multi-critic review, mixing deterministic and LLM-based verifiers — only the SDK layer can express this
+
+```python
+from pydantic import BaseModel
+from agentica import Agent, OpenAIChat
+from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
+
+class Reply(BaseModel):
+    intent: str
+    confidence: float
+
+actor = Agent(name="writer", model=OpenAIChat(id="gpt-4o-mini"))
+reviewer = Agent(
+    name="reviewer",
+    model=OpenAIChat(id="gpt-4o"),
+    instructions="Check correctness; reply APPROVED or list issues.",
+)
+
+result = await refine(
+    actor,
+    task="Classify: 'when does the bus leave?'",
+    critics=[
+        SchemaCritic(Reply),                                  # program-level (zero cost)
+        AgentCritic(reviewer, style=CritiqueStyle.STRICT),    # LLM-level (style-aware)
+    ],
+    max_iter=3,
+)
+
+print(result.final_draft)        # final draft
+print(result.approved)           # True / False
+print(result.stopped_reason)     # approved / max_iter / loop_detected / no_critics
+print(result.iterations)         # actual review rounds
+for round_ in result.history:    # full per-round trail (auditable)
+    print(round_.draft, [v.approved for v in round_.verdicts])
+```
+
+**Key features**:
+
+- `Critic` Protocol — duck-typed; a custom critic (regex / API call / any business rule) is < 20 lines
+- Multi-critic parallel execution (`asyncio.gather`); freely mix LLM critics with zero-cost program critics
+- `CritiqueStyle.STRICT/NEUTRAL/LENIENT` controls the LLM critic's reviewing temperament (paper recommends NEUTRAL as default)
+- **Loop detection early-stop** — when two consecutive rounds produce identical verdicts, the loop terminates automatically, avoiding wasted tokens
+- `RefineResult.history` exposes the full reflection trail and pairs with the CHAT log (`logger.chat`) for first-class multi-agent observability
+
+**When NOT to use**: if the base model is GPT-5+ class and the task has no business-specific constraints, `refine()` will burn tokens for marginal gain. Use it when (1) output must satisfy a programmatic schema, (2) you want a heterogeneous actor + critic (cheap actor, strong critic), or (3) you have business red-lines that generic self-critique cannot enforce.
+
+Full example: [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py) (multi-agent debate using `AgentCritic` to extract structured rebuttals).
 
 ## Agent Recipes
 
