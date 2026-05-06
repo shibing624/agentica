@@ -246,6 +246,11 @@ def parse_args():
     parser.add_argument('--task_api_key', type=str, help='API key for the task-subagent model')
 
     parser.add_argument('--debug', type=int, help='enable verbose mode', default=0)
+    parser.add_argument(
+        '--chat-only',
+        action='store_true',
+        help='Show only inter-agent CHAT messages (suppress INFO/DEBUG/WARNING)',
+    )
     parser.add_argument('--work_dir', type=str, help='Working directory for file operations', default=None)
     parser.add_argument('--tools', nargs='*',
                         choices=list(TOOL_REGISTRY.keys()),

@@ -12,7 +12,13 @@ from agentica.skills import load_skills, get_skill_registry
 
 def main():
     args = parse_args()
-    
+
+    if getattr(args, 'chat_only', False):
+        from agentica.utils.log import logger, CHAT_LEVEL
+        logger.setLevel(CHAT_LEVEL)
+        for h in logger.handlers:
+            h.setLevel(CHAT_LEVEL)
+
     # Handle ACP mode for IDE integration
     if args is None or (hasattr(args, 'command') and args.command == 'acp'):
         from agentica.acp.server import ACPServer
