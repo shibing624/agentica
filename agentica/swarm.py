@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from agentica.handoff import default_handoff_mapper
+from agentica.utils.json_parse import extract_json_array
 from agentica.utils.log import logger
 from agentica.run_config import RunConfig
 
@@ -368,17 +369,7 @@ class Swarm:
             if not isinstance(content, str):
                 content = json.dumps(content, ensure_ascii=False)
 
-            # Parse JSON assignments from response
-            content = content.strip()
-            if "```" in content:
-                # Extract from code block
-                import re
-                match = re.search(r'```(?:json)?\s*\n?(.*?)\n?```', content, re.DOTALL)
-                if match:
-                    content = match.group(1).strip()
-
-            # Robust JSON extraction: find first [ to last ]
-            assignments = self._extract_json_array(content)
+            assignments = extract_json_array(content)
             if assignments is None:
                 logger.warning(f"Coordinator returned unparseable response: {content[:200]}")
                 return []
@@ -388,34 +379,6 @@ class Swarm:
         except Exception as e:
             logger.warning(f"Failed to parse coordinator response: {e}")
             return []
-
-    @staticmethod
-    def _extract_json_array(text: str) -> Optional[List[Dict]]:
-        """Extract a JSON array from text, tolerating surrounding prose.
-
-        Tries json.loads first, then falls back to extracting content between
-        the first '[' and last ']'.
-        """
-        text = text.strip()
-        try:
-            result = json.loads(text)
-            if isinstance(result, list):
-                return result
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # Fallback: find first [ and last ]
-        start = text.find('[')
-        end = text.rfind(']')
-        if start != -1 and end != -1 and end > start:
-            try:
-                result = json.loads(text[start:end + 1])
-                if isinstance(result, list):
-                    return result
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-        return None
 
     async def _synthesize(
         self,

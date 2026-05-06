@@ -203,34 +203,7 @@ class TestSwarmDuplicateNames:
         assert "agent_1" in swarm._agent_map
 
 
-class TestSwarmJsonExtraction:
-    """Tests for I3: Robust JSON extraction."""
-
-    def test_extract_clean_json(self):
-        """Clean JSON array should parse directly."""
-        text = '[{"agent_name": "a", "subtask": "task a"}]'
-        result = Swarm._extract_json_array(text)
-        assert result == [{"agent_name": "a", "subtask": "task a"}]
-
-    def test_extract_json_with_surrounding_text(self):
-        """JSON array surrounded by prose should be extracted."""
-        text = 'Here are the assignments:\n[{"agent_name": "a", "subtask": "task"}]\nDone!'
-        result = Swarm._extract_json_array(text)
-        assert result is not None
-        assert len(result) == 1
-        assert result[0]["agent_name"] == "a"
-
-    def test_extract_non_json_returns_none(self):
-        """Non-JSON text should return None."""
-        text = "This is not JSON at all."
-        result = Swarm._extract_json_array(text)
-        assert result is None
-
-    def test_extract_json_object_returns_none(self):
-        """JSON object (not array) should return None."""
-        text = '{"key": "value"}'
-        result = Swarm._extract_json_array(text)
-        assert result is None
+# JSON extraction was moved to agentica.utils.json_parse; see tests/test_json_parse.py
 
 
 # =========================================================================
