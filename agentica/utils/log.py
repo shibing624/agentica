@@ -23,8 +23,14 @@ logging.addLevelName(CHAT_LEVEL, "CHAT")
 
 
 def _logger_chat(self, message, *args, **kwargs):
-    """Log an inter-agent conversation event at the CHAT level."""
+    """Log an inter-agent conversation event at the CHAT level.
+
+    ``stacklevel=2`` makes Python's logging framework attribute the record
+    to the caller of ``logger.chat(...)`` rather than to this helper, so
+    log lines display the true source location.
+    """
     if self.isEnabledFor(CHAT_LEVEL):
+        kwargs.setdefault("stacklevel", 2)
         self._log(CHAT_LEVEL, message, args, **kwargs)
 
 
