@@ -239,6 +239,7 @@ class Swarm:
         async def _run_agent(agent):
             async with semaphore:
                 agent_name = agent.name or "unnamed"
+                logger.chat(f"[swarm] {agent_name} <- task: {task[:120]}")
                 try:
                     response = await agent.run(task, config=config)
                     content = response.content if response and response.content else ""
@@ -246,6 +247,10 @@ class Swarm:
                         content = json.dumps(content, ensure_ascii=False)
                     # Collect token metrics from response
                     metrics: Dict[str, Any] = response.metrics or {} if response else {}
+                    logger.chat(
+                        f"[swarm] {agent_name} -> result: "
+                        f"{(content or '')[:120]}{'...' if len(content or '') > 120 else ''}"
+                    )
                     return {
                         "agent": agent_name,
                         "content": content,
@@ -295,6 +300,7 @@ class Swarm:
             async with semaphore:
                 agent_name = assignment.get("agent_name", "")
                 subtask = assignment.get("subtask", "")
+                logger.chat(f"[swarm] {agent_name} <- subtask: {subtask[:120]}")
                 source_agent = self._agent_map.get(agent_name)
                 if source_agent is None:
                     return {
@@ -321,6 +327,10 @@ class Swarm:
                     content = response.content if response and response.content else ""
                     if not isinstance(content, str):
                         content = json.dumps(content, ensure_ascii=False)
+                    logger.chat(
+                        f"[swarm] {agent_name} -> result: "
+                        f"{(content or '')[:120]}{'...' if len(content or '') > 120 else ''}"
+                    )
                     return {
                         "agent": agent_name,
                         "subtask": subtask,

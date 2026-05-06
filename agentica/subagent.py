@@ -592,6 +592,13 @@ class SubagentRegistry:
         )
         self.register(run)
 
+        _agent_type_label = getattr(agent_type, 'value', agent_type)
+        _parent_label = parent_agent.name or parent_agent.agent_id
+        logger.chat(
+            f"[spawn] {_parent_label} -> {_agent_type_label} subagent: "
+            f"{task[:120]}{'...' if len(task) > 120 else ''}"
+        )
+
         parent_tools = parent_agent.tools or []
         child_tools = self._select_child_tools(parent_tools, config)
 
@@ -687,6 +694,11 @@ class SubagentRegistry:
             parent_agent.model.usage.merge(child.model.usage)
 
         self.update_status(run_id=run_id, status="completed", result=final_content)
+
+        logger.chat(
+            f"[return] {config.type.value} subagent -> {parent_agent.name or parent_agent.agent_id}: "
+            f"{(final_content or '')[:120]}{'...' if len(final_content or '') > 120 else ''}"
+        )
 
         return {
             "status": "completed",

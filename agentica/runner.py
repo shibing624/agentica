@@ -687,6 +687,10 @@ class Runner:
                 return
 
             agent._running = True
+            logger.chat(
+                f"[user] -> {agent.identifier}: "
+                f"{str(message)[:120] if message else '<no message>'}"
+            )
             # Capture asyncio handles so cancel() can hard-cancel from another thread
             try:
                 agent._run_loop = asyncio.get_running_loop()
