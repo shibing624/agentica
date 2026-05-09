@@ -277,7 +277,7 @@ class Function(BaseModel):
         Shared logic for from_callable() and process_entrypoint().
         """
         from inspect import signature
-        from agentica.utils.json_util import get_json_schema
+        from agentica.utils.json_schema import get_json_schema
 
         parameters: Dict[str, Any] = {"type": "object", "properties": {}, "required": []}
         sig = signature(entrypoint)

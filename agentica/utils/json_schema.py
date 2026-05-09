@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description: Convert Python type hints into OpenAI tool-calling JSON Schema.
+
+Used by ``Function.from_callable()`` (tools/base.py) to auto-generate the
+``parameters`` block sent to the LLM as a tool definition. Not a JSON parser
+-- for parsing JSON OUT of LLM text responses see ``json_parse.py``.
 """
 from typing import Any, Dict, Union, get_args, get_origin, Optional, Literal
 
