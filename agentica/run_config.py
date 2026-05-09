@@ -7,18 +7,22 @@ Separates "each run may differ" parameters from Agent construction.
 Agent fields are defaults; RunConfig overrides them for a specific run.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Dict,
     List,
     Optional,
+    TYPE_CHECKING,
     Type,
     Union,
 )
 
 from agentica.hooks import RunHooks
 from agentica.run_context import RunSource
+
+if TYPE_CHECKING:
+    from agentica.model.base import Model
 
 
 @dataclass
@@ -55,3 +59,10 @@ class RunConfig:
     max_cost_usd: Optional[float] = None
     # Explicit provenance for this run. Product entry points should set this.
     source: RunSource = RunSource.sdk
+    # Fallback model chain (cross-provider). Triggered per-call by:
+    #   - finish_reason == "content_filter" (provider-side content moderation)
+    #   - retryable API errors that exhausted local backoff (timeout / 5xx / 429)
+    # Each call starts from the primary agent.model; fallbacks are tried in order.
+    # Primary model is always retried on the next call (per-call switch, not per-run).
+    # Use cross-provider models — same provider often shares the moderation layer.
+    fallback_models: List["Model"] = field(default_factory=list)

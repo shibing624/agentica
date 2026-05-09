@@ -530,42 +530,168 @@ class Runner:
         *,
         stream: bool = False,
     ):
-        """Call model.response()/response_stream() with retry and reactive compact.
+        """Call model.response()/response_stream() with retry, reactive compact,
+        and cross-provider fallback chain.
 
-        For non-stream: returns ModelResponse.
-        For stream: returns the async iterator from response_stream().
+        Returns:
+            For non-stream: ModelResponse.
+            For stream: async iterator from response_stream().
+
+        Per-call fallback (not per-run): each invocation starts from the primary
+        ``model`` argument; ``agent._run_fallback_models`` are tried in order
+        when triggered by:
+
+          1. ``finish_reason in CONTENT_FILTER_FINISH_REASONS`` (non-stream only;
+             stream cannot detect this until consumed).
+          2. Exception whose text matches ``CONTENT_FILTER_HINTS`` (any provider
+             that raises instead of flagging a finish reason).
+          3. Retryable API error (``RETRYABLE_SUBSTRINGS``) that exhausted local
+             exponential backoff on the current model.
+
+        Reactive compact (``prompt_too_long``) is NOT a fallback trigger —
+        switching providers does not solve a too-long context.
         """
-        for attempt in range(state.max_api_retry):
-            try:
-                if stream:
-                    return model.response_stream(messages=messages)
-                else:
-                    return await model.response(messages=messages)
-            except Exception as exc:
-                err = str(exc).lower()
+        candidates: List["Model"] = [model, *(agent._run_fallback_models or [])]
+        last_exc: Optional[BaseException] = None
+        # Reset per-call bookkeeping. last_used_* reflects the model that
+        # actually produced the response returned by THIS call invocation.
+        state.last_used_model_id = None
+        state.last_used_model_idx = -1
+        primary_id = model.id
+        trigger: Optional[str] = None  # "content_filter" | "exhausted_retry"
 
-                # Reactive compact: prompt_too_long -> emergency compress
-                is_too_long = any(h in err for h in state.PROMPT_TOO_LONG_HINTS)
-                if is_too_long and not state.reactive_compact_done:
-                    state.reactive_compact_done = True
-                    if await Runner._try_reactive_compact(messages, agent, model):
-                        continue  # retry with compacted context
+        def _emit_fallback_recovery(used_model_id: str, used_idx: int) -> None:
+            """Audit-log + event-bus a successful fallback recovery.
 
-                # Retryable errors: exponential back-off
-                is_retryable = any(r in err for r in state.RETRYABLE_SUBSTRINGS)
-                if is_retryable and attempt < state.max_api_retry - 1:
-                    wait = (2 ** attempt) + random.uniform(0.0, 1.0)
-                    logger.warning(
-                        f"[APIRetry] attempt {attempt + 1}/{state.max_api_retry}, "
-                        f"retrying in {wait:.1f}s: {exc}"
+            Only fires when the answer came from a fallback (idx > 0). Gives
+            ops a single grep-able marker for "this run was rescued by a
+            fallback model" without scraping retry/switch warnings.
+            """
+            logger.warning(
+                f"[fallback.recovered] primary={primary_id} -> "
+                f"used={used_model_id} (idx={used_idx}, trigger={trigger})"
+            )
+            cb = agent._event_callback
+            if cb is not None:
+                try:
+                    cb({
+                        "type": "fallback.recovered",
+                        "agent_name": agent.name or "Agent",
+                        "primary_model": primary_id,
+                        "used_model": used_model_id,
+                        "fallback_index": used_idx,
+                        "trigger": trigger,
+                    })
+                except Exception as e:
+                    logger.warning(f"event callback failed for fallback.recovered: {e}")
+
+        for model_idx, current in enumerate(candidates):
+            is_fallback = model_idx > 0
+            if is_fallback:
+                logger.warning(
+                    f"[fallback] switching to {current.id} "
+                    f"({model_idx}/{len(candidates) - 1}) trigger={trigger}"
+                )
+
+            for attempt in range(state.max_api_retry):
+                try:
+                    if stream:
+                        # Stream: defer content_filter detection to the consumer.
+                        # Exception-based fallbacks (timeout/5xx/content_filter
+                        # raised at connect time) are still handled below.
+                        # Record optimistically; consumer may flip later if
+                        # finish_reason turns out to be content_filter.
+                        state.last_used_model_id = current.id
+                        state.last_used_model_idx = model_idx
+                        if is_fallback:
+                            _emit_fallback_recovery(current.id, model_idx)
+                        return current.response_stream(messages=messages)
+
+                    resp = await current.response(messages=messages)
+
+                    # Non-stream: content_filter is a normal-return finish_reason.
+                    _fr = (resp.finish_reason or "").lower()
+                    if _fr in state.CONTENT_FILTER_FINISH_REASONS:
+                        logger.warning(
+                            f"[content_filter] {current.id} returned "
+                            f"finish_reason={resp.finish_reason!r}; "
+                            f"trying next fallback"
+                        )
+                        trigger = "content_filter"
+                        last_exc = RuntimeError(
+                            f"content_filter on {current.id} "
+                            f"(finish_reason={resp.finish_reason})"
+                        )
+                        break  # exit retry loop, go to next model
+
+                    # Success: stamp who actually answered.
+                    state.last_used_model_id = current.id
+                    state.last_used_model_idx = model_idx
+                    if is_fallback:
+                        _emit_fallback_recovery(current.id, model_idx)
+                    return resp
+
+                except Exception as exc:
+                    last_exc = exc
+                    err = str(exc).lower()
+
+                    # Reactive compact: prompt_too_long -> emergency compress.
+                    # Only attempted on the primary model; fallbacks inherit the
+                    # already-compacted message list.
+                    is_too_long = any(h in err for h in state.PROMPT_TOO_LONG_HINTS)
+                    if is_too_long and not state.reactive_compact_done and not is_fallback:
+                        state.reactive_compact_done = True
+                        if await Runner._try_reactive_compact(messages, agent, current):
+                            continue
+
+                    # Content filter raised as exception (some providers do this
+                    # instead of setting finish_reason). No point retrying same
+                    # model — moderation is deterministic.
+                    is_content_filter = any(
+                        h in err for h in state.CONTENT_FILTER_HINTS
                     )
-                    await asyncio.sleep(wait)
-                    continue
+                    if is_content_filter:
+                        logger.warning(
+                            f"[content_filter] {current.id} raised "
+                            f"content_filter exception: {exc}"
+                        )
+                        trigger = "content_filter"
+                        break  # next model
 
-                raise  # non-retryable or exhausted retries
+                    # Retryable transient errors: backoff within current model.
+                    is_retryable = any(r in err for r in state.RETRYABLE_SUBSTRINGS)
+                    if is_retryable and attempt < state.max_api_retry - 1:
+                        wait = (2 ** attempt) + random.uniform(0.0, 1.0)
+                        logger.warning(
+                            f"[APIRetry] {current.id} attempt "
+                            f"{attempt + 1}/{state.max_api_retry}, "
+                            f"retrying in {wait:.1f}s: {exc}"
+                        )
+                        await asyncio.sleep(wait)
+                        continue
 
-        logger.error(f"[APIRetry] All {state.max_api_retry} attempts failed")
-        raise RuntimeError(f"LLM API call failed after {state.max_api_retry} retries")
+                    if is_retryable:
+                        # Exhausted local retries → fall through to next model
+                        logger.warning(
+                            f"[APIRetry] {current.id} exhausted "
+                            f"{state.max_api_retry} retries; trying next fallback"
+                        )
+                        trigger = "exhausted_retry"
+                        break
+
+                    # Truly non-retryable (auth, malformed request, etc.).
+                    # Fallback would not help — propagate immediately.
+                    raise
+
+        # All models in the chain failed.
+        logger.error(
+            f"[fallback] All {len(candidates)} models exhausted. "
+            f"Last error: {last_exc}"
+        )
+        raise RuntimeError(
+            f"LLM call failed across {len(candidates)} model(s) "
+            f"(primary + {len(candidates) - 1} fallback). Last error: {last_exc}"
+        ) from last_exc
 
     def save_run_response_to_file(
         self,
@@ -935,6 +1061,13 @@ class Runner:
                         model_response_stream = await self._call_with_retry(
                             agent.model, messages_for_model, loop_state, agent, stream=True
                         )
+                        # Stamp truthful model id onto RunResponse: reflects the
+                        # model that actually answered, including any per-call
+                        # fallback. Optimistic for streaming (final answer may
+                        # still hit content_filter at end-of-stream, but this
+                        # call did at least connect to `last_used_model_id`).
+                        if loop_state.last_used_model_id is not None:
+                            agent.run_response.model = loop_state.last_used_model_id
                         async for model_response_chunk in model_response_stream:
                             agent._check_cancelled()
                             if model_response_chunk.event == ModelResponseEvent.assistant_response.value:
@@ -1063,6 +1196,12 @@ class Runner:
                         model_response = await self._call_with_retry(
                             agent.model, messages_for_model, loop_state, agent, stream=False
                         )
+                        # Stamp truthful model id onto RunResponse: reflects the
+                        # model that actually answered, including any per-call
+                        # fallback. Final turn naturally wins because each turn
+                        # overwrites the previous value.
+                        if loop_state.last_used_model_id is not None:
+                            agent.run_response.model = loop_state.last_used_model_id
 
                         # --- Lifecycle: LLM end (non-stream) ---
                         if agent._run_hooks is not None:
@@ -1527,8 +1666,14 @@ class Runner:
         max_cost_usd = config.max_cost_usd
         source = config.source
 
-        # Stash cost budget on agent for _run_impl to pick up
+        # Stash run-level state on agent for _run_impl / _call_with_retry to pick up.
+        # fallback_models precedence: RunConfig (this run only) > Agent default.
+        # An empty list on RunConfig falls back to Agent's default; pass an explicit
+        # non-empty list (or None) to override.
         self.agent._run_max_cost_usd = max_cost_usd
+        self.agent._run_fallback_models = list(
+            config.fallback_models or self.agent.fallback_models or []
+        )
 
         if run_timeout is not None:
             return await self._run_with_timeout(
@@ -1616,8 +1761,12 @@ class Runner:
         enabled_skills = config.enabled_skills
         source = config.source
 
-        # Stash cost budget on agent for _run_impl to pick up
+        # Stash run-level state on agent for _run_impl / _call_with_retry to pick up.
+        # fallback_models precedence: RunConfig > Agent default.
         self.agent._run_max_cost_usd = config.max_cost_usd
+        self.agent._run_fallback_models = list(
+            config.fallback_models or self.agent.fallback_models or []
+        )
 
         if self.agent.response_model is not None:
             raise ValueError("Structured output does not support streaming. Use run() instead.")

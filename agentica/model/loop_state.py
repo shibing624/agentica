@@ -40,6 +40,15 @@ class LoopState:
     # Reactive compact (one-shot per loop invocation)
     reactive_compact_done: bool = False
 
+    # Cross-provider fallback bookkeeping for the most recent successful LLM call.
+    # Set by Runner._call_with_retry; consumed by Runner._run_impl to keep
+    # RunResponse.model truthful when a fallback (not the primary) actually
+    # answered. Resets on every call -- this is per-call state, not per-run.
+    last_used_model_id: Optional[str] = None
+    # Index of the model in [primary, *fallbacks] that produced last response.
+    # 0 = primary, 1+ = fallback index. -1 means no successful call yet.
+    last_used_model_idx: int = -1
+
     # Retryable error patterns
     RETRYABLE_SUBSTRINGS: tuple = field(
         default=(
@@ -52,6 +61,22 @@ class LoopState:
         default=(
             "prompt_too_long", "context_length_exceeded",
             "maximum context", "too many tokens", "413",
+        ),
+        repr=False,
+    )
+    # Provider-side content moderation. Detected as either:
+    #   - normal-return finish_reason (OpenAI / Azure / OpenAI-compat providers)
+    #   - exception text from providers that raise instead of returning a flag
+    # When hit, switch to the next fallback model in the chain (no backoff —
+    # retrying the same model is pointless because the moderator is deterministic).
+    CONTENT_FILTER_FINISH_REASONS: tuple = field(
+        default=("content_filter", "content-filter", "content_filtered"),
+        repr=False,
+    )
+    CONTENT_FILTER_HINTS: tuple = field(
+        default=(
+            "content_filter", "content filter", "content-filter",
+            "content_policy", "content policy", "responsibleaipolicyviolation",
         ),
         repr=False,
     )

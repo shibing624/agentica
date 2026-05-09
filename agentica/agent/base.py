@@ -103,6 +103,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # Auxiliary model for low-cost side tasks (compression, memory extraction, evaluation).
     # When set, CompressionManager and other subsystems use this instead of the main model.
     auxiliary_model: Optional[Model] = None
+    # Cross-provider fallback model chain. Activated PER-CALL (not per-run):
+    # each LLM call starts from `model`; fallbacks are tried in order only when
+    # the primary fails (content_filter / exhausted-retry timeout / 5xx).
+    # The next call again starts from the primary. Use cross-provider models —
+    # same provider often shares the moderation layer, defeating the purpose.
+    # RunConfig.fallback_models, if provided, overrides this default for one run.
+    fallback_models: List[Model] = field(default_factory=list)
     name: Optional[str] = None
     agent_id: str = ""
     description: Optional[str] = None
@@ -188,6 +195,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     _default_run_hooks: Optional[RunHooks] = field(default=None, init=False, repr=False)
     # Per-run cost budget (USD). Set by Runner before _run_impl, read by Model.
     _run_max_cost_usd: Optional[float] = field(default=None, init=False, repr=False)
+    # Per-run cross-provider fallback model chain. Set by Runner from RunConfig.
+    # Triggered per-call by content_filter / exhausted-retry timeout / 5xx.
+    _run_fallback_models: List[Any] = field(default_factory=list, init=False, repr=False)
     # Max LLM loop turns. None = unlimited (main agent default).
     # Subagents set this via SubagentConfig.max_turns as a safety net.
     _max_turns: Optional[int] = field(default=None, init=False, repr=False)
@@ -212,6 +222,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             # ---- Core definition ----
             model: Optional[Model] = None,
             auxiliary_model: Optional[Model] = None,
+            fallback_models: Optional[List[Model]] = None,
             name: Optional[str] = None,
             agent_id: Optional[str] = None,
             description: Optional[str] = None,
@@ -254,6 +265,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._init_definition(
             model=model,
             auxiliary_model=auxiliary_model,
+            fallback_models=fallback_models,
             name=name,
             agent_id=agent_id,
             description=description,
@@ -306,6 +318,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         *,
         model: Optional[Model],
         auxiliary_model: Optional[Model],
+        fallback_models: Optional[List[Model]],
         name: Optional[str],
         agent_id: Optional[str],
         description: Optional[str],
@@ -323,6 +336,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         """Initialize identity and capability definition."""
         self.model = model
         self.auxiliary_model = auxiliary_model
+        self.fallback_models = list(fallback_models) if fallback_models else []
         self.name = name
         self.agent_id = agent_id or str(uuid4())
         self.description = description
@@ -429,6 +443,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._skill_runtime_configs: Dict[str, SkillRuntimeConfig] = {}
         self._enabled_tools = None
         self._enabled_skills = None
+        self._run_max_cost_usd = None
+        self._run_fallback_models = []
         self.todos = []
         self._tool_policy_prompts: List[str] = []
         self._session_guidance_prompts: List[str] = []
