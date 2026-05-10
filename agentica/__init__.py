@@ -168,6 +168,19 @@ from agentica.hooks import AgentHooks, RunHooks, ConversationArchiveHooks, Memor
 
 # ── Experience system ──
 from agentica.experience import ExperienceEventStore, ExperienceCompiler, CompiledExperienceStore, SkillEvolutionManager
+from agentica.skills.evolution import (
+    SkillCandidate,
+    GateVerdict,
+    SkillGateResult,
+    SkillAdmissionGate,
+    skill_fingerprint,
+)
+from agentica.skills.provenance import (
+    PROVENANCE_FILENAME,
+    get_provenance_path,
+    append_provenance_event,
+    read_provenance_events,
+)
 
 # ── Workspace ──
 from agentica.workspace import Workspace, WorkspaceConfig

@@ -58,6 +58,8 @@ class TestSkillUpgradeConfig(unittest.TestCase):
         self.assertEqual(config.checkpoint_interval, 5)
         self.assertEqual(config.rollback_consecutive_failures, 2)
         self.assertTrue(config.notify_user)
+        self.assertFalse(config.maintain_failed_skills)
+        self.assertEqual(config.max_repair_attempts, 3)
 
     def test_custom_values(self):
         config = SkillUpgradeConfig(

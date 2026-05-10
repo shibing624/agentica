@@ -27,6 +27,8 @@ from agentica.utils.async_file import (
     extract_frontmatter_list,
     extract_frontmatter_value,
 )
+from agentica.skills.evolution import SkillAdmissionGate
+from agentica.skills.provenance import append_provenance_event
 
 
 @dataclass
@@ -252,6 +254,21 @@ class SkillEvolutionManager:
         '"revised_skill_md": "..." (legacy fallback, only if decision is revise)}\n\n'
     )
 
+    _MAINTENANCE_PROMPT = (
+        "You are maintaining a generated SKILL.md that recently "
+        "failed multiple times.\n\n"
+        "Decide whether this skill should be repaired or discarded. Prefer "
+        "repair only when the failures point to a local fix in the skill "
+        "instructions. Discard when the method is obsolete, misleading, "
+        "conflicts with newer guidance, or depends on a removed tool/API.\n\n"
+        "Return JSON only:\n"
+        '{"decision": "repair|discard", '
+        '"reason": "...", '
+        '"revised_skill_md": "full repaired SKILL.md when decision=repair"}\n\n'
+        "If the skill cannot be repaired, you may also reply with a line "
+        "starting with DISCARD followed by the reason.\n\n"
+    )
+
     # ── Public API ────────────────────────────────────────────────────────
 
     async def maybe_spawn_skill(
@@ -262,6 +279,8 @@ class SkillEvolutionManager:
         generated_skills_dir: Path,
         event_store: Optional[Any] = None,
         min_success_applications: int = 0,
+        admission_critics: Optional[List[Any]] = None,
+        write_provenance: bool = True,
     ) -> Optional[str]:
         """Judge candidates and generate SKILL.md in one LLM call.
 
@@ -277,6 +296,10 @@ class SkillEvolutionManager:
                 this many ``tool_recovery`` events in the event store before
                 being eligible. Without recoveries we only know what failed,
                 not whether a fix actually worked.
+            admission_critics: Optional VaG critics run before installing the
+                candidate as a shadow skill.
+            write_provenance: Whether to append gate lifecycle events to
+                provenance.jsonl beside generated skills.
 
         Returns:
             Skill slug name if installed, None if no upgrade.
@@ -434,8 +457,33 @@ class SkillEvolutionManager:
             logger.info(f"Skill spawn rejected by validator: {reason}")
             return None
 
-        # Install
         skill_dir = generated_skills_dir / slug
+        gate_result = await SkillAdmissionGate(
+            critics=list(admission_critics or [])
+        ).evaluate(
+            skill_md,
+            task="admit generated skill before shadow install",
+            source_experience=source,
+        )
+        if write_provenance:
+            append_provenance_event(
+                skill_dir,
+                gate_result.to_provenance_event(
+                    event="admission",
+                    skill_name=slug,
+                    stage="spawn",
+                    source_experience=source,
+                    source_events=[c.get("filename", "") for c in candidates if c.get("filename")],
+                ),
+            )
+        if not gate_result.approved:
+            logger.info(
+                f"Skill spawn rejected by admission gate: {slug} "
+                f"(rejected_by={gate_result.rejected_by})"
+            )
+            return None
+
+        # Install
         skill_dir.mkdir(parents=True, exist_ok=True)
         await async_write_text(skill_dir / "SKILL.md", skill_md)
 
@@ -469,6 +517,11 @@ class SkillEvolutionManager:
         skill_dir: Path,
         checkpoint_interval: int = 5,
         rollback_consecutive_failures: int = 2,
+        promotion_critics: Optional[List[Any]] = None,
+        repair_critics: Optional[List[Any]] = None,
+        write_provenance: bool = True,
+        maintain_failed_skills: bool = False,
+        max_repair_attempts: int = 3,
     ) -> Optional[str]:
         """Judge skill state from accumulated episodes at checkpoint.
 
@@ -480,6 +533,17 @@ class SkillEvolutionManager:
             skill_dir: Path to generated_skills/{slug}/.
             checkpoint_interval: Run judgment every N episodes.
             rollback_consecutive_failures: Auto-rollback threshold.
+            promotion_critics: Optional VaG critics run before promoting a
+                shadow skill into active/auto status.
+            repair_critics: Optional VaG critics run before accepting an LLM
+                maintenance repair. Falls back to promotion_critics for direct
+                manager calls.
+            write_provenance: Whether to append lifecycle events to
+                provenance.jsonl beside the skill.
+            maintain_failed_skills: If True, repeated failures trigger an LLM
+                repair-or-discard pass instead of deterministic rollback.
+            max_repair_attempts: Retire the skill after this many failed
+                maintenance repairs.
 
         Returns:
             Decision string, or None if not at checkpoint.
@@ -497,9 +561,28 @@ class SkillEvolutionManager:
 
         # Auto-rollback on consecutive failures (deterministic, no LLM)
         if consecutive_failures >= rollback_consecutive_failures:
+            if maintain_failed_skills:
+                return await self._maintain_failed_skill(
+                    model=model,
+                    skill_dir=skill_dir,
+                    meta=meta,
+                    checkpoint_interval=checkpoint_interval,
+                    repair_critics=repair_critics if repair_critics is not None else promotion_critics,
+                    write_provenance=write_provenance,
+                    max_repair_attempts=max_repair_attempts,
+                )
             meta["status"] = "rolled_back"
             self.write_meta(meta_path, meta)
             self._disable_skill_md(skill_dir)
+            if write_provenance:
+                append_provenance_event(skill_dir, {
+                    "event": "rollback",
+                    "skill_name": meta.get("skill_name", skill_dir.name),
+                    "reason": "consecutive_failures",
+                    "consecutive_failures": consecutive_failures,
+                    "approved": False,
+                    "verdicts": [],
+                })
             logger.info(
                 f"Auto-rolled back skill {meta.get('skill_name')} "
                 f"after {consecutive_failures} consecutive failures"
@@ -518,7 +601,8 @@ class SkillEvolutionManager:
         # Read SKILL.md content
         skill_content = ""
         if skill_md_path.exists():
-            skill_content = (await async_read_text(skill_md_path))[:2000]
+            skill_content = await async_read_text(skill_md_path)
+        skill_content_preview = skill_content[:2000]
 
         episodes_text = "\n".join(
             "- "
@@ -544,7 +628,7 @@ class SkillEvolutionManager:
             + f"New gotchas not yet covered (cumulative): "
             + f"{meta.get('new_gotchas_seen', 0)}\n\n"
             + f"Recent episodes:\n{episodes_text}\n\n"
-            + f"SKILL.md content:\n{skill_content}\n"
+            + f"SKILL.md content:\n{skill_content_preview}\n"
         )
 
         response = await model.response([
@@ -566,10 +650,38 @@ class SkillEvolutionManager:
         meta["last_judged_at"] = date.today().isoformat()
 
         if decision == "promote":
-            meta["status"] = "auto"
+            gate_result = await SkillAdmissionGate(
+                critics=list(promotion_critics or [])
+            ).evaluate(
+                skill_content,
+                task="promote generated skill after runtime episodes",
+                source_experience=str(meta.get("source_experience", "")),
+            )
+            if write_provenance:
+                append_provenance_event(
+                    skill_dir,
+                    gate_result.to_provenance_event(
+                        event="promotion",
+                        skill_name=str(meta.get("skill_name", skill_dir.name)),
+                        stage="promote",
+                        source_experience=str(meta.get("source_experience", "")),
+                    ),
+                )
+            if gate_result.approved:
+                meta["status"] = "auto"
+            else:
+                decision = "keep_shadow"
         elif decision == "rollback":
             meta["status"] = "rolled_back"
             self._disable_skill_md(skill_dir)
+            if write_provenance:
+                append_provenance_event(skill_dir, {
+                    "event": "rollback",
+                    "skill_name": meta.get("skill_name", skill_dir.name),
+                    "reason": result.get("reason", ""),
+                    "approved": False,
+                    "verdicts": [],
+                })
         elif decision == "revise":
             revised_md = None
             section_updates = result.get("section_updates")
@@ -605,6 +717,223 @@ class SkillEvolutionManager:
         return decision
 
     # ── Deterministic helpers (no LLM) ────────────────────────────────────
+
+    async def _maintain_failed_skill(
+        self,
+        model: Any,
+        skill_dir: Path,
+        meta: Dict,
+        checkpoint_interval: int,
+        repair_critics: Optional[List[Any]],
+        write_provenance: bool,
+        max_repair_attempts: int,
+    ) -> str:
+        """Ask the LLM to repair a repeatedly failing skill or retire it."""
+        meta_path = skill_dir / "meta.json"
+        skill_md_path = skill_dir / "SKILL.md"
+        episodes_path = skill_dir / "episodes.jsonl"
+
+        skill_content = ""
+        if skill_md_path.exists():
+            skill_content = await async_read_text(skill_md_path)
+        episodes = self._read_recent_episodes(episodes_path, limit=checkpoint_interval)
+        failures_text = "\n".join(
+            "- "
+            f"[{e.get('outcome', '?')}] "
+            f"tool_errors={e.get('tool_errors', 0)} "
+            f"user_corrected={e.get('user_corrected', False)} "
+            f"query={str(e.get('query', ''))[:160]}"
+            for e in episodes
+        )
+        prompt = (
+            self._MAINTENANCE_PROMPT
+            + f"Skill: {meta.get('skill_name', skill_dir.name)}\n"
+            + f"Status: {meta.get('status', '?')}\n"
+            + f"Consecutive failures: {meta.get('consecutive_failures', 0)}\n"
+            + f"Repair attempts: {meta.get('repair_attempts', 0)}\n\n"
+            + f"## Skill content\n{skill_content[:4000]}\n\n"
+            + f"## Recent failures\n{failures_text}\n"
+        )
+
+        response = await model.response([
+            Message(role="user", content=prompt),
+        ])
+        if not response or not response.content:
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason="maintenance model returned empty response",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+            )
+
+        text = _strip_code_fences(response.content)
+        if text.strip().upper().startswith("DISCARD"):
+            reason = text.strip()[len("DISCARD"):].strip(" :-") or "discarded by maintenance model"
+            return self._retire_skill(
+                skill_dir,
+                meta,
+                reason=reason,
+                write_provenance=write_provenance,
+            )
+
+        try:
+            result = json.loads(text)
+        except json.JSONDecodeError:
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason="maintenance model returned invalid JSON",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+            )
+        if not isinstance(result, dict):
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason="maintenance model returned non-object JSON",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+            )
+
+        decision = str(result.get("decision", "")).lower()
+        reason = str(result.get("reason", "") or "no reason provided")
+        if decision == "discard":
+            return self._retire_skill(
+                skill_dir,
+                meta,
+                reason=reason,
+                write_provenance=write_provenance,
+            )
+        if decision != "repair":
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason=f"unsupported maintenance decision: {decision!r}",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+            )
+
+        revised_md = result.get("revised_skill_md")
+        if not isinstance(revised_md, str) or not revised_md.strip():
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason="repair decision missing revised_skill_md",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+            )
+
+        revised_md = _normalize_skill_md(revised_md)
+        revised_md = self._append_source_section(
+            revised_md,
+            source=meta.get("source_experience", ""),
+            event_count=meta.get("gotchas_hit_count", 0)
+            + meta.get("new_gotchas_seen", 0),
+        )
+        is_valid, validation_reason = self._validate_skill_content(revised_md)
+        if not is_valid:
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason=f"repaired skill failed validator: {validation_reason}",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+            )
+
+        gate_result = await SkillAdmissionGate(
+            critics=list(repair_critics or [])
+        ).evaluate(
+            revised_md,
+            task="repair repeatedly failing generated skill",
+            source_experience=str(meta.get("source_experience", "")),
+        )
+        if write_provenance:
+            append_provenance_event(
+                skill_dir,
+                gate_result.to_provenance_event(
+                    event="repair",
+                    skill_name=str(meta.get("skill_name", skill_dir.name)),
+                    stage="maintenance",
+                    source_experience=str(meta.get("source_experience", "")),
+                ),
+            )
+        if not gate_result.approved:
+            return self._record_failed_repair(
+                skill_dir,
+                meta,
+                reason=f"repaired skill rejected by gate: {gate_result.rejected_by}",
+                write_provenance=write_provenance,
+                max_repair_attempts=max_repair_attempts,
+                repair_event_written=write_provenance,
+            )
+
+        await async_write_text(skill_md_path, revised_md)
+        meta["version"] = meta.get("version", 1) + 1
+        meta["repair_attempts"] = 0
+        meta["consecutive_failures"] = 0
+        meta["last_maintenance_at"] = date.today().isoformat()
+        meta["last_maintenance_reason"] = reason
+        self.write_meta(meta_path, meta)
+        logger.info(f"Skill {meta.get('skill_name')}: repaired after repeated failures")
+        return "repair"
+
+    def _record_failed_repair(
+        self,
+        skill_dir: Path,
+        meta: Dict,
+        reason: str,
+        write_provenance: bool,
+        max_repair_attempts: int,
+        repair_event_written: bool = False,
+    ) -> str:
+        """Track a failed maintenance repair and retire after the budget."""
+        attempts = meta.get("repair_attempts", 0) + 1
+        meta["repair_attempts"] = attempts
+        meta["last_maintenance_at"] = date.today().isoformat()
+        meta["last_maintenance_reason"] = reason
+        if write_provenance and not repair_event_written:
+            append_provenance_event(skill_dir, {
+                "event": "repair",
+                "skill_name": meta.get("skill_name", skill_dir.name),
+                "approved": False,
+                "reason": reason,
+                "repair_attempts": attempts,
+                "verdicts": [],
+            })
+        if attempts >= max_repair_attempts:
+            return self._retire_skill(
+                skill_dir,
+                meta,
+                reason=reason,
+                write_provenance=write_provenance,
+            )
+        self.write_meta(skill_dir / "meta.json", meta)
+        return "keep_shadow"
+
+    def _retire_skill(
+        self,
+        skill_dir: Path,
+        meta: Dict,
+        reason: str,
+        write_provenance: bool,
+    ) -> str:
+        """Retire/discard a generated skill so it no longer enters runtime."""
+        meta["status"] = "retired"
+        meta["retired_at"] = date.today().isoformat()
+        meta["retire_reason"] = reason
+        self.write_meta(skill_dir / "meta.json", meta)
+        self._disable_skill_md(skill_dir)
+        if write_provenance:
+            append_provenance_event(skill_dir, {
+                "event": "discard",
+                "skill_name": meta.get("skill_name", skill_dir.name),
+                "reason": reason,
+                "approved": False,
+                "verdicts": [],
+            })
+        logger.info(f"Retired skill {meta.get('skill_name')}: {reason}")
+        return "retired"
 
     @staticmethod
     def _format_gotchas_block(gotchas: Any) -> Optional[str]:

@@ -49,6 +49,19 @@ from agentica.skills.skill_loader import (
     read_skill_file,
 )
 from agentica.skills.installer import install_skills, list_installed_skills, remove_skill
+from agentica.skills.evolution import (
+    SkillCandidate,
+    GateVerdict,
+    SkillGateResult,
+    SkillAdmissionGate,
+    skill_fingerprint,
+)
+from agentica.skills.provenance import (
+    PROVENANCE_FILENAME,
+    get_provenance_path,
+    append_provenance_event,
+    read_provenance_events,
+)
 
 __all__ = [
     # Skill class
@@ -66,6 +79,15 @@ __all__ = [
     "install_skills",
     "list_installed_skills",
     "remove_skill",
+    "SkillCandidate",
+    "GateVerdict",
+    "SkillGateResult",
+    "SkillAdmissionGate",
+    "skill_fingerprint",
+    "PROVENANCE_FILENAME",
+    "get_provenance_path",
+    "append_provenance_event",
+    "read_provenance_events",
     # File operations
     "list_skill_files",
     "read_skill_file",
