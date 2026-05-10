@@ -3,9 +3,9 @@
 @author:XuMing(xuming624@qq.com)
 @description: VaG(Verifier-as-Gatekeeper) skill lifecycle demo: admission, promotion, repair, discard.
 
-This demo is intentionally API-key free. It uses fake model responses and
-real SkillEvolutionManager code paths to show how generated skills move
-through the Verifier-as-Gatekeeper lifecycle:
+This demo uses a real LLM by default and real SkillEvolutionManager code
+paths to show how generated skills move through the Verifier-as-Gatekeeper
+lifecycle:
 
 1. Admission gate decides whether a generated SKILL.md may be installed.
 2. Promotion gate decides whether a shadow skill may become auto/active.
@@ -14,7 +14,13 @@ through the Verifier-as-Gatekeeper lifecycle:
 5. A discarded skill is marked retired and removed from runtime loading.
 
 Run:
+    export ARK_API_KEY=...
+    export VAG_DEMO_PROVIDER=doubao
+    export VAG_DEMO_MODEL=deepseek-v3-2
     python examples/workspace/04_vag_skill_lifecycle.py
+
+Offline smoke mode:
+    VAG_DEMO_USE_FAKE_LLM=1 python examples/workspace/04_vag_skill_lifecycle.py
 """
 import asyncio
 import json
@@ -27,6 +33,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from agentica import create_provider
 from agentica.agent.config import SkillUpgradeConfig
 from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
 from agentica.experience.skill_upgrade import SkillEvolutionManager
@@ -141,6 +148,62 @@ def fake_maintenance_model_discard() -> MagicMock:
     return model
 
 
+def build_demo_model():
+    """Build the real LLM used by this example.
+
+    Examples should exercise real provider paths. Set
+    ``VAG_DEMO_USE_FAKE_LLM=1`` only when you need an offline smoke run.
+    """
+    if os.environ.get("VAG_DEMO_USE_FAKE_LLM") == "1":
+        return None
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    provider = os.environ.get("VAG_DEMO_PROVIDER", "doubao")
+    model_id = (
+        os.environ.get("VAG_DEMO_MODEL")
+        or os.environ.get("ARK_MODEL_NAME")
+        or "deepseek-v3-2"
+    )
+    if provider == "doubao" and not os.environ.get("ARK_API_KEY"):
+        raise RuntimeError(
+            "Set ARK_API_KEY in .env or environment, or run offline with "
+            "VAG_DEMO_USE_FAKE_LLM=1."
+        )
+    if provider == "openai" and not os.environ.get("OPENAI_API_KEY"):
+        raise RuntimeError(
+            "Set OPENAI_API_KEY in .env or environment, or run offline with "
+            "VAG_DEMO_USE_FAKE_LLM=1."
+        )
+    print(f"[model] provider={provider} id={model_id}")
+    return create_provider(provider, id=model_id)
+
+
+def spawn_model(real_model):
+    if real_model is not None:
+        return real_model
+    return fake_spawn_model()
+
+
+def judge_model(real_model, decision: str):
+    if real_model is not None:
+        return real_model
+    return fake_judge_model(decision)
+
+
+def maintenance_repair_model(real_model):
+    if real_model is not None:
+        return real_model
+    return fake_maintenance_model_repair()
+
+
+def maintenance_discard_model(real_model):
+    if real_model is not None:
+        return real_model
+    return fake_maintenance_model_discard()
+
+
 def print_section(title: str) -> None:
     print("\n" + "=" * 72)
     print(title)
@@ -171,13 +234,22 @@ def record_failures(manager: SkillEvolutionManager, skill_dir: Path, count: int 
         meta = manager.update_meta_after_episode(skill_dir / "meta.json", "failure")
 
 
-async def run_admission_and_promotion(manager: SkillEvolutionManager, critics: List) -> Path:
+async def run_admission_and_promotion(
+    manager: SkillEvolutionManager,
+    critics: List,
+    real_model,
+) -> Path:
     print_section("1. Admission: generated skill must pass VaG before shadow install")
     skill_name = await manager.maybe_spawn_skill(
-        model=fake_spawn_model(),
+        model=spawn_model(real_model),
         candidates=[{
             "title": "path-check-card",
-            "content": "Repeated failures came from guessed file paths.",
+            "content": (
+                "Rule: check path before reading a file. "
+                "Why: repeated failures came from guessed file paths. "
+                "How to apply: list the parent directory, pick the exact "
+                "filename, then read it."
+            ),
             "repeat_count": 4,
             "type": "correction",
             "filename": "path_check.md",
@@ -187,6 +259,12 @@ async def run_admission_and_promotion(manager: SkillEvolutionManager, critics: L
         admission_critics=critics,
         write_provenance=True,
     )
+    if skill_name is None:
+        raise RuntimeError(
+            "The LLM did not install a shadow skill. Re-run with "
+            "AGENTICA_LOG_LEVEL=debug or VAG_DEMO_USE_FAKE_LLM=1 for the "
+            "deterministic offline smoke path."
+        )
     skill_dir = GENERATED_SKILLS_DIR / str(skill_name)
     print(f"installed skill: {skill_name}")
     print(f"status after admission: {manager.read_meta(skill_dir / 'meta.json')['status']}")
@@ -208,7 +286,7 @@ async def run_admission_and_promotion(manager: SkillEvolutionManager, critics: L
     manager.write_meta(skill_dir / "meta.json", meta)
 
     decision = await manager.maybe_update_skill_state(
-        model=fake_judge_model("promote"),
+        model=judge_model(real_model, "promote"),
         skill_dir=skill_dir,
         checkpoint_interval=5,
         promotion_critics=critics,
@@ -220,7 +298,12 @@ async def run_admission_and_promotion(manager: SkillEvolutionManager, critics: L
     return skill_dir
 
 
-async def run_repair(manager: SkillEvolutionManager, critics: List, skill_dir: Path) -> None:
+async def run_repair(
+    manager: SkillEvolutionManager,
+    critics: List,
+    skill_dir: Path,
+    real_model,
+) -> None:
     print_section("3. Maintenance: repeated failures trigger repair when opt-in is enabled")
     record_failures(manager, skill_dir, count=2)
 
@@ -231,7 +314,7 @@ async def run_repair(manager: SkillEvolutionManager, critics: List, skill_dir: P
         max_repair_attempts=3,
     )
     decision = await manager.maybe_update_skill_state(
-        model=fake_maintenance_model_repair(),
+        model=maintenance_repair_model(real_model),
         skill_dir=skill_dir,
         rollback_consecutive_failures=cfg.rollback_consecutive_failures,
         repair_critics=cfg.repair_critics,
@@ -243,17 +326,22 @@ async def run_repair(manager: SkillEvolutionManager, critics: List, skill_dir: P
     print(f"maintenance decision: {decision}")
     print(f"status after repair: {meta['status']}")
     print(f"version after repair: {meta['version']}")
-    print("repaired line present:",
-          "list the parent directory" in (skill_dir / "SKILL.md").read_text(encoding="utf-8"))
+    print("skill file still present:", (skill_dir / "SKILL.md").exists())
     print_provenance(skill_dir)
 
 
-async def run_discard(manager: SkillEvolutionManager, critics: List) -> None:
+async def run_discard(manager: SkillEvolutionManager, critics: List, real_model) -> None:
     print_section("4. Maintenance: LLM can discard an obsolete skill")
     obsolete_dir = GENERATED_SKILLS_DIR / "obsolete-tool-skill"
     obsolete_dir.mkdir(parents=True, exist_ok=True)
     (obsolete_dir / "SKILL.md").write_text(
-        GOOD_SKILL_MD.replace("name: check-path-before-read", "name: obsolete-tool-skill"),
+        GOOD_SKILL_MD.replace(
+            "name: check-path-before-read",
+            "name: obsolete-tool-skill",
+        ).replace(
+            "Check that a path exists before reading it.",
+            "Use the retired `legacy_read_file_v1` tool for all file reads.",
+        ),
         encoding="utf-8",
     )
     manager.write_meta(obsolete_dir / "meta.json", {
@@ -270,7 +358,7 @@ async def run_discard(manager: SkillEvolutionManager, critics: List) -> None:
     record_failures(manager, obsolete_dir, count=2)
 
     decision = await manager.maybe_update_skill_state(
-        model=fake_maintenance_model_discard(),
+        model=maintenance_discard_model(real_model),
         skill_dir=obsolete_dir,
         rollback_consecutive_failures=2,
         repair_critics=critics,
@@ -289,15 +377,18 @@ async def main() -> None:
     reset_demo_dir()
     manager = SkillEvolutionManager()
     critics = build_gate_critics()
+    real_model = build_demo_model()
+    offline = real_model is None
 
     print_section("VaG Skill Lifecycle Demo")
     print(f"workspace: {DEMO_DIR}")
     print("default maintain_failed_skills:", SkillUpgradeConfig().maintain_failed_skills)
     print("demo opts in explicitly when showing repair/discard maintenance.")
+    print("llm mode:", "offline fake responses" if offline else "real provider API")
 
-    skill_dir = await run_admission_and_promotion(manager, critics)
-    await run_repair(manager, critics, skill_dir)
-    await run_discard(manager, critics)
+    skill_dir = await run_admission_and_promotion(manager, critics, real_model)
+    await run_repair(manager, critics, skill_dir, real_model)
+    await run_discard(manager, critics, real_model)
 
 
 if __name__ == "__main__":
