@@ -24,8 +24,8 @@ class MemorySummarizer:
 
     def update_model(self) -> None:
         if self.model is None:
-            from agentica.model.openai import OpenAIChat
-            self.model = OpenAIChat()
+            from agentica.model.defaults import create_default_model
+            self.model = create_default_model()
 
         if self.use_structured_outputs:
             self.model.response_format = SessionSummary

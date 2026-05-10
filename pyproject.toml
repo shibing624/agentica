@@ -1,6 +1,6 @@
 [project]
 name = "agentica"
-version = "1.4.1"
+version = "1.4.2"
 description = "Agentica: A lightweight Python SDK for building AI agents with persistent memory and self-evolution"
 readme = "README.md"
 requires-python = ">=3.10"

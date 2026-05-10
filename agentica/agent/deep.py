@@ -136,8 +136,8 @@ class DeepAgent(Agent):
         **kwargs,
     ):
         if model is None:
-            from agentica.model.openai import OpenAIChat
-            model = OpenAIChat(id="gpt-4o")
+            from agentica.model.defaults import create_default_model
+            model = create_default_model()
 
         # Default auxiliary_model — reuse the main model so the whole stack
         # runs on a single API key. Pass a different model explicitly to

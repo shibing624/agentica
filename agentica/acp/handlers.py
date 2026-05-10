@@ -72,9 +72,9 @@ class ACPHandlers:
         """Get existing agent or create a new one (centralized initialization)"""
         if self._agent is None:
             from agentica.agent import Agent
-            from agentica.model.openai.chat import OpenAIChat
+            from agentica.model.defaults import create_default_model
             
-            model = self._model or OpenAIChat()
+            model = self._model or create_default_model()
             self._agent = Agent(
                 model=model,
                 name="Agentica-ACP",

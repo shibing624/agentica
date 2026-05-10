@@ -47,10 +47,10 @@ Required env: ``ARK_API_KEY`` and ``ARK_MODEL_NAME`` (DeepSeek-V3.2
 endpoint id) in ``.env``.
 
 Run:
-    python examples/workspace/03_self_evolution_e2e.py
+    python examples/self_evolution/01_self_evolution_e2e.py
 
 Debug spawn decisions:
-    AGENTICA_LOG_LEVEL=debug python examples/workspace/03_self_evolution_e2e.py 2>&1 \\
+    AGENTICA_LOG_LEVEL=debug python examples/self_evolution/01_self_evolution_e2e.py 2>&1 \\
         | grep -iE "skill spawn|action=|ignore|recovery"
 """
 import asyncio

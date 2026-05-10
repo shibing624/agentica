@@ -17,10 +17,10 @@ Run:
     export ARK_API_KEY=...
     export VAG_DEMO_PROVIDER=doubao
     export VAG_DEMO_MODEL=deepseek-v3.2
-    python examples/workspace/04_vag_skill_lifecycle.py
+    python examples/self_evolution/02_vag_skill_lifecycle.py
 
 Offline smoke mode:
-    VAG_DEMO_USE_FAKE_LLM=1 python3 examples/workspace/04_vag_skill_lifecycle.py
+    VAG_DEMO_USE_FAKE_LLM=1 python3 examples/self_evolution/02_vag_skill_lifecycle.py
 """
 import asyncio
 import json

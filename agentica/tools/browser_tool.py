@@ -1164,12 +1164,14 @@ class Browser:
             planning_agent_model_backend: Optional[Model],
     ) -> Tuple[Agent, Agent]:
         if web_agent_model_backend is None:
-            web_agent_model_instance = OpenAIChat()
+            from agentica.model.defaults import create_default_model
+            web_agent_model_instance = create_default_model()
         else:
             web_agent_model_instance = web_agent_model_backend
 
         if planning_agent_model_backend is None:
-            planning_model = OpenAIChat()
+            from agentica.model.defaults import create_default_model
+            planning_model = create_default_model()
         else:
             planning_model = planning_agent_model_backend
 
@@ -1471,6 +1473,12 @@ class BrowserTool(Tool):
         self.cookie_json_path = cookie_json_path
         self._event_loop = None
         self.register(self.browse_webpage)
+
+    def set_agent_model(self, model: Optional[Model]) -> None:
+        if self.web_agent_model is None:
+            self.web_agent_model = model
+        if self.planning_agent_model is None:
+            self.planning_agent_model = model
 
     async def _init_browser(self):
         """Initialize the browser instance."""

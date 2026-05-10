@@ -254,7 +254,7 @@ workspace/users/alice/
 └── reports/learning/                       # per-run learning reports
 ```
 
-Full e2e demo (Session 1 evolves a skill → Session 2 uses a fresh agent that consumes it across sessions): [`examples/workspace/03_self_evolution_e2e.py`](examples/workspace/03_self_evolution_e2e.py).
+Full e2e demo (Session 1 evolves a skill → Session 2 uses a fresh agent that consumes it across sessions): [`examples/self_evolution/01_self_evolution_e2e.py`](examples/self_evolution/01_self_evolution_e2e.py).
 
 > **Trade-offs**: `mode="shadow"` installs locally to the workspace without affecting other users; `mode="draft"` only writes a draft for human review; `mode="off"` disables auto-skill generation but still captures experience cards. `min_success_applications` is the *"need ≥N tool_recovery events first"* safety gate — it prevents the loop from generating skills for tasks the agent never actually solved. Set to `0` only for cold-start demos.
 

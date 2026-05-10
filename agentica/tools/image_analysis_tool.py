@@ -2,8 +2,7 @@
 """
 @author: XuMing(xuming624@qq.com)
 @description:
-This module contains a class for reading and understanding image content using OpenAI's API.
-It uploads an image, sends it to the API, and retrieves a description of the image content.
+This module contains a class for reading and understanding image content using a vision-capable model.
 """
 import asyncio
 import base64
@@ -11,7 +10,6 @@ import os
 from typing import Optional, cast
 
 from agentica.model.base import Model
-from agentica.model.openai.chat import OpenAIChat
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
@@ -19,7 +17,7 @@ from agentica.utils.log import logger
 class ImageAnalysisTool(Tool):
     """
     This class inherits from the Toolkit class.
-    It defines a function for analyzing and understanding image content using OpenAI's API.
+    It defines a function for analyzing and understanding image content using a vision-capable model.
     """
 
     def __init__(
@@ -32,14 +30,23 @@ class ImageAnalysisTool(Tool):
         super().__init__(name="read_image_tool")
         self.data_dir = data_dir or os.path.curdir
         self.llm = llm
+        self._agent_model: Optional[Model] = None
         self.prompt = prompt
         self.model_name = model_name
 
         self.register(self.analyze_image_content)
 
+    def set_agent_model(self, model: Optional[Model]) -> None:
+        self._agent_model = model
+
     def update_llm(self) -> None:
         if self.llm is None:
-            self.llm = OpenAIChat(id=self.model_name)
+            if self._agent_model is not None:
+                self.llm = self._agent_model
+            else:
+                from agentica.model.defaults import create_default_model
+
+                self.llm = create_default_model()
 
     async def analyze_image_content(self, image_path_or_url: str, prompt: str = '') -> str:
         """Reads and understands the content of an image using image understand model API.

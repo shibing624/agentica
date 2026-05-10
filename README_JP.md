@@ -240,7 +240,7 @@ workspace/users/alice/
 └── reports/learning/                       # 各 run の学習レポート
 ```
 
-完全な e2e demo（Session 1 で自己進化により skill 生成 → Session 2 で全く新しい Agent がクロスセッションで再利用）：[`examples/workspace/03_self_evolution_e2e.py`](examples/workspace/03_self_evolution_e2e.py)。
+完全な e2e demo（Session 1 で自己進化により skill 生成 → Session 2 で全く新しい Agent がクロスセッションで再利用）：[`examples/self_evolution/01_self_evolution_e2e.py`](examples/self_evolution/01_self_evolution_e2e.py)。
 
 > **トレードオフ**：`mode="shadow"` は workspace ローカルに自動インストールされ、他ユーザーには影響しません。`mode="draft"` はドラフトのみ生成しインストールせず、人間レビュー向きです。`mode="off"` は skill 自動生成を無効化（経験カードの収集は継続）。`min_success_applications` は「最低 N 回の `tool_recovery` イベントが必要」という安全ゲート — Agent が永遠に解決できないタスクから skill を生成するのを防ぎます。コールドスタート demo のときのみ `0` に設定してください。
 

@@ -4,12 +4,13 @@
 @description: 
 Experience → Skill automatic upgrade pipeline.
 
-Two LLM touchpoints:
+Three LLM touchpoints:
 1. maybe_spawn_skill(): Judge candidates + generate SKILL.md in one call
 2. maybe_update_skill_state(): At checkpoint, judge keep/promote/revise/rollback
+3. _maintain_failed_skill(): Repair or discard repeatedly failing skills
 
 All runtime evidence (episodes) is recorded deterministically — no LLM.
-LLM is only invoked for semantic judgment at spawn time and at checkpoints.
+LLM is only invoked for semantic judgment at spawn time, checkpoints, and maintenance.
 """
 import json
 import re
@@ -26,6 +27,11 @@ from agentica.utils.async_file import (
     extract_frontmatter_int,
     extract_frontmatter_list,
     extract_frontmatter_value,
+)
+from agentica.prompts.experience.skill_upgrade import (
+    get_skill_judge_prompt,
+    get_skill_maintenance_prompt,
+    get_skill_spawn_prompt,
 )
 from agentica.skills.evolution import SkillAdmissionGate
 from agentica.skills.provenance import append_provenance_event
@@ -155,9 +161,10 @@ def _normalize_skill_md(text: str) -> str:
 class SkillEvolutionManager:
     """Manages experience → skill upgrade lifecycle.
 
-    Two LLM touchpoints, one deterministic evidence layer:
+    Three LLM touchpoints, one deterministic evidence layer:
     - maybe_spawn_skill(): one LLM call to judge + generate SKILL.md
     - maybe_update_skill_state(): one LLM call at checkpoint to judge state
+    - _maintain_failed_skill(): one LLM call to repair or discard failures
     - record_episode(): deterministic append to episodes.jsonl
 
     Usage::
@@ -170,104 +177,6 @@ class SkillEvolutionManager:
             generated_skills_dir=gen_dir,
         )
     """
-
-    # ── LLM Prompts ──────────────────────────────────────────────────────
-
-    _SPAWN_PROMPT = (
-        "You are deciding whether ONE of the experience cards below should "
-        "be upgraded into a reusable SKILL.md file.\n\n"
-        "A SKILL.md is a 'don't step on this landmine again' note, NOT a "
-        "'how to do X' tutorial. Every user-correction card with "
-        "repeat_count >= 3 is a rule the user reinforced multiple times — "
-        "strongly prefer install_shadow for the highest-repeat correction "
-        "card unless it is genuinely a one-off preference. Tool-error cards "
-        "alone are NOT skills, but a matching correction card next to them IS.\n\n"
-        "Decision recipe:\n"
-        "1. Pick the candidate with the highest repeat_count whose type is "
-        "'correction'.\n"
-        "2. If its repeat_count >= 3, return action=install_shadow.\n"
-        "3. Skip only if (a) only tool_error candidates are high-repeat, "
-        "(b) an existing generated skill already covers this rule, or "
-        "(c) the rule is a one-off preference with no procedural content.\n\n"
-        "Return JSON only:\n"
-        '{"action": "ignore|install_shadow", '
-        '"skill_name": "kebab-case-slug", '
-        '"source_experience": "title of the source experience card", '
-        '"reason": "why this deserves to be a skill", '
-        '"skill_md": "full SKILL.md content (see format below)"}\n\n'
-        "## skill_md format (gotcha-first, NOT textbook)\n\n"
-        "The skill_md string MUST NOT be wrapped in ```yaml or any other "
-        "code fence. It MUST start with '-' (the opening '---').\n\n"
-        "FRONTMATTER (minimal, exactly 3 keys):\n"
-        "---\n"
-        "name: <kebab-case slug, equals skill_name above>\n"
-        "description: <one sentence, ≤25 words>\n"
-        "when-to-use: <comma-separated keywords for discovery>\n"
-        "---\n\n"
-        "BODY STRUCTURE (strict, in this order):\n"
-        "1. One-line summary (≤30 words).\n"
-        "2. ## Gotchas (REQUIRED, MUST have ≥2 items).\n"
-        "   - Each gotcha = one observed failure + the fix.\n"
-        "   - Format: '⚠️ <symptom>: <root cause>. <minimal fix>'\n"
-        "   - Every gotcha MUST be traceable to evidence in the cards / "
-        "raw events shown above. Do NOT invent gotchas.\n"
-        "3. ## Minimal Example (≤10 lines, real params, no '# TODO' "
-        "placeholders, no '<your_value_here>').\n"
-        "4. ## Source (auto-filled by the system, leave a blank section).\n\n"
-        "FORBIDDEN (will be auto-rejected):\n"
-        "- Sections named 'Overview' / 'When To Use' / 'Workflow' / "
-        "'Failure Recovery' (these are textbook fluff).\n"
-        "- Generic steps the agent could derive from reading docs.\n"
-        "- Unverified claims (every gotcha must trace to a real event).\n"
-        "- Placeholder code: '# TODO', '<your_*_here>', 'FIXME', "
-        "'pass  # implement'.\n"
-        "- Skeleton code blocks with <10 chars per line on average.\n\n"
-        "Remember: a skill captures lessons that can ONLY be learned by "
-        "actually running the tool and getting burned. If you cannot point "
-        "to a concrete failure event for a gotcha, do NOT include it.\n\n"
-    )
-
-    _JUDGE_PROMPT = (
-        "You are evaluating a shadow-installed generated skill based on its "
-        "runtime performance episodes.\n\n"
-        "Signals to weigh (the most important first):\n"
-        "1. gotchas_hit_count > 0 — strong evidence the skill saved the "
-        "agent from documented landmines. Lean toward PROMOTE.\n"
-        "2. new_gotchas_seen > 0 — the skill is working but incomplete. "
-        "Lean toward REVISE and rewrite the gotchas section to cover them.\n"
-        "3. consecutive_failures or low success rate without any "
-        "gotchas_hit — the skill might be misleading. Lean toward "
-        "ROLLBACK.\n"
-        "4. Otherwise, KEEP_SHADOW until more data accumulates.\n\n"
-        "Decisions:\n"
-        "- keep_shadow: not enough data yet, keep running\n"
-        "- promote: skill is performing well, promote to full status\n"
-        "- revise: skill idea is good but needs changes — prefer returning "
-        "section_updates so the system can patch the current SKILL.md "
-        "instead of rewriting the whole file\n"
-        "- rollback: skill is causing problems, disable it\n\n"
-        "Return JSON only:\n"
-        '{"decision": "keep_shadow|promote|revise|rollback", '
-        '"reason": "...", '
-        '"section_updates": {"summary": "...", "gotchas": ["...", "..."], '
-        '"minimal_example": "..."} (preferred for revise, otherwise null), '
-        '"revised_skill_md": "..." (legacy fallback, only if decision is revise)}\n\n'
-    )
-
-    _MAINTENANCE_PROMPT = (
-        "You are maintaining a generated SKILL.md that recently "
-        "failed multiple times.\n\n"
-        "Decide whether this skill should be repaired or discarded. Prefer "
-        "repair only when the failures point to a local fix in the skill "
-        "instructions. Discard when the method is obsolete, misleading, "
-        "conflicts with newer guidance, or depends on a removed tool/API.\n\n"
-        "Return JSON only:\n"
-        '{"decision": "repair|discard", '
-        '"reason": "...", '
-        '"revised_skill_md": "full repaired SKILL.md when decision=repair"}\n\n'
-        "If the skill cannot be repaired, you may also reply with a line "
-        "starting with DISCARD followed by the reason.\n\n"
-    )
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -359,7 +268,7 @@ class SkillEvolutionManager:
         evidence_text = self._build_evidence_text(candidates, idx)
 
         prompt = (
-            self._SPAWN_PROMPT
+            get_skill_spawn_prompt()
             + f"Existing generated skills: {existing_text}\n\n"
             + f"Experience cards to evaluate:\n{cards_text}\n"
         )
@@ -617,7 +526,7 @@ class SkillEvolutionManager:
         )
 
         prompt = (
-            self._JUDGE_PROMPT
+            get_skill_judge_prompt()
             + f"Skill: {meta.get('skill_name', '?')}\n"
             + f"Status: {meta.get('status', '?')}\n"
             + f"Total episodes: {total}\n"
@@ -746,7 +655,7 @@ class SkillEvolutionManager:
             for e in episodes
         )
         prompt = (
-            self._MAINTENANCE_PROMPT
+            get_skill_maintenance_prompt()
             + f"Skill: {meta.get('skill_name', skill_dir.name)}\n"
             + f"Status: {meta.get('status', '?')}\n"
             + f"Consecutive failures: {meta.get('consecutive_failures', 0)}\n"

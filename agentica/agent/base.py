@@ -595,6 +595,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         from agentica.tools.skill_tool import SkillTool
 
         for tool in self.tools:
+            if isinstance(tool, Tool):
+                tool.set_agent_model(self.model)
             if isinstance(tool, BuiltinTodoTool):
                 tool.set_agent(self)
             elif isinstance(tool, BuiltinTaskTool):
@@ -1077,9 +1079,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
     def update_model(self) -> None:
         if self.model is None:
-            from agentica.model.openai import OpenAIChat
-            logger.debug("Model not set, Using OpenAIChat as default")
-            self.model = OpenAIChat()
+            from agentica.model.defaults import create_default_model
+            logger.debug("Model not set, resolving default model from configured provider credentials")
+            self.model = create_default_model()
+            self._wire_tools_to_self()
         model_cls = self.model.name or self.model.__class__.__name__
         logger.debug(
             f"Agent '{self.name}' using {model_cls}("

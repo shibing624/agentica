@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import List, Optional, cast
 from PIL import Image
 
-from agentica.model.openai.chat import OpenAIChat, OpenAIImageType
+from agentica.model.openai.chat import OpenAIImageType
 from agentica.model.openai.audio import OpenAIAudioModel
 from agentica.model.base import Model
 from agentica.tools.base import Tool
@@ -135,9 +135,8 @@ class VideoAnalysisTool(Tool):
         logger.debug(f"Video will be downloaded to {self._download_directory}")
 
         self.vl_model = model
+        self._agent_model: Optional[Model] = None
         self.model_name = model_name
-        if self.vl_model is None:
-            self.vl_model = OpenAIChat(id=self.model_name)
 
         # Initialize audio models only if audio transcription is enabled
         self.audio_model = None
@@ -153,6 +152,20 @@ class VideoAnalysisTool(Tool):
 
         # Register the tool methods
         self.register(self.ask_question_about_video)
+
+    def set_agent_model(self, model: Optional[Model]) -> None:
+        self._agent_model = model
+
+    def _ensure_vl_model(self) -> None:
+        if self.vl_model is not None:
+            return
+        if self._agent_model is not None:
+            self.vl_model = self._agent_model
+        else:
+            from agentica.model.defaults import create_default_model
+
+            self.vl_model = create_default_model()
+        self.model_name = self.vl_model.id
 
     def __del__(self):
         r"""Clean up temporary directories and files when the object is
@@ -489,6 +502,7 @@ class VideoAnalysisTool(Tool):
             audio_path = self._extract_audio_from_video(video_path)
             audio_transcript = self._transcribe_audio(audio_path)
 
+        self._ensure_vl_model()
         video_frames = self._extract_keyframes(video_path)
 
         self.vl_model = cast(Model, self.vl_model)
@@ -519,7 +533,7 @@ class VideoAnalysisTool(Tool):
                 if image_type not in OpenAIImageType:
                     raise ValueError(
                         f"Image type {image.format} "
-                        f"is not supported by OpenAI vision model"
+                        f"is not supported by the vision model"
                     )
                 with io.BytesIO() as buffer:
                     image.save(fp=buffer, format=image.format)

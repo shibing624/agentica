@@ -5,20 +5,25 @@
 
 This example shows how to:
 1. Match trigger commands and inject skill prompts into Agent
-2. Use Agent.add_instruction() for dynamic prompt injection
-3. Handle skill-based conversations
+2. Use SkillTool(custom_skill_dirs=...) to load SKILL.md folders at runtime
+3. Use Agent.add_instruction() for dynamic prompt injection
+4. Handle skill-based conversations
 """
 import os
 import sys
+import tempfile
+from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, ZhipuAIChat
+from agentica.tools.skill_tool import SkillTool
 from agentica.tools.shell_tool import ShellTool
 from agentica.skills import (
     SkillLoader,
     load_skills,
     get_skill_registry,
+    reset_skill_registry,
 )
 
 
@@ -72,10 +77,63 @@ def demo_skill_injection():
         # Process as normal message
 
 
+def demo_skill_tool_custom_dirs():
+    """Demo: Load a folder of SKILL.md packages through SkillTool."""
+    print("\n" + "=" * 60)
+    print("Demo 2: SkillTool custom_skill_dirs")
+    print("=" * 60)
+
+    reset_skill_registry()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        skills_root = Path(tmpdir) / "my-skills"
+        skill_dir = skills_root / "python-style-guide"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            """---
+name: python-style-guide
+description: Apply a concise Python coding style guide.
+when-to-use: python, style, code review
+---
+
+Prefer small functions, explicit names, and direct control flow.
+
+## Gotchas
+- Avoid broad try/except blocks that hide failures.
+- Keep imports at module top unless a lazy import is necessary.
+
+## Minimal Example
+```python
+def normalize_name(value: str) -> str:
+    return value.strip().lower().replace(" ", "-")
+```
+""",
+            encoding="utf-8",
+        )
+
+        # Point at the parent folder. SkillTool discovers any child directory
+        # that contains SKILL.md, matching the common "drop in a skill folder"
+        # workflow used by coding agents.
+        skill_tool = SkillTool(custom_skill_dirs=[str(skills_root)])
+        skill_tool.initialize()
+
+        agent = Agent(
+            model=ZhipuAIChat(model="glm-4-flash"),
+            instructions="You are a Python coding assistant.",
+            tools=[skill_tool, ShellTool()],
+        )
+
+        print(f"Agent created: {agent.name or 'unnamed'}")
+        print("\nRuntime skills:")
+        print(skill_tool.list_skills())
+        print("\nLoaded skill instructions:")
+        print(skill_tool.get_skill_info("python-style-guide"))
+    reset_skill_registry()
+
+
 def demo_skill_based_agent():
     """Demo: Create an agent that automatically handles skill triggers."""
     print("\n" + "=" * 60)
-    print("Demo 2: Skill-Based Agent")
+    print("Demo 3: Skill-Based Agent")
     print("=" * 60)
 
     # Load skills
@@ -141,7 +199,7 @@ def demo_skill_based_agent():
 def demo_custom_skill_with_agent():
     """Demo: Use custom skill with actual agent execution."""
     print("\n" + "=" * 60)
-    print("Demo 3: Custom Skill with Agent Execution")
+    print("Demo 4: Custom Skill with Agent Execution")
     print("=" * 60)
 
     from agentica.skills import register_skill
@@ -166,8 +224,13 @@ def demo_custom_skill_with_agent():
                 ],
                 tools=[ShellTool()],
             )
-            response = agent.run_sync("What are the main modules in numpy ?")
-            print(response.content)
+            query = "What are the main modules in numpy ?"
+            if os.environ.get("RUN_SKILL_AGENT_LLM") == "1":
+                response = agent.run_sync(query)
+                print(response.content)
+            else:
+                print(f"Ready to run with injected skill. Query: {query}")
+                print("Set RUN_SKILL_AGENT_LLM=1 to call the model.")
     else:
         print(f"Custom skill directory not found: {custom_skill_dir}")
 
@@ -175,7 +238,7 @@ def demo_custom_skill_with_agent():
 def demo_list_triggers():
     """Demo: List all available triggers for user reference."""
     print("\n" + "=" * 60)
-    print("Demo 4: Available Triggers")
+    print("Demo 5: Available Triggers")
     print("=" * 60)
 
     load_skills()
@@ -201,6 +264,7 @@ def demo_list_triggers():
 
 if __name__ == "__main__":
     demo_skill_injection()
+    demo_skill_tool_custom_dirs()
     demo_skill_based_agent()
     demo_custom_skill_with_agent()
     demo_list_triggers()

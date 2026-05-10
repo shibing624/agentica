@@ -257,7 +257,7 @@ workspace/users/alice/
 └── reports/learning/                       # 每次 run 的学习报告
 ```
 
-完整 e2e demo（Session 1 自进化生成技能 → Session 2 全新 Agent 跨会话复用）：[`examples/workspace/03_self_evolution_e2e.py`](examples/workspace/03_self_evolution_e2e.py)。
+完整 e2e demo（Session 1 自进化生成技能 → Session 2 全新 Agent 跨会话复用）：[`examples/self_evolution/01_self_evolution_e2e.py`](examples/self_evolution/01_self_evolution_e2e.py)。
 
 > **配置取舍**：`mode="shadow"` 自动安装到 workspace 本地不影响其他用户；`mode="draft"` 只生成草稿不安装，适合人审；`mode="off"` 等价于不开启 skill 自动生成（但仍采集经验卡片）。`min_success_applications` 是"必须先有 ≥N 次 tool_recovery 才允许生成 skill"的安全闸——避免给 Agent 永远做不对的事情生成技能；冷启动 demo 把它设成 `0`。
 

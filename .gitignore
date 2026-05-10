@@ -208,4 +208,5 @@ AGENTS.md
 .cursor/
 START_HERE.md
 examples/workspace/03_self_evolution_e2e_glm.py
+examples/self_evolution/03_self_evolution_e2e_glm.py
 .workbuddy/

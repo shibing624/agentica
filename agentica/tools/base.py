@@ -846,6 +846,15 @@ class Tool:
         """
         return None
 
+    def set_agent_model(self, model: Optional[Any]) -> None:
+        """Receive the owning agent's model when the tool can use it.
+
+        Most tools do not need an LLM, so the default implementation is a no-op.
+        LLM-backed tools override this to avoid creating provider-specific
+        fallback models when the parent agent already has a configured model.
+        """
+        pass
+
     def clone(self) -> "Tool":
         """Return an instance safe to bind to a different agent.
 

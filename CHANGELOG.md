@@ -19,6 +19,13 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-05-10
+
+### Fixed
+- Default model resolution now preserves OpenAI priority when `OPENAI_API_KEY` is configured, falls back to Anthropic when `ANTHROPIC_API_KEY` is configured, and then checks OpenAI-compatible provider keys.
+- Agent-owned LLM tools now reuse the parent agent model before resolving a fallback provider, avoiding accidental OpenAI usage when another main provider is configured.
+- Experience capture and skill upgrade LLM calls continue to follow the agent auxiliary model or main model instead of creating a separate provider.
+
 ## [1.4.0] - 2026-04-23
 
 ### Added — Gateway IM Channels
