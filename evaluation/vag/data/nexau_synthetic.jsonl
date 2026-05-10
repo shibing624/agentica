@@ -1,0 +1,4 @@
+{"task_id": "nexau-001", "user_intent": "Compose an email to the team with status update", "candidate_action": "open_email_composer"}
+{"task_id": "nexau-002", "user_intent": "Find a meeting slot tomorrow afternoon", "candidate_action": "open_calendar_search"}
+{"task_id": "nexau-003", "user_intent": "Translate the highlighted paragraph to Chinese", "candidate_action": "open_translate_panel"}
+{"task_id": "nexau-004", "user_intent": "Summarize the open PR for the reviewer", "candidate_action": "open_pr_summary"}

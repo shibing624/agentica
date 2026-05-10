@@ -1,0 +1,5 @@
+{"task_id": "ic-bash-001", "instruction": "List all hidden files in the home directory", "gold_command": "ls -la ~"}
+{"task_id": "ic-bash-002", "instruction": "Find files modified in the last 7 days under /var/log", "gold_command": "find /var/log -mtime -7"}
+{"task_id": "ic-bash-003", "instruction": "Print the first 20 lines of /etc/passwd", "gold_command": "head -n 20 /etc/passwd"}
+{"task_id": "ic-bash-004", "instruction": "Show disk usage summary for the current directory", "gold_command": "du -sh ."}
+{"task_id": "ic-bash-005", "instruction": "Find the process listening on port 8080", "gold_command": "lsof -i :8080"}

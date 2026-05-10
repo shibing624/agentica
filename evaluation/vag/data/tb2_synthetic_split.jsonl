@@ -1,0 +1,8 @@
+{"task_id": "tb2-syn-001", "prompt": "Find all python files larger than 1KB in the repository", "working_dir": "/workspace/repo", "expected_command_markers": ["find", "*.py"]}
+{"task_id": "tb2-syn-002", "prompt": "Count lines in every markdown file under docs/", "working_dir": "/workspace/repo", "expected_command_markers": ["docs/", "wc -l"]}
+{"task_id": "tb2-syn-003", "prompt": "Run pytest on the agent test suite", "working_dir": "/workspace/repo", "expected_command_markers": ["pytest", "tests/"]}
+{"task_id": "tb2-syn-004", "prompt": "Show the last 50 lines of any log file in /var/log", "working_dir": "/var/log", "expected_command_markers": ["tail", "-n 50"]}
+{"task_id": "tb2-syn-005", "prompt": "Print the JSON pretty-printed contents of config.json", "working_dir": "/workspace/repo", "expected_command_markers": ["config.json", "json"]}
+{"task_id": "tb2-syn-006", "prompt": "Diff two text files and write the result to a third", "working_dir": "/tmp", "expected_command_markers": ["diff", ">"]}
+{"task_id": "tb2-syn-007", "prompt": "Compress a directory into a tar.gz archive", "working_dir": "/workspace", "expected_command_markers": ["tar", "czf"]}
+{"task_id": "tb2-syn-008", "prompt": "Compute SHA-256 of every file under build/ and write a manifest", "working_dir": "/workspace/build", "expected_command_markers": ["sha256sum", "manifest"]}

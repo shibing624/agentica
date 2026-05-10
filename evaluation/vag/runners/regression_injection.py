@@ -17,11 +17,18 @@ if str(ROOT) not in sys.path:
 
 from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
 from evaluation.vag.lifecycle import SkillAdmissionGate, SkillCandidate
-from evaluation.vag.seeds import PilotCandidate, build_pilot_candidates
+from evaluation.vag.seeds import (
+    PilotCandidate,
+    build_extended_candidates,
+    build_pilot_candidates,
+)
 
 
-DATA_PATH = ROOT / "evaluation" / "vag" / "data" / "60_pilot_candidates.jsonl"
-RESULTS_PATH = ROOT / "evaluation" / "vag" / "data" / "pilot_ablation_results.json"
+DATA_DIR = ROOT / "evaluation" / "vag" / "data"
+DATA_PATH = DATA_DIR / "60_pilot_candidates.jsonl"
+RESULTS_PATH = DATA_DIR / "pilot_ablation_results.json"
+EXTENDED_DATA_PATH = DATA_DIR / "200_labelled_candidates.jsonl"
+EXTENDED_RESULTS_PATH = DATA_DIR / "200_ablation_results.json"
 
 
 class MockAgentRiskCritic:
@@ -129,21 +136,47 @@ async def evaluate_config(
     }
 
 
-async def main() -> None:
-    candidates = build_pilot_candidates()
-    write_candidates(candidates)
+async def run(
+    candidates: List[PilotCandidate],
+    data_path: Path,
+    results_path: Path,
+) -> List[Dict]:
+    write_candidates(candidates, data_path)
     results = []
     for name, gate in gate_configs().items():
         results.append(await evaluate_config(name, gate, candidates))
-    RESULTS_PATH.write_text(
+    results_path.write_text(
         json.dumps(results, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    return results
+
+
+async def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--set",
+        choices=["pilot", "extended"],
+        default="pilot",
+        help="pilot=60 candidates (reproducible pilot), extended=200 (P1 submission table)",
+    )
+    args = parser.parse_args()
+
+    if args.set == "pilot":
+        candidates = build_pilot_candidates()
+        data_path, results_path = DATA_PATH, RESULTS_PATH
+    else:
+        candidates = build_extended_candidates()
+        data_path, results_path = EXTENDED_DATA_PATH, EXTENDED_RESULTS_PATH
+
+    results = await run(candidates, data_path, results_path)
     print(json.dumps([
         {
             "config": r["config"],
-            "harmful_admission_rate": r["harmful_admission_rate"],
-            "benign_retention_rate": r["benign_retention_rate"],
+            "harmful_admission_rate": round(r["harmful_admission_rate"], 4),
+            "benign_retention_rate": round(r["benign_retention_rate"], 4),
         }
         for r in results
     ], ensure_ascii=False, indent=2))
