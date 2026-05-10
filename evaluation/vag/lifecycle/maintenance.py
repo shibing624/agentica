@@ -10,16 +10,20 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agentica.experience.skill_upgrade import (
-    SkillEvolutionManager,
-    _normalize_skill_md,
-    _strip_code_fences,
-)
 from agentica.model.message import Message
 from agentica.prompts.experience.skill_upgrade import get_skill_maintenance_prompt
 from agentica.utils.async_file import async_read_text, async_write_text
 from agentica.utils.log import logger
 
+from evaluation.vag.lifecycle._helpers import (
+    append_source_section,
+    disable_skill_md,
+    normalize_skill_md,
+    read_recent_episodes,
+    strip_code_fences,
+    validate_skill_content,
+    write_meta,
+)
 from evaluation.vag.lifecycle.gate import SkillAdmissionGate
 from evaluation.vag.lifecycle.provenance import append_provenance_event
 
@@ -48,9 +52,7 @@ async def repair_or_discard(
     skill_content = ""
     if skill_md_path.exists():
         skill_content = await async_read_text(skill_md_path)
-    episodes = SkillEvolutionManager._read_recent_episodes(
-        episodes_path, limit=checkpoint_interval,
-    )
+    episodes = read_recent_episodes(episodes_path, limit=checkpoint_interval)
     failures_text = "\n".join(
         "- "
         f"[{e.get('outcome', '?')}] "
@@ -78,7 +80,7 @@ async def repair_or_discard(
             max_repair_attempts=max_repair_attempts,
         )
 
-    text = _strip_code_fences(response.content)
+    text = strip_code_fences(response.content)
     if text.strip().upper().startswith("DISCARD"):
         reason = text.strip()[len("DISCARD"):].strip(" :-") or "discarded by maintenance model"
         return _retire_skill(
@@ -125,14 +127,14 @@ async def repair_or_discard(
             max_repair_attempts=max_repair_attempts,
         )
 
-    revised_md = _normalize_skill_md(revised_md)
-    revised_md = SkillEvolutionManager._append_source_section(
+    revised_md = normalize_skill_md(revised_md)
+    revised_md = append_source_section(
         revised_md,
         source=meta.get("source_experience", ""),
         event_count=meta.get("gotchas_hit_count", 0)
         + meta.get("new_gotchas_seen", 0),
     )
-    is_valid, validation_reason = SkillEvolutionManager._validate_skill_content(revised_md)
+    is_valid, validation_reason = validate_skill_content(revised_md)
     if not is_valid:
         return _record_failed_repair(
             skill_dir, meta,
@@ -171,7 +173,7 @@ async def repair_or_discard(
     meta["consecutive_failures"] = 0
     meta["last_maintenance_at"] = date.today().isoformat()
     meta["last_maintenance_reason"] = reason
-    SkillEvolutionManager.write_meta(meta_path, meta)
+    write_meta(meta_path, meta)
     logger.info(f"Skill {meta.get('skill_name')}: repaired after repeated failures")
     return "repair"
 
@@ -202,7 +204,7 @@ def _record_failed_repair(
         return _retire_skill(
             skill_dir, meta, reason=reason, write_provenance=write_provenance,
         )
-    SkillEvolutionManager.write_meta(skill_dir / "meta.json", meta)
+    write_meta(skill_dir / "meta.json", meta)
     return "keep_shadow"
 
 
@@ -216,8 +218,8 @@ def _retire_skill(
     meta["status"] = "retired"
     meta["retired_at"] = date.today().isoformat()
     meta["retire_reason"] = reason
-    SkillEvolutionManager.write_meta(skill_dir / "meta.json", meta)
-    SkillEvolutionManager._disable_skill_md(skill_dir)
+    write_meta(skill_dir / "meta.json", meta)
+    disable_skill_md(skill_dir)
     if write_provenance:
         append_provenance_event(skill_dir, {
             "event": "discard",

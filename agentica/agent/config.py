@@ -11,6 +11,7 @@ Provides layered configuration:
 
 from dataclasses import dataclass, field
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -20,6 +21,9 @@ from typing import (
     Type,
     Union,
 )
+
+if TYPE_CHECKING:
+    from agentica.experience.skill_lifecycle_hooks import SkillLifecycleHooks
 
 
 @dataclass
@@ -244,10 +248,10 @@ class SkillUpgradeConfig:
     min_success_applications: int = 1
     # Optional lifecycle hooks for extensions like multi-critic admission
     # gates, append-only provenance audit logs or LLM-driven repair-or-discard
-    # maintenance. The SDK ships with no-op default hooks; research extensions
-    # (e.g. evaluation/vag/lifecycle/) implement SkillLifecycleHooks and pass
-    # an instance here.
-    lifecycle_hooks: Optional[Any] = None
+    # maintenance. ``None`` falls back to a no-op at call sites; research
+    # extensions (e.g. ``evaluation/vag/lifecycle/``) implement
+    # ``SkillLifecycleHooks`` and pass an instance here.
+    lifecycle_hooks: Optional["SkillLifecycleHooks"] = None
 
 
 @dataclass

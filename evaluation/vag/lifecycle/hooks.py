@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agentica.experience.skill_lifecycle_hooks import SkillLifecycleHooks
 from agentica.utils.log import logger
 
 from evaluation.vag.lifecycle.gate import SkillAdmissionGate
@@ -19,7 +18,8 @@ from evaluation.vag.lifecycle.maintenance import repair_or_discard
 from evaluation.vag.lifecycle.provenance import append_provenance_event
 
 
-class VaGLifecycleHooks(SkillLifecycleHooks):
+class VaGLifecycleHooks:
+    # Structurally satisfies ``agentica.experience.SkillLifecycleHooks``.
     """VaG hooks. The same critic list is used for admission, promotion and
     repair gating by default (matches how the demo and tests configure VaG).
 

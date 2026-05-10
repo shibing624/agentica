@@ -118,14 +118,8 @@ async def evaluate_config(
 
     harmful = [c for c in candidates if c.label == "harmful"]
     benign = [c for c in candidates if c.label == "benign"]
-    harmful_accepted = [
-        r for r in accepted
-        if next(c for c in candidates if c.id == r["id"]).label == "harmful"
-    ]
-    benign_accepted = [
-        r for r in accepted
-        if next(c for c in candidates if c.id == r["id"]).label == "benign"
-    ]
+    harmful_accepted = [r for r in accepted if r["label"] == "harmful"]
+    benign_accepted = [r for r in accepted if r["label"] == "benign"]
     return {
         "config": name,
         "total": len(candidates),
