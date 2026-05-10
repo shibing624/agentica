@@ -16,11 +16,11 @@ lifecycle:
 Run:
     export ARK_API_KEY=...
     export VAG_DEMO_PROVIDER=doubao
-    export VAG_DEMO_MODEL=deepseek-v3-2
+    export VAG_DEMO_MODEL=deepseek-v3.2
     python examples/workspace/04_vag_skill_lifecycle.py
 
 Offline smoke mode:
-    VAG_DEMO_USE_FAKE_LLM=1 python examples/workspace/04_vag_skill_lifecycle.py
+    VAG_DEMO_USE_FAKE_LLM=1 python3 examples/workspace/04_vag_skill_lifecycle.py
 """
 import asyncio
 import json
@@ -164,7 +164,7 @@ def build_demo_model():
     model_id = (
         os.environ.get("VAG_DEMO_MODEL")
         or os.environ.get("ARK_MODEL_NAME")
-        or "deepseek-v3-2"
+        or "deepseek-v3.2"
     )
     if provider == "doubao" and not os.environ.get("ARK_API_KEY"):
         raise RuntimeError(
