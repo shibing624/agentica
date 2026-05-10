@@ -5,13 +5,13 @@
 
 This example shows how Agentica handles long-term memory **automatically**:
 
-1. **Session 1** — Agent with workspace (BuiltinMemoryTool auto-registered):
+1. **Session 1** — Agent with long-term memory (BuiltinMemoryTool auto-registered):
    - LLM autonomously decides what to remember (user preferences, personal info, etc.)
-   - Memories are persisted as Markdown files in the Workspace
-   - No manual `workspace.save_memory()` calls needed
+   - Memories are persisted as Markdown files by the Workspace storage layer
+   - No manual `memory_store.save_memory()` calls needed
    - If LLM doesn't call save_memory, MemoryExtractHooks auto-extracts memories
 
-2. **Session 2** — A fresh Agent loads the same Workspace:
+2. **Session 2** — A fresh Agent loads the same long-term memory store:
    - Long-term memories are automatically injected into the system prompt
    - Agent "remembers" facts from Session 1 without any code
 
@@ -34,17 +34,18 @@ from agentica.workspace import Workspace
 
 
 def _create_agent(workspace: Workspace, **kwargs) -> Agent:
-    """Helper: create an Agent with workspace for auto-memory.
+    """Helper: create an Agent with long-term memory for auto-memory.
 
     When workspace is set:
     - BuiltinMemoryTool (save_memory, search_memory) is auto-registered
     - auto_archive: saves raw conversation (zero cost)
     - auto_extract_memory: LLM-based memory extraction fallback (one LLM call)
-    - Workspace context + memory are auto-injected into system prompt
+    - Long-term memory is auto-injected into system prompt
     """
     return Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         workspace=workspace,
+        enable_long_term_memory=True,
         long_term_memory_config=WorkspaceMemoryConfig(
             auto_archive=True,
             auto_extract_memory=True,
@@ -172,9 +173,9 @@ async def demo_session_summary():
 
 
 async def demo_combined():
-    """Demo 4: Best practice -- Workspace + Session Summary"""
+    """Demo 4: Best practice -- long-term memory + session summary"""
     print("\n" + "=" * 60)
-    print("Demo 4: Best Practice (Workspace + Auto Memory + Summary)")
+    print("Demo 4: Best Practice (Long-Term Memory + Auto Memory + Summary)")
     print("=" * 60)
 
     workspace_path = Path("outputs") / "best_practice_workspace"
@@ -187,6 +188,7 @@ async def demo_combined():
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         workspace=workspace,
+        enable_long_term_memory=True,
         long_term_memory_config=WorkspaceMemoryConfig(
             auto_archive=True,
             auto_extract_memory=True,
@@ -195,7 +197,7 @@ async def demo_combined():
         add_history_to_context=True,
     )
 
-    print("Config: Workspace (persistent) + SessionSummary + auto memory")
+    print("Config: long-term memory (persistent) + SessionSummary + auto memory")
 
     await agent.print_response(
         "I'm a senior engineer building a RAG system with LangChain and Qdrant. "
@@ -204,7 +206,7 @@ async def demo_combined():
 
     await agent.print_response("What are the best practices for chunking strategies?")
 
-    print("\n--- Workspace memory ---")
+    print("\n--- Long-term memory ---")
     memory = await workspace.get_relevant_memories()
     print(memory or "(empty)")
 
@@ -222,7 +224,7 @@ async def main():
 =================================================================
   BuiltinMemoryTool -> LLM decides when to save memory
   MemoryExtractHooks -> auto-extracts if LLM didn't save
-  Workspace          -> Persistent Markdown files (Git-friendly)
+  Workspace storage -> Persistent Markdown files (Git-friendly)
   WorkingMemory      -> Session history & auto-summary
 
   Key: No manual save_memory() calls needed!
@@ -240,15 +242,15 @@ async def main():
     print("How It Works")
     print("=" * 60)
     print("""
-  1. Agent with workspace -> BuiltinMemoryTool auto-registered
+  1. Agent with long-term memory -> BuiltinMemoryTool auto-registered
   2. LLM detects important info -> calls save_memory() tool
-  3. Memory persisted to workspace/users/{user}/memory/*.md
+  3. Memory persisted to long_term_memory_root/users/{user}/memory/*.md
   4. If LLM didn't save -> MemoryExtractHooks auto-extracts
-  5. Next session: Workspace memory auto-injected into prompt
+  5. Next session: long-term memory auto-injected into prompt
   6. Agent "remembers" without any manual code
 
-Memory Architecture:
-  workspace/
+Storage Layout:
+  long_term_memory_root/
   +-- AGENTS.md            # Agent instructions
   +-- users/
   |   +-- {user_id}/
