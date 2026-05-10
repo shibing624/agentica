@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from agentica.critic import CritiqueResult
 from agentica.experience.skill_upgrade import SkillEvolutionManager
-from agentica.skills.provenance import read_provenance_events
+from evaluation.vag.lifecycle import VaGLifecycleHooks, read_provenance_events
 
 
 VALID_SKILL_MD = """---
@@ -91,7 +91,7 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             candidates=[{"title": "path-check", "content": "Check paths", "repeat_count": 5}],
             existing_skills=[],
             generated_skills_dir=self._gen_dir,
-            admission_critics=[ApproveCritic()],
+            hooks=VaGLifecycleHooks(critics=[ApproveCritic()]),
         ))
 
         skill_dir = self._gen_dir / "gated-skill"
@@ -109,7 +109,7 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             candidates=[{"title": "path-check", "content": "Check paths", "repeat_count": 5}],
             existing_skills=[],
             generated_skills_dir=self._gen_dir,
-            admission_critics=[RejectCritic()],
+            hooks=VaGLifecycleHooks(critics=[RejectCritic()]),
         ))
 
         skill_dir = self._gen_dir / "gated-skill"
@@ -151,7 +151,7 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             model=model,
             skill_dir=skill_dir,
             checkpoint_interval=5,
-            promotion_critics=[RejectCritic()],
+            hooks=VaGLifecycleHooks(critics=[RejectCritic()]),
         ))
 
         meta = SkillEvolutionManager.read_meta(skill_dir / "meta.json")
@@ -193,7 +193,7 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             model=model,
             skill_dir=skill_dir,
             checkpoint_interval=5,
-            promotion_critics=[TailRiskCritic()],
+            hooks=VaGLifecycleHooks(critics=[TailRiskCritic()]),
         ))
 
         meta = SkillEvolutionManager.read_meta(skill_dir / "meta.json")
@@ -237,8 +237,7 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             model=model,
             skill_dir=skill_dir,
             rollback_consecutive_failures=2,
-            promotion_critics=[ApproveCritic()],
-            maintain_failed_skills=True,
+            hooks=VaGLifecycleHooks(critics=[ApproveCritic()], enable_maintenance=True),
         ))
 
         meta = SkillEvolutionManager.read_meta(skill_dir / "meta.json")
@@ -289,9 +288,11 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             model=model,
             skill_dir=skill_dir,
             rollback_consecutive_failures=2,
-            promotion_critics=[ApproveCritic()],
-            repair_critics=[RejectCritic()],
-            maintain_failed_skills=True,
+            hooks=VaGLifecycleHooks(
+                critics=[ApproveCritic()],
+                repair_critics=[RejectCritic()],
+                enable_maintenance=True,
+            ),
         ))
 
         skill_content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
@@ -330,12 +331,12 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             model=model,
             skill_dir=skill_dir,
             rollback_consecutive_failures=2,
-            maintain_failed_skills=True,
+            hooks=VaGLifecycleHooks(enable_maintenance=True),
         ))
 
         meta = SkillEvolutionManager.read_meta(skill_dir / "meta.json")
         events = read_provenance_events(skill_dir)
-        self.assertEqual(decision, "retired")
+        self.assertEqual(decision, "discard")
         self.assertEqual(meta["status"], "retired")
         self.assertFalse((skill_dir / "SKILL.md").exists())
         self.assertTrue((skill_dir / "SKILL.md.disabled").exists())
@@ -373,13 +374,12 @@ class TestSkillUpgradeVaG(unittest.TestCase):
             model=model,
             skill_dir=skill_dir,
             rollback_consecutive_failures=2,
-            maintain_failed_skills=True,
-            max_repair_attempts=3,
+            hooks=VaGLifecycleHooks(enable_maintenance=True, max_repair_attempts=3),
         ))
 
         meta = SkillEvolutionManager.read_meta(skill_dir / "meta.json")
         events = read_provenance_events(skill_dir)
-        self.assertEqual(decision, "retired")
+        self.assertEqual(decision, "discard")
         self.assertEqual(meta["status"], "retired")
         self.assertEqual([event["event"] for event in events], ["repair", "discard"])
 

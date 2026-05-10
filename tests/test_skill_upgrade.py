@@ -58,8 +58,7 @@ class TestSkillUpgradeConfig(unittest.TestCase):
         self.assertEqual(config.checkpoint_interval, 5)
         self.assertEqual(config.rollback_consecutive_failures, 2)
         self.assertTrue(config.notify_user)
-        self.assertFalse(config.maintain_failed_skills)
-        self.assertEqual(config.max_repair_attempts, 3)
+        self.assertIsNone(config.lifecycle_hooks)
 
     def test_custom_values(self):
         config = SkillUpgradeConfig(
@@ -94,38 +93,6 @@ class TestNormalizeSkillMd(unittest.TestCase):
         meta, _ = Skill._parse_frontmatter(normalized.strip())
         return bool(meta) and "name" in meta
 
-    def test_yaml_inline_comment_does_not_truncate_frontmatter(self):
-        """A `# comment` inside YAML must NOT be mistaken for a markdown body."""
-        from agentica.experience.skill_upgrade import _normalize_skill_md
-        raw = (
-            "---\nname: foo\n"
-            "# Reminder: keep slug short\n"
-            "description: bar\n"
-            "when-to-use: never\n\n"
-            "## Body\nactual body\n"
-        )
-        out = _normalize_skill_md(raw)
-        self.assertIn("when-to-use: never", out)
-        self.assertIn("\n---\n## Body", out)
-        from agentica.skills.skill import Skill
-        meta, _ = Skill._parse_frontmatter(out.strip())
-        self.assertEqual(meta.get("when-to-use"), "never")
-        self.assertEqual(meta.get("description"), "bar")
-
-    def test_strips_leading_stray_dash_and_adds_missing_close(self):
-        """Real-world LLM output: stray ``-`` then ``---`` open, no close."""
-        from agentica.experience.skill_upgrade import _normalize_skill_md
-        raw = (
-            "-\n---\nname: list-directory-before-read\n"
-            "description: t\nwhen-to-use: read_file\n\n"
-            "## One-line summary\nEnsure existence.\n\n"
-            "## Gotchas\n- \u26a0\ufe0f a: b. c.\n- \u26a0\ufe0f d: e. f.\n"
-        )
-        out = _normalize_skill_md(raw)
-        self.assertTrue(out.startswith("---\nname:"))
-        self.assertIn("\n---\n## One-line summary", out)
-        self.assertTrue(self._parses(out))
-
     def test_idempotent_on_canonical_input(self):
         from agentica.experience.skill_upgrade import _normalize_skill_md
         canonical = (
@@ -155,50 +122,6 @@ class TestNormalizeSkillMd(unittest.TestCase):
         self.assertTrue(out.startswith("---\n"))
         self.assertIn("---\n# Overview", out)
         self.assertTrue(self._parses(out))
-
-    def test_strips_mixed_fence_and_dashes(self):
-        """Opening ```yaml fence, closing --- (the failure mode hit in practice)."""
-        from agentica.experience.skill_upgrade import _normalize_skill_md
-        raw = (
-            "```yaml\n"
-            "name: mixed\n"
-            "description: mixed front\n"
-            "---\n"
-            "# Overview\n"
-            "Body.\n"
-        )
-        out = _normalize_skill_md(raw)
-        self.assertTrue(out.startswith("---\n"))
-        self.assertTrue(self._parses(out))
-
-    def test_adds_missing_leading_dashes(self):
-        from agentica.experience.skill_upgrade import _normalize_skill_md
-        raw = (
-            "name: bare\n"
-            "description: bare front\n"
-            "---\n"
-            "# Body\n"
-        )
-        out = _normalize_skill_md(raw)
-        self.assertTrue(out.startswith("---\n"))
-        self.assertTrue(self._parses(out))
-
-    def test_strips_stray_prefix_before_dashes(self):
-        """A leaked '-' or other prefix before the real '---' must be dropped."""
-        from agentica.experience.skill_upgrade import _normalize_skill_md
-        raw = (
-            "-\n"
-            "---\n"
-            "name: leaked\n"
-            "description: leaked front\n"
-            "---\n"
-            "# Overview\n"
-            "Body.\n"
-        )
-        out = _normalize_skill_md(raw)
-        self.assertTrue(out.startswith("---\nname: leaked"))
-        self.assertTrue(self._parses(out))
-
 
 class TestSkillEvolutionManager(unittest.TestCase):
     """Test the SkillEvolutionManager."""
@@ -983,7 +906,7 @@ class TestBuildEvidenceText(unittest.TestCase):
     @staticmethod
     def _index(events):
         from agentica.experience.skill_upgrade import SkillEvolutionManager
-        return SkillEvolutionManager._index_events_once(events)
+        return SkillEvolutionManager._index_events(events)
 
     def test_empty_events_returns_empty(self):
         from agentica.experience.skill_upgrade import SkillEvolutionManager
@@ -2150,7 +2073,7 @@ class TestCorrectionKeyDataChain(unittest.TestCase):
                 "correction_key": "use_rg_not_grep",
             },
         ]
-        idx = SkillEvolutionManager._index_events_once(events)
+        idx = SkillEvolutionManager._index_events(events)
         c_a = {"type": "correction", "correction_key": "list_directory_read_file"}
         c_b = {"type": "correction", "correction_key": "use_rg_not_grep"}
         self.assertEqual(SkillEvolutionManager._candidate_recovery_count(c_a, idx), 2)

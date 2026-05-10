@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agentica.skills.provenance import (
+from evaluation.vag.lifecycle import (
     PROVENANCE_FILENAME,
     append_provenance_event,
     get_provenance_path,

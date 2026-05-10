@@ -167,19 +167,13 @@ from agentica.workflow import Workflow, WorkflowSession
 from agentica.hooks import AgentHooks, RunHooks, ConversationArchiveHooks, MemoryExtractHooks, ExperienceCaptureHooks
 
 # ── Experience system ──
-from agentica.experience import ExperienceEventStore, ExperienceCompiler, CompiledExperienceStore, SkillEvolutionManager
-from agentica.skills.evolution import (
-    SkillCandidate,
-    GateVerdict,
-    SkillGateResult,
-    SkillAdmissionGate,
-    skill_fingerprint,
-)
-from agentica.skills.provenance import (
-    PROVENANCE_FILENAME,
-    get_provenance_path,
-    append_provenance_event,
-    read_provenance_events,
+from agentica.experience import (
+    ExperienceEventStore,
+    ExperienceCompiler,
+    CompiledExperienceStore,
+    SkillEvolutionManager,
+    SkillLifecycleHooks,
+    NoopSkillLifecycleHooks,
 )
 
 # ── Workspace ──

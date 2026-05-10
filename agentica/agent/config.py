@@ -242,16 +242,12 @@ class SkillUpgradeConfig:
     # Defaults to 1 (gate on). Set to 0 for cold-start / demo workspaces
     # where no successful recovery has happened yet.
     min_success_applications: int = 1
-    # Optional VaG critics. Admission critics run before a generated SKILL.md
-    # is installed as a shadow skill; promotion critics run before shadow -> auto.
-    admission_critics: List[Any] = field(default_factory=list)
-    promotion_critics: List[Any] = field(default_factory=list)
-    repair_critics: List[Any] = field(default_factory=list)
-    write_provenance: bool = True
-    # When enabled, repeated failures trigger an LLM maintenance pass that
-    # either repairs SKILL.md and re-gates it, or retires the skill.
-    maintain_failed_skills: bool = False
-    max_repair_attempts: int = 3
+    # Optional lifecycle hooks for extensions like multi-critic admission
+    # gates, append-only provenance audit logs or LLM-driven repair-or-discard
+    # maintenance. The SDK ships with no-op default hooks; research extensions
+    # (e.g. evaluation/vag/lifecycle/) implement SkillLifecycleHooks and pass
+    # an instance here.
+    lifecycle_hooks: Optional[Any] = None
 
 
 @dataclass

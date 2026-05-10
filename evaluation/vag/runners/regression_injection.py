@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
-from agentica.skills.evolution import SkillAdmissionGate, SkillCandidate
+from evaluation.vag.lifecycle import SkillAdmissionGate, SkillCandidate
 from evaluation.vag.seeds import PilotCandidate, build_pilot_candidates
 
 

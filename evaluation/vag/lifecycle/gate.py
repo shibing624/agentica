@@ -1,11 +1,7 @@
 # -*- coding: utf-8 -*-
-"""
-@author:XuMing(xuming624@qq.com)
-@description: Core skill evolution gates for generated Agentica skills.
+"""Conjunctive admission gate over heterogeneous critics.
 
-This module contains reusable APIs for gating generated ``SKILL.md`` content
-before it enters a runtime skill directory. Paper/evaluation runners should
-depend on these APIs instead of carrying their own gate implementation.
+Used by VaG paper experiments. NOT part of the SDK runtime path.
 """
 from __future__ import annotations
 
@@ -15,40 +11,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
-
 from agentica.critic import Critic, CritiqueResult, SchemaCritic
 from agentica.skills.skill import Skill
-
-
-class SkillCandidate(BaseModel):
-    """Structured representation of a generated ``SKILL.md`` candidate."""
-
-    name: str = Field(min_length=1)
-    description: str = Field(min_length=1)
-    when_to_use: str = ""
-    body: str = Field(min_length=1)
-    source_experience: str = ""
-
-    @classmethod
-    def from_skill_md(
-        cls,
-        skill_md: str,
-        source_experience: str = "",
-    ) -> "SkillCandidate":
-        """Parse ``SKILL.md`` frontmatter and body into a schema payload."""
-        frontmatter, body = Skill._parse_frontmatter(skill_md.strip())
-        return cls(
-            name=str(frontmatter.get("name") or ""),
-            description=str(frontmatter.get("description") or ""),
-            when_to_use=str(
-                frontmatter.get("when-to-use")
-                or frontmatter.get("when_to_use")
-                or ""
-            ),
-            body=body.strip(),
-            source_experience=source_experience,
-        )
 
 
 @dataclass(frozen=True)
@@ -121,10 +85,10 @@ def skill_fingerprint(skill_md: str) -> str:
 class SkillAdmissionGate:
     """Conjunctive admission gate over heterogeneous critics.
 
-    Every critic must approve for the skill to pass. ``SchemaCritic`` receives
-    a JSON representation parsed from ``SKILL.md`` so Pydantic schemas can
-    validate actual skill frontmatter and body rather than a synthetic payload.
-    Other critics receive the original markdown.
+    Every critic must approve for the skill to pass. ``SchemaCritic``
+    receives a JSON representation parsed from SKILL.md so Pydantic schemas
+    can validate actual frontmatter and body. Other critics receive the
+    original markdown.
     """
 
     critics: List[Critic] = field(default_factory=list)
@@ -207,27 +171,9 @@ class SkillAdmissionGate:
         return skill_md
 
 
-def __getattr__(name: str) -> Any:
-    """Lazy compatibility exports for existing experience classes."""
-    if name == "SkillEvolutionManager":
-        from agentica.experience.skill_upgrade import SkillEvolutionManager
-        return SkillEvolutionManager
-    if name == "ExperienceCompiler":
-        from agentica.experience.compiler import ExperienceCompiler
-        return ExperienceCompiler
-    if name == "CompiledExperienceStore":
-        from agentica.experience.compiled_store import CompiledExperienceStore
-        return CompiledExperienceStore
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
-    "SkillCandidate",
     "GateVerdict",
     "SkillGateResult",
     "SkillAdmissionGate",
     "skill_fingerprint",
-    "SkillEvolutionManager",
-    "ExperienceCompiler",
-    "CompiledExperienceStore",
 ]

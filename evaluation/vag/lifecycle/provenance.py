@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-"""
-@author:XuMing(xuming624@qq.com)
-@description: Append-only provenance log for generated Agentica skills.
+"""Append-only provenance log for VaG-managed generated skills.
+
+JSONL keeps each event independently parseable. Opening with ``O_APPEND``
+makes each single-line write append at the end of the file, which is safer
+for concurrent workers than rewriting one YAML/JSON document.
 """
 from __future__ import annotations
 
@@ -15,17 +17,10 @@ PROVENANCE_FILENAME = "provenance.jsonl"
 
 
 def get_provenance_path(skill_dir: Path) -> Path:
-    """Return the append-only provenance log path for one generated skill."""
     return Path(skill_dir) / PROVENANCE_FILENAME
 
 
 def append_provenance_event(skill_dir: Path, event: Dict[str, Any]) -> Path:
-    """Append one complete provenance event as a JSONL record.
-
-    JSONL keeps each event independently parseable. Opening with ``O_APPEND``
-    makes each single-line write append at the end of the file, which is safer
-    for concurrent workers than rewriting one YAML/JSON document.
-    """
     path = get_provenance_path(skill_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     event = dict(event)
@@ -40,7 +35,6 @@ def append_provenance_event(skill_dir: Path, event: Dict[str, Any]) -> Path:
 
 
 def read_provenance_events(skill_dir: Path) -> List[Dict[str, Any]]:
-    """Read parseable provenance events from a generated skill directory."""
     path = get_provenance_path(skill_dir)
     if not path.exists():
         return []

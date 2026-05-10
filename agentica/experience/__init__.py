@@ -14,10 +14,16 @@ from agentica.experience.event_store import ExperienceEventStore
 from agentica.experience.compiler import ExperienceCompiler
 from agentica.experience.compiled_store import CompiledExperienceStore
 from agentica.experience.skill_upgrade import SkillEvolutionManager
+from agentica.experience.skill_lifecycle_hooks import (
+    SkillLifecycleHooks,
+    NoopSkillLifecycleHooks,
+)
 
 __all__ = [
     "ExperienceEventStore",
     "ExperienceCompiler",
     "CompiledExperienceStore",
     "SkillEvolutionManager",
+    "SkillLifecycleHooks",
+    "NoopSkillLifecycleHooks",
 ]

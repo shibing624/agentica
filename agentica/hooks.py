@@ -866,8 +866,7 @@ class ExperienceCaptureHooks(RunHooks):
                             generated_skills_dir=gen_dir,
                             event_store=event_store,
                             min_success_applications=skill_cfg.min_success_applications,
-                            admission_critics=skill_cfg.admission_critics,
-                            write_provenance=skill_cfg.write_provenance,
+                            hooks=skill_cfg.lifecycle_hooks,
                         )
                         logger.debug(
                             f"[skill-upgrade] maybe_spawn_skill → {spawned!r} "
@@ -926,17 +925,7 @@ class ExperienceCaptureHooks(RunHooks):
                                 skill_dir=skill_dir,
                                 checkpoint_interval=skill_cfg.checkpoint_interval,
                                 rollback_consecutive_failures=skill_cfg.rollback_consecutive_failures,
-                                promotion_critics=skill_cfg.promotion_critics,
-                                repair_critics=(
-                                    skill_cfg.repair_critics
-                                    or [
-                                        *skill_cfg.admission_critics,
-                                        *skill_cfg.promotion_critics,
-                                    ]
-                                ),
-                                write_provenance=skill_cfg.write_provenance,
-                                maintain_failed_skills=skill_cfg.maintain_failed_skills,
-                                max_repair_attempts=skill_cfg.max_repair_attempts,
+                                hooks=skill_cfg.lifecycle_hooks,
                             )
                             if decision is not None:
                                 should_reload_generated_skills = True

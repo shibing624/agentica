@@ -31,14 +31,19 @@ from pathlib import Path
 from typing import List
 from unittest.mock import AsyncMock, MagicMock
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(0, _REPO_ROOT)
 
 from agentica import create_provider
 from agentica.agent.config import SkillUpgradeConfig
 from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
 from agentica.experience.skill_upgrade import SkillEvolutionManager
-from agentica.skills.evolution import SkillAdmissionGate, SkillCandidate
-from agentica.skills.provenance import read_provenance_events
+from evaluation.vag.lifecycle import (
+    SkillAdmissionGate,
+    SkillCandidate,
+    VaGLifecycleHooks,
+    read_provenance_events,
+)
 
 
 DEMO_DIR = Path("./tmp/vag_skill_lifecycle_demo").resolve()
@@ -240,6 +245,7 @@ async def run_admission_and_promotion(
     real_model,
 ) -> Path:
     print_section("1. Admission: generated skill must pass VaG before shadow install")
+    admission_hooks = VaGLifecycleHooks(critics=critics, write_provenance=True)
     skill_name = await manager.maybe_spawn_skill(
         model=spawn_model(real_model),
         candidates=[{
@@ -256,8 +262,7 @@ async def run_admission_and_promotion(
         }],
         existing_skills=[],
         generated_skills_dir=GENERATED_SKILLS_DIR,
-        admission_critics=critics,
-        write_provenance=True,
+        hooks=admission_hooks,
     )
     if skill_name is None:
         raise RuntimeError(
@@ -285,12 +290,12 @@ async def run_admission_and_promotion(
     })
     manager.write_meta(skill_dir / "meta.json", meta)
 
+    promotion_hooks = VaGLifecycleHooks(critics=critics, write_provenance=True)
     decision = await manager.maybe_update_skill_state(
         model=judge_model(real_model, "promote"),
         skill_dir=skill_dir,
         checkpoint_interval=5,
-        promotion_critics=critics,
-        write_provenance=True,
+        hooks=promotion_hooks,
     )
     print(f"promotion decision: {decision}")
     print(f"status after promotion: {manager.read_meta(skill_dir / 'meta.json')['status']}")
@@ -307,20 +312,17 @@ async def run_repair(
     print_section("3. Maintenance: repeated failures trigger repair when opt-in is enabled")
     record_failures(manager, skill_dir, count=2)
 
-    cfg = SkillUpgradeConfig(
-        maintain_failed_skills=True,
-        repair_critics=critics,
-        rollback_consecutive_failures=2,
+    repair_hooks = VaGLifecycleHooks(
+        critics=critics,
+        enable_maintenance=True,
         max_repair_attempts=3,
+        write_provenance=True,
     )
     decision = await manager.maybe_update_skill_state(
         model=maintenance_repair_model(real_model),
         skill_dir=skill_dir,
-        rollback_consecutive_failures=cfg.rollback_consecutive_failures,
-        repair_critics=cfg.repair_critics,
-        maintain_failed_skills=cfg.maintain_failed_skills,
-        max_repair_attempts=cfg.max_repair_attempts,
-        write_provenance=cfg.write_provenance,
+        rollback_consecutive_failures=2,
+        hooks=repair_hooks,
     )
     meta = manager.read_meta(skill_dir / "meta.json")
     print(f"maintenance decision: {decision}")
@@ -357,13 +359,16 @@ async def run_discard(manager: SkillEvolutionManager, critics: List, real_model)
     })
     record_failures(manager, obsolete_dir, count=2)
 
+    discard_hooks = VaGLifecycleHooks(
+        critics=critics,
+        enable_maintenance=True,
+        write_provenance=True,
+    )
     decision = await manager.maybe_update_skill_state(
         model=maintenance_discard_model(real_model),
         skill_dir=obsolete_dir,
         rollback_consecutive_failures=2,
-        repair_critics=critics,
-        maintain_failed_skills=True,
-        write_provenance=True,
+        hooks=discard_hooks,
     )
     meta = manager.read_meta(obsolete_dir / "meta.json")
     print(f"maintenance decision: {decision}")
@@ -382,8 +387,8 @@ async def main() -> None:
 
     print_section("VaG Skill Lifecycle Demo")
     print(f"workspace: {DEMO_DIR}")
-    print("default maintain_failed_skills:", SkillUpgradeConfig().maintain_failed_skills)
-    print("demo opts in explicitly when showing repair/discard maintenance.")
+    print("SDK default lifecycle_hooks:", SkillUpgradeConfig().lifecycle_hooks)
+    print("demo opts in to VaGLifecycleHooks for admission/promotion/repair/discard.")
     print("llm mode:", "offline fake responses" if offline else "real provider API")
 
     skill_dir = await run_admission_and_promotion(manager, critics, real_model)
