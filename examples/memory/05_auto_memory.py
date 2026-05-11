@@ -30,6 +30,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from agentica import Agent, OpenAIChat
 from agentica.agent.config import WorkspaceMemoryConfig
 from agentica.memory import WorkingMemory
+from agentica.model.providers import create_provider
 from agentica.workspace import Workspace
 
 
@@ -173,9 +174,25 @@ async def demo_session_summary():
 
 
 async def demo_combined():
-    """Demo 4: Best practice -- long-term memory + session summary"""
+    """Demo 4: Production-grade full stack -- long-term memory + auxiliary model
+    for cheap+fast memory extraction + background extraction (non-blocking) +
+    session summary.
+
+    Three perf-critical knobs (all introduced in 1.4.4):
+      1. ``auxiliary_model``: MemoryExtractHooks runs on this cheaper/faster
+         model instead of the main one (e.g. DeepSeek Flash vs GPT-4o), so the
+         extraction LLM call costs less and finishes ~5x faster.
+      2. ``auto_extract_memory_background=True``: extraction is fire-and-forget
+         via ``asyncio.create_task`` and does NOT block ``on_agent_end``. The
+         user-visible response RT drops by the full extraction latency.
+         ⚠️  Only enable under a long-running event loop (FastAPI, asyncio.run).
+             Do NOT enable under ``run_sync()`` / ``run_stream_sync()``: the temp
+             loop closes before the task completes and memories are lost.
+      3. ``sync_memories_to_global_agent_md=True``: confirmed user-type memories
+         get mirrored into ~/.agentica/AGENTS.md so future sessions inherit them.
+    """
     print("\n" + "=" * 60)
-    print("Demo 4: Best Practice (Long-Term Memory + Auto Memory + Summary)")
+    print("Demo 4: Production Full Stack (auxiliary_model + background extract)")
     print("=" * 60)
 
     workspace_path = Path("outputs") / "best_practice_workspace"
@@ -185,19 +202,32 @@ async def demo_combined():
     workspace = Workspace(str(workspace_path), user_id="demo_user")
     workspace.initialize()
 
+    # auxiliary_model: only used by MemoryExtractHooks for the extraction
+    # sub-call. Falls back to the main model when DEEPSEEK_API_KEY is missing.
+    auxiliary_model = (
+        create_provider("deepseek") if os.getenv("DEEPSEEK_API_KEY") else None
+    )
+
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
+        auxiliary_model=auxiliary_model,
         workspace=workspace,
         enable_long_term_memory=True,
         long_term_memory_config=WorkspaceMemoryConfig(
             auto_archive=True,
             auto_extract_memory=True,
+            auto_extract_memory_background=True,
+            sync_memories_to_global_agent_md=True,
         ),
         working_memory=WorkingMemory.with_summary(),
         add_history_to_context=True,
     )
 
-    print("Config: long-term memory (persistent) + SessionSummary + auto memory")
+    print(
+        "Config: long-term memory + SessionSummary + auto memory "
+        f"(auxiliary={'deepseek' if auxiliary_model else 'main-model fallback'}, "
+        "background=True, sync_to_global_AGENTS.md=True)"
+    )
 
     await agent.print_response(
         "I'm a senior engineer building a RAG system with LangChain and Qdrant. "
@@ -205,6 +235,17 @@ async def demo_combined():
     )
 
     await agent.print_response("What are the best practices for chunking strategies?")
+
+    # background=True schedules extraction via asyncio.create_task. In a real
+    # FastAPI server you simply return the response and the task finishes on
+    # its own. In this synchronous demo we explicitly drain pending tasks so
+    # we can observe the extracted memories in the same run.
+    pending = [
+        t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()
+    ]
+    if pending:
+        print(f"\n[demo] waiting for {len(pending)} background extraction task(s)...")
+        await asyncio.gather(*pending, return_exceptions=True)
 
     print("\n--- Long-term memory ---")
     memory = await workspace.get_relevant_memories()
