@@ -318,9 +318,27 @@ class MemoryExtractHooks(RunHooks):
         "Conversation:\n"
     )
 
-    def __init__(self, sync_memories_to_global_agent_md: bool = False):
+    def __init__(
+        self,
+        sync_memories_to_global_agent_md: bool = False,
+        background: bool = False,
+    ):
+        """
+        Args:
+            sync_memories_to_global_agent_md: Mirror user-type memories into global AGENT.md.
+            background: If True, run the LLM extraction as a fire-and-forget
+                ``asyncio.create_task`` so it does NOT block ``on_agent_end``.
+                Use this in long-running async servers (FastAPI, asyncio.run)
+                where the event loop persists past the response. Do NOT enable
+                under ``run_sync()`` / ``run_stream_sync()``: those use a
+                temporary loop that closes immediately after the stream is
+                consumed, causing pending tasks to be silently cancelled and
+                memory writes to be lost.
+        """
         self._tool_calls: Dict[str, List[str]] = {}  # agent_id -> list of tool names called
         self._sync_memories_to_global_agent_md = sync_memories_to_global_agent_md
+        self._background = background
+        self._bg_tasks: set = set()  # strong refs to prevent GC of fire-and-forget tasks
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         self._tool_calls[agent.agent_id] = []
@@ -375,15 +393,29 @@ class MemoryExtractHooks(RunHooks):
         if tool_calls and output and len(output) < 500:
             return
 
-        # Use the agent's model to extract memories
-        model = agent.model
+        # Prefer auxiliary_model for the extraction sub-call: it is meant for
+        # cheap/fast side tasks. This both speeds up extraction (smaller model)
+        # and isolates token cost from the main model's session/budget. Fall
+        # back to agent.model when no auxiliary is configured.
+        model = agent.auxiliary_model or agent.model
         if model is None:
             return
 
-        # Await directly — asyncio.create_task() would be silently cancelled
-        # in run_stream_sync()/run_sync() scenarios where the event loop exits
-        # immediately after the stream is consumed. Direct await ensures the
-        # extraction completes before on_agent_end returns.
+        if self._background:
+            # Fire-and-forget: only safe under a long-running event loop
+            # (FastAPI / asyncio.run). The user opts in via background=True.
+            # Strong-ref the task in self._bg_tasks so it is not GC'd before
+            # completion (asyncio only weak-refs scheduled tasks).
+            task = asyncio.create_task(
+                self._extract_and_save(model, workspace, conversation_text)
+            )
+            self._bg_tasks.add(task)
+            task.add_done_callback(self._bg_tasks.discard)
+            return
+
+        # Synchronous path: required under run_sync()/run_stream_sync() where
+        # the temporary event loop closes after the stream is consumed —
+        # any unawaited task would be silently cancelled.
         await self._extract_and_save(model, workspace, conversation_text)
 
     async def _extract_and_save(self, model: Any, workspace: Any, conversation_text: str) -> None:

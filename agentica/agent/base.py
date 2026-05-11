@@ -547,7 +547,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                     MemoryExtractHooks(
                         sync_memories_to_global_agent_md=(
                             self.long_term_memory_config.sync_memories_to_global_agent_md
-                        )
+                        ),
+                        background=self.long_term_memory_config.auto_extract_memory_background,
                     )
                 )
         if self.enable_experience_capture and self.workspace is not None:

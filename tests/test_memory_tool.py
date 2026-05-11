@@ -269,6 +269,114 @@ class TestMemoryExtractHooks:
         # Conversation < 200 chars, should skip extraction
         agent.model.response.assert_not_called()
 
+    def test_background_mode_does_not_block_on_agent_end(self):
+        """background=True schedules a task and returns before extraction completes."""
+        hooks = MemoryExtractHooks(background=True)
+
+        agent = MagicMock()
+        agent.agent_id = "test_agent_bg"
+        agent.run_input = "x" * 150
+        agent.workspace = MagicMock()
+        agent.workspace.write_memory_entry = AsyncMock()
+        agent.auxiliary_model = None  # force fallback to agent.model
+        agent.model = MagicMock()
+
+        # Simulate a slow extraction LLM call (the bug we're fixing).
+        slow_started = asyncio.Event()
+        slow_done = asyncio.Event()
+
+        async def slow_response(*_args, **_kwargs):
+            slow_started.set()
+            await asyncio.sleep(0.5)
+            slow_done.set()
+            return MagicMock(content=json.dumps([
+                {"title": "t", "content": "c", "type": "project"},
+            ]))
+
+        agent.model.response = slow_response
+
+        async def scenario():
+            await hooks.on_agent_start(agent=agent)
+            t0 = asyncio.get_event_loop().time()
+            await hooks.on_agent_end(agent=agent, output="y" * 600)
+            elapsed = asyncio.get_event_loop().time() - t0
+            assert elapsed < 0.1, f"on_agent_end blocked for {elapsed:.3f}s, expected <0.1s"
+            # Yield once so the scheduled task gets a chance to enter slow_response.
+            await asyncio.sleep(0)
+            assert slow_started.is_set(), "background task should have started"
+            assert not slow_done.is_set(), "extraction should still be running"
+            assert len(hooks._bg_tasks) == 1
+            await asyncio.wait_for(slow_done.wait(), timeout=2.0)
+            await asyncio.sleep(0)
+            assert len(hooks._bg_tasks) == 0, "task should self-clean from set"
+
+        asyncio.run(scenario())
+
+    def test_default_mode_blocks_on_agent_end(self):
+        """Default (background=False) awaits extraction synchronously."""
+        hooks = MemoryExtractHooks()
+        agent = MagicMock()
+        agent.agent_id = "test_agent_sync"
+        agent.run_input = "x" * 150
+        agent.workspace = MagicMock()
+        agent.workspace.write_memory_entry = AsyncMock()
+        agent.auxiliary_model = None
+        agent.model = MagicMock()
+
+        completed = []
+
+        async def slow_response(*_args, **_kwargs):
+            await asyncio.sleep(0.2)
+            completed.append(True)
+            return MagicMock(content="[]")
+
+        agent.model.response = slow_response
+
+        async def scenario():
+            await hooks.on_agent_start(agent=agent)
+            await hooks.on_agent_end(agent=agent, output="y" * 600)
+            assert completed == [True], "default mode must complete extraction before returning"
+
+        asyncio.run(scenario())
+
+    def test_prefers_auxiliary_model_over_main_model(self):
+        """Extraction should run on auxiliary_model when configured, not main model."""
+        hooks = MemoryExtractHooks()
+
+        agent = MagicMock()
+        agent.agent_id = "test_agent_aux"
+        agent.run_input = "x" * 150
+        agent.workspace = MagicMock()
+        agent.workspace.write_memory_entry = AsyncMock()
+        agent.model = MagicMock()
+        agent.model.response = AsyncMock(return_value=MagicMock(content="[]"))
+        agent.auxiliary_model = MagicMock()
+        agent.auxiliary_model.response = AsyncMock(return_value=MagicMock(content="[]"))
+
+        asyncio.run(hooks.on_agent_start(agent=agent))
+        asyncio.run(hooks.on_agent_end(agent=agent, output="y" * 600))
+
+        agent.auxiliary_model.response.assert_awaited_once()
+        agent.model.response.assert_not_called()
+
+    def test_falls_back_to_main_model_when_no_auxiliary(self):
+        """When auxiliary_model is None, extraction uses agent.model."""
+        hooks = MemoryExtractHooks()
+
+        agent = MagicMock()
+        agent.agent_id = "test_agent_fallback"
+        agent.run_input = "x" * 150
+        agent.workspace = MagicMock()
+        agent.workspace.write_memory_entry = AsyncMock()
+        agent.auxiliary_model = None
+        agent.model = MagicMock()
+        agent.model.response = AsyncMock(return_value=MagicMock(content="[]"))
+
+        asyncio.run(hooks.on_agent_start(agent=agent))
+        asyncio.run(hooks.on_agent_end(agent=agent, output="y" * 600))
+
+        agent.model.response.assert_awaited_once()
+
     def test_extract_and_save_passes_global_sync_flag(self):
         """Extracted user memories should pass global sync when enabled."""
         hooks = MemoryExtractHooks(sync_memories_to_global_agent_md=True)

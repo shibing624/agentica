@@ -701,6 +701,7 @@ class TestRunInputCrossRoundFix(unittest.TestCase):
         agent = MagicMock()
         agent.agent_id = "test"
         agent.run_input = None
+        agent.auxiliary_model = None  # force fallback to agent.model
         agent.model = MagicMock()
         agent.workspace = MagicMock()
 

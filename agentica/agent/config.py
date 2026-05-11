@@ -106,6 +106,12 @@ class WorkspaceMemoryConfig:
     # Auto-archive conversation to workspace after each run() (zero LLM cost,
     # just appends raw messages to conversations/ directory).
     auto_archive: bool = False
+    # When auto_extract_memory is on, run the extraction LLM call as a
+    # fire-and-forget background task instead of blocking on_agent_end.
+    # Safe ONLY in long-running event loops (FastAPI / asyncio.run). Under
+    # run_sync()/run_stream_sync() the temp loop closes before the task
+    # completes and memories are silently dropped — keep this False there.
+    auto_extract_memory_background: bool = False
     # Auto-extract memories from conversation after each run() using an LLM call.
     # Only fires when the LLM didn't call save_memory during the run.
     # Costs one extra LLM request per run (mirrors CC's extractMemories service).
