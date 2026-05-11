@@ -1,6 +1,6 @@
 # Agentica Public API（Tier 稳定度合约）
 
-> **适用版本**：v1.4.0 及之后
+> **适用版本**：v1.4.3 及之后
 > **维护原则**：每次发版前检查本文档与代码的一致性。未列出的符号均视为 Internal，不承诺稳定。
 
 ---
@@ -248,7 +248,12 @@ from agentica.workflow import Workflow
 
 # 技能 / 经验（自进化能力）
 from agentica.skills import SkillRegistry
-from agentica.experience import ExperienceCompiler, SkillEvolutionManager
+from agentica.experience import (
+    ExperienceCompiler,
+    SkillEvolutionManager,
+    SkillLifecycleHooks,        # v1.4.3+ 扩展协议（admission / promotion / failure）
+    NoopSkillLifecycleHooks,    # 默认 no-op 实现
+)
 
 # 压缩（引擎内部，尽量不直接依赖）
 from agentica.compression import CompressionManager

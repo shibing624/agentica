@@ -5,27 +5,23 @@ repo_url: https://github.com/shibing624/agentica
 repo_name: shibing624/agentica
 
 theme:
-  name: material
-  language: zh
-  palette:
-    scheme: default
-    primary: white
-    accent: indigo
+  name: readthedocs
+  locale: zh
+  highlightjs: true
+  hljs_languages:
+    - python
+    - bash
+    - yaml
+    - json
+    - shell
+    - markdown
+  navigation_depth: 3
+  collapse_navigation: false
+  titles_only: false
+  sticky_navigation: true
+  prev_next_buttons_location: bottom
+  include_homepage_in_sidebar: true
   favicon: assets/favicon.png
-  icon:
-    logo: material/robot-happy
-  features:
-    - navigation.tabs
-    - navigation.sections
-    - navigation.expand
-    - navigation.path
-    - navigation.top
-    - navigation.indexes
-    - navigation.footer
-    - search.highlight
-    - content.code.copy
-    - content.code.select
-    - toc.integrate
 
 nav:
   - Home: index.md
