@@ -3,7 +3,7 @@
 **轻量级、功能强大的 Python 框架，用于构建自主 AI 智能体。**
 
 <div align="center">
-  <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/logo.png" height="60" alt="Logo">
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/logo.png" height="60" alt="Logo">
 </div>
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
@@ -24,7 +24,7 @@
 ## 系统架构
 
 <div align="center">
-  <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/architecturev2.jpg" alt="Architecture" width="600" />
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/architecturev2.jpg" alt="Architecture" width="600" />
 </div>
 
 ## 快速导航

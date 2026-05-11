@@ -95,9 +95,18 @@ class Model(ABC):
 ```python
 from agentica.model.providers import create_provider
 
-model = create_provider("deepseek", api_key="...")
-model = create_provider("qwen", api_key="...")
-model = create_provider("zhipuai", api_key="...")
+# Full param shape: provider slug + id (model name) + api_key + base_url(optional)
+model = create_provider(
+    "deepseek",
+    id="deepseek-v4-flash",
+    api_key="sk-xxx",                              # 也可不传，自动读 DEEPSEEK_API_KEY
+    base_url="https://api.deepseek.com",           # 可选；私有部署/代理时覆盖
+)
+
+# 其他 provider 同样调用方式，slug + id 即可
+model = create_provider("qwen",    id="qwen-max",          api_key="sk-xxx")
+model = create_provider("zhipuai", id="glm-4.7-flash",     api_key="sk-xxx")
+model = create_provider("ark",     id="doubao-1.5-pro-32k", api_key="sk-xxx")  # 火山引擎
 ```
 
 支持: deepseek, qwen, zhipuai, moonshot, ark, together, xai, yi, nvidia, sambanova, groq, cerebras, mistral
