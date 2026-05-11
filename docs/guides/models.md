@@ -8,11 +8,11 @@ Agentica 支持 20+ 模型提供商，所有模型类遵循统一接口，可即
 |------|--------|---------|----------|
 | `OpenAIChat` | OpenAI | gpt-4o-mini | `OPENAI_API_KEY` |
 | `DeepSeek` | DeepSeek | deepseek-chat | `DEEPSEEK_API_KEY` |
-| `ZhipuAI` | 智谱 AI | glm-4.7-flash | `ZHIPUAI_API_KEY` |
+| `ZhipuAI` | 智谱 AI | glm-4.7-flash | `ZAI_API_KEY` (or `ZHIPUAI_API_KEY`) |
 | `Claude` | Anthropic | claude-sonnet-4-20250514 | `ANTHROPIC_API_KEY` |
 | `Qwen` | 阿里通义 | qwen-plus | `DASHSCOPE_API_KEY` |
 | `Moonshot` | Moonshot | moonshot-v1-128k | `MOONSHOT_API_KEY` |
-| `Doubao` | 字节豆包 | doubao-pro-32k | `DOUBAO_API_KEY` |
+| `Ark` | 火山引擎（豆包系列） | doubao-pro-32k / doubao-1.5-pro-32k | `ARK_API_KEY` |
 | `KimiChat` | Kimi Coding | k2p5 | `KIMI_API_KEY` |
 | `Yi` | 零一万物 | yi-lightning | `YI_API_KEY` |
 | `XAI` | xAI | grok-3 | `XAI_API_KEY` |
@@ -26,7 +26,7 @@ Agentica 支持 20+ 模型提供商，所有模型类遵循统一接口，可即
 
 ```bash
 export OPENAI_API_KEY="sk-xxx"
-export ZHIPUAI_API_KEY="your-key"
+export ZAI_API_KEY="your-key"
 ```
 
 ```python

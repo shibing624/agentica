@@ -67,7 +67,7 @@
 
 ```bash
 pip install -U agentica
-export ZHIPUAI_API_KEY="your-api-key"
+export ZAI_API_KEY="your-api-key"
 ```
 
 ```python

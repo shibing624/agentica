@@ -151,7 +151,7 @@ def _make_model():
     from dotenv import load_dotenv
     load_dotenv()
     model_name = os.environ.get("ARK_MODEL_NAME") or "deepseek-v3-2"
-    return create_provider("doubao", id=model_name)
+    return create_provider("ark", id=model_name)
 
 
 def build_evo_agent(workspace: Workspace) -> Agent:
@@ -412,7 +412,7 @@ async def main() -> None:
         print("Set ARK_API_KEY in .env first.")
         sys.exit(1)
     model_name = os.environ.get("ARK_MODEL_NAME") or "deepseek-v3-2"
-    print(f"[model] provider=doubao(Ark)  id={model_name}")
+    print(f"[model] provider=ark(Volcengine)  id={model_name}")
 
     if WS_PATH.exists():
         shutil.rmtree(WS_PATH)

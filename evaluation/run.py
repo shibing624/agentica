@@ -21,7 +21,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica import Agent, OpenAIChat, ZhipuAIChat, Message, PromptConfig
-from agentica import DoubaoChat
+from agentica import ArkChat
 from agentica.tools.buildin_tools import get_builtin_tools
 from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA, SYSTEM_PROMPT_MULTI
 
@@ -207,7 +207,7 @@ async def evaluate_instance(
     try:
         # Create Agent with built-in tools
         agent = Agent(
-            model=DoubaoChat(id=model_name,api_key='89438f33-b401-4540-8558-6027344ef361'),
+            model=ArkChat(id=model_name),
             debug=debug,
             tools=get_builtin_tools(
                 include_web_search=True,

@@ -11,7 +11,7 @@ from typing import List, Optional, Any
 
 from rich.console import Console
 
-from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, DoubaoChat
+from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, ArkChat
 from agentica.agent.config import (
     ExperienceConfig,
     SkillUpgradeConfig,
@@ -128,7 +128,7 @@ MODEL_REGISTRY = {
     'zhipuai': ZhipuAIChat,
     'deepseek': DeepSeekChat,
     'yi': YiChat,
-    'doubao': DoubaoChat,
+    'ark': ArkChat,
 }
 
 # Example models for each provider (for /model command display)
@@ -139,7 +139,7 @@ EXAMPLE_MODELS = {
     'zhipuai': ['glm-5', 'glm-4-flash', 'glm-4.7-flash'],
     'deepseek': ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner', 'deepseek-chat'],
     'yi': ['yi-lightning', 'yi-large'],
-    'doubao': ['doubao-1.5-pro-32k', 'doubao-1.5-lite-32k', 'doubao-1.5-vision-pro-32k'],
+    'ark': ['doubao-1.5-pro-32k', 'doubao-1.5-lite-32k', 'doubao-1.5-vision-pro-32k'],
 }
 
 

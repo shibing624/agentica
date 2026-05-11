@@ -13,5 +13,5 @@ from agentica.embedding.openai import OpenAIEmbedding
 class ZhipuAIEmbedding(OpenAIEmbedding):
     model: str = "embedding-3"
     dimensions: int = 2048
-    api_key: Optional[str] = getenv("ZHIPUAI_API_KEY")
+    api_key: Optional[str] = getenv("ZAI_API_KEY") or getenv("ZHIPUAI_API_KEY")
     base_url: str = "https://open.bigmodel.cn/api/paas/v4"

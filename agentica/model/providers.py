@@ -115,12 +115,12 @@ register_provider("deepseek", ProviderConfig(
     models=["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-reasoner", "deepseek-chat"],
 ))
 
-register_provider("doubao", ProviderConfig(
-    name="Doubao",
+register_provider("ark", ProviderConfig(
+    name="Ark",
     default_model=getenv("ARK_MODEL_NAME", "doubao-1.5-pro-32k"),
     base_url="https://ark.cn-beijing.volces.com/api/v3",
     api_key_env="ARK_API_KEY",
-    provider="ByteDance",
+    provider="ByteDance Volcengine Ark",
     models=["doubao-1.5-pro-32k", "doubao-pro-32k", "doubao-lite-32k"],
 ))
 
@@ -189,8 +189,8 @@ register_provider("zhipuai", ProviderConfig(
     name="ZhipuAI",
     default_model="glm-4.7-flash",
     base_url="https://open.bigmodel.cn/api/paas/v4",
-    api_key_env="ZHIPUAI_API_KEY",
-    api_key_env_fallback="ZAI_API_KEY",
+    api_key_env="ZAI_API_KEY",
+    api_key_env_fallback="ZHIPUAI_API_KEY",
     models=["glm-4.7-flash", "glm-4-plus", "glm-4-long", "glm-4-flashx", "glm-4-flash", "glm-4-air", "glm-4-airx", "glm-4", "glm-5.1"],
 ))
 

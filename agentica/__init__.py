@@ -92,10 +92,10 @@ def MoonshotChat(**kwargs):
 
 Moonshot = MoonshotChat
 
-def DoubaoChat(**kwargs):
-    return create_provider(_api_registry.PROVIDER_ALIAS_TO_SLUG["DoubaoChat"], **kwargs)
+def ArkChat(**kwargs):
+    return create_provider(_api_registry.PROVIDER_ALIAS_TO_SLUG["ArkChat"], **kwargs)
 
-Doubao = DoubaoChat
+Ark = ArkChat
 
 def TogetherChat(**kwargs):
     return create_provider(_api_registry.PROVIDER_ALIAS_TO_SLUG["TogetherChat"], **kwargs)

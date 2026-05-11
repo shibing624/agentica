@@ -15,7 +15,7 @@ from agentica import (
     DeepSeek,           # deepseek-chat, deepseek-reasoner
     Qwen,               # qwen-plus, qwen-turbo
     Moonshot,           # moonshot-v1-128k
-    Doubao,             # doubao-pro-32k
+    Ark,                # 火山引擎，跑 doubao-pro-32k 等
     Yi,                 # yi-large
 
     # 海外模型
@@ -100,7 +100,7 @@ model = create_provider("qwen", api_key="...")
 model = create_provider("zhipuai", api_key="...")
 ```
 
-支持: deepseek, qwen, zhipuai, moonshot, doubao, together, xai, yi, nvidia, sambanova, groq, cerebras, mistral
+支持: deepseek, qwen, zhipuai, moonshot, ark, together, xai, yi, nvidia, sambanova, groq, cerebras, mistral
 
 ## Model 内置安全机制
 

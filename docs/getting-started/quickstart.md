@@ -129,7 +129,7 @@ from agentica import (
     Claude,           # claude-sonnet-4-20250514
     Qwen,             # qwen-plus, qwen-turbo
     Moonshot,         # moonshot-v1-128k
-    Doubao,           # doubao-pro-32k
+    Ark,              # 火山引擎，跑 doubao-pro-32k 等
     Ollama,           # 本地模型
 )
 

@@ -90,7 +90,7 @@ _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
     "qwen-turbo":           {"input": 0.05,  "output": 0.20,  "cache_read": 0.00,  "cache_write": 0.00, "context_window": 1000000},
     "qwen-plus":            {"input": 0.40,  "output": 1.20,  "cache_read": 0.00,  "cache_write": 0.00, "context_window": 1000000},
     "qwen-max":             {"input": 1.60,  "output": 6.40,  "cache_read": 0.00,  "cache_write": 0.00, "context_window": 32768},
-    # ---- Doubao / Seed (ByteDance) ----
+    # ---- Ark (Volcengine) — Doubao / Seed family from ByteDance ----
     "doubao-seed-2.0-pro":  {"input": 0.45,  "output": 2.24,  "cache_read": 0.09,  "cache_write": 0.00, "context_window": 256000},
     "doubao-seed-2.0-lite": {"input": 0.15,  "output": 0.87,  "cache_read": 0.00,  "cache_write": 0.00, "context_window": 256000},
     "doubao-seed-1.8":      {"input": 0.11,  "output": 0.29,  "cache_read": 0.00,  "cache_write": 0.00, "context_window": 224000},

@@ -198,7 +198,7 @@ class OpenAIChat(Model):
 
         Inspects:
         - ``reasoning_effort`` (OpenAI o-series, gpt-5.x)
-        - ``extra_body.thinking`` (DeepSeek, Doubao: ``{"type": "enabled"|"disabled", ...}``)
+        - ``extra_body.thinking`` (DeepSeek, Ark/Doubao: ``{"type": "enabled"|"disabled", ...}``)
         - ``extra_body.enable_thinking`` (Qwen / DashScope-compatible)
         """
         details: List[str] = []

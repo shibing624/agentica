@@ -15,7 +15,7 @@ lifecycle:
 
 Run:
     export ARK_API_KEY=...
-    export VAG_DEMO_PROVIDER=doubao
+    export VAG_DEMO_PROVIDER=ark
     export VAG_DEMO_MODEL=deepseek-v3.2
     python examples/self_evolution/02_vag_skill_lifecycle.py
 
@@ -165,13 +165,13 @@ def build_demo_model():
     from dotenv import load_dotenv
 
     load_dotenv()
-    provider = os.environ.get("VAG_DEMO_PROVIDER", "doubao")
+    provider = os.environ.get("VAG_DEMO_PROVIDER", "ark")
     model_id = (
         os.environ.get("VAG_DEMO_MODEL")
         or os.environ.get("ARK_MODEL_NAME")
         or "deepseek-v3.2"
     )
-    if provider == "doubao" and not os.environ.get("ARK_API_KEY"):
+    if provider == "ark" and not os.environ.get("ARK_API_KEY"):
         raise RuntimeError(
             "Set ARK_API_KEY in .env or environment, or run offline with "
             "VAG_DEMO_USE_FAKE_LLM=1."

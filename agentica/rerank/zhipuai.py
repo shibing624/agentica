@@ -18,7 +18,7 @@ class ZhipuAIRerank(Rerank):
 
     Args:
         model: ZhipuAI rerank model name
-        api_key: ZhipuAI API key (or set ZHIPUAI_API_KEY env var)
+        api_key: ZhipuAI API key (or set ZAI_API_KEY env var; ZHIPUAI_API_KEY also accepted)
         api_url: API endpoint URL
         top_n: Maximum number of documents to return
     """
@@ -28,7 +28,7 @@ class ZhipuAIRerank(Rerank):
     top_n: Optional[int] = None
 
     def _get_api_key(self) -> str:
-        return self.api_key or getenv("ZHIPUAI_API_KEY") or ""
+        return self.api_key or getenv("ZAI_API_KEY") or getenv("ZHIPUAI_API_KEY") or ""
 
     def _rerank(self, query: str, documents: List[Document]) -> List[Document]:
         if not documents:

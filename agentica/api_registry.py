@@ -7,7 +7,7 @@
 PROVIDER_ALIAS_TO_SLUG = {
     "DeepSeekChat": "deepseek",
     "MoonshotChat": "moonshot",
-    "DoubaoChat": "doubao",
+    "ArkChat": "ark",
     "TogetherChat": "together",
     "GrokChat": "xai",
     "YiChat": "yi",
@@ -18,7 +18,7 @@ PROVIDER_ALIAS_TO_SLUG = {
 PROVIDER_LEGACY_ALIAS_TO_FACTORY = {
     "DeepSeek": "DeepSeekChat",
     "Moonshot": "MoonshotChat",
-    "Doubao": "DoubaoChat",
+    "Ark": "ArkChat",
     "Together": "TogetherChat",
     "Grok": "GrokChat",
     "Yi": "YiChat",
@@ -28,7 +28,7 @@ PROVIDER_LEGACY_ALIAS_TO_FACTORY = {
 
 PROVIDER_ALIAS_EXPORTS = [
     "DeepSeekChat", "DeepSeek", "MoonshotChat", "Moonshot",
-    "DoubaoChat", "Doubao", "TogetherChat", "Together",
+    "ArkChat", "Ark", "TogetherChat", "Together",
     "GrokChat", "Grok", "YiChat", "Yi", "QwenChat", "Qwen",
     "ZhipuAIChat", "ZhipuAI",
 ]
@@ -177,7 +177,7 @@ LAZY_ATTR_OVERRIDES = {
     "LiteLLM": "LiteLLMChat",
     "DeepSeek": "DeepSeekChat",
     "Moonshot": "MoonshotChat",
-    "Doubao": "DoubaoChat",
+    "Ark": "ArkChat",
     "Yi": "YiChat",
     "Together": "TogetherChat",
     "Xai": "XaiChat",

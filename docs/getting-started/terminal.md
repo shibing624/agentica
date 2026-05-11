@@ -50,7 +50,7 @@ agentica --model_provider azure     --model_name gpt-4o
 agentica --model_provider zhipuai   --model_name glm-4.7-flash    # 免费
 agentica --model_provider deepseek  --model_name deepseek-chat
 agentica --model_provider moonshot  --model_name moonshot-v1-128k
-agentica --model_provider doubao    --model_name doubao-1.5-pro-32k
+agentica --model_provider ark       --model_name doubao-1.5-pro-32k
 agentica --model_provider ollama    --model_name llama3.1          # 本地，无需 API Key
 ```
 

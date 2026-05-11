@@ -17,7 +17,7 @@ DEFAULT_PROVIDER_ORDER = (
     "openai",
     "anthropic",
     "deepseek",
-    "doubao",
+    "ark",
     "zhipuai",
     "qwen",
     "moonshot",
