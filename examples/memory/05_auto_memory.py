@@ -237,6 +237,18 @@ async def demo_combined():
 
     await agent.print_response("What are the best practices for chunking strategies?")
 
+    # Turn 3: drop a side-note that does NOT say "remember" but contains a
+    # reference-type fact (external tool URL). The LLM will not call
+    # save_memory because the user did not ask for it. After the turn the
+    # background MemoryExtractHooks pipeline kicks in: auxiliary_model reads
+    # the conversation and emits a reference memory, which gets written to
+    # workspace via write_memory_entry. This is the path you should see in
+    # the logs (Auto-extracted memory + write_memory_entry).
+    await agent.print_response(
+        "By the way, my team tracks everything in Notion at notion.so/our-team. "
+        "Anyway, back to chunking — does fixed-size or recursive splitter work better for code?"
+    )
+
     # background=True schedules extraction via asyncio.create_task. In a real
     # FastAPI server you simply return the response and the task finishes on
     # its own. In this synchronous demo we explicitly drain pending tasks so
@@ -275,9 +287,9 @@ async def main():
 =================================================================
 """)
 
-    await demo_auto_memory()
-    await demo_multi_user()
-    await demo_session_summary()
+    # await demo_auto_memory()
+    # await demo_multi_user()
+    # await demo_session_summary()
     await demo_combined()
 
     print("\n" + "=" * 60)
