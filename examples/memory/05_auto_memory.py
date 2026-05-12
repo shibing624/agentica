@@ -205,7 +205,7 @@ async def demo_combined():
     # auxiliary_model: only used by MemoryExtractHooks for the extraction
     # sub-call. Falls back to the main model when DEEPSEEK_API_KEY is missing.
     auxiliary_model = (
-        create_provider("deepseek") if os.getenv("DEEPSEEK_API_KEY") else None
+        create_provider("deepseek", id='deepseek-v4-flash', extra_body={'thinking': {'type': 'disabled'}}) if os.getenv("DEEPSEEK_API_KEY") else None
     )
 
     agent = Agent(
@@ -221,6 +221,7 @@ async def demo_combined():
         ),
         working_memory=WorkingMemory.with_summary(),
         add_history_to_context=True,
+        debug=True,
     )
 
     print(
