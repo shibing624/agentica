@@ -7,8 +7,10 @@
 import json
 import re
 from collections import OrderedDict
+from datetime import date, timedelta
+from pathlib import Path
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
@@ -237,8 +239,10 @@ class BuiltinMemoryTool(Tool):
     """
 
     MEMORY_SYSTEM_PROMPT: str = ""
-    RECENT_MEMORY_FALLBACK_LIMIT: int = 10
-    LOW_CONFIDENCE_SEARCH_SCORE: float = 0.25
+    DEFAULT_SEARCH_LIMIT: int = 10
+    DEFAULT_MAX_SEARCH_CHARS: int = 6000
+    DEFAULT_CONVERSATION_DAYS: int = 7
+    MIN_SEARCH_SCORE: float = 0.1
 
     def __init__(self):
         super().__init__(name="builtin_memory_tool")
@@ -251,6 +255,8 @@ class BuiltinMemoryTool(Tool):
         ## Long-term Memory
 
         You have access to `save_memory` and `search_memory` tools for persistent memory across sessions.
+        `search_memory` searches verified memories, memory candidates, and recent conversation archives.
+        Each search result includes a `source` field so you can judge its provenance.
 
         Memories capture context NOT derivable from the current project state.
         Code patterns, architecture, git history, and file structure are derivable
@@ -340,52 +346,155 @@ class BuiltinMemoryTool(Tool):
         logger.debug(f"Memory saved: {title} -> {filepath}")
         return f"Memory saved: '{title}' (type: {memory_type}) -> {filepath}"
 
-    def search_memory(self, query: str, limit: int = 5) -> str:
-        """Search existing long-term memories by keyword.
+    def search_memory(
+        self,
+        query: str,
+        limit: int = DEFAULT_SEARCH_LIMIT,
+        max_chars: int = DEFAULT_MAX_SEARCH_CHARS,
+        conversation_days: int = DEFAULT_CONVERSATION_DAYS,
+    ) -> str:
+        """Search verified memories, memory candidates, and recent conversation archives.
 
-        If keyword search only finds low-confidence matches, return recent
-        memories as a fallback so the agent can still answer "recall" requests.
+        All three sources are scored against the query in one shared pool. Each
+        result carries a `source` field ("memory" | "memory_candidate" |
+        "conversation") so the agent can judge provenance. Returns JSON of the
+        top matches, capped by `limit` and total `max_chars`. The aggregated
+        ``MEMORY.md`` is excluded because it is already injected into the
+        system prompt.
         """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")
+        if not query.strip():
+            return "No memories found matching '': empty query."
 
-        results = self._workspace.search_memory(query=query, limit=limit)
-        if self._should_use_recent_fallback(results):
-            recent_results = self._get_recent_memory_fallback()
-            if recent_results:
-                return json.dumps(recent_results, ensure_ascii=False, indent=2)
+        limit = max(1, int(limit))
+        max_chars = max(1, int(max_chars))
+        conversation_days = max(1, int(conversation_days))
 
-        if not results:
+        query_lower = query.lower().strip()
+        scored: List[Tuple[float, float, Dict]] = []
+        for mtime, entry in self._collect_searchable_memory_entries(conversation_days):
+            score = self._workspace.compute_relevance_score(query_lower, entry["content"].lower())
+            if score >= self.MIN_SEARCH_SCORE:
+                entry = {**entry, "score": round(score, 4)}
+                scored.append((score, mtime, entry))
+
+        if not scored:
             return f"No memories found matching '{query}'"
 
-        return json.dumps(results, ensure_ascii=False, indent=2)
+        scored.sort(key=lambda item: (-item[0], -item[1]))
+        return json.dumps(
+            self._limit_search_results([entry for _, _, entry in scored], limit=limit, max_chars=max_chars),
+            ensure_ascii=False,
+            indent=2,
+        )
 
-    def _should_use_recent_fallback(self, results: List[Dict]) -> bool:
-        if not results:
-            return True
-        best_score = max(item["score"] for item in results)
-        return best_score < self.LOW_CONFIDENCE_SEARCH_SCORE
-
-    def _get_recent_memory_fallback(self) -> List[Dict]:
+    def _collect_searchable_memory_entries(
+        self, conversation_days: int
+    ) -> List[Tuple[float, Dict]]:
+        """Collect (mtime, entry) pairs across all three memory sources."""
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")
 
-        memory_files = [
-            path for path in self._workspace.get_all_memory_files()
-            if path.name != self._workspace.config.memory_md
-        ]
-        memory_files.sort(key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+        entries: List[Tuple[float, Dict]] = []
 
-        recent_results = []
-        for file_path in memory_files[:self.RECENT_MEMORY_FALLBACK_LIMIT]:
-            content = file_path.read_text(encoding="utf-8").strip()
-            if not content:
+        for file_path in self._workspace.get_all_memory_files():
+            if file_path.name == self._workspace.config.memory_md:
                 continue
-            recent_results.append({
-                "content": content,
-                "file_path": str(file_path.relative_to(self._workspace.path)),
-                "score": 0.0,
-                "fallback": True,
-                "fallback_reason": "keyword search had no high-confidence matches; returning recent memories",
-            })
-        return recent_results
+            entry = self._build_file_search_entry(file_path, "memory")
+            if entry:
+                entries.append(entry)
+
+        for candidate in self._workspace.list_memory_candidates():
+            entry = self._build_file_search_entry(Path(candidate["path"]), "memory_candidate")
+            if entry:
+                entries.append(entry)
+
+        for file_path in self._get_recent_conversation_files(conversation_days):
+            entries.extend(self._build_conversation_search_entries(file_path))
+
+        return entries
+
+    def _build_file_search_entry(
+        self, file_path: Path, source: str
+    ) -> Optional[Tuple[float, Dict]]:
+        if self._workspace is None:
+            raise RuntimeError("No workspace configured.")
+
+        if not file_path.exists():
+            return None
+        try:
+            content = file_path.read_text(encoding="utf-8").strip()
+        except OSError as e:
+            logger.warning(f"unable to read memory search file {file_path}: {e}")
+            return None
+        content = self._strip_frontmatter(content)
+        if not content:
+            return None
+        return file_path.stat().st_mtime, {
+            "content": content,
+            "file_path": str(file_path.relative_to(self._workspace.path)),
+            "source": source,
+        }
+
+    def _get_recent_conversation_files(self, conversation_days: int) -> List[Path]:
+        if self._workspace is None:
+            raise RuntimeError("No workspace configured.")
+
+        cutoff = date.today() - timedelta(days=conversation_days - 1)
+        recent_files: List[Path] = []
+        for file_path in self._workspace.get_conversation_files():
+            try:
+                file_date = date.fromisoformat(file_path.stem)
+            except ValueError:
+                continue
+            if file_date >= cutoff:
+                recent_files.append(file_path)
+        return recent_files
+
+    def _build_conversation_search_entries(
+        self, file_path: Path
+    ) -> List[Tuple[float, Dict]]:
+        if self._workspace is None:
+            raise RuntimeError("No workspace configured.")
+
+        try:
+            content = file_path.read_text(encoding="utf-8").strip()
+        except OSError as e:
+            logger.warning(f"unable to read conversation archive {file_path}: {e}")
+            return []
+        if not content:
+            return []
+
+        mtime = file_path.stat().st_mtime
+        rel_path = str(file_path.relative_to(self._workspace.path))
+        entries: List[Tuple[float, Dict]] = []
+        for block in reversed(re.split(r"\n\n---\n\n", content)):
+            block = block.strip()
+            if not block:
+                continue
+            entries.append((mtime, {
+                "content": block,
+                "file_path": rel_path,
+                "source": "conversation",
+            }))
+        return entries
+
+    @staticmethod
+    def _strip_frontmatter(content: str) -> str:
+        return re.sub(r"^---\n[\s\S]*?\n---\n", "", content, count=1).strip()
+
+    @staticmethod
+    def _limit_search_results(results: List[Dict], limit: int, max_chars: int) -> List[Dict]:
+        limited = []
+        used_chars = 0
+        for result in results[:limit]:
+            remaining = max_chars - used_chars
+            if remaining <= 0:
+                break
+            content = result["content"]
+            if len(content) > remaining:
+                result = {**result, "content": content[:remaining], "truncated": True}
+            used_chars += len(result["content"])
+            limited.append(result)
+        return limited

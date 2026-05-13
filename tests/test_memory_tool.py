@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import shutil
+from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -130,8 +131,8 @@ class TestBuiltinMemoryTool:
         result = self.tool.search_memory("nonexistent_term_xyz")
         assert "No memories found" in result
 
-    def test_search_memory_falls_back_to_recent_memories(self):
-        """When keyword search misses, return recent memories as context."""
+    def test_search_memory_no_fallback_on_miss(self):
+        """No fallback to recent memories: a true miss returns a no-match message."""
         for i in range(12):
             asyncio.run(self.tool.save_memory(
                 title=f"memory_{i:02d}",
@@ -139,12 +140,75 @@ class TestBuiltinMemoryTool:
                 memory_type="user",
             ))
 
-        result = self.tool.search_memory("nonexistent_term_xyz")
+        result = self.tool.search_memory("你好世界")
+        assert "No memories found" in result
+
+    def test_search_memory_includes_verified_candidates_and_conversations(self):
+        """Verified memories, candidates, and recent conversations share one result pool."""
+        asyncio.run(self.tool.save_memory(
+            title="verified_canteen",
+            content="Verified memory: canteen advertising uses Tencent marketing account setup.",
+            memory_type="project",
+        ))
+        asyncio.run(self.workspace.write_memory_entry(
+            title="candidate_canteen",
+            content="Candidate memory: canteen advertising budget and audience context.",
+            memory_type="project",
+            description="canteen advertising Tencent marketing",
+            source="auto_extract",
+        ))
+        asyncio.run(self.workspace.archive_conversation(
+            [
+                {"role": "user", "content": "老板在聊 canteen advertising 和 Tencent marketing"},
+                {"role": "assistant", "content": "建议先明确品类、预算和投放目标。"},
+            ],
+            session_id="run-1",
+        ))
+
+        result = self.tool.search_memory("canteen advertising Tencent marketing", limit=10)
         parsed = json.loads(result)
 
-        assert len(parsed) == 10
-        assert all(item["fallback"] is True for item in parsed)
-        assert all("Persistent user memory" in item["content"] for item in parsed)
+        sources = {item["source"] for item in parsed}
+        assert {"memory", "memory_candidate", "conversation"}.issubset(sources)
+        assert all("score" in item for item in parsed)
+
+    def test_search_memory_limits_conversations_to_recent_seven_days(self):
+        """Conversation search should ignore older daily archive files by default."""
+        conv_dir = self.workspace._get_user_conversations_dir()
+        conv_dir.mkdir(parents=True, exist_ok=True)
+        old_day = date.today() - timedelta(days=8)
+        recent_day = date.today() - timedelta(days=1)
+        (conv_dir / f"{old_day.isoformat()}.md").write_text(
+            "---\n\n### old\n\n**user**: old canteen advertising note\n",
+            encoding="utf-8",
+        )
+        (conv_dir / f"{recent_day.isoformat()}.md").write_text(
+            "---\n\n### recent\n\n**user**: recent canteen advertising note\n",
+            encoding="utf-8",
+        )
+
+        result = self.tool.search_memory("canteen advertising", limit=10)
+        parsed = json.loads(result)
+
+        contents = "\n".join(item["content"] for item in parsed)
+        assert "recent canteen advertising note" in contents
+        assert "old canteen advertising note" not in contents
+
+    def test_search_memory_respects_total_character_limit(self):
+        """Tool output should be capped so memory recall cannot explode context."""
+        for i in range(5):
+            asyncio.run(self.tool.save_memory(
+                title=f"long_note_{i}",
+                content=f"canteen advertising note {i}: " + ("x" * 500),
+                memory_type="project",
+            ))
+
+        result = self.tool.search_memory("canteen advertising", limit=10, max_chars=600)
+        parsed = json.loads(result)
+
+        total_chars = sum(len(item["content"]) for item in parsed)
+        assert total_chars <= 600
+        assert any(item.get("truncated") for item in parsed)
 
     def test_search_memory_no_workspace(self):
         """Test searching without workspace configured."""
@@ -632,20 +696,20 @@ class TestClearDailyMemory:
 
 
 class TestRelevanceScoring:
-    """Test the shared _compute_relevance_score helper."""
+    """Test the shared compute_relevance_score helper."""
 
     def test_english_word_match(self):
-        score = Workspace._compute_relevance_score("python developer", "python developer at google")
+        score = Workspace.compute_relevance_score("python developer", "python developer at google")
         assert score > 0.5
 
     def test_no_match(self):
-        score = Workspace._compute_relevance_score("rust", "python developer at google")
+        score = Workspace.compute_relevance_score("rust", "python developer at google")
         assert score == 0.0
 
     def test_cjk_bigram_match(self):
-        score = Workspace._compute_relevance_score("部署目标", "部署目标是阿里云")
+        score = Workspace.compute_relevance_score("部署目标", "部署目标是阿里云")
         assert score > 0.0
 
     def test_empty_query(self):
-        score = Workspace._compute_relevance_score("", "some content")
+        score = Workspace.compute_relevance_score("", "some content")
         assert score == 0.0

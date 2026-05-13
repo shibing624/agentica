@@ -1134,7 +1134,7 @@ You are a helpful AI assistant.
         return entries
 
     @staticmethod
-    def _compute_relevance_score(query_lower: str, text_lower: str) -> float:
+    def compute_relevance_score(query_lower: str, text_lower: str) -> float:
         """Compute relevance score using hybrid word + character bigram matching.
 
         Supports both English (word-level) and CJK (character bigram) queries.
@@ -1175,7 +1175,7 @@ You are a helpful AI assistant.
         scored = []
         for entry in entries:
             text = f"{entry['title']} {entry['hook']}".lower()
-            score = self._compute_relevance_score(query_lower, text)
+            score = self.compute_relevance_score(query_lower, text)
             scored.append({**entry, "_score": score})
 
         scored.sort(key=lambda x: -x["_score"])
@@ -1283,7 +1283,7 @@ You are a helpful AI assistant.
             if not content:
                 continue
 
-            score = self._compute_relevance_score(query_lower, content.lower())
+            score = self.compute_relevance_score(query_lower, content.lower())
 
             if score >= min_score:
                 results.append({
@@ -1490,7 +1490,7 @@ You are a helpful AI assistant.
         return CompiledExperienceStore(
             exp_dir=self._get_user_experience_dir(),
             index_path=self._get_user_experience_md(),
-            relevance_scorer=self._compute_relevance_score,
+            relevance_scorer=self.compute_relevance_score,
         )
 
     # ── Backward-compatible delegation methods ────────────────────────────
