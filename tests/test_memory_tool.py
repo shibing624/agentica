@@ -130,6 +130,22 @@ class TestBuiltinMemoryTool:
         result = self.tool.search_memory("nonexistent_term_xyz")
         assert "No memories found" in result
 
+    def test_search_memory_falls_back_to_recent_memories(self):
+        """When keyword search misses, return recent memories as context."""
+        for i in range(12):
+            asyncio.run(self.tool.save_memory(
+                title=f"memory_{i:02d}",
+                content=f"Persistent user memory {i:02d}",
+                memory_type="user",
+            ))
+
+        result = self.tool.search_memory("nonexistent_term_xyz")
+        parsed = json.loads(result)
+
+        assert len(parsed) == 10
+        assert all(item["fallback"] is True for item in parsed)
+        assert all("Persistent user memory" in item["content"] for item in parsed)
+
     def test_search_memory_no_workspace(self):
         """Test searching without workspace configured."""
         tool = BuiltinMemoryTool()

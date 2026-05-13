@@ -19,6 +19,12 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-05-13
+
+### Fixed
+- `search_memory` now falls back to recent long-term memories when keyword search has no high-confidence matches.
+- Langfuse tracing now preserves Agent `user_id` and `session_id` on both root traces and OpenAI wrapper metadata.
+
 ## [1.4.2] - 2026-05-10
 
 ### Fixed

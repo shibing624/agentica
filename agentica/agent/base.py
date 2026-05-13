@@ -118,6 +118,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None
     knowledge: Optional[Any] = None  # Knowledge type
     workspace: Optional[Any] = None  # Workspace type
+    user_id: Optional[str] = None
     work_dir: Optional[str] = None  # Working directory for file operations (used by builtin tools)
     enable_long_term_memory: bool = False  # Whether to enable long-term memory tools and hooks
     enable_experience_capture: bool = False  # Whether to enable experience capture (self-evolution)
@@ -348,10 +349,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.work_dir = work_dir
         self.enable_long_term_memory = enable_long_term_memory
         self.enable_experience_capture = enable_experience_capture
+        self.user_id = user_id
 
         if isinstance(workspace, str):
             from agentica.workspace import Workspace
             self.workspace = Workspace(workspace, user_id=user_id)
+            self.user_id = self.workspace.user_id
         else:
             self.workspace = workspace
             if user_id is not None and workspace is not None:
@@ -361,6 +364,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                         f"Agent user_id={user_id!r} overrides Workspace user_id={existing!r}"
                     )
                 workspace.set_user(user_id)
+            if self.workspace is not None:
+                self.user_id = self.workspace.user_id
 
     def _init_execution(
         self,
@@ -1143,9 +1148,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if self.tool_config.tool_call_limit is not None:
             self.model.tool_call_limit = self.tool_config.tool_call_limit
 
-        # Add agent name to the Model for Langfuse tracing
-        if self.name is not None:
-            self.model.agent_name = self.name
+        # Add trace identity to Models for Langfuse/OpenAI integration.
+        for model in [self.model, *self.fallback_models]:
+            model.user_id = self.user_id
+            model.session_id = self.session_id
+            model.agent_name = self.name
 
     def _build_pre_tool_hook(self):
         """Build the pre-tool hook function based on ToolConfig settings.

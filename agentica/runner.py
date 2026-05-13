@@ -1473,6 +1473,8 @@ class Runner:
 
         with langfuse_trace_context(
             name=trace_name,
+            session_id=agent.session_id,
+            user_id=agent.user_id,
             tags=langfuse_tags,
             input_data=trace_input,
         ) as trace:

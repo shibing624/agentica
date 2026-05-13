@@ -237,6 +237,8 @@ class BuiltinMemoryTool(Tool):
     """
 
     MEMORY_SYSTEM_PROMPT: str = ""
+    RECENT_MEMORY_FALLBACK_LIMIT: int = 10
+    LOW_CONFIDENCE_SEARCH_SCORE: float = 0.25
 
     def __init__(self):
         super().__init__(name="builtin_memory_tool")
@@ -339,13 +341,51 @@ class BuiltinMemoryTool(Tool):
         return f"Memory saved: '{title}' (type: {memory_type}) -> {filepath}"
 
     def search_memory(self, query: str, limit: int = 5) -> str:
-        """Search existing long-term memories by keyword."""
+        """Search existing long-term memories by keyword.
+
+        If keyword search only finds low-confidence matches, return recent
+        memories as a fallback so the agent can still answer "recall" requests.
+        """
         if self._workspace is None:
             raise RuntimeError("No workspace configured.")
 
         results = self._workspace.search_memory(query=query, limit=limit)
+        if self._should_use_recent_fallback(results):
+            recent_results = self._get_recent_memory_fallback()
+            if recent_results:
+                return json.dumps(recent_results, ensure_ascii=False, indent=2)
 
         if not results:
             return f"No memories found matching '{query}'"
 
         return json.dumps(results, ensure_ascii=False, indent=2)
+
+    def _should_use_recent_fallback(self, results: List[Dict]) -> bool:
+        if not results:
+            return True
+        best_score = max(item["score"] for item in results)
+        return best_score < self.LOW_CONFIDENCE_SEARCH_SCORE
+
+    def _get_recent_memory_fallback(self) -> List[Dict]:
+        if self._workspace is None:
+            raise RuntimeError("No workspace configured.")
+
+        memory_files = [
+            path for path in self._workspace.get_all_memory_files()
+            if path.name != self._workspace.config.memory_md
+        ]
+        memory_files.sort(key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+
+        recent_results = []
+        for file_path in memory_files[:self.RECENT_MEMORY_FALLBACK_LIMIT]:
+            content = file_path.read_text(encoding="utf-8").strip()
+            if not content:
+                continue
+            recent_results.append({
+                "content": content,
+                "file_path": str(file_path.relative_to(self._workspace.path)),
+                "score": 0.0,
+                "fallback": True,
+                "fallback_reason": "keyword search had no high-confidence matches; returning recent memories",
+            })
+        return recent_results

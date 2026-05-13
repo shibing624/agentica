@@ -9,6 +9,7 @@ MagicMock attribute issues while testing the full Agent.run() pipeline.
 import asyncio
 import sys
 import os
+from contextlib import contextmanager
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -91,6 +92,38 @@ class TestAgentRun:
             resp = await agent.run("Hi")
             assert resp.model is not None
             assert len(resp.model) > 0
+
+    @pytest.mark.asyncio
+    async def test_run_passes_user_and_session_to_langfuse_trace(self):
+        calls = []
+
+        @contextmanager
+        def fake_langfuse_trace_context(**kwargs):
+            calls.append(kwargs)
+
+            class FakeTrace:
+                def set_output(self, _output):
+                    pass
+
+                def set_metadata(self, _key, _value):
+                    pass
+
+            yield FakeTrace()
+
+        with (
+            patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response()),
+            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
+        ):
+            agent = Agent(
+                name="A",
+                model=_make_model(),
+                user_id="user-1",
+                session_id="session-1",
+            )
+            await agent.run("Hi")
+
+        assert calls[0]["user_id"] == "user-1"
+        assert calls[0]["session_id"] == "session-1"
 
     @pytest.mark.asyncio
     async def test_run_with_message_object(self):
@@ -296,6 +329,24 @@ class TestAsyncFirstNamingConvention:
 
 
 class TestAgentFromParts:
+    def test_agent_retains_user_id_without_workspace(self):
+        agent = Agent(name="A", model=_make_model(), user_id="user-1")
+        assert agent.user_id == "user-1"
+
+    def test_update_model_propagates_trace_identity_to_model(self):
+        model = _make_model()
+        agent = Agent(
+            name="A",
+            model=model,
+            user_id="user-1",
+            session_id="session-1",
+        )
+        agent.update_model()
+
+        assert model.user_id == "user-1"
+        assert model.session_id == "session-1"
+        assert model.agent_name == "A"
+
     def test_from_parts_groups_constructor_surface(self):
         agent = Agent.from_parts(
             definition=AgentDefinition(
