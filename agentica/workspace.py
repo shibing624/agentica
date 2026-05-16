@@ -96,6 +96,14 @@ class Workspace:
         >>> await workspace.write_memory_entry("style", "Bob prefers detailed explanations", "user")
     """
 
+    # Sentinel for the "single-user CLI / local install" mode. When
+    # workspace.user_id == DEFAULT_USER_ID, cross-session AGENTS.md and
+    # related artifacts use the home-global path (~/.agentica/AGENTS.md);
+    # any other user_id routes them to workspace_root/users/{user_id}/.
+    # This prevents tenant-A preferences leaking into tenant-B's prompts
+    # when the SDK is embedded in a multi-tenant service.
+    DEFAULT_USER_ID = "default"
+
     # Global config files (shared across all users)
     # Templates are intentionally minimal — boilerplate ("Friendly and
     # professional", default code-verification recipes) pollutes every
@@ -156,7 +164,7 @@ class Workspace:
         self.path = Path(path).expanduser().resolve()
         self.config = config or WorkspaceConfig()
         # Default to 'default' user if not specified
-        self._user_id = user_id if user_id else "default"
+        self._user_id = user_id if user_id else self.DEFAULT_USER_ID
         # Per-file locks for concurrent archive writes
         self._archive_locks: Dict[str, asyncio.Lock] = {}
         # Flag to avoid redundant _initialize_user_dir calls
@@ -176,7 +184,7 @@ class Workspace:
         Args:
             user_id: User ID, defaults to 'default' if None
         """
-        new_id = user_id if user_id else "default"
+        new_id = user_id if user_id else self.DEFAULT_USER_ID
         if new_id != self._user_id:
             self._user_initialized = False
         self._user_id = new_id
@@ -461,8 +469,16 @@ class Workspace:
         found: List[Tuple[str, str]] = []
         seen_paths: set[Path] = set()
 
-        global_agent_md = Path(AGENTICA_HOME) / "AGENTS.md"
-        if not global_agent_md.is_file():
+        # Single source of truth for "cross-session AGENTS.md for this
+        # workspace user". Returns ~/.agentica/AGENTS.md only when running
+        # in default single-user mode; otherwise the per-user copy under
+        # workspace_root/users/{user_id}/AGENTS.md. _get_global_agent_md_path
+        # already mkdirs the parent, so we just check is_file() and look
+        # for the .md/.AGENT.md fallback.
+        global_agent_md = self._get_global_agent_md_path()
+        if not global_agent_md.is_file() and self._user_id == self.DEFAULT_USER_ID:
+            # Legacy fallback only applies to the home-global mode where
+            # users may have an old AGENT.md (singular) file.
             global_agent_md = Path(AGENTICA_HOME) / "AGENT.md"
         if global_agent_md.is_file():
             try:
@@ -652,10 +668,27 @@ class Workspace:
     )
 
     def _get_global_agent_md_path(self) -> Path:
-        """Return the user-global AGENTS.md path loaded into prompts."""
-        global_home = Path(AGENTICA_HOME).expanduser()
-        global_home.mkdir(parents=True, exist_ok=True)
-        return global_home / "AGENTS.md"
+        """Return the cross-session AGENTS.md path for the current workspace user.
+
+        Semantics: "global" here means "cross-session for THIS user", not
+        "shared across users". Routing:
+
+          - Default workspace (user_id == "default", CLI / single-user
+            install): ``~/.agentica/AGENTS.md`` — preserves the historical
+            CLI behavior where one user installs the SDK on their machine.
+          - Multi-tenant workspace (workspace.user_id explicitly set):
+            ``workspace_root/users/{user_id}/AGENTS.md`` — keeps cross-
+            session preferences isolated per tenant. Critical for SaaS
+            deployments: a user_id A's confirmed preference must never
+            be injected into user_id B's system prompt.
+        """
+        if self._user_id == self.DEFAULT_USER_ID:
+            global_home = Path(AGENTICA_HOME).expanduser()
+            global_home.mkdir(parents=True, exist_ok=True)
+            return global_home / "AGENTS.md"
+        user_dir = self._get_user_path()
+        user_dir.mkdir(parents=True, exist_ok=True)
+        return user_dir / "AGENTS.md"
 
     @staticmethod
     def _parse_frontmatter(content: str) -> Dict[str, str]:

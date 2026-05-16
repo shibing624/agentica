@@ -380,12 +380,14 @@ class MemoryExtractHooks(RunHooks):
         buf.append((user_msg, assistant_msg, save_memory_called))
 
         # Periodic boundary: only flush if we've accumulated N turns AND
-        # the global frequency cap allows it. Both gates are intentional —
+        # the per-user frequency cap allows it. Both gates are intentional —
         # every_n_turns bounds work-per-session; min_seconds_between bounds
-        # work-per-wallclock across concurrent agents.
+        # work-per-wallclock for this user_id. The gate is process-local
+        # and keyed by workspace.user_id so concurrent tenants never
+        # suppress each other.
         if self._every_n_turns == 0 or len(buf) < self._every_n_turns:
             return
-        if extract_state.should_skip(self._STATE_SLOT, self._min_seconds_between):
+        if extract_state.should_skip(workspace.user_id, self._STATE_SLOT, self._min_seconds_between):
             logger.debug(
                 "Memory extraction skipped: last run within %ds window",
                 self._min_seconds_between,
@@ -439,7 +441,7 @@ class MemoryExtractHooks(RunHooks):
         if model is None:
             return
 
-        extract_state.stamp(self._STATE_SLOT)
+        extract_state.stamp(workspace.user_id, self._STATE_SLOT)
         await self._extract_and_save(model, workspace, conversation_text)
 
     async def _extract_and_save(self, model: Any, workspace: Any, conversation_text: str) -> None:
@@ -876,9 +878,10 @@ class ExperienceCaptureHooks(RunHooks):
                     (user_msg, previous_assistant_text, original_task)
                 )
                 model = self._get_classification_model(agent)
-                if model is not None and self._should_flush_judge(session_key):
+                user_id = agent.workspace.user_id if agent.workspace else None
+                if model is not None and self._should_flush_judge(user_id, session_key):
                     await self._flush_judge(
-                        model, event_store, compiled_store, session_key,
+                        model, event_store, compiled_store, session_key, user_id,
                     )
 
         # 2c. Success pattern
@@ -1140,13 +1143,13 @@ class ExperienceCaptureHooks(RunHooks):
         "Window (oldest first):\n"
     )
 
-    def _should_flush_judge(self, session_key: str) -> bool:
+    def _should_flush_judge(self, user_id: str | None, session_key: str) -> bool:
         n = self._config.judge_every_n_turns
         if n <= 0:
             return False
         if len(self._judge_buffers.get(session_key, [])) < n:
             return False
-        if extract_state.should_skip(self._JUDGE_STATE_SLOT, self._config.judge_min_seconds_between):
+        if extract_state.should_skip(user_id, self._JUDGE_STATE_SLOT, self._config.judge_min_seconds_between):
             logger.debug(
                 "Correction judge skipped: last run within %ds window",
                 self._config.judge_min_seconds_between,
@@ -1160,6 +1163,7 @@ class ExperienceCaptureHooks(RunHooks):
         event_store: Any,
         compiled_store: Any,
         session_key: str,
+        user_id: str | None,
     ) -> None:
         """Drain the judge buffer for ``session_key`` and run one batched LLM scan."""
         buf = self._judge_buffers.pop(session_key, [])
@@ -1176,7 +1180,7 @@ class ExperienceCaptureHooks(RunHooks):
             )
         prompt = self._BATCH_JUDGE_PROMPT + "\n\n".join(turn_lines)
 
-        extract_state.stamp(self._JUDGE_STATE_SLOT)
+        extract_state.stamp(user_id, self._JUDGE_STATE_SLOT)
         try:
             response = await model.response([Message(role="user", content=prompt)])
             if not response or not response.content:
@@ -1224,7 +1228,7 @@ class ExperienceCaptureHooks(RunHooks):
             return
         event_store = workspace.get_experience_event_store()
         compiled_store = workspace.get_compiled_experience_store()
-        await self._flush_judge(model, event_store, compiled_store, session_key)
+        await self._flush_judge(model, event_store, compiled_store, session_key, workspace.user_id)
 
     @staticmethod
     async def _persist_feedback_classification(
