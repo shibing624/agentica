@@ -51,10 +51,12 @@ if TYPE_CHECKING:
 #   - one-shot tasks (compute X, draft a line): 1–3 turns
 #   - bug fixes (search → edit → test → verify):  5–15 turns
 #   - feature + tests: 20–50 turns
-# A default of 50 covers ~95% of real /goal usage without forcing the user
-# to /goal resume; pathological loops still get caught by token / wall-clock
-# budgets or the consecutive-parse-failure pause.
-DEFAULT_TURN_BUDGET = 50
+#   - multi-step refactor / migration: 50–100 turns
+# A default of 100 keeps the safety net loose enough that almost no real
+# workflow trips it accidentally — runaway loops are still caught by
+# token / wall-clock budgets (the real cost gate) or by the
+# consecutive-parse-failure pause.
+DEFAULT_TURN_BUDGET = 100
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 
 JUDGE_SYSTEM_PROMPT = (

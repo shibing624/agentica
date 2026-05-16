@@ -45,6 +45,7 @@ nav:
   - Advanced:
       - Hooks: advanced/hooks.md
       - RunConfig: advanced/run-config.md
+      - Standing Goal Loop: advanced/goals.md
       - Guardrails: advanced/guardrails.md
       - Context Compression: advanced/compression.md
       - Skills System: advanced/skills.md

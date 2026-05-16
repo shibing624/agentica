@@ -51,6 +51,7 @@
 | **高级功能** | |
 | [Hooks](advanced/hooks.md) | 生命周期钩子 |
 | [RunConfig](advanced/run-config.md) | 运行时配置（超时、成本、白名单） |
+| [Standing Goal Loop](advanced/goals.md) | `/goal` 长任务循环：自动判断、续跑、token / wall-clock 预算 |
 | [Guardrails](advanced/guardrails.md) | 4 层安全守卫 |
 | [Context Compression](advanced/compression.md) | 上下文压缩 |
 | [Skills](advanced/skills.md) | Markdown Skill 系统 |

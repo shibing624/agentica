@@ -131,6 +131,7 @@ from agentica.tools.shell_tool import ShellTool
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
 - **多智能体** — `Agent.as_tool()`（轻量组合）、Swarm（并行/自治）和 Workflow（确定性编排）
 - **Actor-Critic 精炼** — `refine()` + 多 Critic 并行评审，`SchemaCritic` 程序级零成本验证 / `AgentCritic` 异构强模型把关，循环检测自动早停
+- **`/goal` 长任务循环** — `await agent.run_goal("xxx")` 持续推进，自动判断完成、续跑、暂停；支持 token / wall-clock / turn 三种 hard cap；CLI `/goal /subgoal` 即开即用，详见 [文档](https://shibing624.github.io/agentica/advanced/goals)
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
@@ -452,6 +453,34 @@ agentica skills install /path/to/skill-repo --target-dir ~/.agentica/skills
 如果你安装到自定义目录而不是标准搜索路径，记得把这个目录加入 `AGENTICA_EXTRA_SKILL_PATH`，这样 `DeepAgent` 和 CLI 才会自动发现它。
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/cli_snap.png" width="800" />
+
+### 长任务：`/goal`
+
+让 Agent 持续向一个目标推进，每轮结束自动判断是否完成，没完成就续跑——直到 judge 判 done、预算耗尽、或用户主动停下。
+
+CLI：
+
+```text
+/goal 实现 xxx 功能并跑通 pytest    # 设置目标 + 自动开跑
+/goal status                       # 显示状态、预算、subgoals
+/goal pause | resume | clear
+/subgoal 必须补单测                  # 给目标加验收条件
+```
+
+SDK 一行起飞：
+
+```python
+result = await agent.run_goal(
+    "compute 17+9+16 and state the answer",
+    turn_budget=5,
+    token_budget=2000,
+    wall_clock_budget_sec=60,
+)
+print(result.status, result.reason)   # complete / paused / budget_limited
+print(result.response_content)        # == result.run_response.content or ""
+```
+
+支持 token / wall-clock / turn 三种 hard cap（优先级：budget > tool > judge），模型也可以通过受限工具 `update_goal(status="complete"|"paused")` 自己结束循环。完整说明：[Standing Goal Loop 文档](https://shibing624.github.io/agentica/advanced/goals)，运行示例 `examples/cli/03_goal_loop_demo.py`。
 
 ## Web UI / Gateway
 
