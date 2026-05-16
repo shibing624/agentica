@@ -295,6 +295,7 @@ class TestMemoryExtractHooks:
         agent.session_id = "sess_save"
         agent.run_input = "x" * 250
         agent.workspace = MagicMock()
+        agent.workspace.user_id = "u1"
         agent.auxiliary_model = None
         agent.model = MagicMock()
         agent.model.response = AsyncMock()
@@ -359,6 +360,7 @@ class TestMemoryExtractHooks:
         agent.session_id = "sess_buf"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
+        agent.workspace.user_id = "u1"
         agent.auxiliary_model = None
         agent.model = MagicMock()
         agent.model.response = AsyncMock(return_value=MagicMock(content="[]"))
@@ -366,8 +368,9 @@ class TestMemoryExtractHooks:
         async def scenario():
             await hooks.on_agent_start(agent=agent)
             await hooks.on_agent_end(agent=agent, output="y" * 600)
-            assert "sess_buf" in hooks._buffers, "turn should be buffered for later flush"
-            assert len(hooks._buffers["sess_buf"]) == 1
+            key = ("u1", "sess_buf")
+            assert key in hooks._buffers, "turn should be buffered for later flush"
+            assert len(hooks._buffers[key]) == 1
             agent.model.response.assert_not_called()
 
         asyncio.run(scenario())
@@ -380,6 +383,7 @@ class TestMemoryExtractHooks:
         agent.session_id = "sess_flush"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
+        agent.workspace.user_id = "u1"
         agent.workspace.write_memory_entry = AsyncMock()
         agent.auxiliary_model = None
         agent.model = MagicMock()
@@ -392,7 +396,7 @@ class TestMemoryExtractHooks:
             await hooks.on_agent_start(agent=agent)
             await hooks.on_agent_end(agent=agent, output="z" * 600)
             agent.model.response.assert_awaited_once()
-            assert hooks._buffers.get("sess_flush", []) == []
+            assert hooks._buffers.get(("u1", "sess_flush"), []) == []
 
         asyncio.run(scenario())
 
@@ -404,6 +408,7 @@ class TestMemoryExtractHooks:
         agent.session_id = "sess_pre"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
+        agent.workspace.user_id = "u1"
         agent.workspace.write_memory_entry = AsyncMock()
         agent.auxiliary_model = None
         agent.model = MagicMock()
@@ -427,6 +432,7 @@ class TestMemoryExtractHooks:
         agent.session_id = "sess_aux"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
+        agent.workspace.user_id = "u1"
         agent.workspace.write_memory_entry = AsyncMock()
         agent.model = MagicMock()
         agent.model.response = AsyncMock(return_value=MagicMock(content="[]"))
@@ -448,6 +454,7 @@ class TestMemoryExtractHooks:
         agent.session_id = "sess_fb"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
+        agent.workspace.user_id = "u1"
         agent.workspace.write_memory_entry = AsyncMock()
         agent.auxiliary_model = None
         agent.model = MagicMock()

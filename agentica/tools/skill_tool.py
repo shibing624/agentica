@@ -36,6 +36,7 @@ Usage:
     )
 """
 import json
+import math
 import threading
 import time
 from datetime import datetime
@@ -136,7 +137,6 @@ def _score_skill_usage(usage: dict, name: str, now: float) -> float:
     age_days = max((now - last_used) / 86400.0, 0.0)
     recency = 0.5 ** (age_days / _USAGE_RECENCY_HALF_LIFE_DAYS)
     # Log so a single 100-call burst doesn't permanently freeze the top slot.
-    import math
     frequency = math.log1p(count) / math.log1p(50)  # normalises around 50 calls
     frequency = min(frequency, 1.0)
     return _USAGE_RECENCY_WEIGHT * recency + _USAGE_FREQUENCY_WEIGHT * frequency

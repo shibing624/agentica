@@ -18,6 +18,7 @@ import json
 import os
 import random
 import re
+import tempfile
 import urllib.parse
 from copy import deepcopy
 from typing import (
@@ -606,7 +607,6 @@ class BaseBrowser:
         # tempfile fallback below only guarantees no in-process collision and
         # leaves cleanup to the OS.
         if cache_dir is None:
-            import tempfile
             cache_dir = tempfile.mkdtemp(prefix="agentica-browser-")
         self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)

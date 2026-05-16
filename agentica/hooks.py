@@ -326,6 +326,13 @@ class MemoryExtractHooks(RunHooks):
 
     _STATE_SLOT = "memory_extract"
 
+    # Hard cap on per-session buffer size. With the idle gate, a session
+    # that never satisfies `min_seconds_between` would otherwise let the
+    # buffer grow unboundedly. We keep the most recent _MAX_BUFFER_TURNS
+    # turns and drop older ones (FIFO) — they are the least likely to
+    # still be the user's most relevant context.
+    _MAX_BUFFER_TURNS = 50
+
     def __init__(
         self,
         sync_memories_to_global_agent_md: bool = False,
@@ -339,6 +346,12 @@ class MemoryExtractHooks(RunHooks):
                 0 disables periodic extraction (on_pre_compact still flushes).
             min_seconds_between: Cross-process frequency cap; skip when the
                 previous extraction was less than N seconds ago. 0 disables.
+
+        Multi-tenant note: a single ``MemoryExtractHooks`` instance is safe
+        to share across users because per-session buffers are keyed by
+        ``(workspace.user_id, session_id)``. Even so, every flush stamps the
+        per-user idle gate using the *captured* workspace.user_id, so a
+        flush only writes into the user whose buffer it is draining.
         """
         self._tool_calls: Dict[str, List[str]] = {}  # agent_id -> list of tool names called
         self._sync_memories_to_global_agent_md = sync_memories_to_global_agent_md
@@ -346,8 +359,9 @@ class MemoryExtractHooks(RunHooks):
         self._min_seconds_between = max(0, int(min_seconds_between))
         # Per-session buffer of (user, assistant, save_memory_called) tuples.
         # Drained when a boundary fires; survives across runs in the same
-        # session_id so multi-turn batching works.
-        self._buffers: Dict[str, List[Tuple[str, str, bool]]] = {}
+        # (user_id, session_id) so multi-turn batching works without
+        # cross-tenant collisions when one hooks instance is shared.
+        self._buffers: Dict[Tuple[str, str], List[Tuple[str, str, bool]]] = {}
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         self._tool_calls[agent.agent_id] = []
@@ -358,6 +372,16 @@ class MemoryExtractHooks(RunHooks):
         if agent_id not in self._tool_calls:
             self._tool_calls[agent_id] = []
         self._tool_calls[agent_id].append(tool_name)
+
+    @staticmethod
+    def _session_key(workspace: Any, agent: Any) -> Tuple[str, str]:
+        """Buffer key: (user_id, session_id_or_agent_id).
+
+        Including user_id prevents cross-tenant collisions when one hooks
+        instance is shared and two distinct users happen to mint the same
+        session_id.
+        """
+        return (workspace.user_id, agent.session_id or agent.agent_id)
 
     async def on_agent_end(self, agent: Any, output: Any, **kwargs) -> None:
         """Buffer the turn; flush through the LLM when boundary policy says so."""
@@ -374,10 +398,14 @@ class MemoryExtractHooks(RunHooks):
         if not user_msg and not assistant_msg:
             return
 
-        session_key = agent.session_id or agent.agent_id
+        session_key = self._session_key(workspace, agent)
         save_memory_called = "save_memory" in tool_calls
         buf = self._buffers.setdefault(session_key, [])
         buf.append((user_msg, assistant_msg, save_memory_called))
+        # FIFO cap: drop oldest when over the hard limit so a long-idle
+        # session can't pin unbounded memory waiting for the next flush.
+        if len(buf) > self._MAX_BUFFER_TURNS:
+            del buf[: len(buf) - self._MAX_BUFFER_TURNS]
 
         # Periodic boundary: only flush if we've accumulated N turns AND
         # the per-user frequency cap allows it. Both gates are intentional —
@@ -401,7 +429,7 @@ class MemoryExtractHooks(RunHooks):
         workspace = agent.workspace
         if workspace is None:
             return
-        session_key = agent.session_id or agent.agent_id
+        session_key = self._session_key(workspace, agent)
         if not self._buffers.get(session_key):
             return
         # No idle-gate on pre_compact: this is a "last chance before data loss"
@@ -409,7 +437,7 @@ class MemoryExtractHooks(RunHooks):
         # reduction; data-loss prevention overrides it.
         await self._flush(agent, workspace, session_key)
 
-    async def _flush(self, agent: Any, workspace: Any, session_key: str) -> None:
+    async def _flush(self, agent: Any, workspace: Any, session_key: Tuple[str, str]) -> None:
         """Drain buffer for ``session_key`` and run one LLM extraction over it."""
         buf = self._buffers.pop(session_key, [])
         if not buf:
@@ -441,11 +469,16 @@ class MemoryExtractHooks(RunHooks):
         if model is None:
             return
 
-        extract_state.stamp(workspace.user_id, self._STATE_SLOT)
         await self._extract_and_save(model, workspace, conversation_text)
 
     async def _extract_and_save(self, model: Any, workspace: Any, conversation_text: str) -> None:
-        """Run the LLM extraction call and persist results."""
+        """Run the LLM extraction call and persist results.
+
+        Stamps the idle gate only after the LLM call returns successfully.
+        A failed call (LLM down, JSON error) does not consume the
+        ``min_seconds_between`` window, so the next boundary may retry
+        immediately instead of forfeiting a whole cooldown period.
+        """
         extract_messages = [
             Message(role="user", content=self._EXTRACT_PROMPT + conversation_text),
         ]
@@ -454,6 +487,7 @@ class MemoryExtractHooks(RunHooks):
             model_response = await model.response(extract_messages)
             if not model_response or not model_response.content:
                 return
+            extract_state.stamp(workspace.user_id, self._STATE_SLOT)
 
             # Parse JSON array from response
             text = model_response.content.strip()
@@ -518,6 +552,13 @@ class ExperienceCaptureHooks(RunHooks):
     """
 
     parallelizable = False
+
+    # Hard cap on the per-session judge buffer. With idle-gate throttling
+    # the buffer may keep growing while we wait for the cooldown to clear;
+    # the cap drops the oldest turns (FIFO) so a long-running session
+    # cannot pin unbounded memory or feed a giant prompt to the LLM once
+    # it finally flushes.
+    _MAX_JUDGE_BUFFER_TURNS = 50
 
     # LLM prompt for feedback classification
     _FEEDBACK_CLASSIFY_PROMPT = (
@@ -597,10 +638,13 @@ class ExperienceCaptureHooks(RunHooks):
         # the file has grown since last lookup.
         self._failed_tools_cache: Dict[str, Tuple[int, set]] = {}
         # Per-session buffer of (user_msg, previous_assistant, original_task)
-        # tuples for the batched judge LLM call. The cheap prefilter (explicit
-        # rule prefix + strong negation) still fires per-turn so explicit
-        # corrections aren't delayed; only the LLM fall-through is batched.
-        self._judge_buffers: Dict[str, List[Tuple[str, str, str]]] = {}
+        # tuples for the batched judge LLM call. Keyed by
+        # (workspace.user_id, session_or_agent_id) so a hooks instance shared
+        # across users cannot leak turns into the wrong tenant's batch.
+        # The cheap prefilter (explicit rule prefix + strong negation) still
+        # fires per-turn so explicit corrections aren't delayed; only the
+        # LLM fall-through is batched.
+        self._judge_buffers: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {}
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         """Initialize per-agent capture state."""
@@ -873,12 +917,14 @@ class ExperienceCaptureHooks(RunHooks):
                 # turn for a future flush (boundary policy: every_n_turns or
                 # on_pre_compact). One LLM call later scans the whole window
                 # for corrections, replacing N per-turn calls with 1.
-                session_key = agent.session_id or agent.agent_id
-                self._judge_buffers.setdefault(session_key, []).append(
-                    (user_msg, previous_assistant_text, original_task)
-                )
+                user_id = workspace.user_id
+                session_key = (user_id, agent.session_id or agent.agent_id)
+                jbuf = self._judge_buffers.setdefault(session_key, [])
+                jbuf.append((user_msg, previous_assistant_text, original_task))
+                # FIFO cap: drop oldest when over the hard limit.
+                if len(jbuf) > self._MAX_JUDGE_BUFFER_TURNS:
+                    del jbuf[: len(jbuf) - self._MAX_JUDGE_BUFFER_TURNS]
                 model = self._get_classification_model(agent)
-                user_id = agent.workspace.user_id if agent.workspace else None
                 if model is not None and self._should_flush_judge(user_id, session_key):
                     await self._flush_judge(
                         model, event_store, compiled_store, session_key, user_id,
@@ -1143,7 +1189,11 @@ class ExperienceCaptureHooks(RunHooks):
         "Window (oldest first):\n"
     )
 
-    def _should_flush_judge(self, user_id: str | None, session_key: str) -> bool:
+    def _should_flush_judge(
+        self,
+        user_id: str | None,
+        session_key: Tuple[str, str],
+    ) -> bool:
         n = self._config.judge_every_n_turns
         if n <= 0:
             return False
@@ -1162,10 +1212,14 @@ class ExperienceCaptureHooks(RunHooks):
         model: Any,
         event_store: Any,
         compiled_store: Any,
-        session_key: str,
+        session_key: Tuple[str, str],
         user_id: str | None,
     ) -> None:
-        """Drain the judge buffer for ``session_key`` and run one batched LLM scan."""
+        """Drain the judge buffer for ``session_key`` and run one batched LLM scan.
+
+        Stamps the per-user idle gate only on a successful LLM round-trip so
+        a transient failure doesn't burn the cooldown window.
+        """
         buf = self._judge_buffers.pop(session_key, [])
         if not buf:
             return
@@ -1180,11 +1234,11 @@ class ExperienceCaptureHooks(RunHooks):
             )
         prompt = self._BATCH_JUDGE_PROMPT + "\n\n".join(turn_lines)
 
-        extract_state.stamp(user_id, self._JUDGE_STATE_SLOT)
         try:
             response = await model.response([Message(role="user", content=prompt)])
             if not response or not response.content:
                 return
+            extract_state.stamp(user_id, self._JUDGE_STATE_SLOT)
             text = response.content.strip()
             if text.startswith("```"):
                 text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
@@ -1220,7 +1274,7 @@ class ExperienceCaptureHooks(RunHooks):
         workspace = agent.workspace
         if workspace is None:
             return
-        session_key = agent.session_id or agent.agent_id
+        session_key = (workspace.user_id, agent.session_id or agent.agent_id)
         if not self._judge_buffers.get(session_key):
             return
         model = self._get_classification_model(agent)

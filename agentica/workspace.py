@@ -105,6 +105,22 @@ class Workspace:
     # when the SDK is embedded in a multi-tenant service.
     DEFAULT_USER_ID = "default"
 
+    @staticmethod
+    def sanitize_user_id(user_id: Optional[str]) -> str:
+        """Sanitize a user_id into a path-safe segment.
+
+        Single source of truth for the "(user_id) -> directory segment" mapping.
+        Used by every component that builds a per-user filesystem path
+        (Workspace itself, tool_result_storage, etc.) so two callers can never
+        diverge on the encoding of e.g. ``"alice/bob"``.
+
+        Returns ``DEFAULT_USER_ID`` for None / empty / whitespace-only input.
+        """
+        uid = (user_id or "").strip() if user_id else ""
+        if not uid:
+            return Workspace.DEFAULT_USER_ID
+        return uid.replace("/", "_").replace("\\", "_").replace("..", "_")
+
     # Global config files (shared across all users)
     # Templates are intentionally minimal — boilerplate ("Friendly and
     # professional", default code-verification recipes) pollutes every
@@ -213,8 +229,7 @@ class Workspace:
         Returns:
             Path to users/{user_id}/ directory
         """
-        # Sanitize user_id, replace unsafe characters
-        safe_user_id = self._user_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        safe_user_id = self.sanitize_user_id(self._user_id)
         return self.path / self.config.users_dir / safe_user_id
 
     def _get_user_memory_dir(self) -> Path:
@@ -1644,7 +1659,7 @@ class Workspace:
         if not user_id:
             raise ValueError("user_id cannot be empty")
 
-        safe_user_id = user_id.replace("/", "_").replace("\\", "_").replace("..", "_")
+        safe_user_id = self.sanitize_user_id(user_id)
         user_path = self.path / self.config.users_dir / safe_user_id
 
         if not user_path.exists():

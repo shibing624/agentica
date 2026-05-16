@@ -68,13 +68,15 @@ def _sanitize_path(raw: str) -> str:
     return f"{sanitized[:_MAX_SANITIZED_LENGTH]}-{hash_suffix}"
 
 
-_DEFAULT_USER_ID = "default"
-
-
 def _safe_user_segment(user_id: Optional[str]) -> str:
-    uid = (user_id or _DEFAULT_USER_ID).strip() or _DEFAULT_USER_ID
-    # Match Workspace._get_user_path() sanitization rules so paths line up.
-    return uid.replace("/", "_").replace("\\", "_").replace("..", "_")
+    """Path segment for the per-user spill directory.
+
+    Delegates to ``Workspace.sanitize_user_id`` so persisted tool-result
+    paths line up with ``users/{user_id}/`` exactly, including the
+    "default" sentinel for None / blank input.
+    """
+    from agentica.workspace import Workspace
+    return Workspace.sanitize_user_id(user_id)
 
 
 def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) -> str:
