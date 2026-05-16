@@ -68,7 +68,10 @@ from agentica.cli.commands import (
     CONCURRENT_CMDS,
     PendingQueue,
     IMAGE_EXTENSIONS,
+    _run_async_safe,
+    _detach_goal_tool,
 )
+from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 
 
 # ==================== SessionState ====================
@@ -93,6 +96,13 @@ class SessionState:
     # Background tasks — owned by session, not module-global
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
+    # Standing-goal loop (see agentica/goals.py).
+    goal_manager: Optional[GoalManager] = None
+    goal_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Token + wall-clock baselines for per-turn budget accounting (S2).
+    # We snapshot cumulative CostTracker totals BEFORE each turn and diff
+    # AFTER so the goal loop sees the delta, not the whole run.
+    goal_tokens_baseline: int = 0
 
 
 # ==================== Output bridge for patch_stdout ====================
@@ -413,6 +423,92 @@ def _ocr_images_parallel(image_paths: list) -> str:
     return "\n\n".join(results)
 
 
+# ==================== Goal loop hook ====================
+
+def _maybe_continue_goal(
+    state: "SessionState",
+    pending_queue: PendingQueue,
+    tui_state: dict,
+) -> None:
+    """After each agent turn, decide whether to enqueue a continuation prompt.
+
+    Invariants:
+    - Real user input ALWAYS preempts the goal loop. If any non-continuation,
+      non-internal item is already queued, we defer.
+    - A cancelled agent (Ctrl+C) pauses the goal instead of evaluating —
+      otherwise the judge sees a half-finished response, judges "not done",
+      and the user's cancel immediately gets re-queued.
+    - Empty response: skip (nothing to judge).
+    - GoalManager.evaluate_after_turn() is async; we bridge with _run_async_safe.
+    - token_delta is read from CostTracker totals diffed against the
+      pre-turn baseline; elapsed comes from tui_state["last_turn_seconds"].
+    """
+    mgr = state.goal_manager
+    if mgr is None or not mgr.is_active():
+        return
+
+    agent = state.current_agent
+    if agent is None:
+        return
+
+    if agent._cancelled:
+        mgr.pause(reason="user-interrupted")
+        _cprint("  ⊙ Goal paused (user interrupted).")
+        return
+
+    # User real input takes priority.
+    for item, _ts in pending_queue.peek_all_with_timestamps():
+        if isinstance(item, tuple):
+            text = str(item[0]) if item[0] != "__BTW__" else ""
+        else:
+            text = str(item)
+        if not text or text.startswith("__"):
+            continue
+        if text.startswith(CONTINUATION_PROMPT_PREFIX):
+            continue
+        return  # real user message waiting — let it run first
+
+    final_text = ""
+    if agent.run_response is not None:
+        final_text = agent.run_response.content or ""
+    if not final_text.strip():
+        return
+
+    # Compute per-turn token delta from the CostTracker (cumulative).
+    token_delta = 0
+    if agent.run_response is not None and agent.run_response.cost_tracker is not None:
+        ct = agent.run_response.cost_tracker
+        total_now = ct.total_input_tokens + ct.total_output_tokens
+        token_delta = max(0, total_now - state.goal_tokens_baseline)
+        state.goal_tokens_baseline = total_now
+
+    elapsed_sec = float(tui_state.get("last_turn_seconds", 0.0) or 0.0)
+
+    with state.goal_lock:
+        try:
+            decision = _run_async_safe(
+                mgr.evaluate_after_turn(
+                    final_text,
+                    token_delta=token_delta,
+                    elapsed_sec=elapsed_sec,
+                )
+            )
+        except Exception as exc:
+            _cprint(f"  [goal] evaluator failed: {exc}")
+            return
+
+    if decision.message:
+        _cprint(f"  {decision.message}")
+
+    # If the loop ended (complete / paused / budget_limited), detach the
+    # tool — otherwise it lingers on a goal that no longer auto-continues.
+    if decision.status in ("complete", "paused", "budget_limited"):
+        _detach_goal_tool(agent)
+
+    if decision.should_continue and decision.continuation_prompt:
+        pending_queue.put(decision.continuation_prompt)
+
+
 # ==================== Stream response ====================
 
 def _process_stream_response(
@@ -715,6 +811,10 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
             state.last_ctrl_c = now
             _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit)")
             state.current_agent.cancel()
+            # Pause any active standing goal so the post-turn hook doesn't
+            # auto-requeue a continuation right after the user cancelled.
+            if state.goal_manager is not None and state.goal_manager.is_active():
+                state.goal_manager.pause(reason="user-interrupted")
         elif event.app.current_buffer.text:
             event.app.current_buffer.reset()
             event.app.invalidate()
@@ -1105,6 +1205,8 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             image_counter=_image_counter_ref,
             bg_tasks=state.bg_tasks,
             bg_task_counter=state.bg_task_counter,
+            goal_manager=state.goal_manager,
+            goal_lock=state.goal_lock,
         )
 
     def _dispatch_concurrent_cmd(cmd: str, cmd_args: str):
@@ -1144,6 +1246,12 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             skills_registry = result["skills_registry"]
         if "extra_tool_names" in result:
             extra_tool_names = result["extra_tool_names"]
+        if "goal_manager" in result:
+            state.goal_manager = result["goal_manager"]
+            # Reset per-turn token baseline whenever the manager changes
+            # (new session, cleared goal, resumed session). Avoids carrying
+            # the previous session's cumulative counts into a fresh goal.
+            state.goal_tokens_baseline = 0
 
     app = _setup_tui(
         state, skills_registry, tui_state,
@@ -1316,6 +1424,11 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             )
             state.agent_running = False
             tui_state["spinner_text"] = ""
+
+            # Standing-goal hook: decide whether to enqueue a continuation
+            # for the next turn. Honors user-priority and cancel semantics.
+            _maybe_continue_goal(state, pending_queue, tui_state)
+
             app.invalidate()
 
     process_thread = threading.Thread(target=process_loop, daemon=True)

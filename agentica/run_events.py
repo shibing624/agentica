@@ -46,6 +46,13 @@ class RunEventType(str, Enum):
     run_failed = "run.failed"
     run_cancelled = "run.cancelled"
 
+    # Standing goal loop (emitted from agentica.goals.GoalManager via
+    # an optional event_callback wired by the CLI / SDK consumer).
+    goal_set = "goal.set"
+    goal_continuing = "goal.continuing"
+    goal_completed = "goal.completed"
+    goal_paused = "goal.paused"
+
 
 @dataclass
 class RunEventRecord:

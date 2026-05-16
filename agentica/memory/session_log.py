@@ -149,6 +149,92 @@ class SessionLog:
         return entry_uuid
 
     # ------------------------------------------------------------------
+    # Goal entries (standing-goal loop; see agentica/goals.py)
+    # ------------------------------------------------------------------
+    # ``type="goal"`` entries snapshot the GoalState. They break the
+    # parent_uuid chain (parent_uuid=None) like compact_boundary so they
+    # NEVER show up in load() / _build_messages() (which whitelists only
+    # user/assistant/system/tool).
+
+    def append_goal(self, goal_state: Any) -> str:
+        """Append a goal state snapshot. Returns entry uuid.
+
+        ``goal_state`` may be a ``GoalState`` dataclass or any object with a
+        ``to_dict()`` method. We keep the import lazy to avoid a hard cycle
+        between memory and goals modules.
+        """
+        if hasattr(goal_state, "to_dict"):
+            payload = goal_state.to_dict()
+        elif isinstance(goal_state, dict):
+            payload = dict(goal_state)
+        else:
+            raise TypeError(
+                f"append_goal expected GoalState or dict, got {type(goal_state).__name__}"
+            )
+
+        entry_uuid = str(uuid4())
+        self._append({
+            "type": "goal",
+            "uuid": entry_uuid,
+            "parent_uuid": None,  # break chain like compact_boundary
+            "session_id": self.session_id,
+            "cwd": self._cwd,
+            "timestamp": _iso_now(),
+            "version": self._version,
+            "git_branch": self._git_branch,
+            "goal": payload,
+        })
+        # Do NOT update _last_uuid — goal entries are out-of-band and must
+        # not interfere with the conversation UUID chain.
+        return entry_uuid
+
+    def load_goal(self) -> Optional[Dict[str, Any]]:
+        """Read the LAST goal entry's payload, or None.
+
+        Tail-reverse scan: streams the file in chunks from the end and
+        stops at the first ``"type": "goal"`` line. Big-file friendly —
+        a goal-less session pays only one stat() + small tail read.
+        """
+        if not self.path.exists():
+            return None
+
+        try:
+            with open(self.path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                file_size = f.tell()
+                chunk_size = 64 * 1024
+                pos = file_size
+                tail = b""
+                while pos > 0:
+                    read_size = min(chunk_size, pos)
+                    pos -= read_size
+                    f.seek(pos)
+                    tail = f.read(read_size) + tail
+                    # Scan tail lines from newest to oldest.
+                    lines = tail.splitlines()
+                    # If we haven't reached SOF, the first line may be partial.
+                    start_idx = 0 if pos == 0 else 1
+                    for line in reversed(lines[start_idx:]):
+                        if b'"type":"goal"' not in line and b'"type": "goal"' not in line:
+                            continue
+                        try:
+                            entry = json.loads(line.decode("utf-8"))
+                        except (json.JSONDecodeError, UnicodeDecodeError):
+                            continue
+                        if entry.get("type") == "goal":
+                            return entry.get("goal")
+                    # Keep partial first line for next iteration.
+                    if pos > 0 and lines:
+                        tail = lines[0]
+                    else:
+                        tail = b""
+        except OSError as exc:
+            logger.warning("SessionLog.load_goal failed (%s): %s", self.path, exc)
+            return None
+
+        return None
+
+    # ------------------------------------------------------------------
     # Load / Resume
     # ------------------------------------------------------------------
 

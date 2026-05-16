@@ -34,9 +34,12 @@ from agentica.cli.display import (
     print_header,
     show_help,
 )
+from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.model.message import Message
+from agentica.run_context import TaskAnchor
 from agentica.run_response import RunResponse
+from agentica.tools.goal_tool import GoalTool
 from agentica.skills import (
     get_skill_registry,
     install_skills,
@@ -72,6 +75,10 @@ class CommandContext:
     # Background tasks — instance-level, not module-global
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
+    # Persistent goal loop (see agentica/goals.py). Same instance is shared
+    # between the post-turn hook and /goal handlers, guarded by goal_lock.
+    goal_manager: Any = None  # Optional[GoalManager]
+    goal_lock: Any = None     # Optional[threading.Lock]
 
 
 # ==================== PendingQueue ====================
@@ -146,6 +153,9 @@ CONCURRENT_CMDS = frozenset({
     "/history", "/help", "/tools", "/skills",
     "/permissions", "/statusbar", "/sb",
     "/reasoning",
+    # /goal and /subgoal: status/pause/clear/list subcommands are concurrent-safe.
+    # Handlers reject "set new objective" when agent_running.
+    "/goal", "/subgoal",
 })
 
 
@@ -843,7 +853,8 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
     con.print("[green]New chat session created.[/green]")
     con.print("[dim]Conversation history cleared.[/dim]")
-    return {"current_agent": current_agent}
+    # Drop any goal manager — the new session has a new SessionLog.
+    return {"current_agent": current_agent, "goal_manager": None}
 
 
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
@@ -903,7 +914,31 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 
         con.print(f"[green]Resumed session: {chosen['session_id']}"
                   f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}[/green]")
-        return {"current_agent": current_agent}
+
+        # If the resumed session had an active goal, demote to paused for
+        # safety — automatic continuation on resume is too surprising
+        # without token-budget guards (P0).
+        resumed_goal_manager = None
+        if current_agent._session_log is not None:
+            judge_model = current_agent.auxiliary_model or current_agent.model
+            resumed_goal_manager = GoalManager(
+                current_agent._session_log, judge_model=judge_model
+            )
+            state = resumed_goal_manager.load()
+            if state is not None:
+                if state.status == "active":
+                    resumed_goal_manager.force_pause_on_resume()
+                    con.print(
+                        f"  [yellow]⊙ Standing goal detected and paused for safety:[/yellow] "
+                        f"{state.objective}"
+                    )
+                    con.print("  [dim]Use /goal resume to continue working on it.[/dim]")
+                elif state.status in ("paused", "complete"):
+                    con.print(
+                        f"  [dim]⊙ Previous goal ({state.status}): {state.objective}[/dim]"
+                    )
+
+        return {"current_agent": current_agent, "goal_manager": resumed_goal_manager}
     else:
         con.print("\n[bold]Available sessions:[/bold]\n")
         for i, s in enumerate(sessions[:10], 1):
@@ -930,7 +965,7 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
         shell_mode=ctx.shell_mode,
     )
     con.print("[info]Screen cleared and conversation reset.[/info]")
-    return {"current_agent": current_agent}
+    return {"current_agent": current_agent, "goal_manager": None}
 
 
 def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
@@ -1526,6 +1561,206 @@ def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"  [green]Stopped {count} background task(s).[/green]")
 
 
+# ==================== /goal & /subgoal ====================
+
+def _attach_goal_tool(agent: Any) -> None:
+    """Idempotently add a GoalTool bound to the agent's SessionLog so the
+    model can call ``update_goal`` to break the auto-continuation loop.
+    """
+    if agent is None or agent._session_log is None:
+        return
+    if agent.tools is None:
+        agent.tools = []
+    for t in agent.tools:
+        if isinstance(t, GoalTool):
+            return  # already attached
+    agent.tools.append(GoalTool(agent._session_log))
+
+
+def _detach_goal_tool(agent: Any) -> None:
+    if agent is None or not agent.tools:
+        return
+    agent.tools = [t for t in agent.tools if not isinstance(t, GoalTool)]
+
+
+def _ensure_goal_manager(ctx: CommandContext) -> Optional[GoalManager]:
+    """Return existing manager, or build one bound to the current agent's
+    SessionLog. Returns None if the agent has no session_log (impossible in
+    normal CLI flow, but keep defensive).
+    """
+    if ctx.goal_manager is not None:
+        return ctx.goal_manager
+    agent = ctx.current_agent
+    if agent is None or agent._session_log is None:
+        return None
+    judge_model = agent.auxiliary_model or agent.model
+    mgr = GoalManager(agent._session_log, judge_model=judge_model)
+    mgr.load()  # warm cache from disk if a previous goal entry exists
+    return mgr
+
+
+def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
+    """
+    /goal                  -> show status
+    /goal status           -> show status (alias)
+    /goal <objective>      -> set new objective + enqueue first turn
+    /goal pause            -> pause auto-continuation
+    /goal resume           -> resume + enqueue continuation
+    /goal clear            -> clear current goal
+    """
+    con = get_console()
+    arg = (cmd_args or "").strip()
+    _cmd_title(f"/goal {arg}" if arg else "/goal")
+
+    mgr = _ensure_goal_manager(ctx)
+    if mgr is None:
+        con.print("  [yellow]No active agent / session log unavailable.[/yellow]")
+        return
+
+    sub = arg.lower()
+
+    # ── status (default) ──
+    if not arg or sub == "status":
+        con.print(f"  {mgr.status_line()}")
+        if mgr.load() is None:
+            con.print("  [dim]Usage: /goal <objective>  |  pause | resume | clear[/dim]")
+        return {"goal_manager": mgr}
+
+    # ── pause / resume / clear are safe while agent is running ──
+    if sub == "pause":
+        state = mgr.pause("user")
+        if state is None:
+            con.print("  [dim]No goal to pause.[/dim]")
+        else:
+            con.print(f"  ⊙ Goal paused: {state.objective}")
+        return {"goal_manager": mgr}
+
+    if sub == "resume":
+        if ctx.agent_running:
+            con.print("  [yellow]Agent is currently running; goal will continue automatically.[/yellow]")
+            return {"goal_manager": mgr}
+        state = mgr.resume()
+        if state is None:
+            con.print("  [dim]No goal to resume.[/dim]")
+            return {"goal_manager": mgr}
+        if state.status != "active":
+            con.print(f"  [dim]Goal status is {state.status}, cannot resume.[/dim]")
+            return {"goal_manager": mgr}
+        # Re-attach the tool (might have been detached by /clear race).
+        _attach_goal_tool(ctx.current_agent)
+        # Re-prime the loop with a continuation prompt.
+        if ctx.pending_queue is not None:
+            ctx.pending_queue.put(mgr.next_continuation_prompt())
+        con.print(f"  ↻ Goal resumed: {state.objective}")
+        return {"goal_manager": mgr}
+
+    if sub == "clear":
+        mgr.clear()
+        _detach_goal_tool(ctx.current_agent)
+        con.print("  ✗ Goal cleared.")
+        return {"goal_manager": mgr}
+
+    # ── set new objective ──
+    if ctx.agent_running:
+        con.print("  [yellow]Cannot set a new goal while the agent is running. "
+                  "Wait for the current turn or use /goal pause/clear.[/yellow]")
+        return {"goal_manager": mgr}
+
+    try:
+        state = mgr.set(arg)
+    except ValueError as exc:
+        con.print(f"  [red]Invalid goal: {exc}[/red]")
+        return {"goal_manager": mgr}
+
+    # Overwrite the session's TaskAnchor so prompts.py + workspace retrieval
+    # bind to the standing goal, not the latest user message.
+    agent = ctx.current_agent
+    if agent is not None:
+        agent.task_anchor = TaskAnchor(goal=state.objective, source_query=state.objective)
+        agent._anchor_session_id = agent.session_id
+
+    # Workspace freeze timing: if workspace was already frozen on an earlier
+    # query, retrieval will NOT re-bind to the new goal. Document the limit.
+    if agent is not None and agent.workspace is not None:
+        try:
+            already_frozen = agent.workspace.get_frozen_context() is not None
+        except Exception:
+            already_frozen = False
+        if already_frozen:
+            con.print(
+                "  [dim]ℹ Workspace memory was already frozen against an earlier query. "
+                "Goal-bound retrieval will activate from the next /new session.[/dim]"
+            )
+
+    # Attach the update_goal tool so the model can break the loop.
+    _attach_goal_tool(agent)
+
+    con.print(f"  ⊙ Goal set ({state.turn_budget}-turn budget): {state.objective}")
+
+    # Kick off the first turn so the user doesn't need to send a follow-up.
+    if ctx.pending_queue is not None:
+        ctx.pending_queue.put(state.objective)
+
+    return {"goal_manager": mgr}
+
+
+def _cmd_subgoal(ctx: CommandContext, cmd_args: str = ""):
+    """
+    /subgoal               -> list subgoals
+    /subgoal <text>        -> add a subgoal to active goal
+    /subgoal remove <n>    -> remove the n-th subgoal (1-based)
+    /subgoal clear         -> drop all subgoals
+    """
+    con = get_console()
+    arg = (cmd_args or "").strip()
+    _cmd_title(f"/subgoal {arg}" if arg else "/subgoal")
+
+    mgr = _ensure_goal_manager(ctx)
+    if mgr is None or mgr.load() is None:
+        con.print("  [yellow]No active goal — set one with /goal first.[/yellow]")
+        return
+
+    if not arg:
+        state = mgr.load()
+        if not state.subgoals:
+            con.print("  [dim]No subgoals.[/dim]")
+        else:
+            con.print(f"  Subgoals ({len(state.subgoals)}):")
+            for i, sg in enumerate(state.subgoals, 1):
+                con.print(f"    {i}. {sg}")
+        con.print("  [dim]Usage: /subgoal <text>  |  remove <n>  |  clear[/dim]")
+        return {"goal_manager": mgr}
+
+    parts = arg.split(maxsplit=1)
+    sub = parts[0].lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    if sub == "remove" or sub == "rm":
+        if not rest.isdigit():
+            con.print("  [dim]Usage: /subgoal remove <number>[/dim]")
+            return {"goal_manager": mgr}
+        removed = mgr.remove_subgoal(int(rest))
+        if removed is None:
+            con.print(f"  [red]Invalid subgoal index: {rest}[/red]")
+        else:
+            con.print(f"  ✗ Removed subgoal: {removed}")
+        return {"goal_manager": mgr}
+
+    if sub == "clear":
+        n = mgr.clear_subgoals()
+        con.print(f"  ✗ Cleared {n} subgoal(s).")
+        return {"goal_manager": mgr}
+
+    # Default: add the whole argument as a subgoal.
+    try:
+        text = mgr.add_subgoal(arg)
+    except ValueError as exc:
+        con.print(f"  [red]{exc}[/red]")
+        return {"goal_manager": mgr}
+    con.print(f"  + Subgoal added: {text}")
+    return {"goal_manager": mgr}
+
+
 # ==================== Command Registry ====================
 
 COMMAND_REGISTRY = {
@@ -1540,6 +1775,8 @@ COMMAND_REGISTRY = {
     "/undo":          (_cmd_undo,          "Remove the last user/assistant exchange"),
     "/compact":       (_cmd_compact,       "Compact context (summarize history)"),
     "/resume":        (_cmd_resume,        "Resume a previous session"),
+    "/goal":          (_cmd_goal,          "Set or manage a standing goal (auto-continues until done)"),
+    "/subgoal":       (_cmd_subgoal,       "Add or manage acceptance criteria on the active goal"),
     "/btw":           (_cmd_btw,           "Ephemeral side question (no tools, not persisted)"),
     "/queue":         (_cmd_queue,         "Queue management: <prompt> | list | clear | remove <n>"),
     "/q":             (_cmd_queue,         "Queue management (alias)"),

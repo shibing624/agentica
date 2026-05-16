@@ -19,6 +19,18 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+### Added
+- Standing-goal loop P1 (S + A tiers):
+  - `Runner._run_impl` early-loads any persisted active `GoalState` from `SessionLog` and binds `TaskAnchor` to the goal objective — SDK paths now get goal-aware retrieval automatically, not just the CLI.
+  - `GoalState` gains `token_budget` / `tokens_used` / `wall_clock_budget_sec` / `wall_clock_used_sec` and a new `budget_limited` status (semantically distinct from `paused`). `evaluate_after_turn(token_delta=..., elapsed_sec=...)` short-circuits the judge LLM call when the cap is hit.
+  - New `agentica.tools.goal_tool.GoalTool.update_goal(status, reason)`: a receive-only model tool letting the agent self-mark `complete` or `paused` (cannot rewrite the objective). CLI auto-attaches on `/goal` set and detaches on goal termination.
+  - `RunEventType.goal_set / goal_continuing / goal_completed / goal_paused` events emitted through an optional `GoalManager.event_callback`.
+- New example `examples/cli/03_goal_loop_demo.py`: 4-scenario SDK tutorial (basic loop / GoalTool / token budget / event_callback) against a real LLM.
+
+### Changed
+- Top-level lazy imports (e.g. `from agentica import Knowledge`, `Claude`, `SqliteDb`, `Swarm`, ...) no longer emit `DeprecationWarning`. They are now treated as stable v1.x public API alongside the sub-module paths. The `DEPRECATED_TOP_LEVEL` registry has been removed; the planned v2.0 forced migration is dropped.
+- `SearchSerperTool`: fix misuse of `logger.warning(..., DeprecationWarning)` for the `serper_api_key` alias (the extra arg was silently ignored).
+
 ## [1.4.5] - 2026-05-13
 
 ### Fixed

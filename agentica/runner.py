@@ -837,7 +837,30 @@ class Runner:
                 agent.task_anchor is None
                 or agent._anchor_session_id != agent.session_id
             ):
-                agent.task_anchor = TaskAnchor.from_message(message)
+                # Standing-goal awareness (P1 S1): if the session has a
+                # persisted ACTIVE goal, bind the anchor to it instead of
+                # the (possibly transient) current message. This makes goal
+                # semantics work for any SDK entry point — gateway, ACP,
+                # cron, scripts — not just the CLI.
+                _persisted_goal: Optional[Dict[str, Any]] = None
+                if agent._session_log is not None:
+                    try:
+                        _persisted_goal = agent._session_log.load_goal()
+                    except Exception as exc:  # pragma: no cover - I/O edge
+                        logger.debug("load_goal failed at run start: %s", exc)
+                        _persisted_goal = None
+
+                if (
+                    _persisted_goal is not None
+                    and _persisted_goal.get("status") == "active"
+                    and _persisted_goal.get("objective")
+                ):
+                    objective = str(_persisted_goal["objective"])
+                    agent.task_anchor = TaskAnchor(
+                        goal=objective, source_query=objective,
+                    )
+                else:
+                    agent.task_anchor = TaskAnchor.from_message(message)
                 agent._anchor_session_id = agent.session_id
             _anchor = agent.task_anchor
 
