@@ -381,7 +381,10 @@ def _build_cli_experience_config(agent_config: dict) -> ExperienceConfig:
     return ExperienceConfig(
         capture_tool_errors=True,
         capture_user_corrections=True,
-        capture_success_patterns=True,
+        # Pure success sequences (e.g. "read_file x76") teach the model nothing
+        # actionable; only failures and corrections carry real lessons. Off by
+        # default; flip to True only if you want raw success telemetry on disk.
+        capture_success_patterns=False,
         sync_to_global_agent_md=bool(
             agent_config.get("sync_experience_to_global_agent_md")
         ),

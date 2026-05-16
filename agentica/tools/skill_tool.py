@@ -37,6 +37,7 @@ Usage:
 """
 import json
 import time
+from datetime import datetime
 from typing import List, Optional
 from pathlib import Path
 
@@ -98,11 +99,23 @@ def _save_skill_usage(state: dict) -> None:
 def _bump_skill_usage(name: str) -> None:
     """Record one invocation of `name`. Best-effort; never raises."""
     state = _load_skill_usage()
-    entry = state.get(name) or {"count": 0, "last_used": 0.0}
+    entry = state.get(name) or {"count": 0, "last_used": ""}
     entry["count"] = int(entry.get("count", 0)) + 1
-    entry["last_used"] = time.time()
+    entry["last_used"] = datetime.now().isoformat(timespec="seconds")
     state[name] = entry
     _save_skill_usage(state)
+
+
+def _parse_last_used(raw) -> float:
+    """Parse last_used into epoch seconds. Accepts ISO string or legacy float."""
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str) and raw:
+        try:
+            return datetime.fromisoformat(raw).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _score_skill_usage(usage: dict, name: str, now: float) -> float:
@@ -111,7 +124,7 @@ def _score_skill_usage(usage: dict, name: str, now: float) -> float:
     if not entry:
         return 0.0
     count = max(int(entry.get("count", 0)), 0)
-    last_used = float(entry.get("last_used", 0.0))
+    last_used = _parse_last_used(entry.get("last_used"))
     if last_used <= 0 or count <= 0:
         return 0.0
     age_days = max((now - last_used) / 86400.0, 0.0)

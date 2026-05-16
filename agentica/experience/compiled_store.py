@@ -250,6 +250,14 @@ class CompiledExperienceStore:
             except (FileNotFoundError, OSError):
                 continue
 
+            # Defense-in-depth: pure success patterns (e.g. "read_file x76",
+            # "execute x5") teach nothing actionable and just inflate the
+            # prompt. They're no longer captured by default (see ExperienceConfig),
+            # but legacy cards on disk could still leak through; skip them here.
+            card_type = extract_frontmatter_value(raw, "type") or entry.get("type", "")
+            if card_type == "success_pattern":
+                continue
+
             repeat_count = extract_frontmatter_int(raw, "repeat_count", 1)
             last_seen_str = extract_frontmatter_value(raw, "last_seen")
             tier = extract_frontmatter_value(raw, "tier") or "hot"

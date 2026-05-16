@@ -46,6 +46,41 @@ _RULE_STOPWORDS = frozenset({
 _TITLE_TOKEN_CAP = 4
 
 
+def _summarize_error_for_title(error_msg: str) -> str:
+    """Derive a short, readable identifier for a tool_error title.
+
+    Examples:
+        "Skill 'paper-analysis' not found. Available skills: ..." -> "skill_not_found"
+        "FileNotFoundError: [Errno 2] No such file: '/foo'"       -> "FileNotFoundError"
+        "HTTP 500 Internal Server Error"                          -> "http_500"
+        ""                                                        -> "unknown"
+
+    Strategy: prefer the exception class (token before ':' if it looks like an
+    error class), else strip quoted args and pick the first 3 meaningful words.
+    Always returns a snake_case token <= 30 chars, word-boundary-safe.
+    """
+    if not error_msg:
+        return "unknown"
+    head = error_msg.split("\n", 1)[0].strip()
+    # If it looks like "ExceptionName: details", keep just the class name.
+    if ":" in head:
+        prefix, _, _ = head.partition(":")
+        prefix = prefix.strip()
+        if prefix and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*Error", prefix):
+            return prefix[:30]
+    # Strip quoted user-supplied args ("'paper-analysis'", '"foo.txt"') which
+    # would otherwise turn every distinct arg into a new dedup bucket.
+    stripped = re.sub(r"['\"][^'\"]{1,80}['\"]", "", head)
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9]*", stripped)
+    # Keep error-meaningful stopwords like "not"/"no"/"never" — negation is
+    # part of the error identity ("skill not found" != "skill found").
+    _ERROR_TITLE_DROP = _RULE_STOPWORDS - {"not", "no", "never", "none"}
+    keep = [t.lower() for t in tokens if t.lower() not in _ERROR_TITLE_DROP][:3]
+    if not keep:
+        return "unknown"
+    return "_".join(keep)[:30]
+
+
 def _stem(token: str) -> str:
     """Cheap suffix stripping so 'read' / 'reading' / 'reads' collide.
 
@@ -166,7 +201,7 @@ class ExperienceCompiler:
         for err in errors:
             tool = err.get("tool", "unknown")
             error_msg = err.get("error", "")
-            error_type = error_msg.split(":")[0][:30] if error_msg else "unknown"
+            error_type = _summarize_error_for_title(error_msg)
             title = f"{tool}_{error_type}"
             args_summary = str(err.get("args", {}))[:200]
             elapsed = err.get("elapsed", 0.0)

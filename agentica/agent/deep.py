@@ -202,13 +202,15 @@ class DeepAgent(Agent):
                 sync_memories_to_global_agent_md=False,
             )
 
-        # DeepAgent is the product preset: enable all capture switches.
+        # DeepAgent is the product preset: capture errors + corrections only.
+        # Pure success sequences are intentionally dropped — they don't carry
+        # actionable lessons and just inflate the prompt with telemetry.
         # Users can pass their own experience_config to override.
         if experience_config is None:
             experience_config = ExperienceConfig(
                 capture_tool_errors=True,
                 capture_user_corrections=True,
-                capture_success_patterns=True,
+                capture_success_patterns=False,
                 sync_to_global_agent_md=False,
                 skill_upgrade=None,
             )

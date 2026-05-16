@@ -58,7 +58,7 @@ class TestDeepAgentDefaults(unittest.TestCase):
         )
         self.assertTrue(agent.experience_config.capture_tool_errors)
         self.assertTrue(agent.experience_config.capture_user_corrections)
-        self.assertTrue(agent.experience_config.capture_success_patterns)
+        self.assertFalse(agent.experience_config.capture_success_patterns)
         self.assertFalse(agent.experience_config.sync_to_global_agent_md)
         self.assertIsNone(agent.experience_config.skill_upgrade)
         # auto_extract_memory: fallback memory extraction after each run.

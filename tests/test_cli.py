@@ -737,7 +737,7 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertFalse(captured["enable_experience_capture"])
         self.assertTrue(captured["experience_config"].capture_tool_errors)
         self.assertTrue(captured["experience_config"].capture_user_corrections)
-        self.assertTrue(captured["experience_config"].capture_success_patterns)
+        self.assertFalse(captured["experience_config"].capture_success_patterns)
         self.assertTrue(captured["experience_config"].sync_to_global_agent_md)
         self.assertIsNotNone(captured["experience_config"].skill_upgrade)
         self.assertEqual(captured["experience_config"].skill_upgrade.mode, "draft")
