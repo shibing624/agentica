@@ -182,6 +182,73 @@ class TestMaxTokensRetry(unittest.TestCase):
         second_kwargs = mock_create.await_args_list[1].kwargs
         self.assertEqual(second_kwargs["max_tokens"], 4936)
 
+    def test_response_stream_retries_on_aenter_output_cap_error(self):
+        """Streaming path: __aenter__ raises max_tokens-too-large → reopen with adjusted cap.
+
+        Regression: the original implementation wrapped the synchronous
+        ``messages.stream(...)`` constructor in try/except, which cannot
+        catch __aenter__ errors. This test fails fast if that bug returns.
+        """
+        from agentica.model.anthropic.claude import Claude
+
+        err = Exception(
+            "max_tokens: 32768 > context_window: 200000 - "
+            "input_tokens: 195000 = available_tokens: 5000"
+        )
+
+        # First stream_mgr: __aenter__ raises. Second: __aenter__ returns an
+        # async-iterator that yields nothing (empty stream).
+        class _GoodStream:
+            def __aiter__(self):
+                return self
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class _StreamMgrOk:
+            async def __aenter__(self):
+                return _GoodStream()
+            async def __aexit__(self, *_a):
+                return None
+
+        class _StreamMgrFail:
+            async def __aenter__(self):
+                raise err
+            async def __aexit__(self, *_a):
+                return None
+
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+
+        # Record the kwargs each stream() call sees so we can assert the
+        # second call carries the recovered max_tokens.
+        seen_kwargs: list = []
+        mgrs = [_StreamMgrFail(), _StreamMgrOk()]
+
+        def _stream(**kwargs):
+            seen_kwargs.append(kwargs)
+            return mgrs.pop(0)
+
+        mock_client = MagicMock()
+        mock_client.messages.stream = _stream
+        model.client = mock_client
+
+        async def _fake_format(_msgs):
+            return ([{"role": "user", "content": "hi"}], "sys")
+        model.format_messages = _fake_format  # type: ignore[assignment]
+
+        async def _drain():
+            chunks = []
+            async for c in model.response_stream([]):
+                chunks.append(c)
+            return chunks
+
+        asyncio.run(_drain())
+
+        self.assertEqual(len(seen_kwargs), 2, "expected exactly one retry")
+        # Second call uses recovered cap: 5000 - 64 = 4936.
+        self.assertEqual(seen_kwargs[1]["max_tokens"], 4936)
+        # First call used the resolver default (model ceiling 128000).
+        self.assertEqual(seen_kwargs[0]["max_tokens"], 128000)
+
     def test_invoke_does_not_retry_unrelated_error(self):
         from agentica.model.anthropic.claude import Claude
 

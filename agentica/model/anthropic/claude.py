@@ -445,28 +445,61 @@ class Claude(Model):
     @override
     async def invoke_stream(self, messages: List[Message]) -> Any:
         """
-        Stream a response from the Anthropic API.
+        Return a MessageStreamManager for the Anthropic streaming API.
+
+        NOTE: Unlike ``messages.create``, ``messages.stream`` is a synchronous
+        constructor that returns an async context manager. The real API call
+        (and thus any error) happens inside ``async with response as stream``
+        in :py:meth:`response_stream`. A try/except here cannot catch API
+        errors — recovery (``_learn_context_limit_from_error`` +
+        ``_maybe_recover_max_tokens``) lives in ``response_stream``.
 
         Args:
             messages (List[Message]): A list of messages to send to the model.
 
         Returns:
-            Any: The streamed response from the model.
+            Any: An ``AsyncMessageStreamManager`` (anthropic SDK).
+        """
+        chat_messages, system_message = await self.format_messages(messages)
+        request_kwargs = self.prepare_request_kwargs(system_message)
+        return self.get_client().messages.stream(
+            model=self.id, messages=chat_messages, **request_kwargs,
+        )
+
+    async def _open_stream_with_recovery(
+        self, messages: List[Message]
+    ) -> Tuple[Any, Any]:
+        """Open an Anthropic stream, retrying once on max_tokens-too-large.
+
+        Returns ``(stream_mgr, stream)`` where ``stream_mgr`` is the context
+        manager (caller must ``await stream_mgr.__aexit__(...)``) and
+        ``stream`` is the entered stream iterator.
+
+        Mirrors :py:meth:`invoke`'s retry path: API errors at ``__aenter__``
+        are first run through ``_learn_context_limit_from_error`` (for
+        "prompt too long"), then through ``_maybe_recover_max_tokens`` (for
+        "max_tokens too large given prompt"). On a successful match, the
+        stream is reopened once with the adjusted output cap.
         """
         chat_messages, system_message = await self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
 
-        try:
+        def _open():
             return self.get_client().messages.stream(
                 model=self.id, messages=chat_messages, **request_kwargs,
             )
+
+        stream_mgr = _open()
+        try:
+            stream = await stream_mgr.__aenter__()
+            return stream_mgr, stream
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
-            if self._maybe_recover_max_tokens(e, request_kwargs):
-                return self.get_client().messages.stream(
-                    model=self.id, messages=chat_messages, **request_kwargs,
-                )
-            raise
+            if not self._maybe_recover_max_tokens(e, request_kwargs):
+                raise
+            stream_mgr = _open()
+            stream = await stream_mgr.__aenter__()
+            return stream_mgr, stream
 
     def update_usage_metrics(
             self,
@@ -842,10 +875,12 @@ class Claude(Model):
         message_data = MessageData()
         metrics = Metrics()
 
-        # Generate response
+        # Generate response. Open the stream via _open_stream_with_recovery
+        # so "max_tokens too large given prompt" at __aenter__ triggers one
+        # retry with a reduced cap; see the helper's docstring.
         metrics.response_timer.start()
-        response = await self.invoke_stream(messages=messages)
-        async with response as stream:
+        stream_mgr, stream = await self._open_stream_with_recovery(messages)
+        try:
             async for delta in stream:
                 if isinstance(delta, RawContentBlockDeltaEvent):
                     if isinstance(delta.delta, TextDelta):
@@ -886,6 +921,8 @@ class Claude(Model):
                     self.last_finish_reason = (
                         "length" if _stop == "max_tokens" else _stop
                     )
+        finally:
+            await stream_mgr.__aexit__(None, None, None)
         yield ModelResponse(content="\n\n")
 
         metrics.response_timer.stop()
