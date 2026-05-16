@@ -385,6 +385,10 @@ def _build_cli_experience_config(agent_config: dict) -> ExperienceConfig:
         # actionable; only failures and corrections carry real lessons. Off by
         # default; flip to True only if you want raw success telemetry on disk.
         capture_success_patterns=False,
+        # CLI runs in a long-lived asyncio loop — background the judge LLM
+        # call so the user gets the next prompt immediately instead of
+        # waiting ~5s for the correction classifier to return.
+        capture_corrections_background=True,
         sync_to_global_agent_md=bool(
             agent_config.get("sync_experience_to_global_agent_md")
         ),
@@ -397,6 +401,10 @@ def _build_cli_memory_config(agent_config: dict) -> WorkspaceMemoryConfig:
     return WorkspaceMemoryConfig(
         auto_archive=True,
         auto_extract_memory=True,
+        # CLI runs in a long-lived asyncio loop — background the memory
+        # extraction LLM call so the user gets the next prompt without
+        # waiting for it to finish.
+        auto_extract_memory_background=True,
         load_workspace_context=True,
         load_workspace_memory=True,
         max_memory_entries=10,

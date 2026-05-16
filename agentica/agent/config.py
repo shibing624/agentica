@@ -207,6 +207,14 @@ class ExperienceConfig:
     # LLM classification confidence threshold for persisting corrections
     feedback_confidence_threshold: float = 0.8
 
+    # When True, the correction-classification LLM call runs as a
+    # fire-and-forget background task so on_agent_end returns immediately
+    # (the user gets the next prompt without waiting). Safe ONLY in
+    # long-running event loops (FastAPI, asyncio.run, interactive CLI).
+    # Under run_sync()/run_stream_sync() the temp loop closes before the
+    # task completes and the correction is silently dropped — keep False.
+    capture_corrections_background: bool = False
+
     # Promotion lifecycle
     promotion_count: int = 3
     # Used in lifecycle sweep: repeats must occur within this window to promote

@@ -570,6 +570,10 @@ class ExperienceCaptureHooks(RunHooks):
         # rescanning the entire jsonl on every on_agent_end. Refreshed when
         # the file has grown since last lookup.
         self._failed_tools_cache: Dict[str, Tuple[int, set]] = {}
+        # Strong-refs for fire-and-forget judge tasks when
+        # config.capture_corrections_background=True. asyncio only weak-refs
+        # scheduled tasks, so without this set they could be GC'd mid-flight.
+        self._bg_tasks: set = set()
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         """Initialize per-agent capture state."""
@@ -822,15 +826,30 @@ class ExperienceCaptureHooks(RunHooks):
         ):
             model = self._get_classification_model(agent)
             if model is not None:
-                was_correction = await self._classify_and_persist_feedback(
-                    model, event_store, compiled_store,
-                    user_msg, previous_assistant_text,
-                    original_task=original_task,
-                )
-                if was_correction:
-                    correction_this_run = True
-                    report.corrections_persisted += 1
-                    report.cards_written += 1
+                if self._config.capture_corrections_background:
+                    # Fire-and-forget: don't block on_agent_end (and the user's
+                    # next prompt). The trade-off is that correction_this_run
+                    # for THIS run's LearningReport stays False; the correction
+                    # is still persisted to disk and visible to subsequent runs.
+                    task = asyncio.create_task(
+                        self._classify_and_persist_feedback(
+                            model, event_store, compiled_store,
+                            user_msg, previous_assistant_text,
+                            original_task=original_task,
+                        )
+                    )
+                    self._bg_tasks.add(task)
+                    task.add_done_callback(self._bg_tasks.discard)
+                else:
+                    was_correction = await self._classify_and_persist_feedback(
+                        model, event_store, compiled_store,
+                        user_msg, previous_assistant_text,
+                        original_task=original_task,
+                    )
+                    if was_correction:
+                        correction_this_run = True
+                        report.corrections_persisted += 1
+                        report.cards_written += 1
 
         # 2c. Success pattern
         success_card = ExperienceCompiler.compile_success_pattern(successes)

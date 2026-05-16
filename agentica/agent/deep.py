@@ -196,6 +196,14 @@ class DeepAgent(Agent):
             long_term_memory_config = WorkspaceMemoryConfig(
                 auto_archive=True,
                 auto_extract_memory=True,
+                # DeepAgent targets interactive CLI / long-running async servers,
+                # where create_task is safe. The LLM extraction fires AFTER the
+                # response is already streamed — running it inline blocks the
+                # user's next prompt for several seconds. Background it.
+                # NOTE: users running DeepAgent under run_sync() must override
+                # this to False, else memories may be silently dropped when
+                # the temp event loop closes.
+                auto_extract_memory_background=True,
                 load_workspace_context=True,
                 load_workspace_memory=True,
                 max_memory_entries=10,
@@ -211,6 +219,9 @@ class DeepAgent(Agent):
                 capture_tool_errors=True,
                 capture_user_corrections=True,
                 capture_success_patterns=False,
+                # Background the correction-judge LLM call for the same reason
+                # as auto_extract_memory_background above (don't block input).
+                capture_corrections_background=True,
                 sync_to_global_agent_md=False,
                 skill_upgrade=None,
             )
