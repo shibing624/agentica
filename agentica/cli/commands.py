@@ -1564,17 +1564,14 @@ def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
 # ==================== /goal & /subgoal ====================
 
 def _attach_goal_tool(agent: Any) -> None:
-    """Idempotently add a GoalTool bound to the agent's SessionLog so the
-    model can call ``update_goal`` to break the auto-continuation loop.
+    """Idempotently attach the GoalTool so the model can break the loop.
+
+    Delegates to ``Agent.enable_goal_tool()`` (single source of truth shared
+    with the SDK entry point ``Agent.run_goal``).
     """
     if agent is None or agent._session_log is None:
         return
-    if agent.tools is None:
-        agent.tools = []
-    for t in agent.tools:
-        if isinstance(t, GoalTool):
-            return  # already attached
-    agent.tools.append(GoalTool(agent._session_log))
+    agent.enable_goal_tool()
 
 
 def _detach_goal_tool(agent: Any) -> None:
@@ -1593,10 +1590,9 @@ def _ensure_goal_manager(ctx: CommandContext) -> Optional[GoalManager]:
     agent = ctx.current_agent
     if agent is None or agent._session_log is None:
         return None
-    judge_model = agent.auxiliary_model or agent.model
-    mgr = GoalManager(agent._session_log, judge_model=judge_model)
-    mgr.load()  # warm cache from disk if a previous goal entry exists
-    return mgr
+    # Delegate to Agent.get_goal_manager() so CLI and SDK share one
+    # construction path; the agent also caches the manager on itself.
+    return agent.get_goal_manager()
 
 
 def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):

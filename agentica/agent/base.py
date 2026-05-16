@@ -171,6 +171,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # conversation can establish its own anchor. Read by prompts.py + Runner.
     task_anchor: Optional[TaskAnchor] = field(default=None, init=False, repr=False)
     _anchor_session_id: Optional[str] = field(default=None, init=False, repr=False)
+    # Append-only JSONL session log. Lazily created when session_id is set
+    # (see _init_execution) or by the first call to get_goal_manager().
+    # Declared here so attribute access is never speculative (no getattr).
+    _session_log: Optional[Any] = field(default=None, init=False, repr=False)
+    # Persistent standing-goal state machine. Lazily created by
+    # ``get_goal_manager()``; bound to ``_session_log`` for persistence.
+    goal_manager: Optional[Any] = field(default=None, init=False, repr=False)
     # Set by subagent.spawn() before child.run() so the child Runner can record
     # parent_run_id + RunSource.subagent in its RunContext. None for top-level runs.
     _parent_run_id: Optional[str] = field(default=None, init=False, repr=False)
@@ -1417,6 +1424,165 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             **kwargs,
         ):
             yield chunk
+
+    # ============================================================
+    # Standing goal loop (ergonomic SDK surface, see agentica/goals.py)
+    # ============================================================
+    def get_goal_manager(
+        self,
+        *,
+        default_turn_budget: Optional[int] = None,
+        event_callback: Optional[Callable[..., None]] = None,
+    ) -> Any:
+        """Return (and lazily create) this agent's ``GoalManager``.
+
+        Creates a ``SessionLog`` on the fly if the agent was built without
+        a ``session_id``. Idempotent: subsequent calls return the same
+        manager so any persisted GoalState stays consistent.
+
+        Args:
+            default_turn_budget: Overrides the default cap (12). Ignored
+                if a manager already exists.
+            event_callback: ``(RunEventType, dict) -> None`` hook for
+                ``goal.set / continuing / completed / paused`` events.
+
+        Returns:
+            ``agentica.goals.GoalManager``.
+        """
+        # Local import keeps module import graph cheap for users that
+        # never touch the goal loop.
+        from agentica.goals import GoalManager, DEFAULT_TURN_BUDGET
+
+        if self._session_log is None:
+            if self.session_id is None:
+                self.session_id = str(uuid4())
+            self._session_log = SessionLog(session_id=self.session_id)
+
+        if self.goal_manager is None:
+            self.goal_manager = GoalManager(
+                self._session_log,
+                default_turn_budget=(
+                    default_turn_budget if default_turn_budget is not None
+                    else DEFAULT_TURN_BUDGET
+                ),
+                judge_model=self.auxiliary_model or self.model,
+                event_callback=event_callback,
+            )
+            # Load any persisted state from a previous session.
+            self.goal_manager.load()
+        elif event_callback is not None:
+            # Allow re-binding the callback (cheap, no-mutation otherwise).
+            self.goal_manager.event_callback = event_callback
+
+        return self.goal_manager
+
+    def enable_goal_tool(self) -> None:
+        """Attach ``GoalTool.update_goal`` so the model can self-mark the
+        goal ``complete`` or ``paused``, short-circuiting the external
+        judge. Idempotent.
+        """
+        from agentica.tools.goal_tool import GoalTool
+
+        mgr = self.get_goal_manager()
+        if self.tools is None:
+            self.tools = []
+        for t in self.tools:
+            if isinstance(t, GoalTool):
+                return
+        self.tools.append(GoalTool(mgr.session_log))
+
+    async def run_goal(
+        self,
+        objective: str,
+        *,
+        turn_budget: Optional[int] = None,
+        token_budget: Optional[int] = None,
+        wall_clock_budget_sec: Optional[float] = None,
+        attach_goal_tool: bool = True,
+        event_callback: Optional[Callable[..., None]] = None,
+    ) -> Any:
+        """Drive the standing-goal loop until completion / pause / budget.
+
+        Ergonomic entry point: callers do NOT touch ``SessionLog``,
+        ``GoalManager``, or ``GoalTool`` directly. The loop:
+
+            1. Sets the objective on the manager (resets turns_used etc).
+            2. Binds ``TaskAnchor`` to the objective so retrieval / prompt
+               anchoring use it for every turn.
+            3. Optionally attaches ``GoalTool`` so the model can short
+               circuit the judge.
+            4. Runs ``self.run()`` repeatedly, feeding each turn's
+               ``token_delta`` and wall-clock seconds into the manager.
+            5. Stops when the manager says the goal is complete /
+               paused / budget_limited.
+
+        Args:
+            objective: The standing goal text. Used as the first prompt.
+            turn_budget, token_budget, wall_clock_budget_sec:
+                Hard caps passed straight to ``GoalManager.set()``.
+            attach_goal_tool: Register ``GoalTool`` on this agent. Set
+                False if you want the external judge to be authoritative.
+            event_callback: ``goal.*`` event hook.
+
+        Returns:
+            ``agentica.goals.GoalRunResult`` with final status / reason /
+            ``RunResponse`` / GoalState snapshot / turns_used.
+        """
+        import time as _time
+        from agentica.goals import GoalRunResult
+
+        mgr = self.get_goal_manager(event_callback=event_callback)
+        state = mgr.set(
+            objective,
+            turn_budget=turn_budget,
+            token_budget=token_budget,
+            wall_clock_budget_sec=wall_clock_budget_sec,
+        )
+
+        # Pin the anchor up front so the first turn already uses it.
+        self.task_anchor = TaskAnchor(
+            goal=state.objective, source_query=state.objective,
+        )
+        self._anchor_session_id = self.session_id
+
+        if attach_goal_tool:
+            self.enable_goal_tool()
+
+        prompt = state.objective
+        final_response: Optional[RunResponse] = None
+        tokens_baseline = 0
+
+        while True:
+            t0 = _time.monotonic()
+            response = await self.run(prompt)
+            elapsed = _time.monotonic() - t0
+            final_response = response
+
+            token_delta = 0
+            if response.cost_tracker is not None:
+                total_now = (
+                    response.cost_tracker.total_input_tokens
+                    + response.cost_tracker.total_output_tokens
+                )
+                token_delta = max(0, total_now - tokens_baseline)
+                tokens_baseline = total_now
+
+            decision = await mgr.evaluate_after_turn(
+                response.content or "",
+                token_delta=token_delta,
+                elapsed_sec=elapsed,
+            )
+
+            if not decision.should_continue:
+                final_state = mgr.load()
+                return GoalRunResult(
+                    status=decision.status,
+                    reason=decision.reason,
+                    final_response=final_response,
+                    goal=final_state,
+                    turns_used=final_state.turns_used if final_state else 0,
+                )
+            prompt = decision.continuation_prompt
 
     def run_sync(
         self,

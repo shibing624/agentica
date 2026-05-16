@@ -515,6 +515,122 @@ def test_goal_tool_noop_when_no_goal(tmp_path: Path):
 # Runner integration (S1): SDK path picks up persisted active goal.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Agent SDK ergonomic surface: get_goal_manager / enable_goal_tool / run_goal
+# ---------------------------------------------------------------------------
+
+def test_agent_get_goal_manager_lazy_creates_session_log_and_manager(tmp_path):
+    """Agent without session_id still produces a working manager after the
+    first ``get_goal_manager()`` call."""
+    from agentica.agent import Agent
+
+    agent = Agent.__new__(Agent)
+    # Minimal hand-built dataclass-like state for the isolated test.
+    agent.model = None
+    agent.auxiliary_model = None
+    agent.session_id = None
+    agent._session_log = None
+    agent.goal_manager = None
+    agent.tools = None
+
+    mgr = agent.get_goal_manager()
+    assert mgr is not None
+    assert agent._session_log is not None
+    assert agent.session_id is not None
+    # Idempotent: same manager comes back.
+    assert agent.get_goal_manager() is mgr
+
+
+def test_agent_enable_goal_tool_idempotent(tmp_path):
+    from agentica.agent import Agent
+    from agentica.tools.goal_tool import GoalTool
+
+    agent = Agent.__new__(Agent)
+    agent.model = None
+    agent.auxiliary_model = None
+    agent.session_id = None
+    agent._session_log = None
+    agent.goal_manager = None
+    agent.tools = None
+
+    agent.enable_goal_tool()
+    agent.enable_goal_tool()  # idempotent
+    tools = agent.tools or []
+    goal_tools = [t for t in tools if isinstance(t, GoalTool)]
+    assert len(goal_tools) == 1
+
+
+def test_agent_run_goal_drives_to_completion(tmp_path):
+    """Full ergonomic path: mock ``agent.run`` (so we don't touch a real
+    LLM) and a fake judge model. ``run_goal`` should: set objective, bind
+    anchor, attach GoalTool, loop until judge says done, return result.
+    """
+    from unittest.mock import AsyncMock, patch
+    from agentica.agent import Agent
+    from agentica.goals import GoalRunResult
+    from agentica.run_context import TaskAnchor
+    from agentica.run_response import RunResponse
+    from agentica.tools.goal_tool import GoalTool
+
+    agent = Agent.__new__(Agent)
+    agent.model = None
+    agent.auxiliary_model = _fake_model('{"done": true, "reason": "the answer is 42"}')
+    agent.session_id = "agent-rungoal-1"
+    agent._session_log = None
+    agent.goal_manager = None
+    agent.tools = None
+    agent.task_anchor = None
+    agent._anchor_session_id = None
+
+    # Stub agent.run to return a synthetic RunResponse with no cost data.
+    rr = RunResponse(content="42")
+    with patch.object(Agent, "run", new=AsyncMock(return_value=rr)):
+        result = asyncio.run(
+            agent.run_goal("compute 17+9+16", turn_budget=3)
+        )
+
+    assert isinstance(result, GoalRunResult)
+    assert result.status == "complete"
+    assert result.turns_used == 1
+    assert result.final_response is rr
+    # Anchor was bound to the objective, not the message.
+    assert agent.task_anchor.goal == "compute 17+9+16"
+    # GoalTool was attached.
+    assert any(isinstance(t, GoalTool) for t in (agent.tools or []))
+
+
+def test_agent_run_goal_token_budget_stops_loop(tmp_path):
+    """A tight token_budget must short-circuit before the judge runs."""
+    from unittest.mock import AsyncMock, patch
+    from agentica.agent import Agent
+    from agentica.run_response import RunResponse
+    from agentica.cost_tracker import CostTracker
+
+    agent = Agent.__new__(Agent)
+    agent.model = None
+    agent.auxiliary_model = _fake_model('{"done": false, "reason": "more work"}')
+    agent.session_id = "agent-rungoal-budget"
+    agent._session_log = None
+    agent.goal_manager = None
+    agent.tools = None
+    agent.task_anchor = None
+    agent._anchor_session_id = None
+
+    ct = CostTracker()
+    ct.record(model_id="fake-model", input_tokens=80, output_tokens=80)  # 160 > 50
+    rr = RunResponse(content="...")
+    rr.cost_tracker = ct
+    with patch.object(Agent, "run", new=AsyncMock(return_value=rr)):
+        result = asyncio.run(
+            agent.run_goal("X", token_budget=50, turn_budget=10)
+        )
+
+    assert result.status == "budget_limited"
+    assert "token budget" in result.reason
+    # Judge must not have been called this turn — the budget short-circuited.
+    agent.auxiliary_model.response.assert_not_called()
+
+
 def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
     """When a session has an active goal on disk, Runner._run_impl should
     bind TaskAnchor to the goal objective instead of the latest message.

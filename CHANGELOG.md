@@ -20,12 +20,21 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 ## [Unreleased]
 
 ### Added
-- Standing-goal loop P1 (S + A tiers):
+- Standing-goal loop P0 + P1 (S + A tiers):
+  - Ergonomic SDK surface on `Agent`:
+    - `Agent.run_goal(objective, *, turn_budget=..., token_budget=..., wall_clock_budget_sec=..., attach_goal_tool=True, event_callback=...) -> GoalRunResult` — one-liner that drives the whole loop. Replaces the previous low-level `GoalManager(agent._session_log, judge_model=...)` + hand-written driver loop.
+    - `Agent.get_goal_manager(...)` for power users who want to drive turns by hand without touching `SessionLog`.
+    - `Agent.enable_goal_tool()` attaches `GoalTool.update_goal` so the model can self-mark `complete` / `paused`.
+    - `Agent._session_log` and `Agent.goal_manager` are now formally declared dataclass fields (no `getattr` speculation).
+    - New `agentica.goals.GoalRunResult(status, reason, final_response, goal, turns_used)`.
   - `Runner._run_impl` early-loads any persisted active `GoalState` from `SessionLog` and binds `TaskAnchor` to the goal objective — SDK paths now get goal-aware retrieval automatically, not just the CLI.
-  - `GoalState` gains `token_budget` / `tokens_used` / `wall_clock_budget_sec` / `wall_clock_used_sec` and a new `budget_limited` status (semantically distinct from `paused`). `evaluate_after_turn(token_delta=..., elapsed_sec=...)` short-circuits the judge LLM call when the cap is hit.
-  - New `agentica.tools.goal_tool.GoalTool.update_goal(status, reason)`: a receive-only model tool letting the agent self-mark `complete` or `paused` (cannot rewrite the objective). CLI auto-attaches on `/goal` set and detaches on goal termination.
+  - `GoalState` gains `token_budget` / `tokens_used` / `wall_clock_budget_sec` / `wall_clock_used_sec` and a new `budget_limited` status (semantically distinct from `paused`). Hard budget caps take precedence over tool short-circuit and judge.
+  - `agentica.tools.goal_tool.GoalTool.update_goal(status, reason)`: receive-only model tool letting the agent self-mark `complete` or `paused` (cannot rewrite the objective). CLI auto-attaches on `/goal` set and detaches on goal termination.
   - `RunEventType.goal_set / goal_continuing / goal_completed / goal_paused` events emitted through an optional `GoalManager.event_callback`.
-- New example `examples/cli/03_goal_loop_demo.py`: 4-scenario SDK tutorial (basic loop / GoalTool / token budget / event_callback) against a real LLM.
+- New example `examples/cli/03_goal_loop_demo.py`: 4-scenario SDK tutorial (`run_goal()` one-liner / budgets / event_callback / manual loop) against a real LLM.
+
+### Changed
+- `GoalManager.evaluate_after_turn` now charges turn counters (`turns_used`, `tokens_used`, `wall_clock_used_sec`) BEFORE any short-circuit branch so per-turn cost is always tracked, even when a tool ends the loop. Decision priority is now: budget cap > tool signal > judge.
 
 ### Changed
 - Top-level lazy imports (e.g. `from agentica import Knowledge`, `Claude`, `SqliteDb`, `Swarm`, ...) no longer emit `DeprecationWarning`. They are now treated as stable v1.x public API alongside the sub-module paths. The `DEPRECATED_TOP_LEVEL` registry has been removed; the planned v2.0 forced migration is dropped.

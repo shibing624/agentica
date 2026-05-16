@@ -121,6 +121,24 @@ class GoalState:
 
 
 @dataclass
+class GoalRunResult:
+    """Return value of ``Agent.run_goal()``.
+
+    A flat, ergonomic summary of a standing-goal loop execution. ``status``
+    is one of the GoalState terminal values: ``complete``, ``paused``,
+    ``budget_limited``. ``final_response`` is the agent's last
+    ``RunResponse`` so callers can still inspect cost / messages / tool
+    calls without re-running.
+    """
+
+    status: str
+    reason: str
+    final_response: Any  # agentica.run_response.RunResponse
+    goal: "GoalState"
+    turns_used: int
+
+
+@dataclass
 class GoalDecision:
     """Returned by ``GoalManager.evaluate_after_turn()``. UI-neutral."""
 
@@ -547,9 +565,52 @@ class GoalManager:
         # Re-read disk first so a GoalTool call during the turn takes effect.
         self._reload_from_disk()
 
-        if self._state is None or self._state.status != "active":
+        if self._state is None:
+            return GoalDecision(
+                status="cleared",
+                should_continue=False,
+                continuation_prompt=None,
+                verdict="continue",
+                reason="no active goal",
+                message="",
+            )
+
+        # Charge the turn that just ran. This is independent of the
+        # eventual decision (tool short-circuit / budget / judge) — the
+        # LLM work has already happened and the cost is real. Doing this
+        # in ONE place (instead of duplicating below) avoids drift.
+        if self._state.status != "cleared":
+            self._state.turns_used += 1
+            if token_delta > 0:
+                self._state.tokens_used += int(token_delta)
+            if elapsed_sec > 0:
+                self._state.wall_clock_used_sec += float(elapsed_sec)
+
+        # Hard budget caps (P1 S2) take precedence over EVERYTHING else,
+        # including tool short-circuit and judge. Rationale: the user set
+        # the cap to bound resource consumption; once we've blown past it
+        # that's the primary signal to report, regardless of what the
+        # model claimed via update_goal.
+        budget_msg = self._check_budget_exhausted()
+        if budget_msg is not None:
+            self._state.status = "budget_limited"
+            self._state.paused_reason = "budget"
+            self._persist()
+            self._emit(RunEventType.goal_paused, paused_reason="budget",
+                       budget_message=budget_msg)
+            return GoalDecision(
+                status="budget_limited",
+                should_continue=False,
+                continuation_prompt=None,
+                verdict="continue",
+                reason=budget_msg,
+                message=f"⊙ Goal budget-limited: {budget_msg}. Use /goal resume to continue.",
+            )
+
+        if self._state.status != "active":
             # Tool may have marked complete/paused mid-turn.
-            if self._state is not None and self._state.status == "complete":
+            if self._state.status == "complete":
+                self._persist()
                 self._emit(
                     RunEventType.goal_completed,
                     verdict="tool_signal",
@@ -563,7 +624,8 @@ class GoalManager:
                     reason=self._state.last_reason or "agent marked complete",
                     message=f"✓ Goal complete (agent-marked): {self._state.last_reason or ''}",
                 )
-            if self._state is not None and self._state.status == "paused":
+            if self._state.status == "paused":
+                self._persist()
                 self._emit(
                     RunEventType.goal_paused,
                     paused_reason=self._state.paused_reason or "agent-tool",
@@ -577,7 +639,7 @@ class GoalManager:
                     message=f"⊙ Goal paused (agent-marked): {self._state.last_reason or ''}",
                 )
             return GoalDecision(
-                status=self._state.status if self._state else "cleared",
+                status=self._state.status,
                 should_continue=False,
                 continuation_prompt=None,
                 verdict="continue",
@@ -598,33 +660,6 @@ class GoalManager:
                 verdict="parse_failed",
                 reason="no judge model configured",
                 message="⊙ Goal paused: no judge model configured.",
-            )
-
-        # Budget accounting BEFORE the judge call so we charge tokens/time
-        # actually spent on this turn even if we end up budget-limited.
-        self._state.turns_used += 1
-        if token_delta > 0:
-            self._state.tokens_used += int(token_delta)
-        if elapsed_sec > 0:
-            self._state.wall_clock_used_sec += float(elapsed_sec)
-
-        # Hard budget caps (P1 S2): token / wall-clock budgets land us in
-        # ``budget_limited``, which is semantically distinct from ``paused``
-        # — the user must explicitly extend the cap or accept the result.
-        budget_msg = self._check_budget_exhausted()
-        if budget_msg is not None:
-            self._state.status = "budget_limited"
-            self._state.paused_reason = "budget"
-            self._persist()
-            self._emit(RunEventType.goal_paused, paused_reason="budget",
-                       budget_message=budget_msg)
-            return GoalDecision(
-                status="budget_limited",
-                should_continue=False,
-                continuation_prompt=None,
-                verdict="continue",
-                reason=budget_msg,
-                message=f"⊙ Goal budget-limited: {budget_msg}. Use /goal resume to continue.",
             )
 
         verdict, reason, parse_failed = await judge_goal(
