@@ -469,7 +469,12 @@ class TestModelFactory:
             assert model is not None
 
     def test_deepseek_provider_uses_v4_flash_thinking_defaults(self):
-        """Gateway DeepSeek models should inherit SDK provider thinking defaults."""
+        """Gateway DeepSeek models should NOT inject thinking defaults when not requested.
+
+        Thinking is opt-in only via gateway settings (model_thinking / model_reasoning_effort).
+        Empty settings -> plain model with no reasoning_effort / extra_body, so user-side
+        `extra_body={"thinking": {"type": "disabled"}}` won't conflict with baked-in defaults.
+        """
         from agentica.gateway.services.model_factory import create_model
 
         with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
@@ -481,8 +486,8 @@ class TestModelFactory:
         assert model.base_url == "https://api.deepseek.com"
         assert model.context_window == 1_000_000
         assert model.max_output_tokens == 384_000
-        assert model.reasoning_effort == "high"
-        assert model.extra_body == {"thinking": {"type": "enabled"}}
+        assert model.reasoning_effort is None
+        assert model.extra_body is None
 
     def test_deepseek_provider_respects_gateway_reasoning_effort(self):
         """Gateway env reasoning effort should override DeepSeek provider defaults."""

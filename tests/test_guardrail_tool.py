@@ -32,8 +32,9 @@ class TestProviderFactory(unittest.TestCase):
         self.assertEqual(model.id, "deepseek-v4-flash")
         self.assertEqual(model.context_window, 1_000_000)
         self.assertEqual(model.max_output_tokens, 384_000)
-        self.assertEqual(model.reasoning_effort, "high")
-        self.assertEqual(model.extra_body, {"thinking": {"type": "enabled"}})
+        # No thinking defaults; user opts in via reasoning_effort + extra_body kwargs.
+        self.assertIsNone(model.reasoning_effort)
+        self.assertIsNone(model.extra_body)
 
     def test_create_provider_deepseek_allows_overrides(self):
         """Explicit DeepSeek kwargs should override provider defaults."""
@@ -58,7 +59,12 @@ class TestProviderFactory(unittest.TestCase):
         self.assertIsInstance(model, OpenAILike)
 
     def test_create_provider_nvidia_deepseek_v4_flash_defaults(self):
-        """NVIDIA provider should use its DeepSeek v4 flash OpenAI-compatible preset."""
+        """NVIDIA provider should use its DeepSeek v4 flash OpenAI-compatible preset.
+
+        Sampling / thinking knobs are NOT preset (see providers.py NOTE) so that user
+        overrides like `extra_body={"chat_template_kwargs": {"thinking": False}}` don't
+        collide with baked-in defaults.
+        """
         from agentica.model.providers import create_provider
 
         model = create_provider("nvidia", api_key="fake_key")
@@ -67,13 +73,10 @@ class TestProviderFactory(unittest.TestCase):
         self.assertIsInstance(model, OpenAILike)
         self.assertEqual(model.id, "deepseek-ai/deepseek-v4-flash")
         self.assertEqual(model.base_url, "https://integrate.api.nvidia.com/v1")
-        self.assertEqual(model.max_tokens, 16384)
-        self.assertEqual(model.temperature, 1)
-        self.assertEqual(model.top_p, 0.95)
-        self.assertEqual(
-            model.extra_body,
-            {"chat_template_kwargs": {"thinking": True, "reasoning_effort": "high"}},
-        )
+        self.assertEqual(model.max_output_tokens, 16384)
+        self.assertIsNone(model.temperature)
+        self.assertIsNone(model.top_p)
+        self.assertIsNone(model.extra_body)
 
     def test_create_provider_unknown_raises(self):
         from agentica.model.providers import create_provider

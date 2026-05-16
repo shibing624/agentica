@@ -37,16 +37,15 @@ Optional extras (need ``pip install agentica[xxx]``)::
 Backward Compatibility
 ═══════════════════════════════════════════════════════════════
 
-Old-style top-level imports (e.g. ``from agentica import Knowledge``) STILL
-work in v1.x but emit ``DeprecationWarning`` to encourage migration to
-explicit sub-module paths above. Will be removed in v2.0.
+Old-style top-level imports (e.g. ``from agentica import Knowledge``) also
+work via lazy ``__getattr__`` and are considered stable v1.x public API.
+Both styles are supported long-term; pick whichever you prefer.
 
 See ``docs/API.md`` for the Tier 1/2/3 stability contract.
 """
 
 import importlib
 import threading
-import warnings
 from typing import TYPE_CHECKING
 
 from . import api_registry
@@ -196,25 +195,9 @@ _LAZY_CACHE = {}
 _LAZY_LOCK = threading.Lock()
 
 
-def _emit_deprecation_warning(name: str, new_path: str) -> None:
-    """Emit a DeprecationWarning for top-level access of a symbol."""
-    warnings.warn(
-        f"`from agentica import {name}` is deprecated and will be removed in v2.0. "
-        f"Use `from {new_path.rsplit('.', 1)[0]} import {new_path.rsplit('.', 1)[1]}` instead.",
-        DeprecationWarning,
-        stacklevel=3,  # skip __getattr__ + caller's import frame
-    )
-
-
 def __getattr__(name: str):
-    """Lazy import handler for optional modules.
-
-    Emits DeprecationWarning when top-level import path is deprecated (see
-    `DEPRECATED_TOP_LEVEL`). Always still returns the symbol (backward compat).
-    """
+    """Lazy import handler for optional modules."""
     if name in _api_registry.LAZY_IMPORTS:
-        if name in _api_registry.DEPRECATED_TOP_LEVEL:
-            _emit_deprecation_warning(name, _api_registry.DEPRECATED_TOP_LEVEL[name])
         if name not in _LAZY_CACHE:
             with _LAZY_LOCK:
                 if name not in _LAZY_CACHE:

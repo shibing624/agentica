@@ -1,10 +1,7 @@
 # -*- coding: utf-8 -*-
 """Regression tests for the centralized top-level API registry."""
 
-import warnings
-
 from agentica.api_registry import (
-    DEPRECATED_TOP_LEVEL,
     LAZY_IMPORTS,
     PROVIDER_ALIAS_TO_SLUG,
     PUBLIC_API_ALL,
@@ -47,12 +44,6 @@ def test_api_registry_contains_provider_aliases():
     assert PROVIDER_ALIAS_TO_SLUG["ZhipuAIChat"] == "zhipuai"
 
 
-def test_api_registry_contains_deprecated_top_level_paths():
-    assert DEPRECATED_TOP_LEVEL["SqliteDb"] == "agentica.db.SqliteDb"
-    assert DEPRECATED_TOP_LEVEL["Swarm"] == "agentica.swarm.Swarm"
-    assert DEPRECATED_TOP_LEVEL["SubagentType"] == "agentica.subagent.SubagentType"
-
-
 def test_agentica_public_api_uses_registry_names():
     import agentica
 
@@ -79,15 +70,11 @@ def test_agentica_dir_does_not_expose_registry_internals():
     visible = dir(agentica)
     assert "api_registry" not in visible
     assert "LAZY_IMPORTS" not in visible
-    assert "DEPRECATED_TOP_LEVEL" not in visible
     assert "PUBLIC_API_ALL" not in visible
 
 
-def test_deprecated_top_level_access_still_warns():
+def test_top_level_lazy_access_returns_symbol():
     import agentica
+    from agentica.subagent import SubagentType
 
-    with warnings.catch_warnings(record=True) as captured:
-        warnings.simplefilter("always")
-        _ = agentica.SubagentType
-
-    assert any("deprecated" in str(w.message).lower() for w in captured)
+    assert agentica.SubagentType is SubagentType

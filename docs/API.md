@@ -290,7 +290,7 @@ from agentica import Agent, tool
 from agentica.model.openai import OpenAIChat
 from agentica.tools.shell_tool import ShellTool
 
-# ⚠️ 仍兼容但不推荐（v2.0 可能加 DeprecationWarning）
+# ✅ 也可以（顶层快捷 import 作为 v1.x 稳定 API 长期支持）
 from agentica import Agent, OpenAIChat, ShellTool
 ```
 

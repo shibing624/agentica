@@ -108,6 +108,11 @@ register_provider("deepseek", ProviderConfig(
     api_key_env="DEEPSEEK_API_KEY",
     context_window=1_000_000,
     max_output_tokens=384_000,
+    # NOTE: do NOT inject default reasoning_effort/extra_body here. Users may want to
+    # disable thinking via `extra_body={"thinking": {"type": "disabled"}}`, and a baked-in
+    # `reasoning_effort="high"` would conflict with that. Let the user opt in explicitly:
+    #   create_provider("deepseek", reasoning_effort="high",
+    #                   extra_body={"thinking": {"type": "enabled"}})
     models=["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-reasoner", "deepseek-chat"],
 ))
 
@@ -152,6 +157,8 @@ register_provider("nvidia", ProviderConfig(
     base_url="https://integrate.api.nvidia.com/v1",
     api_key_env="NVIDIA_API_KEY",
     max_output_tokens=16384,
+    # NOTE: no default sampling / thinking params — users opt in explicitly to keep
+    # `extra_body.chat_template_kwargs` overridable without merge conflicts.
     models=["deepseek-ai/deepseek-v4-flash"],
 ))
 

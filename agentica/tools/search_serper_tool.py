@@ -27,7 +27,7 @@ class SerperWrapper(BaseModel):
     def validate_serper(cls, values: dict) -> dict:
         if "serper_api_key" in values:
             values.setdefault("api_key", values["serper_api_key"])
-            logger.warning("`serper_api_key` is deprecated, use `api_key` instead", DeprecationWarning)
+            logger.warning("`serper_api_key` is deprecated, use `api_key` instead")
 
         if "api_key" not in values:
             raise ValueError(

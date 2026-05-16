@@ -129,23 +129,31 @@ class LanceDb(VectorDb):
             self.connection = self._init_table()  # Connection update is needed
 
     def _init_table(self) -> lancedb.db.LanceTable:
-        # Check if table already exists — open instead of overwriting (prevents data loss)
+        embedding_dim = len(self.embedding.get_embedding("test"))
+
+        # Open existing table if dim matches; otherwise drop and recreate to
+        # avoid ArrowTypeError when the embedder changed.
         try:
             existing = self.connection.table_names()
             if self.table_name in existing:
-                logger.info(f"Opening existing table: {self.table_name}")
-                return self.connection.open_table(self.table_name)
-        except Exception:
-            pass
+                tbl = self.connection.open_table(self.table_name)
+                existing_dim = tbl.schema.field(self._vector_col).type.list_size
+                if existing_dim == embedding_dim:
+                    logger.info(f"Opening existing table: {self.table_name}")
+                    return tbl
+                logger.warning(
+                    f"Table '{self.table_name}' has vector dim {existing_dim}, "
+                    f"but embedder produces {embedding_dim}. Recreating table."
+                )
+                self.connection.drop_table(self.table_name)
+        except Exception as e:
+            logger.debug(f"Table check failed, will create fresh: {e}")
 
         schema = pa.schema(
             [
                 pa.field(
                     self._vector_col,
-                    pa.list_(
-                        pa.float32(),
-                        len(self.embedding.get_embedding("test")),  # type: ignore
-                    ),
+                    pa.list_(pa.float32(), embedding_dim),
                 ),
                 pa.field(self._id, pa.string()),
                 pa.field("payload", pa.string()),

@@ -56,12 +56,15 @@ def test_openai_compatible_message_preserves_provider_payload():
 
 
 def test_deepseek_thinking_omits_unsupported_sampling_params():
+    # Thinking is opt-in: user must pass reasoning_effort + extra_body.thinking explicitly.
     model = create_provider(
         "deepseek",
         temperature=0.7,
         top_p=0.9,
         presence_penalty=0.1,
         frequency_penalty=0.2,
+        reasoning_effort="high",
+        extra_body={"thinking": {"type": "enabled"}},
     )
 
     request_kwargs = model.request_kwargs
@@ -72,6 +75,17 @@ def test_deepseek_thinking_omits_unsupported_sampling_params():
     assert "top_p" not in request_kwargs
     assert "presence_penalty" not in request_kwargs
     assert "frequency_penalty" not in request_kwargs
+
+
+def test_deepseek_no_default_thinking_params():
+    # Plain create_provider("deepseek") must NOT inject any thinking defaults,
+    # so user `extra_body={"thinking": {"type": "disabled"}}` won't collide with a baked-in
+    # `reasoning_effort`. See providers.py NOTE.
+    model = create_provider("deepseek")
+    request_kwargs = model.request_kwargs
+
+    assert "reasoning_effort" not in request_kwargs
+    assert "extra_body" not in request_kwargs
 
 
 def test_deepseek_non_thinking_keeps_sampling_params():
