@@ -1555,14 +1555,14 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             self.enable_goal_tool()
 
         prompt = state.objective
-        final_response: Optional[RunResponse] = None
+        last_run_response: Optional[RunResponse] = None
         tokens_baseline = 0
 
         while True:
             t0 = time.monotonic()
             response = await self.run(prompt)
             elapsed = time.monotonic() - t0
-            final_response = response
+            last_run_response = response
 
             token_delta = 0
             if response.cost_tracker is not None:
@@ -1584,7 +1584,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 return GoalRunResult(
                     status=decision.status,
                     reason=decision.reason,
-                    final_response=final_response,
+                    run_response=last_run_response,
                     goal=final_state,
                     turns_used=final_state.turns_used if final_state else 0,
                 )

@@ -7,7 +7,7 @@ Most users only need one call:
 
     result = await agent.run_goal("Compute 17+9+16", turn_budget=3)
     print(result.status, result.reason)
-    print(result.final_response.content)
+    print(result.response_content)
 
 `Agent.run_goal()` internally:
     - lazily creates the SessionLog and GoalManager
@@ -56,7 +56,7 @@ async def example_1_one_liner() -> None:
     print(f"status        = {result.status}")
     print(f"reason        = {result.reason}")
     print(f"turns_used    = {result.turns_used}")
-    print(f"final answer  = {result.final_text.strip()[:120]}")
+    print(f"answer        = {result.response_content.strip()[:120]}")
 
 
 async def example_2_budgets() -> None:

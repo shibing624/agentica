@@ -26,7 +26,7 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
     - `Agent.get_goal_manager(...)` for power users who want to drive turns by hand without touching `SessionLog`.
     - `Agent.enable_goal_tool()` attaches `GoalTool.update_goal` so the model can self-mark `complete` / `paused`.
     - `Agent._session_log` and `Agent.goal_manager` are now formally declared dataclass fields (no `getattr` speculation).
-    - New `agentica.goals.GoalRunResult(status, reason, final_response, goal, turns_used)`.
+    - New `agentica.goals.GoalRunResult(status, reason, run_response, goal, turns_used)` with `response_content` convenience property.
   - `Runner._run_impl` early-loads any persisted active `GoalState` from `SessionLog` and binds `TaskAnchor` to the goal objective — SDK paths now get goal-aware retrieval automatically, not just the CLI.
   - `GoalState` gains `token_budget` / `tokens_used` / `wall_clock_budget_sec` / `wall_clock_used_sec` and a new `budget_limited` status (semantically distinct from `paused`). Hard budget caps take precedence over tool short-circuit and judge.
   - `agentica.tools.goal_tool.GoalTool.update_goal(status, reason)`: receive-only model tool letting the agent self-mark `complete` or `paused` (cannot rewrite the objective). CLI auto-attaches on `/goal` set and detaches on goal termination.
@@ -35,7 +35,7 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ### Changed
 - `GoalManager.evaluate_after_turn` now charges turn counters (`turns_used`, `tokens_used`, `wall_clock_used_sec`) BEFORE any short-circuit branch so per-turn cost is always tracked, even when a tool ends the loop. Decision priority is now: budget cap > tool signal > judge.
-- `GoalRunResult.final_response` is now formally typed `Optional[RunResponse]` (was untyped `Any`). New `GoalRunResult.final_text` property returns `final_response.content or ""` for the common one-liner access pattern.
+- `GoalRunResult` field renamed `final_response` → `run_response` (typed `Optional[RunResponse]`, was untyped `Any`) and the convenience property `final_text` → `response_content`, to align with Agentica's existing `Agent.run_response` / `RunResponse.content` terminology. `final_*` was an LLM-style modifier that didn't add information.
 - `agentica.goals.DEFAULT_TURN_BUDGET` bumped 20 → 50. Rationale: with `token_budget` and `wall_clock_budget_sec` now acting as the real hard caps, `turn_budget` is the safety-net against runaway loops; 20 was too aggressive for real coding tasks (feature + tests routinely need 20–50 turns). The token / wall-clock budgets still bound actual cost.
 
 ### Changed

@@ -560,16 +560,16 @@ def test_agent_enable_goal_tool_idempotent(tmp_path):
     assert len(goal_tools) == 1
 
 
-def test_goal_run_result_final_text_property():
-    """``final_text`` returns content for happy path and "" for None."""
+def test_goal_run_result_response_content_property():
+    """``response_content`` returns content for happy path and "" for None."""
     from agentica.goals import GoalRunResult, GoalState
     from agentica.run_response import RunResponse
 
     state = GoalState(session_id="s", objective="x")
     rr = RunResponse(content="hello world")
-    assert GoalRunResult("complete", "ok", rr, state, 1).final_text == "hello world"
-    assert GoalRunResult("complete", "ok", RunResponse(content=None), state, 1).final_text == ""
-    assert GoalRunResult("complete", "ok", None, state, 0).final_text == ""
+    assert GoalRunResult("complete", "ok", rr, state, 1).response_content == "hello world"
+    assert GoalRunResult("complete", "ok", RunResponse(content=None), state, 1).response_content == ""
+    assert GoalRunResult("complete", "ok", None, state, 0).response_content == ""
 
 
 def test_agent_run_goal_drives_to_completion(tmp_path):
@@ -604,7 +604,7 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     assert isinstance(result, GoalRunResult)
     assert result.status == "complete"
     assert result.turns_used == 1
-    assert result.final_response is rr
+    assert result.run_response is rr
     # Anchor was bound to the objective, not the message.
     assert agent.task_anchor.goal == "compute 17+9+16"
     # GoalTool was attached.

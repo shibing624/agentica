@@ -138,34 +138,34 @@ class GoalRunResult:
     A flat, ergonomic summary of a standing-goal loop execution.
 
     Attributes:
-        status:         One of ``complete`` / ``paused`` / ``budget_limited``.
-        reason:         Human-readable rationale (judge verdict, budget
-                        message, or tool reason).
-        final_response: The agent's last ``RunResponse`` — full access to
-                        ``content``, ``cost_tracker``, ``messages``,
-                        ``tool_calls`` for callers that need them. May be
-                        ``None`` only if the loop terminated before the
-                        first ``agent.run()`` call.
-        goal:           Final ``GoalState`` snapshot (objective, counters,
-                        subgoals, last_verdict).
-        turns_used:     Convenience copy of ``goal.turns_used``.
+        status:       One of ``complete`` / ``paused`` / ``budget_limited``.
+        reason:       Human-readable rationale (judge verdict, budget
+                      message, or tool reason).
+        run_response: The agent's last ``RunResponse`` (same shape as
+                      ``Agent.run_response``). Full access to ``content``,
+                      ``cost_tracker``, ``messages``, ``tool_calls`` for
+                      callers that need them. May be ``None`` only if the
+                      loop terminated before the first ``agent.run()``.
+        goal:         Final ``GoalState`` snapshot (objective, counters,
+                      subgoals, last_verdict).
+        turns_used:   Convenience copy of ``goal.turns_used``.
 
-    Convenience accessor: ``result.final_text`` returns
-    ``final_response.content or ""`` so the common case stays a one-liner.
+    Convenience accessor: ``result.response_content`` returns
+    ``run_response.content or ""`` so the 90% case stays a one-liner.
     """
 
     status: str
     reason: str
-    final_response: Optional["RunResponse"]
+    run_response: Optional["RunResponse"]
     goal: "GoalState"
     turns_used: int
 
     @property
-    def final_text(self) -> str:
-        """Last assistant message content, or empty string if unavailable."""
-        if self.final_response is None:
+    def response_content(self) -> str:
+        """Last assistant message content, or "" if no response was produced."""
+        if self.run_response is None:
             return ""
-        return self.final_response.content or ""
+        return self.run_response.content or ""
 
 
 @dataclass
