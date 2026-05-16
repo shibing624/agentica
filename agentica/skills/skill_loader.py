@@ -125,13 +125,6 @@ class SkillLoader:
                 skill_md = item / self.SKILL_FILE
                 if skill_md.exists():
                     skill_files.append(skill_md)
-                else:
-                    # Check for nested skill directories (e.g., document-skills/pdf)
-                    for nested_item in item.iterdir():
-                        if nested_item.is_dir():
-                            nested_skill_md = nested_item / self.SKILL_FILE
-                            if nested_skill_md.exists():
-                                skill_files.append(nested_skill_md)
 
         return skill_files
 

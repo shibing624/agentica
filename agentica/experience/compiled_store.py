@@ -296,6 +296,7 @@ class CompiledExperienceStore:
         parts = []
         for entry in top:
             body = strip_frontmatter(entry["_raw"])
+            body = _compress_repeated_lines(body)
             tier_badge = f"[{entry['_tier'].upper()}]" if entry["_tier"] != "hot" else ""
             count_badge = f"(seen {entry['_repeat_count']}x)" if entry["_repeat_count"] > 1 else ""
             header = f"### {entry['title']} {tier_badge} {count_badge}".strip()
@@ -447,16 +448,21 @@ class CompiledExperienceStore:
                 if len(synced_entries) >= limit:
                     break
 
-        if not synced_entries:
-            synced_entries.append("- No confirmed experiences have been synced yet.")
-
-        block = "\n".join([
-            self._SYNC_HEADER,
-            self._SYNC_START,
-            "Generated from workspace experiences. Edit the experience entries, not this block.",
-            *synced_entries,
-            self._SYNC_END,
-        ])
+        # Empty marker block stays parseable for find/replace on next sync,
+        # but carries no placeholder text that would balloon the system prompt.
+        if synced_entries:
+            block = "\n".join([
+                self._SYNC_HEADER,
+                self._SYNC_START,
+                *synced_entries,
+                self._SYNC_END,
+            ])
+        else:
+            block = "\n".join([
+                self._SYNC_HEADER,
+                self._SYNC_START,
+                self._SYNC_END,
+            ])
 
         existing = ""
         if global_agent_md.exists():
@@ -481,6 +487,27 @@ class CompiledExperienceStore:
 
 
 # ── Module-level helpers (experience-specific, not shared) ────────────────
+
+def _compress_repeated_lines(text: str) -> str:
+    """Collapse consecutive duplicate lines into ``<line> xN`` form.
+
+    Defensive rendering layer for legacy experience cards written before the
+    compiler started deduping. A success-pattern card with 76 raw ``- read_file``
+    lines balloons the system prompt with zero added signal; this collapses
+    such runs to a single ``- read_file x76`` row.
+    """
+    lines = text.split("\n")
+    out: List[str] = []
+    for line in lines:
+        if out and out[-1] == line and line.strip():
+            out[-1] = f"{line} x2"
+        elif out and line.strip() and out[-1].startswith(line + " x"):
+            count = int(out[-1].rsplit(" x", 1)[1]) + 1
+            out[-1] = f"{line} x{count}"
+        else:
+            out.append(line)
+    return "\n".join(out)
+
 
 def _parse_experience_index(index_content: str) -> List[Dict]:
     """Parse EXPERIENCE.md index lines into entry dicts.

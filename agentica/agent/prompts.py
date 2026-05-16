@@ -137,9 +137,16 @@ class PromptsMixin:
 
     @staticmethod
     def _render_xml_cdata_block(tag: str, content: str) -> str:
-        """Wrap markdown content in a lightweight XML container."""
-        escaped = content.replace("]]>", "]]]]><![CDATA[>")
-        return f"<{tag} format=\"markdown\"><![CDATA[\n{escaped}\n]]></{tag}>"
+        """Render a labelled markdown block.
+
+        Historically wrapped in ``<tag><![CDATA[...]]></tag>`` so XML parsers
+        could safely round-trip markdown. Nothing on the read side parses
+        the wrapping anymore (LLMs read it as opaque text), and the CDATA
+        bookends just burn tokens, so we now emit a thin markdown comment
+        marker instead. The ``tag`` is preserved as the marker name so any
+        existing tooling that greps for ``<workspace_context>`` keeps working.
+        """
+        return f"<!-- {tag} -->\n{content}\n<!-- /{tag} -->"
 
     def _get_config_directives(self) -> List[str]:
         """Return prompt directives from prompt_config flags.

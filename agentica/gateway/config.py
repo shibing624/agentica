@@ -14,10 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agentica.config import (
-    AGENTICA_DATA_DIR,
-    AGENTICA_WORKSPACE_DIR,
-)
+from agentica.config import AGENTICA_WORKSPACE_DIR
 
 
 @dataclass
@@ -108,10 +105,6 @@ class Settings:
     @property
     def workspace_path(self) -> Path:
         return Path(AGENTICA_WORKSPACE_DIR)
-
-    @property
-    def data_dir(self) -> Path:
-        return Path(AGENTICA_DATA_DIR)
 
     @property
     def base_dir(self) -> Path:

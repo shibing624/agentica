@@ -36,9 +36,11 @@ Usage:
     )
 """
 import json
+import time
 from typing import List, Optional
 from pathlib import Path
 
+from agentica.config import AGENTICA_HOME
 from agentica.tools.base import Tool
 from agentica.skills import (
     Skill,
@@ -49,6 +51,76 @@ from agentica.skills import (
 )
 from agentica.skills.skill_loader import SkillLoader
 from agentica.utils.log import logger
+
+
+# When the registry holds more than this many skills, the system prompt
+# only includes the FULL description for the top-N most-used / most-recent
+# skills. The rest are listed as `name + trigger only`, and the agent
+# pulls full details on demand via `get_skill_info(name)`.
+_LAZY_THRESHOLD = 20
+
+# Per-call score components for ranking skills in the system prompt.
+# Recency wins over raw frequency to keep the visible set adaptive.
+_USAGE_RECENCY_HALF_LIFE_DAYS = 14.0
+_USAGE_RECENCY_WEIGHT = 0.7
+_USAGE_FREQUENCY_WEIGHT = 0.3
+
+
+def _skill_usage_state_path() -> Path:
+    """Where skill usage counters are persisted (global, single JSON file).
+
+    Lives directly under ~/.agentica/ alongside other single-file runtime
+    caches (model_pricing_cache.json, agent_sessions.db, cli_history.txt).
+    """
+    return Path(AGENTICA_HOME).expanduser() / "skill_usage.json"
+
+
+def _load_skill_usage() -> dict:
+    path = _skill_usage_state_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.debug("skill usage state unreadable, resetting: %s", exc)
+        return {}
+
+
+def _save_skill_usage(state: dict) -> None:
+    path = _skill_usage_state_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.debug("failed to persist skill usage state: %s", exc)
+
+
+def _bump_skill_usage(name: str) -> None:
+    """Record one invocation of `name`. Best-effort; never raises."""
+    state = _load_skill_usage()
+    entry = state.get(name) or {"count": 0, "last_used": 0.0}
+    entry["count"] = int(entry.get("count", 0)) + 1
+    entry["last_used"] = time.time()
+    state[name] = entry
+    _save_skill_usage(state)
+
+
+def _score_skill_usage(usage: dict, name: str, now: float) -> float:
+    """Composite ranking score: recency decay + log-frequency."""
+    entry = usage.get(name)
+    if not entry:
+        return 0.0
+    count = max(int(entry.get("count", 0)), 0)
+    last_used = float(entry.get("last_used", 0.0))
+    if last_used <= 0 or count <= 0:
+        return 0.0
+    age_days = max((now - last_used) / 86400.0, 0.0)
+    recency = 0.5 ** (age_days / _USAGE_RECENCY_HALF_LIFE_DAYS)
+    # Log so a single 100-call burst doesn't permanently freeze the top slot.
+    import math
+    frequency = math.log1p(count) / math.log1p(50)  # normalises around 50 calls
+    frequency = min(frequency, 1.0)
+    return _USAGE_RECENCY_WEIGHT * recency + _USAGE_FREQUENCY_WEIGHT * frequency
 
 
 class SkillTool(Tool):
@@ -244,6 +316,15 @@ class SkillTool(Tool):
             return all_skills
         return [s for s in all_skills if self._agent._is_skill_enabled(s.name)]
 
+    def _rank_skills_by_usage(self, skills: List[Skill]) -> List[Skill]:
+        """Order skills by composite recency+frequency score, ties → name."""
+        usage = _load_skill_usage()
+        now = time.time()
+        return sorted(
+            skills,
+            key=lambda s: (-_score_skill_usage(usage, s.name, now), s.name),
+        )
+
     def list_skills(self) -> str:
         """
         List all available skills.
@@ -263,9 +344,10 @@ class SkillTool(Tool):
                 "- ~/.agentica/skills/ (user-level)"
             )
 
-        result = f"Available Skills ({len(skills)}):\n"
+        ranked = self._rank_skills_by_usage(skills)
+        result = f"Available Skills ({len(ranked)}):\n"
         result += "-" * 40 + "\n"
-        for skill in skills:
+        for skill in ranked:
             result += f"- {skill.name}\n"
             result += f"  Description: {skill.description}\n"
             result += f"  Location: {skill.location}\n"
@@ -298,6 +380,10 @@ class SkillTool(Tool):
                 f"Available skills: {', '.join(available[:50]) if available else 'None'}"
             )
 
+        # Bump usage counter — this is how the system prompt decides which
+        # skills earn a full description slot vs name-only.
+        _bump_skill_usage(skill_obj.name)
+
         # Return full skill prompt with instructions
         result = f"=== Skill: {skill_obj.name} ===\n"
         result += f"Description: {skill_obj.description}\n"
@@ -307,7 +393,7 @@ class SkillTool(Tool):
             result += f"License: {skill_obj.license}\n"
         if skill_obj.allowed_tools:
             result += f"Allowed Tools: {', '.join(skill_obj.allowed_tools)}\n"
-        
+
         # Include full instructions from SKILL.md
         result += f"\n--- Instructions ---\n{skill_obj.content}\n"
 
@@ -350,28 +436,55 @@ No skills are currently available.
 If a matching skill is later installed, load it with `get_skill_info(skill_name)` before acting on the task.
 """
 
-        # Build skill summary list (name + description only)
-        skill_list = []
-        for skill in skills:
+        ranked = self._rank_skills_by_usage(skills)
+        total = len(ranked)
+
+        # Below the threshold, every skill gets a full description.
+        # At or above, only the top-N (by usage recency+frequency) keep their
+        # description in the system prompt. The rest are listed by name +
+        # optional trigger so the agent can `get_skill_info(name)` on demand.
+        if total <= _LAZY_THRESHOLD:
+            full_skills, lazy_skills = ranked, []
+        else:
+            full_skills = ranked[:_LAZY_THRESHOLD]
+            lazy_skills = ranked[_LAZY_THRESHOLD:]
+
+        full_lines = []
+        for skill in full_skills:
             trigger_info = f" (trigger: `{skill.trigger}`)" if skill.trigger else ""
-            skill_list.append(f"- **{skill.name}**{trigger_info}: {skill.description}")
+            full_lines.append(f"- **{skill.name}**{trigger_info}: {skill.description}")
 
-        skills_summary = "\n".join(skill_list)
+        sections = [
+            "# Skills",
+            "",
+            "Use a skill only when it clearly matches the current task.",
+            "",
+            f"## Top Skills ({len(full_skills)} of {total}, ranked by recent usage)",
+            "\n".join(full_lines),
+        ]
 
-        return f"""# Skills
+        if lazy_skills:
+            lazy_lines = []
+            for skill in lazy_skills:
+                trigger_info = f" (`{skill.trigger}`)" if skill.trigger else ""
+                lazy_lines.append(f"- {skill.name}{trigger_info}")
+            sections.extend([
+                "",
+                f"## Other Skills ({len(lazy_skills)}, name only — call `get_skill_info(name)` to load full description before use)",
+                "\n".join(lazy_lines),
+            ])
 
-Use a skill only when it clearly matches the current task.
+        sections.extend([
+            "",
+            "## Skill Workflow",
+            "- Load the matching skill with `get_skill_info(skill_name)` before giving task guidance.",
+            "- Treat slash commands like `/<something>` as skill references and load the matching skill first.",
+            "- Skills provide instructions, not executable actions.",
+            "- Do not mention a skill without loading it.",
+            "- Do not reload the same skill within the current turn.",
+        ])
 
-## Available Skills ({len(skills)})
-{skills_summary}
-
-## Skill Workflow
-- Load the matching skill with `get_skill_info(skill_name)` before giving task guidance.
-- Treat slash commands like `/<something>` as skill references and load the matching skill first.
-- Skills provide instructions, not executable actions.
-- Do not mention a skill without loading it.
-- Do not reload the same skill within the current turn.
-"""
+        return "\n".join(sections) + "\n"
 
     def __repr__(self) -> str:
         self._ensure_initialized()

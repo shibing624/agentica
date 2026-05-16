@@ -22,8 +22,13 @@ from typing import (
     Union,
 )
 
-if TYPE_CHECKING:
-    from agentica.experience.skill_lifecycle_hooks import SkillLifecycleHooks
+# Imported at runtime (not TYPE_CHECKING) so the field annotation
+# ``Optional[SkillLifecycleHooks]`` below resolves at class-build time.
+# Pydantic 2.12+ eagerly resolves forward refs when a subclass of
+# ``Workflow`` exposes ``Agent`` typed fields; a deferred TYPE_CHECKING
+# import leaves the name undefined and raises ``PydanticUserError:
+# `<Workflow subclass>` is not fully defined``.
+from agentica.experience.skill_lifecycle_hooks import SkillLifecycleHooks
 
 
 @dataclass
@@ -257,7 +262,7 @@ class SkillUpgradeConfig:
     # maintenance. ``None`` falls back to a no-op at call sites; research
     # extensions (e.g. ``evaluation/vag/lifecycle/``) implement
     # ``SkillLifecycleHooks`` and pass an instance here.
-    lifecycle_hooks: Optional["SkillLifecycleHooks"] = None
+    lifecycle_hooks: Optional[SkillLifecycleHooks] = None
 
 
 @dataclass

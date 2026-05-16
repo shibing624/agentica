@@ -97,79 +97,46 @@ class Workspace:
     """
 
     # Global config files (shared across all users)
+    # Templates are intentionally minimal — boilerplate ("Friendly and
+    # professional", default code-verification recipes) pollutes every
+    # system prompt with zero behavioural signal. Customize the file on
+    # disk when you actually have project-specific rules to add.
     DEFAULT_GLOBAL_FILES = {
         "AGENTS.md": """# Agent Instructions
 
-You are a helpful AI assistant.
-
-## Guidelines
-1. Be concise and accurate
-2. Use tools when needed
-3. Store important information in memory
-4. Follow user preferences in USER.md
-
-## Code Verification
-
-**VERY IMPORTANT**: After completing code changes, you MUST verify your work:
-
-1. **Find Commands**: Check project files for validation commands:
-   - README.md, package.json, pyproject.toml, Makefile
-
-2. **Execute Validation**: Run the appropriate validation commands for the project:
-   - Lint: `npm run lint`, `ruff check .`, etc.
-   - Type check: `npm run typecheck`, `mypy .`, etc.
-   - Test: `npm test`, `pytest`, etc.
-
-3. **Fix Issues**: If validation fails, fix and re-run until passing.
-
-## Build/Lint/Test Commands
-
-<!-- Add project-specific commands here -->
-<!-- Example:
-- Build: `npm run build`
-- Lint: `npm run lint`
-- Test: `npm test`
-- Single test: `npm test -- --grep "test name"`
--->
+<!-- Add project-specific agent rules here. -->
+<!-- Empty file = no extra rules injected into the system prompt. -->
 """,
-        "PERSONA.md": """# Persona
-
-## Personality
-- Friendly and professional
-- Direct and honest
-- Proactive in helping
-
-## Communication Style
-- Clear and concise
-- Use examples when explaining
-- Ask clarifying questions when needed
-""",
-        "TOOLS.md": """# Tool Usage Guidelines
-
-## File Operations
-- Always use absolute paths
-- Read files before editing
-- Create backups for important changes
-
-## Shell Commands
-- Prefer safe, non-destructive commands
-- Explain what commands will do
-""",
+        "PERSONA.md": "",
+        "TOOLS.md": "",
     }
-    
+
     # Default user file template
     DEFAULT_USER_MD = """# User Profile
 
 ## User ID
 {user_id}
 
-## Preferences
-- Language: Chinese or English
-- Style: Concise
-
-## Context
-<!-- User's background, projects, etc. -->
+<!-- Optional: preferences, context, ongoing projects. -->
 """
+
+    # Files whose body matches a default scaffold (just comments or blank
+    # lines) are skipped entirely when assembling the system prompt —
+    # there's no point telling the LLM "the user did not customize this".
+    @staticmethod
+    def _is_empty_template(content: str) -> bool:
+        if not content:
+            return True
+        for line in content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#") or stripped.startswith("<!--"):
+                continue
+            if stripped.startswith("- ") and ("Add" in stripped or "Example" in stripped):
+                continue
+            return False
+        return True
 
     def __init__(
         self,
@@ -407,21 +374,21 @@ You are a helpful AI assistant.
         if chain_contents:
             contents.append(f"<!-- Project AGENTS.md chain -->\n{chain_contents}")
 
-        # 2. Workspace-level files (PERSONA.md, TOOLS.md)
+        # 2. Workspace-level files (PERSONA.md, TOOLS.md) — skip empty scaffolds
         global_files = [
             self.config.persona_md,
             self.config.tools_md,
         ]
         for f in global_files:
             content = await self.read_file_async(f)
-            if content:
+            if content and not self._is_empty_template(content):
                 contents.append(f"<!-- {f} -->\n{content}")
 
-        # 3. User-specific USER.md
+        # 3. User-specific USER.md — skip empty scaffolds
         user_md_path = self._get_user_md()
         if user_md_path.exists():
             content = (await async_read_text(user_md_path)).strip()
-            if content:
+            if content and not self._is_empty_template(content):
                 contents.append(f"<!-- USER.md (user: {self._user_id}) -->\n{content}")
 
         return "\n\n---\n\n".join(contents) if contents else ""
@@ -463,6 +430,14 @@ You are a helpful AI assistant.
         ".cursorrules",                 # Cursor
     ]
 
+    # Files whose full content is too noisy for the system prompt (developer
+    # docs, architecture references). We surface only the path so the agent
+    # can pull them on demand via read_file. AGENTS.md / AGENT.md stay as
+    # full-content sources — those are agent behaviour rules, not docs.
+    _PATH_ONLY_CONFIG_NAMES: frozenset = frozenset({
+        "CLAUDE.md", "claude.md",
+    })
+
     def _load_agent_md_chain(self) -> str:
         """Load prioritized AGENTS.md content with a 40K character budget."""
         sources = self._collect_agent_md_sources()
@@ -492,7 +467,7 @@ You are a helpful AI assistant.
         if global_agent_md.is_file():
             try:
                 text = global_agent_md.read_text(encoding="utf-8").strip()
-                if text:
+                if text and not self._is_empty_template(text):
                     resolved = global_agent_md.resolve()
                     found.append((str(global_agent_md), text))
                     seen_paths.add(resolved)
@@ -510,16 +485,30 @@ You are a helpful AI assistant.
             # First-match-wins per directory (Hermes-style priority)
             for name in self._PROJECT_CONFIG_NAMES:
                 candidate = resolved / name
-                if candidate.is_file():
-                    try:
-                        text = candidate.read_text(encoding="utf-8").strip()
-                        source_path = candidate.resolve()
-                        if text and source_path not in seen_paths:
-                            project_chain.append((str(candidate), text))
-                            seen_paths.add(source_path)
-                    except (OSError, UnicodeError) as exc:
-                        logger.debug("Skipping unreadable project config %s: %s", candidate, exc)
-                    break  # first-match-wins: stop searching this directory
+                if not candidate.is_file():
+                    continue
+                source_path = candidate.resolve()
+                if source_path in seen_paths:
+                    break
+                if name in self._PATH_ONLY_CONFIG_NAMES:
+                    # Don't inline developer docs; surface the path so the
+                    # agent can pull them via read_file when relevant.
+                    note = (
+                        f"`{candidate}` is available for on-demand reading "
+                        "(developer reference, not auto-loaded). "
+                        "Use the read_file tool when its contents are needed."
+                    )
+                    project_chain.append((str(candidate), note))
+                    seen_paths.add(source_path)
+                    break
+                try:
+                    text = candidate.read_text(encoding="utf-8").strip()
+                    if text:
+                        project_chain.append((str(candidate), text))
+                        seen_paths.add(source_path)
+                except (OSError, UnicodeError) as exc:
+                    logger.debug("Skipping unreadable project config %s: %s", candidate, exc)
+                break  # first-match-wins: stop searching this directory
 
             if (resolved / ".git").exists():
                 break
@@ -532,7 +521,11 @@ You are a helpful AI assistant.
             try:
                 workspace_content = workspace_agent_md.read_text(encoding="utf-8").strip()
                 workspace_resolved = workspace_agent_md.resolve()
-                if workspace_content and workspace_resolved not in seen_paths:
+                if (
+                    workspace_content
+                    and workspace_resolved not in seen_paths
+                    and not self._is_empty_template(workspace_content)
+                ):
                     found.append((str(workspace_agent_md), workspace_content))
             except (OSError, UnicodeError) as exc:
                 logger.debug("Skipping unreadable workspace agent file %s: %s", workspace_agent_md, exc)
@@ -738,18 +731,27 @@ You are a helpful AI assistant.
                 if len(synced_entries) >= limit:
                     break
 
-        if not synced_entries:
-            synced_entries.append("- No confirmed user or feedback memories have been synced yet.")
-
-        block = "\n".join(
-            [
-                self._GLOBAL_AGENT_SYNC_HEADER,
-                self._GLOBAL_AGENT_SYNC_START,
-                "Generated from workspace memories. Edit the memory entries, not this block.",
-                *synced_entries,
-                self._GLOBAL_AGENT_SYNC_END,
-            ]
-        )
+        # When there are no synced entries we still write an empty marker block
+        # so subsequent runs can find/replace it, but we keep the block compact
+        # (no placeholder bullet). The empty block is later stripped from prompt
+        # injection by `_is_empty_template`.
+        if synced_entries:
+            block = "\n".join(
+                [
+                    self._GLOBAL_AGENT_SYNC_HEADER,
+                    self._GLOBAL_AGENT_SYNC_START,
+                    *synced_entries,
+                    self._GLOBAL_AGENT_SYNC_END,
+                ]
+            )
+        else:
+            block = "\n".join(
+                [
+                    self._GLOBAL_AGENT_SYNC_HEADER,
+                    self._GLOBAL_AGENT_SYNC_START,
+                    self._GLOBAL_AGENT_SYNC_END,
+                ]
+            )
 
         global_agent_md = self._get_global_agent_md_path()
         existing = ""

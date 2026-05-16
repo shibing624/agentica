@@ -20,9 +20,10 @@ passed to ``SkillUpgradeConfig.lifecycle_hooks``. The default
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 
+@runtime_checkable
 class SkillLifecycleHooks(Protocol):
     """Optional extension points called by ``SkillEvolutionManager``.
 

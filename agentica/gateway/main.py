@@ -48,7 +48,6 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
     logger.info(f"  Agentica Gateway v{__version__}")
     logger.info(f"  Workspace: {settings.workspace_path}")
-    logger.info(f"  Data dir:  {settings.data_dir}")
     logger.info(f"  Model:     {settings.model_provider}/{settings.model_name}")
     if settings.gateway_token:
         logger.info("  Auth:      token enabled")

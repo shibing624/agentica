@@ -16,7 +16,6 @@ load_dotenv()
 AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
 load_dotenv(AGENTICA_DOTENV_PATH)
 
-AGENTICA_DATA_DIR = os.getenv("AGENTICA_DATA_DIR", f"{AGENTICA_HOME}/data")
 AGENTICA_SKILL_DIR = os.getenv("AGENTICA_SKILL_DIR", f"{AGENTICA_HOME}/skills")
 AGENTICA_EXTRA_SKILL_PATHS = [
     os.path.expanduser(path)

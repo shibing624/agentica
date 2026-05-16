@@ -260,7 +260,7 @@ class TestGetSystemMessage:
         assert msg.content.index("STATIC TOOL POLICY") < msg.content.index("DYNAMIC SKILL GUIDANCE")
 
     @pytest.mark.asyncio
-    async def test_default_prompt_wraps_dynamic_blocks_in_xml(self):
+    async def test_default_prompt_labels_dynamic_blocks(self):
         agent = Agent(
             name="A",
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
@@ -272,15 +272,19 @@ class TestGetSystemMessage:
         msg = await agent.get_system_message()
 
         assert msg is not None
-        assert "<workspace_context format=\"markdown\"><![CDATA[" in msg.content
+        # New contract: lightweight markdown comment markers instead of
+        # CDATA-wrapped XML. The names stay the same so existing greps work.
+        assert "<!-- workspace_context -->" in msg.content
+        assert "<!-- /workspace_context -->" in msg.content
+        assert "<![CDATA[" not in msg.content
         assert "# Workspace Rules" in msg.content
-        assert "<session_guidance format=\"markdown\"><![CDATA[" in msg.content
+        assert "<!-- session_guidance -->" in msg.content
         assert "DYNAMIC SKILL GUIDANCE" in msg.content
-        assert "<workspace_memory format=\"markdown\"><![CDATA[" in msg.content
+        assert "<!-- workspace_memory -->" in msg.content
         assert "Prefer concise responses." in msg.content
 
     @pytest.mark.asyncio
-    async def test_agentic_prompt_wraps_dynamic_blocks_in_xml(self):
+    async def test_agentic_prompt_labels_dynamic_blocks(self):
         agent = Agent(
             name="A",
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
@@ -293,11 +297,12 @@ class TestGetSystemMessage:
         msg = await agent.get_system_message()
 
         assert msg is not None
-        assert "<workspace_context format=\"markdown\"><![CDATA[" in msg.content
+        assert "<!-- workspace_context -->" in msg.content
+        assert "<![CDATA[" not in msg.content
         assert "# Workspace Rules" in msg.content
-        assert "<session_guidance format=\"markdown\"><![CDATA[" in msg.content
+        assert "<!-- session_guidance -->" in msg.content
         assert "DYNAMIC SKILL GUIDANCE" in msg.content
-        assert "<workspace_memory format=\"markdown\"><![CDATA[" in msg.content
+        assert "<!-- workspace_memory -->" in msg.content
         assert "Prefer concise responses." in msg.content
 
 

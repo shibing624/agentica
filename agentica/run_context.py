@@ -127,11 +127,23 @@ class TaskAnchor:
         """Render anchor as a stable system-prompt block.
 
         Used by prompts.py to inject the original goal at the top of the
-        message list. Returns empty string when the anchor is empty so
-        prompts.py can skip the block entirely.
+        message list. Returns empty string when the anchor is empty or when
+        the only signal is a short single-line goal — in that case the
+        live user message already conveys the same text and a mirrored
+        ``## Original Task`` block just duplicates it.
         """
-        if not self.goal and not self.acceptance_criteria and not self.constraints:
-            return ""
+        has_structured = bool(
+            self.acceptance_criteria
+            or self.constraints
+            or self.confirmed_facts
+            or self.next_step_hint
+        )
+        if not has_structured:
+            # Bare single-line goal — let the user message carry it; the
+            # anchor only earns a prompt slot once compaction risks losing
+            # context that the structured fields hold.
+            if not self.goal or "\n" not in self.goal:
+                return ""
 
         lines = ["<original_task>"]
         if self.goal:

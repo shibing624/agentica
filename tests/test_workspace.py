@@ -38,11 +38,24 @@ class TestWorkspaceConfig:
         assert config.agent_md == "CUSTOM_AGENT.md"
         assert config.memory_dir == "memories"
 
-    def test_default_global_templates_do_not_force_shell_for_validation(self):
-        """Default workspace prompt text should avoid shell-first validation guidance."""
+    def test_default_global_templates_are_minimal_scaffolds(self):
+        """Default scaffolds carry no behavioural rules — empty by design.
+
+        Previous templates injected ~1KB of "Friendly and professional" /
+        "Run lint then typecheck then tests" boilerplate into every system
+        prompt with zero project-specific signal. The new defaults are
+        deliberately minimal so the prompt only grows when the user adds
+        real rules to AGENTS.md.
+        """
         agents_md = Workspace.DEFAULT_GLOBAL_FILES["AGENTS.md"]
         assert "Use shell tool to run" not in agents_md
-        assert "Run the appropriate validation commands for the project" in agents_md
+        assert "Friendly and professional" not in agents_md
+        # Marker comments are fine — they're stripped by _is_empty_template.
+        assert Workspace._is_empty_template(agents_md), (
+            "default AGENTS.md should look empty to the prompt assembler"
+        )
+        assert Workspace._is_empty_template(Workspace.DEFAULT_GLOBAL_FILES["PERSONA.md"])
+        assert Workspace._is_empty_template(Workspace.DEFAULT_GLOBAL_FILES["TOOLS.md"])
 
 
 class TestWorkspace:

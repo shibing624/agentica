@@ -186,27 +186,49 @@ class ExperienceCompiler:
             ))
         return cards
 
+    # Minimum number of DISTINCT tools required for a success pattern to be
+    # worth remembering. Single-tool runs (e.g. 76× read_file) and 2-tool
+    # combos provide no cross-tool insight and just inflate the prompt with
+    # "this worked once" trivia.
+    _SUCCESS_MIN_DISTINCT_TOOLS = 3
+
     @staticmethod
     def compile_success_pattern(successes: List[Dict]) -> Optional[CompiledCard]:
-        """Compile a success pattern from tool success records.
+        """Compile a cross-tool success pattern.
 
-        Only produces a card when 3+ tools all succeeded with no errors.
+        Only retained when the run actually demonstrates a non-trivial
+        combination — at least ``_SUCCESS_MIN_DISTINCT_TOOLS`` distinct tools
+        used together. Single-tool or 2-tool sequences are dropped because
+        they teach the LLM nothing it doesn't already know from tool docs.
 
         Args:
             successes: List of dicts with keys: tool, elapsed.
 
         Returns:
-            CompiledCard if >= 3 successes, None otherwise.
+            CompiledCard for cross-tool combos only; None for everything else.
         """
         if len(successes) < 3:
             return None
 
         tool_names = [s.get("tool", "unknown") for s in successes]
-        unique_tools = "_".join(sorted(set(tool_names)))[:40]
-        title = f"success_{unique_tools}" if unique_tools else "success_unknown"
+        distinct_tools = sorted(set(tool_names))
+        if len(distinct_tools) < ExperienceCompiler._SUCCESS_MIN_DISTINCT_TOOLS:
+            return None
+
+        unique_tools = "_".join(distinct_tools)[:40]
+        title = f"success_combo_{unique_tools}"
+
+        # Order matters for cross-tool patterns: surface the dedupped order
+        # the run actually used, not the raw repeat-heavy log.
+        ordered_distinct: List[str] = []
+        for tool in tool_names:
+            if tool not in ordered_distinct:
+                ordered_distinct.append(tool)
+
         content = (
-            f"Successful tool sequence ({len(successes)} calls, all passed):\n"
-            + "\n".join(f"- {t}" for t in tool_names)
+            f"Successful tool combination ({len(successes)} calls across "
+            f"{len(distinct_tools)} tools):\n"
+            + "\n".join(f"- {t}" for t in ordered_distinct)
         )
         # All entries in `successes` come from the same run, so any of them
         # carries the same original_task. Take the first non-empty.
@@ -319,10 +341,16 @@ class ExperienceCompiler:
             })
 
         if len(successes) >= 3 and not errors:
-            events.append({
-                "event_type": "success_pattern",
-                "tool_count": len(successes),
-                "tools": [s.get("tool", "") for s in successes],
-            })
+            distinct = len({s.get("tool", "") for s in successes})
+            # Only log success patterns that span multiple distinct tools.
+            # Mirrors the gate inside compile_success_pattern so the raw event
+            # log doesn't accumulate "read_file x76"-style entries we'd just
+            # discard later.
+            if distinct >= ExperienceCompiler._SUCCESS_MIN_DISTINCT_TOOLS:
+                events.append({
+                    "event_type": "success_pattern",
+                    "tool_count": len(successes),
+                    "tools": [s.get("tool", "") for s in successes],
+                })
 
         return events
