@@ -229,6 +229,19 @@ class RunHooks:
         """
         pass
 
+    async def flush_pending(self, agent: Any, **kwargs) -> None:
+        """Drain any pending buffered work for this hook.
+
+        Called by ``Agent.flush_pending()`` so SDK integrators can guarantee
+        that boundary-triggered work (memory extraction, batched correction
+        judge, etc.) runs before the process exits — instead of losing
+        whatever is still sitting in an in-memory buffer.
+
+        Default is a no-op; override in hooks that maintain cross-run
+        buffers (``MemoryExtractHooks``, ``ExperienceCaptureHooks``).
+        """
+        pass
+
 
 class ConversationArchiveHooks(RunHooks):
     """RunHooks that auto-archives conversations to workspace after each agent run.
@@ -426,15 +439,26 @@ class MemoryExtractHooks(RunHooks):
 
     async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
         """Context is about to be compressed — extract anything we have buffered first."""
+        await self.flush_pending(agent)
+
+    async def flush_pending(self, agent: Any, **kwargs) -> None:
+        """Drain THIS agent's buffer immediately, ignoring the idle gate.
+
+        Two callers: ``on_pre_compact`` (last chance before context
+        compression drops data) and ``Agent.flush_pending`` (SDK shutdown
+        hook). Both want "force flush regardless of cooldown" — the
+        ``min_seconds_between`` cap is for periodic noise reduction, not
+        for data-loss prevention.
+
+        Scoped to a single (user_id, session_id) — the buffer key of the
+        ``agent`` you pass in. Other tenants' buffers are untouched.
+        """
         workspace = agent.workspace
         if workspace is None:
             return
         session_key = self._session_key(workspace, agent)
         if not self._buffers.get(session_key):
             return
-        # No idle-gate on pre_compact: this is a "last chance before data loss"
-        # path, so we always flush. min_seconds_between is for periodic noise
-        # reduction; data-loss prevention overrides it.
         await self._flush(agent, workspace, session_key)
 
     async def _flush(self, agent: Any, workspace: Any, session_key: Tuple[str, str]) -> None:
@@ -1271,6 +1295,16 @@ class ExperienceCaptureHooks(RunHooks):
 
     async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
         """Context is about to be compressed — flush the judge buffer first."""
+        await self.flush_pending(agent)
+
+    async def flush_pending(self, agent: Any, **kwargs) -> None:
+        """Force-flush THIS agent's judge buffer, bypassing N-turn / idle gate.
+
+        Same dual-use semantics as ``MemoryExtractHooks.flush_pending``:
+        called from ``on_pre_compact`` (data-loss prevention) and from
+        ``Agent.flush_pending`` (SDK shutdown). Drains only the buffer for
+        the bound (user_id, session_id) key.
+        """
         workspace = agent.workspace
         if workspace is None:
             return
@@ -1464,3 +1498,7 @@ class _CompositeRunHooks(RunHooks):
     async def on_post_compact(self, agent: Any, messages=None, **kwargs) -> None:
         for h in self._hooks_list:
             await h.on_post_compact(agent=agent, messages=messages, **kwargs)
+
+    async def flush_pending(self, agent: Any, **kwargs) -> None:
+        for h in self._hooks_list:
+            await h.flush_pending(agent=agent, **kwargs)

@@ -1664,3 +1664,64 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             config=config,
             **kwargs,
         )
+
+    # =========================================================================
+    # SDK shutdown helper — drain boundary-triggered work before process exit.
+    # =========================================================================
+
+    async def flush_pending(self) -> None:
+        """Drain any in-memory work that hooks have buffered for later flushing.
+
+        Memory extraction (``MemoryExtractHooks``) and the batched correction
+        judge (``ExperienceCaptureHooks``) intentionally batch turns instead
+        of calling the LLM every turn. They flush on natural boundaries
+        (``every_n_turns``, ``on_pre_compact``). For SDK callers that own
+        the process lifecycle — e.g. a CLI exiting after the last turn, a
+        worker about to be recycled — anything still in the buffer is lost
+        because the buffers are in-process by design (multi-tenant safety:
+        no shared disk state, no cross-user collisions).
+
+        ``flush_pending`` gives integrators an explicit hook to drain those
+        buffers for THIS agent (this ``user_id`` + ``session_id``) before
+        shutdown:
+
+        .. code-block:: python
+
+            try:
+                response = await agent.run("…")
+            finally:
+                await agent.flush_pending()  # call from your shutdown hook
+
+        - Force-flushes the buffers tied to this agent's ``(user_id,
+          session_id)`` key, bypassing ``every_n_turns`` and the idle gate.
+        - Safe to call even with no hooks attached (no-op).
+        - Other tenants' buffers are untouched: this method scopes only
+          to the agent it's called on.
+        - Idempotent: a second call with nothing buffered is a no-op.
+        """
+        for hooks in (self._default_run_hooks, self._run_hooks):
+            if hooks is None:
+                continue
+            try:
+                await hooks.flush_pending(agent=self)
+            except Exception as e:
+                logger.warning(f"flush_pending failed for {type(hooks).__name__}: {e}")
+
+    def flush_pending_sync(self) -> None:
+        """Synchronous wrapper for :meth:`flush_pending`.
+
+        Convenient for ``atexit``-style shutdown paths that aren't async.
+        Runs the async drain in a private event loop, mirroring how
+        :meth:`run_sync` wraps :meth:`run`.
+        """
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and loop.is_running():
+            raise RuntimeError(
+                "flush_pending_sync() cannot be called from a running event loop; "
+                "use `await agent.flush_pending()` instead."
+            )
+        asyncio.run(self.flush_pending())
