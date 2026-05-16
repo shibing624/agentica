@@ -9,6 +9,16 @@ Most users only need one call:
     print(result.status, result.reason)
     print(result.response_content)
 
+Budget semantics (turn / token / wall-clock):
+    - The 3 budgets are **independent hard caps** — whichever hits first stops
+      the loop ("AND / intersection" semantics: every cap must stay under the
+      limit for the loop to keep going).
+    - ``None`` means "do not enforce". ``turn_budget`` falls back to
+      ``DEFAULT_TURN_BUDGET = 100`` as a runaway safety net and cannot be fully
+      disabled — pass a large number (e.g. 10_000) instead.
+    - Priority on each turn: budget > tool short-circuit > judge. budget caps
+      are hard and override the model's own ``update_goal`` signal.
+
 `Agent.run_goal()` internally:
     - lazily creates the SessionLog and GoalManager
     - binds TaskAnchor to the objective
@@ -41,13 +51,17 @@ async def example_1_one_liner() -> None:
     print("Example 1: agent.run_goal()  — the one-liner")
     print("=" * 60)
 
+    # Best practice: strong main model + cheap aux for judge / housekeeping.
+    # Aux is called every turn by the judge, so splitting saves 5–10x cost.
     agent = Agent(
         session_id="goal-demo-basic",
-        model=DeepSeekChat(),
-        auxiliary_model=DeepSeekChat(),
+        model=DeepSeekChat(id="deepseek-v4-pro"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
         instructions="You are terse. One step per turn. State 'done' when finished.",
     )
 
+    # Trivial task → don't bother with token/wall-clock caps. turn_budget
+    # alone is enough; omit it entirely to use the default 100.
     result = await agent.run_goal(
         "Compute 17+9+16 and state the integer answer.",
         turn_budget=3,
@@ -67,13 +81,23 @@ async def example_2_budgets() -> None:
 
     agent = Agent(
         session_id="goal-demo-budget",
-        model=DeepSeekChat(),
-        auxiliary_model=DeepSeekChat(),
+        model=DeepSeekChat(id="deepseek-v4-pro"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
     )
 
+    # Real-world recipe (commented out — would cost real $$):
+    #
+    #   result = await agent.run_goal(
+    #       "Implement feature X and make pytest pass",
+    #       token_budget=200_000,        # ~30 turns of typical coding work
+    #       wall_clock_budget_sec=1800,  # 30 min SLA
+    #   )                                 # turn_budget falls back to default 100
+    #
+    # Here we deliberately set token_budget tiny so the loop hits the cap
+    # on the first turn — proves status becomes 'budget_limited'.
     result = await agent.run_goal(
         "Summarize TCP slow start in 2 sentences.",
-        token_budget=30,             # tiny on purpose — first turn blows it
+        token_budget=30,
         wall_clock_budget_sec=120,
     )
 
@@ -95,8 +119,8 @@ async def example_3_events() -> None:
 
     agent = Agent(
         session_id="goal-demo-events",
-        model=DeepSeekChat(),
-        auxiliary_model=DeepSeekChat(),
+        model=DeepSeekChat(id="deepseek-v4-pro"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
         instructions="Be terse. State 'done' clearly when finished.",
     )
 
@@ -121,8 +145,8 @@ async def example_4_manual_control() -> None:
 
     agent = Agent(
         session_id="goal-demo-manual",
-        model=DeepSeekChat(),
-        auxiliary_model=DeepSeekChat(),
+        model=DeepSeekChat(id="deepseek-v4-pro"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
         instructions="You are terse. State 'done' clearly when finished.",
     )
     mgr = agent.get_goal_manager(default_turn_budget=3)

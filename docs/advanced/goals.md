@@ -15,16 +15,14 @@ from agentica import Agent, DeepSeekChat
 
 agent = Agent(
     session_id="my-task",
-    model=DeepSeekChat(),
-    auxiliary_model=DeepSeekChat(),  # judge 走这个，省钱
+    # 主模型 + 便宜的 aux 模型：judge / 压缩 / 记忆抽取等次要工作都走 aux。
+    # 不区分也能跑，但 judge 每轮都调一次，分开后能省 5-10x 成本。
+    model=DeepSeekChat(id="deepseek-v4-pro"),
+    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
 )
 
-result = await agent.run_goal(
-    "compute 17+9+16 and state the integer answer",
-    turn_budget=5,
-    token_budget=2000,
-    wall_clock_budget_sec=60,
-)
+# 最简：不传任何 budget，只靠默认 100 turns 安全网兜底
+result = await agent.run_goal("compute 17+9+16 and state the integer answer")
 
 print(result.status)            # "complete" / "paused" / "budget_limited"
 print(result.reason)
@@ -53,15 +51,55 @@ print(result.response_content)  # == result.run_response.content or ""
 
 ### 预算（hard caps）
 
-| 参数 | 默认 | 用途 |
-|---|---|---|
-| `turn_budget` | `100` | **安全网**——防 runaway 循环。不是主预算 |
-| `token_budget` | `None` | 真正的 cost cap：输入+输出 token 累计 |
-| `wall_clock_budget_sec` | `None` | 真正的 wall-clock cap |
+三个预算**互相独立、任一触发即停**（取最严的那个先停）。`None` = 不限。
 
-**优先级**：`budget cap > tool short-circuit > judge`。即使模型自己用 `update_goal` 标了 `complete`，只要 token 已经超 `token_budget`，最终 status 都是 `budget_limited`。
+| 参数 | 默认 | 不传时 | 含义 |
+|---|---|---|---|
+| `turn_budget` | `DEFAULT_TURN_BUDGET = 100` | **fallback 到 100**（防 runaway 的安全网） | LLM 循环总轮数上限 |
+| `token_budget` | `None` | **不限**（不计 token） | 累计输入+输出 token 上限 |
+| `wall_clock_budget_sec` | `None` | **不限**（不计时） | agent wall-clock 秒数上限 |
+
+> 注意：`turn_budget` 即便传 `None` 也会回落到 `DEFAULT_TURN_BUDGET = 100`，因为它的角色是"防 runaway 的最后一道闸"——不能真正去掉。想要更大的"实际无限"就传一个大数，例如 `turn_budget=10_000`。
+
+**判定优先级**（在 `evaluate_after_turn` 里固定为）：
+
+```
+turn accounting → budget check → tool short-circuit → judge
+```
+
+即：即便模型自己通过 `update_goal` 标了 `complete`，只要 token / wall-clock 已超 cap，最终 status 仍是 `budget_limited`。budget 是 hard cap，模型短路改不了。
 
 预算耗尽时 status 是独立的 `budget_limited`（不是 `paused`），语义"用户必须决定加额度或接受部分结果"。用 `mgr.resume()` 或 `/goal resume` 可从 `budget_limited` / `paused` 两种状态恢复。
+
+### Best Practices：怎么设预算
+
+| 场景 | `turn_budget` | `token_budget` | `wall_clock_budget_sec` |
+|---|---|---|---|
+| 试玩 / 调试 | `5` | 不传 | 不传 |
+| 一次性短任务（算个数、写一句话） | 不传 (默认 100) | 不传 | 不传 |
+| 修个 bug | 不传 | `50_000` | `600` (10 分钟) |
+| 实现完整功能 + 测试 | 不传 | `200_000` | `1800` (30 分钟) |
+| 长 refactor / migration | 不传 | `500_000` | `3600` (1 小时) |
+| 完全放飞（仅安全网兜底） | `10_000` | 不传 | 不传 |
+| 严控成本，定额执行 | 三个都传 | 按预算算 | 按 SLA 算 |
+
+经验法则：
+
+- **小任务不传 token/wall-clock**——多花一行参数没必要，turn_budget 的 100 已经兜得很松
+- **生产 / 长任务一定传 `token_budget`**——一旦模型陷入死循环（比如反复 read 同一个大文件），按 turn 数算可能要烧很久才触发；按 token 算几秒钟就阻断
+- **`wall_clock_budget_sec` 主要给 SLA 用**——例如"30 分钟内出个结果"，不在乎期间用了多少 token
+- **`token_budget` 怎么估**：粗略按 `≈ avg_turn_tokens × 期望最大 turns`。DeepSeek 一个工具调用 turn 大约 1k–5k token，编码任务 30 turns 估 `100_000` 比较稳
+
+示例：
+
+```python
+# 真实编码任务的常见组合
+result = await agent.run_goal(
+    "在 examples/ 下加一个 mcp_client 示例并跑通",
+    token_budget=200_000,
+    wall_clock_budget_sec=1800,
+)
+```
 
 ### Power-user 路径
 

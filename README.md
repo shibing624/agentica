@@ -467,20 +467,40 @@ CLI：
 /subgoal 必须补单测                  # 给目标加验收条件
 ```
 
-SDK 一行起飞：
+SDK 一行起飞（推荐用 pro + flash 双模型省钱）：
 
 ```python
-result = await agent.run_goal(
-    "compute 17+9+16 and state the answer",
-    turn_budget=5,
-    token_budget=2000,
-    wall_clock_budget_sec=60,
+from agentica import Agent, DeepSeekChat
+
+agent = Agent(
+    session_id="my-task",
+    model=DeepSeekChat(id="deepseek-v4-pro"),       # 主模型干活
+    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),  # judge 用便宜模型
 )
+
+# 不传任何 budget = 只有默认 100 turns 安全网，token / wall-clock 不设限
+result = await agent.run_goal("compute 17+9+16 and state the answer")
+
+# 推荐：长编码任务显式设 token / wall-clock 上限
+result = await agent.run_goal(
+    "实现 xxx 功能并跑通 pytest",
+    token_budget=100000,        # ~$0.1 (取决于模型)
+    wall_clock_budget_sec=1800,  # 30 分钟
+)
+
 print(result.status, result.reason)   # complete / paused / budget_limited
 print(result.response_content)        # == result.run_response.content or ""
 ```
 
-支持 token / wall-clock / turn 三种 hard cap（优先级：budget > tool > judge），模型也可以通过受限工具 `update_goal(status="complete"|"paused")` 自己结束循环。完整说明：[Standing Goal Loop 文档](https://shibing624.github.io/agentica/advanced/goals)，运行示例 `examples/cli/03_goal_loop_demo.py`。
+三个预算之间是 **"任一触发即停"**（取最严的）：
+
+| 参数 | 默认 | 不传时的行为 | 推荐取值 |
+|---|---|---|---|
+| `turn_budget` | `100` | 用默认 100（安全网，防 runaway） | 简单任务 5–20，复杂任务用默认 |
+| `token_budget` | `None` | **不限**（仅 turn_budget 兜底） | 编码任务 `50_000`–`200_000` |
+| `wall_clock_budget_sec` | `None` | **不限** | 长任务 `1800`–`3600` 秒 |
+
+优先级 `budget > tool > judge`。模型也能通过受限工具 `update_goal(status="complete"|"paused")` 自己结束循环。完整说明：[Standing Goal Loop 文档](https://shibing624.github.io/agentica/advanced/goals)，运行示例 `examples/cli/03_goal_loop_demo.py`。
 
 ## Web UI / Gateway
 

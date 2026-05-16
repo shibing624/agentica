@@ -1525,8 +1525,18 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
         Args:
             objective: The standing goal text. Used as the first prompt.
-            turn_budget, token_budget, wall_clock_budget_sec:
-                Hard caps passed straight to ``GoalManager.set()``.
+            turn_budget: Max LLM turns. ``None`` falls back to
+                ``DEFAULT_TURN_BUDGET = 100`` (runaway safety net — cannot be
+                fully disabled; pass a large number like ``10_000`` instead).
+            token_budget: Max cumulative input+output tokens. ``None`` =
+                unlimited. Recommended for production: ``50_000``–``200_000``
+                for coding tasks.
+            wall_clock_budget_sec: Max agent wall-clock seconds. ``None`` =
+                unlimited. Recommended ``1800``–``3600`` for long tasks.
+
+                The three budgets are **independent hard caps — whichever
+                hits first stops the loop** (AND/intersection semantics).
+                Priority each turn: ``budget > tool short-circuit > judge``.
             attach_goal_tool: Register ``GoalTool`` on this agent. Set
                 False if you want the external judge to be authoritative.
             event_callback: ``goal.*`` event hook.
