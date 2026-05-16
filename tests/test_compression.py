@@ -398,6 +398,7 @@ class TestCompressionReport(unittest.TestCase):
             run_response=RunResponse(metrics={}),
             tool_config=SimpleNamespace(compress_tool_results=True, compression_manager=cm),
             task_anchor=None,
+            workspace=None,
         )
         model = SimpleNamespace(id="gpt-4o", tools=[], context_window=None)
 

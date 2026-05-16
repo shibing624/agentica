@@ -36,12 +36,12 @@ Usage:
     )
 """
 import json
+import threading
 import time
 from datetime import datetime
-from typing import List, Optional
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from agentica.config import AGENTICA_HOME
 from agentica.tools.base import Tool
 from agentica.skills import (
     Skill,
@@ -67,43 +67,49 @@ _USAGE_RECENCY_WEIGHT = 0.7
 _USAGE_FREQUENCY_WEIGHT = 0.3
 
 
-def _skill_usage_state_path() -> Path:
-    """Where skill usage counters are persisted (global, single JSON file).
-
-    Lives directly under ~/.agentica/ alongside other single-file runtime
-    caches (model_pricing_cache.json, agent_sessions.db, cli_history.txt).
-    """
-    return Path(AGENTICA_HOME).expanduser() / "skill_usage.json"
-
-
-def _load_skill_usage() -> dict:
-    path = _skill_usage_state_path()
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.debug("skill usage state unreadable, resetting: %s", exc)
-        return {}
+# Process-local skill usage counters, keyed by (user_id, skill_name).
+#
+# Was a single JSON file under ~/.agentica/skill_usage.json — that leaked
+# usage across tenants in SaaS deployments: user A heavily using skill X
+# would promote X into user B's "top N" full-description slot in B's
+# system prompt. The promotion is fairly harmless content-wise (skill
+# descriptions are static), but it makes B's prompt unpredictable.
+#
+# In-memory is good enough here: usage counters are a prompt-ordering
+# optimization, not durable state. Process restart resets the ranking
+# to "unranked" which simply means every skill ties by name for the
+# first few turns — exactly what a cold start looks like anyway.
+_skill_usage_state: Dict[Tuple[str, str], Dict[str, Any]] = {}
+_skill_usage_lock = threading.Lock()
+_DEFAULT_USER_ID = "default"
 
 
-def _save_skill_usage(state: dict) -> None:
-    path = _skill_usage_state_path()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    except OSError as exc:
-        logger.debug("failed to persist skill usage state: %s", exc)
+def _bump_skill_usage(user_id: Optional[str], name: str) -> None:
+    """Record one invocation of `name` for ``user_id``. Best-effort; never raises."""
+    key = (user_id or _DEFAULT_USER_ID, name)
+    with _skill_usage_lock:
+        entry = _skill_usage_state.get(key) or {"count": 0, "last_used": ""}
+        entry["count"] = int(entry.get("count", 0)) + 1
+        entry["last_used"] = datetime.now().isoformat(timespec="seconds")
+        _skill_usage_state[key] = entry
 
 
-def _bump_skill_usage(name: str) -> None:
-    """Record one invocation of `name`. Best-effort; never raises."""
-    state = _load_skill_usage()
-    entry = state.get(name) or {"count": 0, "last_used": ""}
-    entry["count"] = int(entry.get("count", 0)) + 1
-    entry["last_used"] = datetime.now().isoformat(timespec="seconds")
-    state[name] = entry
-    _save_skill_usage(state)
+def _load_skill_usage(user_id: Optional[str]) -> Dict[str, Dict[str, Any]]:
+    """Snapshot the usage dict for ``user_id``: {skill_name: {count, last_used}}."""
+    uid = user_id or _DEFAULT_USER_ID
+    with _skill_usage_lock:
+        # Copy out only this user's slice so callers can't mutate the live dict.
+        return {
+            name: dict(entry)
+            for (owner, name), entry in _skill_usage_state.items()
+            if owner == uid
+        }
+
+
+def _reset_skill_usage() -> None:
+    """Clear all stored counters. Test helper; not for production paths."""
+    with _skill_usage_lock:
+        _skill_usage_state.clear()
 
 
 def _parse_last_used(raw) -> float:
@@ -329,9 +335,22 @@ class SkillTool(Tool):
             return all_skills
         return [s for s in all_skills if self._agent._is_skill_enabled(s.name)]
 
+    def _current_user_id(self) -> Optional[str]:
+        """Resolve user_id from the bound agent's workspace, if any."""
+        if self._agent is None:
+            return None
+        workspace = self._agent.workspace
+        if workspace is None:
+            return None
+        return workspace.user_id
+
     def _rank_skills_by_usage(self, skills: List[Skill]) -> List[Skill]:
-        """Order skills by composite recency+frequency score, ties → name."""
-        usage = _load_skill_usage()
+        """Order skills by composite recency+frequency score, ties → name.
+
+        Usage is scoped to the bound agent's workspace user_id, so one
+        tenant's skill traffic doesn't reshape another tenant's prompt.
+        """
+        usage = _load_skill_usage(self._current_user_id())
         now = time.time()
         return sorted(
             skills,
@@ -394,8 +413,8 @@ class SkillTool(Tool):
             )
 
         # Bump usage counter — this is how the system prompt decides which
-        # skills earn a full description slot vs name-only.
-        _bump_skill_usage(skill_obj.name)
+        # skills earn a full description slot vs name-only. Scoped per-user.
+        _bump_skill_usage(self._current_user_id(), skill_obj.name)
 
         # Return full skill prompt with instructions
         result = f"=== Skill: {skill_obj.name} ===\n"

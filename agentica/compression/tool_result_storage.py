@@ -68,15 +68,34 @@ def _sanitize_path(raw: str) -> str:
     return f"{sanitized[:_MAX_SANITIZED_LENGTH]}-{hash_suffix}"
 
 
-def get_project_dir(cwd: Optional[str] = None) -> str:
-    """Return <AGENTICA_PROJECTS_DIR>/<sanitized-cwd>/ for the given working directory."""
+_DEFAULT_USER_ID = "default"
+
+
+def _safe_user_segment(user_id: Optional[str]) -> str:
+    uid = (user_id or _DEFAULT_USER_ID).strip() or _DEFAULT_USER_ID
+    # Match Workspace._get_user_path() sanitization rules so paths line up.
+    return uid.replace("/", "_").replace("\\", "_").replace("..", "_")
+
+
+def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) -> str:
+    """Return ``<AGENTICA_PROJECTS_DIR>/<user>/<sanitized-cwd>/`` for the given user + cwd.
+
+    The ``user_id`` segment was added to prevent multi-tenant collisions:
+    two requests from different tenants that happen to share the same cwd
+    (e.g. both running from ``/tmp`` in a worker) used to spill to the same
+    directory and read each other's persisted tool outputs.
+    """
     cwd = cwd or os.getcwd()
-    return os.path.join(AGENTICA_PROJECTS_DIR, _sanitize_path(cwd))
+    return os.path.join(AGENTICA_PROJECTS_DIR, _safe_user_segment(user_id), _sanitize_path(cwd))
 
 
-def get_tool_results_dir(cwd: Optional[str] = None, session_id: str = "default") -> str:
-    """Return ~/.agentica/projects/<project-hash>/<session-id>/tool-results/"""
-    return os.path.join(get_project_dir(cwd), session_id, "tool-results")
+def get_tool_results_dir(
+    cwd: Optional[str] = None,
+    session_id: str = "default",
+    user_id: Optional[str] = None,
+) -> str:
+    """Return ``~/.agentica/projects/<user>/<project-hash>/<session-id>/tool-results/``."""
+    return os.path.join(get_project_dir(cwd, user_id=user_id), session_id, "tool-results")
 
 
 def get_tool_result_path(
@@ -84,11 +103,15 @@ def get_tool_result_path(
     cwd: Optional[str] = None,
     session_id: str = "default",
     is_json: bool = False,
+    user_id: Optional[str] = None,
 ) -> str:
     """Return full path for a persisted tool result file."""
     safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in tool_use_id)
     ext = "json" if is_json else "txt"
-    return os.path.join(get_tool_results_dir(cwd, session_id), f"{safe_id}.{ext}")
+    return os.path.join(
+        get_tool_results_dir(cwd, session_id, user_id=user_id),
+        f"{safe_id}.{ext}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +174,7 @@ def maybe_persist_result(
     session_id: str = "default",
     cwd: Optional[str] = None,
     max_result_size_chars: Optional[int] = DEFAULT_MAX_RESULT_SIZE_CHARS,
+    user_id: Optional[str] = None,
 ) -> str:
     """If content exceeds threshold, persist to disk and return preview.
 
@@ -171,7 +195,9 @@ def maybe_persist_result(
         return content
 
     redacted_content = redact_sensitive_text(content)
-    file_path = get_tool_result_path(tool_use_id, cwd=cwd, session_id=session_id)
+    file_path = get_tool_result_path(
+        tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
+    )
     if not _persist_to_disk(file_path, redacted_content):
         # Fallback: truncate in-place
         return redacted_content[:max_result_size_chars] + "\n... (output truncated)"
@@ -191,6 +217,7 @@ def enforce_tool_result_budget(
     session_id: str = "default",
     cwd: Optional[str] = None,
     budget: int = MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
+    user_id: Optional[str] = None,
 ) -> int:
     """Enforce per-message budget on a batch of tool result messages.
 
@@ -237,7 +264,9 @@ def enforce_tool_result_budget(
         msg = tool_results[idx]
         content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
         tool_use_id = msg.tool_call_id or f"budget_{idx}"
-        file_path = get_tool_result_path(tool_use_id, cwd=cwd, session_id=session_id)
+        file_path = get_tool_result_path(
+            tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
+        )
 
         redacted_content = redact_sensitive_text(content)
         if _persist_to_disk(file_path, redacted_content):

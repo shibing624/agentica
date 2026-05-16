@@ -1226,7 +1226,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             compression_manager = agent_ref.tool_config.compression_manager
             compressed = False
             if compression_manager is not None:
-                await compression_manager.compress(messages)
+                _uid_compress = (
+                    agent_ref.workspace.user_id
+                    if agent_ref.workspace is not None
+                    else None
+                )
+                await compression_manager.compress(messages, user_id=_uid_compress)
                 compressed = True
                 usage_ratio = _estimate_usage_ratio(messages, context_window)
 

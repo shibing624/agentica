@@ -417,9 +417,12 @@ class Runner:
 
         # Stage 1: tool result budget (persist oversized results to disk)
         _sid = agent.run_id or 'default'
+        _uid = agent.workspace.user_id if agent.workspace is not None else None
         _recent_tools = [m for m in messages if m.role == "tool" and not m.compressed_content]
         if _recent_tools:
-            enforce_tool_result_budget(tool_results=_recent_tools, session_id=_sid)
+            enforce_tool_result_budget(
+                tool_results=_recent_tools, session_id=_sid, user_id=_uid,
+            )
 
         # Stage 2: micro-compact (clear old tool results, free)
         n = micro_compact(messages)
@@ -457,6 +460,7 @@ class Runner:
                 model=model,
                 trigger="threshold",
                 task_anchor=agent.task_anchor,
+                user_id=_uid,
             )
             compression_report = cm.get_stats().get("last_report")
             if compression_report and agent.run_response is not None:

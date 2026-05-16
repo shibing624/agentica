@@ -756,12 +756,21 @@ class Model(ABC):
                     from agentica.compression.tool_result_storage import maybe_persist_result
                     _agent = self._agent_ref() if self._agent_ref else None
                     _sid = _agent.run_id or 'default' if _agent else 'default'
+                    # user_id partitions the persisted-output directory so two
+                    # tenants whose agents share a cwd can't read each other's
+                    # spills. None falls back to "default" inside the helper.
+                    _uid = (
+                        _agent.workspace.user_id
+                        if _agent and _agent.workspace is not None
+                        else None
+                    )
                     function_call_output = maybe_persist_result(
                         tool_name=function_call.function.name,
                         tool_use_id=function_call.call_id or f"call_{i}",
                         content=function_call_output,
                         session_id=_sid,
                         max_result_size_chars=function_call.function.max_result_size_chars,
+                        user_id=_uid,
                     )
                 except Exception as persist_err:
                     logger.debug(f"Tool result persistence skipped: {persist_err}")
@@ -869,9 +878,15 @@ class Model(ABC):
             from agentica.compression.tool_result_storage import enforce_tool_result_budget
             _agent = self._agent_ref() if self._agent_ref else None
             _sid = _agent.run_id or 'default' if _agent else 'default'
+            _uid = (
+                _agent.workspace.user_id
+                if _agent and _agent.workspace is not None
+                else None
+            )
             enforce_tool_result_budget(
                 tool_results=function_call_results,
                 session_id=_sid,
+                user_id=_uid,
             )
         except Exception as budget_err:
             logger.warning(f"Tool result budget enforcement failed: {budget_err}")

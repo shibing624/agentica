@@ -598,7 +598,17 @@ class BaseBrowser:
         self.page_history: List[str] = []
         self.cookie_json_path = cookie_json_path
 
-        self.cache_dir = "tmp/" if cache_dir is None else cache_dir
+        # Per-instance unique cache dir. The old default of "tmp/" was a
+        # process-relative directory that collided between concurrent agents
+        # (screenshots/downloads from user A overwriting user B's). In
+        # multi-tenant SDK use, integrators SHOULD pass an explicit per-user
+        # cache_dir (e.g. workspace_root/users/{user_id}/browser-cache); the
+        # tempfile fallback below only guarantees no in-process collision and
+        # leaves cleanup to the OS.
+        if cache_dir is None:
+            import tempfile
+            cache_dir = tempfile.mkdtemp(prefix="agentica-browser-")
+        self.cache_dir = cache_dir
         os.makedirs(self.cache_dir, exist_ok=True)
 
         abs_dir_path = os.path.dirname(os.path.abspath(__file__))
@@ -1442,7 +1452,12 @@ class BrowserTool(Tool):
 
         Args:
             headless (bool): Whether to run the browser in headless mode.
-            cache_dir (Union[str, None]): The directory to store cache files.
+            cache_dir (Union[str, None]): Directory for screenshots, downloads,
+                and other per-session browser artifacts. In multi-tenant SDK
+                deployments you MUST pass a per-user path (e.g. under the
+                workspace user dir) — leaving it None spawns a unique
+                process-temp dir per instance which prevents collisions but
+                is not isolated by tenant identity.
             channel (Literal["chrome", "msedge", "chromium"]): The browser
                 channel to use. Must be one of "chrome", "msedge", or
                 "chromium".
@@ -1457,8 +1472,10 @@ class BrowserTool(Tool):
             cookie_json_path (Optional[str]): Path to a JSON file containing
                 authentication cookies and browser storage state. If provided
                 and the file exists, the browser will load this state to
-                maintain
-                authenticated sessions without requiring manual login.
+                maintain authenticated sessions without requiring manual login.
+                In multi-tenant SDK deployments NEVER share this path between
+                tenants — one user's cookies would let another user inherit
+                their authenticated session.
                 (default: :obj:`None`)
         """
         super().__init__(name="BrowserTool")

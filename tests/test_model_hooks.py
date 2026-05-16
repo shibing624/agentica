@@ -106,7 +106,7 @@ class TestContextOverflowHandling(unittest.TestCase):
 
         # Wire a mock compression manager that "compresses" by replacing content
         # with a short stub — dropping total chars below the hard limit.
-        async def fake_compress(msgs, tools=None, model=None, response_format=None):
+        async def fake_compress(msgs, tools=None, model=None, response_format=None, **_kw):
             for m in msgs:
                 if m.role != "system":
                     m.content = "x"

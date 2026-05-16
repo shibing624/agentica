@@ -9,6 +9,7 @@ import yaml
 from typing import Dict, Any, Optional
 from dataclasses import dataclass
 from agentica.config import AGENTICA_HOME
+from agentica.utils.log import logger
 
 
 @dataclass
@@ -48,10 +49,21 @@ class MCPConfig:
                     return config_path
             current_dir = os.path.dirname(current_dir)
 
-        # Check in AGENTICA_HOME directory
+        # Last-resort: check the user-global AGENTICA_HOME directory.
+        # In multi-tenant SDK deployments this is a footgun — all tenants
+        # in the process would share whatever MCP servers (and their
+        # credentials) the operator dropped in ~/.agentica/. Pass an
+        # explicit ``config_path`` (per workspace or per request) to opt
+        # out; the WARN below makes the unsafe path observable.
         for config_file in config_files:
             config_path = os.path.join(AGENTICA_HOME, config_file)
             if os.path.exists(config_path):
+                logger.warning(
+                    "MCP config falling back to user-global %s — all agents "
+                    "in this process will share these servers and credentials. "
+                    "Pass MCPConfig(config_path=...) explicitly for multi-tenant safety.",
+                    config_path,
+                )
                 return config_path
 
         return ""

@@ -6,6 +6,7 @@ Workspace management for Agentica agents.
 Inspired by OpenClaw's workspace concept.
 """
 import asyncio
+import threading
 import json
 import os
 import re
@@ -167,6 +168,12 @@ class Workspace:
         self._user_id = user_id if user_id else self.DEFAULT_USER_ID
         # Per-file locks for concurrent archive writes
         self._archive_locks: Dict[str, asyncio.Lock] = {}
+        # Guards the (_user_id, _user_initialized) tuple so it flips
+        # atomically when set_user() is called. Does NOT protect against
+        # caller-side races (write captures old user_id then set_user
+        # changes it before the write reaches the filesystem) — see the
+        # set_user() docstring for the multi-tenant guidance.
+        self._user_switch_lock = threading.Lock()
         # Flag to avoid redundant _initialize_user_dir calls
         self._user_initialized: bool = False
         # Frozen snapshots for prompt cache stability (Hermes-style)
@@ -181,13 +188,24 @@ class Workspace:
     def set_user(self, user_id: Optional[str]):
         """Set current user ID.
 
+        Multi-tenant safety: ``set_user`` mutates shared instance state
+        (``_user_id`` + ``_user_initialized``). Two concurrent requests
+        switching users on the SAME Workspace instance can interleave and
+        cause writes to land in the wrong user's directory. In SaaS-style
+        deployments **instantiate ``Workspace(user_id=...)`` per request
+        instead of sharing one Workspace across users**. The internal lock
+        below only guarantees that ``_user_id`` and ``_user_initialized``
+        flip together — it cannot protect a write that already captured
+        the old user_id.
+
         Args:
             user_id: User ID, defaults to 'default' if None
         """
         new_id = user_id if user_id else self.DEFAULT_USER_ID
-        if new_id != self._user_id:
-            self._user_initialized = False
-        self._user_id = new_id
+        with self._user_switch_lock:
+            if new_id != self._user_id:
+                self._user_initialized = False
+            self._user_id = new_id
 
     def _get_user_path(self) -> Path:
         """Get current user's data directory path.

@@ -239,7 +239,7 @@ class CompressionManager:
     # Stage 1: Rule-based compression (free)
     # -------------------------------------------------------------------------
 
-    def _truncate_oldest_tool_results(self, messages: List["Message"]) -> int:
+    def _truncate_oldest_tool_results(self, messages: List["Message"], user_id: Optional[str] = None) -> int:
         """Persist oldest uncompressed tool results to disk, replacing with preview.
 
         Uses tool_result_storage.maybe_persist_result() so the full content
@@ -287,6 +287,7 @@ class CompressionManager:
                 tool_use_id=tool_use_id,
                 content=content_str,
                 max_result_size_chars=self.truncate_head_chars,
+                user_id=user_id,
             )
 
             msg.content = new_content
@@ -550,6 +551,7 @@ class CompressionManager:
         response_format: Optional[Union[Dict, Type[BaseModel]]] = None,
         trigger: str = "manual",
         task_anchor: Optional[Any] = None,
+        user_id: Optional[str] = None,
     ) -> None:
         """
         Run compression pipeline on messages (in-place).
@@ -572,7 +574,7 @@ class CompressionManager:
         tool_call_args_shrunk = self._shrink_assistant_tool_call_arguments(messages)
 
         # Stage 1a: Truncate oldest tool results
-        truncated = self._truncate_oldest_tool_results(messages)
+        truncated = self._truncate_oldest_tool_results(messages, user_id=user_id)
         if truncated:
             logger.debug(f"Stage 1a: Truncated {truncated} old tool results")
 
