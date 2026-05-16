@@ -56,7 +56,7 @@ async def example_1_one_liner() -> None:
     print(f"status        = {result.status}")
     print(f"reason        = {result.reason}")
     print(f"turns_used    = {result.turns_used}")
-    print(f"final answer  = {(result.final_response.content or '').strip()[:120]}")
+    print(f"final answer  = {result.final_text.strip()[:120]}")
 
 
 async def example_2_budgets() -> None:

@@ -560,6 +560,18 @@ def test_agent_enable_goal_tool_idempotent(tmp_path):
     assert len(goal_tools) == 1
 
 
+def test_goal_run_result_final_text_property():
+    """``final_text`` returns content for happy path and "" for None."""
+    from agentica.goals import GoalRunResult, GoalState
+    from agentica.run_response import RunResponse
+
+    state = GoalState(session_id="s", objective="x")
+    rr = RunResponse(content="hello world")
+    assert GoalRunResult("complete", "ok", rr, state, 1).final_text == "hello world"
+    assert GoalRunResult("complete", "ok", RunResponse(content=None), state, 1).final_text == ""
+    assert GoalRunResult("complete", "ok", None, state, 0).final_text == ""
+
+
 def test_agent_run_goal_drives_to_completion(tmp_path):
     """Full ergonomic path: mock ``agent.run`` (so we don't touch a real
     LLM) and a fake judge model. ``run_goal`` should: set objective, bind

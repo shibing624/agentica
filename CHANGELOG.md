@@ -35,6 +35,8 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ### Changed
 - `GoalManager.evaluate_after_turn` now charges turn counters (`turns_used`, `tokens_used`, `wall_clock_used_sec`) BEFORE any short-circuit branch so per-turn cost is always tracked, even when a tool ends the loop. Decision priority is now: budget cap > tool signal > judge.
+- `GoalRunResult.final_response` is now formally typed `Optional[RunResponse]` (was untyped `Any`). New `GoalRunResult.final_text` property returns `final_response.content or ""` for the common one-liner access pattern.
+- `agentica.goals.DEFAULT_TURN_BUDGET` bumped 20 → 50. Rationale: with `token_budget` and `wall_clock_budget_sec` now acting as the real hard caps, `turn_budget` is the safety-net against runaway loops; 20 was too aggressive for real coding tasks (feature + tests routinely need 20–50 turns). The token / wall-clock budgets still bound actual cost.
 
 ### Changed
 - Top-level lazy imports (e.g. `from agentica import Knowledge`, `Claude`, `SqliteDb`, `Swarm`, ...) no longer emit `DeprecationWarning`. They are now treated as stable v1.x public API alongside the sub-module paths. The `DEPRECATED_TOP_LEVEL` registry has been removed; the planned v2.0 forced migration is dropped.

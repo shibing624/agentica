@@ -37,13 +37,24 @@ from agentica.utils.log import logger
 if TYPE_CHECKING:
     from agentica.memory.session_log import SessionLog
     from agentica.model.base import Model
+    from agentica.run_response import RunResponse
 
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_TURN_BUDGET = 20
+# Default turn cap for a standing goal. NOTE: this is the safety-net cap
+# against runaway loops, NOT the primary cost budget — ``token_budget`` and
+# ``wall_clock_budget_sec`` (when set) are the real hard caps and take
+# precedence in ``evaluate_after_turn``. Empirically:
+#   - one-shot tasks (compute X, draft a line): 1–3 turns
+#   - bug fixes (search → edit → test → verify):  5–15 turns
+#   - feature + tests: 20–50 turns
+# A default of 50 covers ~95% of real /goal usage without forcing the user
+# to /goal resume; pathological loops still get caught by token / wall-clock
+# budgets or the consecutive-parse-failure pause.
+DEFAULT_TURN_BUDGET = 50
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 
 JUDGE_SYSTEM_PROMPT = (
@@ -124,18 +135,37 @@ class GoalState:
 class GoalRunResult:
     """Return value of ``Agent.run_goal()``.
 
-    A flat, ergonomic summary of a standing-goal loop execution. ``status``
-    is one of the GoalState terminal values: ``complete``, ``paused``,
-    ``budget_limited``. ``final_response`` is the agent's last
-    ``RunResponse`` so callers can still inspect cost / messages / tool
-    calls without re-running.
+    A flat, ergonomic summary of a standing-goal loop execution.
+
+    Attributes:
+        status:         One of ``complete`` / ``paused`` / ``budget_limited``.
+        reason:         Human-readable rationale (judge verdict, budget
+                        message, or tool reason).
+        final_response: The agent's last ``RunResponse`` — full access to
+                        ``content``, ``cost_tracker``, ``messages``,
+                        ``tool_calls`` for callers that need them. May be
+                        ``None`` only if the loop terminated before the
+                        first ``agent.run()`` call.
+        goal:           Final ``GoalState`` snapshot (objective, counters,
+                        subgoals, last_verdict).
+        turns_used:     Convenience copy of ``goal.turns_used``.
+
+    Convenience accessor: ``result.final_text`` returns
+    ``final_response.content or ""`` so the common case stays a one-liner.
     """
 
     status: str
     reason: str
-    final_response: Any  # agentica.run_response.RunResponse
+    final_response: Optional["RunResponse"]
     goal: "GoalState"
     turns_used: int
+
+    @property
+    def final_text(self) -> str:
+        """Last assistant message content, or empty string if unavailable."""
+        if self.final_response is None:
+            return ""
+        return self.final_response.content or ""
 
 
 @dataclass

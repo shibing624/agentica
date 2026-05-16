@@ -25,10 +25,15 @@ from typing import (
     Optional,
     Sequence,
     Type,
+    TYPE_CHECKING,
     Union,
 )
+
+if TYPE_CHECKING:
+    from agentica.goals import GoalRunResult
 import copy
 import os
+import time
 import weakref
 from inspect import signature
 from uuid import uuid4
@@ -1441,7 +1446,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         manager so any persisted GoalState stays consistent.
 
         Args:
-            default_turn_budget: Overrides the default cap (12). Ignored
+            default_turn_budget: Overrides the safety-net turn cap (see
+                ``agentica.goals.DEFAULT_TURN_BUDGET``; ``token_budget`` /
+                ``wall_clock_budget_sec`` are the real hard caps). Ignored
                 if a manager already exists.
             event_callback: ``(RunEventType, dict) -> None`` hook for
                 ``goal.set / continuing / completed / paused`` events.
@@ -1500,7 +1507,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         wall_clock_budget_sec: Optional[float] = None,
         attach_goal_tool: bool = True,
         event_callback: Optional[Callable[..., None]] = None,
-    ) -> Any:
+    ) -> "GoalRunResult":
         """Drive the standing-goal loop until completion / pause / budget.
 
         Ergonomic entry point: callers do NOT touch ``SessionLog``,
@@ -1528,7 +1535,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             ``agentica.goals.GoalRunResult`` with final status / reason /
             ``RunResponse`` / GoalState snapshot / turns_used.
         """
-        import time as _time
         from agentica.goals import GoalRunResult
 
         mgr = self.get_goal_manager(event_callback=event_callback)
@@ -1553,9 +1559,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         tokens_baseline = 0
 
         while True:
-            t0 = _time.monotonic()
+            t0 = time.monotonic()
             response = await self.run(prompt)
-            elapsed = _time.monotonic() - t0
+            elapsed = time.monotonic() - t0
             final_response = response
 
             token_delta = 0
