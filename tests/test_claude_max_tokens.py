@@ -139,6 +139,36 @@ class TestClaudeRequestKwargs(unittest.TestCase):
         model = Claude(id="claude-opus-4-6", api_key="fake", max_tokens=4096)
         self.assertEqual(model.request_kwargs["max_tokens"], 4096)
 
+    def test_temperature_zero_reaches_api(self):
+        """Regression: ``temperature=0`` (deterministic) must NOT be dropped.
+
+        The pre-fix code used ``if self.temperature:`` which silently swallowed
+        ``0`` along with ``None``. Same bug applied to ``top_p`` / ``top_k``.
+        """
+        from agentica.model.anthropic.claude import Claude
+        model = Claude(id="claude-opus-4-6", api_key="fake", temperature=0.0)
+        kwargs = model.request_kwargs
+        self.assertIn("temperature", kwargs)
+        self.assertEqual(kwargs["temperature"], 0.0)
+
+    def test_top_p_zero_reaches_api(self):
+        from agentica.model.anthropic.claude import Claude
+        model = Claude(id="claude-opus-4-6", api_key="fake", top_p=0.0)
+        self.assertEqual(model.request_kwargs["top_p"], 0.0)
+
+    def test_top_k_zero_reaches_api(self):
+        from agentica.model.anthropic.claude import Claude
+        model = Claude(id="claude-opus-4-6", api_key="fake", top_k=0)
+        self.assertEqual(model.request_kwargs["top_k"], 0)
+
+    def test_none_sampling_params_omitted(self):
+        from agentica.model.anthropic.claude import Claude
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        kwargs = model.request_kwargs
+        self.assertNotIn("temperature", kwargs)
+        self.assertNotIn("top_p", kwargs)
+        self.assertNotIn("top_k", kwargs)
+
     def test_small_context_window_clamps_output(self):
         from agentica.model.anthropic.claude import Claude
         # Custom small endpoint

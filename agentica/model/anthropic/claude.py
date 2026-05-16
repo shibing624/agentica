@@ -172,13 +172,16 @@ class Claude(Model):
         _request_params["max_tokens"] = resolve_anthropic_messages_max_tokens(
             self.max_tokens, self.id, context_length=self.context_window,
         )
-        if self.temperature:
+        # Use `is not None` for numeric sampling params so legitimate falsy
+        # values (temperature=0 deterministic, top_p=0/top_k=0) reach the API
+        # instead of being silently dropped.
+        if self.temperature is not None:
             _request_params["temperature"] = self.temperature
         if self.stop_sequences:
             _request_params["stop_sequences"] = self.stop_sequences
-        if self.top_p:
+        if self.top_p is not None:
             _request_params["top_p"] = self.top_p
-        if self.top_k:
+        if self.top_k is not None:
             _request_params["top_k"] = self.top_k
         if self.thinking:
             _request_params["thinking"] = self.thinking
