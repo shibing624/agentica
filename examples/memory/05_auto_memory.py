@@ -27,10 +27,9 @@ from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat
+from agentica import Agent, OpenAIChat, DeepSeekChat
 from agentica.agent.config import WorkspaceMemoryConfig
 from agentica.memory import WorkingMemory
-from agentica.model.providers import create_provider
 from agentica.workspace import Workspace
 
 
@@ -205,7 +204,7 @@ async def demo_combined():
     # auxiliary_model: only used by MemoryExtractHooks for the extraction
     # sub-call. Falls back to the main model when DEEPSEEK_API_KEY is missing.
     auxiliary_model = (
-        create_provider("deepseek", id='deepseek-v4-flash', extra_body={'thinking': {'type': 'disabled'}}) if os.getenv("DEEPSEEK_API_KEY") else None
+        DeepSeekChat(id='deepseek-v4-flash', extra_body={'thinking': {'type': 'disabled'}}) if os.getenv("DEEPSEEK_API_KEY") else None
     )
 
     agent = Agent(

@@ -48,7 +48,7 @@ async def main():
     print("=" * 60)
     
     agent = Agent(
-        model=ZhipuAI(),
+        model=ZhipuAIChat(),
     )
     
     await agent.print_response_stream("一句话简单介绍一下《红楼梦》")

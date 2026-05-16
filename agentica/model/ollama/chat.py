@@ -49,7 +49,6 @@ class Ollama(Model):
     name: str = "Ollama"
     provider: str = "Ollama"
     context_window: int = 128000
-    max_output_tokens: int = 4096
 
     # Request parameters
     format: Optional[Any] = None

@@ -266,8 +266,6 @@ from agentica.compression import CompressionManager
 以下模块/路径属于内部实现，**外部代码不建议直接 import**，API 可能在任何 patch 版本变化：
 
 - `agentica._internal.*`（如果未来新增）
-- `agentica.model.providers.create_provider`（工厂函数，v2.x 会废弃）
-- `agentica.model.providers.list_providers`
 - `agentica.utils.markdown_converter.MarkdownConverter`（被 knowledge 内部使用）
 - `agentica.runner.Runner`（Agent 的执行引擎，通过 Agent.run() 访问）
 - `agentica.compression.*`（内部压缩管道）

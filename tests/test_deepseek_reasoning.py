@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.openai import OpenAIChat
-from agentica.model.providers import create_provider
+from agentica import DeepSeekChat, NvidiaChat
 
 
 class FakeDeepSeekMessage:
@@ -57,8 +57,7 @@ def test_openai_compatible_message_preserves_provider_payload():
 
 def test_deepseek_thinking_omits_unsupported_sampling_params():
     # Thinking is opt-in: user must pass reasoning_effort + extra_body.thinking explicitly.
-    model = create_provider(
-        "deepseek",
+    model = DeepSeekChat(
         temperature=0.7,
         top_p=0.9,
         presence_penalty=0.1,
@@ -78,10 +77,10 @@ def test_deepseek_thinking_omits_unsupported_sampling_params():
 
 
 def test_deepseek_no_default_thinking_params():
-    # Plain create_provider("deepseek") must NOT inject any thinking defaults,
-    # so user `extra_body={"thinking": {"type": "disabled"}}` won't collide with a baked-in
-    # `reasoning_effort`. See providers.py NOTE.
-    model = create_provider("deepseek")
+    # Plain DeepSeekChat() must NOT inject any thinking defaults, so user
+    # `extra_body={"thinking": {"type": "disabled"}}` won't collide with a baked-in
+    # `reasoning_effort`.
+    model = DeepSeekChat()
     request_kwargs = model.request_kwargs
 
     assert "reasoning_effort" not in request_kwargs
@@ -89,8 +88,7 @@ def test_deepseek_no_default_thinking_params():
 
 
 def test_deepseek_non_thinking_keeps_sampling_params():
-    model = create_provider(
-        "deepseek",
+    model = DeepSeekChat(
         temperature=0.7,
         top_p=0.9,
         extra_body={"thinking": {"type": "disabled"}},
@@ -111,7 +109,7 @@ async def _collect_stream_reasoning(model):
 
 
 def test_nvidia_streaming_reasoning_field_maps_to_reasoning_content():
-    model = create_provider("nvidia", api_key="fake_key")
+    model = NvidiaChat(api_key="fake_key")
 
     async def fake_invoke_stream(messages):
         yield SimpleNamespace(

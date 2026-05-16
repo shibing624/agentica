@@ -82,7 +82,7 @@ export ZAI_API_KEY="your-api-key"          # 推荐：智谱免费 glm-4.7-flash
 # export ARK_API_KEY="your-api-key"        # 火山引擎，跑豆包模型
 ```
 
-完整 provider 列表见 `agentica/model/providers.py`（每条 `api_key_env`）。
+完整 provider 列表见 `agentica/__init__.py`（顶层 `XxxChat` 工厂函数）。
 
 ### 进阶：多 Provider 组合（不需要新 env，只用 Python）
 
@@ -91,17 +91,11 @@ export ZAI_API_KEY="your-api-key"          # 推荐：智谱免费 glm-4.7-flash
 **A. Auxiliary Model — 用便宜小模型跑副任务**（context 压缩、记忆抽取、用户纠正分类等）
 
 ```python
-from agentica import Agent, OpenAIChat
-from agentica.model.providers import create_provider
+from agentica import Agent, OpenAIChat, DeepSeekChat
 
 agent = Agent(
-    model=OpenAIChat(id="gpt-4o"),                   # 主流程读 OPENAI_API_KEY
-    auxiliary_model=create_provider(                 # 副任务读 DEEPSEEK_API_KEY
-        "deepseek",
-        id="deepseek-v4-flash",
-        api_key="sk-xxx",                            # 不传则从环境变量读
-        base_url="https://api.deepseek.com",         # 可选
-    ),
+    model=OpenAIChat(id="gpt-4o"),                          # 主流程读 OPENAI_API_KEY
+    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),   # 副任务读 DEEPSEEK_API_KEY
 )
 # export OPENAI_API_KEY=...   # 主流程
 # export DEEPSEEK_API_KEY=... # auxiliary
@@ -110,11 +104,13 @@ agent = Agent(
 **B. Fallback Models — 生产高可用**（content_filter / 5xx / 429 / timeout 自动跳到下一个）
 
 ```python
+from agentica import Agent, OpenAIChat, DeepSeekChat, ZhipuAIChat
+
 agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
     fallback_models=[
-        create_provider("deepseek", id="deepseek-v4-flash", api_key="sk-xxx"),
-        create_provider("zhipuai",  id="glm-4.7-flash",     api_key="sk-xxx"),
+        DeepSeekChat(id="deepseek-v4-flash"),
+        ZhipuAIChat(id="glm-4.7-flash"),
     ],
 )
 # 三家各 export 一份；RunResponse.model 反映实际应答的 provider
@@ -123,16 +119,16 @@ agent = Agent(
 **C. main + auxiliary + fallback 全开**
 
 ```python
+from agentica import Agent, OpenAIChat, DeepSeekChat, ZhipuAIChat
+
 agent = Agent(
-    model=create_provider("openai",   id="gpt-4o",            api_key="sk-xxx"),
-    auxiliary_model=create_provider("deepseek", id="deepseek-v4-flash", api_key="sk-xxx"),
-    fallback_models=[
-        create_provider("zhipuai", id="glm-4.7-flash", api_key="sk-xxx"),
-    ],
+    model=OpenAIChat(id="gpt-4o"),
+    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
+    fallback_models=[ZhipuAIChat(id="glm-4.7-flash")],
 )
 ```
 
-> `create_provider(slug, id=..., api_key=..., base_url=...)` 的 4 个参数：`slug` 选 provider，`id` 指定具体模型名，`api_key` 不传则按 provider 默认环境变量读，`base_url` 仅在私有部署 / 代理时覆盖。完整 slug 列表见 `agentica/model/providers.py`。
+> 每个工厂内部硬编码了 `base_url` 与默认 env 名（如 `DeepSeekChat` 读 `DEEPSEEK_API_KEY`）。私有部署 / 代理传 `base_url=` 显式覆盖即可。完整工厂列表见 `agentica/__init__.py`。
 
 > **同 provider 复用**：如果 main / auxiliary / fallback 都在同一家（比如全用智谱不同 size），只需一份 env，所有 Model 实例共享。
 

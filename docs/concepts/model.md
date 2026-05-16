@@ -26,10 +26,10 @@ from agentica import (
     # 本地模型
     Ollama,             # llama3, mistral, qwen2 等
 
-    # 通用适配
-    OpenAILike,         # 兼容 OpenAI API 的任意模型
 )
 ```
+
+> 兼容 OpenAI API 的任意自定义端点：直接用 `OpenAIChat(id=..., api_key=..., base_url=...)`。
 
 ## 通用参数
 
@@ -90,26 +90,30 @@ class Model(ABC):
 
 ### OpenAI 兼容提供商
 
-通过 `model/providers.py` 的注册工厂创建：
+直接从 `agentica` 顶层导入对应的工厂类，每个工厂内部硬编码了 `base_url` 与默认环境变量。
 
 ```python
-from agentica.model.providers import create_provider
+from agentica import DeepSeekChat, QwenChat, ZhipuAIChat, ArkChat
 
-# Full param shape: provider slug + id (model name) + api_key + base_url(optional)
-model = create_provider(
-    "deepseek",
-    id="deepseek-v4-flash",
-    api_key="sk-xxx",                              # 也可不传，自动读 DEEPSEEK_API_KEY
-    base_url="https://api.deepseek.com",           # 可选；私有部署/代理时覆盖
-)
+# api_key 不传则自动读对应 env（DEEPSEEK_API_KEY / DASHSCOPE_API_KEY / ZAI_API_KEY / ARK_API_KEY）
+model = DeepSeekChat(id="deepseek-v4-flash")
+model = QwenChat(id="qwen-max")
+model = ZhipuAIChat(id="glm-4.7-flash")
+model = ArkChat(id="doubao-1.5-pro-32k")                  # 火山引擎
 
-# 其他 provider 同样调用方式，slug + id 即可
-model = create_provider("qwen",    id="qwen-max",          api_key="sk-xxx")
-model = create_provider("zhipuai", id="glm-4.7-flash",     api_key="sk-xxx")
-model = create_provider("ark",     id="doubao-1.5-pro-32k", api_key="sk-xxx")  # 火山引擎
+# 私有部署 / 代理：传 base_url 覆盖
+model = DeepSeekChat(id="deepseek-v4-pro", base_url="https://my-proxy/api")
 ```
 
-支持: deepseek, qwen, zhipuai, moonshot, ark, together, xai, yi, nvidia, sambanova, groq, cerebras, mistral
+支持的工厂：`DeepSeekChat`, `QwenChat`, `ZhipuAIChat`, `MoonshotChat`, `ArkChat`, `TogetherChat`, `GrokChat`,
+`YiChat`, `NvidiaChat`, `SambanovaChat`, `OpenRouterChat`, `FireworksChat`, `InternLMChat`。
+
+需要按字符串 slug 派发（gateway / multi-tenant 场景）时使用 `agentica.PROVIDER_FACTORIES`：
+
+```python
+from agentica import PROVIDER_FACTORIES
+model = PROVIDER_FACTORIES["deepseek"](id="deepseek-v4-flash")
+```
 
 ## Model 内置安全机制
 

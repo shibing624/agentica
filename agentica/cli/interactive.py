@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from io import StringIO
 
@@ -484,6 +484,13 @@ def _maybe_continue_goal(
 
     elapsed_sec = float(tui_state.get("last_turn_seconds", 0.0) or 0.0)
 
+    # Tool-call summary for the judge + the tool-stuck counter.
+    tool_pairs: List[Tuple[str, bool]] = []
+    if agent.run_response is not None:
+        for tc in agent.run_response.tool_calls:
+            if tc.tool_name:
+                tool_pairs.append((tc.tool_name, bool(tc.is_error)))
+
     with state.goal_lock:
         try:
             decision = _run_async_safe(
@@ -491,6 +498,7 @@ def _maybe_continue_goal(
                     final_text,
                     token_delta=token_delta,
                     elapsed_sec=elapsed_sec,
+                    tool_calls=tool_pairs or None,
                 )
             )
         except Exception as exc:

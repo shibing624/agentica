@@ -88,7 +88,6 @@ def _make_model_with_tool_call(tool_calls_response, final_response_content="Fina
     model.use_structured_outputs = None
     model.supports_structured_outputs = False
     model.context_window = 128000
-    model.max_output_tokens = None
     model.metrics = {}
     model.response_format = None
     model.session_id = None

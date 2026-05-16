@@ -9,6 +9,7 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
+from typing import Any, Dict
 from unittest.mock import AsyncMock
 
 import pytest
@@ -686,3 +687,177 @@ def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
 
     assert agent.task_anchor.goal == "write the migration script"
     assert agent.task_anchor.source_query == "write the migration script"
+
+
+# ---------------------------------------------------------------------------
+# B1.3: weak-judge JSON parsing (string done values, fences)
+# ---------------------------------------------------------------------------
+
+def test_parse_judge_response_string_yes():
+    """Weak models sometimes emit ``"done": "yes"`` instead of a bool."""
+    v, _, failed = _parse_judge_response('{"done": "yes", "reason": "ok"}')
+    assert v == "done" and failed is False
+
+
+def test_parse_judge_response_string_true_uppercase():
+    v, _, failed = _parse_judge_response('{"done": "TRUE", "reason": "ok"}')
+    assert v == "done" and failed is False
+
+
+def test_parse_judge_response_int_one():
+    v, _, failed = _parse_judge_response('{"done": 1, "reason": "ok"}')
+    assert v == "done" and failed is False
+
+
+def test_parse_judge_response_string_no():
+    v, _, failed = _parse_judge_response('{"done": "no", "reason": "more"}')
+    assert v == "continue" and failed is False
+
+
+# ---------------------------------------------------------------------------
+# B1.1: subgoal-aware "find evidence" judge prompt
+# ---------------------------------------------------------------------------
+
+def test_judge_prompt_includes_evidence_rule_for_subgoals():
+    """When subgoals are present the user prompt must demand concrete
+    evidence — without this hermes saw judges accepting vague summaries."""
+    captured: Dict[str, Any] = {}
+
+    class _Capturing:
+        async def response(self, messages):
+            captured["messages"] = messages
+            return ModelResponse(content='{"done": false, "reason": "more"}')
+
+    model = _Capturing()
+    asyncio.run(judge_goal(
+        model, "ship the demo", "started", subgoals=["tests pass", "docs updated"],
+    ))
+    user_prompt = captured["messages"][-1].content
+    assert "tests pass" in user_prompt
+    assert "docs updated" in user_prompt
+    assert "concrete evidence" in user_prompt.lower()
+
+
+def test_judge_prompt_omits_evidence_rule_without_subgoals():
+    """No subgoals → simpler prompt with no evidence-rule block (the
+    rule only applies to the per-criterion subgoal case)."""
+    captured: Dict[str, Any] = {}
+
+    class _Capturing:
+        async def response(self, messages):
+            captured["messages"] = messages
+            return ModelResponse(content='{"done": true, "reason": "ok"}')
+
+    model = _Capturing()
+    asyncio.run(judge_goal(model, "ship the demo", "shipped"))
+    user_prompt = captured["messages"][-1].content
+    assert "concrete evidence" not in user_prompt.lower()
+
+
+# ---------------------------------------------------------------------------
+# B2.1: judge sees tool-call names (no LLM summarisation)
+# ---------------------------------------------------------------------------
+
+def test_judge_prompt_includes_tool_call_names():
+    captured: Dict[str, Any] = {}
+
+    class _Capturing:
+        async def response(self, messages):
+            captured["messages"] = messages
+            return ModelResponse(content='{"done": false, "reason": "more"}')
+
+    model = _Capturing()
+    asyncio.run(judge_goal(
+        model, "do X", "did stuff",
+        tool_calls=[("read_file", False), ("run_pytest", True)],
+    ))
+    user_prompt = captured["messages"][-1].content
+    assert "read_file" in user_prompt
+    # Errored tool is flagged inline.
+    assert "run_pytest(error)" in user_prompt
+
+
+def test_judge_prompt_omits_tool_section_when_none():
+    captured: Dict[str, Any] = {}
+
+    class _Capturing:
+        async def response(self, messages):
+            captured["messages"] = messages
+            return ModelResponse(content='{"done": false, "reason": "more"}')
+
+    model = _Capturing()
+    asyncio.run(judge_goal(model, "do X", "did stuff"))
+    user_prompt = captured["messages"][-1].content
+    assert "Tools used this turn" not in user_prompt
+
+
+# ---------------------------------------------------------------------------
+# B2.2: consecutive tool failures auto-pause
+# ---------------------------------------------------------------------------
+
+def test_consecutive_tool_failures_auto_pause(tmp_path: Path):
+    """All-failed-tools turns N in a row → auto-pause with reason 'tool-stuck'."""
+    from agentica.goals import MAX_CONSECUTIVE_TOOL_FAILURES
+
+    model = _fake_model('{"done": false, "reason": "keep going"}')
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr.set("x")
+
+    # First N-1 turns of all-failed tools just bump the counter.
+    for i in range(MAX_CONSECUTIVE_TOOL_FAILURES - 1):
+        d = asyncio.run(mgr.evaluate_after_turn(
+            f"r{i}", tool_calls=[("edit_file", True), ("run_pytest", True)],
+        ))
+        assert d.status == "active"
+        assert d.should_continue is True
+
+    # N-th turn trips auto-pause.
+    final = asyncio.run(mgr.evaluate_after_turn(
+        "stuck", tool_calls=[("edit_file", True)],
+    ))
+    assert final.status == "paused"
+    assert final.should_continue is False
+    state = mgr.load()
+    assert state.paused_reason == "tool-stuck"
+    assert state.consecutive_tool_failures == MAX_CONSECUTIVE_TOOL_FAILURES
+
+
+def test_any_tool_success_resets_failure_counter(tmp_path: Path):
+    model = _fake_model('{"done": false, "reason": "go"}')
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr.set("x")
+
+    asyncio.run(mgr.evaluate_after_turn(
+        "r1", tool_calls=[("edit_file", True), ("ls", True)],
+    ))
+    assert mgr.load().consecutive_tool_failures == 1
+
+    # One success in the next turn resets the counter.
+    asyncio.run(mgr.evaluate_after_turn(
+        "r2", tool_calls=[("edit_file", True), ("read_file", False)],
+    ))
+    assert mgr.load().consecutive_tool_failures == 0
+
+
+def test_turns_with_no_tool_calls_do_not_reset_counter(tmp_path: Path):
+    """A 'just thinking' turn while stuck shouldn't get a free pass."""
+    model = _fake_model('{"done": false, "reason": "go"}')
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr.set("x")
+
+    asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=[("edit_file", True)]))
+    assert mgr.load().consecutive_tool_failures == 1
+
+    # No tool calls — counter must stay at 1, not reset to 0.
+    asyncio.run(mgr.evaluate_after_turn("r2", tool_calls=None))
+    assert mgr.load().consecutive_tool_failures == 1
+
+
+def test_resume_resets_tool_failure_counter(tmp_path: Path):
+    model = _fake_model('{"done": false, "reason": "more"}')
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr.set("x")
+    asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=[("a", True)]))
+    mgr.pause("user")
+    mgr.resume()
+    assert mgr.load().consecutive_tool_failures == 0

@@ -4,33 +4,14 @@
 @description: Single-source registry for Agentica's top-level public API.
 """
 
-PROVIDER_ALIAS_TO_SLUG = {
-    "DeepSeekChat": "deepseek",
-    "MoonshotChat": "moonshot",
-    "ArkChat": "ark",
-    "TogetherChat": "together",
-    "GrokChat": "xai",
-    "YiChat": "yi",
-    "QwenChat": "qwen",
-    "ZhipuAIChat": "zhipuai",
-}
-
-PROVIDER_LEGACY_ALIAS_TO_FACTORY = {
-    "DeepSeek": "DeepSeekChat",
-    "Moonshot": "MoonshotChat",
-    "Ark": "ArkChat",
-    "Together": "TogetherChat",
-    "Grok": "GrokChat",
-    "Yi": "YiChat",
-    "Qwen": "QwenChat",
-    "ZhipuAI": "ZhipuAIChat",
-}
-
 PROVIDER_ALIAS_EXPORTS = [
     "DeepSeekChat", "DeepSeek", "MoonshotChat", "Moonshot",
     "ArkChat", "Ark", "TogetherChat", "Together",
     "GrokChat", "Grok", "YiChat", "Yi", "QwenChat", "Qwen",
     "ZhipuAIChat", "ZhipuAI",
+    "NvidiaChat", "SambanovaChat", "OpenRouterChat",
+    "FireworksChat", "InternLMChat",
+    "PROVIDER_FACTORIES",
 ]
 
 LAZY_IMPORTS = {
@@ -45,7 +26,6 @@ LAZY_IMPORTS = {
     "Model": "agentica.model.base",
     "ModelResponse": "agentica.model.response",
     "FileType": "agentica.model.response",
-    "OpenAILike": "agentica.model.openai.like",
     "AzureOpenAIChat": "agentica.model.azure.openai_chat",
     # model providers (heavy dependencies)
     "LiteLLMChat": "agentica.model.litellm.chat",
@@ -175,17 +155,6 @@ LAZY_IMPORTS = {
 
 LAZY_ATTR_OVERRIDES = {
     "LiteLLM": "LiteLLMChat",
-    "DeepSeek": "DeepSeekChat",
-    "Moonshot": "MoonshotChat",
-    "Ark": "ArkChat",
-    "Yi": "YiChat",
-    "Together": "TogetherChat",
-    "Xai": "XaiChat",
-    "Nvidia": "NvidiaChat",
-    "Sambanova": "SambanovaChat",
-    "Groq": "GroqChat",
-    "Cerebras": "CerebrasChat",
-    "Mistral": "MistralChat",
 }
 
 EAGER_PUBLIC_EXPORTS = [
@@ -198,7 +167,6 @@ EAGER_PUBLIC_EXPORTS = [
     "Message", "MessageReferences", "UserMessage", "AssistantMessage",
     "SystemMessage", "ToolMessage", "Media", "Video", "Audio", "Image",
     "Usage", "RequestUsage", "TokenDetails",
-    "create_provider", "list_providers",
     "OpenAIChat",
     "BuiltinFileTool", "BuiltinExecuteTool", "BuiltinFetchUrlTool",
     "BuiltinWebSearchTool", "BuiltinTodoTool", "BuiltinTaskTool", "BuiltinMemoryTool",

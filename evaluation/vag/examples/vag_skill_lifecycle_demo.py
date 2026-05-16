@@ -34,7 +34,7 @@ from unittest.mock import AsyncMock, MagicMock
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, _REPO_ROOT)
 
-from agentica import create_provider
+from agentica import PROVIDER_FACTORIES
 from agentica.agent.config import SkillUpgradeConfig
 from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
 from agentica.experience.skill_upgrade import SkillEvolutionManager
@@ -182,7 +182,7 @@ def build_demo_model():
             "VAG_DEMO_USE_FAKE_LLM=1."
         )
     print(f"[model] provider={provider} id={model_id}")
-    return create_provider(provider, id=model_id)
+    return PROVIDER_FACTORIES[provider](id=model_id)
 
 
 def spawn_model(real_model):

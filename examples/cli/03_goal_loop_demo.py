@@ -56,7 +56,7 @@ async def example_1_one_liner() -> None:
     agent = Agent(
         session_id="goal-demo-basic",
         model=DeepSeekChat(id="deepseek-v4-pro"),
-        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash", max_completion_tokens=4096),
         instructions="You are terse. One step per turn. State 'done' when finished.",
     )
 
@@ -82,7 +82,7 @@ async def example_2_budgets() -> None:
     agent = Agent(
         session_id="goal-demo-budget",
         model=DeepSeekChat(id="deepseek-v4-pro"),
-        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash", max_completion_tokens=4096),
     )
 
     # Real-world recipe (commented out — would cost real $$):
@@ -120,7 +120,7 @@ async def example_3_events() -> None:
     agent = Agent(
         session_id="goal-demo-events",
         model=DeepSeekChat(id="deepseek-v4-pro"),
-        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash", max_completion_tokens=4096),
         instructions="Be terse. State 'done' clearly when finished.",
     )
 
@@ -146,7 +146,7 @@ async def example_4_manual_control() -> None:
     agent = Agent(
         session_id="goal-demo-manual",
         model=DeepSeekChat(id="deepseek-v4-pro"),
-        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
+        auxiliary_model=DeepSeekChat(id="deepseek-v4-flash", max_completion_tokens=4096),
         instructions="You are terse. State 'done' clearly when finished.",
     )
     mgr = agent.get_goal_manager(default_turn_budget=3)

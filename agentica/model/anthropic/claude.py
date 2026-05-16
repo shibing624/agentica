@@ -71,7 +71,6 @@ class Claude(Model):
     name: str = "Claude"
     provider: str = "Anthropic"
     context_window: int = 200000
-    max_output_tokens: int = 8192
 
     # Request parameters
     max_tokens: int = 8192

@@ -24,7 +24,8 @@ def create_model(
     """Instantiate the configured LLM model.
 
     Core providers (openai, claude, kimi, azure) use dedicated classes.
-    All other providers use the SDK registry factory (create_provider).
+    OpenAI-compatible providers (deepseek, qwen, zhipuai, ...) use the
+    slug → factory dispatch table exposed by ``agentica.PROVIDER_FACTORIES``.
 
     Args:
         model_provider: Provider identifier (e.g. "openai", "zhipuai").
@@ -76,13 +77,13 @@ def create_model(
         from agentica.model.azure import AzureOpenAIChat
         return AzureOpenAIChat(**params)
 
-    # All other providers: use SDK registry factory
-    from agentica.model.providers import PROVIDER_REGISTRY, create_provider
-    if model_provider in PROVIDER_REGISTRY:
-        return create_provider(model_provider, **params)
+    # All other providers: OpenAI-compatible factory dispatch
+    from agentica import PROVIDER_FACTORIES
+    if model_provider in PROVIDER_FACTORIES:
+        return PROVIDER_FACTORIES[model_provider](**params)
 
     # Unknown provider: raise instead of silent fallback
-    supported = ["openai", "kimi", "anthropic", "claude", "azure"] + list(PROVIDER_REGISTRY.keys())
+    supported = ["openai", "kimi", "anthropic", "claude", "azure"] + list(PROVIDER_FACTORIES.keys())
     raise ValueError(
         f"Unknown model_provider '{model_provider}'. "
         f"Supported providers: {sorted(supported)}"

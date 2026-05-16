@@ -18,7 +18,10 @@ agent = Agent(
     # 主模型 + 便宜的 aux 模型：judge / 压缩 / 记忆抽取等次要工作都走 aux。
     # 不区分也能跑，但 judge 每轮都调一次，分开后能省 5-10x 成本。
     model=DeepSeekChat(id="deepseek-v4-pro"),
-    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),
+    auxiliary_model=DeepSeekChat(
+        id="deepseek-v4-flash",
+        max_completion_tokens=4096,   # judge JSON 输出预算
+    ),
 )
 
 # 最简：不传任何 budget，只靠默认 100 turns 安全网兜底
@@ -101,6 +104,31 @@ result = await agent.run_goal(
 )
 ```
 
+### Judge 鲁棒性（自动启用，无需配置）
+
+每轮 judge 调用会自动：
+
+1. **看 tool call 名字**——`agent.run_goal()` 会把本轮 `RunResponse.tool_calls` 的 `(tool_name, is_error)` 列表传给 judge，让它分清"啥也没干就嘴硬"和"跑了 5 个工具实际产出"。**零额外 LLM 调用**，只是名字。
+2. **强制 evidence rule for subgoals**——当存在 subgoals 时，judge prompt 自动加一句"为每条验收条件找具体证据（文件片段 / 命令输出 / 结果值），不接受 'all requirements met' 这种泛泛之言"。来自 hermes 的实战经验。
+3. **JSON 解析容错**——支持 `{"done": "yes"}`、`{"done": "TRUE"}`、`{"done": 1}` 这类弱 judge 模型的偏差输出，以及 markdown fence 包裹。
+4. **Tool-stuck 自动 pause**——连续 N（默认 3）轮"所有 tool call 都失败"时，自动 pause 状态为 `tool-stuck`，避免烧穿整个 turn_budget。任意一次 tool 成功就重置计数；"光思考不调 tool"的轮**不重置**计数。
+
+### Reasoning judge 的特别注意
+
+如果你想用 reasoning 模型当 judge（DeepSeek-Reasoner、o-series、qwq、GLM-4 Reasoning 等），hidden CoT 会先烧掉一大块 output token，**必须在构造时显式给足 `max_completion_tokens`**（推荐 `≥ 4096`），否则 JSON 还没输出完就被截断，会被 GoalManager 当成 parse failure，连续 3 次后 auto-pause 为 `judge-broken`：
+
+```python
+agent = Agent(
+    model=DeepSeekChat(id="deepseek-v4-pro"),
+    auxiliary_model=DeepSeekChat(
+        id="deepseek-reasoner",
+        max_completion_tokens=4096,   # judge 必备
+    ),
+)
+```
+
+非 reasoning 的小 chat 模型（`deepseek-v4-flash`、`gpt-4o-mini` 等）默认输出预算就够用，不用设。
+
 ### Power-user 路径
 
 需要更细粒度控制（例如自己写循环、自定义 logging、与 streaming 配合）时：
@@ -114,8 +142,11 @@ while True:
     resp = await agent.run(mgr.next_continuation_prompt())
     ct = resp.cost_tracker
     delta = (ct.total_input_tokens + ct.total_output_tokens) if ct else 0
+    # Recommended: pass tool-call names so the judge sees what work
+    # actually happened + the tool-stuck counter advances correctly.
+    tool_pairs = [(t.tool_name, bool(t.is_error)) for t in resp.tool_calls if t.tool_name]
     decision = await mgr.evaluate_after_turn(
-        resp.content or "", token_delta=delta,
+        resp.content or "", token_delta=delta, tool_calls=tool_pairs or None,
     )
     if not decision.should_continue:
         break
@@ -207,6 +238,7 @@ result = await agent.run_goal("xxx", attach_goal_tool=False)
 | 模型调 `update_goal(paused)` | `paused` | `agent-tool` | `/goal resume` |
 | `/resume <sid>` 拾回 active goal | `paused` | `resume-safety` | `/goal resume` |
 | Judge 连续 3 次 JSON 解析失败 | `paused` | `judge-broken` | `/goal resume`（先排查 judge） |
+| 连续 3 轮所有 tool call 都失败 | `paused` | `tool-stuck` | 看最后几轮 tool 报错 → 修 → `/goal resume` |
 | `turn_budget` 超 | `budget_limited` | `budget` | `/goal resume` |
 | `token_budget` / `wall_clock_budget_sec` 超 | `budget_limited` | `budget` | `/goal resume` |
 

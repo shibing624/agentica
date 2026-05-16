@@ -20,28 +20,23 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # ===========================================================================
 
 class TestProviderFactory(unittest.TestCase):
-    """Tests for model/providers.py registry and factory."""
+    """Tests for top-level OpenAI-compatible provider factories."""
 
-    def test_create_provider_deepseek(self):
-        """create_provider('deepseek') returns OpenAILike with correct config."""
-        from agentica.model.providers import create_provider
-        model = create_provider("deepseek", api_key="fake_key")
-        from agentica.model.openai.like import OpenAILike
-        self.assertIsInstance(model, OpenAILike)
+    def test_deepseek_factory(self):
+        from agentica import DeepSeekChat
+        from agentica import OpenAIChat
+        model = DeepSeekChat(api_key="fake_key")
+        self.assertIsInstance(model, OpenAIChat)
         self.assertIn("deepseek", model.base_url)
         self.assertEqual(model.id, "deepseek-v4-flash")
         self.assertEqual(model.context_window, 1_000_000)
-        self.assertEqual(model.max_output_tokens, 384_000)
-        # No thinking defaults; user opts in via reasoning_effort + extra_body kwargs.
         self.assertIsNone(model.reasoning_effort)
         self.assertIsNone(model.extra_body)
 
-    def test_create_provider_deepseek_allows_overrides(self):
-        """Explicit DeepSeek kwargs should override provider defaults."""
-        from agentica.model.providers import create_provider
+    def test_deepseek_factory_allows_overrides(self):
+        from agentica import DeepSeekChat
 
-        model = create_provider(
-            "deepseek",
+        model = DeepSeekChat(
             id="deepseek-v4-flash",
             api_key="fake_key",
             reasoning_effort="low",
@@ -52,50 +47,32 @@ class TestProviderFactory(unittest.TestCase):
         self.assertEqual(model.reasoning_effort, "low")
         self.assertEqual(model.extra_body, {"thinking": {"type": "disabled"}})
 
-    def test_create_provider_qwen(self):
-        from agentica.model.providers import create_provider
-        model = create_provider("qwen", api_key="fake_key")
-        from agentica.model.openai.like import OpenAILike
-        self.assertIsInstance(model, OpenAILike)
+    def test_qwen_factory(self):
+        from agentica import QwenChat, OpenAIChat
+        model = QwenChat(api_key="fake_key")
+        self.assertIsInstance(model, OpenAIChat)
 
-    def test_create_provider_nvidia_deepseek_v4_flash_defaults(self):
-        """NVIDIA provider should use its DeepSeek v4 flash OpenAI-compatible preset.
+    def test_nvidia_factory_defaults(self):
+        from agentica import NvidiaChat, OpenAIChat
 
-        Sampling / thinking knobs are NOT preset (see providers.py NOTE) so that user
-        overrides like `extra_body={"chat_template_kwargs": {"thinking": False}}` don't
-        collide with baked-in defaults.
-        """
-        from agentica.model.providers import create_provider
+        model = NvidiaChat(api_key="fake_key")
 
-        model = create_provider("nvidia", api_key="fake_key")
-
-        from agentica.model.openai.like import OpenAILike
-        self.assertIsInstance(model, OpenAILike)
+        self.assertIsInstance(model, OpenAIChat)
         self.assertEqual(model.id, "deepseek-ai/deepseek-v4-flash")
         self.assertEqual(model.base_url, "https://integrate.api.nvidia.com/v1")
-        self.assertEqual(model.max_output_tokens, 16384)
         self.assertIsNone(model.temperature)
         self.assertIsNone(model.top_p)
         self.assertIsNone(model.extra_body)
 
-    def test_create_provider_unknown_raises(self):
-        from agentica.model.providers import create_provider
-        with self.assertRaises((ValueError, KeyError)):
-            create_provider("nonexistent_provider_xyz", api_key="fake_key")
+    def test_provider_factories_registry(self):
+        from agentica import PROVIDER_FACTORIES
+        self.assertIn("deepseek", PROVIDER_FACTORIES)
+        self.assertIn("qwen", PROVIDER_FACTORIES)
+        self.assertIn("nvidia", PROVIDER_FACTORIES)
 
-    def test_list_providers(self):
-        from agentica.model.providers import list_providers
-        providers = list_providers()
-        self.assertIsInstance(providers, list)
-        self.assertIn("deepseek", providers)
-        self.assertIn("qwen", providers)
-
-    def test_backward_compat_aliases(self):
-        """Backward-compatible aliases in __init__.py should work."""
-        from agentica import DeepSeekChat, QwenChat, ZhipuAIChat
-        model = DeepSeekChat(api_key="fake_key")
-        from agentica.model.openai.like import OpenAILike
-        self.assertIsInstance(model, OpenAILike)
+    def test_legacy_short_aliases(self):
+        from agentica import DeepSeek, Qwen, ZhipuAI, DeepSeekChat
+        self.assertIs(DeepSeek, DeepSeekChat)
 
 
 # ===========================================================================

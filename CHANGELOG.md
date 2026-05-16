@@ -19,7 +19,46 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+### Removed (Breaking)
+- **`agentica.model.providers` module deleted** (`ProviderConfig`, `create_provider`, `list_providers`, `register_provider`, `PROVIDER_REGISTRY`). The registry indirection had a single concrete output (`OpenAILike(**config)`) so every OpenAI-compatible factory now directly constructs `OpenAIChat` with hardcoded `base_url` / `api_key_env` / `default_model` / `context_window`.
+- **`agentica.OpenAILike` deleted**. Was a 22-line subclass of `OpenAIChat` whose only behavior was a placeholder-`api_key` warning. Use `OpenAIChat(id=..., api_key=..., base_url=...)` for custom OpenAI-compatible endpoints.
+- **`agentica.model.openai.like` deleted**. `AzureOpenAIChat` now subclasses `OpenAIChat` directly.
+
+### Changed (Breaking)
+- Each `XxxChat` is now a thin top-level factory in `agentica/__init__.py` (e.g. `DeepSeekChat`, `ZhipuAIChat`, `QwenChat`, `ArkChat`, …). Added 5 previously-only-by-slug factories: `NvidiaChat`, `SambanovaChat`, `OpenRouterChat`, `FireworksChat`, `InternLMChat`.
+- New `agentica.PROVIDER_FACTORIES: dict[str, Callable]` exposes slug → factory dispatch for gateway / multi-tenant code (replaces `PROVIDER_REGISTRY` lookups).
+- `agentica.model.defaults.create_default_model()` now uses an inline env-var table + `PROVIDER_FACTORIES`.
+- `agentica.gateway.services.model_factory.create_model()` dispatches via `PROVIDER_FACTORIES` instead of `create_provider`.
+
+### Migration
+```python
+# Before
+from agentica.model.providers import create_provider
+model = create_provider("deepseek", id="deepseek-v4-pro", api_key="sk-...")
+
+# After
+from agentica import DeepSeekChat
+model = DeepSeekChat(id="deepseek-v4-pro", api_key="sk-...")
+```
+```python
+# Custom OpenAI-compatible endpoint
+# Before:
+from agentica import OpenAILike
+model = OpenAILike(id="my-model", api_key="sk-...", base_url="https://...")
+# After:
+from agentica import OpenAIChat
+model = OpenAIChat(id="my-model", api_key="sk-...", base_url="https://...")
+```
+
 ### Added
+- Standing-goal loop judge hardening (hermes-validated + beyond):
+  - **Tool-call summary fed to judge**: `Agent.run_goal()` extracts `(tool_name, is_error)` pairs from each turn's `RunResponse.tool_calls` and passes them to `judge_goal`. Judge prompt now includes a `Tools used this turn: edit_file, run_pytest(error), ls` line so it can distinguish "answered with no tools" from "actually did work". Zero extra LLM calls — names + flags only. New optional `tool_calls` param on `GoalManager.evaluate_after_turn()` and `judge_goal()`.
+  - **Tool-stuck auto-pause**: `GoalState.consecutive_tool_failures` counts consecutive turns where every tool call errored. After `MAX_CONSECUTIVE_TOOL_FAILURES = 3` the loop auto-pauses with `paused_reason="tool-stuck"`. Any successful tool call resets; turns with no tool calls do NOT reset (a "just thinking while stuck" turn shouldn't get a free pass).
+  - **Subgoal "find evidence" rule**: when subgoals are present, judge prompt now demands concrete evidence for each criterion (file excerpt / command output / result value) and explicitly rejects vague summaries like "all requirements met". Borrowed from hermes-agent's hard-won production prompt.
+  - **JSON parsing accepts weak-model output**: `_parse_judge_response` now coerces `"yes"`, `"true"`, `"1"`, `"done"`, `"y"` strings and numeric `1` to `done=true` (small chat models and some reasoning models don't always emit JSON booleans).
+  - **Static prompts lifted to `agentica/prompts/base/md/`**: `goal_judge.md` (judge system prompt) and `goal_continuation.md` (continuation template) now live alongside `soul.md` / `heartbeat.md` for consistency. New module `agentica/prompts/base/goal.py` exposes `GOAL_JUDGE_SYSTEM_PROMPT`, `GOAL_CONTINUATION_PROMPT_TEMPLATE`, and `render_goal_continuation_prompt()`. The dynamic per-turn user prompt stays in `goals.py` (it's conditional logic, not a static template).
+  - **Reasoning-judge guidance documented, no magic in code**: judge models that need a large output budget (DeepSeek-Reasoner, o-series, qwq) must be constructed with `max_completion_tokens` set explicitly by the caller. The prior in-place mutation helper `_ensure_judge_output_budget` was removed — it was opaque, surprising, and mutated user-owned state. See `docs/advanced/goals.md` "Reasoning judge 的特别注意" for the recipe.
+
 - Standing-goal loop P0 + P1 (S + A tiers):
   - Ergonomic SDK surface on `Agent`:
     - `Agent.run_goal(objective, *, turn_budget=..., token_budget=..., wall_clock_budget_sec=..., attach_goal_tool=True, event_callback=...) -> GoalRunResult` — one-liner that drives the whole loop. Replaces the previous low-level `GoalManager(agent._session_log, judge_model=...)` + hand-written driver loop.

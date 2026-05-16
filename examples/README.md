@@ -155,7 +155,7 @@ Model Context Protocol 集成。
 | 01 | [openai.py](model_providers/01_openai.py) | OpenAI（原生 async） | `OpenAIChat`, `response()`, `response_stream()` |
 | 02 | [deepseek.py](model_providers/02_deepseek.py) | DeepSeek（含推理模型） | `DeepSeek`, `reasoning_content` |
 | 03 | [zhipuai.py](model_providers/03_zhipuai.py) | 智谱 AI | `ZhipuAI` |
-| 04 | [custom_endpoint.py](model_providers/04_custom_endpoint.py) | 自定义 OpenAI 兼容端点 | `OpenAILike`, `base_url` |
+| 04 | [custom_endpoint.py](model_providers/04_custom_endpoint.py) | 自定义 OpenAI 兼容端点 | `OpenAIChat`, `base_url` |
 | 05 | [litellm.py](model_providers/05_litellm.py) | LiteLLM 统一接口 | `LiteLLM` |
 | 06 | [kimi_coding.py](model_providers/06_kimi_coding.py) | Kimi for Coding（扩展思考） | `KimiChat`, extended thinking |
 

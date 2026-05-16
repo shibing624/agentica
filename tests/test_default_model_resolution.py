@@ -54,12 +54,12 @@ class TestDefaultModelResolution(unittest.TestCase):
         self.assertIs(agent.auxiliary_model, agent.model)
 
     def test_image_analysis_tool_reuses_agent_model(self):
+        from agentica import DeepSeekChat
         from agentica.agent import Agent
-        from agentica.model.providers import create_provider
         from agentica.tools.image_analysis_tool import ImageAnalysisTool
 
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fake_deepseek_key"}, clear=True):
-            model = create_provider("deepseek")
+            model = DeepSeekChat()
             tool = ImageAnalysisTool()
             Agent(model=model, tools=[tool])
             tool.update_llm()

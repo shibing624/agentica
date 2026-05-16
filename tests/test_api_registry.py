@@ -3,7 +3,7 @@
 
 from agentica.api_registry import (
     LAZY_IMPORTS,
-    PROVIDER_ALIAS_TO_SLUG,
+    PROVIDER_ALIAS_EXPORTS,
     PUBLIC_API_ALL,
 )
 
@@ -39,9 +39,11 @@ def test_eager_top_level_imports_are_directly_accessible():
 
 
 def test_api_registry_contains_provider_aliases():
-    assert PROVIDER_ALIAS_TO_SLUG["DeepSeekChat"] == "deepseek"
-    assert PROVIDER_ALIAS_TO_SLUG["MoonshotChat"] == "moonshot"
-    assert PROVIDER_ALIAS_TO_SLUG["ZhipuAIChat"] == "zhipuai"
+    assert "DeepSeekChat" in PROVIDER_ALIAS_EXPORTS
+    assert "MoonshotChat" in PROVIDER_ALIAS_EXPORTS
+    assert "ZhipuAIChat" in PROVIDER_ALIAS_EXPORTS
+    assert "NvidiaChat" in PROVIDER_ALIAS_EXPORTS
+    assert "PROVIDER_FACTORIES" in PROVIDER_ALIAS_EXPORTS
 
 
 def test_agentica_public_api_uses_registry_names():

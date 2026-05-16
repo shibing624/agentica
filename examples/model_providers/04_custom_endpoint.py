@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Custom LLM endpoint demo - Demonstrates using OpenAILike for custom endpoints
+@description: Custom LLM endpoint demo - Demonstrates using OpenAIChat for custom endpoints
 
 This example shows how to use custom LLM endpoints that are compatible with OpenAI API.
 """
@@ -11,16 +11,16 @@ import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, OpenAIChat, OpenAILike, Message
+from agentica import Agent, OpenAIChat, Message
 
 
 async def main():
-    # Example 1: Custom endpoint with OpenAILike
+    # Example 1: Custom endpoint with OpenAIChat
     print("=" * 60)
-    print("Example 1: Custom Endpoint with OpenAILike")
+    print("Example 1: Custom Endpoint with OpenAIChat")
     print("=" * 60)
-    
-    model = OpenAILike(
+
+    model = OpenAIChat(
         id='your-model-id',
         api_key='your_api_key',
         base_url='your_base_url'

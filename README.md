@@ -475,7 +475,10 @@ from agentica import Agent, DeepSeekChat
 agent = Agent(
     session_id="my-task",
     model=DeepSeekChat(id="deepseek-v4-pro"),       # 主模型干活
-    auxiliary_model=DeepSeekChat(id="deepseek-v4-flash"),  # judge 用便宜模型
+    auxiliary_model=DeepSeekChat(
+        id="deepseek-v4-flash",
+        max_completion_tokens=4096,   # judge JSON 输出预算；reasoning judge 必须显式给够
+    ),
 )
 
 # 不传任何 budget = 只有默认 100 turns 安全网，token / wall-clock 不设限

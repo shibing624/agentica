@@ -31,6 +31,10 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
+from agentica.prompts.base.goal import (
+    GOAL_JUDGE_SYSTEM_PROMPT,
+    render_goal_continuation_prompt,
+)
 from agentica.run_events import RunEventType
 from agentica.utils.log import logger
 
@@ -58,26 +62,16 @@ if TYPE_CHECKING:
 # consecutive-parse-failure pause.
 DEFAULT_TURN_BUDGET = 100
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
+# Auto-pause after N consecutive turns where every tool call failed. Guards
+# against the agent getting stuck repeating the same broken tool invocation
+# (e.g. retrying an edit_file with the same wrong path) until the turn
+# budget runs out. 3 in a row is conservative — flakes don't trip it but a
+# real loop will.
+MAX_CONSECUTIVE_TOOL_FAILURES = 3
 
-JUDGE_SYSTEM_PROMPT = (
-    "You are a strict judge evaluating whether an autonomous agent has "
-    "achieved a user's stated goal. Consider the agent's last response "
-    "only. Be conservative: only mark done=true when the response shows "
-    "the goal is actually complete (not merely progress).\n"
-    "Reply ONLY with a single JSON object on one line, no prose:\n"
-    '{"done": <true|false>, "reason": "<one-sentence rationale>"}'
-)
-
-CONTINUATION_PROMPT_TEMPLATE = (
-    "[Continuing toward your standing goal]\n"
-    "Goal: {objective}\n"
-    "{subgoals_block}\n"
-    "Continue working toward this goal. Take the next concrete step. "
-    "Do not stop merely because you made partial progress. "
-    "If the goal is complete, state the evidence clearly and stop. "
-    "If blocked and needing user input, explain the blocker and stop."
-)
-
+# Continuation prompts always start with this prefix. Used by the CLI loop
+# in cli/interactive.py to distinguish auto-fed continuation prompts from
+# real user messages (real ones preempt the goal loop).
 CONTINUATION_PROMPT_PREFIX = "[Continuing toward your standing goal]"
 
 
@@ -116,9 +110,16 @@ class GoalState:
     wall_clock_used_sec: float = 0.0
     subgoals: List[str] = field(default_factory=list)
     consecutive_parse_failures: int = 0
+    # Counts consecutive turns where EVERY tool call failed
+    # (``ToolCallInfo.is_error == True``). Turns with no tool calls do
+    # NOT reset this counter — a model that decides to "just think" while
+    # stuck shouldn't get a free pass. Counter is reset by ANY successful
+    # tool call. Tripping ``MAX_CONSECUTIVE_TOOL_FAILURES`` auto-pauses
+    # the loop with ``paused_reason="tool-stuck"``.
+    consecutive_tool_failures: int = 0
     last_verdict: Optional[str] = None      # "done" | "continue" | "parse_failed" | "tool_signal"
     last_reason: Optional[str] = None
-    paused_reason: Optional[str] = None     # user | interrupted | budget | judge-broken | resume-safety | agent-tool
+    paused_reason: Optional[str] = None     # user | interrupted | budget | judge-broken | resume-safety | agent-tool | tool-stuck
     created_at: float = 0.0
     updated_at: float = 0.0
 
@@ -187,6 +188,21 @@ class GoalDecision:
 # ---------------------------------------------------------------------------
 
 _JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
+_TRUTHY_STRINGS = {"true", "yes", "1", "done", "y"}
+
+
+def _coerce_done_field(value: Any) -> bool:
+    """Coerce judge's ``done`` field to bool. Accept bool, common truthy
+    strings, and numeric 1/0. Weak judge models (small chat checkpoints,
+    some reasoning models) sometimes emit ``"yes"`` / ``"true"`` strings
+    instead of JSON booleans — accept those rather than parse-failing."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in _TRUTHY_STRINGS
+    return bool(value)
 
 
 def _parse_judge_response(raw: str) -> Tuple[str, str, bool]:
@@ -220,26 +236,70 @@ def _parse_judge_response(raw: str) -> Tuple[str, str, bool]:
     if not isinstance(payload, dict) or "done" not in payload:
         return "continue", "judge JSON missing 'done' field", True
 
-    done = bool(payload.get("done"))
+    done = _coerce_done_field(payload.get("done"))
     reason = str(payload.get("reason", "")).strip() or ("done" if done else "continue")
     return ("done" if done else "continue"), reason, False
+
+
+def _format_tool_calls_for_judge(
+    tool_calls: Optional[List[Tuple[str, bool]]],
+) -> str:
+    """Render tool calls as a single-line summary for the judge prompt.
+
+    ``tool_calls`` is a list of ``(tool_name, is_error)`` pairs collected
+    from the just-finished turn's ``RunResponse.tool_calls``. Names only —
+    we deliberately do NOT inline tool args/output (avoid blowing the
+    judge context with raw file contents). The is_error flag is shown
+    inline as ``tool_name(error)`` so the judge can downweight turns
+    where the work didn't actually land.
+
+    Empty / None → empty string (judge falls back to objective + response).
+    """
+    if not tool_calls:
+        return ""
+    bits = []
+    for name, is_error in tool_calls:
+        if not name:
+            continue
+        bits.append(f"{name}(error)" if is_error else name)
+    return ", ".join(bits)
 
 
 def _build_judge_user_prompt(
     objective: str,
     final_response: str,
     subgoals: Optional[List[str]],
+    tool_calls: Optional[List[Tuple[str, bool]]] = None,
 ) -> str:
     parts = [f"Goal: {objective}"]
     if subgoals:
-        parts.append("Acceptance criteria:")
+        parts.append("")
+        parts.append(
+            "Acceptance criteria the user added mid-loop (ALL must be "
+            "satisfied for DONE):"
+        )
         for i, sg in enumerate(subgoals, 1):
             parts.append(f"  {i}. {sg}")
+    tool_summary = _format_tool_calls_for_judge(tool_calls)
+    if tool_summary:
+        parts.append("")
+        parts.append(f"Tools used this turn: {tool_summary}")
     parts.append("")
     parts.append("Agent's last response:")
     parts.append("---")
     parts.append(final_response.strip() or "(empty)")
     parts.append("---")
+    if subgoals:
+        # Hermes-style evidence rule. Without this the judge happily
+        # accepts vague summaries.
+        parts.append(
+            "Decision: for EACH numbered criterion above, find concrete "
+            "evidence in the agent's response (a file excerpt, a command "
+            "output line, a result value). Do not accept generic "
+            "phrases like 'all requirements met' or 'implied done'. If "
+            "ANY criterion lacks specific evidence, the goal is NOT "
+            "done — return CONTINUE."
+        )
     parts.append("Is the goal complete? Reply with the JSON object only.")
     return "\n".join(parts)
 
@@ -249,21 +309,44 @@ async def judge_goal(
     objective: str,
     final_response: str,
     subgoals: Optional[List[str]] = None,
+    tool_calls: Optional[List[Tuple[str, bool]]] = None,
 ) -> Tuple[str, str, bool]:
     """Ask the judge model whether ``final_response`` satisfies ``objective``.
 
-    Uses Agentica's standard async entrypoint ``Model.response()``.
+    Uses Agentica's standard async entrypoint ``Model.response()``. The
+    caller is responsible for handing in a properly-configured judge
+    model — in particular, for **reasoning models** (DeepSeek-Reasoner,
+    o-series, qwq, …) the user MUST construct the model with at least
+    ``max_completion_tokens=4096`` because hidden CoT eats output tokens
+    before the visible JSON verdict appears. The right place to set this
+    is on ``Agent(auxiliary_model=...)`` construction:
+
+        agent = Agent(
+            model=DeepSeekChat(id="deepseek-v4-pro"),
+            auxiliary_model=DeepSeekChat(
+                id="deepseek-reasoner",
+                max_completion_tokens=4096,
+            ),
+        )
+
     Fail-open on transport errors (caller treats this as ``continue`` and
-    does NOT count it as a parse failure).
+    does NOT count it as a parse failure — see ``return False`` below).
+
+    Args:
+        tool_calls: Optional ``(tool_name, is_error)`` pairs from the
+            just-finished turn. When provided the judge sees a one-line
+            summary so it can distinguish "answered with no tools" from
+            "ran 5 tools and produced output". Names only — no args/output
+            (cheap, no extra LLM call). Pass ``None`` to skip.
 
     Returns:
         (verdict, reason, parse_failed)
     """
     from agentica.model.message import Message
 
-    user_prompt = _build_judge_user_prompt(objective, final_response, subgoals)
+    user_prompt = _build_judge_user_prompt(objective, final_response, subgoals, tool_calls)
     messages = [
-        Message(role="system", content=JUDGE_SYSTEM_PROMPT),
+        Message(role="system", content=GOAL_JUDGE_SYSTEM_PROMPT),
         Message(role="user", content=user_prompt),
     ]
     try:
@@ -377,6 +460,7 @@ class GoalManager:
             wall_clock_used_sec=0.0,
             subgoals=[],
             consecutive_parse_failures=0,
+            consecutive_tool_failures=0,
             last_verdict=None,
             last_reason=None,
             paused_reason=None,
@@ -442,6 +526,7 @@ class GoalManager:
         self._state.status = "active"
         self._state.paused_reason = None
         self._state.consecutive_parse_failures = 0
+        self._state.consecutive_tool_failures = 0
         self._persist()
         return self._state
 
@@ -567,7 +652,7 @@ class GoalManager:
             for i, sg in enumerate(self._state.subgoals, 1):
                 lines.append(f"  {i}. {sg}")
             subgoals_block = "\n" + "\n".join(lines) + "\n"
-        return CONTINUATION_PROMPT_TEMPLATE.format(
+        return render_goal_continuation_prompt(
             objective=self._state.objective,
             subgoals_block=subgoals_block,
         )
@@ -578,6 +663,7 @@ class GoalManager:
         *,
         token_delta: int = 0,
         elapsed_sec: float = 0.0,
+        tool_calls: Optional[List[Tuple[str, bool]]] = None,
     ) -> GoalDecision:
         """Drive one round of the goal loop after an agent turn finishes.
 
@@ -590,6 +676,14 @@ class GoalManager:
                             (input + output). Caller reads from
                             ``agent.run_response.cost_tracker``.
             elapsed_sec:    Wall-clock seconds the turn took.
+            tool_calls:     Optional ``(tool_name, is_error)`` pairs from
+                            the just-finished turn. Drives two things:
+                            (1) feeds names into the judge prompt so it
+                            can tell "answered with no tools" from "ran 5
+                            tools"; (2) increments
+                            ``consecutive_tool_failures`` when every tool
+                            in the turn errored, auto-pausing after
+                            ``MAX_CONSECUTIVE_TOOL_FAILURES``.
 
         Returns:
             A UI-neutral ``GoalDecision``.
@@ -617,6 +711,17 @@ class GoalManager:
                 self._state.tokens_used += int(token_delta)
             if elapsed_sec > 0:
                 self._state.wall_clock_used_sec += float(elapsed_sec)
+
+        # Update consecutive-tool-failure counter (B2.2). Turns with no
+        # tool calls don't reset — a model "just thinking" while stuck
+        # shouldn't break out of the streak. Any single successful tool
+        # call resets to 0.
+        if tool_calls:
+            all_failed = all(is_error for _, is_error in tool_calls)
+            if all_failed:
+                self._state.consecutive_tool_failures += 1
+            else:
+                self._state.consecutive_tool_failures = 0
 
         # Hard budget caps (P1 S2) take precedence over EVERYTHING else,
         # including tool short-circuit and judge. Rationale: the user set
@@ -679,6 +784,30 @@ class GoalManager:
                 message="",
             )
 
+        # Tool-failure auto-pause (B2.2). Runs after budget + tool short
+        # circuit, before judge — there's no point asking the judge to
+        # bless a turn where the model is stuck on broken tools.
+        if self._state.consecutive_tool_failures >= MAX_CONSECUTIVE_TOOL_FAILURES:
+            self._state.status = "paused"
+            self._state.paused_reason = "tool-stuck"
+            self._persist()
+            self._emit(RunEventType.goal_paused, paused_reason="tool-stuck")
+            return GoalDecision(
+                status="paused",
+                should_continue=False,
+                continuation_prompt=None,
+                verdict="continue",
+                reason=(
+                    f"every tool call failed for "
+                    f"{self._state.consecutive_tool_failures} turns in a row"
+                ),
+                message=(
+                    f"⊙ Goal paused: every tool call failed "
+                    f"{self._state.consecutive_tool_failures} turns in a row. "
+                    f"Inspect the last errors, then /goal resume to continue."
+                ),
+            )
+
         if self.judge_model is None:
             # Caller forgot to pass a model — fail-open: treat as continue
             # but do NOT auto-loop because we have no way to ever say done.
@@ -699,6 +828,7 @@ class GoalManager:
             self._state.objective,
             final_response,
             subgoals=self._state.subgoals or None,
+            tool_calls=tool_calls,
         )
         self._state.last_verdict = "parse_failed" if parse_failed else verdict
         self._state.last_reason = reason

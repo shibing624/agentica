@@ -452,7 +452,7 @@ from agentica import Model
 | `Grok` | xAI | grok-beta |
 | `Ollama` | 本地 | llama3 |
 | `Together` | Together AI | — |
-| `OpenAILike` | 通用适配 | — |
+| `OpenAIChat` + `base_url` | 通用适配 | — |
 
 ---
 

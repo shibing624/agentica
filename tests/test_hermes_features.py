@@ -535,11 +535,11 @@ class TestGatewayModelFactory:
     """Test gateway _create_model() uses registry for non-core providers."""
 
     def test_registry_provider_used(self):
-        """Providers in PROVIDER_REGISTRY should use create_provider."""
-        from agentica.model.providers import PROVIDER_REGISTRY
-        assert "zhipuai" in PROVIDER_REGISTRY
-        assert "deepseek" in PROVIDER_REGISTRY
-        assert "moonshot" in PROVIDER_REGISTRY
+        """Providers in PROVIDER_FACTORIES should use the factory dispatch."""
+        from agentica import PROVIDER_FACTORIES
+        assert "zhipuai" in PROVIDER_FACTORIES
+        assert "deepseek" in PROVIDER_FACTORIES
+        assert "moonshot" in PROVIDER_FACTORIES
 
     def test_core_providers_not_in_registry_branch(self):
         """openai, claude, kimi, azure have dedicated classes."""

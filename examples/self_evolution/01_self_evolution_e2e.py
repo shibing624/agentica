@@ -63,7 +63,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from agentica import Agent, Workspace, create_provider
+from agentica import Agent, Workspace, ArkChat
 from agentica.agent.config import ExperienceConfig, SkillUpgradeConfig
 from agentica.experience.compiler import _RULE_STOPWORDS, _rule_to_title, _stem
 from agentica.experience.skill_upgrade import SkillEvolutionManager
@@ -150,8 +150,8 @@ def _make_model():
     """DeepSeek-V3.2 via Volc Ark endpoint."""
     from dotenv import load_dotenv
     load_dotenv()
-    model_name = os.environ.get("ARK_MODEL_NAME") or "deepseek-v3-2"
-    return create_provider("ark", id=model_name)
+    model_name = os.environ.get("ARK_MODEL_NAME")
+    return ArkChat(id=model_name)
 
 
 def build_evo_agent(workspace: Workspace) -> Agent:

@@ -34,8 +34,7 @@ Run:
 
 import os
 
-from agentica import Agent, OpenAIChat, RunConfig
-from agentica.model.providers import create_provider
+from agentica import Agent, OpenAIChat, RunConfig, DeepSeekChat
 
 
 def _build_agent(primary: OpenAIChat, name: str) -> Agent:
@@ -43,7 +42,7 @@ def _build_agent(primary: OpenAIChat, name: str) -> Agent:
     return Agent(
         name=name,
         model=primary,
-        fallback_models=[create_provider("deepseek", id="deepseek-v4-flash")],
+        fallback_models=[DeepSeekChat(id="deepseek-v4-flash")],
         instructions="You are a concise assistant. Answer in ONE sentence.",
     )
 
@@ -137,7 +136,7 @@ def demo_run_config_override() -> None:
     print(f"  agent default fallback : {[m.id for m in agent.fallback_models]}")
 
     # For this one call, force a different (also benign) chain.
-    custom_chain = [create_provider("deepseek", id="deepseek-v4-pro")]
+    custom_chain = [DeepSeekChat(id="deepseek-v4-pro")]
     response = agent.run_sync(
         "用一句话解释什么是 LangChain。",
         config=RunConfig(fallback_models=custom_chain),

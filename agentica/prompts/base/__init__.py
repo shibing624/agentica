@@ -27,6 +27,12 @@ from agentica.prompts.base.self_verification import (
     SELF_VERIFICATION_PROMPT,
     get_self_verification_prompt,
 )
+from agentica.prompts.base.goal import (
+    GOAL_JUDGE_SYSTEM_PROMPT,
+    GOAL_CONTINUATION_PROMPT_TEMPLATE,
+    get_goal_judge_system_prompt,
+    render_goal_continuation_prompt,
+)
 
 __all__ = [
     "HEARTBEAT_PROMPT",
@@ -38,4 +44,8 @@ __all__ = [
     "get_soul_prompt",
     "SELF_VERIFICATION_PROMPT",
     "get_self_verification_prompt",
+    "GOAL_JUDGE_SYSTEM_PROMPT",
+    "GOAL_CONTINUATION_PROMPT_TEMPLATE",
+    "get_goal_judge_system_prompt",
+    "render_goal_continuation_prompt",
 ]

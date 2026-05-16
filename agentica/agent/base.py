@@ -24,6 +24,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     Type,
     TYPE_CHECKING,
     Union,
@@ -1583,10 +1584,20 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 token_delta = max(0, total_now - tokens_baseline)
                 tokens_baseline = total_now
 
+            # Pluck (tool_name, is_error) pairs from the just-finished
+            # turn so the judge sees what work actually happened and the
+            # manager can track consecutive tool failures. No LLM call —
+            # names + flags only.
+            tool_pairs: List[Tuple[str, bool]] = []
+            for tc in response.tool_calls:
+                if tc.tool_name:
+                    tool_pairs.append((tc.tool_name, bool(tc.is_error)))
+
             decision = await mgr.evaluate_after_turn(
                 response.content or "",
                 token_delta=token_delta,
                 elapsed_sec=elapsed,
+                tool_calls=tool_pairs or None,
             )
 
             if not decision.should_continue:

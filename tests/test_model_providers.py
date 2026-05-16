@@ -27,11 +27,6 @@ def _get_provider_classes():
     except ImportError:
         pass
     try:
-        from agentica.model.openai.like import OpenAILike
-        providers.append(("OpenAILike", OpenAILike))
-    except ImportError:
-        pass
-    try:
         from agentica.model.anthropic.claude import Claude
         providers.append(("Claude", Claude))
     except ImportError:

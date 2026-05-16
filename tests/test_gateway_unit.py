@@ -455,18 +455,16 @@ class TestModelFactory:
             model = create_model("kimi", "moonshot-v1")
         assert model.__class__.__name__ == "KimiChat"
 
-    def test_registry_provider(self):
-        """Providers in the SDK registry (e.g. deepseek) should be created via create_provider."""
+    def test_openai_compat_provider(self):
+        """Providers in PROVIDER_FACTORIES (e.g. deepseek) should be created via the factory dispatch."""
         from agentica.gateway.services.model_factory import create_model
-        from agentica.model.providers import PROVIDER_REGISTRY
-        # Pick a registry provider if any exist
-        if PROVIDER_REGISTRY:
-            provider_name = next(iter(PROVIDER_REGISTRY))
-            with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
-                mock_settings.model_thinking = ""
-                mock_settings.model_reasoning_effort = ""
-                model = create_model(provider_name, "test-model")
-            assert model is not None
+        from agentica import PROVIDER_FACTORIES
+        provider_name = next(iter(PROVIDER_FACTORIES))
+        with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
+            mock_settings.model_thinking = ""
+            mock_settings.model_reasoning_effort = ""
+            model = create_model(provider_name, "test-model")
+        assert model is not None
 
     def test_deepseek_provider_uses_v4_flash_thinking_defaults(self):
         """Gateway DeepSeek models should NOT inject thinking defaults when not requested.
@@ -485,7 +483,6 @@ class TestModelFactory:
         assert model.id == "deepseek-v4-flash"
         assert model.base_url == "https://api.deepseek.com"
         assert model.context_window == 1_000_000
-        assert model.max_output_tokens == 384_000
         assert model.reasoning_effort is None
         assert model.extra_body is None
 

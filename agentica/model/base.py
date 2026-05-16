@@ -110,7 +110,6 @@ class Model(ABC):
 
     # -*- Model capability limits (not sent to the API) -*-
     context_window: int = 128000
-    max_output_tokens: Optional[int] = None
 
     # A list of tools provided to the Model.
     tools: Optional[List[Union[ModelTool, Dict]]] = None
