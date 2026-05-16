@@ -2094,7 +2094,12 @@ class TestCrossLayerCleanup(unittest.TestCase):
         from agentica.hooks import ExperienceCaptureHooks
 
         # capture_user_corrections is False by default; opt in explicitly for this test.
-        config = ExperienceConfig(capture_user_corrections=True)
+        # Disable the batch judge gates so a single turn flushes immediately.
+        config = ExperienceConfig(
+            capture_user_corrections=True,
+            judge_every_n_turns=1,
+            judge_min_seconds_between=0,
+        )
         hooks = ExperienceCaptureHooks(config)
         agent = MagicMock()
         agent.agent_id = "test"
@@ -2122,8 +2127,8 @@ class TestCrossLayerCleanup(unittest.TestCase):
 
         # Simulate LLM returning experience target
         mock_response = MagicMock()
-        mock_response.content = json.dumps({
-            "is_correction": True,
+        mock_response.content = json.dumps([{
+            "turn_index": 0,
             "confidence": 0.95,
             "category": "preference",
             "scope": "cross_session",
@@ -2133,7 +2138,7 @@ class TestCrossLayerCleanup(unittest.TestCase):
             "rule": "Use pandas for data",
             "why": "Better",
             "how_to_apply": "Data tasks",
-        })
+        }])
         agent.model.response = AsyncMock(return_value=mock_response)
 
         asyncio.run(hooks.on_agent_start(agent))

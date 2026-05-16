@@ -14,6 +14,7 @@ import json
 import re
 from typing import Any, Optional, List, Dict, Tuple
 
+from agentica.experience import extract_state
 from agentica.experience.skill_upgrade import SkillEvolutionManager
 from agentica.learning_report import (
     LearningReport,
@@ -278,21 +279,26 @@ class ConversationArchiveHooks(RunHooks):
 
 
 class MemoryExtractHooks(RunHooks):
-    """RunHooks that auto-extracts memories from conversations after each agent run.
+    """Boundary-triggered memory extraction.
 
-    After each run, checks if the LLM already called save_memory during the conversation.
-    If not, uses the LLM to extract key information worth remembering and saves it
-    to the workspace memory directory.
+    Per-turn behavior is zero-cost: completed turns are appended to a
+    per-session in-memory buffer. The LLM extraction runs only when the
+    buffer is flushed, which happens on two boundaries:
 
-    This mirrors Claude Code's extractMemories service: a background process that
-    fires after each conversation to capture important information the main agent
-    didn't explicitly save.
+      1. Every ``every_n_turns`` turns (default 10).
+      2. ``on_pre_compact`` — context is about to be summarized/dropped,
+         so we extract whatever is buffered before it's lost.
+
+    Plus a cross-process frequency cap (``min_seconds_between``) so two
+    parallel agents in the same ``~/.agentica/`` don't both extract at the
+    same wall-clock second.
+
+    If the LLM already called ``save_memory`` during the buffered window,
+    the extraction is skipped — the model has already self-curated.
 
     Usage::
 
-        from agentica.hooks import MemoryExtractHooks
-
-        hooks = MemoryExtractHooks()
+        hooks = MemoryExtractHooks(every_n_turns=10, min_seconds_between=60)
         response = await agent.run("Hello", config=RunConfig(hooks=hooks))
     """
 
@@ -318,27 +324,30 @@ class MemoryExtractHooks(RunHooks):
         "Conversation:\n"
     )
 
+    _STATE_SLOT = "memory_extract"
+
     def __init__(
         self,
         sync_memories_to_global_agent_md: bool = False,
-        background: bool = False,
+        every_n_turns: int = 10,
+        min_seconds_between: int = 60,
     ):
         """
         Args:
             sync_memories_to_global_agent_md: Mirror user-type memories into global AGENT.md.
-            background: If True, run the LLM extraction as a fire-and-forget
-                ``asyncio.create_task`` so it does NOT block ``on_agent_end``.
-                Use this in long-running async servers (FastAPI, asyncio.run)
-                where the event loop persists past the response. Do NOT enable
-                under ``run_sync()`` / ``run_stream_sync()``: those use a
-                temporary loop that closes immediately after the stream is
-                consumed, causing pending tasks to be silently cancelled and
-                memory writes to be lost.
+            every_n_turns: Flush the buffer through the LLM every N turns.
+                0 disables periodic extraction (on_pre_compact still flushes).
+            min_seconds_between: Cross-process frequency cap; skip when the
+                previous extraction was less than N seconds ago. 0 disables.
         """
         self._tool_calls: Dict[str, List[str]] = {}  # agent_id -> list of tool names called
         self._sync_memories_to_global_agent_md = sync_memories_to_global_agent_md
-        self._background = background
-        self._bg_tasks: set = set()  # strong refs to prevent GC of fire-and-forget tasks
+        self._every_n_turns = max(0, int(every_n_turns))
+        self._min_seconds_between = max(0, int(min_seconds_between))
+        # Per-session buffer of (user, assistant, save_memory_called) tuples.
+        # Drained when a boundary fires; survives across runs in the same
+        # session_id so multi-turn batching works.
+        self._buffers: Dict[str, List[Tuple[str, str, bool]]] = {}
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         self._tool_calls[agent.agent_id] = []
@@ -351,9 +360,7 @@ class MemoryExtractHooks(RunHooks):
         self._tool_calls[agent_id].append(tool_name)
 
     async def on_agent_end(self, agent: Any, output: Any, **kwargs) -> None:
-        """Extract and save memories if LLM didn't use save_memory during this run."""
-        # Always drain accumulated state first — even when workspace is None.
-        # Without this, _tool_calls leaks keys for workspace-less runs.
+        """Buffer the turn; flush through the LLM when boundary policy says so."""
         agent_id = agent.agent_id
         tool_calls = self._tool_calls.pop(agent_id, [])
 
@@ -361,61 +368,78 @@ class MemoryExtractHooks(RunHooks):
         if workspace is None:
             return
 
-        # Read run_input directly — Runner sets it before calling on_agent_end
         run_input = agent.run_input
-        run_input = run_input if isinstance(run_input, str) else None
-
-        # If LLM already called save_memory, skip extraction (CC's hasMemoryWritesSince)
-        if "save_memory" in tool_calls:
-            logger.debug("Skipping memory extraction: save_memory was called during this run")
+        user_msg = run_input if isinstance(run_input, str) else ""
+        assistant_msg = output if isinstance(output, str) else ""
+        if not user_msg and not assistant_msg:
             return
 
-        # Build conversation text for extraction
-        if not run_input and not output:
+        session_key = agent.session_id or agent.agent_id
+        save_memory_called = "save_memory" in tool_calls
+        buf = self._buffers.setdefault(session_key, [])
+        buf.append((user_msg, assistant_msg, save_memory_called))
+
+        # Periodic boundary: only flush if we've accumulated N turns AND
+        # the global frequency cap allows it. Both gates are intentional —
+        # every_n_turns bounds work-per-session; min_seconds_between bounds
+        # work-per-wallclock across concurrent agents.
+        if self._every_n_turns == 0 or len(buf) < self._every_n_turns:
+            return
+        if extract_state.should_skip(self._STATE_SLOT, self._min_seconds_between):
+            logger.debug(
+                "Memory extraction skipped: last run within %ds window",
+                self._min_seconds_between,
+            )
             return
 
-        conversation_text = ""
-        if run_input:
-            conversation_text += f"User: {run_input}\n\n"
-        if output and isinstance(output, str):
-            conversation_text += f"Assistant: {output}\n"
+        await self._flush(agent, workspace, session_key)
 
-        # Skip short conversations. 200 chars filters out trivial interactions
-        # like "read file X" + "file not found" (~80 chars) where there is
-        # nothing memory-worthy to extract, saving a full LLM round-trip per
-        # turn in tool-heavy workflows.
+    async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
+        """Context is about to be compressed — extract anything we have buffered first."""
+        workspace = agent.workspace
+        if workspace is None:
+            return
+        session_key = agent.session_id or agent.agent_id
+        if not self._buffers.get(session_key):
+            return
+        # No idle-gate on pre_compact: this is a "last chance before data loss"
+        # path, so we always flush. min_seconds_between is for periodic noise
+        # reduction; data-loss prevention overrides it.
+        await self._flush(agent, workspace, session_key)
+
+    async def _flush(self, agent: Any, workspace: Any, session_key: str) -> None:
+        """Drain buffer for ``session_key`` and run one LLM extraction over it."""
+        buf = self._buffers.pop(session_key, [])
+        if not buf:
+            return
+
+        # If any turn in the window already called save_memory, the model
+        # self-curated — skip extraction. Mirrors CC's hasMemoryWritesSince.
+        if any(save_called for _, _, save_called in buf):
+            logger.debug(
+                "Skipping memory extraction: save_memory called within batch (session=%s, turns=%d)",
+                session_key, len(buf),
+            )
+            return
+
+        parts: List[str] = []
+        for user_msg, assistant_msg, _ in buf:
+            if user_msg:
+                parts.append(f"User: {user_msg}")
+            if assistant_msg:
+                parts.append(f"Assistant: {assistant_msg}")
+        conversation_text = "\n\n".join(parts)
+
+        # Cheap floor: a single trivial turn ("hi" / "ok") still rolls up to
+        # a tiny conversation_text; not worth a sub-LLM round trip.
         if len(conversation_text) < 200:
             return
 
-        # Tool-heavy turns with short output are almost always tool-result
-        # summaries (e.g. "File not found", "Directory listing: ...") with no
-        # substantive reasoning worth memorizing. Skip the LLM extraction.
-        if tool_calls and output and len(output) < 500:
-            return
-
-        # Prefer auxiliary_model for the extraction sub-call: it is meant for
-        # cheap/fast side tasks. This both speeds up extraction (smaller model)
-        # and isolates token cost from the main model's session/budget. Fall
-        # back to agent.model when no auxiliary is configured.
         model = agent.auxiliary_model or agent.model
         if model is None:
             return
 
-        if self._background:
-            # Fire-and-forget: only safe under a long-running event loop
-            # (FastAPI / asyncio.run). The user opts in via background=True.
-            # Strong-ref the task in self._bg_tasks so it is not GC'd before
-            # completion (asyncio only weak-refs scheduled tasks).
-            task = asyncio.create_task(
-                self._extract_and_save(model, workspace, conversation_text)
-            )
-            self._bg_tasks.add(task)
-            task.add_done_callback(self._bg_tasks.discard)
-            return
-
-        # Synchronous path: required under run_sync()/run_stream_sync() where
-        # the temporary event loop closes after the stream is consumed —
-        # any unawaited task would be silently cancelled.
+        extract_state.stamp(self._STATE_SLOT)
         await self._extract_and_save(model, workspace, conversation_text)
 
     async def _extract_and_save(self, model: Any, workspace: Any, conversation_text: str) -> None:
@@ -570,10 +594,11 @@ class ExperienceCaptureHooks(RunHooks):
         # rescanning the entire jsonl on every on_agent_end. Refreshed when
         # the file has grown since last lookup.
         self._failed_tools_cache: Dict[str, Tuple[int, set]] = {}
-        # Strong-refs for fire-and-forget judge tasks when
-        # config.capture_corrections_background=True. asyncio only weak-refs
-        # scheduled tasks, so without this set they could be GC'd mid-flight.
-        self._bg_tasks: set = set()
+        # Per-session buffer of (user_msg, previous_assistant, original_task)
+        # tuples for the batched judge LLM call. The cheap prefilter (explicit
+        # rule prefix + strong negation) still fires per-turn so explicit
+        # corrections aren't delayed; only the LLM fall-through is batched.
+        self._judge_buffers: Dict[str, List[Tuple[str, str, str]]] = {}
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         """Initialize per-agent capture state."""
@@ -818,38 +843,43 @@ class ExperienceCaptureHooks(RunHooks):
         # 2b. LLM-based correction classification.
         # Structural pre-filter (no keyword heuristics): a correction requires
         # a previous assistant turn to correct. First-turn messages cannot be
-        # corrections by definition, so skip the LLM call entirely.
+        # corrections by definition, so skip entirely.
         if (
             self._config.capture_user_corrections
             and user_msg
             and previous_assistant_text
         ):
-            model = self._get_classification_model(agent)
-            if model is not None:
-                if self._config.capture_corrections_background:
-                    # Fire-and-forget: don't block on_agent_end (and the user's
-                    # next prompt). The trade-off is that correction_this_run
-                    # for THIS run's LearningReport stays False; the correction
-                    # is still persisted to disk and visible to subsequent runs.
-                    task = asyncio.create_task(
-                        self._classify_and_persist_feedback(
-                            model, event_store, compiled_store,
-                            user_msg, previous_assistant_text,
-                            original_task=original_task,
-                        )
+            # Cheap deterministic prefilter still runs per-turn — explicit
+            # rules ("下次请先…", "the rule is …") and strong negations
+            # ("你错了") shouldn't wait for a batch boundary to take effect.
+            prefiltered = self._prefilter_feedback_classification(user_msg)
+            if prefiltered is not None:
+                prefiltered["user_message"] = user_msg
+                was_correction = await self._persist_feedback_classification(
+                    event_store=event_store,
+                    compiled_store=compiled_store,
+                    result=prefiltered,
+                    threshold=self._config.feedback_confidence_threshold,
+                    original_task=original_task,
+                )
+                if was_correction:
+                    correction_this_run = True
+                    report.corrections_persisted += 1
+                    report.cards_written += 1
+            else:
+                # Fall-through goes to the LLM judge — batch it. Buffer this
+                # turn for a future flush (boundary policy: every_n_turns or
+                # on_pre_compact). One LLM call later scans the whole window
+                # for corrections, replacing N per-turn calls with 1.
+                session_key = agent.session_id or agent.agent_id
+                self._judge_buffers.setdefault(session_key, []).append(
+                    (user_msg, previous_assistant_text, original_task)
+                )
+                model = self._get_classification_model(agent)
+                if model is not None and self._should_flush_judge(session_key):
+                    await self._flush_judge(
+                        model, event_store, compiled_store, session_key,
                     )
-                    self._bg_tasks.add(task)
-                    task.add_done_callback(self._bg_tasks.discard)
-                else:
-                    was_correction = await self._classify_and_persist_feedback(
-                        model, event_store, compiled_store,
-                        user_msg, previous_assistant_text,
-                        original_task=original_task,
-                    )
-                    if was_correction:
-                        correction_this_run = True
-                        report.corrections_persisted += 1
-                        report.cards_written += 1
 
         # 2c. Success pattern
         success_card = ExperienceCompiler.compile_success_pattern(successes)
@@ -1086,6 +1116,115 @@ class ExperienceCaptureHooks(RunHooks):
             }
 
         return None
+
+    _JUDGE_STATE_SLOT = "correction_judge"
+
+    # Prompt for the batched judge: one call scans an entire turn window.
+    _BATCH_JUDGE_PROMPT = (
+        "You are auditing a recent conversation window to find user corrections "
+        "or behavioral feedback addressed to the assistant.\n\n"
+        "For each turn, decide whether the user's message was a correction, "
+        "rejection, or a reusable rule the assistant should remember.\n\n"
+        "Important:\n"
+        "- A pure retry request ('try again') or a question is NOT a correction.\n"
+        "- Code snippets / log lines in quotes are NOT corrections.\n"
+        "- An explicit workflow or rule ('always do X before Y', '下次请先 ...', "
+        "'the rule is …') IS a correction worth persisting.\n\n"
+        "Output a JSON array; one object per correction you found:\n"
+        '{"turn_index": int, "rule": "verb-object phrase <=8 words", '
+        '"confidence": float, "category": "factual|preference|workflow|tool_usage|rejection", '
+        '"scope": "turn_only|session|cross_session", '
+        '"should_persist": bool, "persist_target": "experience|none", '
+        '"why": "...", "how_to_apply": "..."}\n\n'
+        "If nothing in the window is a correction, output []. Do not invent corrections.\n\n"
+        "Window (oldest first):\n"
+    )
+
+    def _should_flush_judge(self, session_key: str) -> bool:
+        n = self._config.judge_every_n_turns
+        if n <= 0:
+            return False
+        if len(self._judge_buffers.get(session_key, [])) < n:
+            return False
+        if extract_state.should_skip(self._JUDGE_STATE_SLOT, self._config.judge_min_seconds_between):
+            logger.debug(
+                "Correction judge skipped: last run within %ds window",
+                self._config.judge_min_seconds_between,
+            )
+            return False
+        return True
+
+    async def _flush_judge(
+        self,
+        model: Any,
+        event_store: Any,
+        compiled_store: Any,
+        session_key: str,
+    ) -> None:
+        """Drain the judge buffer for ``session_key`` and run one batched LLM scan."""
+        buf = self._judge_buffers.pop(session_key, [])
+        if not buf:
+            return
+
+        # Build the window as numbered turns so the LLM can refer back by index.
+        turn_lines: List[str] = []
+        for idx, (user_msg, prev_asst, _) in enumerate(buf):
+            turn_lines.append(
+                f"--- Turn {idx} ---\n"
+                f"Previous assistant: {prev_asst[:800]}\n"
+                f"User: {user_msg[:800]}"
+            )
+        prompt = self._BATCH_JUDGE_PROMPT + "\n\n".join(turn_lines)
+
+        extract_state.stamp(self._JUDGE_STATE_SLOT)
+        try:
+            response = await model.response([Message(role="user", content=prompt)])
+            if not response or not response.content:
+                return
+            text = response.content.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            findings = json.loads(text)
+            if not isinstance(findings, list):
+                return
+        except (json.JSONDecodeError, Exception) as e:
+            logger.debug(f"Batched correction judge failed: {e}")
+            return
+
+        threshold = self._config.feedback_confidence_threshold
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            turn_idx = finding.get("turn_index")
+            if not isinstance(turn_idx, int) or not (0 <= turn_idx < len(buf)):
+                continue
+            user_msg, _, original_task = buf[turn_idx]
+            # Promote a few canonical fields so the persistence helper
+            # treats this like a single-turn classification.
+            finding["is_correction"] = True
+            finding["user_message"] = user_msg
+            await self._persist_feedback_classification(
+                event_store=event_store,
+                compiled_store=compiled_store,
+                result=finding,
+                threshold=threshold,
+                original_task=original_task or "",
+            )
+
+    async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
+        """Context is about to be compressed — flush the judge buffer first."""
+        workspace = agent.workspace
+        if workspace is None:
+            return
+        session_key = agent.session_id or agent.agent_id
+        if not self._judge_buffers.get(session_key):
+            return
+        model = self._get_classification_model(agent)
+        if model is None:
+            return
+        event_store = workspace.get_experience_event_store()
+        compiled_store = workspace.get_compiled_experience_store()
+        await self._flush_judge(model, event_store, compiled_store, session_key)
 
     @staticmethod
     async def _persist_feedback_classification(

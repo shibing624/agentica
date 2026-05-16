@@ -196,14 +196,12 @@ class DeepAgent(Agent):
             long_term_memory_config = WorkspaceMemoryConfig(
                 auto_archive=True,
                 auto_extract_memory=True,
-                # DeepAgent targets interactive CLI / long-running async servers,
-                # where create_task is safe. The LLM extraction fires AFTER the
-                # response is already streamed — running it inline blocks the
-                # user's next prompt for several seconds. Background it.
-                # NOTE: users running DeepAgent under run_sync() must override
-                # this to False, else memories may be silently dropped when
-                # the temp event loop closes.
-                auto_extract_memory_background=True,
+                # Boundary-triggered (every 10 turns or on_pre_compact) instead
+                # of per-turn — keeps token cost bounded and removes the post-
+                # response blocking that used to make the user wait several
+                # seconds before the next prompt.
+                extract_every_n_turns=10,
+                extract_min_seconds_between=60,
                 load_workspace_context=True,
                 load_workspace_memory=True,
                 max_memory_entries=10,
@@ -219,9 +217,11 @@ class DeepAgent(Agent):
                 capture_tool_errors=True,
                 capture_user_corrections=True,
                 capture_success_patterns=False,
-                # Background the correction-judge LLM call for the same reason
-                # as auto_extract_memory_background above (don't block input).
-                capture_corrections_background=True,
+                # Cheap prefilter still per-turn; LLM fall-through judge
+                # batches every 10 turns (or on_pre_compact). Same idea as
+                # extract_every_n_turns above.
+                judge_every_n_turns=10,
+                judge_min_seconds_between=60,
                 sync_to_global_agent_md=False,
                 skill_upgrade=None,
             )

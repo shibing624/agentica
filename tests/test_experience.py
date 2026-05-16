@@ -91,6 +91,12 @@ class TestExperienceCaptureHooks(unittest.TestCase):
             "capture_tool_errors": True,
             "capture_user_corrections": True,
             "capture_success_patterns": True,
+            # Tests in this class assert behavior on individual turns; the
+            # production default batches the LLM judge every 10 turns and
+            # rate-limits across processes. Disable both gates so each turn
+            # flushes the judge immediately.
+            "judge_every_n_turns": 1,
+            "judge_min_seconds_between": 0,
         }
         defaults.update(config_overrides)
         config = ExperienceConfig(**defaults)
@@ -217,10 +223,10 @@ class TestExperienceCaptureHooks(unittest.TestCase):
         prev_msg.content = "I'll use the csv module to parse the data."
         agent.working_memory.messages = [prev_msg]
 
-        # Mock the LLM response for classification
+        # Batched judge: returns an array, one entry per turn flagged as a correction.
         mock_response = MagicMock()
-        mock_response.content = json.dumps({
-            "is_correction": True,
+        mock_response.content = json.dumps([{
+            "turn_index": 0,
             "confidence": 0.95,
             "category": "preference",
             "scope": "cross_session",
@@ -229,7 +235,7 @@ class TestExperienceCaptureHooks(unittest.TestCase):
             "rule": "Use pandas for data processing, not raw CSV parsing",
             "why": "User prefers pandas for data tasks",
             "how_to_apply": "When doing data processing tasks",
-        })
+        }])
         agent.model.response = AsyncMock(return_value=mock_response)
 
         asyncio.run(hooks.on_agent_start(agent))
@@ -605,8 +611,8 @@ class TestExperienceCaptureHooks(unittest.TestCase):
 
         # Confidence 0.6 is below default 0.8 but above custom 0.5
         mock_response = MagicMock()
-        mock_response.content = json.dumps({
-            "is_correction": True,
+        mock_response.content = json.dumps([{
+            "turn_index": 0,
             "confidence": 0.6,
             "category": "preference",
             "scope": "cross_session",
@@ -616,7 +622,7 @@ class TestExperienceCaptureHooks(unittest.TestCase):
             "rule": "Some rule",
             "why": "Some reason",
             "how_to_apply": "Some guidance",
-        })
+        }])
         agent.model.response = AsyncMock(return_value=mock_response)
 
         asyncio.run(hooks.on_agent_start(agent))
@@ -696,10 +702,11 @@ class TestRunInputCrossRoundFix(unittest.TestCase):
 
     def test_memory_extract_reads_current_run_input(self):
         """MemoryExtractHooks should read current agent.run_input."""
-        hooks = MemoryExtractHooks()
+        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0)
 
         agent = MagicMock()
         agent.agent_id = "test"
+        agent.session_id = "sess_test"
         agent.run_input = None
         agent.auxiliary_model = None  # force fallback to agent.model
         agent.model = MagicMock()

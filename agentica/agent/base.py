@@ -252,7 +252,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             response_model: Optional[Type[Any]] = None,
             # ---- Common config ----
             add_history_to_context: bool = False,
-            num_history_turns: int = 3,
+            num_history_turns: int = 8,
             use_structured_outputs: bool = False,
             debug: bool = False,
             enable_tracing: bool = False,
@@ -566,7 +566,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                         sync_memories_to_global_agent_md=(
                             self.long_term_memory_config.sync_memories_to_global_agent_md
                         ),
-                        background=self.long_term_memory_config.auto_extract_memory_background,
+                        every_n_turns=self.long_term_memory_config.extract_every_n_turns,
+                        min_seconds_between=self.long_term_memory_config.extract_min_seconds_between,
                     )
                 )
         if self.enable_experience_capture and self.workspace is not None:

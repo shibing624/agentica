@@ -111,16 +111,20 @@ class WorkspaceMemoryConfig:
     # Auto-archive conversation to workspace after each run() (zero LLM cost,
     # just appends raw messages to conversations/ directory).
     auto_archive: bool = False
-    # When auto_extract_memory is on, run the extraction LLM call as a
-    # fire-and-forget background task instead of blocking on_agent_end.
-    # Safe ONLY in long-running event loops (FastAPI / asyncio.run). Under
-    # run_sync()/run_stream_sync() the temp loop closes before the task
-    # completes and memories are silently dropped — keep this False there.
-    auto_extract_memory_background: bool = False
-    # Auto-extract memories from conversation after each run() using an LLM call.
+    # Auto-extract memories from conversation using an LLM call.
     # Only fires when the LLM didn't call save_memory during the run.
-    # Costs one extra LLM request per run (mirrors CC's extractMemories service).
+    # Batched at boundaries (not per-turn) so token cost is bounded.
     auto_extract_memory: bool = False
+    # Boundary policy: flush the pending turn buffer through the extraction
+    # LLM every N turns. 0 disables the periodic trigger; on_pre_compact
+    # still flushes whatever has accumulated. Default 10 turns matches the
+    # typical CLI session length where users want roughly one extraction
+    # per "topic".
+    extract_every_n_turns: int = 10
+    # Frequency cap (seconds) across processes. Even if every_n_turns says
+    # "flush", we skip when the previous extraction ran less than this many
+    # seconds ago. Persisted to ~/.agentica/extract_state.json. 0 disables.
+    extract_min_seconds_between: int = 60
     # Recompile confirmed user/feedback memories into ~/.agentica/AGENTS.md so
     # future sessions automatically inherit long-lived preferences.
     sync_memories_to_global_agent_md: bool = False
@@ -207,13 +211,16 @@ class ExperienceConfig:
     # LLM classification confidence threshold for persisting corrections
     feedback_confidence_threshold: float = 0.8
 
-    # When True, the correction-classification LLM call runs as a
-    # fire-and-forget background task so on_agent_end returns immediately
-    # (the user gets the next prompt without waiting). Safe ONLY in
-    # long-running event loops (FastAPI, asyncio.run, interactive CLI).
-    # Under run_sync()/run_stream_sync() the temp loop closes before the
-    # task completes and the correction is silently dropped — keep False.
-    capture_corrections_background: bool = False
+    # Boundary policy for the LLM correction judge. Cheap prefilter (explicit
+    # rule prefixes + strong negations) still fires per-turn — only the
+    # fall-through LLM scan is batched. Every N turns, the buffered
+    # (user, assistant) pairs are passed to one LLM call that scans for
+    # corrections across the window. 0 disables the periodic trigger;
+    # on_pre_compact still flushes accumulated buffer.
+    judge_every_n_turns: int = 10
+    # Frequency cap (seconds) across processes. Same idea as
+    # extract_min_seconds_between. Persisted to ~/.agentica/extract_state.json.
+    judge_min_seconds_between: int = 60
 
     # Promotion lifecycle
     promotion_count: int = 3

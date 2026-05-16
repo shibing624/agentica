@@ -309,7 +309,7 @@ def create_llm_os(
         long_term_memory_config=WorkspaceMemoryConfig(
             auto_archive=True,
             auto_extract_memory=True,
-            auto_extract_memory_background=True,
+            extract_every_n_turns=10,
             load_workspace_context=True,
             load_workspace_memory=True,
             max_memory_entries=10,

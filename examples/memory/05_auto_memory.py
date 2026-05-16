@@ -174,19 +174,17 @@ async def demo_session_summary():
 
 async def demo_combined():
     """Demo 4: Production-grade full stack -- long-term memory + auxiliary model
-    for cheap+fast memory extraction + background extraction (non-blocking) +
-    session summary.
+    for cheap+fast batched memory extraction + session summary.
 
-    Three perf-critical knobs (all introduced in 1.4.4):
+    Three perf-critical knobs:
       1. ``auxiliary_model``: MemoryExtractHooks runs on this cheaper/faster
          model instead of the main one (e.g. DeepSeek Flash vs GPT-4o), so the
          extraction LLM call costs less and finishes ~5x faster.
-      2. ``auto_extract_memory_background=True``: extraction is fire-and-forget
-         via ``asyncio.create_task`` and does NOT block ``on_agent_end``. The
-         user-visible response RT drops by the full extraction latency.
-         ⚠️  Only enable under a long-running event loop (FastAPI, asyncio.run).
-             Do NOT enable under ``run_sync()`` / ``run_stream_sync()``: the temp
-             loop closes before the task completes and memories are lost.
+      2. Boundary-triggered extraction (``extract_every_n_turns`` /
+         ``on_pre_compact``): turns are buffered in-memory; the LLM extraction
+         only fires after N turns or right before context compaction.
+         ``extract_min_seconds_between`` provides a cross-process frequency
+         cap. Together these slash extraction cost vs the old per-turn path.
       3. ``sync_memories_to_global_agent_md=True``: confirmed user-type memories
          get mirrored into ~/.agentica/AGENTS.md so future sessions inherit them.
     """
@@ -215,7 +213,8 @@ async def demo_combined():
         long_term_memory_config=WorkspaceMemoryConfig(
             auto_archive=True,
             auto_extract_memory=True,
-            auto_extract_memory_background=True,
+            extract_every_n_turns=2,  # demo only; default in production is 10
+            extract_min_seconds_between=0,  # demo only; default 60
             sync_memories_to_global_agent_md=True,
         ),
         working_memory=WorkingMemory.with_summary(),
@@ -226,7 +225,7 @@ async def demo_combined():
     print(
         "Config: long-term memory + SessionSummary + auto memory "
         f"(auxiliary={'deepseek' if auxiliary_model else 'main-model fallback'}, "
-        "background=True, sync_to_global_AGENTS.md=True)"
+        "extract_every_n_turns=2, sync_to_global_AGENTS.md=True)"
     )
 
     await agent.print_response(
@@ -248,16 +247,10 @@ async def demo_combined():
         "Anyway, back to chunking — does fixed-size or recursive splitter work better for code?"
     )
 
-    # background=True schedules extraction via asyncio.create_task. In a real
-    # FastAPI server you simply return the response and the task finishes on
-    # its own. In this synchronous demo we explicitly drain pending tasks so
-    # we can observe the extracted memories in the same run.
-    pending = [
-        t for t in asyncio.all_tasks() if t is not asyncio.current_task() and not t.done()
-    ]
-    if pending:
-        print(f"\n[demo] waiting for {len(pending)} background extraction task(s)...")
-        await asyncio.gather(*pending, return_exceptions=True)
+    # With extract_every_n_turns=2 the second turn above already flushed the
+    # buffer synchronously, so the extracted memory is on disk by now. If the
+    # session ends below the every-N threshold, you can also force a flush by
+    # firing on_pre_compact manually before reading memories.
 
     print("\n--- Long-term memory ---")
     memory = await workspace.get_relevant_memories()
