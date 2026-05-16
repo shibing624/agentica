@@ -19,6 +19,13 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+### Changed
+- **Claude `max_tokens` resolution** (ported from hermes-agent's `anthropic_adapter.py`):
+  - Default changed from `max_tokens: int = 8192` to `max_tokens: Optional[int] = None`. When `None`, a per-model output ceiling is looked up from `_ANTHROPIC_OUTPUT_LIMITS` (Opus 4.6/4.7 → 128K, Sonnet 4.5/4.6 → 64K, 3.5 Sonnet → 8192, etc.). Previously every model was capped at 8K which starved thinking-enabled models (thinking tokens count toward the limit).
+  - Resolved cap is clamped to `max(context_window - 1, 1)` for small custom endpoints whose context window is smaller than the model's native output ceiling. No-op for full-size native models.
+  - Positive-finite guard rejects locally: `max_tokens=0 / -1 / 0.5 / NaN / True` no longer leak to the API and 400 — they fall back to the model ceiling.
+- **Claude auto-recovery from "max_tokens too large given prompt"**: `Claude.invoke()` and `invoke_stream()` now parse the API error message for `available_tokens: N` and retry once with `max_tokens = N - 64` (safety margin). Prompt-too-long errors are NOT touched — that path still flows through `_learn_context_limit_from_error`. New module: `agentica/model/anthropic/_max_tokens.py` with `resolve_anthropic_messages_max_tokens` + `parse_available_output_tokens_from_error` (28 unit tests).
+
 ### Removed (Breaking)
 - **`agentica.model.providers` module deleted** (`ProviderConfig`, `create_provider`, `list_providers`, `register_provider`, `PROVIDER_REGISTRY`). The registry indirection had a single concrete output (`OpenAILike(**config)`) so every OpenAI-compatible factory now directly constructs `OpenAIChat` with hardcoded `base_url` / `api_key_env` / `default_model` / `context_window`.
 - **`agentica.OpenAILike` deleted**. Was a 22-line subclass of `OpenAIChat` whose only behavior was a placeholder-`api_key` warning. Use `OpenAIChat(id=..., api_key=..., base_url=...)` for custom OpenAI-compatible endpoints.

@@ -17,9 +17,19 @@ from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
+from agentica.model.anthropic._max_tokens import (
+    resolve_anthropic_messages_max_tokens,
+    parse_available_output_tokens_from_error,
+)
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
+
+# Safety margin subtracted from the API-reported ``available_tokens`` when
+# retrying after a "max_tokens too large given prompt" error. Without this,
+# the retry sometimes hits the same boundary again because token counting
+# is approximate.
+_MAX_TOKENS_RETRY_SAFETY_MARGIN = 64
 
 try:
     from anthropic import AsyncAnthropic as AnthropicClient
@@ -73,7 +83,10 @@ class Claude(Model):
     context_window: int = 200000
 
     # Request parameters
-    max_tokens: int = 8192
+    # max_tokens is Anthropic's OUTPUT cap (not the context window). Required by
+    # the SDK on every call; when None, the per-model ceiling from
+    # _ANTHROPIC_OUTPUT_LIMITS is used. See _max_tokens.py for the table.
+    max_tokens: Optional[int] = None
     temperature: Optional[float] = None
     stop_sequences: Optional[List[str]] = None
     top_p: Optional[float] = None
@@ -154,7 +167,11 @@ class Claude(Model):
             Dict[str, Any]: A dictionary of keyword arguments for API requests.
         """
         _request_params: Dict[str, Any] = {}
-        _request_params["max_tokens"] = self.max_tokens
+        # Resolve the output cap: positive user-passed value, else per-model
+        # ceiling, optionally clamped to context_window - 1 for small endpoints.
+        _request_params["max_tokens"] = resolve_anthropic_messages_max_tokens(
+            self.max_tokens, self.id, context_length=self.context_window,
+        )
         if self.temperature:
             _request_params["temperature"] = self.temperature
         if self.stop_sequences:
@@ -376,6 +393,29 @@ class Claude(Model):
             tools.append(tool)
         return tools
 
+    def _maybe_recover_max_tokens(
+        self, error: Exception, request_kwargs: Dict[str, Any]
+    ) -> bool:
+        """Detect "max_tokens too large given prompt" and adjust in-place.
+
+        Returns True when the caller should retry the request with the
+        mutated ``request_kwargs``. The new cap is the API-reported
+        ``available_tokens`` minus a small safety margin. Returns False for
+        any other error (caller re-raises).
+        """
+        available = parse_available_output_tokens_from_error(str(error))
+        if available is None:
+            return False
+        safe_out = max(1, available - _MAX_TOKENS_RETRY_SAFETY_MARGIN)
+        old_cap = request_kwargs.get("max_tokens")
+        request_kwargs["max_tokens"] = safe_out
+        logger.warning(
+            f"Anthropic max_tokens={old_cap} too large for current prompt; "
+            f"retrying with max_tokens={safe_out:,} "
+            f"(available_tokens={available:,})."
+        )
+        return True
+
     @override
     async def invoke(self, messages: List[Message]) -> AnthropicMessage:
         """
@@ -396,6 +436,10 @@ class Claude(Model):
             )
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
+            if self._maybe_recover_max_tokens(e, request_kwargs):
+                return await self.get_client().messages.create(
+                    model=self.id, messages=chat_messages, **request_kwargs,
+                )
             raise
 
     @override
@@ -418,6 +462,10 @@ class Claude(Model):
             )
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
+            if self._maybe_recover_max_tokens(e, request_kwargs):
+                return self.get_client().messages.stream(
+                    model=self.id, messages=chat_messages, **request_kwargs,
+                )
             raise
 
     def update_usage_metrics(
