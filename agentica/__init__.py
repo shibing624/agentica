@@ -87,16 +87,22 @@ from os import getenv as _getenv
 
 def _openai_compat(
     *,
-    name: str,
-    provider: str,
+    default_name: str,
+    default_provider: str,
     default_model: str,
-    base_url: str,
+    default_base_url: str,
     api_key_env: str,
     api_key_env_fallback: Optional[str] = None,
-    context_window: int = 128000,
+    default_context_window: int = 128000,
     **kwargs,
 ):
-    """Internal helper to build an OpenAIChat for an OpenAI-compatible endpoint."""
+    """Internal helper to build an OpenAIChat for an OpenAI-compatible endpoint.
+
+    Internal "default_*" parameter names exist so that user-supplied
+    ``base_url`` / ``name`` / ``provider`` / ``context_window`` in
+    ``**kwargs`` do not collide with the wrapper's positional defaults
+    (Python's "multiple values for keyword argument" error).
+    """
     if "model" in kwargs:
         kwargs["id"] = kwargs.pop("model")
     api_key = kwargs.pop("api_key", None)
@@ -106,22 +112,22 @@ def _openai_compat(
             api_key = _getenv(api_key_env_fallback)
     return OpenAIChat(
         id=kwargs.pop("id", default_model),
-        name=kwargs.pop("name", name),
-        provider=kwargs.pop("provider", provider),
-        base_url=kwargs.pop("base_url", base_url),
+        name=kwargs.pop("name", default_name),
+        provider=kwargs.pop("provider", default_provider),
+        base_url=kwargs.pop("base_url", default_base_url),
         api_key=api_key,
-        context_window=kwargs.pop("context_window", context_window),
+        context_window=kwargs.pop("context_window", default_context_window),
         **kwargs,
     )
 
 
 def DeepSeekChat(**kwargs):
     return _openai_compat(
-        name="DeepSeek", provider="DeepSeek",
+        default_name="DeepSeek", default_provider="DeepSeek",
         default_model=_getenv("DEEPSEEK_MODEL_NAME", "deepseek-v4-flash"),
-        base_url="https://api.deepseek.com",
+        default_base_url="https://api.deepseek.com",
         api_key_env="DEEPSEEK_API_KEY",
-        context_window=1_000_000,
+        default_context_window=1_000_000,
         **kwargs,
     )
 
@@ -130,9 +136,9 @@ DeepSeek = DeepSeekChat
 
 def MoonshotChat(**kwargs):
     return _openai_compat(
-        name="MoonShot", provider="MoonShot",
+        default_name="MoonShot", default_provider="MoonShot",
         default_model="kimi-k2.5",
-        base_url="https://api.moonshot.cn/v1",
+        default_base_url="https://api.moonshot.cn/v1",
         api_key_env="MOONSHOT_API_KEY",
         **kwargs,
     )
@@ -142,9 +148,9 @@ Moonshot = MoonshotChat
 
 def ArkChat(**kwargs):
     return _openai_compat(
-        name="Ark", provider="ByteDance Volcengine Ark",
+        default_name="Ark", default_provider="ByteDance Volcengine Ark",
         default_model=_getenv("ARK_MODEL_NAME", "doubao-1.5-pro-32k"),
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        default_base_url="https://ark.cn-beijing.volces.com/api/v3",
         api_key_env="ARK_API_KEY",
         **kwargs,
     )
@@ -154,9 +160,9 @@ Ark = ArkChat
 
 def TogetherChat(**kwargs):
     return _openai_compat(
-        name="Together", provider="Together",
+        default_name="Together", default_provider="Together",
         default_model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-        base_url="https://api.together.xyz/v1",
+        default_base_url="https://api.together.xyz/v1",
         api_key_env="TOGETHER_API_KEY",
         **kwargs,
     )
@@ -166,9 +172,9 @@ Together = TogetherChat
 
 def GrokChat(**kwargs):
     return _openai_compat(
-        name="Grok", provider="xAI",
+        default_name="Grok", default_provider="xAI",
         default_model="grok-beta",
-        base_url="https://api.x.ai/v1",
+        default_base_url="https://api.x.ai/v1",
         api_key_env="XAI_API_KEY",
         **kwargs,
     )
@@ -178,9 +184,9 @@ Grok = GrokChat
 
 def YiChat(**kwargs):
     return _openai_compat(
-        name="Yi", provider="01.ai",
+        default_name="Yi", default_provider="01.ai",
         default_model="yi-lightning",
-        base_url="https://api.lingyiwanwu.com/v1",
+        default_base_url="https://api.lingyiwanwu.com/v1",
         api_key_env="YI_API_KEY",
         **kwargs,
     )
@@ -190,9 +196,9 @@ Yi = YiChat
 
 def QwenChat(**kwargs):
     return _openai_compat(
-        name="Qwen", provider="Alibaba",
+        default_name="Qwen", default_provider="Alibaba",
         default_model="qwen-max",
-        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         api_key_env="DASHSCOPE_API_KEY",
         **kwargs,
     )
@@ -202,9 +208,9 @@ Qwen = QwenChat
 
 def ZhipuAIChat(**kwargs):
     return _openai_compat(
-        name="ZhipuAI", provider="ZhipuAI",
+        default_name="ZhipuAI", default_provider="ZhipuAI",
         default_model="glm-4.7-flash",
-        base_url="https://open.bigmodel.cn/api/paas/v4",
+        default_base_url="https://open.bigmodel.cn/api/paas/v4",
         api_key_env="ZAI_API_KEY",
         api_key_env_fallback="ZHIPUAI_API_KEY",
         **kwargs,
@@ -215,9 +221,9 @@ ZhipuAI = ZhipuAIChat
 
 def NvidiaChat(**kwargs):
     return _openai_compat(
-        name="Nvidia", provider="Nvidia",
+        default_name="Nvidia", default_provider="Nvidia",
         default_model=_getenv("NVIDIA_MODEL_NAME", "deepseek-ai/deepseek-v4-flash"),
-        base_url="https://integrate.api.nvidia.com/v1",
+        default_base_url="https://integrate.api.nvidia.com/v1",
         api_key_env="NVIDIA_API_KEY",
         **kwargs,
     )
@@ -225,9 +231,9 @@ def NvidiaChat(**kwargs):
 
 def SambanovaChat(**kwargs):
     return _openai_compat(
-        name="Sambanova", provider="Sambanova",
+        default_name="Sambanova", default_provider="Sambanova",
         default_model="Meta-Llama-3.1-8B-Instruct",
-        base_url="https://api.sambanova.ai/v1",
+        default_base_url="https://api.sambanova.ai/v1",
         api_key_env="SAMBANOVA_API_KEY",
         **kwargs,
     )
@@ -235,9 +241,9 @@ def SambanovaChat(**kwargs):
 
 def OpenRouterChat(**kwargs):
     return _openai_compat(
-        name="OpenRouter", provider="OpenRouter",
+        default_name="OpenRouter", default_provider="OpenRouter",
         default_model="gpt-4o",
-        base_url="https://openrouter.ai/api/v1",
+        default_base_url="https://openrouter.ai/api/v1",
         api_key_env="OPENROUTER_API_KEY",
         **kwargs,
     )
@@ -245,9 +251,9 @@ def OpenRouterChat(**kwargs):
 
 def FireworksChat(**kwargs):
     return _openai_compat(
-        name="Fireworks", provider="Fireworks",
+        default_name="Fireworks", default_provider="Fireworks",
         default_model="accounts/fireworks/models/firefunction-v2",
-        base_url="https://api.fireworks.ai/inference/v1",
+        default_base_url="https://api.fireworks.ai/inference/v1",
         api_key_env="FIREWORKS_API_KEY",
         **kwargs,
     )
@@ -255,9 +261,9 @@ def FireworksChat(**kwargs):
 
 def InternLMChat(**kwargs):
     return _openai_compat(
-        name="InternLM", provider="InternLM",
+        default_name="InternLM", default_provider="InternLM",
         default_model="internlm2.5-latest",
-        base_url="https://internlm-chat.intern-ai.org.cn/puyu/api/v1/chat/completions",
+        default_base_url="https://internlm-chat.intern-ai.org.cn/puyu/api/v1/chat/completions",
         api_key_env="INTERNLM_API_KEY",
         **kwargs,
     )
