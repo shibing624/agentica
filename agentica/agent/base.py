@@ -1565,8 +1565,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         )
 
         # Pin the anchor up front so the first turn already uses it.
+        # source="goal" → anchor is rendered into the system prompt every
+        # turn for long-task drift defense; this is the whole point of
+        # run_goal().
         self.task_anchor = TaskAnchor(
             goal=state.objective, source_query=state.objective,
+            source="goal",
         )
         self._anchor_session_id = self.session_id
 

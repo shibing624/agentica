@@ -862,8 +862,12 @@ class Runner:
                     objective = str(_persisted_goal["objective"])
                     agent.task_anchor = TaskAnchor(
                         goal=objective, source_query=objective,
+                        source="goal",
                     )
                 else:
+                    # source defaults to "message" — not rendered into the
+                    # system prompt, only used as a retrieval query. See
+                    # TaskAnchor.to_prompt_block for the gate.
                     agent.task_anchor = TaskAnchor.from_message(message)
                 agent._anchor_session_id = agent.session_id
             _anchor = agent.task_anchor

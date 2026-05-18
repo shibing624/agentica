@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from time import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
 
@@ -101,6 +101,17 @@ class TaskAnchor:
     # planning layer; everything else above is frozen.
     next_step_hint: Optional[str] = None
 
+    # Where this anchor came from. Gates system-prompt rendering:
+    #   "message" — auto-built from `agent.run(message)`'s first message;
+    #               never rendered into the system prompt, so a transcript /
+    #               replay / seed message can't leak into every turn.
+    #               Still used as the retrieval query (`_get_anchor_query`).
+    #   "goal"    — built from an explicit goal entry point: `run_goal()`,
+    #               CLI `/goal`, or a `session_log.load_goal()` active goal.
+    #               Rendered as the `## Original Task` block for long-task
+    #               drift defense.
+    source: Literal["message", "goal"] = "message"
+
     @classmethod
     def from_message(cls, message: Any) -> "TaskAnchor":
         """Build an anchor from the very first user-supplied message.
@@ -127,23 +138,22 @@ class TaskAnchor:
         """Render anchor as a stable system-prompt block.
 
         Used by prompts.py to inject the original goal at the top of the
-        message list. Returns empty string when the anchor is empty or when
-        the only signal is a short single-line goal — in that case the
-        live user message already conveys the same text and a mirrored
-        ``## Original Task`` block just duplicates it.
+        message list. Only renders for explicit goal-sourced anchors —
+        message-sourced anchors (the default for plain `agent.run(msg)`)
+        always return "" so a transcript / replay / seed message can never
+        leak into the system prompt every turn. Callers that need long-task
+        drift defense should go through `Agent.run_goal()` or set
+        `source="goal"` explicitly.
         """
-        has_structured = bool(
+        if self.source != "goal":
+            return ""
+        if not self.goal and not (
             self.acceptance_criteria
             or self.constraints
             or self.confirmed_facts
             or self.next_step_hint
-        )
-        if not has_structured:
-            # Bare single-line goal — let the user message carry it; the
-            # anchor only earns a prompt slot once compaction risks losing
-            # context that the structured fields hold.
-            if not self.goal or "\n" not in self.goal:
-                return ""
+        ):
+            return ""
 
         lines = ["<original_task>"]
         if self.goal:
@@ -238,6 +248,7 @@ class RunContext:
                 "constraints": list(self.task_anchor.constraints),
                 "confirmed_facts": list(self.task_anchor.confirmed_facts),
                 "next_step_hint": self.task_anchor.next_step_hint,
+                "source": self.task_anchor.source,
             },
             "metadata": dict(self.metadata),
         }

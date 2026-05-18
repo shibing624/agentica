@@ -1672,7 +1672,10 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     # bind to the standing goal, not the latest user message.
     agent = ctx.current_agent
     if agent is not None:
-        agent.task_anchor = TaskAnchor(goal=state.objective, source_query=state.objective)
+        agent.task_anchor = TaskAnchor(
+            goal=state.objective, source_query=state.objective,
+            source="goal",
+        )
         agent._anchor_session_id = agent.session_id
 
     # Workspace freeze timing: if workspace was already frozen on an earlier

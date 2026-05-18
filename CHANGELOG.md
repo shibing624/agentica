@@ -19,6 +19,9 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+### Fixed
+- **TaskAnchor no longer leaks `agent.run(message)`'s first message into the system prompt every turn.** `TaskAnchor` gains a `source: Literal["message", "goal"] = "message"` field that gates `to_prompt_block()`. Only explicit goal entry points — `Agent.run_goal()`, CLI `/goal`, and an active session-log goal — produce `source="goal"` anchors that render as `## Original Task`. Ordinary `agent.run(message)` produces `source="message"` anchors that are still used as the retrieval query but stay out of the system prompt. This restores pre-1.4.0 prompt behavior for plain `agent.run()` callers (e.g. private chat seed, workflow handoff, session resume) where the "first message" is a transcript / replay / dump and pinning it system-wide was a bug. Callers that need long-task drift defense should use `Agent.run_goal()` or set `agent.task_anchor = TaskAnchor(..., source="goal")` explicitly.
+
 ### Changed
 - **Claude `max_tokens` resolution** (ported from hermes-agent's `anthropic_adapter.py`):
   - Default changed from `max_tokens: int = 8192` to `max_tokens: Optional[int] = None`. When `None`, a per-model output ceiling is looked up from `_ANTHROPIC_OUTPUT_LIMITS` (Opus 4.6/4.7 → 128K, Sonnet 4.5/4.6 → 64K, 3.5 Sonnet → 8192, etc.). Previously every model was capped at 8K which starved thinking-enabled models (thinking tokens count toward the limit).
