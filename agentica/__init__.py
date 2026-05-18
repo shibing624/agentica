@@ -46,7 +46,7 @@ See ``docs/API.md`` for the Tier 1/2/3 stability contract.
 
 import importlib
 import threading
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from . import api_registry
 
@@ -85,188 +85,166 @@ from agentica.model.openai.chat import OpenAIChat
 from os import getenv as _getenv
 
 
-def _openai_compat(
-    *,
-    default_name: str,
-    default_provider: str,
-    default_model: str,
-    default_base_url: str,
-    api_key_env: str,
-    api_key_env_fallback: Optional[str] = None,
-    default_context_window: int = 128000,
-    **kwargs,
-):
-    """Internal helper to build an OpenAIChat for an OpenAI-compatible endpoint.
+def _apply_defaults(kwargs: dict, **defaults) -> dict:
+    """Set provider defaults without overriding anything the caller passed.
 
-    Internal "default_*" parameter names exist so that user-supplied
-    ``base_url`` / ``name`` / ``provider`` / ``context_window`` in
-    ``**kwargs`` do not collide with the wrapper's positional defaults
-    (Python's "multiple values for keyword argument" error).
+    Uses ``setdefault`` per key so user-supplied ``id`` / ``name`` /
+    ``provider`` / ``base_url`` / ``api_key`` / ``context_window`` always
+    win. Also normalizes the legacy ``model=`` alias to ``id=``.
     """
     if "model" in kwargs:
         kwargs["id"] = kwargs.pop("model")
-    api_key = kwargs.pop("api_key", None)
-    if api_key is None:
-        api_key = _getenv(api_key_env)
-        if api_key is None and api_key_env_fallback:
-            api_key = _getenv(api_key_env_fallback)
-    return OpenAIChat(
-        id=kwargs.pop("id", default_model),
-        name=kwargs.pop("name", default_name),
-        provider=kwargs.pop("provider", default_provider),
-        base_url=kwargs.pop("base_url", default_base_url),
-        api_key=api_key,
-        context_window=kwargs.pop("context_window", default_context_window),
-        **kwargs,
-    )
+    for k, v in defaults.items():
+        kwargs.setdefault(k, v)
+    return kwargs
 
 
 def DeepSeekChat(**kwargs):
-    return _openai_compat(
-        default_name="DeepSeek", default_provider="DeepSeek",
-        default_model=_getenv("DEEPSEEK_MODEL_NAME", "deepseek-v4-flash"),
-        default_base_url="https://api.deepseek.com",
-        api_key_env="DEEPSEEK_API_KEY",
-        default_context_window=1_000_000,
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id=_getenv("DEEPSEEK_MODEL_NAME", "deepseek-v4-flash"),
+        name="DeepSeek", provider="DeepSeek",
+        base_url="https://api.deepseek.com",
+        api_key=_getenv("DEEPSEEK_API_KEY"),
+        context_window=1_000_000,
+    ))
 
 DeepSeek = DeepSeekChat
 
 
 def MoonshotChat(**kwargs):
-    return _openai_compat(
-        default_name="MoonShot", default_provider="MoonShot",
-        default_model="kimi-k2.5",
-        default_base_url="https://api.moonshot.cn/v1",
-        api_key_env="MOONSHOT_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="kimi-k2.5",
+        name="MoonShot", provider="MoonShot",
+        base_url="https://api.moonshot.cn/v1",
+        api_key=_getenv("MOONSHOT_API_KEY"),
+    ))
 
 Moonshot = MoonshotChat
 
 
 def ArkChat(**kwargs):
-    return _openai_compat(
-        default_name="Ark", default_provider="ByteDance Volcengine Ark",
-        default_model=_getenv("ARK_MODEL_NAME", "doubao-1.5-pro-32k"),
-        default_base_url="https://ark.cn-beijing.volces.com/api/v3",
-        api_key_env="ARK_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id=_getenv("ARK_MODEL_NAME", "doubao-1.5-pro-32k"),
+        name="Ark", provider="ByteDance Volcengine Ark",
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=_getenv("ARK_API_KEY"),
+    ))
 
 Ark = ArkChat
 
 
 def TogetherChat(**kwargs):
-    return _openai_compat(
-        default_name="Together", default_provider="Together",
-        default_model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-        default_base_url="https://api.together.xyz/v1",
-        api_key_env="TOGETHER_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
+        name="Together", provider="Together",
+        base_url="https://api.together.xyz/v1",
+        api_key=_getenv("TOGETHER_API_KEY"),
+    ))
 
 Together = TogetherChat
 
 
 def GrokChat(**kwargs):
-    return _openai_compat(
-        default_name="Grok", default_provider="xAI",
-        default_model="grok-beta",
-        default_base_url="https://api.x.ai/v1",
-        api_key_env="XAI_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="grok-beta",
+        name="Grok", provider="xAI",
+        base_url="https://api.x.ai/v1",
+        api_key=_getenv("XAI_API_KEY"),
+    ))
 
 Grok = GrokChat
 
 
 def YiChat(**kwargs):
-    return _openai_compat(
-        default_name="Yi", default_provider="01.ai",
-        default_model="yi-lightning",
-        default_base_url="https://api.lingyiwanwu.com/v1",
-        api_key_env="YI_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="yi-lightning",
+        name="Yi", provider="01.ai",
+        base_url="https://api.lingyiwanwu.com/v1",
+        api_key=_getenv("YI_API_KEY"),
+    ))
 
 Yi = YiChat
 
 
 def QwenChat(**kwargs):
-    return _openai_compat(
-        default_name="Qwen", default_provider="Alibaba",
-        default_model="qwen-max",
-        default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
-        api_key_env="DASHSCOPE_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="qwen-max",
+        name="Qwen", provider="Alibaba",
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        api_key=_getenv("DASHSCOPE_API_KEY"),
+    ))
 
 Qwen = QwenChat
 
 
 def ZhipuAIChat(**kwargs):
-    return _openai_compat(
-        default_name="ZhipuAI", default_provider="ZhipuAI",
-        default_model="glm-4.7-flash",
-        default_base_url="https://open.bigmodel.cn/api/paas/v4",
-        api_key_env="ZAI_API_KEY",
-        api_key_env_fallback="ZHIPUAI_API_KEY",
-        **kwargs,
-    )
+    # ZAI_API_KEY is the canonical name; ZHIPUAI_API_KEY kept as legacy fallback.
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="glm-4.7-flash",
+        name="ZhipuAI", provider="ZhipuAI",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key=_getenv("ZAI_API_KEY") or _getenv("ZHIPUAI_API_KEY"),
+    ))
 
 ZhipuAI = ZhipuAIChat
 
 
 def NvidiaChat(**kwargs):
-    return _openai_compat(
-        default_name="Nvidia", default_provider="Nvidia",
-        default_model=_getenv("NVIDIA_MODEL_NAME", "deepseek-ai/deepseek-v4-flash"),
-        default_base_url="https://integrate.api.nvidia.com/v1",
-        api_key_env="NVIDIA_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id=_getenv("NVIDIA_MODEL_NAME", "deepseek-ai/deepseek-v4-flash"),
+        name="Nvidia", provider="Nvidia",
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=_getenv("NVIDIA_API_KEY"),
+    ))
 
 
 def SambanovaChat(**kwargs):
-    return _openai_compat(
-        default_name="Sambanova", default_provider="Sambanova",
-        default_model="Meta-Llama-3.1-8B-Instruct",
-        default_base_url="https://api.sambanova.ai/v1",
-        api_key_env="SAMBANOVA_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="Meta-Llama-3.1-8B-Instruct",
+        name="Sambanova", provider="Sambanova",
+        base_url="https://api.sambanova.ai/v1",
+        api_key=_getenv("SAMBANOVA_API_KEY"),
+    ))
 
 
 def OpenRouterChat(**kwargs):
-    return _openai_compat(
-        default_name="OpenRouter", default_provider="OpenRouter",
-        default_model="gpt-4o",
-        default_base_url="https://openrouter.ai/api/v1",
-        api_key_env="OPENROUTER_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="gpt-4o",
+        name="OpenRouter", provider="OpenRouter",
+        base_url="https://openrouter.ai/api/v1",
+        api_key=_getenv("OPENROUTER_API_KEY"),
+    ))
 
 
 def FireworksChat(**kwargs):
-    return _openai_compat(
-        default_name="Fireworks", default_provider="Fireworks",
-        default_model="accounts/fireworks/models/firefunction-v2",
-        default_base_url="https://api.fireworks.ai/inference/v1",
-        api_key_env="FIREWORKS_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="accounts/fireworks/models/firefunction-v2",
+        name="Fireworks", provider="Fireworks",
+        base_url="https://api.fireworks.ai/inference/v1",
+        api_key=_getenv("FIREWORKS_API_KEY"),
+    ))
 
 
 def InternLMChat(**kwargs):
-    return _openai_compat(
-        default_name="InternLM", default_provider="InternLM",
-        default_model="internlm2.5-latest",
-        default_base_url="https://internlm-chat.intern-ai.org.cn/puyu/api/v1/chat/completions",
-        api_key_env="INTERNLM_API_KEY",
-        **kwargs,
-    )
+    return OpenAIChat(**_apply_defaults(
+        kwargs,
+        id="internlm2.5-latest",
+        name="InternLM", provider="InternLM",
+        base_url="https://internlm-chat.intern-ai.org.cn/puyu/api/v1/chat/completions",
+        api_key=_getenv("INTERNLM_API_KEY"),
+    ))
 
 
 # Slug-keyed dispatch (used by gateway/services/model_factory.py and similar)
