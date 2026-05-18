@@ -158,9 +158,15 @@ def build_evo_agent(workspace: Workspace) -> Agent:
     """Agent with full hooks chain to drive the self-evolution pipeline."""
     model = _make_model()
 
+    # This e2e demo runs exactly 8 turns (4 read + 4 correction). Production
+    # defaults batch the memory extract / correction judge every 10 turns
+    # and fire-and-forget the LLM call in the background — both kill this
+    # demo: corrections would never be classified before the script asserts,
+    # and the background task could outlive the script process. Override
+    # back to per-turn synchronous flush so the spawn pipeline is observable.
     hooks = _CompositeRunHooks([
         ConversationArchiveHooks(),
-        MemoryExtractHooks(),
+        MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False),
         ExperienceCaptureHooks(
             ExperienceConfig(
                 capture_tool_errors=True,
@@ -169,6 +175,9 @@ def build_evo_agent(workspace: Workspace) -> Agent:
                 feedback_confidence_threshold=0.55,
                 promotion_count=2,
                 promotion_window_days=1,
+                judge_every_n_turns=1,
+                judge_min_seconds_between=0,
+                judge_background=False,
                 skill_upgrade=SkillUpgradeConfig(
                     mode="shadow",
                     min_repeat_count=3,
