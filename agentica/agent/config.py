@@ -125,6 +125,18 @@ class WorkspaceMemoryConfig:
     # "flush", we skip when the previous extraction ran less than this many
     # seconds ago. Persisted to ~/.agentica/extract_state.json. 0 disables.
     extract_min_seconds_between: int = 60
+    # Run periodic extraction as a background task so the user's turn returns
+    # immediately even when the LLM is slow. on_pre_compact / flush_pending
+    # still run synchronously because those are "data is about to be lost"
+    # boundaries. Set to False to force synchronous extraction for tests or
+    # when you cannot tolerate fire-and-forget semantics under run_sync
+    # (whose temp loop kills pending tasks on close — call
+    # ``await agent.flush_pending()`` from your shutdown hook to drain).
+    extract_background: bool = True
+    # Hard wall-clock cap for a single extraction LLM call. If the model
+    # hangs or the network breaks, the task is cancelled and the buffer
+    # is forfeited (will retry on the next boundary). 0 disables the cap.
+    extract_timeout: float = 60.0
     # Recompile confirmed user/feedback memories into ~/.agentica/AGENTS.md so
     # future sessions automatically inherit long-lived preferences.
     sync_memories_to_global_agent_md: bool = False
@@ -221,6 +233,12 @@ class ExperienceConfig:
     # Frequency cap (seconds) across processes. Same idea as
     # extract_min_seconds_between. Persisted to ~/.agentica/extract_state.json.
     judge_min_seconds_between: int = 60
+    # Run the batched correction judge as a background task — see
+    # WorkspaceMemoryConfig.extract_background for the same semantics &
+    # caveats. on_pre_compact / flush_pending always run synchronously.
+    judge_background: bool = True
+    # Hard wall-clock cap for one batched judge LLM call. 0 disables.
+    judge_timeout: float = 60.0
 
     # Promotion lifecycle
     promotion_count: int = 3

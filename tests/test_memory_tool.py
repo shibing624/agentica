@@ -288,7 +288,7 @@ class TestMemoryExtractHooks:
 
     def test_skips_when_save_memory_called(self):
         """Even at flush time, skip extraction when save_memory was called in the batch."""
-        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0)
+        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False)
 
         agent = MagicMock()
         agent.agent_id = "test_agent"
@@ -377,7 +377,9 @@ class TestMemoryExtractHooks:
 
     def test_flushes_after_every_n_turns(self):
         """When every_n_turns turns accumulate, the LLM flush fires once."""
-        hooks = MemoryExtractHooks(every_n_turns=2, min_seconds_between=0)
+        # background=False so the assertion right after on_agent_end is
+        # deterministic; production default is background=True.
+        hooks = MemoryExtractHooks(every_n_turns=2, min_seconds_between=0, background=False)
         agent = MagicMock()
         agent.agent_id = "test_agent_flush"
         agent.session_id = "sess_flush"
@@ -425,7 +427,7 @@ class TestMemoryExtractHooks:
 
     def test_prefers_auxiliary_model_over_main_model(self):
         """Extraction should run on auxiliary_model when configured, not main model."""
-        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0)
+        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False)
 
         agent = MagicMock()
         agent.agent_id = "test_agent_aux"
@@ -447,7 +449,7 @@ class TestMemoryExtractHooks:
 
     def test_falls_back_to_main_model_when_no_auxiliary(self):
         """When auxiliary_model is None, extraction uses agent.model."""
-        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0)
+        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False)
 
         agent = MagicMock()
         agent.agent_id = "test_agent_fallback"

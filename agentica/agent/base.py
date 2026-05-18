@@ -568,6 +568,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                         ),
                         every_n_turns=self.long_term_memory_config.extract_every_n_turns,
                         min_seconds_between=self.long_term_memory_config.extract_min_seconds_between,
+                        background=self.long_term_memory_config.extract_background,
+                        timeout=self.long_term_memory_config.extract_timeout,
                     )
                 )
         if self.enable_experience_capture and self.workspace is not None:

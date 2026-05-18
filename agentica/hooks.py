@@ -351,6 +351,8 @@ class MemoryExtractHooks(RunHooks):
         sync_memories_to_global_agent_md: bool = False,
         every_n_turns: int = 10,
         min_seconds_between: int = 60,
+        background: bool = True,
+        timeout: float = 60.0,
     ):
         """
         Args:
@@ -359,6 +361,16 @@ class MemoryExtractHooks(RunHooks):
                 0 disables periodic extraction (on_pre_compact still flushes).
             min_seconds_between: Cross-process frequency cap; skip when the
                 previous extraction was less than N seconds ago. 0 disables.
+            background: Run periodic extraction as a fire-and-forget task so
+                the user's turn returns immediately. ``on_pre_compact`` and
+                ``flush_pending`` always run synchronously (data-loss
+                boundaries). Under ``run_sync`` the temp event loop may
+                cancel pending tasks on close — call ``await
+                agent.flush_pending()`` from your shutdown hook to drain.
+            timeout: Hard wall-clock cap on a single extraction LLM call so
+                a slow/broken model can't pin a background task forever.
+                On timeout the buffer is forfeited (retried next boundary).
+                0 disables the cap.
 
         Multi-tenant note: a single ``MemoryExtractHooks`` instance is safe
         to share across users because per-session buffers are keyed by
@@ -370,11 +382,18 @@ class MemoryExtractHooks(RunHooks):
         self._sync_memories_to_global_agent_md = sync_memories_to_global_agent_md
         self._every_n_turns = max(0, int(every_n_turns))
         self._min_seconds_between = max(0, int(min_seconds_between))
+        self._background = bool(background)
+        self._timeout = max(0.0, float(timeout))
         # Per-session buffer of (user, assistant, save_memory_called) tuples.
         # Drained when a boundary fires; survives across runs in the same
         # (user_id, session_id) so multi-turn batching works without
         # cross-tenant collisions when one hooks instance is shared.
         self._buffers: Dict[Tuple[str, str], List[Tuple[str, str, bool]]] = {}
+        # In-flight background flush tasks. Tracked so ``flush_pending``
+        # can ``await`` them on SDK shutdown — and so a long-running
+        # background task survives Python's task-GC (asyncio only holds a
+        # weak ref). Tasks self-discard via ``add_done_callback``.
+        self._pending_tasks: set = set()
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         self._tool_calls[agent.agent_id] = []
@@ -435,14 +454,66 @@ class MemoryExtractHooks(RunHooks):
             )
             return
 
-        await self._flush(agent, workspace, session_key)
+        await self._dispatch_flush(agent, workspace, session_key)
+
+    async def _dispatch_flush(
+        self, agent: Any, workspace: Any, session_key: Tuple[str, str],
+    ) -> None:
+        """Run the periodic flush either in background or inline.
+
+        Background path schedules an ``asyncio.create_task`` so the user's
+        turn returns immediately — a slow/broken auxiliary LLM cannot block
+        the main dialogue. The task is wrapped in ``asyncio.wait_for`` so a
+        hung HTTP connection cannot pin resources forever.
+
+        Falls back to inline ``await`` when ``background=False`` or no
+        running event loop is available (rare; only happens if a hook
+        somehow fires outside the agent's loop).
+        """
+        if not self._background:
+            await self._flush_with_timeout(agent, workspace, session_key)
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            await self._flush_with_timeout(agent, workspace, session_key)
+            return
+        task = loop.create_task(
+            self._flush_with_timeout(agent, workspace, session_key)
+        )
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+
+    async def _flush_with_timeout(
+        self, agent: Any, workspace: Any, session_key: Tuple[str, str],
+    ) -> None:
+        """Wrap ``_flush`` with a hard wall-clock cap. Errors are swallowed
+        with a warning — this is a background best-effort path."""
+        try:
+            if self._timeout > 0:
+                await asyncio.wait_for(
+                    self._flush(agent, workspace, session_key),
+                    timeout=self._timeout,
+                )
+            else:
+                await self._flush(agent, workspace, session_key)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Memory extraction timed out after %.1fs (session=%s); buffer forfeited",
+                self._timeout, session_key,
+            )
+        except asyncio.CancelledError:
+            # Don't swallow cancellation — sync wrapper loop close needs to propagate.
+            raise
+        except Exception as e:
+            logger.warning(f"Memory extraction background task failed: {e}")
 
     async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
         """Context is about to be compressed — extract anything we have buffered first."""
         await self.flush_pending(agent)
 
     async def flush_pending(self, agent: Any, **kwargs) -> None:
-        """Drain THIS agent's buffer immediately, ignoring the idle gate.
+        """Drain THIS agent's buffer + await any background extractions still in flight.
 
         Two callers: ``on_pre_compact`` (last chance before context
         compression drops data) and ``Agent.flush_pending`` (SDK shutdown
@@ -450,16 +521,23 @@ class MemoryExtractHooks(RunHooks):
         ``min_seconds_between`` cap is for periodic noise reduction, not
         for data-loss prevention.
 
-        Scoped to a single (user_id, session_id) — the buffer key of the
-        ``agent`` you pass in. Other tenants' buffers are untouched.
+        Buffer drain is scoped to a single (user_id, session_id) — other
+        tenants' buffers are untouched. But pending background tasks are
+        process-global (we don't track which user spawned which task), so
+        ``await``ing them on shutdown drains everyone's in-flight work
+        before the process exits, which is what SDK callers want.
         """
         workspace = agent.workspace
         if workspace is None:
             return
         session_key = self._session_key(workspace, agent)
-        if not self._buffers.get(session_key):
-            return
-        await self._flush(agent, workspace, session_key)
+        if self._buffers.get(session_key):
+            # Force-flush this session's buffer SYNCHRONOUSLY (don't race
+            # with a background task on the same buffer — we just popped it).
+            await self._flush_with_timeout(agent, workspace, session_key)
+        if self._pending_tasks:
+            # Snapshot — tasks self-remove from the set via done_callback.
+            await asyncio.gather(*list(self._pending_tasks), return_exceptions=True)
 
     async def _flush(self, agent: Any, workspace: Any, session_key: Tuple[str, str]) -> None:
         """Drain buffer for ``session_key`` and run one LLM extraction over it."""
@@ -669,6 +747,9 @@ class ExperienceCaptureHooks(RunHooks):
         # fires per-turn so explicit corrections aren't delayed; only the
         # LLM fall-through is batched.
         self._judge_buffers: Dict[Tuple[str, str], List[Tuple[str, str, str]]] = {}
+        # In-flight background judge tasks — same semantics as
+        # MemoryExtractHooks._pending_tasks. Drained by flush_pending().
+        self._pending_judge_tasks: set = set()
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         """Initialize per-agent capture state."""
@@ -950,7 +1031,7 @@ class ExperienceCaptureHooks(RunHooks):
                     del jbuf[: len(jbuf) - self._MAX_JUDGE_BUFFER_TURNS]
                 model = self._get_classification_model(agent)
                 if model is not None and self._should_flush_judge(user_id, session_key):
-                    await self._flush_judge(
+                    await self._dispatch_flush_judge(
                         model, event_store, compiled_store, session_key, user_id,
                     )
 
@@ -1293,30 +1374,95 @@ class ExperienceCaptureHooks(RunHooks):
                 original_task=original_task or "",
             )
 
+    async def _dispatch_flush_judge(
+        self,
+        model: Any,
+        event_store: Any,
+        compiled_store: Any,
+        session_key: Tuple[str, str],
+        user_id: Optional[str],
+    ) -> None:
+        """Background-or-inline dispatch of the batched correction judge.
+
+        Same design as ``MemoryExtractHooks._dispatch_flush``: the user's
+        turn returns immediately under default ``judge_background=True``,
+        while ``judge_timeout`` caps a single LLM call so a hung connection
+        cannot pin a background task forever.
+        """
+        background = bool(getattr(self._config, "judge_background", True))
+        if not background:
+            await self._flush_judge_with_timeout(
+                model, event_store, compiled_store, session_key, user_id,
+            )
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            await self._flush_judge_with_timeout(
+                model, event_store, compiled_store, session_key, user_id,
+            )
+            return
+        task = loop.create_task(
+            self._flush_judge_with_timeout(
+                model, event_store, compiled_store, session_key, user_id,
+            )
+        )
+        self._pending_judge_tasks.add(task)
+        task.add_done_callback(self._pending_judge_tasks.discard)
+
+    async def _flush_judge_with_timeout(
+        self,
+        model: Any,
+        event_store: Any,
+        compiled_store: Any,
+        session_key: Tuple[str, str],
+        user_id: Optional[str],
+    ) -> None:
+        timeout = float(getattr(self._config, "judge_timeout", 60.0) or 0.0)
+        try:
+            if timeout > 0:
+                await asyncio.wait_for(
+                    self._flush_judge(model, event_store, compiled_store, session_key, user_id),
+                    timeout=timeout,
+                )
+            else:
+                await self._flush_judge(model, event_store, compiled_store, session_key, user_id)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Correction judge timed out after %.1fs (session=%s); buffer forfeited",
+                timeout, session_key,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning(f"Correction judge background task failed: {e}")
+
     async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
         """Context is about to be compressed — flush the judge buffer first."""
         await self.flush_pending(agent)
 
     async def flush_pending(self, agent: Any, **kwargs) -> None:
-        """Force-flush THIS agent's judge buffer, bypassing N-turn / idle gate.
+        """Force-flush THIS agent's judge buffer + drain background judge tasks.
 
-        Same dual-use semantics as ``MemoryExtractHooks.flush_pending``:
-        called from ``on_pre_compact`` (data-loss prevention) and from
-        ``Agent.flush_pending`` (SDK shutdown). Drains only the buffer for
-        the bound (user_id, session_id) key.
+        ``on_pre_compact`` and ``Agent.flush_pending`` (SDK shutdown) both
+        call this. Buffer drain is scoped to ``(user_id, session_id)``;
+        pending judge tasks are drained process-wide so SDK shutdown
+        guarantees no in-flight LLM call is left dangling.
         """
         workspace = agent.workspace
         if workspace is None:
             return
         session_key = (workspace.user_id, agent.session_id or agent.agent_id)
-        if not self._judge_buffers.get(session_key):
-            return
-        model = self._get_classification_model(agent)
-        if model is None:
-            return
-        event_store = workspace.get_experience_event_store()
-        compiled_store = workspace.get_compiled_experience_store()
-        await self._flush_judge(model, event_store, compiled_store, session_key, workspace.user_id)
+        if self._judge_buffers.get(session_key):
+            model = self._get_classification_model(agent)
+            if model is not None:
+                event_store = workspace.get_experience_event_store()
+                compiled_store = workspace.get_compiled_experience_store()
+                await self._flush_judge_with_timeout(
+                    model, event_store, compiled_store, session_key, workspace.user_id,
+                )
+        if self._pending_judge_tasks:
+            await asyncio.gather(*list(self._pending_judge_tasks), return_exceptions=True)
 
     @staticmethod
     async def _persist_feedback_classification(

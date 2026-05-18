@@ -92,11 +92,13 @@ class TestExperienceCaptureHooks(unittest.TestCase):
             "capture_user_corrections": True,
             "capture_success_patterns": True,
             # Tests in this class assert behavior on individual turns; the
-            # production default batches the LLM judge every 10 turns and
-            # rate-limits across processes. Disable both gates so each turn
-            # flushes the judge immediately.
+            # production default batches the LLM judge every 10 turns,
+            # rate-limits across processes, and runs the LLM call in a
+            # fire-and-forget background task. Force a synchronous,
+            # every-turn flush so each test's assertions are deterministic.
             "judge_every_n_turns": 1,
             "judge_min_seconds_between": 0,
+            "judge_background": False,
         }
         defaults.update(config_overrides)
         config = ExperienceConfig(**defaults)
@@ -702,7 +704,7 @@ class TestRunInputCrossRoundFix(unittest.TestCase):
 
     def test_memory_extract_reads_current_run_input(self):
         """MemoryExtractHooks should read current agent.run_input."""
-        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0)
+        hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False)
 
         agent = MagicMock()
         agent.agent_id = "test"
