@@ -339,22 +339,38 @@ class OpenAIChat(Model):
 
     @override
     async def invoke_stream(self, messages: List[Message]) -> AsyncIterator[ChatCompletionChunk]:
-        """Send a streaming chat completion request to the OpenAI API (async-only)."""
-        langfuse_params = self._get_langfuse_extra_params()
+        """Send a streaming chat completion request to the OpenAI API (async-only).
 
-        try:
-            async_stream = await self.get_client().chat.completions.create(
-                model=self.id,
-                messages=[self.format_message(m) for m in messages],  # type: ignore
-                stream=True,
-                stream_options={"include_usage": True},
-                **self.request_kwargs,
-                **langfuse_params,
-            )
-        except Exception as e:
-            self._learn_context_limit_from_error(str(e))
-            raise
-        async for chunk in async_stream:  # type: ignore
+        Wraps the open+iterate cycle in ``stream_with_retry`` so transient
+        gateway / proxy / SSE-parser failures that happen *before any chunk
+        is yielded downstream* retry automatically. Once the first chunk has
+        been yielded, any subsequent error propagates verbatim (retrying
+        would duplicate output).
+        """
+        from agentica.model.stream_retry import stream_with_retry
+
+        langfuse_params = self._get_langfuse_extra_params()
+        formatted = [self.format_message(m) for m in messages]
+
+        async def _open() -> AsyncIterator[ChatCompletionChunk]:
+            try:
+                return await self.get_client().chat.completions.create(
+                    model=self.id,
+                    messages=formatted,  # type: ignore
+                    stream=True,
+                    stream_options={"include_usage": True},
+                    **self.request_kwargs,
+                    **langfuse_params,
+                )
+            except Exception as e:
+                self._learn_context_limit_from_error(str(e))
+                raise
+
+        async for chunk in stream_with_retry(
+            _open,
+            extra_substrings=self.extra_retryable_substrings,
+            provider_label=f"openai/{self.id}",
+        ):
             yield chunk
 
     # handle_tool_calls and handle_stream_tool_calls are inherited from Model base class.

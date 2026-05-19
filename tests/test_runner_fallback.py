@@ -41,6 +41,10 @@ def _fake_model(model_id, response_factory=None, raise_exc=None):
 
     m.response = _resp
     m.response_stream = MagicMock()
+    # Bridge the new Model.get_retryable_substrings hook so the runner can
+    # merge SDK defaults with user-extended markers even on mocked models.
+    m.get_retryable_substrings = lambda defaults: tuple(defaults)
+    m.extra_retryable_substrings = None
     return m
 
 
@@ -150,6 +154,8 @@ class TestFallbackRetryableExhausted(unittest.TestCase):
         primary = MagicMock()
         primary.id = "primary"
         primary.response = _flaky_resp
+        primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+        primary.extra_retryable_substrings = None
 
         fallback = _fake_model(
             "fb",
@@ -178,6 +184,8 @@ class TestFallbackRetryableExhausted(unittest.TestCase):
         primary = MagicMock()
         primary.id = "primary"
         primary.response = _503
+        primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+        primary.extra_retryable_substrings = None
 
         fallback = _fake_model(
             "fb",
@@ -383,6 +391,8 @@ class TestPerCallNotPerRun(unittest.TestCase):
         primary = MagicMock()
         primary.id = "p"
         primary.response = _flaky
+        primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+        primary.extra_retryable_substrings = None
 
         fallback = _fake_model(
             "fb",

@@ -49,11 +49,37 @@ class LoopState:
     # 0 = primary, 1+ = fallback index. -1 means no successful call yet.
     last_used_model_idx: int = -1
 
-    # Retryable error patterns
+    # Retryable error patterns. Match against ``str(exc).lower()``.
+    # Covers three buckets:
+    #   1. Standard transient HTTP: 429 / 502 / 503 / 504 / 500
+    #   2. Network / socket: connection, timeout, overloaded, disconnected
+    #   3. Provider-specific proxy/gateway markers commonly seen in the wild
+    #      (e.g. Tencent venus_error 4001 "状态错误" — a transient proxy
+    #      hiccup that surfaces as a 400-bodied BadRequestError despite being
+    #      retryable). Add new substrings here when new gateway flavors
+    #      appear in production logs.
+    # Default retryable substrings. Keep this list to STANDARD protocol-level
+    # transients only — patterns that any HTTP/SSE-based LLM API can hit:
+    #   - rate limits
+    #   - 5xx transients (use "internal server error" text instead of bare
+    #     "500" to avoid colliding with "max_tokens=500" style messages)
+    #   - network / socket-level errors
+    #
+    # Deployment-specific or vendor-proxy markers (e.g. company-internal
+    # API gateways like venus, aiproxy, apilink, etc.) MUST NOT live here.
+    # Callers extend the list via ``Model.extra_retryable_substrings`` or
+    # the env var ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS`` (comma-separated).
+    # See agentica.model.base.Model for how the merged list is consumed.
     RETRYABLE_SUBSTRINGS: tuple = field(
         default=(
-            "rate_limit", "rate limit", "429", "503", "502",
+            "rate_limit", "rate limit", "429",
+            "502", "503", "504",
+            "internal server error",
+            "bad gateway", "gateway timeout", "service unavailable",
+            "temporarily unavailable",
             "connection", "timeout", "overloaded",
+            "remote disconnected", "remotedisconnected",
+            "incomplete chunked read", "chunked encoding", "premature",
         ),
         repr=False,
     )

@@ -663,7 +663,12 @@ class Runner:
                         break  # next model
 
                     # Retryable transient errors: backoff within current model.
-                    is_retryable = any(r in err for r in state.RETRYABLE_SUBSTRINGS)
+                    # Merge SDK defaults with model-level + env-level user
+                    # extensions, so deployment-specific proxy markers
+                    # (e.g. a private "venus_error") become retryable
+                    # without touching SDK source.
+                    _retryable = current.get_retryable_substrings(state.RETRYABLE_SUBSTRINGS)
+                    is_retryable = any(r in err for r in _retryable)
                     if is_retryable and attempt < state.max_api_retry - 1:
                         wait = (2 ** attempt) + random.uniform(0.0, 1.0)
                         logger.warning(

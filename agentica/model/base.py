@@ -9,6 +9,7 @@ import collections.abc
 import io
 import json
 import base64
+import os
 import re
 import weakref
 from abc import ABC, abstractmethod
@@ -111,6 +112,17 @@ class Model(ABC):
     # -*- Model capability limits (not sent to the API) -*-
     context_window: int = 128000
 
+    # Extra retryable error substrings, merged on top of the SDK's default
+    # protocol-level transients (see ``LoopState.RETRYABLE_SUBSTRINGS``).
+    #
+    # Use this for deployment-specific API-gateway / proxy markers that the
+    # SDK cannot know about — e.g. a private corp gateway returning
+    # ``venus_error 4001`` or ``aiproxy_busy`` as a 400-bodied transient.
+    #
+    # Resolution order: this field > env var ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS``
+    # (comma-separated) > none. Matched case-insensitively via substring.
+    extra_retryable_substrings: Optional[List[str]] = None
+
     # A list of tools provided to the Model.
     tools: Optional[List[Union[ModelTool, Dict]]] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
@@ -167,6 +179,34 @@ class Model(ABC):
         r"(?:maximum context (?:length|window)|context_length|max_context_length)[^\d]*(\d[\d,]*)",
         re.IGNORECASE,
     )
+
+    def get_retryable_substrings(self, defaults: tuple) -> tuple:
+        """Merge SDK default retry markers with user-extended markers.
+
+        Sources merged (de-duplicated, all lowercased, all matched as substrings):
+          1. ``defaults`` — SDK protocol-level transients (passed in by caller,
+             usually ``LoopState.RETRYABLE_SUBSTRINGS``).
+          2. ``self.extra_retryable_substrings`` — per-model deployment hook.
+          3. Env var ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS`` — comma-separated
+             global override, useful for ops without touching code.
+
+        Example: a private corp gateway named ``venus`` that returns
+        ``Error code: 400 - {'type': 'venus_error', ...}`` for transient
+        upstream hiccups::
+
+            model = OpenAIChat(id="gpt-5", extra_retryable_substrings=["venus_error"])
+
+        or, deployment-side without code changes::
+
+            export AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS="venus_error,aiproxy_busy"
+        """
+        merged = {s.lower() for s in defaults}
+        if self.extra_retryable_substrings:
+            merged.update(s.lower() for s in self.extra_retryable_substrings if s)
+        env_extra = os.environ.get("AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS", "")
+        if env_extra:
+            merged.update(s.strip().lower() for s in env_extra.split(",") if s.strip())
+        return tuple(merged)
 
     def _learn_context_limit_from_error(self, error_message: str) -> None:
         """Extract context window size from API error messages and update self.context_window."""
@@ -790,12 +830,21 @@ class Model(ABC):
             if soft_error:
                 function_call_success = False
 
-            # Track repeated failures and append a notice (not blocking)
-            _result_content = (
-                function_call_output
-                if (function_call_success or soft_error)
-                else function_call.error
-            )
+            # Track repeated failures and append a notice (not blocking).
+            # SECURITY: tool error strings are written back into the LLM context
+            # in the next turn. They may carry traceback fragments containing
+            # API keys, Authorization headers, env-style assignments, JWTs, or
+            # URL tokens (e.g. when a tool wraps an HTTPS client and re-raises
+            # the URL on failure). We sanitize the error branch before it ever
+            # touches Message.content. Successful outputs are NOT sanitized to
+            # preserve structured payloads verbatim.
+            if function_call_success or soft_error:
+                _result_content = function_call_output
+            else:
+                _raw_err = function_call.error
+                _result_content = (
+                    redact_sensitive_text(_raw_err) if isinstance(_raw_err, str) else _raw_err
+                )
             if not function_call_success:
                 _call_key = f"{function_call.function.name}:{json.dumps(function_call.arguments, sort_keys=True, default=str)}"
                 self._failed_call_counts[_call_key] = self._failed_call_counts.get(_call_key, 0) + 1

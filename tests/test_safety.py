@@ -181,6 +181,112 @@ class TestDangerousPatterns:
         result = check_command_safety("chmod 644 file.txt")
         assert result["action"] == "allow"
 
+    # --- Newly added patterns (hermes_v6) ---
+
+    def test_warn_sudo_rm(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("sudo rm /var/log/app.log")
+        assert result["action"] == "warn"
+        assert "sudo rm" in result["pattern"]
+
+    def test_warn_git_reset_hard(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("git reset --hard origin/main")
+        assert result["action"] == "warn"
+        assert "git reset --hard" in result["pattern"]
+
+    def test_warn_git_clean_fd(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("git clean -fd")
+        assert result["action"] == "warn"
+        assert "git clean -fd" in result["pattern"]
+
+    def test_warn_git_push_force(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("git push --force origin main")
+        assert result["action"] == "warn"
+        assert "git push --force" in result["pattern"]
+
+    def test_warn_overwrite_etc(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("echo malicious > /etc/passwd")
+        assert result["action"] == "warn"
+        assert "/etc" in result["pattern"]
+
+    def test_warn_overwrite_ssh(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("cat key > ~/.ssh/authorized_keys2")
+        assert result["action"] == "warn"
+
+    def test_allow_redirect_to_dev_null(self):
+        # /dev/null, /dev/stderr, /dev/stdout should be allowed (whitelist)
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("noisy_cmd > /dev/null 2>&1")
+        assert result["action"] == "allow"
+
+
+class TestCompoundCommandSplit:
+    """Test that compound shell commands are scanned segment-by-segment."""
+
+    def test_split_and_and(self):
+        from agentica.tools.safety import split_compound_command
+        parts = split_compound_command("cd /tmp && rm -rf *")
+        assert any("rm -rf" in p for p in parts)
+        assert any("cd /tmp" in p for p in parts)
+
+    def test_split_semicolon(self):
+        from agentica.tools.safety import split_compound_command
+        parts = split_compound_command("echo ok; sudo rm /etc/foo")
+        assert any("sudo rm" in p for p in parts)
+
+    def test_split_pipe(self):
+        from agentica.tools.safety import split_compound_command
+        parts = split_compound_command("cat file | grep secret")
+        assert any("cat file" in p for p in parts)
+        assert any("grep secret" in p for p in parts)
+
+    def test_compound_blocks_when_subcommand_destructive(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("echo hi && rm -rf /")
+        assert result["action"] == "block"
+        # reason names the destruction (whole-command scan catches it first)
+        assert "delete" in result["reason"] or "rm" in result["reason"]
+
+    def test_compound_warns_when_subcommand_risky(self):
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("true; git reset --hard")
+        assert result["action"] == "warn"
+        assert "git reset --hard" in result["reason"]
+
+    def test_quoted_dangerous_command_is_not_executed(self):
+        # Inside a quoted string, the dangerous token is data, not a command.
+        # We accept that this still WARNS (regex sees the substring after
+        # shlex strips quotes) — the point is it should not CRASH the
+        # splitter and should produce a sensible reason.
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety('git commit -m "do not rm -rf anywhere"')
+        # The action may be allow OR warn depending on splitting; just
+        # ensure no exception and a stable schema.
+        assert result["action"] in ("allow", "warn")
+        assert isinstance(result["reason"], str)
+
+    def test_unbalanced_quotes_fallback(self):
+        # shlex would raise on unbalanced quotes — splitter must fall back
+        # to scanning the whole string without crashing.
+        from agentica.tools.safety import check_command_safety, split_compound_command
+        parts = split_compound_command('echo "broken && rm -rf /')
+        assert parts == ['echo "broken && rm -rf /']  # full fallback
+        result = check_command_safety('echo "broken && rm -rf /')
+        # Whole-string scan still catches the rm -rf / pattern
+        assert result["action"] == "block"
+
+    def test_block_dominates_warn(self):
+        # If any sub-command is block-level, the overall result must be block,
+        # not warn — even if an earlier sub-command would only warn.
+        from agentica.tools.safety import check_command_safety
+        result = check_command_safety("chmod 777 /tmp && rm -rf /")
+        assert result["action"] == "block"
+
 
 # ============== TestSecretRedaction ==============
 

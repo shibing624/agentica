@@ -484,6 +484,10 @@ class Claude(Model):
         "max_tokens too large given prompt"). On a successful match, the
         stream is reopened once with the adjusted output cap.
         """
+        import asyncio as _asyncio
+        import random as _random
+        from agentica.model.stream_retry import default_is_parser_error
+
         chat_messages, system_message = await self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
 
@@ -492,17 +496,37 @@ class Claude(Model):
                 model=self.id, messages=chat_messages, **request_kwargs,
             )
 
-        stream_mgr = _open()
-        try:
-            stream = await stream_mgr.__aenter__()
-            return stream_mgr, stream
-        except Exception as e:
-            self._learn_context_limit_from_error(str(e))
-            if not self._maybe_recover_max_tokens(e, request_kwargs):
+        async def _try_enter() -> Tuple[Any, Any]:
+            mgr = _open()
+            stream = await mgr.__aenter__()
+            return mgr, stream
+
+        # Retry the open step on transient parser / gateway / 5xx errors.
+        # max_tokens recovery is layered on top so both paths compose.
+        max_retries = 2
+        attempt = 0
+        while True:
+            try:
+                return await _try_enter()
+            except Exception as e:
+                self._learn_context_limit_from_error(str(e))
+                if self._maybe_recover_max_tokens(e, request_kwargs):
+                    # max_tokens-too-large: reopen once with adjusted cap;
+                    # do not consume retry budget for transient bucket.
+                    return await _try_enter()
+                if attempt < max_retries and default_is_parser_error(
+                    e, extra_substrings=self.extra_retryable_substrings,
+                ):
+                    wait = 0.5 * (2 ** attempt) + _random.uniform(0.0, 0.25)
+                    logger.warning(
+                        "[stream-retry] anthropic/%s open attempt %d/%d failed, "
+                        "retrying in %.2fs: %s",
+                        self.id, attempt + 1, max_retries + 1, wait, e,
+                    )
+                    await _asyncio.sleep(wait)
+                    attempt += 1
+                    continue
                 raise
-            stream_mgr = _open()
-            stream = await stream_mgr.__aenter__()
-            return stream_mgr, stream
 
     def update_usage_metrics(
             self,

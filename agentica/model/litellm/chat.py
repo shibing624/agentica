@@ -270,18 +270,31 @@ class LiteLLMChat(Model):
         return response
     
     async def invoke_stream(self, messages: List[Message]) -> Any:
-        """Send an async streaming completion request to LiteLLM."""
+        """Send an async streaming completion request to LiteLLM.
+
+        Wrapped in ``stream_with_retry`` so transient gateway / SSE-parser
+        errors that happen before any chunk is yielded retry automatically.
+        """
         from litellm import acompletion
+        from agentica.model.stream_retry import stream_with_retry
+
         api_key = self._get_api_key()
-        
-        response = await acompletion(
-            model=self.id,
-            messages=[self.format_message(m) for m in messages],
-            api_key=api_key,
-            stream=True,
-            **self.request_kwargs,
-        )
-        async for chunk in response:
+        formatted = [self.format_message(m) for m in messages]
+
+        async def _open():
+            return await acompletion(
+                model=self.id,
+                messages=formatted,
+                api_key=api_key,
+                stream=True,
+                **self.request_kwargs,
+            )
+
+        async for chunk in stream_with_retry(
+            _open,
+            extra_substrings=self.extra_retryable_substrings,
+            provider_label=f"litellm/{self.id}",
+        ):
             yield chunk
 
     # handle_tool_calls, handle_stream_tool_calls, update_usage_metrics,

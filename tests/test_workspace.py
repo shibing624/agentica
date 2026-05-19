@@ -146,14 +146,37 @@ class TestWorkspace:
         assert "Second line" in content
 
     def test_get_context_prompt(self, temp_workspace_path):
-        """Test getting context prompt from workspace files."""
+        """Test getting context prompt from workspace files.
+
+        Pins the AGENTS.md discovery to the temp workspace by chdir-ing into
+        it and pointing AGENTICA_HOME at a temp dir. Previously this test
+        relied on the host having ``~/.agentica/AGENTS.md`` or an ancestor
+        ``AGENTS.md`` in cwd, which made it pass locally but fail in clean CI
+        environments. The test now controls all three discovery sources
+        (global home / cwd chain / workspace) so the outcome is deterministic.
+        """
+        # Seed a real AGENTS.md in the workspace so _load_agent_md_chain has
+        # non-empty content regardless of host filesystem state.
+        (temp_workspace_path / "AGENTS.md").write_text(
+            "# Project Agent\nProject-specific agent instructions go here.\n",
+            encoding="utf-8",
+        )
+
         workspace = Workspace(temp_workspace_path)
         workspace.initialize()
 
-        context = asyncio.run(workspace.get_context_prompt())
+        # Isolate cwd + AGENTICA_HOME so host pollution can't influence merge.
+        prev_cwd = os.getcwd()
+        empty_home = temp_workspace_path / "_empty_home"
+        empty_home.mkdir()
+        try:
+            os.chdir(temp_workspace_path)
+            with patch("agentica.workspace.AGENTICA_HOME", str(empty_home)):
+                context = asyncio.run(workspace.get_context_prompt())
+        finally:
+            os.chdir(prev_cwd)
 
-        # Should include content from default files
-        assert "AGENTS.md" in context or "Agent" in context
+        assert "AGENTS.md" in context or "Project Agent" in context
         assert len(context) > 0
 
     def test_write_memory_daily(self, temp_workspace_path):
