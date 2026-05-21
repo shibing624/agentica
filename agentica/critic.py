@@ -77,6 +77,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Protocol, Type
 
 from pydantic import BaseModel, ValidationError
 
+from agentica.prompts.critic import CRITIC_PROMPT_TEMPLATE, REVISE_PROMPT_TEMPLATE
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
@@ -114,24 +115,6 @@ _STYLE_GUIDANCE = {
         "even if incomplete in detail; reject only on serious factual or relevance failures."
     ),
 }
-
-_CRITIC_PROMPT_TEMPLATE = (
-    "Critique the following draft produced for the task.\n\n"
-    "Reviewing style: {style_guidance}\n\n"
-    "Task: {task}\n\n"
-    "Draft:\n{draft}\n\n"
-    f"If the draft fully addresses the task with no material issues, reply "
-    f"with the single word {_APPROVAL_TOKEN}. Otherwise, list specific "
-    "actionable issues — one per line, no preamble."
-)
-
-_REVISE_PROMPT_TEMPLATE = (
-    "Revise your previous draft to address the critic feedback.\n\n"
-    "Original task: {task}\n\n"
-    "Previous draft:\n{draft}\n\n"
-    "Critic feedback:\n{feedback}\n\n"
-    "Return only the revised draft."
-)
 
 _DRAFT_PREVIEW_CHARS = 200
 
@@ -325,10 +308,11 @@ class AgentCritic:
         self.style = style
 
     async def __call__(self, task: str, answer: str) -> CritiqueResult:
-        prompt = _CRITIC_PROMPT_TEMPLATE.format(
+        prompt = CRITIC_PROMPT_TEMPLATE.format(
             style_guidance=_STYLE_GUIDANCE[self.style],
             task=task,
             draft=answer,
+            approval_token=_APPROVAL_TOKEN,
         )
         resp = await self.agent.run(prompt)
         text = resp.content or ""
@@ -466,7 +450,7 @@ async def refine(
             if not v.approved
         )
         revise_resp = await actor.run(
-            _REVISE_PROMPT_TEMPLATE.format(
+            REVISE_PROMPT_TEMPLATE.format(
                 task=task, draft=draft, feedback=all_issues
             )
         )

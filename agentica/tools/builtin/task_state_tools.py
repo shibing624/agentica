@@ -249,43 +249,9 @@ class BuiltinMemoryTool(Tool):
         self._workspace = None
         self._sync_memories_to_global_agent_md = False
 
-        from agentica.hooks import MEMORY_EXCLUSION_SPEC, MEMORY_TYPE_SPEC
+        from agentica.prompts.memory import MEMORY_SYSTEM_PROMPT
 
-        self.MEMORY_SYSTEM_PROMPT = dedent("""\
-        ## Long-term Memory
-
-        You have access to `save_memory` and `search_memory` tools for persistent memory across sessions.
-        `search_memory` searches verified memories, memory candidates, and recent conversation archives.
-        Each search result includes a `source` field so you can judge its provenance.
-
-        Memories capture context NOT derivable from the current project state.
-        Code patterns, architecture, git history, and file structure are derivable
-        (via grep/git/AGENTS.md) and must NOT be saved as memories.
-
-        If the user explicitly asks you to remember something, save it immediately
-        as whichever type fits best. If they ask you to forget, tell them to delete
-        the relevant memory file.
-
-        ### Memory types
-
-        """) + MEMORY_TYPE_SPEC + dedent("""
-        **feedback** — Guidance on how to approach work: what to avoid AND what
-          to keep doing.
-          When to save: any time the user corrects an approach ('don't do X') OR
-          confirms a non-obvious approach worked ('yes exactly', 'perfect').
-          Body structure: lead with the rule, then Why, then How to apply.
-
-        ### How to save
-        Call `save_memory` with:
-        - `title`: short, searchable name (e.g. "user_role", "prefer_pytest")
-        - `content`: what to remember and how to apply it
-        - `memory_type`: one of "user", "feedback", "project", "reference"
-
-        ### What NOT to save
-
-        """) + MEMORY_EXCLUSION_SPEC + (
-            "\n- Duplicate of existing memory (search first before saving)."
-        )
+        self.MEMORY_SYSTEM_PROMPT = MEMORY_SYSTEM_PROMPT
 
         self.register(self.save_memory, is_destructive=True)
         self.register(self.search_memory, concurrency_safe=True, is_read_only=True)

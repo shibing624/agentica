@@ -21,46 +21,10 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from agentica.handoff import default_handoff_mapper
+from agentica.prompts.swarm import COORDINATOR_SYSTEM_PROMPT, SYNTHESIZER_PROMPT
+from agentica.run_config import RunConfig
 from agentica.utils.json_parse import extract_json_array
 from agentica.utils.log import logger
-from agentica.run_config import RunConfig
-
-COORDINATOR_SYSTEM_PROMPT = """\
-You are a task coordinator. Your job is to:
-1. Analyze the user's task
-2. Decompose it into subtasks that can be handled by your team
-3. Return a JSON array of subtask assignments
-
-Available team members:
-{team_description}
-
-Return ONLY a JSON array, where each element is:
-{{"agent_name": "<name>", "subtask": "<description of what this agent should do>"}}
-
-Example:
-[
-  {{"agent_name": "researcher", "subtask": "Search for recent papers on transformer architectures"}},
-  {{"agent_name": "coder", "subtask": "Implement a simple transformer encoder in PyTorch"}}
-]
-
-Rules:
-- Each subtask should be self-contained
-- Assign to the most appropriate team member based on their description
-- You may assign multiple subtasks to the same agent
-- Return ONLY valid JSON, no explanations
-"""
-
-SYNTHESIZER_PROMPT = """\
-You are synthesizing results from multiple agents who worked on subtasks of the user's request.
-
-Original task: {original_task}
-
-Agent results:
-{agent_results}
-
-Synthesize these results into a single coherent response that addresses the original task.
-Be concise and well-structured. Do not mention the individual agents or subtask assignments.
-"""
 
 
 @dataclass

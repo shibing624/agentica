@@ -1,27 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Shared utility for loading prompt markdown files.
-"""
-from pathlib import Path
+@description: base/ shim around the package-level load_prompt.
 
-_BASE_DIR = Path(__file__).parent / "md"
+Existing base/*.py modules call ``load_prompt("name.md")`` with no caller
+argument. We keep that ergonomic by binding ``__file__`` here so the
+underlying loader (``agentica.prompts.utils.load_prompt``) stays generic.
+"""
+from agentica.prompts.utils import load_prompt as _load_prompt
 
 
 def load_prompt(filename: str, **kwargs) -> str:
-    """Load prompt content from MD file in the md/ directory.
-
-    Args:
-        filename: Name of the .md file (e.g., "heartbeat.md")
-        **kwargs: Optional format variables to substitute in the template
-
-    Returns:
-        Stripped content of the file, or empty string if not found.
-    """
-    filepath = _BASE_DIR / filename
-    if filepath.exists():
-        content = filepath.read_text(encoding="utf-8").strip()
-        if kwargs:
-            content = content.format(**kwargs)
-        return content
-    return ""
+    """Load a prompt from ``agentica/prompts/base/md/<filename>``."""
+    return _load_prompt(__file__, filename, **kwargs)

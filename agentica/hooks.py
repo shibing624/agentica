@@ -22,40 +22,13 @@ from agentica.learning_report import (
     write_learning_report,
 )
 from agentica.model.message import Message
+from agentica.prompts.memory import (
+    BATCH_JUDGE_PROMPT,
+    FEEDBACK_CLASSIFY_PROMPT,
+    MEMORY_EXTRACT_PROMPT,
+)
 from agentica.tools.skill_tool import SkillTool
 from agentica.utils.log import logger
-
-# ─── Shared memory type specification ───────────────────────────────────────
-# Used by both BuiltinMemoryTool (LLM-facing system prompt) and
-# MemoryExtractHooks (extraction sub-call). Keep in sync by importing
-# from this single source.
-
-MEMORY_TYPE_SPEC = (
-    "**user** — User's role, goals, preferences, and knowledge.\n"
-    "  When to save: when you learn details about the user's role, preferences, "
-    "responsibilities, or knowledge.\n"
-    "  Example: 'User is a data scientist focused on observability/logging.'\n\n"
-    "**project** — Information about ongoing work, goals, bugs, or incidents "
-    "NOT derivable from code or git history.\n"
-    "  When to save: when you learn who is doing what, why, or by when. "
-    "Convert relative dates to absolute dates.\n\n"
-    "**reference** — Pointers to external resources: issue trackers, dashboards, "
-    "wikis, documentation sites, or internal tools.\n"
-    "  When to save: when you learn about an external system the team uses.\n"
-)
-
-MEMORY_EXCLUSION_SPEC = (
-    "- Code patterns, conventions, architecture, file paths, or project structure "
-    "— derivable by reading the codebase.\n"
-    "- Git history, recent changes, or who-changed-what — `git log`/`git blame` "
-    "are authoritative.\n"
-    "- Debugging solutions or fix recipes — the fix is in the code.\n"
-    "- Anything already documented in AGENTS.md files.\n"
-    "- Ephemeral task details: in-progress work, temporary state, current "
-    "conversation context.\n"
-    "- Activity logs, PR lists, or task summaries — only the *surprising* or "
-    "*non-obvious* part is worth keeping.\n"
-)
 
 
 class AgentHooks:
@@ -315,27 +288,9 @@ class MemoryExtractHooks(RunHooks):
         response = await agent.run("Hello", config=RunConfig(hooks=hooks))
     """
 
-    # Prompt for the memory extraction sub-call.
-    # Uses shared MEMORY_TYPE_SPEC / MEMORY_EXCLUSION_SPEC constants
-    # (same source as BuiltinMemoryTool.MEMORY_SYSTEM_PROMPT).
-    _EXTRACT_PROMPT = (
-        "You are a memory extraction assistant. Review the conversation below and "
-        "extract key information worth remembering for future sessions.\n\n"
-        "Memories capture context NOT derivable from the current project state. "
-        "Code patterns, architecture, git history, and file structure are derivable "
-        "(via grep/git/AGENTS.md) and must NOT be saved as memories.\n\n"
-        "## Memory types\n\n"
-        + MEMORY_TYPE_SPEC +
-        "\n## What NOT to save\n\n"
-        + MEMORY_EXCLUSION_SPEC +
-        "\n## Output format\n\n"
-        "For each memory, output a JSON object with fields:\n"
-        '  {"title": "short_name", "content": "what to remember", '
-        '"type": "user|project|reference"}\n\n'
-        "Do NOT extract feedback/corrections — those are handled separately.\n\n"
-        "Output a JSON array of memories. If nothing worth remembering, output: []\n\n"
-        "Conversation:\n"
-    )
+    # Prompt for the memory extraction sub-call. See
+    # ``agentica.prompts.memory`` for the markdown source.
+    _EXTRACT_PROMPT = MEMORY_EXTRACT_PROMPT
 
     _STATE_SLOT = "memory_extract"
 
@@ -662,46 +617,9 @@ class ExperienceCaptureHooks(RunHooks):
     # it finally flushes.
     _MAX_JUDGE_BUFFER_TURNS = 50
 
-    # LLM prompt for feedback classification
-    _FEEDBACK_CLASSIFY_PROMPT = (
-        "You are judging whether the user's latest message is a correction or "
-        "behavioral feedback to the assistant.\n\n"
-        "Inputs:\n"
-        "- Previous assistant message\n"
-        "- Current user message\n\n"
-        "Decide:\n"
-        "1. Is the user correcting the assistant, rejecting its approach, or "
-        "imposing a behavioral constraint?\n"
-        "2. Is this a reusable rule worth remembering for future sessions?\n"
-        "3. If yes, normalize it into a reusable rule.\n\n"
-        "Important:\n"
-        "- Do not rely on literal phrases. Indirect corrections still count.\n"
-        "- Code snippets, log lines, or hypothetical examples in quotes are NOT corrections.\n"
-        "- A pure retry request (e.g. 'try again', 'read another file') is NOT "
-        "a correction.\n"
-        "- When the user explicitly states a workflow, procedure, or rule (e.g. "
-        "'always do X before Y', 'the rule is ...', '下次请先 ...'), set "
-        "should_persist=true and persist_target=\"experience\".\n"
-        "- Set persist_target=\"experience\" for any cross-session reusable "
-        "rule; use \"none\" only for turn-specific feedback or non-corrections.\n\n"
-        "Rule field requirements (CRITICAL — this becomes the dedup key):\n"
-        "- If the user gives an explicit quoted rule string (\"the rule is: '<X>'\", "
-        "'apply this rule: \"<X>\"', etc.), copy <X> verbatim into the rule field. "
-        "Do not paraphrase, do not add steps, do not prepend 'Always'.\n"
-        "- Otherwise, condense to a single short verb-object phrase, "
-        "<= 8 words, no leading 'Always/Never/Please', no trailing period.\n"
-        "- The rule must be the same string every time the same intent recurs — "
-        "it is hashed to a filename.\n\n"
-        "Return JSON only with these fields:\n"
-        '{"is_correction": bool, "confidence": float (0-1), '
-        '"category": "factual|preference|workflow|tool_usage|rejection|not_correction", '
-        '"scope": "turn_only|session|cross_session", '
-        '"should_persist": bool, '
-        '"persist_target": "none|experience", '
-        '"rule": "verb-object phrase, <= 8 words", '
-        '"why": "reason this matters", '
-        '"how_to_apply": "when and where to apply this rule"}\n\n'
-    )
+    # LLM prompt for feedback classification (markdown in
+    # ``agentica.prompts.memory``).
+    _FEEDBACK_CLASSIFY_PROMPT = FEEDBACK_CLASSIFY_PROMPT
 
     _RULE_PREFIX_PATTERNS = (
         re.compile(
@@ -1274,25 +1192,7 @@ class ExperienceCaptureHooks(RunHooks):
     _JUDGE_STATE_SLOT = "correction_judge"
 
     # Prompt for the batched judge: one call scans an entire turn window.
-    _BATCH_JUDGE_PROMPT = (
-        "You are auditing a recent conversation window to find user corrections "
-        "or behavioral feedback addressed to the assistant.\n\n"
-        "For each turn, decide whether the user's message was a correction, "
-        "rejection, or a reusable rule the assistant should remember.\n\n"
-        "Important:\n"
-        "- A pure retry request ('try again') or a question is NOT a correction.\n"
-        "- Code snippets / log lines in quotes are NOT corrections.\n"
-        "- An explicit workflow or rule ('always do X before Y', '下次请先 ...', "
-        "'the rule is …') IS a correction worth persisting.\n\n"
-        "Output a JSON array; one object per correction you found:\n"
-        '{"turn_index": int, "rule": "verb-object phrase <=8 words", '
-        '"confidence": float, "category": "factual|preference|workflow|tool_usage|rejection", '
-        '"scope": "turn_only|session|cross_session", '
-        '"should_persist": bool, "persist_target": "experience|none", '
-        '"why": "...", "how_to_apply": "..."}\n\n'
-        "If nothing in the window is a correction, output []. Do not invent corrections.\n\n"
-        "Window (oldest first):\n"
-    )
+    _BATCH_JUDGE_PROMPT = BATCH_JUDGE_PROMPT
 
     def _should_flush_judge(
         self,

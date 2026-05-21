@@ -1,0 +1,6 @@
+- Code patterns, conventions, architecture, file paths, or project structure — derivable by reading the codebase.
+- Git history, recent changes, or who-changed-what — `git log`/`git blame` are authoritative.
+- Debugging solutions or fix recipes — the fix is in the code.
+- Anything already documented in AGENTS.md files.
+- Ephemeral task details: in-progress work, temporary state, current conversation context.
+- Activity logs, PR lists, or task summaries — only the *surprising* or *non-obvious* part is worth keeping.
