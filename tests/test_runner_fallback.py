@@ -9,6 +9,7 @@ import unittest
 import unittest.mock
 from unittest.mock import AsyncMock, MagicMock
 
+from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
 from agentica.model.response import ModelResponse
 from agentica.runner import Runner
@@ -76,6 +77,58 @@ class TestFallbackContentFilterFinishReason(unittest.TestCase):
 
         self.assertEqual(result.content, "real answer")
         self.assertEqual(result.finish_reason, "stop")
+
+    def test_fallback_does_not_receive_filtered_assistant_from_primary(self):
+        messages = [
+            Message(role="user", content="上一轮用户问题"),
+            Message(role="assistant", content="上一轮正常回答"),
+            Message(role="user", content="当前用户追问"),
+        ]
+        seen_by_fallback = {"contents": []}
+
+        async def _primary_resp(messages):
+            messages.append(
+                Message(role="assistant", content="你好，我无法给到相关内容。")
+            )
+            return ModelResponse(
+                content="你好，我无法给到相关内容。",
+                finish_reason="content_filter",
+            )
+
+        async def _fallback_resp(messages):
+            seen_by_fallback["contents"] = [m.content for m in messages]
+            messages.append(Message(role="assistant", content="结合上文继续回答"))
+            return ModelResponse(content="结合上文继续回答", finish_reason="stop")
+
+        primary = MagicMock()
+        primary.id = "primary"
+        primary.response = _primary_resp
+        primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+        primary.extra_retryable_substrings = None
+
+        fallback = MagicMock()
+        fallback.id = "fallback"
+        fallback.response = _fallback_resp
+        fallback.get_retryable_substrings = lambda defaults: tuple(defaults)
+        fallback.extra_retryable_substrings = None
+
+        agent = _make_agent()
+        agent._run_fallback_models = [fallback]
+
+        state = LoopState()
+        result = asyncio.run(
+            Runner._call_with_retry(primary, messages, state, agent, stream=False)
+        )
+
+        self.assertEqual(result.content, "结合上文继续回答")
+        self.assertEqual(
+            seen_by_fallback["contents"],
+            ["上一轮用户问题", "上一轮正常回答", "当前用户追问"],
+        )
+        self.assertEqual(
+            [m.content for m in messages],
+            ["上一轮用户问题", "上一轮正常回答", "当前用户追问", "结合上文继续回答"],
+        )
 
     def test_walks_full_chain_until_a_clean_finish_reason(self):
         primary = _fake_model(

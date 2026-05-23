@@ -598,6 +598,7 @@ class Runner:
                 )
 
             for attempt in range(state.max_api_retry):
+                message_checkpoint = len(messages)
                 try:
                     if stream:
                         # Stream: defer content_filter detection to the consumer.
@@ -621,6 +622,10 @@ class Runner:
                             f"finish_reason={resp.finish_reason!r}; "
                             f"trying next fallback"
                         )
+                        # Model.response() may already have appended the blocked
+                        # assistant message. Fallback must retry the same clean
+                        # prompt, not continue after the primary model's refusal.
+                        del messages[message_checkpoint:]
                         trigger = "content_filter"
                         last_exc = RuntimeError(
                             f"content_filter on {current.id} "
@@ -636,6 +641,7 @@ class Runner:
                     return resp
 
                 except Exception as exc:
+                    del messages[message_checkpoint:]
                     last_exc = exc
                     err = str(exc).lower()
 
