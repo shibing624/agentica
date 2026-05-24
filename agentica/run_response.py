@@ -83,7 +83,6 @@ class ToolCallInfo(BaseModel):
 
 class RunResponseExtraData(BaseModel):
     references: Optional[List[MessageReferences]] = None
-    add_messages: Optional[List[Message]] = None
     history: Optional[List[Message]] = None
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
 

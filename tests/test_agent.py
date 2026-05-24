@@ -202,8 +202,7 @@ class TestAgentTimeout(unittest.TestCase):
             agent.response_model = None
             agent.parse_response = True
 
-            from agentica.run_config import RunConfig
-            response = agent.run_sync("test", config=RunConfig(run_timeout=0.001))
+            response = agent.run_sync("test", timeout=0.001)
             self.assertEqual(response.event, "RunTimeout")
             self.assertIn("timed out", response.content)
 

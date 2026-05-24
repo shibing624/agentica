@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from agentica.utils.log import logger
 from agentica.document import Document
 from agentica.model.message import Message, MessageReferences
+from agentica.run_input import build_user_message_from_sequence
 from agentica.run_response import RunResponseExtraData
 from agentica.utils.timer import Timer
 from agentica.agent.history_filter import apply_history_pipeline
@@ -619,8 +620,25 @@ class PromptsMixin:
         if message is None:
             return None
 
-        if not pc.use_default_user_message or isinstance(message, list):
-            return Message(role=pc.user_message_role, content=message, images=images, audio=audio, **kwargs)
+        if isinstance(message, list):
+            return build_user_message_from_sequence(
+                message,
+                role=pc.user_message_role,
+                audio=audio,
+                images=images,
+                videos=videos,
+                **kwargs,
+            )
+
+        if not pc.use_default_user_message:
+            return Message(
+                role=pc.user_message_role,
+                content=message,
+                audio=audio,
+                images=images,
+                videos=videos,
+                **kwargs,
+            )
 
         user_prompt = message
         if (
@@ -652,7 +670,6 @@ class PromptsMixin:
             images: Optional[Sequence[Any]] = None,
             videos: Optional[Sequence[Any]] = None,
             messages: Optional[Sequence[Union[Dict, Message]]] = None,
-            add_messages: Optional[List[Union[Dict, Message]]] = None,
             **kwargs: Any,
     ) -> Tuple[Optional[Message], List[Message], List[Message]]:
         """Build and return (system_message, user_messages, messages_for_model)."""
@@ -663,30 +680,7 @@ class PromptsMixin:
         if system_message is not None:
             messages_for_model.append(system_message)
 
-        if add_messages is not None:
-            _add_messages: List[Message] = []
-            for _m in add_messages:
-                if isinstance(_m, Message):
-                    _add_messages.append(_m)
-                    messages_for_model.append(_m)
-                elif isinstance(_m, dict):
-                    try:
-                        _m_parsed = Message.model_validate(_m)
-                        _add_messages.append(_m_parsed)
-                        messages_for_model.append(_m_parsed)
-                    except Exception as e:
-                        logger.warning(f"Failed to validate message: {e}")
-            if len(_add_messages) > 0:
-                logger.debug(f"Adding {len(_add_messages)} extra messages")
-                if self.run_response.extra_data is None:
-                    self.run_response.extra_data = RunResponseExtraData(add_messages=_add_messages)
-                else:
-                    if self.run_response.extra_data.add_messages is None:
-                        self.run_response.extra_data.add_messages = _add_messages
-                    else:
-                        self.run_response.extra_data.add_messages.extend(_add_messages)
-
-        if self.add_history_to_context:
+        if messages is None and self.add_history_to_context:
             history: List[Message] = self.working_memory.get_messages_from_last_n_runs(
                 last_n=self.num_history_turns, skip_role=pc.system_message_role
             )
@@ -717,10 +711,7 @@ class PromptsMixin:
                 if user_message is not None:
                     user_messages.append(user_message)
             elif isinstance(message, dict):
-                try:
-                    user_messages.append(Message.model_validate(message))
-                except Exception as e:
-                    logger.warning(f"Failed to validate message: {e}")
+                user_messages.append(Message.model_validate(message))
             else:
                 logger.warning(f"Invalid message type: {type(message)}")
         elif messages is not None and len(messages) > 0:
@@ -728,10 +719,9 @@ class PromptsMixin:
                 if isinstance(_m, Message):
                     user_messages.append(_m)
                 elif isinstance(_m, dict):
-                    try:
-                        user_messages.append(Message.model_validate(_m))
-                    except Exception as e:
-                        logger.warning(f"Failed to validate message: {e}")
+                    user_messages.append(Message.model_validate(_m))
+                else:
+                    raise ValueError(f"Invalid messages item type: {type(_m)}")
         messages_for_model.extend(user_messages)
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model

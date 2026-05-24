@@ -1387,29 +1387,37 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         logger.debug(f"Filtered {len(disabled_funcs)} disabled tools: {disabled_funcs}")
 
     # =========================================================================
-    # Run API — delegates to self._runner (public API unchanged)
+    # Run API — delegates to self._runner
     # =========================================================================
 
     async def run(
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
-        """Run the Agent and return the final response (non-streaming)."""
+        """Run the Agent and return the final response (non-streaming).
+
+        Args:
+            timeout: Total wall-clock seconds for this run (maps to RunConfig.run_timeout).
+                For fine-grained stream timeouts use RunConfig(first_token_timeout=..., idle_timeout=...).
+            hooks: Per-run lifecycle hooks (maps to RunConfig.hooks).
+        """
         return await self._runner.run(
             message=message,
+            messages=messages,
             audio=audio,
             images=images,
             videos=videos,
-            messages=messages,
-            add_messages=add_messages,
+            timeout=timeout,
+            hooks=hooks,
             config=config,
             **kwargs,
         )
@@ -1418,22 +1426,24 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
         """Run the Agent and stream incremental responses."""
         async for chunk in self._runner.run_stream(
             message=message,
+            messages=messages,
             audio=audio,
             images=images,
             videos=videos,
-            messages=messages,
-            add_messages=add_messages,
+            timeout=timeout,
+            hooks=hooks,
             config=config,
             **kwargs,
         ):
@@ -1627,22 +1637,24 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
         """Synchronous wrapper for `run()` (non-streaming only)."""
         return self._runner.run_sync(
             message=message,
+            messages=messages,
             audio=audio,
             images=images,
             videos=videos,
-            messages=messages,
-            add_messages=add_messages,
+            timeout=timeout,
+            hooks=hooks,
             config=config,
             **kwargs,
         )
@@ -1651,22 +1663,24 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> Iterator[RunResponse]:
         """Synchronous wrapper for `run_stream()`."""
         return self._runner.run_stream_sync(
             message=message,
+            messages=messages,
             audio=audio,
             images=images,
             videos=videos,
-            messages=messages,
-            add_messages=add_messages,
+            timeout=timeout,
+            hooks=hooks,
             config=config,
             **kwargs,
         )

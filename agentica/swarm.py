@@ -322,8 +322,8 @@ class Swarm:
     ) -> List[Dict]:
         """Use coordinator to decompose task into subtask assignments.
 
-        Passes the coordinator prompt via add_messages to avoid mutating
-        the coordinator's instructions (which would be unsafe under concurrency).
+        Passes the coordinator prompt via a complete transcript to avoid
+        mutating the coordinator's instructions (which would be unsafe under concurrency).
         """
         team_desc = "\n".join(
             f"- {name}: {a.description or a.name or name}"
@@ -332,11 +332,13 @@ class Swarm:
         prompt = COORDINATOR_SYSTEM_PROMPT.format(team_description=team_desc)
 
         try:
-            # Pass coordinator prompt as a system message via add_messages
-            # instead of mutating coordinator.instructions (concurrency-safe)
+            # Pass coordinator prompt in a complete transcript instead of
+            # mutating coordinator.instructions (concurrency-safe).
             response = await coordinator.run(
-                task,
-                add_messages=[{"role": "system", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": task},
+                ],
                 config=config,
             )
             content = response.content if response and response.content else ""
@@ -387,14 +389,16 @@ class Swarm:
             agent_results=results_text,
         )
 
-        # Use add_messages instead of mutating synthesizer.instructions (concurrency-safe)
+        # Use a complete transcript instead of mutating synthesizer.instructions (concurrency-safe).
         try:
             response = await synthesizer.run(
-                prompt,
-                add_messages=[{
-                    "role": "system",
-                    "content": "You synthesize results from multiple agents into a coherent response.",
-                }],
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You synthesize results from multiple agents into a coherent response.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
                 config=config,
             )
             content = response.content if response and response.content else ""

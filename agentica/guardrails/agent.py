@@ -321,15 +321,14 @@ def normalize_input_for_guardrails(
     images: Any = None,
     videos: Any = None,
     messages: Optional[Sequence[Any]] = None,
-    add_messages: Optional[Sequence[Any]] = None,
 ) -> List[dict]:
     """Build the full inbound payload visible to input guardrails.
 
     A single ``message`` argument is *not* enough: callers may also pass
-    a prior conversation via ``messages=[...]`` plus ``add_messages=[...]``
-    plus multimodal attachments (``audio``/``images``/``videos``). All of
-    these reach the model, so guardrails MUST be able to inspect all of
-    them — otherwise a malicious image or earlier turn slips past.
+    a full conversation via ``messages=[...]`` plus multimodal attachments
+    (``audio``/``images``/``videos``). All of these reach the model, so
+    guardrails MUST be able to inspect all of them — otherwise a malicious
+    image or earlier turn slips past.
 
     Returns a list of ``{"role", "content", "media"?}`` dicts in the order
     they will be sent to the model. ``str(result)`` keeps backward-compat
@@ -339,11 +338,6 @@ def normalize_input_for_guardrails(
     items: List[dict] = []
     if messages:
         for m in messages:
-            d = _coerce_message_to_dict(m)
-            if d is not None:
-                items.append(d)
-    if add_messages:
-        for m in add_messages:
             d = _coerce_message_to_dict(m)
             if d is not None:
                 items.append(d)

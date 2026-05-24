@@ -72,6 +72,23 @@ class TestImageInput:
             )
             assert isinstance(resp, RunResponse)
 
+    @pytest.mark.asyncio
+    async def test_run_with_sequence_image_and_text(self):
+        captured = []
+
+        async def fake_response(*args, **kwargs):
+            captured.append(list(kwargs["messages"]))
+            return _mock_resp("Sequence image")
+
+        with patch.object(OpenAIChat, 'response', new=fake_response):
+            agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
+            resp = await agent.run(["https://example.com/image.png", "Describe this image"])
+
+        assert resp.content == "Sequence image"
+        user_message = captured[0][-1]
+        assert user_message.content == "Describe this image"
+        assert user_message.images == ["https://example.com/image.png"]
+
     def test_run_sync_with_images(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_resp("Image OK")):
             agent = Agent(name="A", model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))

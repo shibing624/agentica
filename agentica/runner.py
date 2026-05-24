@@ -51,6 +51,7 @@ from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
+from agentica.run_input import merge_run_config, warn_unknown_run_kwargs
 from agentica.run_response import AgentCancelledError, RunEvent, RunResponse
 from agentica.run_config import RunConfig
 from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
@@ -775,7 +776,6 @@ class Runner:
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
         messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
         stream_intermediate_steps: bool = False,
         save_response_to_file: Optional[str] = None,
         hooks: Optional[RunHooks] = None,
@@ -792,6 +792,18 @@ class Runner:
         - Streaming users should call `run_stream()` (which returns this generator).
 
         All LLM calls within this run are grouped under a single Langfuse trace (if enabled).
+
+        Args:
+            message: Primary user input for this turn. In message mode the
+                Runner sends ``[system] + [working_memory.history] + [message]``.
+            messages: Full transcript for this run. Mutually exclusive with
+                ``message``. In messages mode the Runner sends
+                ``[system] + [messages]`` and does not append working memory
+                history or persist the transcript back into working memory.
+
+        Final message order sent to the model:
+            * message mode:  [system_message] + [history] + [message]
+            * messages mode: [system_message] + [messages]
         """
         agent = self.agent
 
@@ -810,11 +822,12 @@ class Runner:
                 )
 
             # Guard: early return if no input provided
-            if (
-                message is None
-                and (messages is None or len(messages) == 0)
-                and (add_messages is None or len(add_messages) == 0)
-            ):
+            if message is not None and messages is not None:
+                raise ValueError("message and messages are mutually exclusive")
+            if messages is not None and (audio is not None or images is not None or videos is not None):
+                raise ValueError("audio/images/videos can only be used with message, not messages")
+
+            if message is None and (messages is None or len(messages) == 0):
                 logger.warning(
                     f"Agent '{agent.identifier}' called with no message and no messages. "
                     "Returning empty response."
@@ -879,7 +892,16 @@ class Runner:
                     # source defaults to "message" — not rendered into the
                     # system prompt, only used as a retrieval query. See
                     # TaskAnchor.to_prompt_block for the gate.
-                    agent.task_anchor = TaskAnchor.from_message(message)
+                    anchor_input = message
+                    if anchor_input is None and messages:
+                        for candidate in reversed(messages):
+                            if isinstance(candidate, Message) and candidate.role == "user":
+                                anchor_input = candidate
+                                break
+                            if isinstance(candidate, dict) and candidate.get("role") == "user":
+                                anchor_input = candidate
+                                break
+                    agent.task_anchor = TaskAnchor.from_message(anchor_input)
                 agent._anchor_session_id = agent.session_id
             _anchor = agent.task_anchor
 
@@ -1005,11 +1027,10 @@ class Runner:
                 # model call, no token cost.
                 #
                 # Inspect the COMPLETE inbound surface — not just `message`.
-                # Callers can prepend prior context via `messages=[...]` and
-                # `add_messages=[...]`, and attach multimodal payloads via
-                # `audio` / `images` / `videos`. All of these reach the model,
-                # so the guardrail must see all of them; otherwise an earlier
-                # turn or an attached image bypasses the policy.
+                # Callers may provide a full transcript via `messages=[...]`
+                # and attach multimodal payloads via `audio` / `images` /
+                # `videos`. All of these reach the model, so the guardrail must
+                # see them before any model call.
                 if agent.input_guardrails:
                     _guard_input = normalize_input_for_guardrails(
                         message=message,
@@ -1017,7 +1038,6 @@ class Runner:
                         images=images,
                         videos=videos,
                         messages=messages,
-                        add_messages=add_messages,
                     )
                     await run_input_guardrails(
                         agent=agent,
@@ -1029,7 +1049,7 @@ class Runner:
                 # 3. Prepare messages
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
                     message=message, audio=audio, images=images, videos=videos,
-                    messages=messages, add_messages=add_messages, **kwargs
+                    messages=messages, **kwargs
                 )
                 num_input_messages = len(messages_for_model)
 
@@ -1354,44 +1374,24 @@ class Runner:
                 if agent.stream_intermediate_steps:
                     yield self.generic_run_response("Updating memory", RunEvent.updating_memory)
 
-                if system_message is not None:
-                    agent.working_memory.add_system_message(system_message, system_message_role=agent.prompt_config.system_message_role)
-                agent.working_memory.add_messages(messages=(user_messages + messages_for_model[num_input_messages:]))
+                if messages is None:
+                    if system_message is not None:
+                        agent.working_memory.add_system_message(
+                            system_message,
+                            system_message_role=agent.prompt_config.system_message_role,
+                        )
+                    agent.working_memory.add_messages(
+                        messages=(user_messages + messages_for_model[num_input_messages:])
+                    )
 
-                agent_run = AgentRun(response=agent.run_response)
+                    agent_run = AgentRun(response=agent.run_response)
+                    if user_messages:
+                        agent_run.message = user_messages[0]
+                        agent_run.messages = list(user_messages)
+                    agent.working_memory.add_run(agent_run)
 
-                # Handle agent_run message assignment
-                if message is not None:
-                    user_message_for_memory: Optional[Message] = None
-                    if isinstance(message, str):
-                        user_message_for_memory = Message(role=agent.prompt_config.user_message_role, content=message)
-                    elif isinstance(message, Message):
-                        user_message_for_memory = message
-                    if user_message_for_memory is not None:
-                        agent_run.message = user_message_for_memory
-                elif messages is not None and len(messages) > 0:
-                    for _m in messages:
-                        _um = None
-                        if isinstance(_m, Message):
-                            _um = _m
-                        elif isinstance(_m, dict):
-                            try:
-                                _um = Message(**_m)
-                            except Exception as e:
-                                logger.error(f"Error converting message to Message: {e}")
-                        else:
-                            logger.warning(f"Unsupported message type: {type(_m)}")
-                            continue
-                        if _um:
-                            if agent_run.messages is None:
-                                agent_run.messages = []
-                            agent_run.messages.append(_um)
-                        else:
-                            logger.warning("Unable to add message to memory")
-                agent.working_memory.add_run(agent_run)
-
-                if agent.working_memory.create_session_summary and agent.working_memory.update_session_summary_after_run:
-                    await agent.working_memory.update_summary()
+                    if agent.working_memory.create_session_summary and agent.working_memory.update_session_summary_after_run:
+                        await agent.working_memory.update_summary()
 
                 # 6. Save output to file
                 self.save_run_response_to_file(message=message, save_response_to_file=save_response_to_file)
@@ -1426,7 +1426,7 @@ class Runner:
 
                 # --- Session persist (CC-style JSONL append) ---
                 # Log the complete turn: user input + tool results + assistant output
-                if agent._session_log is not None:
+                if agent._session_log is not None and messages is None:
                     # 1. Log user input
                     _user_text = None
                     if isinstance(message, str):
@@ -1684,37 +1684,26 @@ class Runner:
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
-        """Run the Agent and return the final response (non-streaming).
-
-        This is the primary async API.
-
-        Args:
-            config: Per-run configuration (run_timeout, first_token_timeout,
-                    save_response_to_file, hooks, etc.).
-        """
-        config = config or RunConfig()
+        """Run the Agent and return the final response (non-streaming)."""
+        warn_unknown_run_kwargs(kwargs)
+        config = merge_run_config(config, timeout=timeout, hooks=hooks)
         run_timeout = config.run_timeout
-        first_token_timeout = config.first_token_timeout
         save_response_to_file = config.save_response_to_file
-        hooks = config.hooks
+        effective_hooks = config.hooks
         enabled_tools = config.enabled_tools
         enabled_skills = config.enabled_skills
-        max_cost_usd = config.max_cost_usd
         source = config.source
 
-        # Stash run-level state on agent for _run_impl / _call_with_retry to pick up.
-        # fallback_models precedence: RunConfig (this run only) > Agent default.
-        # An empty list on RunConfig falls back to Agent's default; pass an explicit
-        # non-empty list (or None) to override.
-        self.agent._run_max_cost_usd = max_cost_usd
+        self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_fallback_models = list(
             config.fallback_models or self.agent.fallback_models or []
         )
@@ -1727,16 +1716,14 @@ class Runner:
                 videos=videos,
                 messages=messages,
                 run_timeout=run_timeout,
-                add_messages=add_messages,
                 save_response_to_file=save_response_to_file,
-                hooks=hooks,
+                hooks=effective_hooks,
                 enabled_tools=enabled_tools,
                 enabled_skills=enabled_skills,
                 source=source,
                 **kwargs,
             )
 
-        # Structured output path
         if self.agent.response_model is not None:
             return await self._consume_run(
                 message=message,
@@ -1744,9 +1731,8 @@ class Runner:
                 images=images,
                 videos=videos,
                 messages=messages,
-                add_messages=add_messages,
                 save_response_to_file=save_response_to_file,
-                hooks=hooks,
+                hooks=effective_hooks,
                 enabled_tools=enabled_tools,
                 enabled_skills=enabled_skills,
                 source=source,
@@ -1762,9 +1748,8 @@ class Runner:
                 images=images,
                 videos=videos,
                 messages=messages,
-                add_messages=add_messages,
                 save_response_to_file=save_response_to_file,
-                hooks=hooks,
+                hooks=effective_hooks,
                 enabled_tools=enabled_tools,
                 enabled_skills=enabled_skills,
                 source=source,
@@ -1780,33 +1765,28 @@ class Runner:
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
-        """Run the Agent and stream incremental responses.
-
-        Usage:
-            async for chunk in runner.run_stream("..."):
-                ...
-        """
-        config = config or RunConfig()
+        """Run the Agent and stream incremental responses."""
+        warn_unknown_run_kwargs(kwargs)
+        config = merge_run_config(config, timeout=timeout, hooks=hooks)
         stream_intermediate_steps = config.stream_intermediate_steps
         run_timeout = config.run_timeout
         first_token_timeout = config.first_token_timeout
         idle_timeout = config.idle_timeout
         save_response_to_file = config.save_response_to_file
-        hooks = config.hooks
+        effective_hooks = config.hooks
         enabled_tools = config.enabled_tools
         enabled_skills = config.enabled_skills
         source = config.source
 
-        # Stash run-level state on agent for _run_impl / _call_with_retry to pick up.
-        # fallback_models precedence: RunConfig > Agent default.
         self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_fallback_models = list(
             config.fallback_models or self.agent.fallback_models or []
@@ -1822,10 +1802,9 @@ class Runner:
             images=images,
             videos=videos,
             messages=messages,
-            add_messages=add_messages,
             stream_intermediate_steps=stream_intermediate_steps,
             save_response_to_file=save_response_to_file,
-            hooks=hooks,
+            hooks=effective_hooks,
             enabled_tools=enabled_tools,
             enabled_skills=enabled_skills,
             source=source,
@@ -1848,11 +1827,12 @@ class Runner:
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> RunResponse:
@@ -1860,11 +1840,12 @@ class Runner:
         return run_sync(
             self.run(
                 message=message,
+                messages=messages,
                 audio=audio,
                 images=images,
                 videos=videos,
-                messages=messages,
-                add_messages=add_messages,
+                timeout=timeout,
+                hooks=hooks,
                 config=config,
                 **kwargs,
             )
@@ -1874,18 +1855,16 @@ class Runner:
         self,
         message: Optional[Union[str, List, Dict, Message]] = None,
         *,
+        messages: Optional[Sequence[Union[Dict, Message]]] = None,
         audio: Optional[Any] = None,
         images: Optional[Sequence[Any]] = None,
         videos: Optional[Sequence[Any]] = None,
-        messages: Optional[Sequence[Union[Dict, Message]]] = None,
-        add_messages: Optional[List[Union[Dict, Message]]] = None,
+        timeout: Optional[float] = None,
+        hooks: Optional[RunHooks] = None,
         config: Optional[RunConfig] = None,
         **kwargs: Any,
     ) -> Iterator[RunResponse]:
-        """Synchronous wrapper for `run_stream()`.
-
-        Internally runs the async iterator in a dedicated background thread.
-        """
+        """Synchronous wrapper for `run_stream()`."""
 
         def _iter_from_async(ait: AsyncIterator[RunResponse]) -> Iterator[RunResponse]:
             sentinel = object()
@@ -1929,11 +1908,12 @@ class Runner:
         return _iter_from_async(
             self.run_stream(
                 message=message,
+                messages=messages,
                 audio=audio,
                 images=images,
                 videos=videos,
-                messages=messages,
-                add_messages=add_messages,
+                timeout=timeout,
+                hooks=hooks,
                 config=config,
                 **kwargs,
             )

@@ -7,6 +7,7 @@ Uses real OpenAIChat instances with patched response/response_stream methods to 
 MagicMock attribute issues while testing the full Agent.run() pipeline.
 """
 import asyncio
+import inspect
 import sys
 import os
 from contextlib import contextmanager
@@ -22,6 +23,7 @@ from agentica.agent import (
     AgentMemoryConfig,
     AgentSafetyConfig,
 )
+from agentica.hooks import RunHooks
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
@@ -140,6 +142,68 @@ class TestAgentRun:
             msgs = [Message(role="user", content="M1"), Message(role="user", content="M2")]
             resp = await agent.run(messages=msgs)
             assert resp.content == "OK"
+
+    @pytest.mark.asyncio
+    async def test_run_messages_mode_skips_history_and_memory_write(self):
+        calls = []
+
+        async def fake_response(*args, **kwargs):
+            calls.append(list(kwargs["messages"]))
+            return _mock_response("OK")
+
+        with patch.object(OpenAIChat, 'response', new=fake_response):
+            agent = Agent(name="A", model=_make_model(), add_history_to_context=True)
+            await agent.run("stateful history")
+            await agent.run(messages=[Message(role="user", content="stateless turn")])
+
+        latest_contents = [m.content for m in calls[-1]]
+        assert "stateful history" not in latest_contents
+        assert "stateless turn" in latest_contents
+        assert len(agent.working_memory.runs) == 1
+
+    @pytest.mark.asyncio
+    async def test_run_message_and_messages_are_mutually_exclusive(self):
+        agent = Agent(name="A", model=_make_model())
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            await agent.run("Hi", messages=[Message(role="user", content="M1")])
+
+    @pytest.mark.asyncio
+    async def test_run_messages_mode_rejects_top_level_media(self):
+        agent = Agent(name="A", model=_make_model())
+        with pytest.raises(ValueError, match="audio/images/videos"):
+            await agent.run(
+                messages=[Message(role="user", content="M1")],
+                images=["https://example.com/image.png"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_run_rejects_removed_add_messages(self):
+        agent = Agent(name="A", model=_make_model())
+        with pytest.raises(TypeError, match="add_messages was removed"):
+            await agent.run("Hi", add_messages=[{"role": "system", "content": "x"}])
+
+    def test_run_entrypoint_signatures_match(self):
+        expected = [
+            "self", "message", "messages", "audio", "images", "videos",
+            "timeout", "hooks", "config", "kwargs",
+        ]
+        for method_name in ("run", "run_stream", "run_sync", "run_stream_sync"):
+            signature = inspect.signature(getattr(Agent, method_name))
+            assert list(signature.parameters) == expected
+
+    @pytest.mark.asyncio
+    async def test_run_accepts_inline_hooks(self):
+        called = []
+
+        class InlineHooks(RunHooks):
+            async def on_agent_start(self, agent, **kwargs):
+                called.append(agent.name)
+
+        with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")):
+            agent = Agent(name="A", model=_make_model())
+            await agent.run("Hi", hooks=InlineHooks())
+
+        assert called == ["A"]
 
     @pytest.mark.asyncio
     async def test_run_no_message_no_error(self):
