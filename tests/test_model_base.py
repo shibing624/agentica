@@ -332,6 +332,47 @@ class TestRunFunctionCalls:
         assert "tool_call_times" in model.metrics
         assert "tool" in model.metrics["tool_call_times"]
 
+    @pytest.mark.asyncio
+    async def test_concurrent_function_calls_ignore_shared_stack_reset(self):
+        model = self._make_model_instance()
+
+        async def slow_tool(x: int = 0) -> str:
+            """Slow tool."""
+            await asyncio.sleep(0.05)
+            return str(x)
+
+        async def run_one(x: int):
+            fc = self._make_fc(slow_tool, {"x": x}, f"c{x}")
+            results = []
+            async for _ in model.run_function_calls([fc], results):
+                pass
+            return fc.result, len(results)
+
+        first = asyncio.create_task(run_one(1))
+        await asyncio.sleep(0.01)
+        model.function_call_stack = None
+        model._failed_call_counts = None
+        second = asyncio.create_task(run_one(2))
+
+        assert await asyncio.gather(first, second) == [("1", 1), ("2", 1)]
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_is_task_local(self):
+        async def read_choice(choice: str, delay: float) -> str:
+            token = Model.begin_run_state()
+            try:
+                model = self._make_model_instance()
+                model.set_tool_choice(choice)
+                await asyncio.sleep(delay)
+                return model.get_tool_choice()
+            finally:
+                Model.reset_run_state(token)
+
+        assert await asyncio.gather(
+            read_choice("none", 0.03),
+            read_choice("auto", 0.01),
+        ) == ["none", "auto"]
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

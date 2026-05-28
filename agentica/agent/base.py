@@ -1119,11 +1119,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if self.model.tools:
             self.model.tools.clear()
         self.model.metrics.clear()
-        # Reset tool-call state so each agent run starts clean.
-        # Prevents function_call_stack / tool_choice leaking between runs
-        # (or between agents that share the same Model instance).
-        self.model.function_call_stack = None
-        self.model.tool_choice = None
+        # Reset run-local tool choice. Tool-call stack and failed-call counters
+        # live in ModelRunState (ContextVar), not on the shared Model instance.
+        self.model.set_tool_choice(None)
 
         # Set agent reference on model (legacy, for backward compatibility with
         # direct model.run_function_calls() calls in tests/examples).
@@ -1157,8 +1155,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             self._filter_model_functions()
 
         # Set tool_choice
-        if self.model.tool_choice is None and self.tool_config.tool_choice is not None:
-            self.model.tool_choice = self.tool_config.tool_choice
+        if self.model.get_tool_choice() is None and self.tool_config.tool_choice is not None:
+            self.model.set_tool_choice(self.tool_config.tool_choice)
 
         # Set tool_call_limit
         if self.tool_config.tool_call_limit is not None:

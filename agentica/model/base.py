@@ -6,6 +6,7 @@ part of the code is from phidata
 """
 import asyncio
 import collections.abc
+import contextvars
 import io
 import json
 import base64
@@ -50,6 +51,21 @@ _STREAM_REDACTION_MAX_BUFFER_CHARS = 4096
 _STREAM_REDACTION_TAIL_CHARS = 512
 _STREAM_PRIVATE_KEY_BEGIN_RE = re.compile(r"-----BEGIN[A-Z ]*PRIVATE KEY-----")
 _STREAM_PRIVATE_KEY_END_RE = re.compile(r"-----END[A-Z ]*PRIVATE KEY-----")
+
+
+@dataclass
+class ModelRunState:
+    """Task-local mutable state for one model run."""
+
+    function_call_stack: List[FunctionCall] = field(default_factory=list)
+    failed_call_counts: Dict[str, int] = field(default_factory=dict)
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+
+
+_MODEL_RUN_STATE: contextvars.ContextVar[Optional[ModelRunState]] = contextvars.ContextVar(
+    "agentica_model_run_state",
+    default=None,
+)
 
 
 def _redact_unterminated_private_key_block(text: str) -> str:
@@ -132,8 +148,11 @@ class Model(ABC):
 
     # -*- Functions available to the Model to call -*-
     functions: Optional[Dict[str, Function]] = None
+    # Legacy mirrors for direct run_function_calls() callers. Agent/Runner paths
+    # keep these per-run values in ModelRunState instead of shared Model fields.
     function_call_stack: Optional[List[FunctionCall]] = None
-    # Per-run tracker for repeated failed tool calls (soft notice, not blocking)
+    # Per-run tracker for repeated failed tool calls (soft notice, not blocking).
+    # Kept on Model only as a legacy mirror for direct run_function_calls().
     _failed_call_counts: Optional[Dict[str, int]] = None
 
     # System prompt from the model added to the Agent.
@@ -174,6 +193,48 @@ class Model(ABC):
             catalog_cw = get_model_context_window(self.id, default=0)
             if catalog_cw > 0:
                 self.context_window = catalog_cw
+
+    @staticmethod
+    def begin_run_state(tool_choice: Optional[Union[str, Dict[str, Any]]] = None) -> contextvars.Token:
+        return _MODEL_RUN_STATE.set(ModelRunState(tool_choice=tool_choice))
+
+    @staticmethod
+    def reset_run_state(token: contextvars.Token) -> None:
+        _MODEL_RUN_STATE.reset(token)
+
+    @staticmethod
+    def current_run_state() -> Optional[ModelRunState]:
+        return _MODEL_RUN_STATE.get()
+
+    def _get_model_run_state(self) -> ModelRunState:
+        state = _MODEL_RUN_STATE.get()
+        if state is None:
+            state = ModelRunState(
+                function_call_stack=self.function_call_stack if self.function_call_stack is not None else [],
+                failed_call_counts=self._failed_call_counts if self._failed_call_counts is not None else {},
+                tool_choice=self.tool_choice,
+            )
+            _MODEL_RUN_STATE.set(state)
+        return state
+
+    def _get_function_call_stack(self) -> List[FunctionCall]:
+        return self._get_model_run_state().function_call_stack
+
+    def _get_failed_call_counts(self) -> Dict[str, int]:
+        return self._get_model_run_state().failed_call_counts
+
+    def get_tool_choice(self) -> Optional[Union[str, Dict[str, Any]]]:
+        state = _MODEL_RUN_STATE.get()
+        if state is not None:
+            return state.tool_choice
+        return self.tool_choice
+
+    def set_tool_choice(self, tool_choice: Optional[Union[str, Dict[str, Any]]]) -> None:
+        state = _MODEL_RUN_STATE.get()
+        if state is not None:
+            state.tool_choice = tool_choice
+            return
+        self.tool_choice = tool_choice
 
     _CONTEXT_LIMIT_PATTERN = re.compile(
         r"(?:maximum context (?:length|window)|context_length|max_context_length)[^\d]*(\d[\d,]*)",
@@ -447,7 +508,7 @@ class Model(ABC):
     def deactivate_function_calls(self) -> None:
         # Deactivate tool calls by setting future tool calls to "none"
         # This is triggered when the function call limit is reached.
-        self.tool_choice = "none"
+        self.set_tool_choice("none")
 
     # ── Tool call parsing and result formatting (provider-overridable) ────────
     # Runner calls these to decouple tool execution from the Model layer.
@@ -499,6 +560,27 @@ class Model(ABC):
     async def run_function_calls(
             self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
     ) -> AsyncIterator[ModelResponse]:
+        token = None
+        if self.current_run_state() is None:
+            token = self.begin_run_state(tool_choice=self.tool_choice)
+        try:
+            async for response in self._run_function_calls_impl(
+                    function_calls=function_calls,
+                    function_call_results=function_call_results,
+                    tool_role=tool_role,
+            ):
+                yield response
+        finally:
+            if token is not None:
+                state = self._get_model_run_state()
+                self.function_call_stack = list(state.function_call_stack)
+                self._failed_call_counts = dict(state.failed_call_counts)
+                self.tool_choice = state.tool_choice
+                self.reset_run_state(token)
+
+    async def _run_function_calls_impl(
+            self, function_calls: List[FunctionCall], function_call_results: List[Message], tool_role: str = "tool"
+    ) -> AsyncIterator[ModelResponse]:
         """Execute tool calls with concurrency-split execution.
 
         Strategy (mirrors CC's StreamingToolExecutor):
@@ -512,10 +594,8 @@ class Model(ABC):
         Phase 2b: Execute unsafe tools sequentially
         Phase 3: Process results in original order
         """
-        if self.function_call_stack is None:
-            self.function_call_stack = []
-        if self._failed_call_counts is None:
-            self._failed_call_counts = {}
+        function_call_stack = self._get_function_call_stack()
+        failed_call_counts = self._get_failed_call_counts()
 
         # Phase 1: Emit started events for all function calls
         _agent = self._agent_ref() if self._agent_ref is not None else None
@@ -847,8 +927,8 @@ class Model(ABC):
                 )
             if not function_call_success:
                 _call_key = f"{function_call.function.name}:{json.dumps(function_call.arguments, sort_keys=True, default=str)}"
-                self._failed_call_counts[_call_key] = self._failed_call_counts.get(_call_key, 0) + 1
-                _n = self._failed_call_counts[_call_key]
+                failed_call_counts[_call_key] = failed_call_counts.get(_call_key, 0) + 1
+                _n = failed_call_counts[_call_key]
                 if _n >= 2 and isinstance(_result_content, str):
                     _result_content += (
                         f"\n\n[Notice: This exact call has failed {_n} times "
@@ -912,12 +992,12 @@ class Model(ABC):
             function_call_results.append(function_call_result)
             if len(additional_messages_from_function_call) > 0:
                 function_call_results.extend(additional_messages_from_function_call)
-            self.function_call_stack.append(function_call)
+            function_call_stack.append(function_call)
 
         # Check tool_call_limit after processing all results in the current batch.
         # Moving this outside the loop ensures every tool_call_id from the assistant
         # message gets a corresponding tool result message (required by OpenAI API).
-        if self.tool_call_limit and len(self.function_call_stack) >= self.tool_call_limit:
+        if self.tool_call_limit and len(function_call_stack) >= self.tool_call_limit:
             self.deactivate_function_calls()
 
         # --- Layer 2: per-message budget enforcement ---
@@ -1337,5 +1417,10 @@ class Model(ABC):
         self.functions = None
         self.function_call_stack = None
         self._failed_call_counts = None
+        state = self.current_run_state()
+        if state is not None:
+            state.function_call_stack = []
+            state.failed_call_counts = {}
+            state.tool_choice = None
         self.session_id = None
         self.last_finish_reason = None

@@ -269,50 +269,47 @@ def langfuse_trace_context(
         from langfuse import get_client
 
         langfuse = get_client()
-
-        # Start a span as the root observation for this agent run
-        # This automatically creates a trace
-        # OpenAI calls within this context will automatically become children
-        with langfuse.start_as_current_observation(
-                as_type="span",
-                name=name,
-                input=input_data,
-                metadata=metadata,
-        ) as root_span:
-            # Set trace-level attributes at the beginning
-            root_span.update_trace(
-                session_id=session_id,
-                user_id=user_id,
-                tags=tags,
-            )
-
-            # Create a wrapper to collect output
-            wrapper = _LangfuseTraceWrapper(root_span, langfuse)
-
-            yield wrapper
-
-            # IMPORTANT: After all child observations are complete,
-            # update trace output as the LAST step using update_current_trace()
-            # This prevents child spans from overwriting the trace output
-            if wrapper._output is not None:
-                # Update root span output first
-                root_span.update(output=wrapper._output)
-                # Then use update_current_trace() as the final step
-                # This is the recommended way to set trace output when there are nested observations
-                langfuse.update_current_trace(
-                    input=input_data,
-                    output=wrapper._output,
-                )
-
-            if wrapper._metadata:
-                root_span.update(metadata=wrapper._metadata)
-
+        observation = langfuse.start_as_current_observation(
+            as_type="span",
+            name=name,
+            input=input_data,
+            metadata=metadata,
+        )
     except ImportError:
         logger.debug("Langfuse context manager not available")
         yield _DummySpanWrapper()
+        return
     except Exception as e:
         logger.warning(f"Failed to create Langfuse trace context: {e}")
         yield _DummySpanWrapper()
+        return
+
+    with observation as root_span:
+        root_span.update_trace(
+            session_id=session_id,
+            user_id=user_id,
+            tags=tags,
+        )
+        wrapper = _LangfuseTraceWrapper(root_span, langfuse)
+
+        try:
+            yield wrapper
+        finally:
+            try:
+                # IMPORTANT: After all child observations are complete,
+                # update trace output as the LAST step using update_current_trace()
+                # This prevents child spans from overwriting the trace output
+                if wrapper._output is not None:
+                    root_span.update(output=wrapper._output)
+                    langfuse.update_current_trace(
+                        input=input_data,
+                        output=wrapper._output,
+                    )
+
+                if wrapper._metadata:
+                    root_span.update(metadata=wrapper._metadata)
+            except Exception as e:
+                logger.debug(f"Failed to finalize Langfuse trace context: {e}")
 
 
 class _LangfuseTraceWrapper:
@@ -408,20 +405,22 @@ def langfuse_span_context(
         from langfuse import get_client
 
         langfuse = get_client()
-
-        with langfuse.start_as_current_observation(
-                as_type="span",
-                name=name,
-                input=input_data,
-                metadata=metadata,
-        ) as span:
-            yield span
-
+        observation = langfuse.start_as_current_observation(
+            as_type="span",
+            name=name,
+            input=input_data,
+            metadata=metadata,
+        )
     except ImportError:
         yield None
+        return
     except Exception as e:
         logger.warning(f"Failed to create Langfuse span: {e}")
         yield None
+        return
+
+    with observation as span:
+        yield span
 
 
 def update_langfuse_span(

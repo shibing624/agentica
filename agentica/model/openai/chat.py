@@ -244,7 +244,8 @@ class OpenAIChat(Model):
             tools_for_api = self.get_tools_for_api()
             if tools_for_api:
                 request_params["tools"] = tools_for_api
-                request_params["tool_choice"] = self.tool_choice if self.tool_choice is not None else "auto"
+                tool_choice = self.get_tool_choice()
+                request_params["tool_choice"] = tool_choice if tool_choice is not None else "auto"
         if self.request_params is not None:
             request_params.update(self.request_params)
         if self._is_deepseek_thinking_request(request_params):
@@ -265,7 +266,8 @@ class OpenAIChat(Model):
             tools_for_api = self.get_tools_for_api()
             if tools_for_api:
                 model_dict["tools"] = tools_for_api
-                model_dict["tool_choice"] = self.tool_choice if self.tool_choice is not None else "auto"
+                tool_choice = self.get_tool_choice()
+                model_dict["tool_choice"] = tool_choice if tool_choice is not None else "auto"
         cleaned_dict = {k: v for k, v in model_dict.items() if v is not None}
         return cleaned_dict
 

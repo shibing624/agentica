@@ -1513,25 +1513,29 @@ class Runner:
         if agent.model and hasattr(agent.model, "langfuse_tags"):
             langfuse_tags = agent.model.langfuse_tags
 
-        with langfuse_trace_context(
-            name=trace_name,
-            session_id=agent.session_id,
-            user_id=agent.user_id,
-            tags=langfuse_tags,
-            input_data=trace_input,
-        ) as trace:
-            final_response: Optional[RunResponse] = None
-            async for response in _run_core():
-                final_response = response
-                yield response
+        run_state_token = Model.begin_run_state()
+        try:
+            with langfuse_trace_context(
+                name=trace_name,
+                session_id=agent.session_id,
+                user_id=agent.user_id,
+                tags=langfuse_tags,
+                input_data=trace_input,
+            ) as trace:
+                final_response: Optional[RunResponse] = None
+                async for response in _run_core():
+                    final_response = response
+                    yield response
 
-            if final_response:
-                output_content = final_response.content
-                if isinstance(output_content, BaseModel):
-                    output_content = output_content.model_dump()
-                trace.set_output(output_content)
-                trace.set_metadata("run_id", final_response.run_id)
-                trace.set_metadata("model", final_response.model)
+                if final_response:
+                    output_content = final_response.content
+                    if isinstance(output_content, BaseModel):
+                        output_content = output_content.model_dump()
+                    trace.set_output(output_content)
+                    trace.set_metadata("run_id", final_response.run_id)
+                    trace.set_metadata("model", final_response.model)
+        finally:
+            Model.reset_run_state(run_state_token)
 
     # =========================================================================
     # Timeout wrappers

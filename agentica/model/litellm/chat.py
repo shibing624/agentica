@@ -220,7 +220,7 @@ class LiteLLMChat(Model):
             tools_for_api = self.get_tools_for_api()
             if tools_for_api:
                 params["tools"] = tools_for_api
-                params["tool_choice"] = self.tool_choice or "auto"
+                params["tool_choice"] = self.get_tool_choice() or "auto"
             
         # Merge vendor-specific extra_body. Explicit fields already in params
         # take precedence — extra_body cannot override them.

@@ -13,9 +13,12 @@ Covers:
 All tests mock LLM API keys -- no real API calls.
 """
 import asyncio
+import sys
+import types
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import agentica.utils.langfuse_integration as langfuse_integration
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
@@ -202,6 +205,41 @@ class TestFileLockSetdefault(unittest.TestCase):
         lock1 = tool._get_file_lock("/tmp/a.txt")
         lock2 = tool._get_file_lock("/tmp/b.txt")
         self.assertIsNot(lock1, lock2)
+
+
+class TestLangfuseContextManagers(unittest.TestCase):
+    """Langfuse context managers must preserve the original body exception."""
+
+    def test_trace_context_does_not_yield_dummy_after_body_exception(self):
+        class FakeSpan:
+            def update_trace(self, **_kwargs):
+                pass
+
+            def update(self, **_kwargs):
+                pass
+
+        class FakeObservation:
+            def __enter__(self):
+                return FakeSpan()
+
+            def __exit__(self, _exc_type, _exc, _tb):
+                return False
+
+        class FakeClient:
+            def start_as_current_observation(self, **_kwargs):
+                return FakeObservation()
+
+            def update_current_trace(self, **_kwargs):
+                pass
+
+        fake_langfuse = types.SimpleNamespace(get_client=lambda: FakeClient())
+        with (
+            patch.object(langfuse_integration, "is_langfuse_available", return_value=True),
+            patch.dict(sys.modules, {"langfuse": fake_langfuse}),
+        ):
+            with self.assertRaisesRegex(ValueError, "root cause"):
+                with langfuse_integration.langfuse_trace_context(name="test"):
+                    raise ValueError("root cause")
 
 
 class TestCompressionManagerResetRun(unittest.TestCase):
