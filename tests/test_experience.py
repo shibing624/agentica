@@ -110,6 +110,7 @@ class TestExperienceCaptureHooks(unittest.TestCase):
         agent.run_input = "test input"
         agent.model = MagicMock()
         agent.auxiliary_model = None
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.workspace = MagicMock()
         # Backward-compat workspace methods (used by some tests)
         agent.workspace.write_experience_entry = AsyncMock(return_value="/tmp/exp.md")
@@ -712,6 +713,7 @@ class TestRunInputCrossRoundFix(unittest.TestCase):
         agent.run_input = None
         agent.auxiliary_model = None  # force fallback to agent.model
         agent.model = MagicMock()
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.workspace = MagicMock()
 
         # Mock LLM response returning empty array (no memories to extract)

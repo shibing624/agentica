@@ -10,6 +10,11 @@ from agentica.compression.tool_result_storage import (
     DEFAULT_MAX_RESULT_SIZE_CHARS,
     MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
 )
+from agentica.compression.tool_result_classification import (
+    ToolResultClass,
+    classify_tool_result,
+    describe_media,
+)
 
 __all__ = [
     "CompressionManager",
@@ -17,4 +22,7 @@ __all__ = [
     "enforce_tool_result_budget",
     "DEFAULT_MAX_RESULT_SIZE_CHARS",
     "MAX_TOOL_RESULTS_PER_MESSAGE_CHARS",
+    "ToolResultClass",
+    "classify_tool_result",
+    "describe_media",
 ]

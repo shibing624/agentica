@@ -7,6 +7,7 @@ Handles specific ACP methods like initialize, tools/list, tools/call, agent/exec
 """
 
 
+import inspect
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Callable
 
 from agentica.acp.types import (
@@ -31,13 +32,22 @@ class ACPHandlers:
     """Handlers for ACP methods"""
     
     def __init__(self, agent: Optional["Agent"] = None, model: Optional["Model"] = None,
-                 protocol: Optional[Any] = None):
+                 protocol: Optional[Any] = None,
+                 permission_policy: Optional[Any] = None,
+                 permission_callback: Optional[Callable] = None):
         self._agent = agent
         self._model = model
         self._protocol = protocol
         self._initialized = False
         self._tools: List[ACPTool] = []
         self._session_manager = SessionManager()
+        # IDE tool-permission gate. Default AUTO = allow all (backward compatible).
+        # ``permission_callback`` is an optional async/sync callable invoked for
+        # ASK decisions: callback(tool_call) -> bool (True = grant). When a tool
+        # needs approval but no callback is set, the call is denied (fail-safe).
+        from agentica.acp.permissions import ToolPermissionPolicy
+        self._permission_policy = permission_policy or ToolPermissionPolicy()
+        self._permission_callback = permission_callback
         
         # Lazy-initialized tool instances (avoid repeated instantiation)
         self._file_tool = None
@@ -252,11 +262,46 @@ class ACPHandlers:
         
         return result.to_dict()
     
+    async def _check_permission(self, tool_call: ACPToolCall) -> Optional[ACPToolResult]:
+        """Gate a tool call through the permission policy.
+
+        Returns an error ACPToolResult if the call is denied, or None if it may
+        proceed. ASK decisions consult ``permission_callback``; absent a
+        callback, ASK is treated as denied (fail-safe).
+        """
+        from agentica.acp.permissions import PermissionDecision
+
+        decision = self._permission_policy.decide(tool_call.name, tool_call.arguments)
+        if decision == PermissionDecision.ALLOW:
+            return None
+        if decision == PermissionDecision.DENY:
+            return ACPToolResult(
+                content=f"Permission denied by policy for tool '{tool_call.name}'.",
+                isError=True,
+            )
+
+        # ASK: defer to the IDE/user via the callback.
+        granted = False
+        if self._permission_callback is not None:
+            result = self._permission_callback(tool_call)
+            granted = await result if inspect.isawaitable(result) else result
+        if not granted:
+            return ACPToolResult(
+                content=f"Permission not granted for tool '{tool_call.name}'.",
+                isError=True,
+            )
+        return None
+
     async def _execute_tool(self, tool_call: ACPToolCall) -> ACPToolResult:
         """Execute a tool call (async, since all builtin tools are async)"""
         tool_name = tool_call.name
         arguments = tool_call.arguments
-        
+
+        # Permission gate (no-op in default AUTO mode).
+        denied = await self._check_permission(tool_call)
+        if denied is not None:
+            return denied
+
         try:
             # File operations - use singleton instance
             if tool_name in ("read_file", "write_file", "edit_file", "ls", "glob", "grep"):

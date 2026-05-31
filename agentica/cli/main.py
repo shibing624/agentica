@@ -5,6 +5,7 @@
 """
 from agentica.cli.config import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.interactive import run_interactive
+from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.utils.log import suppress_console_logging
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
@@ -31,11 +32,26 @@ def main():
         run_extensions_command(args)
         return
 
+    # `agentica setup` — re-run the onboarding wizard and exit.
+    if hasattr(args, "command") and args.command == "setup":
+        run_onboarding(get_console())
+        return
+
+    # `agentica doctor` — run the environment health check and exit.
+    if hasattr(args, "command") and args.command == "doctor":
+        from agentica.cli.doctor_display import show_doctor
+        show_doctor(get_console())
+        return
+
+    # Resolve provider/model/base_url: CLI args > saved config > defaults.
+    # Triggers the first-run wizard when no key/config is present on a TTY.
+    resolved = resolve_model_config(args, console=get_console())
+
     # Store agent configuration parameters
     agent_config = {
-        "model_provider": args.model_provider,
-        "model_name": args.model_name,
-        "base_url": args.base_url,
+        "model_provider": resolved["model_provider"],
+        "model_name": resolved["model_name"],
+        "base_url": resolved["base_url"],
         "api_key": args.api_key,
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,

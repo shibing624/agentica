@@ -23,9 +23,10 @@ def create_model(
 ) -> Any:
     """Instantiate the configured LLM model.
 
-    Core providers (openai, claude, kimi, azure) use dedicated classes.
-    OpenAI-compatible providers (deepseek, qwen, zhipuai, ...) use the
-    slug → factory dispatch table exposed by ``agentica.PROVIDER_FACTORIES``.
+    Provider instantiation is delegated to the central ``provider_registry``
+    (core classes openai/claude/kimi/azure + every OpenAI-compatible factory in
+    ``PROVIDER_FACTORIES`` are seeded there). This factory only owns the
+    gateway-specific request tuning (thinking mode, reasoning effort).
 
     Args:
         model_provider: Provider identifier (e.g. "openai", "zhipuai").
@@ -63,31 +64,15 @@ def create_model(
             params["reasoning_effort"] = settings.model_reasoning_effort
             logger.info(f"DeepSeek reasoning effort: {settings.model_reasoning_effort}")
 
-    # Core providers with dedicated classes
-    if model_provider == "openai":
-        from agentica.model.openai import OpenAIChat
-        return OpenAIChat(**params)
-    elif model_provider == "kimi":
-        from agentica.model.kimi.chat import KimiChat
-        return KimiChat(**params)
-    elif model_provider in ("anthropic", "claude"):
-        from agentica.model.anthropic.claude import Claude
-        return Claude(**params)
-    elif model_provider == "azure":
-        from agentica.model.azure import AzureOpenAIChat
-        return AzureOpenAIChat(**params)
-
-    # All other providers: OpenAI-compatible factory dispatch
-    from agentica import PROVIDER_FACTORIES
-    if model_provider in PROVIDER_FACTORIES:
-        return PROVIDER_FACTORIES[model_provider](**params)
-
-    # Unknown provider: raise instead of silent fallback
-    supported = ["openai", "kimi", "anthropic", "claude", "azure"] + list(PROVIDER_FACTORIES.keys())
-    raise ValueError(
-        f"Unknown model_provider '{model_provider}'. "
-        f"Supported providers: {sorted(supported)}"
-    )
+    # Delegate instantiation to the central registry (single source of truth
+    # for the provider dispatch table — avoids drift with a parallel copy).
+    from agentica.provider_registry import create_provider, get_provider_factory, list_providers
+    if get_provider_factory(model_provider) is None:
+        raise ValueError(
+            f"Unknown model_provider '{model_provider}'. "
+            f"Supported providers: {list_providers()}"
+        )
+    return create_provider(model_provider, **params)
 
 
 def get_cron_tools() -> List[Any]:

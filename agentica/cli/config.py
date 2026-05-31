@@ -12,6 +12,7 @@ from typing import List, Optional, Any
 from rich.console import Console
 
 from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, ArkChat
+from agentica.model.anthropic.claude import Claude
 from agentica.agent.config import (
     ExperienceConfig,
     SkillUpgradeConfig,
@@ -129,6 +130,7 @@ MODEL_REGISTRY = {
     'deepseek': DeepSeekChat,
     'yi': YiChat,
     'ark': ArkChat,
+    'anthropic': Claude,
 }
 
 # Example models for each provider (for /model command display)
@@ -140,6 +142,7 @@ EXAMPLE_MODELS = {
     'deepseek': ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-reasoner', 'deepseek-chat'],
     'yi': ['yi-lightning', 'yi-large'],
     'ark': ['doubao-1.5-pro-32k', 'doubao-1.5-lite-32k', 'doubao-1.5-vision-pro-32k'],
+    'anthropic': ['claude-opus-4.8', 'claude-sonnet-4.5', 'claude-3-5-sonnet-20241022'],
 }
 
 
@@ -153,6 +156,14 @@ def parse_args():
     # Check if running in ACP mode (special handling)
     if len(sys.argv) > 1 and sys.argv[1] == 'acp':
         return None  # Signal to run in ACP mode
+
+    # `agentica setup` — re-run the model provider onboarding wizard.
+    if len(sys.argv) > 1 and sys.argv[1] == 'setup':
+        return argparse.Namespace(command='setup')
+
+    # `agentica doctor` — run the environment health check and exit.
+    if len(sys.argv) > 1 and sys.argv[1] == 'doctor':
+        return argparse.Namespace(command='doctor')
 
     if len(sys.argv) > 1 and sys.argv[1] in ("skills", "extensions"):
         parser = argparse.ArgumentParser(description="Manage Agentica skills")
@@ -212,12 +223,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description='CLI for agentica')
 
     parser.add_argument('--query', type=str, help='Question to ask the LLM', default=None)
+    # Default is None so saved CLI config (from the first-run wizard) can take
+    # effect; main.py resolves args > saved config > hardcoded default.
     parser.add_argument('--model_provider', type=str,
                         choices=list(MODEL_REGISTRY.keys()),
-                        help='LLM model provider', default='deepseek')
+                        help='LLM model provider', default=None)
     parser.add_argument('--model_name', type=str,
                         help='LLM model name to use, can be deepseek-v4-flash/deepseek-v4-pro/gpt-5/glm-4.7-flash/...',
-                        default='deepseek-v4-flash')
+                        default=None)
     parser.add_argument('--base_url', type=str, help='API base URL for the LLM')
     parser.add_argument('--api_key', type=str, help='API key for the LLM')
     parser.add_argument('--max_tokens', type=int, help='Maximum number of tokens for the LLM')
@@ -324,18 +337,21 @@ def get_model(
     Uses MODEL_REGISTRY for provider lookup instead of if/elif chains.
     """
     params = {"id": model_name}
-    if base_url is not None:
-        params["base_url"] = base_url
     if api_key is not None:
         params["api_key"] = api_key
     if max_tokens is not None:
         params["max_tokens"] = max_tokens
     if temperature is not None:
         params["temperature"] = temperature
-    if model_provider == "deepseek":
-        params["reasoning_effort"] = reasoning_effort or "max"
-    elif reasoning_effort is not None:
-        params["reasoning_effort"] = reasoning_effort
+    # Anthropic's Claude has no base_url / reasoning_effort fields; the SDK
+    # reads its endpoint from client defaults, so skip those params for it.
+    if model_provider != "anthropic":
+        if base_url is not None:
+            params["base_url"] = base_url
+        if model_provider == "deepseek":
+            params["reasoning_effort"] = reasoning_effort or "max"
+        elif reasoning_effort is not None:
+            params["reasoning_effort"] = reasoning_effort
 
     model_class = MODEL_REGISTRY.get(model_provider)
     if model_class is None:

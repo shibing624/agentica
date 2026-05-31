@@ -148,7 +148,7 @@ class PendingQueue:
 # Readonly info commands + queue/bg management.
 CONCURRENT_CMDS = frozenset({
     "/bg", "/background", "/stop",
-    "/q", "/queue",
+    "/q", "/queue", "/steer",
     "/cost", "/usage", "/config", "/debug",
     "/history", "/help", "/tools", "/skills",
     "/permissions", "/statusbar", "/sb",
@@ -968,6 +968,16 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     return {"current_agent": current_agent, "goal_manager": None}
 
 
+def _persist_model_choice(provider: str, model_name: str) -> None:
+    """Remember a live /model switch so it survives the next launch."""
+    from agentica.cli.setup import load_cli_config, save_cli_config
+    config = load_cli_config()
+    config["onboarded"] = True
+    config["model_provider"] = provider
+    config["model_name"] = model_name
+    save_cli_config(config)
+
+
 def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     supported_providers = set(MODEL_REGISTRY.keys())
@@ -987,6 +997,7 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
 
         ctx.agent_config["model_provider"] = new_provider
         ctx.agent_config["model_name"] = new_model
+        _persist_model_choice(new_provider, new_model)
 
         new_model_obj = get_model(
             model_provider=new_provider,
@@ -1365,6 +1376,100 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
     preview = args[:80] + ("..." if len(args) > 80 else "")
     if not ctx.agent_running:
         con.print(f"  Queued: {preview}")
+
+
+def _cmd_steer(ctx: CommandContext, cmd_args: str = ""):
+    """Inject guidance into the running agent's tool loop (mid-task).
+
+    Unlike /queue (runs as a fresh turn after the current run finishes), /steer
+    is consumed between tool batches of the CURRENT run, so the agent can course-
+    correct without being interrupted.
+    """
+    con = get_console()
+    guidance = cmd_args.strip()
+    if not guidance:
+        con.print("  [dim]Usage: /steer <guidance>  (e.g. /steer don't change the API, keep it compatible)[/dim]")
+        return
+    if not ctx.agent_running:
+        con.print("  [yellow]Agent isn't running — use /queue to send this as the next message instead.[/yellow]")
+        return
+    if ctx.current_agent.steer(guidance):
+        con.print("  [green]Steering queued — the agent will see it on its next step.[/green]")
+
+
+def _checkpoint_manager(ctx: CommandContext):
+    """Build a disk-backed CheckpointManager scoped to the current session."""
+    from agentica.checkpoint import CheckpointManager
+    session_id = ctx.current_agent.session_id or "default"
+    return CheckpointManager(session_id=session_id)
+
+
+def _resolve_ckpt_path(ctx: CommandContext, raw: str) -> str:
+    """Resolve a user-supplied path against the agent's work_dir."""
+    p = os.path.expanduser(raw)
+    if os.path.isabs(p):
+        return p
+    base = ctx.current_agent.work_dir or os.getcwd()
+    return os.path.join(str(base), p)
+
+
+def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
+    """Manual, durable, multi-file checkpoints for the current session.
+
+    /checkpoint [list]                 -> list checkpoints (newest first)
+    /checkpoint create <label> <path...> -> snapshot files' current content
+    /checkpoint diff <id>              -> unified diff snapshot -> current
+    /checkpoint restore <id>           -> roll files back to the snapshot
+    """
+    con = get_console()
+    cm = _checkpoint_manager(ctx)
+    args = cmd_args.strip()
+    parts = args.split()
+    sub = parts[0].lower() if parts else "list"
+
+    def _find(cid_prefix: str):
+        ck = cm.get(cid_prefix)
+        if ck is not None:
+            return ck
+        matches = [c for c in cm.list() if c.id.startswith(cid_prefix)]
+        return matches[0] if len(matches) == 1 else None
+
+    if sub == "list":
+        items = cm.list()
+        if not items:
+            con.print("  [dim]No checkpoints. Create one: /checkpoint create <label> <path...>[/dim]")
+            return
+        con.print(f"  [cyan]Checkpoints ({len(items)}):[/cyan]")
+        for c in items:
+            con.print(f"    {c.id[:18]}  [dim]{c.created_at}[/dim]  {c.label}  ([dim]{len(c.files)} file(s)[/dim])")
+        return
+
+    if sub == "create":
+        if len(parts) < 3:
+            con.print("  [dim]Usage: /checkpoint create <label> <path> [more paths...][/dim]")
+            return
+        label = parts[1]
+        paths = [_resolve_ckpt_path(ctx, p) for p in parts[2:]]
+        ck = cm.create(label, paths)
+        con.print(f"  [green]Created checkpoint {ck.id[:18]} ({label}) with {len(ck.files)} file(s).[/green]")
+        return
+
+    if sub in ("diff", "restore"):
+        if len(parts) < 2:
+            con.print(f"  [dim]Usage: /checkpoint {sub} <id>[/dim]")
+            return
+        ck = _find(parts[1])
+        if ck is None:
+            con.print(f"  [red]No checkpoint matching '{parts[1]}'.[/red]")
+            return
+        if sub == "diff":
+            con.print(cm.diff(ck.id))
+        else:
+            restored = cm.restore(ck.id)
+            con.print(f"  [green]Restored {len(restored)} file(s) from {ck.id[:18]} ({ck.label}).[/green]")
+        return
+
+    con.print("  [dim]Usage: /checkpoint list | create <label> <path...> | diff <id> | restore <id>[/dim]")
 
 
 def _cmd_reasoning(ctx: CommandContext, cmd_args: str = ""):
@@ -1782,6 +1887,8 @@ COMMAND_REGISTRY = {
     "/background":    (_cmd_background,    "Run a prompt in background (independent agent)"),
     "/bg":            (_cmd_background,    "Run a prompt in background (alias)"),
     "/stop":          (_cmd_stop,          "Kill all running background tasks"),
+    "/steer":         (_cmd_steer,         "Guide the running agent mid-task (injected between tool batches)"),
+    "/checkpoint":    (_cmd_checkpoint,    "Durable file snapshots: list | create <label> <path...> | diff <id> | restore <id>"),
     # Model & Config
     "/model":         (_cmd_model,         "View or switch model"),
     "/config":        (_cmd_workspace,     "Show current configuration"),

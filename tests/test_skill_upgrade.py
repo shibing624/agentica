@@ -2106,6 +2106,7 @@ class TestCrossLayerCleanup(unittest.TestCase):
         agent.run_input = "Use pandas instead"
         agent.model = MagicMock()
         agent.auxiliary_model = None
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.workspace = MagicMock()
 
         mock_event_store = MagicMock()

@@ -130,6 +130,7 @@ class DeepAgent(Agent):
         include_skills: bool = True,
         include_user_input: bool = False,
         enable_long_term_memory: bool = True,
+        enable_diagnostics: bool = False,
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         user_input_callback: Optional[Callable] = None,
@@ -171,6 +172,7 @@ class DeepAgent(Agent):
                 custom_skill_dirs=custom_skill_dirs,
                 user_input_callback=user_input_callback,
                 sandbox_config=sandbox_config,
+                enable_diagnostics=enable_diagnostics,
             )
         )
         if tools:

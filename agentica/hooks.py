@@ -522,7 +522,7 @@ class MemoryExtractHooks(RunHooks):
         if len(conversation_text) < 200:
             return
 
-        model = agent.auxiliary_model or agent.model
+        model = agent.resolve_auxiliary_model("memory_extract")
         if model is None:
             return
 
@@ -1135,13 +1135,10 @@ class ExperienceCaptureHooks(RunHooks):
     def _get_classification_model(agent: Any) -> Any:
         """Get the model for feedback classification.
 
-        Prefers auxiliary_model (cheaper), falls back to main model.
-        Returns None if no model is available.
+        Routes via the agent's auxiliary task router ("classification" task):
+        task override -> auxiliary_model -> main model.
         """
-        model = agent.auxiliary_model
-        if model is not None:
-            return model
-        return agent.model
+        return agent.resolve_auxiliary_model("classification")
 
     @staticmethod
     def _clean_prefilter_rule(text: str) -> str:

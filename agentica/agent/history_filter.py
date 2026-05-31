@@ -69,6 +69,10 @@ def apply_history_pipeline(
         if config.assistant_max_chars is not None and config.assistant_max_chars > 0:
             out = _truncate_assistant_content(out, config.assistant_max_chars)
 
+    # Strip leaked <think>/<reasoning> blocks from replayed assistant turns.
+    if config is None or config.scrub_reasoning:
+        out = _scrub_reasoning_leak(out)
+
     if user_filter is not None:
         out = list(user_filter(out))
 
@@ -111,6 +115,24 @@ def _drop_excluded_tools(history: List[Message], patterns: List[str]) -> List[Me
                 m = m.model_copy(update={"tool_calls": kept_calls or None})
         cleaned.append(m)
     return cleaned
+
+
+def _scrub_reasoning_leak(history: List[Message]) -> List[Message]:
+    """Remove leaked reasoning blocks from replayed assistant messages.
+
+    No-op for the common case (no reasoning tags present). Only assistant
+    messages are touched; user/tool content is left verbatim.
+    """
+    from agentica.think_scrubber import contains_reasoning_leak, sanitize_assistant_content_for_history
+
+    out: List[Message] = []
+    for m in history:
+        if m.role == "assistant" and isinstance(m.content, str) and contains_reasoning_leak(m.content):
+            m = m.model_copy(
+                update={"content": sanitize_assistant_content_for_history(m.content)}
+            )
+        out.append(m)
+    return out
 
 
 def _truncate_assistant_content(history: List[Message], max_chars: int) -> List[Message]:

@@ -467,16 +467,34 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertIsInstance(history_file, str)
         self.assertTrue(history_file.endswith("cli_history.txt"))
 
-    def test_parse_args_defaults_to_deepseek_v4_flash(self):
-        """CLI defaults should use the current DeepSeek v4 flash model."""
+    def test_parse_args_defaults_to_none_for_resolution(self):
+        """parse_args leaves provider/model as None so saved config can apply.
+
+        Final defaults (deepseek/deepseek-v4-flash) are filled in by
+        resolve_model_config (args > saved cli_config.json > hardcoded).
+        """
         from agentica.cli.config import parse_args
 
         with patch.object(sys, "argv", ["agentica"]):
             args = parse_args()
 
-        self.assertEqual(args.model_provider, "deepseek")
-        self.assertEqual(args.model_name, "deepseek-v4-flash")
+        self.assertIsNone(args.model_provider)
+        self.assertIsNone(args.model_name)
         self.assertIsNone(args.reasoning_effort)
+
+    def test_resolve_model_config_defaults_to_deepseek_v4_flash(self):
+        """With no flags/saved config, resolution falls back to DeepSeek v4 flash."""
+        import argparse
+        from agentica.cli.setup import resolve_model_config
+
+        args = argparse.Namespace(
+            model_provider=None, model_name=None, base_url=None, api_key=None,
+        )
+        with patch("agentica.cli.setup.load_cli_config", return_value={}):
+            resolved = resolve_model_config(args, console=None)
+
+        self.assertEqual(resolved["model_provider"], "deepseek")
+        self.assertEqual(resolved["model_name"], "deepseek-v4-flash")
 
     def test_get_model_defaults_deepseek_cli_reasoning_effort_to_max(self):
         """CLI DeepSeek usage should default to max effort for agentic tasks."""

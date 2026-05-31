@@ -240,6 +240,23 @@ class Runner:
         return None
 
     @staticmethod
+    def _inject_steering(messages: List[Message], agent: "Agent") -> None:
+        """Flush pending user steering into the message list before an inference.
+
+        Guidance buffered via ``agent.steer()`` (possibly from another thread) is
+        appended as a user message so the model sees it on the very next call.
+        Draining here — right before each inference — guarantees delivery: if a
+        run ends before the buffer is flushed, the leftover guidance survives on
+        the agent and is delivered at the start of the next run.
+        """
+        for guidance in agent._drain_steer():
+            messages.append(Message(
+                role="user",
+                content=f"[User guidance received while you were working]\n{guidance}",
+            ))
+            logger.debug("Injected steering guidance before inference")
+
+    @staticmethod
     def _loop_post_response(
         messages: List[Message],
         model: "Model",
@@ -1113,6 +1130,10 @@ class Runner:
                                 # Hook says skip this batch — let model reconsider
                                 continue
 
+                        # Mid-run steering: flush any guidance pushed since the last
+                        # inference so the model sees it on THIS call.
+                        self._inject_steering(messages_for_model, agent)
+
                         # Compression pipeline (cheapest-first, before LLM call)
                         await self._maybe_compress_messages(messages_for_model, agent, agent.model)
 
@@ -1247,6 +1268,10 @@ class Runner:
                             _skip = await _pre_tool_hook(messages_for_model, [])
                             if _skip:
                                 continue  # Let model reconsider
+
+                        # Mid-run steering: flush any guidance pushed since the last
+                        # inference so the model sees it on THIS call.
+                        self._inject_steering(messages_for_model, agent)
 
                         # Compression pipeline (cheapest-first, before LLM call)
                         await self._maybe_compress_messages(messages_for_model, agent, agent.model)

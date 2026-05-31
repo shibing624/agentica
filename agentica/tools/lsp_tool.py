@@ -79,6 +79,12 @@ class JsonRpcClient:
         self._pending: Dict[int, queue.Queue] = {}
         self._lock = threading.Lock()
         self._running = True
+        # Latest published diagnostics per document URI + a monotonically
+        # increasing publish counter so callers can wait for a NEW batch
+        # (publishDiagnostics is a server->client notification, no request id).
+        self._diagnostics: Dict[str, list] = {}
+        self._diag_counts: Dict[str, int] = {}
+        self._diag_cv = threading.Condition()
         self._reader_thread = threading.Thread(target=self._read_loop, daemon=True)
         self._reader_thread.start()
 
@@ -120,9 +126,38 @@ class JsonRpcClient:
         return json.loads(content.decode('utf-8'))
 
     def _handle_message(self, message: Dict) -> None:
-        """Handle received message (response to pending request)."""
+        """Handle received message (response to request, or server notification)."""
         if "id" in message and message["id"] in self._pending:
             self._pending[message["id"]].put(message)
+            return
+        # Server -> client notifications (no matching pending id).
+        if message.get("method") == "textDocument/publishDiagnostics":
+            params = message.get("params", {})
+            uri = params.get("uri", "")
+            with self._diag_cv:
+                self._diagnostics[uri] = params.get("diagnostics", [])
+                self._diag_counts[uri] = self._diag_counts.get(uri, 0) + 1
+                self._diag_cv.notify_all()
+
+    def diagnostics_count(self, uri: str) -> int:
+        """Number of publishDiagnostics batches seen for a URI so far."""
+        with self._diag_cv:
+            return self._diag_counts.get(uri, 0)
+
+    def wait_for_diagnostics(self, uri: str, baseline_count: int, timeout: float) -> list:
+        """Block until a publishDiagnostics batch newer than baseline arrives.
+
+        Returns the latest diagnostics list for the URI (possibly the stale
+        one if the timeout elapses without a new batch).
+        """
+        deadline = time.time() + timeout
+        with self._diag_cv:
+            while self._diag_counts.get(uri, 0) <= baseline_count:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    break
+                self._diag_cv.wait(timeout=remaining)
+            return list(self._diagnostics.get(uri, []))
 
     def send_request(self, method: str, params: Dict) -> Any:
         """Send a JSON-RPC request and wait for response."""
@@ -191,6 +226,7 @@ class LspClient:
         self._rpc: Optional[JsonRpcClient] = None
         self._initialized = False
         self._version_counter: Dict[str, int] = {}
+        self._opened: set = set()
 
     def start(self) -> None:
         """Start the LSP server process."""
@@ -276,6 +312,26 @@ class LspClient:
             "contentChanges": [{"text": content}]
         })
 
+    def get_diagnostics(self, file_path: Path, content: Optional[str] = None,
+                        timeout: float = 10.0) -> List[Dict]:
+        """Open/refresh a document and return the server's published diagnostics.
+
+        Sends didOpen (first time) or didChange (subsequent) for the file, then
+        waits for the next publishDiagnostics batch. Returns the raw LSP
+        diagnostic dicts ({range, severity, message, source, code, ...}).
+        """
+        if content is None:
+            content = file_path.read_text(encoding="utf-8", errors="ignore")
+        uri = file_path.as_uri()
+        baseline = self._rpc.diagnostics_count(uri)
+        path_str = str(file_path)
+        if path_str in self._opened:
+            self.text_document_did_change(file_path, content)
+        else:
+            self.text_document_did_open(file_path, content)
+            self._opened.add(path_str)
+        return self._rpc.wait_for_diagnostics(uri, baseline, timeout)
+
     def goto_definition(self, file_path: Path, line: int, character: int) -> List[Dict]:
         """Go to definition of symbol at position.
 
@@ -341,6 +397,10 @@ class LspServerManager:
         """Get LSP client for a file path."""
         ext = Path(file_path).suffix
         return self._ext_to_client.get(ext)
+
+    def has_any(self) -> bool:
+        """True if at least one LSP server is running."""
+        return bool(self._clients)
 
     def shutdown_all(self) -> None:
         """Shutdown all LSP servers."""

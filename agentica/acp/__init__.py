@@ -48,6 +48,11 @@ from agentica.acp.session import (
     SessionStatus,
     SessionMessage,
 )
+from agentica.acp.permissions import (
+    ToolPermissionPolicy,
+    PermissionMode,
+    PermissionDecision,
+)
 
 __all__ = [
     "ACPServer",
@@ -65,4 +70,8 @@ __all__ = [
     "ACPSession",
     "SessionStatus",
     "SessionMessage",
+    # Permissions
+    "ToolPermissionPolicy",
+    "PermissionMode",
+    "PermissionDecision",
 ]

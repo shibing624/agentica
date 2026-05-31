@@ -212,6 +212,8 @@ def show_help(skills_registry=None):
             "/compact":         "Compact context (summarize history)",
             "/btw <question>":  "Ephemeral side question (no tools, not saved)",
             "/queue":           "Queue: <prompt> | list | clear | remove <n>",
+            "/steer <text>":    "Guide the running agent mid-task (no interrupt)",
+            "/checkpoint":      "Durable file snapshots: list | create | diff | restore",
             "/background":      "Run prompt in background (/bg alias)",
             "/stop":            "Kill all running background tasks",
         },

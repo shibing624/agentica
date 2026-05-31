@@ -12,6 +12,12 @@ PROVIDER_ALIAS_EXPORTS = [
     "NvidiaChat", "SambanovaChat", "OpenRouterChat",
     "FireworksChat", "InternLMChat",
     "PROVIDER_FACTORIES",
+    "register_provider", "unregister_provider", "get_provider_factory",
+    "list_providers", "create_provider",
+    "AuxiliaryModelRouter",
+    "scrub_reasoning", "contains_reasoning_leak",
+    "sanitize_assistant_content_for_history",
+    "run_doctor", "DoctorReport", "DoctorCheck",
 ]
 
 LAZY_IMPORTS = {
@@ -97,6 +103,10 @@ LAZY_IMPORTS = {
     "run_output_guardrails": "agentica.guardrails",
     "run_tool_input_guardrails": "agentica.guardrails",
     "run_tool_output_guardrails": "agentica.guardrails",
+    # LSP edit-time diagnostics (pulls subprocess/LSP machinery; keep lazy)
+    "LspDiagnosticsChecker": "agentica.lsp_diagnostics",
+    "Diagnostic": "agentica.lsp_diagnostics",
+    "format_diagnostics": "agentica.lsp_diagnostics",
     # tools (external dependencies)
     "CronTool": "agentica.tools.cron_tool",
     "check_command_safety": "agentica.tools.safety",
@@ -181,6 +191,7 @@ EAGER_PUBLIC_EXPORTS = [
     "Document",
     "Tool", "ModelTool", "Function", "FunctionCall", "tool",
     "CompressionManager",
+    "CheckpointManager", "Checkpoint", "CheckpointFile",
     "count_tokens", "count_text_tokens", "count_image_tokens",
     "count_message_tokens", "count_tool_tokens",
     "Agent", "AgentCancelledError",

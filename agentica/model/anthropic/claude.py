@@ -854,6 +854,7 @@ class Claude(Model):
             "length" if response.stop_reason == "max_tokens" else response.stop_reason
         )
         self.last_finish_reason = model_response.finish_reason
+        assistant_message.finish_reason = model_response.finish_reason
 
         if await self.handle_tool_calls(assistant_message, messages, model_response, response_content, tool_ids):
             return model_response
@@ -969,6 +970,7 @@ class Claude(Model):
 
         # Update usage metrics
         self.update_usage_metrics(assistant_message, message_data.response_usage, metrics)
+        assistant_message.finish_reason = self.last_finish_reason
 
         # Add assistant message to messages
         messages.append(assistant_message)

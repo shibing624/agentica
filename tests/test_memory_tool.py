@@ -382,6 +382,7 @@ class TestMemoryExtractHooks:
         hooks = MemoryExtractHooks(every_n_turns=2, min_seconds_between=0, background=False)
         agent = MagicMock()
         agent.agent_id = "test_agent_flush"
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.session_id = "sess_flush"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
@@ -407,6 +408,7 @@ class TestMemoryExtractHooks:
         hooks = MemoryExtractHooks(every_n_turns=99, min_seconds_between=0)
         agent = MagicMock()
         agent.agent_id = "test_agent_pre"
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.session_id = "sess_pre"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
@@ -431,6 +433,7 @@ class TestMemoryExtractHooks:
 
         agent = MagicMock()
         agent.agent_id = "test_agent_aux"
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.session_id = "sess_aux"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
@@ -453,6 +456,7 @@ class TestMemoryExtractHooks:
 
         agent = MagicMock()
         agent.agent_id = "test_agent_fallback"
+        agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.session_id = "sess_fb"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()

@@ -177,6 +177,10 @@ class HistoryConfig:
     """
     excluded_tools: List[str] = field(default_factory=list)
     assistant_max_chars: Optional[int] = None
+    # Strip leaked <think>/<reasoning>/<scratchpad> blocks from replayed assistant
+    # turns so the model doesn't treat its prior hidden reasoning as ground truth.
+    # No-op when no such tags are present (the common case).
+    scrub_reasoning: bool = True
 
 
 @dataclass
@@ -351,6 +355,7 @@ class AgentDefinition:
 
     model: Optional[Any] = None
     auxiliary_model: Optional[Any] = None
+    auxiliary_task_models: Optional[Dict[str, Any]] = None
     name: Optional[str] = None
     agent_id: Optional[str] = None
     description: Optional[str] = None

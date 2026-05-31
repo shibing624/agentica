@@ -529,6 +529,7 @@ def test_agent_get_goal_manager_lazy_creates_session_log_and_manager(tmp_path):
     # Minimal hand-built dataclass-like state for the isolated test.
     agent.model = None
     agent.auxiliary_model = None
+    agent.auxiliary_task_models = {}
     agent.session_id = None
     agent._session_log = None
     agent.goal_manager = None
@@ -549,6 +550,7 @@ def test_agent_enable_goal_tool_idempotent(tmp_path):
     agent = Agent.__new__(Agent)
     agent.model = None
     agent.auxiliary_model = None
+    agent.auxiliary_task_models = {}
     agent.session_id = None
     agent._session_log = None
     agent.goal_manager = None
@@ -588,6 +590,7 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     agent = Agent.__new__(Agent)
     agent.model = None
     agent.auxiliary_model = _fake_model('{"done": true, "reason": "the answer is 42"}')
+    agent.auxiliary_task_models = {}
     agent.session_id = "agent-rungoal-1"
     agent._session_log = None
     agent.goal_manager = None
@@ -622,6 +625,7 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     agent = Agent.__new__(Agent)
     agent.model = None
     agent.auxiliary_model = _fake_model('{"done": false, "reason": "more work"}')
+    agent.auxiliary_task_models = {}
     agent.session_id = "agent-rungoal-budget"
     agent._session_log = None
     agent.goal_manager = None

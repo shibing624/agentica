@@ -66,6 +66,9 @@ class Message(BaseModel):
     # when an assistant message with tool calls is replayed.
     reasoning_content: Optional[str] = None
     # -*- Attributes not sent to the model
+    # Why the model stopped generating this message (stop | length | tool_calls
+    # | content_filter | ...). Kept for audit/replay fidelity; not sent to the API.
+    finish_reason: Optional[str] = None
     # The name of the tool called
     tool_name: Optional[str] = Field(None, alias="tool_call_name")
     # Arguments passed to the tool

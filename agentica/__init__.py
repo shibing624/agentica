@@ -264,6 +264,23 @@ PROVIDER_FACTORIES = {
     "internlm": InternLMChat,
 }
 
+# ── Pluggable provider registry ──
+from agentica.provider_registry import (
+    register_provider, unregister_provider, get_provider_factory,
+    list_providers, create_provider,
+)
+
+# ── Auxiliary task model router ──
+from agentica.auxiliary_router import AuxiliaryModelRouter
+
+# ── Think scrubber ──
+from agentica.think_scrubber import (
+    scrub_reasoning, contains_reasoning_leak, sanitize_assistant_content_for_history,
+)
+
+# ── Doctor / environment health check ──
+from agentica.diagnostics import run_doctor, DoctorReport, DoctorCheck
+
 # ── Memory ──
 from agentica.memory import (
     AgentRun, SessionSummary, MemorySummarizer, WorkingMemory,
@@ -296,6 +313,9 @@ from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
 # ── Compression ──
 from agentica.compression import CompressionManager
+
+# ── Checkpoint / rollback primitive ──
+from agentica.checkpoint import CheckpointManager, Checkpoint, CheckpointFile
 
 # ── Token counting ──
 from agentica.utils.tokens import count_tokens, count_text_tokens, count_image_tokens, count_message_tokens, count_tool_tokens

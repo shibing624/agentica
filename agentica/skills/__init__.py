@@ -49,9 +49,17 @@ from agentica.skills.skill_loader import (
     read_skill_file,
 )
 from agentica.skills.installer import install_skills, list_installed_skills, remove_skill
+from agentica.skills.curator import (
+    SkillCurator,
+    SkillReport,
+    SkillIssue,
+)
 
 __all__ = [
     "Skill",
+    "SkillCurator",
+    "SkillReport",
+    "SkillIssue",
     "SkillRegistry",
     "get_skill_registry",
     "reset_skill_registry",

@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from agentica.goals import GoalRunResult
 import copy
 import os
+import threading
 import time
 import weakref
 from inspect import signature
@@ -109,6 +110,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # Auxiliary model for low-cost side tasks (compression, memory extraction, evaluation).
     # When set, CompressionManager and other subsystems use this instead of the main model.
     auxiliary_model: Optional[Model] = None
+    # Per-task auxiliary model overrides, e.g. {"compression": cheap, "goal_judge": claude}.
+    # Resolution order per task: this dict -> auxiliary_model -> main model.
+    auxiliary_task_models: Dict[str, Model] = field(default_factory=dict)
     # Cross-provider fallback model chain. Activated PER-CALL (not per-run):
     # each LLM call starts from `model`; fallbacks are tried in order only when
     # the primary fails (content_filter / exhausted-retry timeout / 5xx).
@@ -236,6 +240,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             # ---- Core definition ----
             model: Optional[Model] = None,
             auxiliary_model: Optional[Model] = None,
+            auxiliary_task_models: Optional[Dict[str, Model]] = None,
             fallback_models: Optional[List[Model]] = None,
             name: Optional[str] = None,
             agent_id: Optional[str] = None,
@@ -279,6 +284,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._init_definition(
             model=model,
             auxiliary_model=auxiliary_model,
+            auxiliary_task_models=auxiliary_task_models,
             fallback_models=fallback_models,
             name=name,
             agent_id=agent_id,
@@ -332,6 +338,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         *,
         model: Optional[Model],
         auxiliary_model: Optional[Model],
+        auxiliary_task_models: Optional[Dict[str, Model]],
         fallback_models: Optional[List[Model]],
         name: Optional[str],
         agent_id: Optional[str],
@@ -350,6 +357,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         """Initialize identity and capability definition."""
         self.model = model
         self.auxiliary_model = auxiliary_model
+        self.auxiliary_task_models = dict(auxiliary_task_models) if auxiliary_task_models else {}
         self.fallback_models = list(fallback_models) if fallback_models else []
         self.name = name
         self.agent_id = agent_id or str(uuid4())
@@ -379,6 +387,15 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 workspace.set_user(user_id)
             if self.workspace is not None:
                 self.user_id = self.workspace.user_id
+
+    def resolve_auxiliary_model(self, task: str = "default") -> Model:
+        """Pick the model for an auxiliary task (compression/goal_judge/...).
+
+        Resolution order: ``auxiliary_task_models[task]`` -> ``auxiliary_model``
+        -> main ``model``. Resolved fresh each call so live ``/model`` switches
+        and auxiliary-model changes are always reflected.
+        """
+        return self.auxiliary_task_models.get(task) or self.auxiliary_model or self.model
 
     def _init_execution(
         self,
@@ -467,6 +484,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._tool_policy_prompts: List[str] = []
         self._session_guidance_prompts: List[str] = []
 
+        # Mid-run steering: guidance pushed (possibly from another thread) while
+        # the agent is inside its tool loop. Drained between tool batches and
+        # injected as a user message so the model sees it on the next inference.
+        self._pending_steer: List[str] = []
+        self._steer_lock = threading.Lock()
+
         # Session-level set of memory filenames already surfaced (dedup across turns).
         # Prevents the same memory entry from occupying system prompt slots every turn.
         self._surfaced_memories: set = set()
@@ -529,7 +552,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # Initialize compression manager
         if self.tool_config.compress_tool_results and self.tool_config.compression_manager is None:
             self.tool_config.compression_manager = CompressionManager(
-                model=self.auxiliary_model or self.model,
+                model=self.resolve_auxiliary_model("compression"),
                 compress_tool_results=True,
                 workspace=self.workspace,
             )
@@ -761,6 +784,32 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if prompt and prompt not in self._session_guidance_prompts:
             self._session_guidance_prompts.append(prompt)
 
+    def steer(self, guidance: str) -> bool:
+        """Inject guidance into a running tool loop without interrupting it.
+
+        Unlike a queued message (which runs as a fresh turn after the current
+        run finishes), steering is consumed BETWEEN tool batches of the current
+        run and shown to the model as a user message on its next inference —
+        so the agent can course-correct mid-task. Thread-safe: callers (e.g. a
+        CLI input thread) may invoke this while ``run()`` executes elsewhere.
+
+        Returns True if the guidance was buffered (non-empty), else False.
+        """
+        if not guidance or not guidance.strip():
+            return False
+        with self._steer_lock:
+            self._pending_steer.append(guidance.strip())
+        return True
+
+    def _drain_steer(self) -> List[str]:
+        """Atomically take and clear any buffered steering guidance."""
+        with self._steer_lock:
+            if not self._pending_steer:
+                return []
+            drained = self._pending_steer
+            self._pending_steer = []
+            return drained
+
     def _merge_tool_system_prompts(self) -> None:
         """Collect tool prompts and split them into static vs dynamic sections."""
         if not self.tools:
@@ -842,6 +891,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         return cls(
             model=definition.model,
             auxiliary_model=definition.auxiliary_model,
+            auxiliary_task_models=definition.auxiliary_task_models,
             name=definition.name,
             agent_id=definition.agent_id,
             description=definition.description,
@@ -1489,7 +1539,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                     default_turn_budget if default_turn_budget is not None
                     else DEFAULT_TURN_BUDGET
                 ),
-                judge_model=self.auxiliary_model or self.model,
+                judge_model=self.resolve_auxiliary_model("goal_judge"),
                 event_callback=event_callback,
             )
             # Load any persisted state from a previous session.

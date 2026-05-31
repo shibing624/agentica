@@ -177,6 +177,7 @@ class BuiltinFileTool(Tool):
             max_read_lines: int = 500,
             max_line_length: int = 2000,
             sandbox_config=None,
+            diagnostics_checker=None,
     ):
         """
         Initialize BuiltinFileTool.
@@ -186,6 +187,8 @@ class BuiltinFileTool(Tool):
             max_read_lines: Maximum number of lines to read by default
             max_line_length: Maximum length per line, longer lines will be truncated
             sandbox_config: SandboxConfig instance for path restriction enforcement
+            diagnostics_checker: Optional LspDiagnosticsChecker. When set, file
+                edits append newly-introduced LSP diagnostics to the tool result.
         """
         super().__init__(name="builtin_file_tool")
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
@@ -193,6 +196,7 @@ class BuiltinFileTool(Tool):
         self.max_line_length = max_line_length
         self._file_locks: Dict[str, asyncio.Lock] = {}
         self._sandbox_config = sandbox_config
+        self.diagnostics_checker = diagnostics_checker
 
         # mtime cache: detect external modifications before edit/write.
         # Key: resolved absolute path (str), Value: {"mtime": float}
@@ -238,6 +242,30 @@ class BuiltinFileTool(Tool):
     def _get_file_lock(self, path: str) -> asyncio.Lock:
         """Get or create a per-file asyncio.Lock to serialize concurrent edits."""
         return self._file_locks.setdefault(path, asyncio.Lock())
+
+    async def _diagnostics_snapshot(self, path: "Path") -> None:
+        """Capture a pre-edit diagnostics baseline (off the event loop).
+
+        No-op when no checker is attached. Cheap on repeat edits (the checker
+        caches the baseline per file).
+        """
+        if self.diagnostics_checker is None:
+            return
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self.diagnostics_checker.snapshot_before, str(path))
+
+    async def _diagnostics_after(self, path: "Path") -> str:
+        """Return formatted newly-introduced diagnostics (off the event loop)."""
+        if self.diagnostics_checker is None:
+            return ""
+        loop = asyncio.get_event_loop()
+        try:
+            return await loop.run_in_executor(
+                None, self.diagnostics_checker.report_after, str(path)
+            )
+        except Exception as e:
+            logger.warning(f"Diagnostics check failed for {path}: {e}")
+            return ""
 
     def _preflight_edit_check(self, file_path: str) -> Optional[str]:
         """Run shared preflight checks for edit_file / multi_edit_file.
@@ -575,6 +603,7 @@ class BuiltinFileTool(Tool):
         action = "Created" if not path.exists() else "Updated"
 
         # ── Snapshot for rollback ─────────────────────────────────
+        await self._diagnostics_snapshot(path)
         if path.exists() and path.is_file():
             try:
                 old_content = path.read_text(encoding='utf-8', errors='ignore')
@@ -606,7 +635,9 @@ class BuiltinFileTool(Tool):
         except OSError:
             self._file_read_state.pop(absolute_path, None)
         logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
-        return f"{action} file, absolute path: {absolute_path}{stale_warning}"
+        diag_text = await self._diagnostics_after(path)
+        suffix = f"\n\n{diag_text}" if diag_text else ""
+        return f"{action} file, absolute path: {absolute_path}{stale_warning}{suffix}"
 
     async def edit_file(
             self,
@@ -674,6 +705,8 @@ class BuiltinFileTool(Tool):
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
+        await self._diagnostics_snapshot(path)
+
         # Per-file lock to serialize concurrent edits on the same file
         lock = self._get_file_lock(path_key)
         async with lock:
@@ -707,7 +740,9 @@ class BuiltinFileTool(Tool):
             self._file_read_state[abs_path] = {"mtime": path.stat().st_mtime}
         except OSError:
             self._file_read_state.pop(abs_path, None)
-        return f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"
+        diag_text = await self._diagnostics_after(path)
+        suffix = f"\n\n{diag_text}" if diag_text else ""
+        return f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'{suffix}"
 
     async def multi_edit_file(
             self,
@@ -761,10 +796,15 @@ class BuiltinFileTool(Tool):
         if not edits:
             raise ValueError("'edits' list cannot be empty.")
 
+        await self._diagnostics_snapshot(path)
+
         lock = self._get_file_lock(path_key)
         async with lock:
             async with aiofiles.open(path, 'r', encoding='utf-8') as f:
                 content = await f.read()
+
+            # ── Snapshot for rollback before edits ────────────────
+            self._file_snapshots.setdefault(abs_path, []).append(content)
 
             # Apply edits sequentially on in-memory content
             results = []
@@ -806,6 +846,9 @@ class BuiltinFileTool(Tool):
             self._file_read_state[abs_path] = {"mtime": path.stat().st_mtime}
         except OSError:
             self._file_read_state.pop(abs_path, None)
+        diag_text = await self._diagnostics_after(path)
+        if diag_text:
+            summary += f"\n\n{diag_text}"
         return summary
 
     @staticmethod
@@ -1534,6 +1577,9 @@ def get_builtin_tools(
         custom_skill_dirs: Optional[List[str]] = None,
         user_input_callback=None,
         sandbox_config=None,
+        enable_diagnostics: bool = False,
+        diagnostics_servers: Optional[List[str]] = None,
+        diagnostics_errors_only: bool = True,
     ) -> List[Tool]:
     """
     Get the list of built-in tools for Agent.
@@ -1553,6 +1599,13 @@ def get_builtin_tools(
         custom_skill_dirs: Custom skill directories to load (optional)
         user_input_callback: Custom callback for user input tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
+        enable_diagnostics: When True, start an LSP diagnostics checker and attach
+            it to the file tool so write/edit results report newly-introduced
+            type/import/syntax errors. Requires a language server (e.g. pyright)
+            on PATH; degrades to a no-op if none is available. Default False.
+        diagnostics_servers: LSP server names to use (default ["pyright"]).
+        diagnostics_errors_only: When True (default), only severity "error"
+            diagnostics are surfaced to the model.
 
     Returns:
         List of tools
@@ -1560,7 +1613,21 @@ def get_builtin_tools(
     tools = []
 
     if include_file_tools:
-        tools.append(BuiltinFileTool(work_dir=work_dir, sandbox_config=sandbox_config))
+        diagnostics_checker = None
+        if enable_diagnostics:
+            from agentica.lsp_diagnostics import LspDiagnosticsChecker
+            checker = LspDiagnosticsChecker(
+                work_dir=work_dir,
+                servers=diagnostics_servers,
+                errors_only=diagnostics_errors_only,
+            )
+            # Only attach if a server actually started; otherwise stay a no-op.
+            diagnostics_checker = checker if checker.available() else None
+        tools.append(BuiltinFileTool(
+            work_dir=work_dir,
+            sandbox_config=sandbox_config,
+            diagnostics_checker=diagnostics_checker,
+        ))
 
     if include_execute:
         tools.append(BuiltinExecuteTool(work_dir=work_dir, sandbox_config=sandbox_config))

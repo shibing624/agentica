@@ -58,7 +58,7 @@ class MCPConfig:
         for config_file in config_files:
             config_path = os.path.join(AGENTICA_HOME, config_file)
             if os.path.exists(config_path):
-                logger.warning(
+                logger.debug(
                     "MCP config falling back to user-global %s — all agents "
                     "in this process will share these servers and credentials. "
                     "Pass MCPConfig(config_path=...) explicitly for multi-tenant safety.",

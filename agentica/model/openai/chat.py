@@ -463,6 +463,7 @@ class OpenAIChat(Model):
         # truncated output (finish_reason == "length") for max_tokens recovery.
         model_response.finish_reason = first_choice.finish_reason
         self.last_finish_reason = model_response.finish_reason
+        assistant_message.finish_reason = model_response.finish_reason
 
         tool_role = "tool"
         if (
@@ -567,6 +568,7 @@ class OpenAIChat(Model):
 
         # Expose finish_reason so Runner's agentic loop can detect truncated output
         self.last_finish_reason = stream_finish_reason
+        assistant_message.finish_reason = stream_finish_reason
 
         messages.append(assistant_message)
         assistant_message.log()

@@ -193,6 +193,23 @@ def maybe_persist_result(
     """
     if max_result_size_chars is None:
         return content
+
+    # ── Classify first: image/binary should never sit raw in context, even
+    #    when under the size threshold (a 5 KB base64 image is still noise). ──
+    from agentica.compression.tool_result_classification import (
+        classify_tool_result, describe_media, ToolResultClass,
+    )
+    cls = classify_tool_result(content, large_threshold=max_result_size_chars)
+    if cls in (ToolResultClass.IMAGE, ToolResultClass.BINARY) and len(content) > PREVIEW_CHARS:
+        descriptor = describe_media(content, cls)
+        file_path = get_tool_result_path(
+            tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
+        )
+        if _persist_to_disk(file_path, content):
+            logger.debug(f"Persisted {cls.value} {tool_name} result to {file_path}")
+            return f"{descriptor}\nFull {cls.value} output saved to: {file_path}"
+        return descriptor
+
     if len(content) <= max_result_size_chars:
         return content
 
