@@ -61,7 +61,7 @@ from agentica.agent.config import (
 from agentica.agent.history_filter import HistoryFilter
 from agentica.hooks import (
     AgentHooks, RunHooks, ConversationArchiveHooks, MemoryExtractHooks,
-    ExperienceCaptureHooks, _CompositeRunHooks,
+    ExperienceCaptureHooks, _CompositeRunHooks, _CompositeAgentHooks,
 )
 from agentica.runner import Runner
 
@@ -154,8 +154,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # Supports compact boundaries for resume from last compaction point.
     session_id: Optional[str] = None
 
-    # Lifecycle hooks (per-agent)
-    hooks: Optional[AgentHooks] = None
+    # Lifecycle hooks (per-agent). Accepts a single AgentHooks or a list of
+    # them (a list is wrapped in _CompositeAgentHooks at init).
+    hooks: Optional[Union[AgentHooks, List[AgentHooks]]] = None
 
     # ============================
     # Layer 3: Packed config
@@ -271,7 +272,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             use_structured_outputs: bool = False,
             debug: bool = False,
             enable_tracing: bool = False,
-            hooks: Optional[AgentHooks] = None,
+            hooks: Optional[Union[AgentHooks, List[AgentHooks]]] = None,
             # ---- Session persistence ----
             session_id: Optional[str] = None,
             # ---- Packed config ----
@@ -418,7 +419,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         use_structured_outputs: bool,
         debug: bool,
         enable_tracing: bool,
-        hooks: Optional[AgentHooks],
+        hooks: Optional[Union[AgentHooks, List[AgentHooks]]],
         session_id: Optional[str],
     ) -> None:
         """Initialize execution behavior and session state."""
@@ -427,7 +428,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.use_structured_outputs = use_structured_outputs
         self.debug = debug
         self.enable_tracing = enable_tracing
-        self.hooks = hooks
+        # Accept a single AgentHooks or a list; wrap a list so the Runner can
+        # always call agent.hooks.on_start / on_end on one object.
+        if isinstance(hooks, (list, tuple)):
+            self.hooks = _CompositeAgentHooks(list(hooks)) if hooks else None
+        else:
+            self.hooks = hooks
 
         self.session_id = session_id
         self._session_log = None

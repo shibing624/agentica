@@ -1545,3 +1545,24 @@ class _CompositeRunHooks(RunHooks):
     async def flush_pending(self, agent: Any, **kwargs) -> None:
         for h in self._hooks_list:
             await h.flush_pending(agent=agent, **kwargs)
+
+
+class _CompositeAgentHooks(AgentHooks):
+    """Internal wrapper that fans out per-agent lifecycle events to several
+    ``AgentHooks`` instances.
+
+    Lets ``Agent(hooks=[hook_a, hook_b])`` work without the caller composing
+    hooks by hand. ``hooks`` exposes the underlying list so callers can locate a
+    specific hook (e.g. ``next(h for h in agent.hooks.hooks if isinstance(...))``).
+    """
+
+    def __init__(self, hooks_list: List[AgentHooks]):
+        self.hooks: List[AgentHooks] = list(hooks_list)
+
+    async def on_start(self, agent: Any, **kwargs) -> None:
+        for h in self.hooks:
+            await h.on_start(agent=agent, **kwargs)
+
+    async def on_end(self, agent: Any, output: Any, **kwargs) -> None:
+        for h in self.hooks:
+            await h.on_end(agent=agent, output=output, **kwargs)

@@ -7,7 +7,10 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agentica.hooks import AgentHooks, RunHooks, ConversationArchiveHooks, _CompositeRunHooks
+from agentica.hooks import (
+    AgentHooks, RunHooks, ConversationArchiveHooks,
+    _CompositeRunHooks, _CompositeAgentHooks,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +49,54 @@ class TestAgentHooks(unittest.TestCase):
         self.assertEqual(calls[0][0], "start")
         self.assertEqual(calls[1][0], "end")
         self.assertEqual(calls[1][1], "result")
+
+    def test_composite_fans_out_to_all(self):
+        """_CompositeAgentHooks dispatches on_start/on_end to every member."""
+        calls = []
+
+        class A(AgentHooks):
+            async def on_start(self, agent, **kwargs):
+                calls.append("a_start")
+
+            async def on_end(self, agent, output, **kwargs):
+                calls.append(("a_end", output))
+
+        class B(AgentHooks):
+            async def on_start(self, agent, **kwargs):
+                calls.append("b_start")
+
+            async def on_end(self, agent, output, **kwargs):
+                calls.append(("b_end", output))
+
+        composite = _CompositeAgentHooks([A(), B()])
+        agent = MagicMock()
+        asyncio.run(composite.on_start(agent=agent))
+        asyncio.run(composite.on_end(agent=agent, output="r"))
+
+        self.assertEqual(calls[0], "a_start")
+        self.assertEqual(calls[1], "b_start")
+        self.assertIn(("a_end", "r"), calls)
+        self.assertIn(("b_end", "r"), calls)
+        # Underlying list is exposed so callers can locate a specific hook.
+        self.assertEqual(len(composite.hooks), 2)
+
+    def test_agent_wraps_hooks_list(self):
+        """Agent(hooks=[...]) wraps a list into _CompositeAgentHooks; a single
+        hook is kept as-is; None stays None."""
+        import os
+        os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
+        from agentica import Agent
+
+        single = AgentHooks()
+        self.assertIs(Agent(hooks=single).hooks, single)
+        self.assertIsNone(Agent(hooks=None).hooks)
+
+        h1, h2 = AgentHooks(), AgentHooks()
+        wrapped = Agent(hooks=[h1, h2]).hooks
+        self.assertIsInstance(wrapped, _CompositeAgentHooks)
+        self.assertEqual(wrapped.hooks, [h1, h2])
+        # Empty list collapses to None (nothing to dispatch).
+        self.assertIsNone(Agent(hooks=[]).hooks)
 
     def test_hook_exception_does_not_propagate_through_base(self):
         """If a hook raises, it should surface (not be silently swallowed)."""
