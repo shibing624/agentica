@@ -185,6 +185,67 @@ class TestRunResponseBreakSignal(unittest.TestCase):
         # Content stays clean — no internal error text leaked in.
         self.assertEqual(resp.content, "partial answer")
 
+    def test_fallback_used_defaults_false(self):
+        from agentica.run_response import RunResponse
+        self.assertFalse(RunResponse().fallback_used)
+
+
+class TestFallbackOnBreak(unittest.TestCase):
+    """Break-recovery: a tool-free fallback inference rescues a broken loop."""
+
+    def test_disabled_returns_none(self):
+        """No recovery when fallback_on_break is off."""
+        agent = _make_agent()
+        agent.update_model()
+        agent._run_fallback_on_break = False
+        agent._run_fallback_models = [object()]  # non-empty but unused (flag is off)
+        runner = Runner(agent)
+        result = asyncio.run(
+            runner._recover_with_fallback([], LoopState(), agent, "death_spiral")
+        )
+        self.assertIsNone(result)
+
+    def test_no_fallback_models_returns_none(self):
+        """No recovery when there is no fallback model configured."""
+        agent = _make_agent()
+        agent.update_model()
+        agent._run_fallback_on_break = True
+        agent._run_fallback_models = []
+        runner = Runner(agent)
+        result = asyncio.run(
+            runner._recover_with_fallback([], LoopState(), agent, "death_spiral")
+        )
+        self.assertIsNone(result)
+
+    def test_recovery_uses_fallback_and_records_model(self):
+        """When enabled, the fallback model answers and last_used_model_id is set."""
+        from agentica.model.response import ModelResponse
+
+        agent = _make_agent()
+        agent.update_model()
+        agent._run_fallback_on_break = True
+
+        fb = _make_agent().model  # a second OpenAIChat instance
+        fb.id = "fallback-model-x"
+
+        async def _fake_response(messages):
+            messages.append(Message(role="assistant", content="recovered reply"))
+            return ModelResponse(content="recovered reply", finish_reason="stop")
+
+        fb.response = _fake_response
+        agent._run_fallback_models = [fb]
+
+        runner = Runner(agent)
+        loop_state = LoopState()
+        result = asyncio.run(
+            runner._recover_with_fallback([], loop_state, agent, "death_spiral")
+        )
+        self.assertIsNotNone(result)
+        self.assertEqual(result.content, "recovered reply")
+        self.assertEqual(loop_state.last_used_model_id, "fallback-model-x")
+        # The fallback chain is restored after the recovery call.
+        self.assertEqual(agent._run_fallback_models, [fb])
+
 
 class TestLoopPostResponse(unittest.TestCase):
     """Test _loop_post_response helper."""

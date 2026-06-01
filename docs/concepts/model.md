@@ -139,6 +139,36 @@ if not resp.is_complete:                 # 被安全检查中断
 
 `break_reason` 取值见 `RunBreakReason`：`death_spiral` / `max_turns` / `cost_budget`。
 
+### 断点自动兜底（fallback_on_break）
+
+若不想让下游自己处理 break，可开启 `fallback_on_break`：循环被安全检查中断时，Runner 会用 `fallback_models` 链做**一次无工具补跑**，回放完整历史（含失败的 tool 调用，让模型看到失败原因），把回复填进 `content`：
+
+```python
+agent = Agent(
+    model=primary_model,
+    fallback_models=[cheap_model],   # 兜底模型（无需绑定工具）
+    fallback_on_break=True,          # 仅 break 触发，异常抛出仍交给调用方
+)
+resp = await agent.run("...")
+reply = resp.content                 # 永远可用，下游无需写 fallback 代码
+# 观测：resp.break_reason 仍记录中断原因；resp.fallback_used=True；
+#       resp.model = 实际应答的兜底模型 id（主模型仍是 agent.model.id）
+```
+
+补跑只在 loop-break 时触发（异常抛出不触发，交由调用方 try/except）；不注入任何人设提示，纯靠历史上下文。
+
+**下游契约（重要）**：开启 `fallback_on_break` 后，`is_complete` 仍为 `False`（循环确实被中断过，保留供观测）。**判断"有没有可发的回复"要看 `content` / `fallback_used`，不要再用 `if not is_complete: reply=""` 那套**——否则会把已经兜好的回复丢掉。两种模式二选一：
+
+- 关闭（默认）：`content` 在 break 时为空/残缺，下游自己决定怎么降级（查 `is_complete`）。
+- 开启：库已兜底，下游直接读 `content`；`break_reason` / `fallback_used` / `model` 仅用于日志告警。
+
+其它注意点：
+
+- **流式**：兜底回复会作为一个 chunk yield 出来，同时写入最终 `run_response.content`。若主模型在 break 前已 yield 过可见文本，消费者累加的分块会是"旧文本+兜底"，**以最终 `run_response.content` 为准**。
+- **成本**：`cost_budget` 触发时，兜底仍会多产生**一次**有界 LLM 调用，会略微超出预算上限（计入 `cost_tracker`）。
+- **模型选择**：兜底模型应是**与主模型不同的实例**（最好跨 provider）。若把绑了工具的主模型自己塞进 `fallback_models`，兜底可能只产 tool_calls、`content` 为空（工具不执行），等于兜底失效。
+- **结构化输出**：`response_model` 只绑在主模型上，兜底回复是纯文本、不保证能解析成目标模型。
+
 ## 下一步
 
 - [Agent 核心概念](agent.md) -- Agent 如何使用 Model

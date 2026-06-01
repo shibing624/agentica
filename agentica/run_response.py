@@ -140,6 +140,11 @@ class RunResponse(BaseModel):
     # error text before showing the reply to an end user.
     break_reason: Optional[str] = None
     break_message: Optional[str] = None
+    # True when a loop-break was recovered by a tool-free fallback inference
+    # (see Agent.fallback_on_break). When True, `content` holds the fallback
+    # reply and `model` reflects the fallback that answered; `break_reason`
+    # still records why the primary loop was aborted.
+    fallback_used: bool = False
     created_at: int = Field(default_factory=lambda: int(time()))
     # Cost tracking — populated by Runner after each model.response() call.
     # Excluded from serialisation (avoid heavy / circular dumps).

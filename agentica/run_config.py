@@ -66,3 +66,13 @@ class RunConfig:
     # Primary model is always retried on the next call (per-call switch, not per-run).
     # Use cross-provider models — same provider often shares the moderation layer.
     fallback_models: List["Model"] = field(default_factory=list)
+    # Break recovery: when the agentic loop is aborted by a safety check
+    # (death spiral / max turns / cost budget) the assistant content may be empty
+    # or partial. If True AND `fallback_models` is non-empty, the Runner does one
+    # final tool-free inference with the fallback chain, replaying the full
+    # history (including the failed tool calls — so the model sees what went
+    # wrong), and uses that as the answer. The run still reports break_reason;
+    # `RunResponse.fallback_used` flips True and `RunResponse.model` reflects the
+    # fallback that answered. Only loop-breaks trigger this — a raised exception
+    # is left to the caller. Defaults to False (opt-in, no behavior change).
+    fallback_on_break: bool = False

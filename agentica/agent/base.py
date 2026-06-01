@@ -120,6 +120,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # same provider often shares the moderation layer, defeating the purpose.
     # RunConfig.fallback_models, if provided, overrides this default for one run.
     fallback_models: List[Model] = field(default_factory=list)
+    # When the agentic loop is aborted by a safety check (death spiral / max
+    # turns / cost budget), do one final tool-free inference with `fallback_models`
+    # so the caller still gets a usable reply instead of empty/partial content.
+    # The full history (incl. failed tool calls) is replayed so the fallback
+    # model sees what went wrong; no synthetic hint is injected. Opt-in.
+    fallback_on_break: bool = False
     name: Optional[str] = None
     agent_id: str = ""
     description: Optional[str] = None
@@ -216,6 +222,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # Per-run cross-provider fallback model chain. Set by Runner from RunConfig.
     # Triggered per-call by content_filter / exhausted-retry timeout / 5xx.
     _run_fallback_models: List[Any] = field(default_factory=list, init=False, repr=False)
+    # Per-run break-recovery toggle. Set by Runner from RunConfig.fallback_on_break
+    # (falling back to Agent.fallback_on_break). Read at the loop-break sites.
+    _run_fallback_on_break: bool = field(default=False, init=False, repr=False)
     # Max LLM loop turns. None = unlimited (main agent default).
     # Subagents set this via SubagentConfig.max_turns as a safety net.
     _max_turns: Optional[int] = field(default=None, init=False, repr=False)
@@ -242,6 +251,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             auxiliary_model: Optional[Model] = None,
             auxiliary_task_models: Optional[Dict[str, Model]] = None,
             fallback_models: Optional[List[Model]] = None,
+            fallback_on_break: bool = False,
             name: Optional[str] = None,
             agent_id: Optional[str] = None,
             description: Optional[str] = None,
@@ -286,6 +296,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             auxiliary_model=auxiliary_model,
             auxiliary_task_models=auxiliary_task_models,
             fallback_models=fallback_models,
+            fallback_on_break=fallback_on_break,
             name=name,
             agent_id=agent_id,
             description=description,
@@ -340,6 +351,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         auxiliary_model: Optional[Model],
         auxiliary_task_models: Optional[Dict[str, Model]],
         fallback_models: Optional[List[Model]],
+        fallback_on_break: bool,
         name: Optional[str],
         agent_id: Optional[str],
         description: Optional[str],
@@ -359,6 +371,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.auxiliary_model = auxiliary_model
         self.auxiliary_task_models = dict(auxiliary_task_models) if auxiliary_task_models else {}
         self.fallback_models = list(fallback_models) if fallback_models else []
+        self.fallback_on_break = fallback_on_break
         self.name = name
         self.agent_id = agent_id or str(uuid4())
         self.description = description
@@ -480,6 +493,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._enabled_skills = None
         self._run_max_cost_usd = None
         self._run_fallback_models = []
+        self._run_fallback_on_break = False
         self.todos = []
         self._tool_policy_prompts: List[str] = []
         self._session_guidance_prompts: List[str] = []

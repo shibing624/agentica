@@ -263,6 +263,67 @@ class Runner:
 
         return None
 
+    async def _recover_with_fallback(
+        self,
+        messages: List[Message],
+        loop_state: "LoopState",
+        agent: "Agent",
+        break_reason: str,
+    ) -> Optional[ModelResponse]:
+        """After a loop break, do ONE tool-free inference with the fallback chain.
+
+        Opt-in via ``Agent.fallback_on_break`` / ``RunConfig.fallback_on_break``.
+        The full message history (including the failed tool calls) is replayed so
+        the fallback model can see what went wrong — no synthetic hint is injected.
+        Fallback models carry no bound tools (``update_model`` only binds tools to
+        the primary), so the reply is naturally tool-free.
+
+        Returns the recovery ModelResponse (its assistant message is appended to
+        ``messages``), or None when break-recovery is disabled, no fallback is
+        configured, or every fallback failed.
+        """
+        if not agent._run_fallback_on_break or not agent._run_fallback_models:
+            return None
+
+        fb_chain = list(agent._run_fallback_models)
+        primary_id = agent.model.id if agent.model else "?"
+
+        # Reuse the retry/fallback machinery: treat the first fallback as the
+        # "primary" of this recovery call and the rest as its own fallbacks.
+        saved_chain = agent._run_fallback_models
+        agent._run_fallback_models = fb_chain[1:]
+        try:
+            recovery = await self._call_with_retry(
+                fb_chain[0], messages, loop_state, agent, stream=False,
+            )
+        except Exception as exc:
+            logger.error(
+                f"[fallback.on_break] recovery inference failed "
+                f"(reason={break_reason}, primary={primary_id}): {exc}"
+            )
+            return None
+        finally:
+            agent._run_fallback_models = saved_chain
+
+        used_id = loop_state.last_used_model_id or fb_chain[0].id
+        logger.warning(
+            f"[fallback.on_break] recovered: primary={primary_id} -> "
+            f"used={used_id} (reason={break_reason})"
+        )
+        cb = agent._event_callback
+        if cb is not None:
+            try:
+                cb({
+                    "type": "fallback.on_break",
+                    "agent_name": agent.name or "Agent",
+                    "primary_model": primary_id,
+                    "used_model": used_id,
+                    "break_reason": break_reason,
+                })
+            except Exception as e:
+                logger.warning(f"event callback failed for fallback.on_break: {e}")
+        return recovery
+
     @staticmethod
     def _inject_steering(messages: List[Message], agent: "Agent") -> None:
         """Flush pending user steering into the message list before an inference.
@@ -1145,6 +1206,27 @@ class Runner:
                                 f"Agent '{agent.identifier}': loop aborted "
                                 f"({_loop_break.reason}) — {_loop_break.message}"
                             )
+                            _recovery = await self._recover_with_fallback(
+                                messages_for_model, loop_state, agent, _loop_break.reason,
+                            )
+                            if _recovery is not None:
+                                agent.run_response.fallback_used = True
+                                if loop_state.last_used_model_id is not None:
+                                    agent.run_response.model = loop_state.last_used_model_id
+                                if _recovery.content:
+                                    # Recovery replaces the (usually empty)
+                                    # partial. We yield it as a chunk AND make it
+                                    # the authoritative final content; if earlier
+                                    # turns streamed visible text, consumers should
+                                    # treat run_response.content as the source of
+                                    # truth (see docs: fallback_on_break).
+                                    model_response.content = _recovery.content
+                                    yield RunResponse(
+                                        event=RunEvent.run_response,
+                                        content=_recovery.content,
+                                        run_id=agent.run_id,
+                                        agent_id=agent.agent_id,
+                                    )
                             break
 
                         # Safety: cancellation
@@ -1296,6 +1378,14 @@ class Runner:
                                 f"Agent '{agent.identifier}': loop aborted "
                                 f"({_loop_break.reason}) — {_loop_break.message}"
                             )
+                            _recovery = await self._recover_with_fallback(
+                                messages_for_model, loop_state, agent, _loop_break.reason,
+                            )
+                            if _recovery is not None:
+                                model_response = _recovery
+                                agent.run_response.fallback_used = True
+                                if loop_state.last_used_model_id is not None:
+                                    agent.run_response.model = loop_state.last_used_model_id
                             break
 
                         # Pre-tool hook (context overflow handling)
@@ -1771,6 +1861,9 @@ class Runner:
         self.agent._run_fallback_models = list(
             config.fallback_models or self.agent.fallback_models or []
         )
+        self.agent._run_fallback_on_break = bool(
+            config.fallback_on_break or self.agent.fallback_on_break
+        )
 
         if run_timeout is not None:
             return await self._run_with_timeout(
@@ -1854,6 +1947,9 @@ class Runner:
         self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_fallback_models = list(
             config.fallback_models or self.agent.fallback_models or []
+        )
+        self.agent._run_fallback_on_break = bool(
+            config.fallback_on_break or self.agent.fallback_on_break
         )
 
         if self.agent.response_model is not None:
