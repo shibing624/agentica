@@ -98,6 +98,38 @@ class TestAgentHooks(unittest.TestCase):
         # Empty list collapses to None (nothing to dispatch).
         self.assertIsNone(Agent(hooks=[]).hooks)
 
+    def test_find_hook_and_iter_hooks(self):
+        """find_hook/iter_hooks abstract over None / single / list shapes so
+        callers never poke at _CompositeAgentHooks internals."""
+        import os
+        os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
+        from agentica import Agent
+
+        class AlertHook(AgentHooks):
+            pass
+
+        class MetricsHook(AgentHooks):
+            pass
+
+        # None: nothing found, empty iteration.
+        a_none = Agent(hooks=None)
+        self.assertIsNone(a_none.find_hook(AlertHook))
+        self.assertEqual(list(a_none.iter_hooks()), [])
+
+        # Single hook.
+        single = AlertHook()
+        a_single = Agent(hooks=single)
+        self.assertIs(a_single.find_hook(AlertHook), single)
+        self.assertIsNone(a_single.find_hook(MetricsHook))
+        self.assertEqual(list(a_single.iter_hooks()), [single])
+
+        # List of hooks.
+        alert, metrics = AlertHook(), MetricsHook()
+        a_list = Agent(hooks=[metrics, alert])
+        self.assertIs(a_list.find_hook(AlertHook), alert)
+        self.assertIs(a_list.find_hook(MetricsHook), metrics)
+        self.assertEqual(list(a_list.iter_hooks()), [metrics, alert])
+
     def test_hook_exception_does_not_propagate_through_base(self):
         """If a hook raises, it should surface (not be silently swallowed)."""
         class BrokenHooks(AgentHooks):

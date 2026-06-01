@@ -26,6 +26,7 @@ from typing import (
     Sequence,
     Tuple,
     Type,
+    TypeVar,
     TYPE_CHECKING,
     Union,
 )
@@ -64,6 +65,9 @@ from agentica.hooks import (
     ExperienceCaptureHooks, _CompositeRunHooks, _CompositeAgentHooks,
 )
 from agentica.runner import Runner
+
+# Bound TypeVar so find_hook(SensitiveAlertHook) is typed as Optional[SensitiveAlertHook].
+_HookT = TypeVar("_HookT", bound=AgentHooks)
 
 # Import mixin classes — pure method containers, no state, no __init__
 from agentica.agent.prompts import PromptsMixin
@@ -1168,6 +1172,36 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                     logger.warning(f"Failed to resolve context for {ctx_key}: {e}")
             else:
                 self.context[ctx_key] = ctx_value
+
+    def iter_hooks(self) -> Iterator[AgentHooks]:
+        """Yield each per-agent ``AgentHooks`` instance.
+
+        Hides how ``hooks`` was configured — None, a single instance, or a list
+        wrapped in ``_CompositeAgentHooks`` — so callers never branch on the
+        container shape. Useful for ``for h in agent.iter_hooks(): ...``.
+        """
+        hooks = self.hooks
+        if hooks is None:
+            return
+        if isinstance(hooks, _CompositeAgentHooks):
+            yield from hooks.hooks
+        else:
+            yield hooks
+
+    def find_hook(self, hook_type: Type[_HookT]) -> Optional[_HookT]:
+        """Return the first attached ``AgentHooks`` of ``hook_type``, or None.
+
+        Works regardless of whether ``hooks`` is a single instance or a list,
+        so downstream code stays a single line::
+
+            alert = agent.find_hook(SensitiveAlertHook)
+            if alert is not None:
+                alert.set_request_context(...)
+        """
+        return next(
+            (h for h in self.iter_hooks() if isinstance(h, hook_type)),
+            None,
+        )
 
     def update_model(self) -> None:
         if self.model is None:
