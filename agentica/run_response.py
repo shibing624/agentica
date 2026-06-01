@@ -49,6 +49,28 @@ class RunEvent(str, Enum):
     subagent_completed = "SubagentCompleted"
 
 
+class RunBreakReason(str, Enum):
+    """Machine-readable reason a run was cut short by a Runner safety check.
+
+    When a run ends normally, ``RunResponse.break_reason`` is ``None`` and
+    ``RunResponse.is_complete`` is ``True``. When the Runner aborts the agentic
+    loop for safety, it sets ``break_reason`` to one of these stable codes and
+    keeps ``content`` clean (the human-readable note lives in ``break_message``).
+
+    Downstream consumers should branch on these codes instead of regex-matching
+    the response text::
+
+        resp = await agent.run(...)
+        if not resp.is_complete:
+            if resp.break_reason == RunBreakReason.DEATH_SPIRAL:
+                ...  # soft-degrade, retry, alert, etc.
+    """
+
+    DEATH_SPIRAL = "death_spiral"
+    MAX_TURNS = "max_turns"
+    COST_BUDGET = "cost_budget"
+
+
 class ToolCallInfo(BaseModel):
     """Flat, typed view of a single tool call result.
 
@@ -111,6 +133,13 @@ class RunResponse(BaseModel):
     response_audio: Optional[Dict] = None  # Model audio response
     reasoning_content: Optional[str] = None
     extra_data: Optional[RunResponseExtraData] = None
+    # Loop-break signalling. When a Runner safety check (death spiral, max turns,
+    # cost budget) aborts the agentic loop, ``break_reason`` carries a stable
+    # machine code (see RunBreakReason) and ``break_message`` the human-readable
+    # detail. ``content`` stays clean so downstream never has to strip internal
+    # error text before showing the reply to an end user.
+    break_reason: Optional[str] = None
+    break_message: Optional[str] = None
     created_at: int = Field(default_factory=lambda: int(time()))
     # Cost tracking — populated by Runner after each model.response() call.
     # Excluded from serialisation (avoid heavy / circular dumps).
@@ -146,6 +175,15 @@ class RunResponse(BaseModel):
         if self.cost_tracker is None:
             return 0.0
         return self.cost_tracker.total_cost_usd
+
+    @property
+    def is_complete(self) -> bool:
+        """True when the run finished normally (no safety check aborted the loop).
+
+        ``False`` means a Runner safety check cut the run short — inspect
+        ``break_reason`` for the machine code and ``break_message`` for detail.
+        """
+        return self.break_reason is None
 
 
 

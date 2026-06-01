@@ -184,7 +184,7 @@ EAGER_PUBLIC_EXPORTS = [
     "MemoryType", "MemoryEntry",
     "WorkflowRun", "WorkflowMemory",
     "BaseDb", "SessionRow", "MemoryRow", "MetricsRow",
-    "RunResponse", "RunEvent", "RunResponseExtraData", "ToolCallInfo", "pprint_run_response",
+    "RunResponse", "RunEvent", "RunBreakReason", "RunResponseExtraData", "ToolCallInfo", "pprint_run_response",
     "RunContext", "RunSource", "RunStatus", "TaskAnchor",
     "RunEventRecord", "RunEventType",
     "LearningReport", "LearningStatus", "write_learning_report",

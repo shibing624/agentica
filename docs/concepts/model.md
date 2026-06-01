@@ -127,6 +127,18 @@ Model 层集成了多项运行时安全机制：
 | **API 重试** | 可重试错误（429, 503, timeout 等）指数退避重试（最多 3 次） |
 | **Context 压缩** | token 超限时自动触发 3 层压缩（micro → auto → reactive） |
 
+当 Death Spiral / Max Turns / Cost Budget 任一安全检查中断循环时，Runner **不会**把英文错误文本拼进回复内容，而是写入 `RunResponse` 的结构化字段，下游据此分支处理，无需正则剥离：
+
+```python
+resp = await agent.run("...")
+if not resp.is_complete:                 # 被安全检查中断
+    if resp.break_reason == RunBreakReason.DEATH_SPIRAL.value:
+        ...  # 软降级 / 重试 / 告警；resp.content 保持干净
+    # resp.break_message 为人类可读详情（仅用于日志，不要直接发给用户）
+```
+
+`break_reason` 取值见 `RunBreakReason`：`death_spiral` / `max_turns` / `cost_budget`。
+
 ## 下一步
 
 - [Agent 核心概念](agent.md) -- Agent 如何使用 Model

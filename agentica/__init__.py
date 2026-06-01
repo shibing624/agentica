@@ -292,7 +292,7 @@ from agentica.memory import (
 from agentica.db.base import BaseDb, SessionRow, MemoryRow, MetricsRow
 
 # ── Run Response ──
-from agentica.run_response import RunResponse, RunEvent, RunResponseExtraData, ToolCallInfo, pprint_run_response
+from agentica.run_response import RunResponse, RunEvent, RunBreakReason, RunResponseExtraData, ToolCallInfo, pprint_run_response
 from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
 from agentica.run_events import RunEventRecord, RunEventType
 from agentica.learning_report import LearningReport, LearningStatus, write_learning_report

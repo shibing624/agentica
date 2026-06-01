@@ -22,6 +22,7 @@ import agentica.utils.langfuse_integration as langfuse_integration
 from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
+from agentica.run_response import RunBreakReason
 from agentica.runner import Runner
 from agentica.tools.base import Function, FunctionCall
 
@@ -124,7 +125,65 @@ class TestLoopSafetyChecks(unittest.TestCase):
         loop_state = LoopState()
         result = runner._loop_safety_checks([], loop_state, agent)
         self.assertIsNotNone(result)
-        self.assertIn("Cost budget exceeded", result)
+        self.assertEqual(result.reason, RunBreakReason.COST_BUDGET.value)
+        self.assertIn("Cost budget exceeded", result.message)
+
+    def test_death_spiral_returns_structured_reason(self):
+        """Death spiral break carries a machine code and a clean message
+        (no leading newlines / bracket tags that used to ride in content)."""
+        agent = _make_agent()
+        agent.update_model()
+        from agentica.cost_tracker import CostTracker
+        agent.model._cost_tracker = CostTracker()
+        agent._run_max_cost_usd = None
+        runner = Runner(agent)
+        loop_state = LoopState(death_spiral_threshold=1)
+        messages = [
+            Message(role="assistant", content="", tool_calls=[{"id": "1"}]),
+            Message(role="tool", content="boom", tool_call_error=True),
+        ]
+        result = runner._loop_safety_checks(messages, loop_state, agent)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.reason, RunBreakReason.DEATH_SPIRAL.value)
+        self.assertNotIn("[", result.message)
+        self.assertFalse(result.message.startswith("\n"))
+
+    def test_max_turns_returns_structured_reason(self):
+        agent = _make_agent()
+        agent.update_model()
+        from agentica.cost_tracker import CostTracker
+        agent.model._cost_tracker = CostTracker()
+        agent._run_max_cost_usd = None
+        runner = Runner(agent)
+        loop_state = LoopState(max_turns=2)
+        loop_state.turn_count = 2
+        result = runner._loop_safety_checks([], loop_state, agent)
+        self.assertIsNotNone(result)
+        self.assertEqual(result.reason, RunBreakReason.MAX_TURNS.value)
+
+
+class TestRunResponseBreakSignal(unittest.TestCase):
+    """RunResponse exposes loop-break info as structured fields, keeping
+    content clean for downstream consumers."""
+
+    def test_defaults_complete(self):
+        from agentica.run_response import RunResponse
+        resp = RunResponse(content="hello")
+        self.assertTrue(resp.is_complete)
+        self.assertIsNone(resp.break_reason)
+        self.assertIsNone(resp.break_message)
+
+    def test_break_marks_incomplete(self):
+        from agentica.run_response import RunResponse
+        resp = RunResponse(
+            content="partial answer",
+            break_reason=RunBreakReason.DEATH_SPIRAL.value,
+            break_message="All tool calls have failed repeatedly.",
+        )
+        self.assertFalse(resp.is_complete)
+        self.assertEqual(resp.break_reason, "death_spiral")
+        # Content stays clean — no internal error text leaked in.
+        self.assertEqual(resp.content, "partial answer")
 
 
 class TestLoopPostResponse(unittest.TestCase):

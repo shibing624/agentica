@@ -32,6 +32,7 @@ from typing import (
     Dict,
     Iterator,
     List,
+    NamedTuple,
     Optional,
     Sequence,
     TYPE_CHECKING,
@@ -52,7 +53,7 @@ from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.run_input import merge_run_config, warn_unknown_run_kwargs
-from agentica.run_response import AgentCancelledError, RunEvent, RunResponse
+from agentica.run_response import AgentCancelledError, RunBreakReason, RunEvent, RunResponse
 from agentica.run_config import RunConfig
 from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
 from agentica.run_events import RunEventRecord, RunEventType
@@ -69,6 +70,18 @@ from agentica.guardrails.agent import (
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
+
+
+class LoopBreak(NamedTuple):
+    """Structured result of a Runner safety check that aborts the agentic loop.
+
+    ``reason`` is a stable machine code (RunBreakReason value); ``message`` is a
+    human-readable detail. Both are surfaced on ``RunResponse`` so downstream
+    never has to parse internal error text out of ``content``.
+    """
+
+    reason: str
+    message: str
 
 
 class Runner:
@@ -217,25 +230,36 @@ class Runner:
         messages: List[Message],
         loop_state: "LoopState",
         agent: "Agent",
-    ) -> Optional[str]:
-        """Run all per-turn safety checks. Returns break-message or None to continue."""
+    ) -> Optional["LoopBreak"]:
+        """Run all per-turn safety checks.
+
+        Returns a ``LoopBreak`` (structured reason + human message) when the loop
+        must abort, or ``None`` to continue. The message is intentionally NOT
+        appended to the assistant content — the Runner records it on
+        ``RunResponse.break_reason`` / ``break_message`` so it never leaks into
+        the user-facing reply.
+        """
         if self._check_death_spiral(messages, loop_state):
-            return "\n\n[Error: All tool calls have failed repeatedly. Stopping to prevent infinite loop.]"
+            return LoopBreak(
+                RunBreakReason.DEATH_SPIRAL.value,
+                "All tool calls have failed repeatedly. Stopping to prevent infinite loop.",
+            )
 
         if (
             loop_state.max_turns is not None
             and loop_state.turn_count >= loop_state.max_turns
         ):
-            return (
-                f"\n\n[Reached max_turns={loop_state.max_turns} limit. "
-                f"Returning results collected so far.]"
+            return LoopBreak(
+                RunBreakReason.MAX_TURNS.value,
+                f"Reached max_turns={loop_state.max_turns} limit. "
+                f"Returning results collected so far.",
             )
 
         _cost_msg = self._check_cost_budget(
             agent.model._cost_tracker, agent._run_max_cost_usd
         )
         if _cost_msg:
-            return f"\n\n[{_cost_msg}]"
+            return LoopBreak(RunBreakReason.COST_BUDGET.value, _cost_msg)
 
         return None
 
@@ -1107,16 +1131,19 @@ class Runner:
                             f"agent={agent.identifier}, messages={len(messages_for_model)}"
                         )
 
-                        # Safety checks (death spiral + cost budget)
-                        _break_msg = self._loop_safety_checks(
+                        # Safety checks (death spiral + cost budget). The break
+                        # reason is recorded as structured metadata on the
+                        # RunResponse, NOT streamed as content, so downstream
+                        # never has to strip internal error text from the reply.
+                        _loop_break = self._loop_safety_checks(
                             messages_for_model, loop_state, agent,
                         )
-                        if _break_msg:
-                            yield RunResponse(
-                                event=RunEvent.run_response,
-                                content=_break_msg,
-                                run_id=agent.run_id,
-                                agent_id=agent.agent_id,
+                        if _loop_break:
+                            agent.run_response.break_reason = _loop_break.reason
+                            agent.run_response.break_message = _loop_break.message
+                            logger.warning(
+                                f"Agent '{agent.identifier}': loop aborted "
+                                f"({_loop_break.reason}) — {_loop_break.message}"
                             )
                             break
 
@@ -1255,12 +1282,20 @@ class Runner:
                         )
                         agent._check_cancelled()
 
-                        # Safety checks (death spiral + cost budget)
-                        _break_msg = self._loop_safety_checks(
+                        # Safety checks (death spiral + cost budget). The break
+                        # reason is recorded as structured metadata on the
+                        # RunResponse, NOT appended to content, so downstream
+                        # never has to strip internal error text from the reply.
+                        _loop_break = self._loop_safety_checks(
                             messages_for_model, loop_state, agent,
                         )
-                        if _break_msg:
-                            model_response.content = (model_response.content or "") + _break_msg
+                        if _loop_break:
+                            agent.run_response.break_reason = _loop_break.reason
+                            agent.run_response.break_message = _loop_break.message
+                            logger.warning(
+                                f"Agent '{agent.identifier}': loop aborted "
+                                f"({_loop_break.reason}) — {_loop_break.message}"
+                            )
                             break
 
                         # Pre-tool hook (context overflow handling)

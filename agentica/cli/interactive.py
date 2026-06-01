@@ -708,6 +708,16 @@ def _process_stream_response(
         _set_spinner("")
         tui_state["_thinking"] = False
 
+        # Surface loop-break reasons (death spiral / max turns / cost budget).
+        # These no longer ride inside the response content, so render a notice
+        # here to keep the CLI user informed about a truncated run.
+        if current_agent.run_response.break_reason:
+            con.print(
+                f"\n[yellow]⚠ Run stopped early "
+                f"({current_agent.run_response.break_reason}): "
+                f"{current_agent.run_response.break_message}[/yellow]"
+            )
+
         elapsed = perf_counter() - request_start
         tui_state["last_turn_seconds"] = elapsed
         tui_state["active_seconds"] = tui_state.get("active_seconds", 0.0) + elapsed
