@@ -1552,8 +1552,8 @@ class _CompositeAgentHooks(AgentHooks):
     ``AgentHooks`` instances.
 
     Lets ``Agent(hooks=[hook_a, hook_b])`` work without the caller composing
-    hooks by hand. ``hooks`` exposes the underlying list so callers can locate a
-    specific hook (e.g. ``next(h for h in agent.hooks.hooks if isinstance(...))``).
+    hooks by hand. To locate a specific hook, use ``agent.find_hook(HookType)``
+    rather than reaching into this wrapper's internals.
     """
 
     def __init__(self, hooks_list: List[AgentHooks]):
