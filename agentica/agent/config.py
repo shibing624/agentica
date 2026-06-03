@@ -377,6 +377,7 @@ class AgentExecutionConfig:
     use_structured_outputs: bool = False
     debug: bool = False
     enable_tracing: bool = False
+    max_api_retry: int = 1
     session_id: Optional[str] = None
     hooks: Optional[Any] = None
 

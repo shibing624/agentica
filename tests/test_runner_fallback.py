@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 from agentica.model.message import Message
 from agentica.model.loop_state import LoopState
 from agentica.model.response import ModelResponse
-from agentica.runner import Runner
+from agentica.runner import ModelCallResult, Runner
 
 
 def _make_agent(name="test-agent"):
@@ -195,7 +195,7 @@ class TestFallbackContentFilterException(unittest.TestCase):
 
 
 class TestFallbackRetryableExhausted(unittest.TestCase):
-    """5xx / timeout / 429 should retry-then-fallback."""
+    """Retryable errors retry up to max_api_retry; hard outages fallback immediately."""
 
     def test_retries_then_falls_back_after_exhausting_local_retries(self):
         call_count = {"n": 0}
@@ -227,7 +227,7 @@ class TestFallbackRetryableExhausted(unittest.TestCase):
         self.assertEqual(call_count["n"], 2)
         self.assertEqual(result.content, "recovered")
 
-    def test_503_triggers_retry_then_fallback(self):
+    def test_service_unavailable_falls_back_without_same_model_retry(self):
         primary_calls = {"n": 0}
 
         async def _503(messages):
@@ -247,12 +247,49 @@ class TestFallbackRetryableExhausted(unittest.TestCase):
         agent = _make_agent()
         agent._run_fallback_models = [fallback]
 
-        state = LoopState(max_api_retry=1)
+        state = LoopState(max_api_retry=3)
         result = asyncio.run(
             Runner._call_with_retry(primary, [], state, agent, stream=False)
         )
         self.assertEqual(primary_calls["n"], 1)
         self.assertEqual(result.content, "ok")
+        self.assertEqual(state.last_used_model_id, "fb")
+
+    def test_hard_outages_fallback_without_same_model_retry(self):
+        outage_messages = [
+            "Connection error.",
+            "internal server error",
+            "502 bad gateway",
+            "503 service unavailable",
+        ]
+        for outage_message in outage_messages:
+            with self.subTest(outage_message=outage_message):
+                primary_calls = {"n": 0}
+
+                async def _outage(messages):
+                    primary_calls["n"] += 1
+                    raise RuntimeError(outage_message)
+
+                primary = MagicMock()
+                primary.id = "primary"
+                primary.response = _outage
+                primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+                primary.extra_retryable_substrings = None
+
+                fallback = _fake_model(
+                    "fb",
+                    response_factory=lambda: ModelResponse(content="ok", finish_reason="stop"),
+                )
+                agent = _make_agent()
+                agent._run_fallback_models = [fallback]
+
+                result = asyncio.run(
+                    Runner._call_with_retry(
+                        primary, [], LoopState(max_api_retry=3), agent, stream=False,
+                    )
+                )
+                self.assertEqual(primary_calls["n"], 1)
+                self.assertEqual(result.content, "ok")
 
 
 class TestFallbackNonRetryableImmediateRaise(unittest.TestCase):
@@ -346,6 +383,57 @@ class TestRunConfigFallbackModelsField(unittest.TestCase):
 
         agent.run_sync(message=None, config=RunConfig(fallback_models=[fb]))
         self.assertEqual(captured["value"], [fb])
+
+
+class TestMaxApiRetryConfig(unittest.TestCase):
+    """Agent / RunConfig max_api_retry should feed LoopState per run."""
+
+    def test_agent_default_max_api_retry_used_by_loop_state(self):
+        captured = []
+        agent = _make_agent()
+        agent.max_api_retry = 4
+
+        async def _fake_call(runner, model, messages, state, agent_arg, *, stream=False):
+            captured.append(state.max_api_retry)
+            return ModelCallResult(
+                response=ModelResponse(content="ok", finish_reason="stop"),
+                used_model=model,
+                used_fallback=False,
+            )
+
+        with unittest.mock.patch.object(Runner, "_call_with_retry", new=_fake_call):
+            response = agent.run_sync("hi")
+
+        self.assertEqual(response.content, "ok")
+        self.assertEqual(captured, [4])
+
+    def test_run_config_max_api_retry_overrides_agent_default(self):
+        from agentica.run_config import RunConfig
+
+        captured = []
+        agent = _make_agent()
+        agent.max_api_retry = 4
+
+        async def _fake_call(runner, model, messages, state, agent_arg, *, stream=False):
+            captured.append(state.max_api_retry)
+            return ModelCallResult(
+                response=ModelResponse(content="ok", finish_reason="stop"),
+                used_model=model,
+                used_fallback=False,
+            )
+
+        with unittest.mock.patch.object(Runner, "_call_with_retry", new=_fake_call):
+            response = agent.run_sync("hi", config=RunConfig(max_api_retry=2))
+
+        self.assertEqual(response.content, "ok")
+        self.assertEqual(captured, [2])
+
+    def test_invalid_max_api_retry_rejected(self):
+        from agentica.run_config import RunConfig
+
+        agent = _make_agent()
+        with self.assertRaises(ValueError):
+            agent.run_sync("hi", config=RunConfig(max_api_retry=0))
 
 
 class TestAgentFallbackModelsField(unittest.TestCase):
@@ -509,6 +597,141 @@ class TestLastUsedModelTruthfulness(unittest.TestCase):
         asyncio.run(Runner._call_with_retry(primary, [], state, agent, stream=False))
         self.assertEqual(state.last_used_model_id, "p")
         self.assertEqual(state.last_used_model_idx, 0)
+
+
+class TestFallbackToolTransaction(unittest.TestCase):
+    """Fallback may execute tools, but its provider-specific transcript is compacted."""
+
+    def test_fallback_tool_transaction_compacts_replay_context(self):
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.run_config import RunConfig
+
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+
+        primary = OpenAIChat(id="primary", api_key="fake_openai_key")
+        fallback = OpenAIChat(id="fallback", api_key="fake_openai_key")
+
+        async def _primary_response(messages):
+            messages.append(Message(role="assistant", content="blocked"))
+            return ModelResponse(content="blocked", finish_reason="content_filter")
+
+        fallback_calls = {"n": 0, "saw_tool_result": False}
+
+        async def _fallback_response(messages):
+            fallback_calls["n"] += 1
+            if fallback_calls["n"] == 1:
+                messages.append(Message(role="assistant", content="", tool_calls=[{
+                    "id": "call_add",
+                    "type": "function",
+                    "function": {"name": "add_numbers", "arguments": "{\"a\": 2, \"b\": 3}"},
+                }]))
+                return ModelResponse(content="", finish_reason="tool_calls")
+
+            fallback_calls["saw_tool_result"] = any(
+                msg.role == "tool" and msg.tool_call_id == "call_add" and msg.content == "5"
+                for msg in messages
+            )
+            messages.append(Message(role="assistant", content="final: 5"))
+            return ModelResponse(content="final: 5", finish_reason="stop")
+
+        primary.response = _primary_response
+        fallback.response = _fallback_response
+        agent = Agent(
+            name="fallback-tool-agent",
+            model=primary,
+            tools=[add_numbers],
+            fallback_models=[fallback],
+        )
+
+        response = agent.run_sync(
+            "compute 2+3",
+            config=RunConfig(fallback_models=[fallback]),
+        )
+
+        self.assertEqual(response.content, "final: 5")
+        self.assertTrue(fallback_calls["saw_tool_result"])
+        self.assertTrue(response.fallback_used)
+        self.assertEqual(response.model, "fallback")
+        replay_messages = response.messages or []
+        self.assertFalse(any(msg.role == "tool" for msg in replay_messages))
+        self.assertFalse(any(msg.tool_calls for msg in replay_messages if msg.role == "assistant"))
+        self.assertTrue(response.tools)
+        self.assertTrue(response.tools[0]["fallback_compacted"])
+        self.assertFalse(response.tools[0]["replay"])
+        self.assertEqual(primary.response, _primary_response)
+        self.assertIs(agent.model, primary)
+
+    def test_streaming_fallback_tool_transaction_compacts_replay_context(self):
+        """Streaming path: fallback runs the tool-call turn; transcript compacted."""
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.model.response import ModelResponseEvent
+        from agentica.run_config import RunConfig
+
+        def add_numbers(a: int, b: int) -> int:
+            return a + b
+
+        primary = OpenAIChat(id="primary", api_key="fake_openai_key")
+        fallback = OpenAIChat(id="fallback", api_key="fake_openai_key")
+
+        def _primary_stream(messages):
+            # Plain function so it raises at call time -> triggers fallback.
+            raise RuntimeError("content_filter triggered")
+
+        fallback_calls = {"n": 0, "saw_tool_result": False}
+
+        async def _fallback_stream(messages):
+            fallback_calls["n"] += 1
+            if fallback_calls["n"] == 1:
+                messages.append(Message(role="assistant", content="", tool_calls=[{
+                    "id": "call_add",
+                    "type": "function",
+                    "function": {"name": "add_numbers", "arguments": "{\"a\": 2, \"b\": 3}"},
+                }]))
+                return
+                yield  # noqa: unreachable — marks this as an async generator
+            fallback_calls["saw_tool_result"] = any(
+                msg.role == "tool" and msg.tool_call_id == "call_add" and msg.content == "5"
+                for msg in messages
+            )
+            messages.append(Message(role="assistant", content="final: 5"))
+            yield ModelResponse(
+                event=ModelResponseEvent.assistant_response.value,
+                content="final: 5",
+            )
+
+        primary.response_stream = _primary_stream
+        fallback.response_stream = _fallback_stream
+        agent = Agent(
+            name="fallback-stream-tool-agent",
+            model=primary,
+            tools=[add_numbers],
+            fallback_models=[fallback],
+        )
+
+        for _ in agent.run_stream_sync(
+            "compute 2+3",
+            config=RunConfig(fallback_models=[fallback]),
+        ):
+            pass
+
+        response = agent.run_response
+        self.assertEqual(response.content, "final: 5")
+        self.assertTrue(fallback_calls["saw_tool_result"])
+        self.assertTrue(response.fallback_used)
+        self.assertEqual(response.model, "fallback")
+        replay_messages = response.messages or []
+        self.assertFalse(any(msg.role == "tool" for msg in replay_messages))
+        self.assertFalse(any(msg.tool_calls for msg in replay_messages if msg.role == "assistant"))
+        self.assertTrue(response.tools)
+        self.assertTrue(response.tools[0]["fallback_compacted"])
+        self.assertFalse(response.tools[0]["replay"])
+        # Primary stays un-mutated; clone isolation means the patched fallback
+        # object is not the one mutated during the run.
+        self.assertEqual(primary.response_stream, _primary_stream)
+        self.assertIs(agent.model, primary)
 
 
 class TestFallbackRecoveryEvent(unittest.TestCase):

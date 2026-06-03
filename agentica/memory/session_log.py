@@ -238,7 +238,7 @@ class SessionLog:
     # Load / Resume
     # ------------------------------------------------------------------
 
-    def load(self, resume_at: Optional[str] = None) -> List[Dict[str, str]]:
+    def load(self, resume_at: Optional[str] = None) -> List[Dict[str, Any]]:
         """Replay JSONL log for session resume.
 
         Args:
@@ -258,7 +258,7 @@ class SessionLog:
 
         return self._load_full(resume_at=resume_at)
 
-    def _load_full(self, resume_at: Optional[str] = None) -> List[Dict[str, str]]:
+    def _load_full(self, resume_at: Optional[str] = None) -> List[Dict[str, Any]]:
         """Load entire file (small files < 5MB), optionally truncated at resume_at."""
         lines = self.path.read_text(encoding="utf-8").splitlines()
         entries: List[Dict] = []
@@ -299,7 +299,7 @@ class SessionLog:
 
         return self._build_messages(entries, last_boundary_idx, last_boundary_summary)
 
-    def _load_large_file(self) -> List[Dict[str, str]]:
+    def _load_large_file(self) -> List[Dict[str, Any]]:
         """Large file optimization: only parse lines after the last compact_boundary."""
         last_boundary_offset = -1
         last_boundary_summary: Optional[str] = None
@@ -343,9 +343,9 @@ class SessionLog:
         entries: List[Dict],
         last_boundary_idx: int,
         last_boundary_summary: Optional[str],
-    ) -> List[Dict[str, str]]:
+    ) -> List[Dict[str, Any]]:
         """Build message list from parsed entries."""
-        messages: List[Dict[str, str]] = []
+        messages: List[Dict[str, Any]] = []
 
         if last_boundary_summary is not None:
             messages.append({
@@ -357,14 +357,23 @@ class SessionLog:
                 "content": "Understood. I have the conversation context. Continuing.",
             })
 
+        replay_fields = (
+            "tool_call_id", "tool_calls", "tool_name", "tool_args", "is_error",
+            "reasoning_content", "finish_reason", "provider_data", "metrics",
+            "model", "usage",
+        )
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
         for entry in entries[start_from:]:
             entry_type = entry.get("type", "")
             if entry_type in ("user", "assistant", "system", "tool"):
-                messages.append({
+                msg = {
                     "role": entry_type,
                     "content": entry.get("content", ""),
-                })
+                }
+                for key in replay_fields:
+                    if key in entry and entry[key] is not None:
+                        msg[key] = entry[key]
+                messages.append(msg)
 
         logger.debug(
             f"SessionLog.load({self.session_id}): "

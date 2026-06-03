@@ -27,6 +27,7 @@ from agentica.model.base import Model, require_first_choice
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
+from agentica.model.stream_retry import stream_with_retry
 from agentica.utils.log import logger
 from agentica.utils.langfuse_integration import is_langfuse_available, build_langfuse_metadata, get_langfuse_openai_client
 
@@ -110,7 +111,7 @@ class OpenAIChat(Model):
     organization: Optional[str] = None
     base_url: Optional[Union[str, httpx.URL]] = None
     timeout: Optional[float] = None
-    max_retries: Optional[int] = None
+    max_retries: Optional[int] = 0
     default_headers: Optional[Any] = None
     default_query: Optional[Any] = None
     http_client: Optional[httpx.Client] = None
@@ -343,14 +344,12 @@ class OpenAIChat(Model):
     async def invoke_stream(self, messages: List[Message]) -> AsyncIterator[ChatCompletionChunk]:
         """Send a streaming chat completion request to the OpenAI API (async-only).
 
-        Wraps the open+iterate cycle in ``stream_with_retry`` so transient
-        gateway / proxy / SSE-parser failures that happen *before any chunk
-        is yielded downstream* retry automatically. Once the first chunk has
-        been yielded, any subsequent error propagates verbatim (retrying
-        would duplicate output).
+        Wraps the open+iterate cycle in ``stream_with_retry``. Same-stream
+        retries are disabled by default; callers can opt in with
+        ``OpenAIChat(max_retries=...)`` when a provider integration needs it.
+        Once the first chunk has been yielded, any subsequent error propagates verbatim
+        because retrying would duplicate output.
         """
-        from agentica.model.stream_retry import stream_with_retry
-
         langfuse_params = self._get_langfuse_extra_params()
         formatted = [self.format_message(m) for m in messages]
 
@@ -371,6 +370,7 @@ class OpenAIChat(Model):
         async for chunk in stream_with_retry(
             _open,
             extra_substrings=self.extra_retryable_substrings,
+            max_retries=self.max_retries or 0,
             provider_label=f"openai/{self.id}",
         ):
             yield chunk

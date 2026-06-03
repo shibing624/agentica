@@ -1413,6 +1413,18 @@ def _resolve_ckpt_path(ctx: CommandContext, raw: str) -> str:
     return os.path.join(str(base), p)
 
 
+def _work_dir_root(ctx: CommandContext) -> Path:
+    return Path(ctx.current_agent.work_dir or os.getcwd()).expanduser().resolve()
+
+
+def _is_inside_work_dir(path: str, root: Path) -> bool:
+    try:
+        Path(path).expanduser().resolve().relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
     """Manual, durable, multi-file checkpoints for the current session.
 
@@ -1424,7 +1436,11 @@ def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     cm = _checkpoint_manager(ctx)
     args = cmd_args.strip()
-    parts = args.split()
+    try:
+        parts = shlex.split(args)
+    except ValueError as exc:
+        con.print(f"  [red]Invalid checkpoint command: {exc}[/red]")
+        return
     sub = parts[0].lower() if parts else "list"
 
     def _find(cid_prefix: str):
@@ -1456,7 +1472,7 @@ def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
 
     if sub in ("diff", "restore"):
         if len(parts) < 2:
-            con.print(f"  [dim]Usage: /checkpoint {sub} <id>[/dim]")
+            con.print(f"  [dim]Usage: /checkpoint {sub} <id>{' --yes' if sub == 'restore' else ''}[/dim]")
             return
         ck = _find(parts[1])
         if ck is None:
@@ -1464,12 +1480,34 @@ def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
             return
         if sub == "diff":
             con.print(cm.diff(ck.id))
-        else:
-            restored = cm.restore(ck.id)
-            con.print(f"  [green]Restored {len(restored)} file(s) from {ck.id[:18]} ({ck.label}).[/green]")
+            return
+
+        root = _work_dir_root(ctx)
+        outside = [f.path for f in ck.files if not _is_inside_work_dir(f.path, root)]
+        if outside:
+            con.print(
+                f"  [red]Refusing to restore checkpoint files outside work_dir: {root}[/red]"
+            )
+            for path in outside[:5]:
+                con.print(f"    [dim]{path}[/dim]")
+            return
+
+        diff_text = cm.diff(ck.id)
+        deletions = [f.path for f in ck.files if not f.existed and Path(f.path).exists()]
+        if "--yes" not in parts:
+            con.print(diff_text)
+            if deletions:
+                con.print("  [yellow]Restore will delete file(s) created after the checkpoint:[/yellow]")
+                for path in deletions:
+                    con.print(f"    [dim]{path}[/dim]")
+            con.print("  [yellow]Re-run with --yes to restore this checkpoint.[/yellow]")
+            return
+
+        restored = cm.restore(ck.id)
+        con.print(f"  [green]Restored {len(restored)} file(s) from {ck.id[:18]} ({ck.label}).[/green]")
         return
 
-    con.print("  [dim]Usage: /checkpoint list | create <label> <path...> | diff <id> | restore <id>[/dim]")
+    con.print("  [dim]Usage: /checkpoint list | create <label> <path...> | diff <id> | restore <id> --yes[/dim]")
 
 
 def _cmd_reasoning(ctx: CommandContext, cmd_args: str = ""):
@@ -1700,11 +1738,84 @@ def _ensure_goal_manager(ctx: CommandContext) -> Optional[GoalManager]:
     return agent.get_goal_manager()
 
 
+def _parse_goal_set_args(raw: str) -> tuple[str, Dict[str, Any], Optional[str]]:
+    """Parse /goal budget flags while keeping plain text fully compatible."""
+    try:
+        tokens = shlex.split(raw)
+    except ValueError as exc:
+        return "", {}, str(exc)
+
+    budgets: Dict[str, Any] = {}
+    objective: List[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token in {"--turns", "--turn-budget"}:
+            if i + 1 >= len(tokens):
+                return "", {}, f"{token} requires an integer value"
+            try:
+                budgets["turn_budget"] = int(tokens[i + 1])
+            except ValueError:
+                return "", {}, f"{token} must be an integer"
+            i += 2
+            continue
+        if token.startswith("--turns=") or token.startswith("--turn-budget="):
+            value = token.split("=", 1)[1]
+            try:
+                budgets["turn_budget"] = int(value)
+            except ValueError:
+                return "", {}, "--turns must be an integer"
+            i += 1
+            continue
+        if token == "--tokens":
+            if i + 1 >= len(tokens):
+                return "", {}, "--tokens requires an integer value"
+            try:
+                budgets["token_budget"] = int(tokens[i + 1])
+            except ValueError:
+                return "", {}, "--tokens must be an integer"
+            i += 2
+            continue
+        if token.startswith("--tokens="):
+            try:
+                budgets["token_budget"] = int(token.split("=", 1)[1])
+            except ValueError:
+                return "", {}, "--tokens must be an integer"
+            i += 1
+            continue
+        if token == "--wall":
+            if i + 1 >= len(tokens):
+                return "", {}, "--wall requires a number of seconds"
+            try:
+                budgets["wall_clock_budget_sec"] = float(tokens[i + 1])
+            except ValueError:
+                return "", {}, "--wall must be a number of seconds"
+            i += 2
+            continue
+        if token.startswith("--wall="):
+            try:
+                budgets["wall_clock_budget_sec"] = float(token.split("=", 1)[1])
+            except ValueError:
+                return "", {}, "--wall must be a number of seconds"
+            i += 1
+            continue
+        objective.append(token)
+        i += 1
+
+    for key, value in budgets.items():
+        if value <= 0:
+            return "", {}, f"{key} must be positive"
+    return " ".join(objective).strip(), budgets, None
+
+
 def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     """
     /goal                  -> show status
     /goal status           -> show status (alias)
     /goal <objective>      -> set new objective + enqueue first turn
+    /goal --turns 5 <objective>       -> set turn budget
+    /goal --tokens 80000 <objective>  -> set token budget
+    /goal --wall 1800 <objective>     -> set wall-clock budget seconds
     /goal pause            -> pause auto-continuation
     /goal resume           -> resume + enqueue continuation
     /goal clear            -> clear current goal
@@ -1767,8 +1878,13 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
                   "Wait for the current turn or use /goal pause/clear.[/yellow]")
         return {"goal_manager": mgr}
 
+    objective, budgets, parse_error = _parse_goal_set_args(arg)
+    if parse_error:
+        con.print(f"  [red]Invalid goal options: {parse_error}[/red]")
+        con.print("  [dim]Usage: /goal [--turns N] [--tokens N] [--wall SECONDS] <objective>[/dim]")
+        return {"goal_manager": mgr}
     try:
-        state = mgr.set(arg)
+        state = mgr.set(objective, **budgets)
     except ValueError as exc:
         con.print(f"  [red]Invalid goal: {exc}[/red]")
         return {"goal_manager": mgr}
@@ -1799,7 +1915,12 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     # Attach the update_goal tool so the model can break the loop.
     _attach_goal_tool(agent)
 
-    con.print(f"  ⊙ Goal set ({state.turn_budget}-turn budget): {state.objective}")
+    budget_bits = [f"{state.turn_budget} turns"]
+    if state.token_budget is not None:
+        budget_bits.append(f"{state.token_budget:,} tokens")
+    if state.wall_clock_budget_sec is not None:
+        budget_bits.append(f"{state.wall_clock_budget_sec:.0f}s wall")
+    con.print(f"  ⊙ Goal set ({', '.join(budget_bits)}): {state.objective}")
 
     # Kick off the first turn so the user doesn't need to send a follow-up.
     if ctx.pending_queue is not None:

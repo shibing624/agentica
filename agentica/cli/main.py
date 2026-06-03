@@ -40,7 +40,12 @@ def main():
     # `agentica doctor` — run the environment health check and exit.
     if hasattr(args, "command") and args.command == "doctor":
         from agentica.cli.doctor_display import show_doctor
-        show_doctor(get_console())
+        show_doctor(
+            get_console(),
+            enable_diagnostics=args.enable_diagnostics,
+            diagnostics_servers=args.diagnostics_servers,
+            work_dir=args.work_dir,
+        )
         return
 
     # Resolve provider/model/base_url: CLI args > saved config > defaults.
@@ -74,6 +79,8 @@ def main():
         "enable_skill_upgrade": args.enable_skill_upgrade,
         "skill_upgrade_mode": args.skill_upgrade_mode,
         "permissions": "allow-all" if args.allow_all else args.permissions,
+        "enable_diagnostics": args.enable_diagnostics,
+        "diagnostics_servers": args.diagnostics_servers,
     }
     extra_tool_names = list(args.tools) if args.tools else None
 

@@ -46,6 +46,7 @@ def _mock_response(content="Mock response"):
     resp.parsed = None
     resp.audio = None
     resp.reasoning_content = None
+    resp.finish_reason = None
     resp.created_at = None
     return resp
 
@@ -420,6 +421,7 @@ class TestAgentFromParts:
             ),
             execution=AgentExecutionConfig(
                 add_history_to_context=True,
+                max_api_retry=2,
                 session_id="session-1",
             ),
             memory=AgentMemoryConfig(
@@ -436,6 +438,7 @@ class TestAgentFromParts:
         assert agent.name == "Planner"
         assert agent.instructions == "Plan carefully"
         assert agent.add_history_to_context is True
+        assert agent.max_api_retry == 2
         assert agent.session_id == "session-1"
         assert agent.enable_long_term_memory is True
         assert agent.enable_experience_capture is True

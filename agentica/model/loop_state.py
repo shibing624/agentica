@@ -30,8 +30,9 @@ class LoopState:
     max_tokens_recovery_count: int = 0
     max_tokens_recovery_limit: int = 3
 
-    # API retry ceiling
-    max_api_retry: int = 3
+    # API call attempts per model in Runner-level retry/fallback handling.
+    # 1 means no same-model retry; fallback can still switch models immediately.
+    max_api_retry: int = 1
 
     # Death spiral detection
     consecutive_all_error_turns: int = 0
@@ -50,36 +51,28 @@ class LoopState:
     last_used_model_idx: int = -1
 
     # Retryable error patterns. Match against ``str(exc).lower()``.
-    # Covers three buckets:
-    #   1. Standard transient HTTP: 429 / 502 / 503 / 504 / 500
-    #   2. Network / socket: connection, timeout, overloaded, disconnected
-    #   3. Provider-specific proxy/gateway markers commonly seen in the wild
-    #      (e.g. Tencent venus_error 4001 "状态错误" — a transient proxy
-    #      hiccup that surfaces as a 400-bodied BadRequestError despite being
-    #      retryable). Add new substrings here when new gateway flavors
-    #      appear in production logs.
-    # Default retryable substrings. Keep this list to STANDARD protocol-level
-    # transients only — patterns that any HTTP/SSE-based LLM API can hit:
-    #   - rate limits
-    #   - 5xx transients (use "internal server error" text instead of bare
-    #     "500" to avoid colliding with "max_tokens=500" style messages)
-    #   - network / socket-level errors
-    #
-    # Deployment-specific or vendor-proxy markers (e.g. company-internal
-    # API gateways like venus, aiproxy, apilink, etc.) MUST NOT live here.
-    # Callers extend the list via ``Model.extra_retryable_substrings`` or
-    # the env var ``AGENTICA_EXTRA_RETRYABLE_SUBSTRINGS`` (comma-separated).
-    # See agentica.model.base.Model for how the merged list is consumed.
+    # These errors are worth retrying on the same model when max_api_retry > 1.
+    # Keep the list conservative: hard outages such as connection failures,
+    # service unavailable, internal server error and bad gateway should switch
+    # to fallback immediately instead of burning time on same-model retries.
     RETRYABLE_SUBSTRINGS: tuple = field(
         default=(
             "rate_limit", "rate limit", "429",
-            "502", "503", "504",
-            "internal server error",
-            "bad gateway", "gateway timeout", "service unavailable",
-            "temporarily unavailable",
-            "connection", "timeout", "overloaded",
+            "504", "gateway timeout",
+            "timeout", "overloaded",
             "remote disconnected", "remotedisconnected",
             "incomplete chunked read", "chunked encoding", "premature",
+        ),
+        repr=False,
+    )
+    # Fallback-only errors: do not retry the same model; try the next fallback
+    # model immediately when a fallback chain is configured.
+    FALLBACK_ONLY_SUBSTRINGS: tuple = field(
+        default=(
+            "connection",
+            "502", "503",
+            "internal server error", "bad gateway", "service unavailable",
+            "temporarily unavailable",
         ),
         repr=False,
     )

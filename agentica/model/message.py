@@ -120,7 +120,8 @@ class Message(BaseModel):
             return self.compressed_content
         return self.content
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_model_dict(self) -> Dict[str, Any]:
+        """Serialize only fields intended for provider API requests."""
         _dict = self.model_dump(
             exclude_none=True,
             include={"role", "content", "audio", "name", "tool_call_id", "tool_calls", "reasoning_content"},
@@ -128,8 +129,25 @@ class Message(BaseModel):
         # Manually add the content field even if it is None
         if self.content is None:
             _dict["content"] = None
-
         return _dict
+
+    def to_replay_dict(self) -> Dict[str, Any]:
+        """Serialize provider/audit metadata needed for faithful session replay."""
+        _dict = self.model_dump(
+            exclude_none=True,
+            include={
+                "role", "content", "audio", "name", "tool_call_id", "tool_calls",
+                "reasoning_content", "finish_reason", "provider_data", "metrics",
+                "thinking", "redacted_thinking",
+            },
+        )
+        if self.content is None:
+            _dict["content"] = None
+        return _dict
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Backward-compatible provider request serialization."""
+        return self.to_model_dict()
 
     def log(self, level: Optional[str] = None):
         """Log the message to the console

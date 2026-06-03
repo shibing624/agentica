@@ -51,6 +51,7 @@ class TestRunConfigFields:
         cfg = RunConfig()
         assert cfg.enabled_tools is None
         assert cfg.enabled_skills is None
+        assert cfg.max_api_retry is None
 
     def test_run_config_with_enabled_tools(self):
         cfg = RunConfig(enabled_tools=["web_search", "read_file"])
@@ -63,6 +64,10 @@ class TestRunConfigFields:
     def test_run_config_with_use_structured_outputs(self):
         cfg = RunConfig(use_structured_outputs=True)
         assert cfg.use_structured_outputs is True
+
+    def test_run_config_with_max_api_retry(self):
+        cfg = RunConfig(max_api_retry=2)
+        assert cfg.max_api_retry == 2
 
 
 class TestAgentEnableDisable:

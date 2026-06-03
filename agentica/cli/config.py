@@ -163,7 +163,16 @@ def parse_args():
 
     # `agentica doctor` — run the environment health check and exit.
     if len(sys.argv) > 1 and sys.argv[1] == 'doctor':
-        return argparse.Namespace(command='doctor')
+        doctor_parser = argparse.ArgumentParser(description="Run Agentica environment diagnostics")
+        doctor_parser.add_argument('--enable-diagnostics', action='store_true',
+                                   help='Report diagnostics as enabled for this invocation')
+        doctor_parser.add_argument('--diagnostics-server', action='append', dest='diagnostics_servers', default=None,
+                                   help='LSP server to check (repeatable, default: pyright)')
+        doctor_parser.add_argument('--work_dir', type=str, default=None,
+                                   help='Workspace directory to inspect for git/LSP suitability')
+        args = doctor_parser.parse_args(sys.argv[2:])
+        args.command = 'doctor'
+        return args
 
     if len(sys.argv) > 1 and sys.argv[1] in ("skills", "extensions"):
         parser = argparse.ArgumentParser(description="Manage Agentica skills")
@@ -283,6 +292,10 @@ def parse_args():
                         help='Workspace directory path (default: ~/.agentica/workspace)')
     parser.add_argument('--no-workspace', action='store_true',
                         help='Disable workspace context injection')
+    parser.add_argument('--enable-diagnostics', action='store_true',
+                        help='Enable edit-time LSP diagnostics for built-in file tools')
+    parser.add_argument('--diagnostics-server', action='append', dest='diagnostics_servers', default=None,
+                        help='LSP server to use for diagnostics (repeatable, default: pyright)')
     parser.add_argument('--enable-skills', action='store_true',
                         help='Enable skills loading (disabled by default)')
     parser.add_argument('--allow-all', action='store_true',
@@ -467,6 +480,8 @@ def create_agent(agent_config: dict, extra_tools: Optional[List] = None,
         experience_config=experience_config,
         long_term_memory_config=long_term_memory_config,
         include_user_input=True,      # CLI is interactive, always enable human-in-the-loop
+        enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
+        diagnostics_servers=agent_config.get("diagnostics_servers"),
     )
 
     if skills_registry and len(skills_registry) > 0:

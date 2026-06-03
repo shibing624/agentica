@@ -119,7 +119,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     auxiliary_task_models: Dict[str, Model] = field(default_factory=dict)
     # Cross-provider fallback model chain. Activated PER-CALL (not per-run):
     # each LLM call starts from `model`; fallbacks are tried in order only when
-    # the primary fails (content_filter / exhausted-retry timeout / 5xx).
+    # the primary fails (content_filter / fallback-only outage / exhausted retry).
     # The next call again starts from the primary. Use cross-provider models —
     # same provider often shares the moderation layer, defeating the purpose.
     # RunConfig.fallback_models, if provided, overrides this default for one run.
@@ -130,6 +130,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # The full history (incl. failed tool calls) is replayed so the fallback
     # model sees what went wrong; no synthetic hint is injected. Opt-in.
     fallback_on_break: bool = False
+    # Runner-level API call attempts per model. 1 means no same-model retry;
+    # fallback can still switch models immediately when configured.
+    max_api_retry: int = 1
     name: Optional[str] = None
     agent_id: str = ""
     description: Optional[str] = None
@@ -225,11 +228,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # Per-run cost budget (USD). Set by Runner before _run_impl, read by Model.
     _run_max_cost_usd: Optional[float] = field(default=None, init=False, repr=False)
     # Per-run cross-provider fallback model chain. Set by Runner from RunConfig.
-    # Triggered per-call by content_filter / exhausted-retry timeout / 5xx.
+    # Triggered per-call by content_filter / fallback-only outage / exhausted retry.
     _run_fallback_models: List[Any] = field(default_factory=list, init=False, repr=False)
     # Per-run break-recovery toggle. Set by Runner from RunConfig.fallback_on_break
     # (falling back to Agent.fallback_on_break). Read at the loop-break sites.
     _run_fallback_on_break: bool = field(default=False, init=False, repr=False)
+    # Per-run Runner-level API call attempts. Set by Runner from RunConfig.
+    _run_max_api_retry: int = field(default=1, init=False, repr=False)
     # Max LLM loop turns. None = unlimited (main agent default).
     # Subagents set this via SubagentConfig.max_turns as a safety net.
     _max_turns: Optional[int] = field(default=None, init=False, repr=False)
@@ -257,6 +262,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             auxiliary_task_models: Optional[Dict[str, Model]] = None,
             fallback_models: Optional[List[Model]] = None,
             fallback_on_break: bool = False,
+            max_api_retry: int = 1,
             name: Optional[str] = None,
             agent_id: Optional[str] = None,
             description: Optional[str] = None,
@@ -302,6 +308,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             auxiliary_task_models=auxiliary_task_models,
             fallback_models=fallback_models,
             fallback_on_break=fallback_on_break,
+            max_api_retry=max_api_retry,
             name=name,
             agent_id=agent_id,
             description=description,
@@ -357,6 +364,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         auxiliary_task_models: Optional[Dict[str, Model]],
         fallback_models: Optional[List[Model]],
         fallback_on_break: bool,
+        max_api_retry: int,
         name: Optional[str],
         agent_id: Optional[str],
         description: Optional[str],
@@ -377,6 +385,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.auxiliary_task_models = dict(auxiliary_task_models) if auxiliary_task_models else {}
         self.fallback_models = list(fallback_models) if fallback_models else []
         self.fallback_on_break = fallback_on_break
+        if max_api_retry < 1:
+            raise ValueError(
+                "max_api_retry must be >= 1; "
+                "use 1 to disable Runner-level same-model retry"
+            )
+        self.max_api_retry = max_api_retry
         self.name = name
         self.agent_id = agent_id or str(uuid4())
         self.description = description
@@ -504,6 +518,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._run_max_cost_usd = None
         self._run_fallback_models = []
         self._run_fallback_on_break = False
+        self._run_max_api_retry = 1
         self.todos = []
         self._tool_policy_prompts: List[str] = []
         self._session_guidance_prompts: List[str] = []
@@ -931,6 +946,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             use_structured_outputs=execution.use_structured_outputs,
             debug=execution.debug,
             enable_tracing=execution.enable_tracing,
+            max_api_retry=execution.max_api_retry,
             hooks=execution.hooks,
             session_id=execution.session_id,
             enable_long_term_memory=memory.enable_long_term_memory,

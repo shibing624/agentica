@@ -11,9 +11,9 @@ from agentica.diagnostics import run_doctor, OK, WARN, FAIL
 _ICON = {OK: "[green]\u2713[/green]", WARN: "[yellow]\u26a0[/yellow]", FAIL: "[red]\u2717[/red]"}
 
 
-def show_doctor(console) -> bool:
+def show_doctor(console, **doctor_kwargs) -> bool:
     """Render the doctor report. Returns True if no check failed."""
-    report = run_doctor()
+    report = run_doctor(**doctor_kwargs)
     console.print()
     console.print("  [bold]Agentica doctor[/bold] — environment health check")
     console.print()

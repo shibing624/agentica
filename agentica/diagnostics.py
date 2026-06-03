@@ -19,10 +19,12 @@ CLI use:
 """
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from typing import List
+from pathlib import Path
+from typing import List, Optional
 
 from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH
 
@@ -124,13 +126,55 @@ def _check_provider(report: DoctorReport) -> None:
         report.add("API key", FAIL, f"{env_var} not set — run `agentica setup` or export it")
 
 
-def _check_lsp(report: DoctorReport) -> None:
-    # pyright ships the server as `pyright-langserver` (or `pyright`).
-    found = shutil.which("pyright-langserver") or shutil.which("pyright")
-    if found:
-        report.add("LSP (pyright)", OK, found)
-    else:
-        report.add("LSP (pyright)", WARN, "not on PATH — enable_diagnostics will no-op (npm i -g pyright)")
+def _server_binary_candidates(server: str) -> List[str]:
+    normalized = server.strip().lower()
+    if normalized == "pyright":
+        return ["pyright-langserver", "pyright"]
+    if normalized in {"typescript", "typescript-language-server", "tsserver"}:
+        return ["typescript-language-server"]
+    return [server]
+
+
+def _workdir_git_state(work_dir: Optional[str]) -> tuple[str, str]:
+    root = Path(work_dir or os.getcwd()).expanduser().resolve()
+    if not root.exists():
+        return WARN, f"{root} does not exist"
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(root), capture_output=True, text=True, timeout=3,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError) as exc:
+        return WARN, f"could not inspect git workspace at {root}: {exc}"
+    if proc.returncode == 0 and proc.stdout.strip():
+        return OK, proc.stdout.strip()
+    return WARN, f"{root} is not inside a git workspace; LSP diagnostics may be less useful"
+
+
+def _check_lsp(
+    report: DoctorReport,
+    *,
+    enable_diagnostics: bool = False,
+    diagnostics_servers: Optional[List[str]] = None,
+    work_dir: Optional[str] = None,
+) -> None:
+    state = "enabled" if enable_diagnostics else "disabled"
+    detail = "pass --enable-diagnostics to enable edit-time LSP diagnostics" if not enable_diagnostics else "edit-time LSP diagnostics requested"
+    report.add("LSP diagnostics", OK if enable_diagnostics else WARN, f"{state} — {detail}")
+
+    git_status, git_detail = _workdir_git_state(work_dir)
+    report.add("LSP workspace", git_status, git_detail)
+
+    for server in diagnostics_servers or ["pyright"]:
+        candidates = _server_binary_candidates(server)
+        found = next((path for path in (shutil.which(c) for c in candidates) if path), None)
+        if found:
+            report.add(f"LSP server ({server})", OK, found)
+        else:
+            report.add(
+                f"LSP server ({server})", WARN,
+                f"not on PATH — install one of: {', '.join(candidates)}",
+            )
 
 
 def _check_mcp(report: DoctorReport) -> None:
@@ -149,7 +193,12 @@ def _check_mcp(report: DoctorReport) -> None:
         report.add("MCP config", WARN, f"{cfg.config_path} has no usable servers")
 
 
-def run_doctor() -> DoctorReport:
+def run_doctor(
+    *,
+    enable_diagnostics: bool = False,
+    diagnostics_servers: Optional[List[str]] = None,
+    work_dir: Optional[str] = None,
+) -> DoctorReport:
     """Run all environment checks and return a structured report.
 
     Never raises: a check that blows up is recorded as a FAIL entry rather than
@@ -162,7 +211,12 @@ def run_doctor() -> DoctorReport:
         ("Agentica version", _check_version),
         ("Filesystem", _check_dirs),
         ("Provider/credentials", _check_provider),
-        ("LSP", _check_lsp),
+        ("LSP", lambda r: _check_lsp(
+            r,
+            enable_diagnostics=enable_diagnostics,
+            diagnostics_servers=diagnostics_servers,
+            work_dir=work_dir,
+        )),
         ("MCP config", _check_mcp),
     ]
     for label, fn in checks:

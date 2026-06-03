@@ -481,6 +481,36 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertIsNone(args.model_provider)
         self.assertIsNone(args.model_name)
         self.assertIsNone(args.reasoning_effort)
+        self.assertFalse(args.enable_diagnostics)
+        self.assertIsNone(args.diagnostics_servers)
+
+    def test_parse_diagnostics_flags(self):
+        from agentica.cli.config import parse_args
+
+        with patch.object(
+            sys,
+            "argv",
+            ["agentica", "--enable-diagnostics", "--diagnostics-server", "pyright", "--diagnostics-server", "typescript-language-server"],
+        ):
+            args = parse_args()
+
+        self.assertTrue(args.enable_diagnostics)
+        self.assertEqual(args.diagnostics_servers, ["pyright", "typescript-language-server"])
+
+    def test_parse_doctor_diagnostics_flags(self):
+        from agentica.cli.config import parse_args
+
+        with patch.object(
+            sys,
+            "argv",
+            ["agentica", "doctor", "--enable-diagnostics", "--diagnostics-server", "pyright", "--work_dir", "."],
+        ):
+            args = parse_args()
+
+        self.assertEqual(args.command, "doctor")
+        self.assertTrue(args.enable_diagnostics)
+        self.assertEqual(args.diagnostics_servers, ["pyright"])
+        self.assertEqual(args.work_dir, ".")
 
     def test_resolve_model_config_defaults_to_deepseek_v4_flash(self):
         """With no flags/saved config, resolution falls back to DeepSeek v4 flash."""
@@ -542,6 +572,50 @@ class TestCLIConfiguration(unittest.TestCase):
             )
 
         self.assertEqual(captured["model"].reasoning_effort, "max")
+
+    def test_create_agent_passes_diagnostics_controls_to_deep_agent(self):
+        from agentica.cli.config import create_agent
+
+        captured = {}
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+                self.tools = []
+
+        with patch("agentica.cli.config.get_model", return_value=MagicMock()), patch(
+            "agentica.agent.deep.DeepAgent",
+            FakeDeepAgent,
+        ):
+            create_agent(
+                {
+                    "model_provider": "deepseek",
+                    "model_name": "deepseek-v4-flash",
+                    "debug": False,
+                    "work_dir": None,
+                    "enable_diagnostics": True,
+                    "diagnostics_servers": ["pyright"],
+                },
+                extra_tools=[],
+                workspace=None,
+                skills_registry=None,
+            )
+
+        self.assertTrue(captured["enable_diagnostics"])
+        self.assertEqual(captured["diagnostics_servers"], ["pyright"])
+
+    def test_parse_goal_budget_flags(self):
+        from agentica.cli.commands import _parse_goal_set_args
+
+        objective, budgets, err = _parse_goal_set_args(
+            "--turns 5 --tokens 80000 --wall 1800 修复 API"
+        )
+
+        self.assertIsNone(err)
+        self.assertEqual(objective, "修复 API")
+        self.assertEqual(budgets["turn_budget"], 5)
+        self.assertEqual(budgets["token_budget"], 80000)
+        self.assertEqual(budgets["wall_clock_budget_sec"], 1800)
 
     def test_parse_extensions_remove_command(self):
         """CLI supports `agentica extensions remove <skill-name>`."""

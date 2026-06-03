@@ -28,12 +28,12 @@ Design notes
 - Pre-yield-only retry: tracked via ``first_chunk_seen`` flag. Any exception
   after a yield is propagated verbatim, preserving the original provider
   exception class (do not swallow).
-- Bounded retries (default 2) with exponential backoff + small jitter.
-- Connection-open errors are also retryable when they pass ``is_parser_error``
-  — that lets providers fold "open failed with malformed first chunk" into
-  the same path as "iteration produced malformed chunk".
+- Bounded retries (default 0) with exponential backoff + small jitter.
+- Open-stream errors are retryable only when they pass ``is_parser_error``
+  and ``max_retries`` is greater than 0.
 """
 import asyncio
+import json
 import logging
 import os
 import random
@@ -50,11 +50,8 @@ T = TypeVar("T")
 # Listed inline (not imported) to avoid a cycle with model.loop_state.
 _DEFAULT_RETRYABLE_SUBSTRINGS = (
     "rate_limit", "rate limit", "429",
-    "502", "503", "504",
-    "internal server error",
-    "bad gateway", "gateway timeout", "service unavailable",
-    "temporarily unavailable",
-    "connection", "timeout", "overloaded",
+    "504", "gateway timeout",
+    "timeout", "overloaded",
     "remote disconnected", "remotedisconnected",
     "incomplete chunked read", "chunked encoding", "premature",
 )
@@ -87,7 +84,6 @@ def default_is_parser_error(
     - ``extra_substrings`` lets deployments add vendor-proxy markers without
       patching SDK defaults.
     """
-    import json
     if isinstance(exc, json.JSONDecodeError):
         return True
     text = str(exc).lower()
@@ -99,7 +95,7 @@ async def stream_with_retry(
     *,
     is_parser_error: Optional[Callable[[BaseException], bool]] = None,
     extra_substrings: Optional[Sequence[str]] = None,
-    max_retries: int = 2,
+    max_retries: int = 0,
     base_delay: float = 0.5,
     provider_label: str = "stream",
 ) -> AsyncIterator[T]:
@@ -109,10 +105,12 @@ async def stream_with_retry(
         open_stream: Async callable that opens and returns the stream iterator.
             Called once per attempt; must produce a fresh stream each time.
         is_parser_error: Predicate to classify an exception as retryable.
-            Default catches JSON decode errors and common transient text
-            (gateway / proxy / 5xx / rate-limit / connection / venus_error).
+            Default catches JSON decode errors and conservative transient text
+            (rate-limit / timeout / chunked-transfer failures). Hard outages
+            such as connection failures, service unavailable, internal server
+            error and bad gateway are not retried by default.
         max_retries: Max number of *additional* attempts after the first one
-            (so total attempts = max_retries + 1). Default 2 → up to 3 tries.
+            (so total attempts = max_retries + 1). Default 0 → one try.
         base_delay: Initial backoff in seconds; doubled per attempt + jitter.
         provider_label: Free-form string for log lines (e.g. ``"openai stream"``).
 

@@ -53,6 +53,23 @@ class TestStreamRetryHelper:
         assert result == ["a", "b", "c"]
         assert calls["n"] == 1
 
+    def test_default_does_not_retry_pre_yield_parser_error(self):
+        calls = {"n": 0}
+
+        async def _open():
+            calls["n"] += 1
+            raise json.JSONDecodeError("expecting value", "doc", 0)
+
+        async def _do():
+            try:
+                await _collect(stream_with_retry(_open, base_delay=0.01))
+                return "no-raise"
+            except json.JSONDecodeError:
+                return "raised"
+
+        assert _run(_do()) == "raised"
+        assert calls["n"] == 1
+
     def test_retry_on_pre_yield_parser_error(self):
         calls = {"n": 0}
 
@@ -186,7 +203,7 @@ class TestStreamRetryHelper:
 
         async def _open():
             calls["n"] += 1
-            raise RuntimeError("bad gateway 502")
+            raise RuntimeError("gateway timeout 504")
 
         async def _do():
             try:
@@ -195,7 +212,7 @@ class TestStreamRetryHelper:
                 )
                 return "no-raise"
             except RuntimeError as e:
-                assert "502" in str(e)
+                assert "504" in str(e)
                 return "raised"
 
         assert _run(_do()) == "raised"
@@ -205,9 +222,15 @@ class TestStreamRetryHelper:
 
 class TestDefaultIsParserError:
 
-    def test_classifies_502_503_as_retryable(self):
-        assert default_is_parser_error(RuntimeError("502 bad gateway"))
-        assert default_is_parser_error(RuntimeError("503 service unavailable"))
+    def test_does_not_classify_hard_outages_as_retryable(self):
+        assert not default_is_parser_error(RuntimeError("Connection error."))
+        assert not default_is_parser_error(RuntimeError("502 bad gateway"))
+        assert not default_is_parser_error(RuntimeError("503 service unavailable"))
+        assert not default_is_parser_error(RuntimeError("internal server error"))
+
+    def test_classifies_conservative_transients_as_retryable(self):
+        assert default_is_parser_error(RuntimeError("gateway timeout 504"))
+        assert default_is_parser_error(RuntimeError("rate_limit hit, 429"))
 
     def test_classifies_json_decode_as_retryable(self):
         assert default_is_parser_error(json.JSONDecodeError("x", "doc", 0))

@@ -131,6 +131,8 @@ class DeepAgent(Agent):
         include_user_input: bool = False,
         enable_long_term_memory: bool = True,
         enable_diagnostics: bool = False,
+        diagnostics_servers: Optional[List[str]] = None,
+        diagnostics_errors_only: bool = True,
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         user_input_callback: Optional[Callable] = None,
@@ -173,6 +175,8 @@ class DeepAgent(Agent):
                 user_input_callback=user_input_callback,
                 sandbox_config=sandbox_config,
                 enable_diagnostics=enable_diagnostics,
+                diagnostics_servers=diagnostics_servers,
+                diagnostics_errors_only=diagnostics_errors_only,
             )
         )
         if tools:

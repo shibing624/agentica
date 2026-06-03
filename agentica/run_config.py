@@ -57,11 +57,16 @@ class RunConfig:
     # Cost budget: stop the run when total cost exceeds this amount (USD).
     # None = no limit. Works with CostTracker (always active).
     max_cost_usd: Optional[float] = None
+    # Runner-level API call attempts per model for this run. None keeps the
+    # Agent default. 1 means no same-model retry; fallback can still switch
+    # models immediately when configured.
+    max_api_retry: Optional[int] = None
     # Explicit provenance for this run. Product entry points should set this.
     source: RunSource = RunSource.sdk
     # Fallback model chain (cross-provider). Triggered per-call by:
     #   - finish_reason == "content_filter" (provider-side content moderation)
-    #   - retryable API errors that exhausted local backoff (timeout / 5xx / 429)
+    #   - fallback-only API errors (connection / 502 / 503 / bad gateway)
+    #   - retryable API errors that exhausted local backoff (timeout / 429)
     # Each call starts from the primary agent.model; fallbacks are tried in order.
     # Primary model is always retried on the next call (per-call switch, not per-run).
     # Use cross-provider models — same provider often shares the moderation layer.

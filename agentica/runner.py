@@ -18,12 +18,14 @@ Notes:
 """
 
 import asyncio
+import copy
 import json
 import queue
 import random
 import threading
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import (
     Any,
@@ -52,6 +54,7 @@ from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
+from agentica.model.usage import Usage
 from agentica.run_input import merge_run_config, warn_unknown_run_kwargs
 from agentica.run_response import AgentCancelledError, RunBreakReason, RunEvent, RunResponse
 from agentica.run_config import RunConfig
@@ -82,6 +85,32 @@ class LoopBreak(NamedTuple):
 
     reason: str
     message: str
+
+
+@dataclass
+class ModelCallResult:
+    """A model response plus the concrete provider that produced it."""
+
+    response: Any
+    used_model: Model
+    used_fallback: bool = False
+
+    def __getattr__(self, name: str) -> Any:
+        # Transparent delegation to the wrapped response (ModelResponse or the
+        # stream iterator) for ergonomic access at call sites/tests. Guard the
+        # backing field so a half-built instance (deepcopy/pickle) can't recurse
+        # forever via getattr(self.response, ...) before `response` is set.
+        if name == "response":
+            raise AttributeError(name)
+        return getattr(self.response, name)
+
+
+@dataclass
+class ToolHandlingResult:
+    """Runner-owned tool execution summary for the current LLM turn."""
+
+    had_tool_calls: bool
+    tool_results: List[Dict[str, Any]]
 
 
 class Runner:
@@ -293,9 +322,10 @@ class Runner:
         saved_chain = agent._run_fallback_models
         agent._run_fallback_models = fb_chain[1:]
         try:
-            recovery = await self._call_with_retry(
+            recovery_call = await self._call_with_retry(
                 fb_chain[0], messages, loop_state, agent, stream=False,
             )
+            recovery = recovery_call.response
         except Exception as exc:
             logger.error(
                 f"[fallback.on_break] recovery inference failed "
@@ -340,6 +370,76 @@ class Runner:
                 content=f"[User guidance received while you were working]\n{guidance}",
             ))
             logger.debug("Injected steering guidance before inference")
+
+    @staticmethod
+    def _tool_records_from_messages(
+        messages: List[Message],
+        *,
+        fallback_compacted: bool = False,
+        fallback_model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for msg in messages:
+            if msg.role != "tool" or not msg.tool_name:
+                continue
+            record = {
+                "tool_call_id": msg.tool_call_id,
+                "tool_name": msg.tool_name,
+                "tool_args": msg.tool_args,
+                "content": msg.content,
+                "tool_call_error": msg.tool_call_error or False,
+                "metrics": msg.metrics if msg.metrics else {},
+            }
+            if fallback_compacted:
+                record["fallback_compacted"] = True
+                record["replay"] = False
+                if fallback_model:
+                    record["fallback_model"] = fallback_model
+            records.append(record)
+        return records
+
+    @staticmethod
+    def _compact_fallback_transaction(
+        messages: List[Message],
+        marker: Message,
+        model_response: ModelResponse,
+        used_model: "Model",
+    ) -> List[Dict[str, Any]]:
+        """Hide provider-specific fallback tool transcript from future model replay.
+
+        ``marker`` is the first message the fallback produced. We resolve its
+        live index by object identity so a compression pass that dropped/moved
+        messages between transaction start and now can't make us fold the wrong
+        segment: if the marker is gone we skip compaction rather than corrupt
+        the transcript.
+        """
+        start = next((i for i, m in enumerate(messages) if m is marker), -1)
+        if start < 0:
+            return []
+        segment = messages[start:]
+        audit_tools = Runner._tool_records_from_messages(
+            segment,
+            fallback_compacted=True,
+            fallback_model=used_model.id,
+        )
+        final_content = model_response.content
+        if final_content is None:
+            for msg in reversed(segment):
+                if msg.role == "assistant" and not msg.tool_calls and msg.content is not None:
+                    final_content = msg.content
+                    break
+        compacted = Message(
+            role="assistant",
+            content=final_content or "",
+            reasoning_content=model_response.reasoning_content,
+            finish_reason=model_response.finish_reason,
+            provider_data={
+                "fallback_compacted": True,
+                "fallback_model": used_model.id,
+            },
+        )
+        messages[start:] = [compacted]
+        return audit_tools
 
     @staticmethod
     def _loop_post_response(
@@ -413,15 +513,11 @@ class Runner:
         agent: "Agent",
         model: "Model",
         stream: bool = False,
-    ) -> bool:
-        """Check for tool calls in the last assistant message, execute them, format results.
-
-        Returns True if tool calls were found and executed (loop should continue).
-        Returns False if no tool calls (loop should check for break).
-        """
+    ) -> ToolHandlingResult:
+        """Check for tool calls in the last assistant message, execute them, format results."""
         assistant_msg = self._get_last_assistant_message(messages)
         if assistant_msg is None or not assistant_msg.tool_calls:
-            return False
+            return ToolHandlingResult(False, [])
 
         # Parse tool calls (provider-specific)
         function_calls, provider_metadata = model.parse_tool_calls(
@@ -429,7 +525,7 @@ class Runner:
         )
         if not function_calls:
             # All tool calls had errors (already appended to messages by parse_tool_calls)
-            return True
+            return ToolHandlingResult(True, [])
 
         # Log what the LLM asked for this turn — primary signal when diagnosing
         # "tool loop too many iterations" or "model keeps retrying the same tool".
@@ -461,9 +557,11 @@ class Runner:
         ):
             pass  # Events consumed by streaming loop if needed
 
+        tool_records = self._tool_records_from_messages(function_call_results)
+
         # Format and append results (provider-specific)
         model.format_tool_results(function_call_results, messages, provider_metadata)
-        return True
+        return ToolHandlingResult(True, tool_records)
 
     async def _handle_tool_calls_in_runner_stream(
         self,
@@ -499,6 +597,61 @@ class Runner:
             yield tool_resp
 
         model.format_tool_results(function_call_results, messages, provider_metadata)
+
+    @staticmethod
+    def _prepare_model_for_runner_call(current: "Model", primary: "Model") -> None:
+        """Bind runner-owned tool context to the concrete model used for this call."""
+        current.run_tools = False
+        if current is primary:
+            return
+        current.tools = primary.tools
+        current.functions = primary.functions
+        current.tool_choice = primary.tool_choice
+        current.tool_call_limit = primary.tool_call_limit
+        current.max_concurrent_tools = primary.max_concurrent_tools
+        current._cost_tracker = primary._cost_tracker
+
+    @staticmethod
+    def _isolate_fallback_models(models: List["Model"]) -> List["Model"]:
+        """Give this run its own fallback model instances.
+
+        A fallback model is commonly shared across agents/runs (one backup model
+        handed to many agents). Since ``_prepare_model_for_runner_call`` rebinds
+        tools/cost_tracker onto the concrete model used for a call, two concurrent
+        runs sharing the same fallback object would stomp on each other. Shallow-
+        clone per run (the canonical Model clone), reset runtime state, and drop
+        client refs so each run owns an isolated instance bound to its own loop.
+        """
+        isolated: List["Model"] = []
+        for source in models:
+            # Only real Model instances are clonable. Anything else (e.g. test
+            # doubles) is passed through untouched so it keeps its identity.
+            if not isinstance(source, Model):
+                isolated.append(source)
+                continue
+            cloned = copy.copy(source)
+            cloned.metrics = {}
+            cloned.usage = Usage()
+            for attr in ("client", "http_client", "async_client"):
+                if hasattr(cloned, attr):
+                    setattr(cloned, attr, None)
+            isolated.append(cloned)
+        return isolated
+
+    @staticmethod
+    def _resolve_max_api_retry(agent: "Agent", config: RunConfig) -> int:
+        """Resolve and validate Runner-level API call attempts for one run."""
+        value = (
+            config.max_api_retry
+            if config.max_api_retry is not None
+            else agent.max_api_retry
+        )
+        if value < 1:
+            raise ValueError(
+                "max_api_retry must be >= 1; "
+                "use 1 to disable Runner-level same-model retry"
+            )
+        return value
 
     @staticmethod
     async def _maybe_compress_messages(
@@ -641,8 +794,8 @@ class Runner:
         and cross-provider fallback chain.
 
         Returns:
-            For non-stream: ModelResponse.
-            For stream: async iterator from response_stream().
+            ModelCallResult(response=ModelResponse, used_model=...) for non-stream.
+            ModelCallResult(response=async iterator, used_model=...) for stream.
 
         Per-call fallback (not per-run): each invocation starts from the primary
         ``model`` argument; ``agent._run_fallback_models`` are tried in order
@@ -652,20 +805,32 @@ class Runner:
              stream cannot detect this until consumed).
           2. Exception whose text matches ``CONTENT_FILTER_HINTS`` (any provider
              that raises instead of flagging a finish reason).
-          3. Retryable API error (``RETRYABLE_SUBSTRINGS``) that exhausted local
+          3. Fallback-only API error (``FALLBACK_ONLY_SUBSTRINGS``), such as
+             connection failure / 502 / 503 / bad gateway.
+          4. Retryable API error (``RETRYABLE_SUBSTRINGS``) that exhausted local
              exponential backoff on the current model.
 
         Reactive compact (``prompt_too_long``) is NOT a fallback trigger —
         switching providers does not solve a too-long context.
         """
-        candidates: List["Model"] = [model, *(agent._run_fallback_models or [])]
+        # Dedup by object identity, not ``model.id``: two distinct instances may
+        # share an id but differ in api_key/base_url (a legitimate second
+        # fallback). Identity only drops the same object listed twice (e.g. the
+        # primary also present in the fallback chain).
+        candidates: List["Model"] = []
+        seen_candidate_objs: set[int] = set()
+        for candidate in [model, *(agent._run_fallback_models or [])]:
+            if id(candidate) in seen_candidate_objs:
+                continue
+            candidates.append(candidate)
+            seen_candidate_objs.add(id(candidate))
         last_exc: Optional[BaseException] = None
         # Reset per-call bookkeeping. last_used_* reflects the model that
         # actually produced the response returned by THIS call invocation.
         state.last_used_model_id = None
         state.last_used_model_idx = -1
         primary_id = model.id
-        trigger: Optional[str] = None  # "content_filter" | "exhausted_retry"
+        trigger: Optional[str] = None  # "content_filter" | "fallback_only" | "exhausted_retry"
 
         def _emit_fallback_recovery(used_model_id: str, used_idx: int) -> None:
             """Audit-log + event-bus a successful fallback recovery.
@@ -702,6 +867,7 @@ class Runner:
 
             for attempt in range(state.max_api_retry):
                 message_checkpoint = len(messages)
+                Runner._prepare_model_for_runner_call(current, model)
                 try:
                     if stream:
                         # Stream: defer content_filter detection to the consumer.
@@ -713,7 +879,11 @@ class Runner:
                         state.last_used_model_idx = model_idx
                         if is_fallback:
                             _emit_fallback_recovery(current.id, model_idx)
-                        return current.response_stream(messages=messages)
+                        return ModelCallResult(
+                            response=current.response_stream(messages=messages),
+                            used_model=current,
+                            used_fallback=is_fallback,
+                        )
 
                     resp = await current.response(messages=messages)
 
@@ -741,7 +911,11 @@ class Runner:
                     state.last_used_model_idx = model_idx
                     if is_fallback:
                         _emit_fallback_recovery(current.id, model_idx)
-                    return resp
+                    return ModelCallResult(
+                        response=resp,
+                        used_model=current,
+                        used_fallback=is_fallback,
+                    )
 
                 except Exception as exc:
                     del messages[message_checkpoint:]
@@ -771,6 +945,19 @@ class Runner:
                         trigger = "content_filter"
                         break  # next model
 
+                    # Hard outage errors: do not retry the same model. Switch
+                    # directly to the next fallback model when configured.
+                    is_fallback_only = any(
+                        r in err for r in state.FALLBACK_ONLY_SUBSTRINGS
+                    )
+                    if is_fallback_only:
+                        logger.warning(
+                            f"[fallback] {current.id} hit non-retry outage: {exc}; "
+                            "trying next fallback"
+                        )
+                        trigger = "fallback_only"
+                        break
+
                     # Retryable transient errors: backoff within current model.
                     # Merge SDK defaults with model-level + env-level user
                     # extensions, so deployment-specific proxy markers
@@ -783,16 +970,16 @@ class Runner:
                         logger.warning(
                             f"[APIRetry] {current.id} attempt "
                             f"{attempt + 1}/{state.max_api_retry}, "
-                            f"retrying in {wait:.1f}s: {exc}"
+                            f"retrying same model in {wait:.1f}s: {exc}"
                         )
                         await asyncio.sleep(wait)
                         continue
 
                     if is_retryable:
-                        # Exhausted local retries → fall through to next model
+                        # Exhausted local attempts → fall through to next model.
                         logger.warning(
                             f"[APIRetry] {current.id} exhausted "
-                            f"{state.max_api_retry} retries; trying next fallback"
+                            f"{state.max_api_retry} attempts; trying next fallback"
                         )
                         trigger = "exhausted_retry"
                         break
@@ -1042,9 +1229,7 @@ class Runner:
                     resumed_messages = agent._session_log.load()
                     if resumed_messages:
                         for rm in resumed_messages:
-                            agent.working_memory.add_message(
-                                Message(role=rm["role"], content=rm.get("content", ""))
-                            )
+                            agent.working_memory.add_message(Message(**rm))
                         logger.debug(
                             f"Session resumed from JSONL: {len(resumed_messages)} messages"
                         )
@@ -1160,7 +1345,10 @@ class Runner:
 
                 # 4. Generate response from the Model
                 # The agentic loop (tool call → LLM → ...) is driven here.
-                loop_state = LoopState(max_turns=agent._max_turns)
+                loop_state = LoopState(
+                    max_turns=agent._max_turns,
+                    max_api_retry=agent._run_max_api_retry,
+                )
 
                 model_response: ModelResponse
                 agent.model = cast(Model, agent.model)
@@ -1184,6 +1372,8 @@ class Runner:
                     # ============================================================
                     model_response = ModelResponse(content="", reasoning_content="")
                     agent._cancelled = False
+                    fallback_transaction_marker: Optional[Message] = None
+                    fallback_transaction_model: Optional[Model] = None
 
                     while True:
                         loop_state.turn_count += 1
@@ -1243,16 +1433,25 @@ class Runner:
                         # inference so the model sees it on THIS call.
                         self._inject_steering(messages_for_model, agent)
 
+                        active_model = fallback_transaction_model or agent.model
+
                         # Compression pipeline (cheapest-first, before LLM call)
-                        await self._maybe_compress_messages(messages_for_model, agent, agent.model)
+                        await self._maybe_compress_messages(messages_for_model, agent, active_model)
 
                         # --- Lifecycle: LLM start (stream) ---
                         if agent._run_hooks is not None:
                             await agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model)
 
-                        model_response_stream = await self._call_with_retry(
-                            agent.model, messages_for_model, loop_state, agent, stream=True
+                        call_start = len(messages_for_model)
+                        model_call = await self._call_with_retry(
+                            active_model, messages_for_model, loop_state, agent, stream=True
                         )
+                        model_response_stream = model_call.response
+                        active_model = model_call.used_model
+                        if model_call.used_fallback:
+                            agent.run_response.fallback_used = True
+                        if model_call.used_fallback or fallback_transaction_model is not None:
+                            fallback_transaction_model = active_model
                         # Stamp truthful model id onto RunResponse: reflects the
                         # model that actually answered, including any per-call
                         # fallback. Optimistic for streaming (final answer may
@@ -1282,6 +1481,16 @@ class Runner:
                                         agent_id=agent.agent_id,
                                     )
 
+                        # Streaming appends the turn's assistant message during
+                        # consumption, so capture the transaction-start marker now
+                        # (once) — the first message produced at ``call_start``.
+                        if (
+                            fallback_transaction_model is not None
+                            and fallback_transaction_marker is None
+                            and call_start < len(messages_for_model)
+                        ):
+                            fallback_transaction_marker = messages_for_model[call_start]
+
                         # --- Lifecycle: LLM end (stream) ---
                         if agent._run_hooks is not None:
                             await agent._run_hooks.on_llm_end(agent=agent, response=model_response)
@@ -1294,13 +1503,17 @@ class Runner:
                         if assistant_msg is not None and assistant_msg.tool_calls:
                             _had_tool_calls = True
                             async for tool_resp in self._handle_tool_calls_in_runner_stream(
-                                messages_for_model, agent, agent.model,
+                                messages_for_model, agent, active_model,
                             ):
                                 if tool_resp.event == ModelResponseEvent.tool_call_started.value:
                                     tool_call_dict = tool_resp.tool_call
                                     if tool_call_dict is not None:
                                         if agent.run_response.tools is None:
                                             agent.run_response.tools = []
+                                        if fallback_transaction_model is not None:
+                                            tool_call_dict["fallback_compacted"] = True
+                                            tool_call_dict["replay"] = False
+                                            tool_call_dict["fallback_model"] = fallback_transaction_model.id
                                         agent.run_response.tools.append(tool_call_dict)
                                     if agent.stream_intermediate_steps:
                                         yield self.generic_run_response(
@@ -1344,9 +1557,19 @@ class Runner:
                             await _post_tool_hook(messages_for_model, [])
 
                         # Check if loop should continue
-                        if not self._loop_post_response(
-                            messages_for_model, agent.model, loop_state, _had_tool_calls,
-                        ):
+                        should_continue = self._loop_post_response(
+                            messages_for_model, active_model, loop_state, _had_tool_calls,
+                        )
+                        if not should_continue:
+                            if fallback_transaction_model is not None and fallback_transaction_marker is not None:
+                                self._compact_fallback_transaction(
+                                    messages_for_model,
+                                    fallback_transaction_marker,
+                                    model_response,
+                                    fallback_transaction_model,
+                                )
+                                fallback_transaction_model = None
+                                fallback_transaction_marker = None
                             break
 
                 else:
@@ -1355,6 +1578,9 @@ class Runner:
                     # ============================================================
                     agent._cancelled = False
                     model_response = ModelResponse()
+                    fallback_transaction_marker: Optional[Message] = None
+                    fallback_transaction_model: Optional[Model] = None
+                    fallback_compacted_tools: List[Dict[str, Any]] = []
 
                     while True:
                         loop_state.turn_count += 1
@@ -1398,16 +1624,27 @@ class Runner:
                         # inference so the model sees it on THIS call.
                         self._inject_steering(messages_for_model, agent)
 
+                        active_model = fallback_transaction_model or agent.model
+
                         # Compression pipeline (cheapest-first, before LLM call)
-                        await self._maybe_compress_messages(messages_for_model, agent, agent.model)
+                        await self._maybe_compress_messages(messages_for_model, agent, active_model)
 
                         # --- Lifecycle: LLM start (non-stream) ---
                         if agent._run_hooks is not None:
                             await agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model)
 
-                        model_response = await self._call_with_retry(
-                            agent.model, messages_for_model, loop_state, agent, stream=False
+                        call_start = len(messages_for_model)
+                        model_call = await self._call_with_retry(
+                            active_model, messages_for_model, loop_state, agent, stream=False
                         )
+                        model_response = model_call.response
+                        active_model = model_call.used_model
+                        if model_call.used_fallback:
+                            agent.run_response.fallback_used = True
+                        if model_call.used_fallback or fallback_transaction_model is not None:
+                            if fallback_transaction_marker is None and call_start < len(messages_for_model):
+                                fallback_transaction_marker = messages_for_model[call_start]
+                            fallback_transaction_model = active_model
                         # Stamp truthful model id onto RunResponse: reflects the
                         # model that actually answered, including any per-call
                         # fallback. Final turn naturally wins because each turn
@@ -1420,18 +1657,37 @@ class Runner:
                             await agent._run_hooks.on_llm_end(agent=agent, response=model_response)
 
                         # --- Runner-owned tool execution ---
-                        _had_tool_calls = await self._handle_tool_calls_in_runner(
-                            messages_for_model, agent, agent.model, stream=False,
+                        tool_result = await self._handle_tool_calls_in_runner(
+                            messages_for_model, agent, active_model, stream=False,
                         )
+                        _had_tool_calls = tool_result.had_tool_calls
+                        if fallback_transaction_model is not None and tool_result.tool_results:
+                            for record in tool_result.tool_results:
+                                record["fallback_compacted"] = True
+                                record["replay"] = False
+                                record["fallback_model"] = fallback_transaction_model.id
+                            fallback_compacted_tools.extend(tool_result.tool_results)
 
                         # Post-tool hook (todo reminder injection)
                         if _post_tool_hook is not None:
                             await _post_tool_hook(messages_for_model, [])
 
                         # Check if loop should continue
-                        if not self._loop_post_response(
-                            messages_for_model, agent.model, loop_state, _had_tool_calls,
-                        ):
+                        should_continue = self._loop_post_response(
+                            messages_for_model, active_model, loop_state, _had_tool_calls,
+                        )
+                        if not should_continue:
+                            if fallback_transaction_model is not None and fallback_transaction_marker is not None:
+                                fallback_compacted_tools.extend(
+                                    self._compact_fallback_transaction(
+                                        messages_for_model,
+                                        fallback_transaction_marker,
+                                        model_response,
+                                        fallback_transaction_model,
+                                    )
+                                )
+                                fallback_transaction_model = None
+                                fallback_transaction_marker = None
                             break
 
                     # --- Context window usage warning ---
@@ -1463,7 +1719,7 @@ class Runner:
                     agent.run_response.created_at = model_response.created_at
 
                     # Extract tool call info from messages for non-streaming mode
-                    tool_calls_data = []
+                    tool_calls_data = list(fallback_compacted_tools)
                     for msg in messages_for_model:
                         m = msg if isinstance(msg, Message) else None
                         if m is None:
@@ -1480,7 +1736,19 @@ class Runner:
                                 }
                             )
                     if tool_calls_data:
-                        agent.run_response.tools = tool_calls_data
+                        deduped_tool_calls = []
+                        seen_tool_keys = set()
+                        for tool_call in tool_calls_data:
+                            key = (
+                                tool_call.get("tool_call_id"),
+                                tool_call.get("tool_name"),
+                                tool_call.get("content"),
+                            )
+                            if key in seen_tool_keys:
+                                continue
+                            seen_tool_keys.add(key)
+                            deduped_tool_calls.append(tool_call)
+                        agent.run_response.tools = deduped_tool_calls
 
                 # Build run messages
                 run_messages = user_messages + messages_for_model[num_input_messages:]
@@ -1603,11 +1871,15 @@ class Runner:
                                     _origin_meta["origin_agent_name"] = _fn.origin.agent_name
                                 if _fn.origin.source_tool_name:
                                     _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
+                            _log_role = "tool_audit" if tc.get("replay") is False else "tool"
                             agent._session_log.append(
-                                "tool", _tool_content,
+                                _log_role, _tool_content,
                                 tool_name=tc.get("tool_name", ""),
                                 tool_call_id=tc.get("tool_call_id", ""),
                                 is_error=tc.get("tool_call_error", False),
+                                fallback_compacted=tc.get("fallback_compacted", False),
+                                fallback_model=tc.get("fallback_model"),
+                                replay=tc.get("replay", True),
                                 **_origin_meta,
                             )
 
@@ -1615,14 +1887,22 @@ class Runner:
                     _assistant_text = agent.run_response.content
                     if _assistant_text and isinstance(_assistant_text, str):
                         _model_meta = {}
-                        if agent.model:
+                        if agent.run_response.model:
+                            _model_meta["model"] = agent.run_response.model
+                        elif agent.model:
                             _model_meta["model"] = agent.model.id
-                            if agent.model.usage and agent.model.usage.request_usage_entries:
-                                _last_usage = agent.model.usage.request_usage_entries[-1]
-                                _model_meta["usage"] = {
-                                    "input_tokens": _last_usage.input_tokens,
-                                    "output_tokens": _last_usage.output_tokens,
-                                }
+                        if model_response.finish_reason:
+                            _model_meta["finish_reason"] = model_response.finish_reason
+                        if agent.run_response.reasoning_content:
+                            _model_meta["reasoning_content"] = agent.run_response.reasoning_content
+                        if agent.run_response.metrics:
+                            _model_meta["metrics"] = agent.run_response.metrics
+                        if agent.model and agent.model.usage and agent.model.usage.request_usage_entries:
+                            _last_usage = agent.model.usage.request_usage_entries[-1]
+                            _model_meta["usage"] = {
+                                "input_tokens": _last_usage.input_tokens,
+                                "output_tokens": _last_usage.output_tokens,
+                            }
                         agent._session_log.append("assistant", _assistant_text, **_model_meta)
 
                 # Run reached natural completion -- mark + emit terminal event.
@@ -1655,6 +1935,7 @@ class Runner:
                 agent._running = False
                 agent._run_loop = None
                 agent._run_task = None
+                agent._run_max_api_retry = agent.max_api_retry
 
         trace_input = message if isinstance(message, str) else str(message) if message else None
         trace_name = agent.name or "agent-run"
@@ -1858,8 +2139,11 @@ class Runner:
         source = config.source
 
         self.agent._run_max_cost_usd = config.max_cost_usd
-        self.agent._run_fallback_models = list(
-            config.fallback_models or self.agent.fallback_models or []
+        self.agent._run_max_api_retry = self._resolve_max_api_retry(
+            self.agent, config,
+        )
+        self.agent._run_fallback_models = self._isolate_fallback_models(
+            list(config.fallback_models or self.agent.fallback_models or [])
         )
         self.agent._run_fallback_on_break = bool(
             config.fallback_on_break or self.agent.fallback_on_break
@@ -1945,8 +2229,11 @@ class Runner:
         source = config.source
 
         self.agent._run_max_cost_usd = config.max_cost_usd
-        self.agent._run_fallback_models = list(
-            config.fallback_models or self.agent.fallback_models or []
+        self.agent._run_max_api_retry = self._resolve_max_api_retry(
+            self.agent, config,
+        )
+        self.agent._run_fallback_models = self._isolate_fallback_models(
+            list(config.fallback_models or self.agent.fallback_models or [])
         )
         self.agent._run_fallback_on_break = bool(
             config.fallback_on_break or self.agent.fallback_on_break

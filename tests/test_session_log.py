@@ -84,6 +84,23 @@ class TestSessionLogBasic:
         assert messages[1]["role"] == "tool"
         assert "file1.py" in messages[1]["content"]
 
+    def test_load_preserves_assistant_replay_metadata(self, tmp_dir):
+        log = SessionLog("replay", base_dir=tmp_dir)
+        log.append(
+            "assistant", "answer",
+            reasoning_content="reason",
+            finish_reason="stop",
+            model="m1",
+            usage={"input_tokens": 10, "output_tokens": 2},
+        )
+
+        messages = log.load()
+
+        assert messages[0]["reasoning_content"] == "reason"
+        assert messages[0]["finish_reason"] == "stop"
+        assert messages[0]["model"] == "m1"
+        assert messages[0]["usage"] == {"input_tokens": 10, "output_tokens": 2}
+
 
 class TestUUIDChain:
     """Verify UUID + parent_uuid chain (CC's core design)."""

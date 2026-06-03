@@ -7,12 +7,12 @@ Cross-Provider Fallback Models Demo.
 Real-world problem:
     Some user prompts hit a provider's content moderation layer
     ("我无法给到相关内容" / "I cannot help with that"). Or the provider
-    has a transient outage (5xx / timeout / 429). Either way, the user's
-    request fails.
+    has an outage or transient failure (connection / 5xx / timeout / 429).
+    Either way, the user's request fails.
 
 Solution in agentica:
     Configure a cross-provider fallback chain on the Agent. When the
-    primary model fails (content_filter / exhausted-retry timeout / 5xx),
+    primary model fails (content_filter / direct-fallback outage / exhausted retry),
     the next model in the chain is tried automatically. The user gets a
     real answer instead of a refusal.
 
@@ -77,7 +77,7 @@ def demo_happy_path() -> None:
 
 
 def demo_provider_outage() -> None:
-    """Primary unreachable -> retry exhausted -> fallback rescues."""
+    """Primary unreachable -> immediate fallback rescues."""
     print("=" * 60)
     print("Demo 2: primary outage -> auto-fallback to deepseek")
     print("=" * 60)
@@ -85,6 +85,7 @@ def demo_provider_outage() -> None:
     bad_primary = OpenAIChat(
         id="gpt-4o",
         base_url="https://unreachable-host-for-fallback-demo.invalid",
+        max_retries=0,
     )
     agent = _build_agent(bad_primary, name="fallback")
     audit = _attach_audit(agent)
@@ -109,6 +110,7 @@ def demo_per_call_recovery() -> None:
     bad_primary = OpenAIChat(
         id="gpt-4o",
         base_url="https://unreachable-host-for-fallback-demo.invalid",
+        max_retries=0,
     )
     agent = _build_agent(bad_primary, name="per-call")
     audit = _attach_audit(agent)

@@ -11,6 +11,41 @@ from agentica.model.base import Model
 from agentica.model.message import Message
 
 
+class TestMessageSerialization(unittest.TestCase):
+    def test_model_dict_excludes_replay_only_fields(self):
+        msg = Message(
+            role="assistant",
+            content="ok",
+            reasoning_content="reason",
+            finish_reason="stop",
+            provider_data={"raw": True},
+            metrics={"tokens": 3},
+        )
+
+        data = msg.to_model_dict()
+
+        self.assertIn("reasoning_content", data)
+        self.assertNotIn("finish_reason", data)
+        self.assertNotIn("provider_data", data)
+        self.assertNotIn("metrics", data)
+
+    def test_replay_dict_preserves_audit_fields(self):
+        msg = Message(
+            role="assistant",
+            content="ok",
+            reasoning_content="reason",
+            finish_reason="stop",
+            provider_data={"raw": True},
+            metrics={"tokens": 3},
+        )
+
+        data = msg.to_replay_dict()
+
+        self.assertEqual(data["finish_reason"], "stop")
+        self.assertEqual(data["provider_data"], {"raw": True})
+        self.assertEqual(data["metrics"], {"tokens": 3})
+
+
 class TestSanitizeMessages(unittest.TestCase):
     """Test Model.sanitize_messages fixes broken tool_call sequences."""
 

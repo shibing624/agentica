@@ -21,7 +21,8 @@ class TestDoctor(unittest.TestCase):
         self.assertIsInstance(report, DoctorReport)
         names = [c.name for c in report.checks]
         for expected in ["Python version", "Agentica version", "Home dir writable",
-                         "Configured provider", "API key", "LSP (pyright)", "MCP config"]:
+                         "Configured provider", "API key", "LSP diagnostics",
+                         "LSP workspace", "LSP server (pyright)", "MCP config"]:
             self.assertIn(expected, names)
 
     def test_all_statuses_valid(self):
@@ -54,6 +55,12 @@ class TestDoctor(unittest.TestCase):
         # ok ignores warnings (e.g. pyright/MCP may warn in CI).
         api = next(c for c in report.checks if c.name == "API key")
         self.assertEqual(api.status, OK)
+
+    def test_diagnostics_enabled_is_reported(self):
+        report = run_doctor(enable_diagnostics=True, diagnostics_servers=["pyright"], work_dir=os.getcwd())
+        diag = next(c for c in report.checks if c.name == "LSP diagnostics")
+        self.assertEqual(diag.status, OK)
+        self.assertIn("enabled", diag.detail)
 
 
 if __name__ == "__main__":

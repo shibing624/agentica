@@ -59,7 +59,7 @@ class TestCheckpointCli(unittest.TestCase):
         # Mutate the file after the snapshot.
         with open(self.target, "w") as f:
             f.write("x = 999  # broken\n")
-        _cmd_checkpoint(self.ctx, f"restore {cid}")
+        _cmd_checkpoint(self.ctx, f"restore {cid} --yes")
         self.assertEqual(open(self.target).read(), "x = 1\n")
 
     def test_restore_by_id_prefix(self):
@@ -67,7 +67,7 @@ class TestCheckpointCli(unittest.TestCase):
         cid = self._manager().list()[0].id
         with open(self.target, "w") as f:
             f.write("changed\n")
-        _cmd_checkpoint(self.ctx, f"restore {cid[:10]}")
+        _cmd_checkpoint(self.ctx, f"restore {cid[:10]} --yes")
         self.assertEqual(open(self.target).read(), "x = 1\n")
 
     def test_diff_shows_change(self):
@@ -77,6 +77,27 @@ class TestCheckpointCli(unittest.TestCase):
             f.write("x = 2\n")
         # Should not raise; diff is printed to console.
         _cmd_checkpoint(self.ctx, f"diff {cid}")
+
+    def test_restore_requires_yes(self):
+        _cmd_checkpoint(self.ctx, "create snap calc.py")
+        cid = self._manager().list()[0].id
+        with open(self.target, "w") as f:
+            f.write("changed\n")
+        _cmd_checkpoint(self.ctx, f"restore {cid}")
+        self.assertEqual(open(self.target).read(), "changed\n")
+
+    def test_restore_refuses_outside_workdir(self):
+        outside = os.path.join(self._tmp.name, "..", "outside.txt")
+        outside = os.path.abspath(outside)
+        with open(outside, "w") as f:
+            f.write("old\n")
+        _cmd_checkpoint(self.ctx, f"create snap {outside}")
+        cid = self._manager().list()[0].id
+        with open(outside, "w") as f:
+            f.write("new\n")
+        _cmd_checkpoint(self.ctx, f"restore {cid} --yes")
+        self.assertEqual(open(outside).read(), "new\n")
+        os.remove(outside)
 
 
 if __name__ == "__main__":

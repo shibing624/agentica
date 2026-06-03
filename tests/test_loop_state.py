@@ -8,7 +8,7 @@ def test_default_values():
     assert state.turn_count == 0
     assert state.max_tokens_recovery_count == 0
     assert state.max_tokens_recovery_limit == 3
-    assert state.max_api_retry == 3
+    assert state.max_api_retry == 1
     assert state.consecutive_all_error_turns == 0
     assert state.death_spiral_threshold == 5
     assert state.reactive_compact_done is False
@@ -30,6 +30,18 @@ def test_retryable_substrings():
     assert "rate_limit" in state.RETRYABLE_SUBSTRINGS
     assert "429" in state.RETRYABLE_SUBSTRINGS
     assert "timeout" in state.RETRYABLE_SUBSTRINGS
+    assert "connection" not in state.RETRYABLE_SUBSTRINGS
+    assert "service unavailable" not in state.RETRYABLE_SUBSTRINGS
+    assert "internal server error" not in state.RETRYABLE_SUBSTRINGS
+    assert "bad gateway" not in state.RETRYABLE_SUBSTRINGS
+
+
+def test_fallback_only_substrings():
+    state = LoopState()
+    assert "connection" in state.FALLBACK_ONLY_SUBSTRINGS
+    assert "service unavailable" in state.FALLBACK_ONLY_SUBSTRINGS
+    assert "internal server error" in state.FALLBACK_ONLY_SUBSTRINGS
+    assert "bad gateway" in state.FALLBACK_ONLY_SUBSTRINGS
 
 
 def test_prompt_too_long_hints():
