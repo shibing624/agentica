@@ -238,8 +238,17 @@ async def upload_file(
             detail=f"File size {len(content) // 1024}KB exceeds limit of {settings.upload_max_size_mb}MB",
         )
 
-    # Write to destination
-    base = Path(target_dir) if target_dir else settings.workspace_path
+    # Write to destination — enforce that files land inside workspace
+    workspace = settings.workspace_path.resolve()
+    if target_dir:
+        base = Path(target_dir).resolve()
+        if not base.is_relative_to(workspace):
+            raise HTTPException(
+                status_code=400,
+                detail="target_dir must be within the workspace directory",
+            )
+    else:
+        base = workspace
     base.mkdir(parents=True, exist_ok=True)
     dest = base / Path(file.filename or "upload").name
 
