@@ -28,6 +28,12 @@
 | **Self-Evolution（自进化）** | 工具失败 / 用户纠正 / 成功序列 → 经验卡片 → 自动生成 SKILL.md，跨会话复用 |
 | **Open, Composable Harness** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而不是封闭 SaaS 黑盒 |
 
+## 🔥 News
+
+- [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
+- [2026/05/11] **v1.4.4**：MemoryExtractHooks 优化，新增 `auto_extract_memory_background` 后台抽取（不再阻塞 `on_agent_end`），memory 抽取优先走更快更便宜的 `auxiliary_model`。详见 [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
+- [2026/05/10] **v1.4.3**：Skill 生命周期重构 + VaG 解耦，新增 `SkillLifecycleHooks` 统一扩展点。详见 [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
+
 ## 架构
 
 Agentica 提供了从底层模型路由到顶层多智能体协作的完整抽象：

@@ -18,6 +18,13 @@
 
 **Agentica** は軽量な Python フレームワークで、AIエージェントの構築に使用します。Async-First アーキテクチャで、ツール呼び出し、RAG、マルチエージェントチーム、ワークフローオーケストレーション、MCP プロトコルをサポートします。
 
+## 🔥 News
+
+- [2026/06/03] **v1.4.6**：クロスプロバイダー fallback がツール呼び出しターンに対応——fallback モデルがツールを呼び出して最終回答を生成でき、そのプロバイダー固有の履歴は圧縮され、主モデルへのリプレイがクリーンに保たれます。fallback モデルは run ごとにクローンされ並行安全性を確保。編集時 LSP 診断 CLI フラグ（`--enable-diagnostics`/`--diagnostics-server`）、強化版 `agentica doctor`、`/checkpoint restore --yes` 確認、`/goal` 予算フラグを追加。詳細は [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
+- [2026/05/11] **v1.4.4**：MemoryExtractHooks の最適化——新しい `auto_extract_memory_background` がメモリ抽出をバックグラウンドで実行（`on_agent_end` をブロックしなくなりました）、抽出は高速・低コストな `auxiliary_model` を優先。詳細は [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
+- [2026/05/10] **v1.4.3**：Skill ライフサイクルのリファクタリング + VaG の分離——VaG 実験コードは `evaluation/vag/` 研究モジュールへ移動、統一された `SkillLifecycleHooks` 拡張ポイントを追加。詳細は [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
+
+
 ## アーキテクチャ
 
 Agentica は、低レベルのモデルルーティングから高レベルのマルチエージェントオーケストレーションまで、完全な抽象化スタックを提供します：

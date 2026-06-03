@@ -28,6 +28,13 @@ tool calling, long-running task loops, multi-agent orchestration, cross-session 
 | **Self-Evolution** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` files across sessions |
 | **Open Composable Harness** | Models, tools, memory, skills, guardrails, and MCP are replaceable building blocks instead of a closed hosted platform |
 
+## 🔥 News
+
+- [2026/06/03] **v1.4.6**: Cross-provider fallback now supports tool-calling turns — a fallback model can invoke tools and produce the final answer, while its provider-specific transcript is compacted to keep replay to the recovered primary clean; fallback models are cloned per run for concurrency safety. Adds edit-time LSP diagnostics CLI flags (`--enable-diagnostics`/`--diagnostics-server`), an enhanced `agentica doctor`, `/checkpoint restore --yes` confirmation, and `/goal` budget flags. See [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
+- [2026/05/11] **v1.4.4**: MemoryExtractHooks optimization — new `auto_extract_memory_background` runs memory extraction in the background (no longer blocking `on_agent_end`), and extraction prefers the cheaper/faster `auxiliary_model`. See [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
+- [2026/05/10] **v1.4.3**: Skill lifecycle refactor + VaG decoupling — VaG experimental code moved to the `evaluation/vag/` research module, with a unified `SkillLifecycleHooks` extension point. See [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
+
+
 ## Architecture
 
 Agentica provides a complete abstraction stack, from low-level model routing to high-level multi-agent orchestration:
