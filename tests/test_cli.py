@@ -16,6 +16,8 @@ from agentica.cli import (
     TOOL_ICONS,
     TOOL_REGISTRY,
 )
+from agentica.cli import commands as cli_commands
+from agentica.cli import setup as cli_setup
 
 
 class TestToolIcons(unittest.TestCase):
@@ -603,6 +605,78 @@ class TestCLIConfiguration(unittest.TestCase):
 
         self.assertTrue(captured["enable_diagnostics"])
         self.assertEqual(captured["diagnostics_servers"], ["pyright"])
+
+    def test_persist_model_choice_writes_base_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "cli_config.json")
+            with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path):
+                cli_commands._persist_model_choice(
+                    "openai", "gpt-5", "https://api.openai.com/v1",
+                )
+                saved = cli_setup.load_cli_config()
+
+        self.assertTrue(saved["onboarded"])
+        self.assertEqual(saved["model_provider"], "openai")
+        self.assertEqual(saved["model_name"], "gpt-5")
+        self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
+
+    def test_model_command_switch_provider_resets_and_persists_base_url(self):
+        ctx = cli_commands.CommandContext(
+            agent_config={
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+                "api_key": "fake_openai_key",
+                "debug": False,
+                "work_dir": None,
+            },
+            current_agent=None,
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "cli_config.json")
+            with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path), \
+                 patch.object(cli_commands, "get_console", return_value=MagicMock()), \
+                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model, \
+                 patch.object(cli_commands, "create_agent", return_value=MagicMock()):
+                cli_commands._cmd_model(ctx, "openai/gpt-5")
+                saved = cli_setup.load_cli_config()
+
+        self.assertEqual(ctx.agent_config["base_url"], "https://api.openai.com/v1")
+        self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
+        self.assertEqual(saved["model_provider"], "openai")
+        self.assertEqual(saved["model_name"], "gpt-5")
+        self.assertEqual(mock_get_model.call_args.kwargs["base_url"], "https://api.openai.com/v1")
+
+    def test_model_command_same_provider_preserves_custom_base_url(self):
+        ctx = cli_commands.CommandContext(
+            agent_config={
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://proxy.example/v1",
+                "api_key": "fake_openai_key",
+                "debug": False,
+                "work_dir": None,
+            },
+            current_agent=None,
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = os.path.join(tmp, "cli_config.json")
+            with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path), \
+                 patch.object(cli_commands, "get_console", return_value=MagicMock()), \
+                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model, \
+                 patch.object(cli_commands, "create_agent", return_value=MagicMock()):
+                cli_commands._cmd_model(ctx, "gpt-5")
+                saved = cli_setup.load_cli_config()
+
+        self.assertEqual(ctx.agent_config["base_url"], "https://proxy.example/v1")
+        self.assertEqual(saved["base_url"], "https://proxy.example/v1")
+        self.assertEqual(mock_get_model.call_args.kwargs["base_url"], "https://proxy.example/v1")
 
     def test_parse_goal_budget_flags(self):
         from agentica.cli.commands import _parse_goal_set_args

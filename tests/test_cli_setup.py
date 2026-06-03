@@ -44,6 +44,15 @@ class TestCliConfigPersistence(unittest.TestCase):
         self.assertTrue(loaded["onboarded"])
         self.assertEqual(loaded["model_provider"], "openai")
 
+    def test_config_complete_requires_provider_model_and_base_url(self):
+        self.assertFalse(cli_setup.is_cli_config_complete({"onboarded": True}))
+        self.assertTrue(cli_setup.is_cli_config_complete({
+            "onboarded": True,
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        }))
+
     def test_is_onboarded(self):
         self.assertFalse(cli_setup.is_onboarded())
         cli_setup.save_cli_config({"onboarded": True})
@@ -62,6 +71,11 @@ class TestProviderHelpers(unittest.TestCase):
 
     def test_provider_env_var_unknown_falls_back_to_openai(self):
         self.assertEqual(cli_setup.provider_env_var("whatever"), "OPENAI_API_KEY")
+
+    def test_provider_defaults(self):
+        self.assertEqual(cli_setup.default_base_url("deepseek"), "https://api.deepseek.com")
+        self.assertEqual(cli_setup.default_model_name("openai"), "gpt-4o")
+        self.assertIsNone(cli_setup.default_base_url("azure"))
 
     def test_has_api_key_reads_env(self):
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "x"}, clear=False):
@@ -124,6 +138,7 @@ class TestResolveModelConfig(unittest.TestCase):
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["model_provider"], cli_setup.DEFAULT_PROVIDER)
         self.assertEqual(resolved["model_name"], cli_setup.DEFAULT_MODEL)
+        self.assertEqual(resolved["base_url"], "https://api.deepseek.com")
 
     def test_saved_config_used(self):
         cli_setup.save_cli_config({
@@ -139,12 +154,29 @@ class TestResolveModelConfig(unittest.TestCase):
 
     def test_cli_args_override_saved(self):
         cli_setup.save_cli_config({
-            "onboarded": True, "model_provider": "openai", "model_name": "gpt-4o",
+            "onboarded": True,
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
         })
         args = _make_args(model_provider="deepseek", model_name="deepseek-chat")
         resolved = cli_setup.resolve_model_config(args, console=None)
         self.assertEqual(resolved["model_provider"], "deepseek")
         self.assertEqual(resolved["model_name"], "deepseek-chat")
+        self.assertEqual(resolved["base_url"], "https://api.deepseek.com")
+
+    def test_cli_model_override_keeps_saved_base_url_for_same_provider(self):
+        cli_setup.save_cli_config({
+            "onboarded": True,
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://proxy.example/v1",
+        })
+        args = _make_args(model_name="gpt-5")
+        resolved = cli_setup.resolve_model_config(args, console=None)
+        self.assertEqual(resolved["model_provider"], "openai")
+        self.assertEqual(resolved["model_name"], "gpt-5")
+        self.assertEqual(resolved["base_url"], "https://proxy.example/v1")
 
     def test_explicit_provider_flag_skips_onboarding(self):
         # Even on a TTY, passing --model_provider must not trigger the wizard.
@@ -181,17 +213,39 @@ class TestShouldOnboard(unittest.TestCase):
         self._patch.stop()
         self._tmp.cleanup()
 
-    def test_skips_when_already_onboarded(self):
-        cli_setup.save_cli_config({"onboarded": True})
-        self.assertFalse(cli_setup.should_onboard("deepseek"))
+    def _tty(self):
+        return patch.multiple(
+            cli_setup.sys,
+            stdin=MagicMock(isatty=MagicMock(return_value=True)),
+            stdout=MagicMock(isatty=MagicMock(return_value=True)),
+        )
 
-    def test_skips_when_key_present(self):
-        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "x"}, clear=False):
+    def test_skips_when_config_complete_and_key_present(self):
+        cli_setup.save_cli_config({
+            "onboarded": True,
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        })
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "x"}, clear=True), self._tty():
             self.assertFalse(cli_setup.should_onboard("deepseek"))
 
+    def test_onboards_when_key_present_but_config_incomplete(self):
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "x"}, clear=True), self._tty():
+            self.assertTrue(cli_setup.should_onboard("deepseek"))
+
+    def test_onboards_when_config_complete_but_key_missing(self):
+        cli_setup.save_cli_config({
+            "onboarded": True,
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+        })
+        with patch.dict(os.environ, {}, clear=True), self._tty():
+            self.assertTrue(cli_setup.should_onboard("deepseek"))
+
     def test_requires_tty(self):
-        env = {k: v for k, v in os.environ.items() if k != "DEEPSEEK_API_KEY"}
-        with patch.dict(os.environ, env, clear=True), \
+        with patch.dict(os.environ, {}, clear=True), \
              patch.object(cli_setup.sys.stdin, "isatty", return_value=False):
             self.assertFalse(cli_setup.should_onboard("deepseek"))
 
@@ -233,6 +287,8 @@ class TestRunOnboarding(unittest.TestCase):
         saved = cli_setup.load_cli_config()
         self.assertTrue(saved["onboarded"])
         self.assertEqual(saved["model_provider"], "openai")
+        self.assertEqual(saved["model_name"], "gpt-4o")
+        self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
         self.assertEqual(os.environ.get("OPENAI_API_KEY"), "sk-test")
 
     def test_custom_endpoint_flow(self):
@@ -247,6 +303,9 @@ class TestRunOnboarding(unittest.TestCase):
         self.assertEqual(result["model_provider"], "openai")
         self.assertEqual(result["base_url"], "https://my-llm.local/v1")
         self.assertEqual(result["model_name"], "my-model")
+        saved = cli_setup.load_cli_config()
+        self.assertEqual(saved["base_url"], "https://my-llm.local/v1")
+        self.assertEqual(saved["model_name"], "my-model")
         self.assertEqual(os.environ.get("OPENAI_API_KEY"), "sk-custom")
 
 
