@@ -3,9 +3,9 @@
 @author:XuMing(xuming624@qq.com)
 @description: First-run model provider onboarding wizard for the CLI.
 
-On first launch (no saved CLI config and no API key in the environment) the
-user is walked through picking a model provider and filling in base_url,
-api_key and model_name. The non-secret choices are persisted to
+On first launch (missing saved CLI config or missing API key) the user is
+walked through picking a model provider and filling in base_url, api_key and
+model_name. The non-secret choices are persisted to
 ``~/.agentica/cli_config.json``; the API key is written to the existing
 ``~/.agentica/.env`` (AGENTICA_DOTENV_PATH), so secrets never live in JSON.
 """
@@ -102,6 +102,33 @@ def is_onboarded() -> bool:
     return bool(load_cli_config().get("onboarded"))
 
 
+def default_base_url(provider: str) -> Optional[str]:
+    """Return the default base_url for a known provider."""
+    preset = PROVIDER_PRESETS.get(provider)
+    if preset is None:
+        return None
+    return preset["base_url"]
+
+
+def default_model_name(provider: str) -> str:
+    """Return the default model name for a known provider."""
+    preset = PROVIDER_PRESETS.get(provider)
+    if preset is None:
+        return DEFAULT_MODEL
+    return preset["default_model"]
+
+
+def is_cli_config_complete(config: Optional[Dict] = None) -> bool:
+    """Return True when non-secret CLI model config is complete."""
+    data = load_cli_config() if config is None else config
+    return bool(
+        data.get("onboarded")
+        and data.get("model_provider")
+        and data.get("model_name")
+        and data.get("base_url")
+    )
+
+
 def provider_env_var(provider: str) -> str:
     """Return the API-key env var name for a provider (OPENAI_API_KEY fallback)."""
     preset = PROVIDER_PRESETS.get(provider)
@@ -148,12 +175,11 @@ def save_api_key_to_env(env_var: str, value: str) -> None:
 def should_onboard(provider: str) -> bool:
     """Decide whether to run the first-launch wizard.
 
-    Only when: not yet onboarded, no API key present for the resolved
-    provider, and we have an interactive terminal to prompt on.
+    Run the wizard whenever either side of the CLI setup is incomplete:
+    non-secret config (provider/model/base_url) or the provider API key.
+    A complete config plus an API key skips onboarding.
     """
-    if is_onboarded():
-        return False
-    if has_api_key(provider):
+    if is_cli_config_complete() and has_api_key(provider):
         return False
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -263,10 +289,20 @@ def resolve_model_config(args, console=None) -> Dict:
     ``model_provider``, ``model_name`` and ``base_url`` keys.
     """
     saved = load_cli_config()
+    saved_provider = saved.get("model_provider")
 
-    provider = args.model_provider or saved.get("model_provider") or DEFAULT_PROVIDER
-    model_name = args.model_name or saved.get("model_name") or DEFAULT_MODEL
-    base_url = args.base_url or saved.get("base_url")
+    provider = args.model_provider or saved_provider or DEFAULT_PROVIDER
+    use_saved_provider_config = provider == saved_provider
+    model_name = (
+        args.model_name
+        or (saved.get("model_name") if use_saved_provider_config else None)
+        or default_model_name(provider)
+    )
+    base_url = (
+        args.base_url
+        or (saved.get("base_url") if use_saved_provider_config else None)
+        or default_base_url(provider)
+    )
 
     # Only consider onboarding when the user didn't pin a provider via flags.
     if args.model_provider is None and console is not None and should_onboard(provider):
