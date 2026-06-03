@@ -178,9 +178,8 @@ def _check_lsp(
 
 
 def _check_mcp(report: DoctorReport) -> None:
-    from agentica.mcp.config import MCPConfig
-
     try:
+        from agentica.mcp.config import MCPConfig
         cfg = MCPConfig()
     except Exception as e:
         report.add("MCP config", FAIL, f"failed to load: {e}")
