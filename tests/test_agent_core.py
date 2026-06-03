@@ -183,6 +183,18 @@ class TestAgentRun:
         with pytest.raises(TypeError, match="add_messages was removed"):
             await agent.run("Hi", add_messages=[{"role": "system", "content": "x"}])
 
+    @pytest.mark.asyncio
+    async def test_run_rejects_unknown_kwarg_with_hint(self):
+        agent = Agent(name="A", model=_make_model())
+        with pytest.raises(TypeError, match="Did you mean 'timeout'"):
+            await agent.run("Hi", timoeut=5)
+
+    @pytest.mark.asyncio
+    async def test_run_rejects_unknown_kwarg_without_hint(self):
+        agent = Agent(name="A", model=_make_model())
+        with pytest.raises(TypeError, match="Unknown run\\(\\) keyword argument 'totally_bogus'"):
+            await agent.run("Hi", totally_bogus=1)
+
     def test_run_entrypoint_signatures_match(self):
         expected = [
             "self", "message", "messages", "audio", "images", "videos",
@@ -345,6 +357,32 @@ class TestAgentRunStreamSync:
                 if chunk.content:
                     contents.append(chunk.content)
             assert len(contents) >= 1
+
+    def test_run_stream_sync_cancels_agent_on_early_break(self):
+        """Abandoning the iterator must cancel the background agent run so it
+        stops calling tools/LLMs with nobody listening (no silent token burn)."""
+        async def mock_stream(messages, **kwargs):
+            for c in ["A", "B", "C"]:
+                yield ModelResponse(content=c, event=ModelResponseEvent.assistant_response.value)
+
+        with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
+            agent = Agent(name="A", model=_make_model())
+            with patch.object(agent, 'cancel') as mock_cancel:
+                for _chunk in agent.run_stream_sync("Hi"):
+                    break  # abandon the stream after the first chunk
+            mock_cancel.assert_called_once()
+
+    def test_run_stream_sync_no_cancel_on_full_consumption(self):
+        """Fully draining the iterator is a normal completion — do not cancel."""
+        async def mock_stream(messages, **kwargs):
+            for c in ["A", "B", "C"]:
+                yield ModelResponse(content=c, event=ModelResponseEvent.assistant_response.value)
+
+        with patch.object(OpenAIChat, 'response_stream', side_effect=mock_stream):
+            agent = Agent(name="A", model=_make_model())
+            with patch.object(agent, 'cancel') as mock_cancel:
+                list(agent.run_stream_sync("Hi"))
+            mock_cancel.assert_not_called()
 
 
 # ===========================================================================

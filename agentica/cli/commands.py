@@ -34,6 +34,11 @@ from agentica.cli.display import (
     print_header,
     show_help,
 )
+from agentica.cli.setup import (
+    default_base_url,
+    load_cli_config,
+    save_cli_config,
+)
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.model.message import Message
@@ -786,7 +791,7 @@ def _cmd_history(ctx: CommandContext, cmd_args: str = ""):
     con.print()
 
 
-def _cmd_workspace(ctx: CommandContext, cmd_args: str = ""):
+def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     """Display current configuration and workspace status."""
     _cmd_title(f"/config {cmd_args.strip()}" if cmd_args.strip() else "/config")
     con = get_console()
@@ -968,13 +973,13 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     return {"current_agent": current_agent, "goal_manager": None}
 
 
-def _persist_model_choice(provider: str, model_name: str) -> None:
+def _persist_model_choice(provider: str, model_name: str, base_url: Optional[str]) -> None:
     """Remember a live /model switch so it survives the next launch."""
-    from agentica.cli.setup import load_cli_config, save_cli_config
     config = load_cli_config()
     config["onboarded"] = True
     config["model_provider"] = provider
     config["model_name"] = model_name
+    config["base_url"] = base_url
     save_cli_config(config)
 
 
@@ -995,14 +1000,21 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"Supported: {', '.join(sorted(supported_providers))}", style="dim")
             return
 
+        old_provider = ctx.agent_config["model_provider"]
+        if new_provider == old_provider:
+            new_base_url = ctx.agent_config.get("base_url") or default_base_url(new_provider)
+        else:
+            new_base_url = default_base_url(new_provider)
+
         ctx.agent_config["model_provider"] = new_provider
         ctx.agent_config["model_name"] = new_model
-        _persist_model_choice(new_provider, new_model)
+        ctx.agent_config["base_url"] = new_base_url
+        _persist_model_choice(new_provider, new_model, new_base_url)
 
         new_model_obj = get_model(
             model_provider=new_provider,
             model_name=new_model,
-            base_url=ctx.agent_config.get("base_url"),
+            base_url=new_base_url,
             api_key=ctx.agent_config.get("api_key"),
             max_tokens=ctx.agent_config.get("max_tokens"),
             temperature=ctx.agent_config.get("temperature"),
@@ -1334,6 +1346,7 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
                 con.print(f"    {i + 1}. [dim]{preview}[/dim]")
             con.print()
         con.print("  [dim]Usage: /queue <prompt>  |  /queue list  |  /queue clear  |  /queue remove <n>[/dim]")
+        con.print("  [dim]See also: /steer (nudge current run) · /background (run in parallel)[/dim]")
         return
 
     sub = args.split(maxsplit=1)
@@ -1588,7 +1601,7 @@ def _cmd_btw(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     question = cmd_args.strip()
     if not question:
-        con.print("  [dim]Usage: /btw <question>[/dim]")
+        con.print("  [dim]Usage: /btw <question>   (quick aside; for a persisted parallel task use /background)[/dim]")
         return
     if ctx.current_agent is None:
         con.print("[yellow]No active agent.[/yellow]")
@@ -1620,6 +1633,7 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
         else:
             con.print("  [dim]No active background tasks.[/dim]")
         con.print("  [dim]Usage: /background <prompt>  |  /stop to kill all[/dim]")
+        con.print("  [dim]See also: /queue (next turn, same session) · /btw (quick aside, not persisted)[/dim]")
         return
 
     ctx.bg_task_counter += 1
@@ -2002,17 +2016,17 @@ COMMAND_REGISTRY = {
     "/resume":        (_cmd_resume,        "Resume a previous session"),
     "/goal":          (_cmd_goal,          "Set or manage a standing goal (auto-continues until done)"),
     "/subgoal":       (_cmd_subgoal,       "Add or manage acceptance criteria on the active goal"),
-    "/btw":           (_cmd_btw,           "Ephemeral side question (no tools, not persisted)"),
-    "/queue":         (_cmd_queue,         "Queue management: <prompt> | list | clear | remove <n>"),
-    "/q":             (_cmd_queue,         "Queue management (alias)"),
-    "/background":    (_cmd_background,    "Run a prompt in background (independent agent)"),
-    "/bg":            (_cmd_background,    "Run a prompt in background (alias)"),
+    "/btw":           (_cmd_btw,           "Quick aside answered in parallel \u2014 no tools, not persisted"),
+    "/queue":         (_cmd_queue,         "Run as the NEXT turn after the current run finishes | list | clear | remove <n>"),
+    "/q":             (_cmd_queue,         "Run as the next turn after current run (alias)"),
+    "/background":    (_cmd_background,    "Run NOW in a parallel independent agent (own session)"),
+    "/bg":            (_cmd_background,    "Run now in a parallel independent agent (alias)"),
     "/stop":          (_cmd_stop,          "Kill all running background tasks"),
-    "/steer":         (_cmd_steer,         "Guide the running agent mid-task (injected between tool batches)"),
+    "/steer":         (_cmd_steer,         "Course-correct the CURRENT run mid-task (injected between tool batches)"),
     "/checkpoint":    (_cmd_checkpoint,    "Durable file snapshots: list | create <label> <path...> | diff <id> | restore <id>"),
     # Model & Config
     "/model":         (_cmd_model,         "View or switch model"),
-    "/config":        (_cmd_workspace,     "Show current configuration"),
+    "/config":        (_cmd_config,        "Show current configuration"),
     "/cost":          (_cmd_cost,          "Show token usage and cost"),
     "/usage":         (_cmd_cost,          "Show token usage and cost (alias)"),
     "/debug":         (_cmd_debug,         "Show debug info"),

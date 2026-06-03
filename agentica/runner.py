@@ -55,7 +55,7 @@ from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.model.usage import Usage
-from agentica.run_input import merge_run_config, warn_unknown_run_kwargs
+from agentica.run_input import merge_run_config, reject_unknown_run_kwargs
 from agentica.run_response import AgentCancelledError, RunBreakReason, RunEvent, RunResponse
 from agentica.run_config import RunConfig
 from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
@@ -1819,11 +1819,11 @@ class Runner:
                     if isinstance(message, str):
                         agent.run_input = message
                     elif isinstance(message, Message):
-                        agent.run_input = message.to_dict()
+                        agent.run_input = message.to_model_dict()
                     else:
                         agent.run_input = message
                 elif messages is not None:
-                    agent.run_input = [m.to_dict() if isinstance(m, Message) else m for m in messages]
+                    agent.run_input = [m.to_model_dict() if isinstance(m, Message) else m for m in messages]
 
                 if agent.stream_intermediate_steps:
                     yield self.generic_run_response(agent.run_response.content, RunEvent.run_completed)
@@ -2129,7 +2129,7 @@ class Runner:
         **kwargs: Any,
     ) -> RunResponse:
         """Run the Agent and return the final response (non-streaming)."""
-        warn_unknown_run_kwargs(kwargs)
+        reject_unknown_run_kwargs(kwargs)
         config = merge_run_config(config, timeout=timeout, hooks=hooks)
         run_timeout = config.run_timeout
         save_response_to_file = config.save_response_to_file
@@ -2216,7 +2216,7 @@ class Runner:
         **kwargs: Any,
     ) -> AsyncIterator[RunResponse]:
         """Run the Agent and stream incremental responses."""
-        warn_unknown_run_kwargs(kwargs)
+        reject_unknown_run_kwargs(kwargs)
         config = merge_run_config(config, timeout=timeout, hooks=hooks)
         stream_intermediate_steps = config.stream_intermediate_steps
         run_timeout = config.run_timeout
@@ -2336,6 +2336,7 @@ class Runner:
             thread = threading.Thread(target=_producer, daemon=True)
             thread.start()
 
+            completed = False
             try:
                 while True:
                     # Use timeout so KeyboardInterrupt can be delivered promptly
@@ -2344,13 +2345,20 @@ class Runner:
                     except queue.Empty:
                         continue
                     if item is sentinel:
+                        completed = True
                         break
                     if isinstance(item, BaseException):
                         raise item
                     yield cast(RunResponse, item)
             finally:
-                # Best-effort: let the producer finish; it will be daemon anyway.
-                pass
+                # If the caller stopped consuming early (break / exception /
+                # GeneratorExit) the producer thread is still driving the agent
+                # to completion in the background — burning tokens silently.
+                # Cancel it (thread-safe) so an abandoned stream doesn't keep
+                # calling tools/LLMs with nobody listening.
+                if not completed:
+                    logger.info("run_stream_sync consumer exited early; cancelling background agent run")
+                    self.agent.cancel()
 
         return _iter_from_async(
             self.run_stream(

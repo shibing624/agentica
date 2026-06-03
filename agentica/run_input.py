@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from agentica.model.message import Message
 from agentica.run_config import RunConfig
-from agentica.utils.log import logger
 
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
@@ -115,8 +114,10 @@ def merge_run_config(
     return merged
 
 
-def warn_unknown_run_kwargs(kwargs: Dict[str, Any]) -> None:
-    """Warn on likely misspelled run kwargs while preserving extension kwargs."""
+def reject_unknown_run_kwargs(kwargs: Dict[str, Any]) -> None:
+    """Reject unknown run() kwargs loudly. A silently-dropped argument is the
+    worst kind of bug — the caller thinks a setting took effect when it didn't.
+    Misspellings get a 'did you mean' hint."""
     removed = sorted(set(kwargs) & _REMOVED_RUN_KWARGS)
     if removed:
         raise TypeError(
@@ -128,5 +129,5 @@ def warn_unknown_run_kwargs(kwargs: Dict[str, Any]) -> None:
         if key in _KNOWN_RUN_KWARGS:
             continue
         matches = get_close_matches(key, known, n=1, cutoff=0.82)
-        if matches:
-            logger.warning(f"Unknown run() keyword argument '{key}'. Did you mean '{matches[0]}'?")
+        hint = f" Did you mean '{matches[0]}'?" if matches else ""
+        raise TypeError(f"Unknown run() keyword argument '{key}'.{hint}")

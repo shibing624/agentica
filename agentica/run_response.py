@@ -213,7 +213,7 @@ class RunResponse(BaseModel):
             exclude={"messages"},
         )
         if self.messages is not None:
-            _dict["messages"] = [m.to_dict() for m in self.messages]
+            _dict["messages"] = [m.to_model_dict() for m in self.messages]
         return _dict
 
     def get_content_as_string(self, **kwargs) -> str:

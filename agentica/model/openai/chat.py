@@ -281,7 +281,7 @@ class OpenAIChat(Model):
         if message.audio is not None:
             message = self.add_audio_to_message(message=message, audio=message.audio)
 
-        return message.to_dict()
+        return message.to_model_dict()
 
     def _get_langfuse_extra_params(self) -> Dict[str, Any]:
         """Get extra parameters for Langfuse tracing."""

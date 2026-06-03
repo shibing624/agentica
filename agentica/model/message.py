@@ -145,10 +145,6 @@ class Message(BaseModel):
             _dict["content"] = None
         return _dict
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Backward-compatible provider request serialization."""
-        return self.to_model_dict()
-
     def log(self, level: Optional[str] = None):
         """Log the message to the console
 
@@ -168,7 +164,7 @@ class Message(BaseModel):
         else:
             _logger = logger.debug
 
-        _logger(f"[{self.role}] {self.to_dict()}")
+        _logger(f"[{self.role}] {self.to_model_dict()}")
 
     def content_is_valid(self) -> bool:
         """Check if the message content is valid."""

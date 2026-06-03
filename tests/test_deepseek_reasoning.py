@@ -30,7 +30,7 @@ def test_assistant_message_keeps_reasoning_content_for_next_request():
         reasoning_content="thinking trace",
     )
 
-    assert message.to_dict() == {
+    assert message.to_model_dict() == {
         "role": "assistant",
         "content": "final answer",
         "reasoning_content": "thinking trace",
