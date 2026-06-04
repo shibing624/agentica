@@ -229,14 +229,21 @@ async def upload_file(
             detail=f"File type '{ext}' not allowed. Allowed: {', '.join(sorted(allowed))}",
         )
 
-    # Read and enforce size limit
+    # Read in chunks and enforce the size limit while streaming, so an oversized
+    # upload is rejected mid-read instead of being fully buffered into memory
+    # first (a full read() lets a client OOM the server regardless of the limit).
     max_bytes = settings.upload_max_size_mb * 1024 * 1024
-    content = await file.read()
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File size {len(content) // 1024}KB exceeds limit of {settings.upload_max_size_mb}MB",
-        )
+    chunks = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds size limit of {settings.upload_max_size_mb}MB",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
 
     # Write to destination — enforce that files land inside workspace
     workspace = settings.workspace_path.resolve()

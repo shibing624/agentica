@@ -123,6 +123,53 @@ class TestSettings:
         assert ext_set == {".py", ".js", ".ts"}
 
 
+# ============== TestUploadFile ==============
+
+class TestUploadFile:
+    """Upload endpoint: streamed size limit + workspace path containment."""
+
+    def _make_upload(self, content, filename):
+        import io
+        from starlette.datastructures import UploadFile
+        return UploadFile(io.BytesIO(content), filename=filename)
+
+    def _settings(self, tmp_path, max_mb=1):
+        s = MagicMock()
+        s.upload_allowed_ext_set = {".txt"}
+        s.upload_max_size_mb = max_mb
+        s.workspace_path = tmp_path
+        return s
+
+    def test_oversized_upload_rejected_with_mb_unit(self, tmp_path):
+        from fastapi import HTTPException
+        from agentica.gateway.routes import chat
+        up = self._make_upload(b"x" * (2 * 1024 * 1024), "big.txt")
+        with patch.object(chat, "settings", self._settings(tmp_path, max_mb=1)):
+            with pytest.raises(HTTPException) as ei:
+                asyncio.run(chat.upload_file(file=up, target_dir=""))
+        assert ei.value.status_code == 413
+        # Error message must use MB consistently (the old KB-vs-MB bug).
+        assert "1MB" in ei.value.detail and "KB" not in ei.value.detail
+
+    def test_valid_upload_written_to_workspace(self, tmp_path):
+        from agentica.gateway.routes import chat
+        up = self._make_upload(b"hello", "note.txt")
+        with patch.object(chat, "settings", self._settings(tmp_path)):
+            result = asyncio.run(chat.upload_file(file=up, target_dir=""))
+        assert result["status"] == "ok"
+        assert (tmp_path / "note.txt").read_bytes() == b"hello"
+
+    def test_target_dir_outside_workspace_rejected(self, tmp_path):
+        from fastapi import HTTPException
+        from agentica.gateway.routes import chat
+        up = self._make_upload(b"hi", "x.txt")
+        outside = str(tmp_path.parent)  # parent dir escapes the workspace root
+        with patch.object(chat, "settings", self._settings(tmp_path)):
+            with pytest.raises(HTTPException) as ei:
+                asyncio.run(chat.upload_file(file=up, target_dir=outside))
+        assert ei.value.status_code == 400
+
+
 # ============== TestLRUAgentCache ==============
 
 class TestLRUAgentCache:
