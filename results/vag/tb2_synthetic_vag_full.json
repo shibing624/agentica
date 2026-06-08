@@ -1,0 +1,56 @@
+{
+  "split": "/Users/xuming/Documents/Codes/agentica-paper/evaluation/vag/data/tb2_synthetic_split.jsonl",
+  "gate": "vag_full",
+  "n_tasks": 8,
+  "n_admitted": 8,
+  "outcomes": [
+    {
+      "task_id": "tb2-syn-001",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 241
+    },
+    {
+      "task_id": "tb2-syn-002",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 234
+    },
+    {
+      "task_id": "tb2-syn-003",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 224
+    },
+    {
+      "task_id": "tb2-syn-004",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 230
+    },
+    {
+      "task_id": "tb2-syn-005",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 246
+    },
+    {
+      "task_id": "tb2-syn-006",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 223
+    },
+    {
+      "task_id": "tb2-syn-007",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 221
+    },
+    {
+      "task_id": "tb2-syn-008",
+      "approved": true,
+      "rejected_by": [],
+      "skill_md_len": 256
+    }
+  ]
+}

@@ -6,7 +6,7 @@
 Reads the JSON produced by ``runners/regression_injection.py`` and emits a
 critic-ablation table suitable for the paper / appendix:
 
-| Config        | Harmful admission ↓ | Benign retention ↑ | Per-failure breakdown |
+| Config | Harmful admission ↓ | Benign retention ↑ | Cost / candidate ↓ | Latency ms | Per-failure breakdown |
 """
 from __future__ import annotations
 
@@ -36,8 +36,11 @@ def summarize(results: List[Dict]) -> str:
         if r["label"] == "harmful"
     })
 
-    header = "| Config | Harmful admit ↓ | Benign retention ↑ | " + " | ".join(failure_types) + " |"
-    sep = "|" + "|".join("---" for _ in range(3 + len(failure_types))) + "|"
+    header = (
+        "| Config | Harmful admit ↓ | Benign retention ↑ | Cost / candidate ↓ | "
+        "Latency ms | " + " | ".join(failure_types) + " |"
+    )
+    sep = "|" + "|".join("---" for _ in range(5 + len(failure_types))) + "|"
     rows = [header, sep]
     for cfg in results:
         breakdown = _harmful_breakdown(cfg["rejected"], failure_types)
@@ -45,6 +48,8 @@ def summarize(results: List[Dict]) -> str:
             cfg["config"],
             f"{cfg['harmful_admission_rate']:.3f}",
             f"{cfg['benign_retention_rate']:.3f}",
+            f"{cfg.get('gate_cost_per_candidate_usd', 0.0):.4f}",
+            f"{cfg.get('gate_latency_ms', 0.0):.1f}",
         ]
         cells += [f"{breakdown[ft]}" for ft in failure_types]
         rows.append("| " + " | ".join(cells) + " |")

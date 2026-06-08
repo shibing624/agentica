@@ -1,0 +1,78 @@
+{
+  "dataset": "terminal-bench/terminal-bench-2",
+  "hf_dataset": "harborframework/terminal-bench-2.0",
+  "dataset_root": null,
+  "task_source": "doc_page_snapshot",
+  "n_discovered_tasks": 50,
+  "split": {
+    "event": [
+      "feal-linear-cryptanalysis",
+      "extract-moves-from-video",
+      "distribution-search",
+      "code-from-image",
+      "build-pmars",
+      "make-mips-interpreter",
+      "filter-js-from-html",
+      "circuit-fibsqrt"
+    ],
+    "holdout": [
+      "fix-git",
+      "crack-7z-hash",
+      "gcode-to-text",
+      "dna-insert"
+    ],
+    "test": [
+      "compile-compcert",
+      "build-cython-ext",
+      "large-scale-text-editing",
+      "kv-store-grpc"
+    ]
+  },
+  "split_files": {
+    "event": "/Users/xuming/Documents/Codes/agentica-paper/evaluation/vag/data/tbench2_split_event.txt",
+    "holdout": "/Users/xuming/Documents/Codes/agentica-paper/evaluation/vag/data/tbench2_split_holdout.txt",
+    "test": "/Users/xuming/Documents/Codes/agentica-paper/evaluation/vag/data/tbench2_split_test.txt",
+    "manifest": "/Users/xuming/Documents/Codes/agentica-paper/evaluation/vag/data/tbench2_split_manifest.json"
+  },
+  "commands": [
+    {
+      "name": "tb2_oracle_smoke",
+      "command": [
+        "harbor",
+        "run",
+        "-d",
+        "terminal-bench/terminal-bench-2",
+        "-a",
+        "oracle"
+      ],
+      "shell_command": "harbor run -d terminal-bench/terminal-bench-2 -a oracle",
+      "notes": [
+        "Run this first on the Linux/Docker host to verify Harbor + Docker + TB2 access."
+      ]
+    },
+    {
+      "name": "tb2_claude-code_run",
+      "command": [
+        "harbor",
+        "run",
+        "-d",
+        "terminal-bench/terminal-bench-2",
+        "-a",
+        "claude-code",
+        "-m",
+        "anthropic/claude-haiku-4-5",
+        "--env",
+        "daytona",
+        "-n",
+        "4"
+      ],
+      "shell_command": "harbor run -d terminal-bench/terminal-bench-2 -a claude-code -m anthropic/claude-haiku-4-5 --env daytona -n 4",
+      "notes": [
+        "Execute on a Linux/Docker host or with --env daytona; do not rely on macOS for every TB2 image.",
+        "If using a custom Agentica/VaG agent, register it with Harbor and replace -a accordingly.",
+        "Harbor task filtering is intentionally left in extra_args because the CLI flag may change."
+      ]
+    }
+  ],
+  "execution_note": "Run Harbor commands on a Linux/Docker host or via Harbor remote env such as Daytona. The macOS repo can generate plans and ingest results, but should not be assumed to build every TB2 image."
+}

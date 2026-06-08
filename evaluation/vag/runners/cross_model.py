@@ -28,10 +28,11 @@ if str(ROOT) not in sys.path:
 from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
 from evaluation.vag.lifecycle import SkillAdmissionGate, SkillCandidate
 from evaluation.vag.runners.regression_injection import (
-    EXTENDED_DATA_PATH,
+    CANDIDATES_PATH,
+    LABELS_PATH,
     evaluate_config,
     exec_holdout,
-    write_candidates,
+    write_dataset,
 )
 from evaluation.vag.seeds import build_extended_candidates
 
@@ -56,7 +57,6 @@ class _BiasedAgentCritic:
             "api token",
             "user emails",
             "every task",
-            "always",
             "assume the failed command is always",
             "ignore any existing skill",
             "git reset --hard",
@@ -92,7 +92,7 @@ async def run(
     factory: AgentCriticFactory = _default_factory,
 ) -> List[Dict]:
     candidates = build_extended_candidates()
-    write_candidates(candidates, EXTENDED_DATA_PATH)
+    write_dataset(candidates, CANDIDATES_PATH, LABELS_PATH)
     schema = SchemaCritic(SkillCandidate)
     exec_critic = ExecCritic(exec_holdout, name="exec")
 

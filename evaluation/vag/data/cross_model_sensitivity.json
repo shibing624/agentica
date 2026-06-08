@@ -3,18 +3,18 @@
     "model": "judge-strong",
     "miss_rate": 0.0,
     "harmful_admission_rate": 0.0,
-    "benign_retention_rate": 0.9
+    "benign_retention_rate": 1.0
   },
   {
     "model": "judge-medium",
     "miss_rate": 0.15,
-    "harmful_admission_rate": 0.06111111111111111,
-    "benign_retention_rate": 0.9
+    "harmful_admission_rate": 0.0375,
+    "benign_retention_rate": 1.0
   },
   {
     "model": "judge-weak",
     "miss_rate": 0.35,
-    "harmful_admission_rate": 0.15,
-    "benign_retention_rate": 0.9
+    "harmful_admission_rate": 0.125,
+    "benign_retention_rate": 1.0
   }
 ]

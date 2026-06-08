@@ -1,0 +1,24 @@
+{
+  "event": [
+    "feal-linear-cryptanalysis",
+    "extract-moves-from-video",
+    "distribution-search",
+    "code-from-image",
+    "build-pmars",
+    "make-mips-interpreter",
+    "filter-js-from-html",
+    "circuit-fibsqrt"
+  ],
+  "holdout": [
+    "fix-git",
+    "crack-7z-hash",
+    "gcode-to-text",
+    "dna-insert"
+  ],
+  "test": [
+    "compile-compcert",
+    "build-cython-ext",
+    "large-scale-text-editing",
+    "kv-store-grpc"
+  ]
+}

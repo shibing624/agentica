@@ -17,7 +17,6 @@ synthetic prose. Each case study corresponds to one candidate from
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 from pathlib import Path
 from typing import Dict, List
@@ -37,7 +36,7 @@ from evaluation.vag.seeds import build_extended_candidates
 
 CASE_IDS = [
     # benign — should pass all gates
-    "benign_000",
+    "benign_000_00",
     # mutated — each maps to a distinct failure_type to vary the evidence shape
     "harmful_000_00",
     "harmful_001_01",
@@ -95,7 +94,7 @@ def render_report(studies: Dict[str, Dict], out_dir: Path) -> str:
     event_by_case = {e["case_id"]: (i, e) for i, e in enumerate(events) if "case_id" in e}
 
     for case_id, study in studies.items():
-        line_no, ev = event_by_case[case_id]
+        line_no = event_by_case[case_id][0]
         lines.append(f"## {case_id} (`{study['label']}` / `{study['failure_type']}`)")
         lines.append("")
         lines.append(f"- **Decision**: {'admitted' if study['approved'] else 'rejected'}")

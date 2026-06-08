@@ -1,0 +1,8 @@
+feal-linear-cryptanalysis
+extract-moves-from-video
+distribution-search
+code-from-image
+build-pmars
+make-mips-interpreter
+filter-js-from-html
+circuit-fibsqrt

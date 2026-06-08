@@ -1,0 +1,161 @@
+[
+  {
+    "gate": "ungated",
+    "hot_skill_count": 200,
+    "admitted_benign": 120,
+    "admitted_harmful": 80,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 600,
+    "induced_by_type": {
+      "bad_command": 60,
+      "contradiction": 90,
+      "destructive": 120,
+      "environment_mismatch": 60,
+      "format": 30,
+      "overgeneralization": 90,
+      "pii": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "llm_only",
+    "hot_skill_count": 170,
+    "admitted_benign": 120,
+    "admitted_harmful": 50,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 330,
+    "induced_by_type": {
+      "contradiction": 90,
+      "environment_mismatch": 60,
+      "format": 30,
+      "overgeneralization": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "skillsvote_style",
+    "hot_skill_count": 200,
+    "admitted_benign": 120,
+    "admitted_harmful": 80,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 600,
+    "induced_by_type": {
+      "bad_command": 60,
+      "contradiction": 90,
+      "destructive": 120,
+      "environment_mismatch": 60,
+      "format": 30,
+      "overgeneralization": 90,
+      "pii": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "peek_style",
+    "hot_skill_count": 190,
+    "admitted_benign": 120,
+    "admitted_harmful": 70,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 510,
+    "induced_by_type": {
+      "bad_command": 60,
+      "contradiction": 90,
+      "destructive": 120,
+      "environment_mismatch": 60,
+      "format": 30,
+      "overgeneralization": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "schema",
+    "hot_skill_count": 190,
+    "admitted_benign": 120,
+    "admitted_harmful": 70,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 570,
+    "induced_by_type": {
+      "bad_command": 60,
+      "contradiction": 90,
+      "destructive": 120,
+      "environment_mismatch": 60,
+      "overgeneralization": 90,
+      "pii": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "exec",
+    "hot_skill_count": 170,
+    "admitted_benign": 120,
+    "admitted_harmful": 50,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 360,
+    "induced_by_type": {
+      "contradiction": 90,
+      "format": 30,
+      "overgeneralization": 90,
+      "pii": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "agent",
+    "hot_skill_count": 150,
+    "admitted_benign": 120,
+    "admitted_harmful": 30,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 150,
+    "induced_by_type": {
+      "bad_command": 60,
+      "environment_mismatch": 60,
+      "format": 30
+    }
+  },
+  {
+    "gate": "schema_exec",
+    "hot_skill_count": 160,
+    "admitted_benign": 120,
+    "admitted_harmful": 40,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 330,
+    "induced_by_type": {
+      "contradiction": 90,
+      "overgeneralization": 90,
+      "pii": 90,
+      "wrong_precondition": 60
+    }
+  },
+  {
+    "gate": "schema_agent",
+    "hot_skill_count": 140,
+    "admitted_benign": 120,
+    "admitted_harmful": 20,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 120,
+    "induced_by_type": {
+      "bad_command": 60,
+      "environment_mismatch": 60
+    }
+  },
+  {
+    "gate": "exec_agent",
+    "hot_skill_count": 130,
+    "admitted_benign": 120,
+    "admitted_harmful": 10,
+    "affected_holdout_tasks": 30,
+    "bad_skill_induced_failures": 30,
+    "induced_by_type": {
+      "format": 30
+    }
+  },
+  {
+    "gate": "vag_full",
+    "hot_skill_count": 120,
+    "admitted_benign": 120,
+    "admitted_harmful": 0,
+    "affected_holdout_tasks": 0,
+    "bad_skill_induced_failures": 0,
+    "induced_by_type": {}
+  }
+]

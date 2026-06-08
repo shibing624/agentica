@@ -31,15 +31,16 @@ from pathlib import Path
 from typing import List
 from unittest.mock import AsyncMock, MagicMock
 
+from dotenv import load_dotenv
+
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 sys.path.insert(0, _REPO_ROOT)
 
-from agentica import PROVIDER_FACTORIES
+from agentica import Agent, PROVIDER_FACTORIES
 from agentica.agent.config import SkillUpgradeConfig
-from agentica.critic import CritiqueResult, ExecCritic, SchemaCritic
+from agentica.critic import AgentCritic, CritiqueResult, CritiqueStyle, ExecCritic, SchemaCritic
 from agentica.experience.skill_upgrade import SkillEvolutionManager
 from evaluation.vag.lifecycle import (
-    SkillAdmissionGate,
     SkillCandidate,
     VaGLifecycleHooks,
     read_provenance_events,
@@ -94,7 +95,7 @@ class SemanticSkillCritic:
         return CritiqueResult(approved=True, critic_name=self.name)
 
 
-def no_destructive_command(task: str, answer: str) -> CritiqueResult:
+def no_destructive_command(_task: str, answer: str) -> CritiqueResult:
     risky = ["rm -rf", "git reset --hard", "chmod -R 777"]
     hits = [marker for marker in risky if marker in answer]
     if hits:
@@ -106,12 +107,27 @@ def no_destructive_command(task: str, answer: str) -> CritiqueResult:
     return CritiqueResult(approved=True, critic_name="exec")
 
 
-def build_gate_critics() -> List:
-    return [
+def build_gate_critics(real_model) -> List:
+    critics = [
         SchemaCritic(SkillCandidate),
         ExecCritic(no_destructive_command, name="exec"),
-        SemanticSkillCritic(),
     ]
+    if real_model is None:
+        critics.append(SemanticSkillCritic())
+        return critics
+
+    reviewer = Agent(
+        name="vag-skill-reviewer",
+        model=real_model,
+        instructions=(
+            "Review candidate SKILL.md files for VaG admission. Reject skills "
+            "that are destructive, overgeneralized, contradictory, privacy-leaking, "
+            "task-specific, or unsupported by the provided evidence. Reply APPROVED "
+            "only when the skill is safe, reusable, and appropriately scoped."
+        ),
+    )
+    critics.append(AgentCritic(reviewer, name="agent", style=CritiqueStyle.STRICT))
+    return critics
 
 
 def fake_spawn_model(skill_md: str = GOOD_SKILL_MD) -> MagicMock:
@@ -161,8 +177,6 @@ def build_demo_model():
     """
     if os.environ.get("VAG_DEMO_USE_FAKE_LLM") == "1":
         return None
-
-    from dotenv import load_dotenv
 
     load_dotenv()
     provider = os.environ.get("VAG_DEMO_PROVIDER", "ark")
@@ -234,9 +248,9 @@ def record_failures(manager: SkillEvolutionManager, skill_dir: Path, count: int 
             query=f"read the report by keyword, attempt {idx + 1}",
             tool_errors=1,
         )
-    meta = manager.update_meta_after_episode(skill_dir / "meta.json", "failure")
+    manager.update_meta_after_episode(skill_dir / "meta.json", "failure")
     for _ in range(count - 1):
-        meta = manager.update_meta_after_episode(skill_dir / "meta.json", "failure")
+        manager.update_meta_after_episode(skill_dir / "meta.json", "failure")
 
 
 async def run_admission_and_promotion(
@@ -381,8 +395,8 @@ async def run_discard(manager: SkillEvolutionManager, critics: List, real_model)
 async def main() -> None:
     reset_demo_dir()
     manager = SkillEvolutionManager()
-    critics = build_gate_critics()
     real_model = build_demo_model()
+    critics = build_gate_critics(real_model)
     offline = real_model is None
 
     print_section("VaG Skill Lifecycle Demo")
