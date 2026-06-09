@@ -193,6 +193,20 @@ class Runner:
         return str(value)
 
     @staticmethod
+    def _has_langfuse_payload(value: Any) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (int, float, bool)):
+            return True
+        if isinstance(value, dict):
+            return any(Runner._has_langfuse_payload(item) for item in value.values())
+        if isinstance(value, (list, tuple)):
+            return any(Runner._has_langfuse_payload(item) for item in value)
+        return True
+
+    @staticmethod
     def _extract_langfuse_message_text(value: Union[Dict, Message]) -> Optional[str]:
         """Extract display text from a Message-like object for trace input."""
         if isinstance(value, Message):
@@ -274,22 +288,38 @@ class Runner:
         metadata: Optional[Dict[str, Any]] = None,
         record_span: bool = True,
     ) -> Any:
-        """Execute a hook and record implemented hooks as Langfuse child spans."""
+        """Execute a hook and record only meaningful Langfuse child spans."""
         if not record_span:
             return await hook_call
+        span_input = self._serialize_langfuse_data(input_data)
+        if not self._has_langfuse_payload(span_input):
+            result = await hook_call
+            span_output = self._serialize_langfuse_data(result)
+            if not self._has_langfuse_payload(span_output):
+                return result
+            span_metadata = self._langfuse_hook_metadata(hook_name)
+            if metadata:
+                span_metadata.update(metadata)
+            with langfuse_span_context(
+                name=f"hook.{hook_name}",
+                input_data=None,
+                metadata=span_metadata,
+            ) as span:
+                update_langfuse_span(span, output=span_output)
+            return result
+
         span_metadata = self._langfuse_hook_metadata(hook_name)
         if metadata:
             span_metadata.update(metadata)
         with langfuse_span_context(
             name=f"hook.{hook_name}",
-            input_data=self._serialize_langfuse_data(input_data),
+            input_data=span_input,
             metadata=span_metadata,
         ) as span:
             result = await hook_call
             span_output = self._serialize_langfuse_data(result)
-            if span_output is None:
-                span_output = {"status": "completed"}
-            update_langfuse_span(span, output=span_output)
+            if self._has_langfuse_payload(span_output):
+                update_langfuse_span(span, output=span_output)
             return result
 
     # =========================================================================

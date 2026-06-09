@@ -641,7 +641,6 @@ class Model(ABC):
                         tool_call_id=function_call.call_id or "",
                         tool_args=function_call.arguments,
                     )
-                    update_langfuse_span(span, output={"status": "completed"})
 
             yield ModelResponse(
                 content=function_call.get_call_str(),
@@ -1036,10 +1035,8 @@ class Model(ABC):
                         is_error=not function_call_success,
                         elapsed=timers[i].elapsed,
                     )
-                    span_output = hook_result
-                    if span_output is None:
-                        span_output = {"status": "completed"}
-                    update_langfuse_span(span, output=span_output)
+                    if hook_result is not None:
+                        update_langfuse_span(span, output=hook_result)
 
             if "tool_call_times" not in self.metrics:
                 self.metrics["tool_call_times"] = {}

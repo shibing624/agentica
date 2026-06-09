@@ -187,7 +187,7 @@ class TestAgentRun:
             await agent.run("Hi", hooks=InlineHooks())
 
         names = [call["kwargs"]["name"] for call in span_calls]
-        assert "hook.run.on_agent_start" in names
+        assert "hook.run.on_agent_start" not in names
         assert "hook.run.on_user_prompt" in names
         assert "hook.run.on_agent_end" in names
         assert "hook.run.on_llm_start" not in names
@@ -198,6 +198,12 @@ class TestAgentRun:
         )
         assert prompt_span["kwargs"]["input_data"] == "Hi"
         assert prompt_span["updates"] == [{"output": "Hi modified"}]
+        end_span = next(
+            call for call in span_calls
+            if call["kwargs"]["name"] == "hook.run.on_agent_end"
+        )
+        assert end_span["kwargs"]["input_data"] == "OK"
+        assert end_span["updates"] == []
 
     @pytest.mark.asyncio
     async def test_base_run_hooks_do_not_create_langfuse_spans(self):
