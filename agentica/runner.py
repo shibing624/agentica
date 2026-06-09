@@ -32,6 +32,7 @@ from typing import (
     AsyncIterator,
     cast,
     Dict,
+    Awaitable,
     Iterator,
     List,
     NamedTuple,
@@ -63,7 +64,11 @@ from agentica.run_events import RunEventRecord, RunEventType
 from agentica.memory import AgentRun
 from agentica.utils.string import parse_structured_output
 from agentica.utils.tokens import count_tokens
-from agentica.utils.langfuse_integration import langfuse_trace_context
+from agentica.utils.langfuse_integration import (
+    langfuse_trace_context,
+    langfuse_span_context,
+    update_langfuse_span,
+)
 from agentica.tools.base import FunctionCall
 from agentica.guardrails.agent import (
     normalize_input_for_guardrails,
@@ -166,6 +171,67 @@ class Runner:
                     f"event callback failed for {event_type.value}: {e}",
                     exc_info=True,
                 )
+
+    @staticmethod
+    def _serialize_langfuse_data(value: Any) -> Any:
+        """Convert Agentica objects to Langfuse-friendly JSON-like data."""
+        if value is None:
+            return None
+        if isinstance(value, Message):
+            return value.to_model_dict()
+        if isinstance(value, BaseModel):
+            return value.model_dump()
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, dict):
+            return {
+                str(key): Runner._serialize_langfuse_data(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            return [Runner._serialize_langfuse_data(item) for item in value]
+        return str(value)
+
+    @classmethod
+    def _build_langfuse_trace_input(
+        cls,
+        message: Optional[Union[str, List, Dict, Message]],
+        messages: Optional[Sequence[Union[Dict, Message]]],
+    ) -> Any:
+        """Build the root trace input for both message and messages modes."""
+        if messages is not None:
+            return cls._serialize_langfuse_data(list(messages))
+        return cls._serialize_langfuse_data(message)
+
+    def _langfuse_hook_metadata(self, hook_name: str) -> Dict[str, Any]:
+        agent = self.agent
+        return {
+            "hook": hook_name,
+            "agent_id": agent.agent_id,
+            "agent_name": agent.name or "Agent",
+            "run_id": agent.run_id,
+        }
+
+    async def _run_hook_with_langfuse(
+        self,
+        hook_name: str,
+        hook_call: Awaitable[Any],
+        *,
+        input_data: Optional[Any] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Execute a hook and record its invocation as a Langfuse child span."""
+        span_metadata = self._langfuse_hook_metadata(hook_name)
+        if metadata:
+            span_metadata.update(metadata)
+        with langfuse_span_context(
+            name=f"hook.{hook_name}",
+            input_data=self._serialize_langfuse_data(input_data),
+            metadata=span_metadata,
+        ) as span:
+            result = await hook_call
+            update_langfuse_span(span, output=self._serialize_langfuse_data(result))
+            return result
 
     # =========================================================================
     # Agentic loop helpers (safety checks + state)
@@ -1290,16 +1356,26 @@ class Runner:
 
                 # --- Lifecycle: agent start ---
                 if agent.hooks is not None:
-                    await agent.hooks.on_start(agent=agent)
+                    await self._run_hook_with_langfuse(
+                        "agent.on_start",
+                        agent.hooks.on_start(agent=agent),
+                    )
                 if agent._run_hooks is not None:
-                    await agent._run_hooks.on_agent_start(agent=agent)
+                    await self._run_hook_with_langfuse(
+                        "run.on_agent_start",
+                        agent._run_hooks.on_agent_start(agent=agent),
+                    )
 
                 # --- Lifecycle: on_user_prompt hook ---
                 # Allows hooks to inspect/modify user input before message assembly.
                 if isinstance(message, str) and agent._run_hooks is not None:
                     try:
-                        modified = await agent._run_hooks.on_user_prompt(
-                            agent=agent, message=message,
+                        modified = await self._run_hook_with_langfuse(
+                            "run.on_user_prompt",
+                            agent._run_hooks.on_user_prompt(
+                                agent=agent, message=message,
+                            ),
+                            input_data=message,
                         )
                         if modified is not None:
                             message = modified
@@ -1440,7 +1516,11 @@ class Runner:
 
                         # --- Lifecycle: LLM start (stream) ---
                         if agent._run_hooks is not None:
-                            await agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model)
+                            await self._run_hook_with_langfuse(
+                                "run.on_llm_start",
+                                agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model),
+                                metadata={"message_count": len(messages_for_model), "stream": True},
+                            )
 
                         call_start = len(messages_for_model)
                         model_call = await self._call_with_retry(
@@ -1493,7 +1573,15 @@ class Runner:
 
                         # --- Lifecycle: LLM end (stream) ---
                         if agent._run_hooks is not None:
-                            await agent._run_hooks.on_llm_end(agent=agent, response=model_response)
+                            await self._run_hook_with_langfuse(
+                                "run.on_llm_end",
+                                agent._run_hooks.on_llm_end(agent=agent, response=model_response),
+                                input_data={
+                                    "content": model_response.content,
+                                    "reasoning_content": model_response.reasoning_content,
+                                },
+                                metadata={"stream": True},
+                            )
 
                         # --- Runner-owned tool execution (streaming) ---
                         # Model.response_stream() only parsed tool_calls (run_tools=False).
@@ -1631,7 +1719,11 @@ class Runner:
 
                         # --- Lifecycle: LLM start (non-stream) ---
                         if agent._run_hooks is not None:
-                            await agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model)
+                            await self._run_hook_with_langfuse(
+                                "run.on_llm_start",
+                                agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model),
+                                metadata={"message_count": len(messages_for_model), "stream": False},
+                            )
 
                         call_start = len(messages_for_model)
                         model_call = await self._call_with_retry(
@@ -1654,7 +1746,15 @@ class Runner:
 
                         # --- Lifecycle: LLM end (non-stream) ---
                         if agent._run_hooks is not None:
-                            await agent._run_hooks.on_llm_end(agent=agent, response=model_response)
+                            await self._run_hook_with_langfuse(
+                                "run.on_llm_end",
+                                agent._run_hooks.on_llm_end(agent=agent, response=model_response),
+                                input_data={
+                                    "content": model_response.content,
+                                    "reasoning_content": model_response.reasoning_content,
+                                },
+                                metadata={"stream": False},
+                            )
 
                         # --- Runner-owned tool execution ---
                         tool_result = await self._handle_tool_calls_in_runner(
@@ -1830,9 +1930,17 @@ class Runner:
 
                 # --- Lifecycle: agent end ---
                 if agent.hooks is not None:
-                    await agent.hooks.on_end(agent=agent, output=_output)
+                    await self._run_hook_with_langfuse(
+                        "agent.on_end",
+                        agent.hooks.on_end(agent=agent, output=_output),
+                        input_data=_output,
+                    )
                 if agent._run_hooks is not None:
-                    await agent._run_hooks.on_agent_end(agent=agent, output=_output)
+                    await self._run_hook_with_langfuse(
+                        "run.on_agent_end",
+                        agent._run_hooks.on_agent_end(agent=agent, output=_output),
+                        input_data=_output,
+                    )
 
                 if not agent.stream:
                     yield agent.run_response
@@ -1937,7 +2045,7 @@ class Runner:
                 agent._run_task = None
                 agent._run_max_api_retry = agent.max_api_retry
 
-        trace_input = message if isinstance(message, str) else str(message) if message else None
+        trace_input = self._build_langfuse_trace_input(message, messages)
         trace_name = agent.name or "agent-run"
 
         langfuse_tags = None

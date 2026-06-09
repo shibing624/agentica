@@ -129,6 +129,75 @@ class TestAgentRun:
         assert calls[0]["session_id"] == "session-1"
 
     @pytest.mark.asyncio
+    async def test_run_messages_passes_input_to_langfuse_trace(self):
+        calls = []
+
+        @contextmanager
+        def fake_langfuse_trace_context(**kwargs):
+            calls.append(kwargs)
+
+            class FakeTrace:
+                def set_output(self, _output):
+                    pass
+
+                def set_metadata(self, _key, _value):
+                    pass
+
+            yield FakeTrace()
+
+        with (
+            patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response()),
+            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
+        ):
+            agent = Agent(name="A", model=_make_model())
+            await agent.run(messages=[Message(role="user", content="M1")])
+
+        assert calls[0]["input_data"] == [{"role": "user", "content": "M1"}]
+
+    @pytest.mark.asyncio
+    async def test_run_hooks_create_langfuse_spans(self):
+        span_calls = []
+
+        @contextmanager
+        def fake_langfuse_span_context(**kwargs):
+            span_call = {"kwargs": kwargs, "updates": []}
+            span_calls.append(span_call)
+
+            class FakeSpan:
+                def update(self, **update_kwargs):
+                    span_call["updates"].append(update_kwargs)
+
+            yield FakeSpan()
+
+        class InlineHooks(RunHooks):
+            async def on_agent_start(self, agent, **kwargs):
+                pass
+
+            async def on_user_prompt(self, agent, message, **kwargs):
+                return f"{message} modified"
+
+            async def on_agent_end(self, agent, output, **kwargs):
+                pass
+
+        with (
+            patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")),
+            patch("agentica.runner.langfuse_span_context", new=fake_langfuse_span_context),
+        ):
+            agent = Agent(name="A", model=_make_model())
+            await agent.run("Hi", hooks=InlineHooks())
+
+        names = [call["kwargs"]["name"] for call in span_calls]
+        assert "hook.run.on_agent_start" in names
+        assert "hook.run.on_user_prompt" in names
+        assert "hook.run.on_agent_end" in names
+        prompt_span = next(
+            call for call in span_calls
+            if call["kwargs"]["name"] == "hook.run.on_user_prompt"
+        )
+        assert prompt_span["kwargs"]["input_data"] == "Hi"
+        assert prompt_span["updates"] == [{"output": "Hi modified"}]
+
+    @pytest.mark.asyncio
     async def test_run_with_message_object(self):
         with patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")):
             agent = Agent(name="A", model=_make_model())

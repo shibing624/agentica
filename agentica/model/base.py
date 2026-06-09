@@ -28,6 +28,7 @@ from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
 from agentica.utils.timer import Timer
 from agentica.cost_tracker import CostTracker, get_model_context_window
+from agentica.utils.langfuse_integration import langfuse_span_context, update_langfuse_span
 
 
 def require_first_choice(response: Any, *, context: str) -> Any:
@@ -603,12 +604,27 @@ class Model(ABC):
 
             # --- Lifecycle: tool start ---
             if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
-                await _agent._run_hooks.on_tool_start(
-                    agent=_agent,
-                    tool_name=function_call.function.name,
-                    tool_call_id=function_call.call_id or "",
-                    tool_args=function_call.arguments,
-                )
+                tool_start_input = {
+                    "tool_name": function_call.function.name,
+                    "tool_call_id": function_call.call_id or "",
+                    "tool_args": function_call.arguments,
+                }
+                with langfuse_span_context(
+                    name="hook.run.on_tool_start",
+                    input_data=tool_start_input,
+                    metadata={
+                        "hook": "run.on_tool_start",
+                        "agent_id": _agent.agent_id,
+                        "agent_name": _agent.name or "Agent",
+                        "run_id": _agent.run_id,
+                    },
+                ):
+                    await _agent._run_hooks.on_tool_start(
+                        agent=_agent,
+                        tool_name=function_call.function.name,
+                        tool_call_id=function_call.call_id or "",
+                        tool_args=function_call.arguments,
+                    )
 
             yield ModelResponse(
                 content=function_call.get_call_str(),
@@ -973,15 +989,33 @@ class Model(ABC):
                     if (function_call_success or soft_error)
                     else function_call.error
                 )
-                await _agent._run_hooks.on_tool_end(
-                    agent=_agent,
-                    tool_name=function_call.function.name,
-                    tool_call_id=function_call.call_id or "",
-                    tool_args=function_call.arguments,
-                    result=hook_result,
-                    is_error=not function_call_success,
-                    elapsed=timers[i].elapsed,
-                )
+                tool_end_input = {
+                    "tool_name": function_call.function.name,
+                    "tool_call_id": function_call.call_id or "",
+                    "tool_args": function_call.arguments,
+                    "is_error": not function_call_success,
+                    "elapsed": timers[i].elapsed,
+                }
+                with langfuse_span_context(
+                    name="hook.run.on_tool_end",
+                    input_data=tool_end_input,
+                    metadata={
+                        "hook": "run.on_tool_end",
+                        "agent_id": _agent.agent_id,
+                        "agent_name": _agent.name or "Agent",
+                        "run_id": _agent.run_id,
+                    },
+                ) as span:
+                    await _agent._run_hooks.on_tool_end(
+                        agent=_agent,
+                        tool_name=function_call.function.name,
+                        tool_call_id=function_call.call_id or "",
+                        tool_args=function_call.arguments,
+                        result=hook_result,
+                        is_error=not function_call_success,
+                        elapsed=timers[i].elapsed,
+                    )
+                    update_langfuse_span(span, output=hook_result)
 
             if "tool_call_times" not in self.metrics:
                 self.metrics["tool_call_times"] = {}
