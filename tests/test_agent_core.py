@@ -152,7 +152,7 @@ class TestAgentRun:
             agent = Agent(name="A", model=_make_model())
             await agent.run(messages=[Message(role="user", content="M1")])
 
-        assert calls[0]["input_data"] == [{"role": "user", "content": "M1"}]
+        assert calls[0]["input_data"] == "M1"
 
     @pytest.mark.asyncio
     async def test_run_hooks_create_langfuse_spans(self):
@@ -190,12 +190,32 @@ class TestAgentRun:
         assert "hook.run.on_agent_start" in names
         assert "hook.run.on_user_prompt" in names
         assert "hook.run.on_agent_end" in names
+        assert "hook.run.on_llm_start" not in names
+        assert "hook.run.on_llm_end" not in names
         prompt_span = next(
             call for call in span_calls
             if call["kwargs"]["name"] == "hook.run.on_user_prompt"
         )
         assert prompt_span["kwargs"]["input_data"] == "Hi"
         assert prompt_span["updates"] == [{"output": "Hi modified"}]
+
+    @pytest.mark.asyncio
+    async def test_base_run_hooks_do_not_create_langfuse_spans(self):
+        span_calls = []
+
+        @contextmanager
+        def fake_langfuse_span_context(**kwargs):
+            span_calls.append(kwargs)
+            yield None
+
+        with (
+            patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")),
+            patch("agentica.runner.langfuse_span_context", new=fake_langfuse_span_context),
+        ):
+            agent = Agent(name="A", model=_make_model())
+            await agent.run("Hi", hooks=RunHooks())
+
+        assert span_calls == []
 
     @pytest.mark.asyncio
     async def test_run_with_message_object(self):

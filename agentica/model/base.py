@@ -29,6 +29,7 @@ from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCal
 from agentica.utils.timer import Timer
 from agentica.cost_tracker import CostTracker, get_model_context_window
 from agentica.utils.langfuse_integration import langfuse_span_context, update_langfuse_span
+from agentica.hooks import RunHooks, _CompositeRunHooks
 
 
 def require_first_choice(response: Any, *, context: str) -> Any:
@@ -67,6 +68,17 @@ _MODEL_RUN_STATE: contextvars.ContextVar[Optional[ModelRunState]] = contextvars.
     "agentica_model_run_state",
     default=None,
 )
+
+
+def _run_hook_method_overridden(hooks: Optional[RunHooks], method_name: str) -> bool:
+    if hooks is None:
+        return False
+    if isinstance(hooks, _CompositeRunHooks):
+        return any(
+            getattr(type(hook), method_name) is not getattr(RunHooks, method_name)
+            for hook in hooks._hooks_list
+        )
+    return getattr(type(hooks), method_name) is not getattr(RunHooks, method_name)
 
 
 def _redact_unterminated_private_key_block(text: str) -> str:
@@ -603,7 +615,11 @@ class Model(ABC):
         for function_call in function_calls:
 
             # --- Lifecycle: tool start ---
-            if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
+            if (
+                _agent is not None
+                and hasattr(_agent, '_run_hooks')
+                and _run_hook_method_overridden(_agent._run_hooks, "on_tool_start")
+            ):
                 tool_start_input = {
                     "tool_name": function_call.function.name,
                     "tool_call_id": function_call.call_id or "",
@@ -618,13 +634,14 @@ class Model(ABC):
                         "agent_name": _agent.name or "Agent",
                         "run_id": _agent.run_id,
                     },
-                ):
+                ) as span:
                     await _agent._run_hooks.on_tool_start(
                         agent=_agent,
                         tool_name=function_call.function.name,
                         tool_call_id=function_call.call_id or "",
                         tool_args=function_call.arguments,
                     )
+                    update_langfuse_span(span, output={"status": "completed"})
 
             yield ModelResponse(
                 content=function_call.get_call_str(),
@@ -979,7 +996,11 @@ class Model(ABC):
             )
 
             # --- Lifecycle: tool end ---
-            if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
+            if (
+                _agent is not None
+                and hasattr(_agent, '_run_hooks')
+                and _run_hook_method_overridden(_agent._run_hooks, "on_tool_end")
+            ):
                 # For soft-errors (builtin tools returning "Error: ..." strings
                 # without raising), function_call.error is None but the output
                 # carries the human-readable error message. Forward the output
@@ -1015,7 +1036,10 @@ class Model(ABC):
                         is_error=not function_call_success,
                         elapsed=timers[i].elapsed,
                     )
-                    update_langfuse_span(span, output=hook_result)
+                    span_output = hook_result
+                    if span_output is None:
+                        span_output = {"status": "completed"}
+                    update_langfuse_span(span, output=span_output)
 
             if "tool_call_times" not in self.metrics:
                 self.metrics["tool_call_times"] = {}

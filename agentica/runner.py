@@ -50,7 +50,7 @@ from agentica.utils.async_utils import run_sync
 from agentica.compression.micro import micro_compact
 from agentica.compression.tool_result_storage import enforce_tool_result_budget
 from agentica.cost_tracker import CostTracker
-from agentica.hooks import RunHooks, _CompositeRunHooks
+from agentica.hooks import AgentHooks, RunHooks, _CompositeAgentHooks, _CompositeRunHooks
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
@@ -192,6 +192,19 @@ class Runner:
             return [Runner._serialize_langfuse_data(item) for item in value]
         return str(value)
 
+    @staticmethod
+    def _extract_langfuse_message_text(value: Union[Dict, Message]) -> Optional[str]:
+        """Extract display text from a Message-like object for trace input."""
+        if isinstance(value, Message):
+            content = value.content
+        else:
+            content = value.get("content")
+        if isinstance(content, str):
+            return content
+        if content is None:
+            return None
+        return json.dumps(content, ensure_ascii=False)
+
     @classmethod
     def _build_langfuse_trace_input(
         cls,
@@ -200,8 +213,48 @@ class Runner:
     ) -> Any:
         """Build the root trace input for both message and messages modes."""
         if messages is not None:
+            for candidate in reversed(messages):
+                role = candidate.role if isinstance(candidate, Message) else candidate.get("role")
+                if role == "user":
+                    text = cls._extract_langfuse_message_text(candidate)
+                    if text is not None:
+                        return text
             return cls._serialize_langfuse_data(list(messages))
+        if isinstance(message, Message):
+            text = cls._extract_langfuse_message_text(message)
+            if text is not None:
+                return text
+        if isinstance(message, dict):
+            text = cls._extract_langfuse_message_text(message)
+            if text is not None:
+                return text
         return cls._serialize_langfuse_data(message)
+
+    @staticmethod
+    def _hook_method_overridden(hook: Any, base_class: Any, method_name: str) -> bool:
+        return getattr(type(hook), method_name) is not getattr(base_class, method_name)
+
+    @classmethod
+    def _run_hook_method_overridden(cls, hooks: Optional[RunHooks], method_name: str) -> bool:
+        if hooks is None:
+            return False
+        if isinstance(hooks, _CompositeRunHooks):
+            return any(
+                cls._hook_method_overridden(hook, RunHooks, method_name)
+                for hook in hooks._hooks_list
+            )
+        return cls._hook_method_overridden(hooks, RunHooks, method_name)
+
+    @classmethod
+    def _agent_hook_method_overridden(cls, hooks: Optional[AgentHooks], method_name: str) -> bool:
+        if hooks is None:
+            return False
+        if isinstance(hooks, _CompositeAgentHooks):
+            return any(
+                cls._hook_method_overridden(hook, AgentHooks, method_name)
+                for hook in hooks.hooks
+            )
+        return cls._hook_method_overridden(hooks, AgentHooks, method_name)
 
     def _langfuse_hook_metadata(self, hook_name: str) -> Dict[str, Any]:
         agent = self.agent
@@ -219,8 +272,11 @@ class Runner:
         *,
         input_data: Optional[Any] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        record_span: bool = True,
     ) -> Any:
-        """Execute a hook and record its invocation as a Langfuse child span."""
+        """Execute a hook and record implemented hooks as Langfuse child spans."""
+        if not record_span:
+            return await hook_call
         span_metadata = self._langfuse_hook_metadata(hook_name)
         if metadata:
             span_metadata.update(metadata)
@@ -230,7 +286,10 @@ class Runner:
             metadata=span_metadata,
         ) as span:
             result = await hook_call
-            update_langfuse_span(span, output=self._serialize_langfuse_data(result))
+            span_output = self._serialize_langfuse_data(result)
+            if span_output is None:
+                span_output = {"status": "completed"}
+            update_langfuse_span(span, output=span_output)
             return result
 
     # =========================================================================
@@ -1359,11 +1418,13 @@ class Runner:
                     await self._run_hook_with_langfuse(
                         "agent.on_start",
                         agent.hooks.on_start(agent=agent),
+                        record_span=self._agent_hook_method_overridden(agent.hooks, "on_start"),
                     )
                 if agent._run_hooks is not None:
                     await self._run_hook_with_langfuse(
                         "run.on_agent_start",
                         agent._run_hooks.on_agent_start(agent=agent),
+                        record_span=self._run_hook_method_overridden(agent._run_hooks, "on_agent_start"),
                     )
 
                 # --- Lifecycle: on_user_prompt hook ---
@@ -1376,6 +1437,7 @@ class Runner:
                                 agent=agent, message=message,
                             ),
                             input_data=message,
+                            record_span=self._run_hook_method_overridden(agent._run_hooks, "on_user_prompt"),
                         )
                         if modified is not None:
                             message = modified
@@ -1520,6 +1582,7 @@ class Runner:
                                 "run.on_llm_start",
                                 agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model),
                                 metadata={"message_count": len(messages_for_model), "stream": True},
+                                record_span=self._run_hook_method_overridden(agent._run_hooks, "on_llm_start"),
                             )
 
                         call_start = len(messages_for_model)
@@ -1581,6 +1644,7 @@ class Runner:
                                     "reasoning_content": model_response.reasoning_content,
                                 },
                                 metadata={"stream": True},
+                                record_span=self._run_hook_method_overridden(agent._run_hooks, "on_llm_end"),
                             )
 
                         # --- Runner-owned tool execution (streaming) ---
@@ -1723,6 +1787,7 @@ class Runner:
                                 "run.on_llm_start",
                                 agent._run_hooks.on_llm_start(agent=agent, messages=messages_for_model),
                                 metadata={"message_count": len(messages_for_model), "stream": False},
+                                record_span=self._run_hook_method_overridden(agent._run_hooks, "on_llm_start"),
                             )
 
                         call_start = len(messages_for_model)
@@ -1754,6 +1819,7 @@ class Runner:
                                     "reasoning_content": model_response.reasoning_content,
                                 },
                                 metadata={"stream": False},
+                                record_span=self._run_hook_method_overridden(agent._run_hooks, "on_llm_end"),
                             )
 
                         # --- Runner-owned tool execution ---
@@ -1934,12 +2000,14 @@ class Runner:
                         "agent.on_end",
                         agent.hooks.on_end(agent=agent, output=_output),
                         input_data=_output,
+                        record_span=self._agent_hook_method_overridden(agent.hooks, "on_end"),
                     )
                 if agent._run_hooks is not None:
                     await self._run_hook_with_langfuse(
                         "run.on_agent_end",
                         agent._run_hooks.on_agent_end(agent=agent, output=_output),
                         input_data=_output,
+                        record_span=self._run_hook_method_overridden(agent._run_hooks, "on_agent_end"),
                     )
 
                 if not agent.stream:
