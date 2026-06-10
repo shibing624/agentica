@@ -42,6 +42,7 @@ from inspect import signature
 from uuid import uuid4
 from pathlib import Path
 from dataclasses import dataclass, field
+from agentica.utils.hook_recorder import HookRecorder
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.model.message import Message
 from agentica.tools.base import ModelTool, Tool, Function
@@ -223,6 +224,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
     # Run-level hooks (set per-run via run(hooks=...))
     _run_hooks: Optional[RunHooks] = field(default=None, init=False, repr=False)
+    # Per-run hook telemetry collected by Runner/Model and flushed to Langfuse trace metadata.
+    # Backend-neutral: HookRecorder owns serialization, override filtering, and storage.
+    _hook_recorder: HookRecorder = field(default_factory=HookRecorder, init=False, repr=False)
     # Default run hooks (auto-injected, e.g. ConversationArchiveHooks when auto_archive=True)
     _default_run_hooks: Optional[RunHooks] = field(default=None, init=False, repr=False)
     # Per-run cost budget (USD). Set by Runner before _run_impl, read by Model.
@@ -510,6 +514,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._run_task = None
         self._event_callback = None
         self._run_hooks = None
+        self._hook_recorder = HookRecorder()
         self._default_run_hooks = None
         self._tool_runtime_configs: Dict[str, ToolRuntimeConfig] = {}
         self._skill_runtime_configs: Dict[str, SkillRuntimeConfig] = {}

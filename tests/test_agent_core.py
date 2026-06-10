@@ -23,7 +23,7 @@ from agentica.agent import (
     AgentMemoryConfig,
     AgentSafetyConfig,
 )
-from agentica.hooks import RunHooks
+from agentica.hooks import AgentHooks, RunHooks
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
@@ -155,21 +155,28 @@ class TestAgentRun:
         assert calls[0]["input_data"] == "M1"
 
     @pytest.mark.asyncio
-    async def test_run_hooks_create_langfuse_spans(self):
-        span_calls = []
+    async def test_hooks_are_recorded_in_langfuse_trace_metadata(self):
+        trace_metadata = {}
 
         @contextmanager
-        def fake_langfuse_span_context(**kwargs):
-            span_call = {"kwargs": kwargs, "updates": []}
-            span_calls.append(span_call)
+        def fake_langfuse_trace_context(**kwargs):
+            class FakeTrace:
+                def set_output(self, _output):
+                    pass
 
-            class FakeSpan:
-                def update(self, **update_kwargs):
-                    span_call["updates"].append(update_kwargs)
+                def set_metadata(self, key, value):
+                    trace_metadata[key] = value
 
-            yield FakeSpan()
+            yield FakeTrace()
 
-        class InlineHooks(RunHooks):
+        class InlineAgentHooks(AgentHooks):
+            async def on_start(self, agent, **kwargs):
+                pass
+
+            async def on_end(self, agent, output, **kwargs):
+                pass
+
+        class InlineRunHooks(RunHooks):
             async def on_agent_start(self, agent, **kwargs):
                 pass
 
@@ -181,47 +188,45 @@ class TestAgentRun:
 
         with (
             patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")),
-            patch("agentica.runner.langfuse_span_context", new=fake_langfuse_span_context),
+            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
         ):
-            agent = Agent(name="A", model=_make_model())
-            await agent.run("Hi", hooks=InlineHooks())
+            agent = Agent(name="A", model=_make_model(), hooks=[InlineAgentHooks()])
+            await agent.run("Hi", hooks=InlineRunHooks())
 
-        names = [call["kwargs"]["name"] for call in span_calls]
-        assert "hook.run.on_agent_start" not in names
-        assert "hook.run.on_user_prompt" in names
-        assert "hook.run.on_agent_end" in names
-        assert "hook.run.on_llm_start" not in names
-        assert "hook.run.on_llm_end" not in names
-        prompt_span = next(
-            call for call in span_calls
-            if call["kwargs"]["name"] == "hook.run.on_user_prompt"
-        )
-        assert prompt_span["kwargs"]["input_data"] == "Hi"
-        assert prompt_span["updates"] == [{"output": "Hi modified"}]
-        end_span = next(
-            call for call in span_calls
-            if call["kwargs"]["name"] == "hook.run.on_agent_end"
-        )
-        assert end_span["kwargs"]["input_data"] == "OK"
-        assert end_span["updates"] == []
+        hook_calls = trace_metadata["hook_calls"]
+        observed = {(item["hook_type"], item["hook_class"], item["method"]) for item in hook_calls}
+        assert ("agent", "InlineAgentHooks", "on_start") in observed
+        assert ("agent", "InlineAgentHooks", "on_end") in observed
+        assert ("run", "InlineRunHooks", "on_agent_start") in observed
+        assert ("run", "InlineRunHooks", "on_user_prompt") in observed
+        assert ("run", "InlineRunHooks", "on_agent_end") in observed
+        prompt_record = next(item for item in hook_calls if item["method"] == "on_user_prompt")
+        assert prompt_record["output"] == "Hi modified"
+        assert all(item["ok"] for item in hook_calls)
 
     @pytest.mark.asyncio
-    async def test_base_run_hooks_do_not_create_langfuse_spans(self):
-        span_calls = []
+    async def test_base_run_hooks_do_not_create_langfuse_hook_metadata(self):
+        trace_metadata = {}
 
         @contextmanager
-        def fake_langfuse_span_context(**kwargs):
-            span_calls.append(kwargs)
-            yield None
+        def fake_langfuse_trace_context(**kwargs):
+            class FakeTrace:
+                def set_output(self, _output):
+                    pass
+
+                def set_metadata(self, key, value):
+                    trace_metadata[key] = value
+
+            yield FakeTrace()
 
         with (
             patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")),
-            patch("agentica.runner.langfuse_span_context", new=fake_langfuse_span_context),
+            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
         ):
             agent = Agent(name="A", model=_make_model())
             await agent.run("Hi", hooks=RunHooks())
 
-        assert span_calls == []
+        assert "hook_calls" not in trace_metadata
 
     @pytest.mark.asyncio
     async def test_run_with_message_object(self):

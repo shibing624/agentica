@@ -1479,56 +1479,122 @@ class _CompositeRunHooks(RunHooks):
 
     Used to combine auto-injected hooks (e.g. ConversationArchiveHooks)
     with user-provided hooks without requiring users to manage composition.
+
+    Owns chain/parallel execution semantics for the lifecycle protocol:
+    - on_user_prompt is chained (each hook sees the previous result)
+    - on_agent_end fans out parallel-safe hooks via asyncio.gather
+    - all other methods fan out sequentially
+
+    Optional ``observer`` callable (set via ``set_observer``) is invoked
+    around every leaf-hook awaitable, letting Runner attach a HookRecorder
+    without re-implementing the dispatch logic. Observer signature::
+
+        await observer(hook, hook_type, method, awaitable, base_class=..., metadata=...)
+
+    Returns the awaitable's value. Falls back to direct ``await`` when no
+    observer is set or when the leaf is itself a nested composite (in which
+    case the inner composite is responsible for its own leaf recording).
     """
 
     def __init__(self, hooks_list: List[RunHooks]):
         self._hooks_list = hooks_list
+        self._observer: Optional[Any] = None
+
+    def set_observer(self, observer: Optional[Any]) -> None:
+        """Install a per-run observer; propagate transparently to nested composites."""
+        self._observer = observer
+        for h in self._hooks_list:
+            if isinstance(h, _CompositeRunHooks):
+                h.set_observer(observer)
+
+    async def _dispatch(
+        self,
+        hook: RunHooks,
+        method: str,
+        awaitable: Any,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        # Nested composite owns its own leaf recording — pass the awaitable
+        # straight through so it can dispatch to its own hooks_list.
+        if isinstance(hook, _CompositeRunHooks) or self._observer is None:
+            return await awaitable
+        return await self._observer(
+            hook, "run", method, awaitable,
+            base_class=RunHooks, metadata=metadata,
+        )
 
     async def on_agent_start(self, agent: Any, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.on_agent_start(agent=agent, **kwargs)
+            await self._dispatch(h, "on_agent_start", h.on_agent_start(agent=agent, **kwargs))
 
     async def on_agent_end(self, agent: Any, output: Any, **kwargs) -> None:
         parallel = [h for h in self._hooks_list if h.parallelizable]
         serial = [h for h in self._hooks_list if not h.parallelizable]
         if parallel:
             await asyncio.gather(*(
-                h.on_agent_end(agent=agent, output=output, **kwargs)
+                self._dispatch(h, "on_agent_end", h.on_agent_end(agent=agent, output=output, **kwargs))
                 for h in parallel
             ))
         for h in serial:
-            await h.on_agent_end(agent=agent, output=output, **kwargs)
+            await self._dispatch(h, "on_agent_end", h.on_agent_end(agent=agent, output=output, **kwargs))
 
     async def on_llm_start(self, agent: Any, messages: Optional[List[Dict[str, Any]]] = None, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.on_llm_start(agent=agent, messages=messages, **kwargs)
+            await self._dispatch(
+                h, "on_llm_start",
+                h.on_llm_start(agent=agent, messages=messages, **kwargs),
+            )
 
     async def on_llm_end(self, agent: Any, response: Any = None, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.on_llm_end(agent=agent, response=response, **kwargs)
+            await self._dispatch(
+                h, "on_llm_end",
+                h.on_llm_end(agent=agent, response=response, **kwargs),
+            )
 
     async def on_tool_start(self, agent: Any, tool_name: str = "", tool_call_id: str = "",
                             tool_args: Optional[Dict[str, Any]] = None, **kwargs) -> None:
+        meta = {"tool_name": tool_name, "tool_call_id": tool_call_id}
         for h in self._hooks_list:
-            await h.on_tool_start(agent=agent, tool_name=tool_name, tool_call_id=tool_call_id,
-                                  tool_args=tool_args, **kwargs)
+            await self._dispatch(
+                h, "on_tool_start",
+                h.on_tool_start(agent=agent, tool_name=tool_name, tool_call_id=tool_call_id,
+                                tool_args=tool_args, **kwargs),
+                metadata=meta,
+            )
 
     async def on_tool_end(self, agent: Any, tool_name: str = "", tool_call_id: str = "",
                           tool_args: Optional[Dict[str, Any]] = None, result: Any = None,
                           is_error: bool = False, elapsed: float = 0.0, **kwargs) -> None:
+        meta = {
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "is_error": is_error,
+            "tool_elapsed": elapsed,
+        }
         for h in self._hooks_list:
-            await h.on_tool_end(agent=agent, tool_name=tool_name, tool_call_id=tool_call_id,
-                                tool_args=tool_args, result=result, is_error=is_error,
-                                elapsed=elapsed, **kwargs)
+            await self._dispatch(
+                h, "on_tool_end",
+                h.on_tool_end(agent=agent, tool_name=tool_name, tool_call_id=tool_call_id,
+                              tool_args=tool_args, result=result, is_error=is_error,
+                              elapsed=elapsed, **kwargs),
+                metadata=meta,
+            )
 
     async def on_agent_transfer(self, from_agent: Any, to_agent: Any, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.on_agent_transfer(from_agent=from_agent, to_agent=to_agent, **kwargs)
+            await self._dispatch(
+                h, "on_agent_transfer",
+                h.on_agent_transfer(from_agent=from_agent, to_agent=to_agent, **kwargs),
+            )
 
     async def on_user_prompt(self, agent: Any, message: str, **kwargs) -> Optional[str]:
         result = None
         for h in self._hooks_list:
-            r = await h.on_user_prompt(agent=agent, message=message, **kwargs)
+            r = await self._dispatch(
+                h, "on_user_prompt",
+                h.on_user_prompt(agent=agent, message=message, **kwargs),
+            )
             if r is not None:
                 result = r
                 message = r  # chain: next hook sees the modified message
@@ -1536,15 +1602,24 @@ class _CompositeRunHooks(RunHooks):
 
     async def on_pre_compact(self, agent: Any, messages=None, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.on_pre_compact(agent=agent, messages=messages, **kwargs)
+            await self._dispatch(
+                h, "on_pre_compact",
+                h.on_pre_compact(agent=agent, messages=messages, **kwargs),
+            )
 
     async def on_post_compact(self, agent: Any, messages=None, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.on_post_compact(agent=agent, messages=messages, **kwargs)
+            await self._dispatch(
+                h, "on_post_compact",
+                h.on_post_compact(agent=agent, messages=messages, **kwargs),
+            )
 
     async def flush_pending(self, agent: Any, **kwargs) -> None:
         for h in self._hooks_list:
-            await h.flush_pending(agent=agent, **kwargs)
+            await self._dispatch(
+                h, "flush_pending",
+                h.flush_pending(agent=agent, **kwargs),
+            )
 
 
 class _CompositeAgentHooks(AgentHooks):
@@ -1554,15 +1629,32 @@ class _CompositeAgentHooks(AgentHooks):
     Lets ``Agent(hooks=[hook_a, hook_b])`` work without the caller composing
     hooks by hand. To locate a specific hook, use ``agent.find_hook(HookType)``
     rather than reaching into this wrapper's internals.
+
+    See ``_CompositeRunHooks`` for observer semantics.
     """
 
     def __init__(self, hooks_list: List[AgentHooks]):
         self.hooks: List[AgentHooks] = list(hooks_list)
+        self._observer: Optional[Any] = None
+
+    def set_observer(self, observer: Optional[Any]) -> None:
+        self._observer = observer
+        for h in self.hooks:
+            if isinstance(h, _CompositeAgentHooks):
+                h.set_observer(observer)
+
+    async def _dispatch(self, hook: AgentHooks, method: str, awaitable: Any) -> Any:
+        if isinstance(hook, _CompositeAgentHooks) or self._observer is None:
+            return await awaitable
+        return await self._observer(
+            hook, "agent", method, awaitable,
+            base_class=AgentHooks, metadata=None,
+        )
 
     async def on_start(self, agent: Any, **kwargs) -> None:
         for h in self.hooks:
-            await h.on_start(agent=agent, **kwargs)
+            await self._dispatch(h, "on_start", h.on_start(agent=agent, **kwargs))
 
     async def on_end(self, agent: Any, output: Any, **kwargs) -> None:
         for h in self.hooks:
-            await h.on_end(agent=agent, output=output, **kwargs)
+            await self._dispatch(h, "on_end", h.on_end(agent=agent, output=output, **kwargs))

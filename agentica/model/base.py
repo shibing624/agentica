@@ -28,7 +28,6 @@ from agentica.security.redact import redact_sensitive_text
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
 from agentica.utils.timer import Timer
 from agentica.cost_tracker import CostTracker, get_model_context_window
-from agentica.utils.langfuse_integration import langfuse_span_context, update_langfuse_span
 from agentica.hooks import RunHooks, _CompositeRunHooks
 
 
@@ -70,15 +69,35 @@ _MODEL_RUN_STATE: contextvars.ContextVar[Optional[ModelRunState]] = contextvars.
 )
 
 
-def _run_hook_method_overridden(hooks: Optional[RunHooks], method_name: str) -> bool:
-    if hooks is None:
-        return False
+async def _emit_run_hook(
+    agent: Any,
+    method_name: str,
+    awaitable: Any,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Dispatch a tool-lifecycle hook on behalf of the Model layer.
+
+    Single source of truth lives elsewhere:
+    - ``_CompositeRunHooks`` owns fan-out + observer-driven leaf recording.
+    - Non-composite single hooks route directly through ``HookRecorder.run``
+      so the audit trail is uniform regardless of hook composition.
+
+    The ``metadata`` payload (tool_name / tool_call_id / is_error / elapsed)
+    is the audit value for tool events even when the hook itself returns
+    None, so it is always recorded.
+
+    Caller MUST gate on ``agent._run_hooks is not None`` before invoking.
+    """
+    hooks = agent._run_hooks
     if isinstance(hooks, _CompositeRunHooks):
-        return any(
-            getattr(type(hook), method_name) is not getattr(RunHooks, method_name)
-            for hook in hooks._hooks_list
-        )
-    return getattr(type(hooks), method_name) is not getattr(RunHooks, method_name)
+        # Composite fans out to every leaf and applies its observer (the
+        # agent's HookRecorder.run) per leaf with metadata.
+        return await awaitable
+    # Single hook path: record once via the recorder.
+    return await agent._hook_recorder.run(
+        hooks, "run", method_name, awaitable,
+        base_class=RunHooks, metadata=metadata,
+    )
 
 
 def _redact_unterminated_private_key_block(text: str) -> str:
@@ -615,32 +634,21 @@ class Model(ABC):
         for function_call in function_calls:
 
             # --- Lifecycle: tool start ---
-            if (
-                _agent is not None
-                and hasattr(_agent, '_run_hooks')
-                and _run_hook_method_overridden(_agent._run_hooks, "on_tool_start")
-            ):
-                tool_start_input = {
-                    "tool_name": function_call.function.name,
-                    "tool_call_id": function_call.call_id or "",
-                    "tool_args": function_call.arguments,
-                }
-                with langfuse_span_context(
-                    name="hook.run.on_tool_start",
-                    input_data=tool_start_input,
-                    metadata={
-                        "hook": "run.on_tool_start",
-                        "agent_id": _agent.agent_id,
-                        "agent_name": _agent.name or "Agent",
-                        "run_id": _agent.run_id,
-                    },
-                ) as span:
-                    await _agent._run_hooks.on_tool_start(
+            if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
+                await _emit_run_hook(
+                    _agent,
+                    "on_tool_start",
+                    _agent._run_hooks.on_tool_start(
                         agent=_agent,
                         tool_name=function_call.function.name,
                         tool_call_id=function_call.call_id or "",
                         tool_args=function_call.arguments,
-                    )
+                    ),
+                    metadata={
+                        "tool_name": function_call.function.name,
+                        "tool_call_id": function_call.call_id or "",
+                    },
+                )
 
             yield ModelResponse(
                 content=function_call.get_call_str(),
@@ -995,11 +1003,7 @@ class Model(ABC):
             )
 
             # --- Lifecycle: tool end ---
-            if (
-                _agent is not None
-                and hasattr(_agent, '_run_hooks')
-                and _run_hook_method_overridden(_agent._run_hooks, "on_tool_end")
-            ):
+            if _agent is not None and hasattr(_agent, '_run_hooks') and _agent._run_hooks is not None:
                 # For soft-errors (builtin tools returning "Error: ..." strings
                 # without raising), function_call.error is None but the output
                 # carries the human-readable error message. Forward the output
@@ -1009,24 +1013,10 @@ class Model(ABC):
                     if (function_call_success or soft_error)
                     else function_call.error
                 )
-                tool_end_input = {
-                    "tool_name": function_call.function.name,
-                    "tool_call_id": function_call.call_id or "",
-                    "tool_args": function_call.arguments,
-                    "is_error": not function_call_success,
-                    "elapsed": timers[i].elapsed,
-                }
-                with langfuse_span_context(
-                    name="hook.run.on_tool_end",
-                    input_data=tool_end_input,
-                    metadata={
-                        "hook": "run.on_tool_end",
-                        "agent_id": _agent.agent_id,
-                        "agent_name": _agent.name or "Agent",
-                        "run_id": _agent.run_id,
-                    },
-                ) as span:
-                    await _agent._run_hooks.on_tool_end(
+                await _emit_run_hook(
+                    _agent,
+                    "on_tool_end",
+                    _agent._run_hooks.on_tool_end(
                         agent=_agent,
                         tool_name=function_call.function.name,
                         tool_call_id=function_call.call_id or "",
@@ -1034,9 +1024,14 @@ class Model(ABC):
                         result=hook_result,
                         is_error=not function_call_success,
                         elapsed=timers[i].elapsed,
-                    )
-                    if hook_result is not None:
-                        update_langfuse_span(span, output=hook_result)
+                    ),
+                    metadata={
+                        "tool_name": function_call.function.name,
+                        "tool_call_id": function_call.call_id or "",
+                        "is_error": not function_call_success,
+                        "tool_elapsed": timers[i].elapsed,
+                    },
+                )
 
             if "tool_call_times" not in self.metrics:
                 self.metrics["tool_call_times"] = {}

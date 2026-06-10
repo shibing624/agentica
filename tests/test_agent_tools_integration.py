@@ -6,6 +6,7 @@ Uses mocked LLM but real tool execution.
 """
 import asyncio
 import time
+import weakref
 import sys
 import os
 
@@ -18,7 +19,9 @@ from agentica.model.base import Model
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.run_response import RunResponse, RunEvent
+from agentica.hooks import RunHooks
 from agentica.tools.base import Function, FunctionCall, Tool, StopAgentRun, RetryAgentRun
+from agentica.utils.hook_recorder import HookRecorder
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +191,54 @@ class TestParallelToolExecution:
         elapsed = time.monotonic() - start
         assert elapsed < 0.25, f"Took {elapsed:.2f}s — not parallel?"
         assert len(results) == 3
+
+    @pytest.mark.asyncio
+    async def test_tool_run_hooks_record_to_agent_metadata(self):
+        model = self._make_model()
+
+        class AgentStub:
+            agent_id = "agent-1"
+            name = "Agent"
+            run_id = "run-1"
+            tool_input_guardrails = []
+            tool_output_guardrails = []
+            context = None
+
+            def __init__(self):
+                self._hook_recorder = HookRecorder()
+                self._run_hooks = None
+
+        class ToolAuditHooks(RunHooks):
+            async def on_tool_start(self, agent, tool_name="", tool_call_id="", tool_args=None, **kwargs):
+                pass
+
+            async def on_tool_end(
+                self, agent, tool_name="", tool_call_id="", tool_args=None,
+                result=None, is_error=False, elapsed=0.0, **kwargs
+            ):
+                pass
+
+        agent = AgentStub()
+        agent._run_hooks = ToolAuditHooks()
+        model._agent_ref = weakref.ref(agent)
+        function_call = FunctionCall(
+            function=Function.from_callable(sync_add),
+            arguments={"a": 1, "b": 2},
+            call_id="c1",
+        )
+        results = []
+
+        async for _ in model.run_function_calls([function_call], results):
+            pass
+
+        records = agent._hook_recorder.export()
+        observed = {
+            (item["hook_class"], item["method"], item.get("meta", {}).get("tool_name"))
+            for item in records
+        }
+        assert ("ToolAuditHooks", "on_tool_start", "sync_add") in observed
+        assert ("ToolAuditHooks", "on_tool_end", "sync_add") in observed
+        assert all(item["ok"] for item in records)
 
     @pytest.mark.asyncio
     async def test_mixed_sync_async_parallel(self):
