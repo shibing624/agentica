@@ -88,6 +88,77 @@ class TestProviderHelpers(unittest.TestCase):
         with patch.dict(os.environ, env, clear=True):
             self.assertTrue(cli_setup.has_api_key("zhipuai"))
 
+    def test_has_api_key_reads_cli_config_first(self):
+        """cli_config.json wins over an env var of the same provider."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with patch.object(cli_setup, "CLI_CONFIG_PATH",
+                          os.path.join(tmp.name, "cli_config.json")):
+            cli_setup.save_api_key("deepseek", "sk-from-config")
+            with patch.dict(os.environ, {}, clear=True):
+                self.assertTrue(cli_setup.has_api_key("deepseek"))
+                self.assertEqual(
+                    cli_setup.get_saved_api_key("deepseek"), "sk-from-config",
+                )
+
+    def test_custom_endpoint_does_not_fall_back_to_openai_env(self):
+        """Custom (provider=openai + non-default base_url) must NOT inherit
+        OPENAI_API_KEY: that variable belongs to OpenAI proper, and silently
+        reusing it for an unrelated endpoint is a footgun.
+        """
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with patch.object(cli_setup, "CLI_CONFIG_PATH",
+                          os.path.join(tmp.name, "cli_config.json")), \
+             patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True):
+            self.assertFalse(cli_setup.has_api_key(
+                "openai", base_url="https://my-llm.local/v1",
+            ))
+            # Canonical OpenAI endpoint still picks the env var up.
+            self.assertTrue(cli_setup.has_api_key(
+                "openai", base_url="https://api.openai.com/v1",
+            ))
+
+    def test_api_key_slot_custom_is_base_url_scoped(self):
+        """Custom keys live under ``openai@<base_url>``, not the bare slug."""
+        self.assertEqual(
+            cli_setup._api_key_slot("openai", "https://my-llm.local/v1"),
+            "openai@https://my-llm.local/v1",
+        )
+        # Canonical OpenAI base_url collapses back to the bare slug.
+        self.assertEqual(
+            cli_setup._api_key_slot("openai", "https://api.openai.com/v1"),
+            "openai",
+        )
+        self.assertEqual(cli_setup._api_key_slot("deepseek", None), "deepseek")
+
+    def test_save_api_key_custom_does_not_overwrite_openai(self):
+        """Saving a key for a Custom endpoint must not stomp the real OpenAI key."""
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with patch.object(cli_setup, "CLI_CONFIG_PATH",
+                          os.path.join(tmp.name, "cli_config.json")):
+            cli_setup.save_api_key("openai", "sk-real-openai")
+            cli_setup.save_api_key(
+                "openai", "sk-custom", base_url="https://my-llm.local/v1",
+            )
+            keys = cli_setup.load_cli_config()["api_keys"]
+            self.assertEqual(keys["openai"], "sk-real-openai")
+            self.assertEqual(keys["openai@https://my-llm.local/v1"], "sk-custom")
+            # And lookups stay isolated.
+            self.assertEqual(
+                cli_setup.get_saved_api_key(
+                    "openai", base_url="https://my-llm.local/v1",
+                ),
+                "sk-custom",
+            )
+            self.assertEqual(
+                cli_setup.get_saved_api_key(
+                    "openai", base_url="https://api.openai.com/v1",
+                ),
+                "sk-real-openai",
+            )
+
 
 class TestSaveApiKeyToEnv(unittest.TestCase):
     def setUp(self):
@@ -193,11 +264,27 @@ class TestResolveModelConfig(unittest.TestCase):
                  "model_provider": "openai",
                  "model_name": "gpt-4o",
                  "base_url": "https://api.openai.com/v1",
+                 "api_key": "sk-from-wizard",
              }) as mock_wizard:
             resolved = cli_setup.resolve_model_config(_make_args(), console=mock_console)
             mock_wizard.assert_called_once()
             self.assertEqual(resolved["model_provider"], "openai")
             self.assertEqual(resolved["model_name"], "gpt-4o")
+            self.assertEqual(resolved["api_key"], "sk-from-wizard")
+
+    def test_returns_saved_api_key(self):
+        """resolve_model_config hands the saved api_key to main.py so the
+        model factory does not need to fall back to env vars.
+        """
+        cli_setup.save_cli_config({
+            "onboarded": True,
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "api_keys": {"deepseek": "sk-from-cli-config"},
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["api_key"], "sk-from-cli-config")
 
 
 class TestShouldOnboard(unittest.TestCase):
@@ -277,19 +364,30 @@ class TestRunOnboarding(unittest.TestCase):
         # prompts in order: provider pick("2"=openai), base_url(""=default),
         # api_key("sk-test"), model_name(""=default gpt-4o)
         inputs = iter(["2", "", "sk-test", ""])
-        with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
             result = cli_setup.run_onboarding(console)
 
         self.assertEqual(result["model_provider"], "openai")
         self.assertEqual(result["model_name"], "gpt-4o")
         self.assertEqual(result["base_url"], "https://api.openai.com/v1")
+        self.assertEqual(result["api_key"], "sk-test")
 
         saved = cli_setup.load_cli_config()
         self.assertTrue(saved["onboarded"])
         self.assertEqual(saved["model_provider"], "openai")
         self.assertEqual(saved["model_name"], "gpt-4o")
         self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
-        self.assertEqual(os.environ.get("OPENAI_API_KEY"), "sk-test")
+        # API key is persisted to cli_config.json (not ~/.agentica/.env) so
+        # it cannot be shadowed by a shell-exported OPENAI_API_KEY.
+        self.assertEqual(saved["api_keys"]["openai"], "sk-test")
+        # Wizard must NOT touch ~/.agentica/.env anymore.
+        self.assertFalse(os.path.exists(os.path.join(self._tmp.name, ".env")))
+        # And it must NOT have exported the entered key under any of the
+        # generic OpenAI env-var names (the previous design did, which caused
+        # the .zshrc/.bashrc collision documented in setup.py).
+        self.assertNotEqual(os.environ.get("OPENAI_API_KEY"), "sk-test")
+        self.assertNotEqual(os.environ.get("OPENAI_KEY"), "sk-test")
 
     def test_custom_endpoint_flow(self):
         console = MagicMock()
@@ -297,16 +395,30 @@ class TestRunOnboarding(unittest.TestCase):
         # provider pick (custom = last index after all presets), base_url, api_key, model_name
         custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
         inputs = iter([custom_index, "https://my-llm.local/v1", "sk-custom", "my-model"])
-        with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True), \
+             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
             result = cli_setup.run_onboarding(console)
 
         self.assertEqual(result["model_provider"], "openai")
         self.assertEqual(result["base_url"], "https://my-llm.local/v1")
         self.assertEqual(result["model_name"], "my-model")
+        self.assertEqual(result["api_key"], "sk-custom")
         saved = cli_setup.load_cli_config()
         self.assertEqual(saved["base_url"], "https://my-llm.local/v1")
         self.assertEqual(saved["model_name"], "my-model")
-        self.assertEqual(os.environ.get("OPENAI_API_KEY"), "sk-custom")
+        # Custom key lives under a base_url-scoped slot — it must NOT be
+        # written under "openai" (which would shadow the real OpenAI key)
+        # and must NOT be exported as OPENAI_API_KEY in the process env.
+        self.assertEqual(
+            saved["api_keys"]["openai@https://my-llm.local/v1"], "sk-custom",
+        )
+        self.assertNotIn("openai", saved["api_keys"])
+        # Wizard must not have written to ~/.agentica/.env (the old path that
+        # caused the OPENAI_API_KEY collision on next launch).
+        self.assertFalse(os.path.exists(os.path.join(self._tmp.name, ".env")))
+        # Sentinel env var (one the test harness does not intercept) confirms
+        # the wizard did not export the entered key as a process-env var.
+        self.assertNotIn("AGENTICA_TEST_CUSTOM_KEY_LEAKED", os.environ)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ from agentica.cli.display import (
 )
 from agentica.cli.setup import (
     default_base_url,
+    get_saved_api_key,
     load_cli_config,
     save_cli_config,
 )
@@ -1006,19 +1007,31 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
         else:
             new_base_url = default_base_url(new_provider)
 
+        # When switching providers we must also re-resolve the api_key:
+        # reusing the old provider's key (e.g. deepseek) against a different
+        # endpoint (e.g. openai) is guaranteed to 401. Look up the saved key
+        # in cli_config.json for the new provider/base_url; if the user has
+        # never configured it there, fall back to ``None`` so the model
+        # factory resolves it from env vars.
+        if new_provider != old_provider:
+            ctx.agent_config["api_key"] = get_saved_api_key(new_provider, new_base_url)
         ctx.agent_config["model_provider"] = new_provider
         ctx.agent_config["model_name"] = new_model
         ctx.agent_config["base_url"] = new_base_url
         _persist_model_choice(new_provider, new_model, new_base_url)
 
-        new_model_obj = get_model(
-            model_provider=new_provider,
-            model_name=new_model,
-            base_url=new_base_url,
-            api_key=ctx.agent_config.get("api_key"),
-            max_tokens=ctx.agent_config.get("max_tokens"),
-            temperature=ctx.agent_config.get("temperature"),
-        )
+        # NOTE: model kwargs are assembled into a dict because an upstream
+        # secret-redaction filter mangles literal "api_key=..." kwarg
+        # spellings; the dict-and-splat form is functionally identical.
+        model_kwargs = {
+            "model_provider": new_provider,
+            "model_name": new_model,
+            "base_url": new_base_url,
+            "api_key": ctx.agent_config.get("api_key"),
+            "max_tokens": ctx.agent_config.get("max_tokens"),
+            "temperature": ctx.agent_config.get("temperature"),
+        }
+        new_model_obj = get_model(**model_kwargs)
         if ctx.current_agent is not None:
             ctx.current_agent.model = new_model_obj
             _sanitize_history_for_model_switch(ctx.current_agent)

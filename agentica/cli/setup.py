@@ -5,9 +5,23 @@
 
 On first launch (missing saved CLI config or missing API key) the user is
 walked through picking a model provider and filling in base_url, api_key and
-model_name. The non-secret choices are persisted to
-``~/.agentica/cli_config.json``; the API key is written to the existing
-``~/.agentica/.env`` (AGENTICA_DOTENV_PATH), so secrets never live in JSON.
+model_name. **All** wizard output - including the API key - is persisted to a
+single file: ``~/.agentica/cli_config.json`` (chmod 0o600). This avoids three
+long-standing problems with the previous design:
+
+* Writing ``OPENAI_API_KEY=...`` into ``~/.agentica/.env`` collides with the
+  same variable already exported by the user's shell (``.zshrc`` / ``.bashrc``);
+  ``python-dotenv`` does not override existing process env, so the value the
+  user just typed silently has no effect on the next launch.
+* Splitting non-secret config (cli_config.json) and secrets (.env) forces the
+  user to look in two places to understand or fix their setup.
+* For a ``Custom (OpenAI-compatible)`` endpoint, reusing the literal
+  ``OPENAI_API_KEY`` env name guarantees a clash with the real OpenAI key.
+  Custom keys are now stored under a base_url-scoped slot in cli_config.json
+  and are never written to a generic env var.
+
+``~/.agentica/.env`` is still loaded at startup (for users who maintain it by
+hand for MCP tools and similar), but the wizard no longer writes to it.
 """
 import json
 import os
@@ -20,10 +34,26 @@ from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH
 
 CLI_CONFIG_PATH = os.path.join(AGENTICA_HOME, "cli_config.json")
 
+# cli_config.json schema (only ``api_keys`` is new; older files are migrated
+# transparently - missing fields are simply treated as absent):
+#
+#   {
+#     "onboarded": true,
+#     "model_provider": "openai",
+#     "model_name": "gpt-4o",
+#     "base_url": "https://api.openai.com/v1",
+#     "api_keys": {
+#         "deepseek": "...",              # one slot per known provider
+#         "openai": "...",
+#         "openai@https://x.ai/v1": "..." # custom endpoints: base_url-scoped
+#     }
+#   }
+
 # Provider presets: provider slug -> metadata used by the wizard.
 # ``env`` is the environment variable each provider factory reads for its key
-# (see agentica/__init__.py). ``base_url`` is the default endpoint shown to the
-# user. Every provider here is backed by MODEL_REGISTRY in cli/config.py.
+# (see agentica/__init__.py). It is consulted as a *fallback* only when no key
+# is stored in cli_config.json. ``base_url`` is the default endpoint shown to
+# the user. Every provider here is backed by MODEL_REGISTRY in cli/config.py.
 PROVIDER_PRESETS = {
     "deepseek": {
         "label": "DeepSeek",
@@ -91,10 +121,21 @@ def load_cli_config() -> Dict:
 
 
 def save_cli_config(config: Dict) -> None:
-    """Persist the CLI config (non-secret fields only) to disk."""
+    """Persist the CLI config (including API keys) to disk with 0o600 perms.
+
+    The file is the single source of truth for the CLI: provider, model,
+    base_url and api_keys all live here. Permissions are restricted to the
+    current user because ``api_keys`` contains secrets.
+    """
     os.makedirs(os.path.dirname(CLI_CONFIG_PATH), exist_ok=True)
     with open(CLI_CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=2, ensure_ascii=False)
+    try:
+        os.chmod(CLI_CONFIG_PATH, 0o600)
+    except OSError:
+        # Non-fatal on platforms (e.g. some Windows setups) where chmod has
+        # no effect; the contents are still saved.
+        pass
 
 
 def is_onboarded() -> bool:
@@ -130,13 +171,75 @@ def is_cli_config_complete(config: Optional[Dict] = None) -> bool:
 
 
 def provider_env_var(provider: str) -> str:
-    """Return the API-key env var name for a provider (OPENAI_API_KEY fallback)."""
+    """Return the API-key env var name for a provider (OPENAI_API_KEY fallback).
+
+    Used as a *fallback* lookup only when no key is stored in cli_config.json
+    - the wizard itself no longer writes to env vars.
+    """
     preset = PROVIDER_PRESETS.get(provider)
     return preset["env"] if preset else "OPENAI_API_KEY"
 
 
-def has_api_key(provider: str) -> bool:
-    """True if an API key is already available in the environment."""
+def _api_key_slot(provider: str, base_url: Optional[str] = None) -> str:
+    """Return the slot under which an api_key is stored in cli_config['api_keys'].
+
+    For known providers the slot is just the provider slug (``deepseek``,
+    ``openai``, ...). For a Custom OpenAI-compatible endpoint we scope the
+    slot by base_url (``openai@https://my-llm.local/v1``) so that storing a
+    custom key never overwrites the user's real OpenAI key.
+    """
+    if provider == "openai" and base_url:
+        canonical = PROVIDER_PRESETS["openai"]["base_url"].rstrip("/")
+        if base_url.rstrip("/") != canonical:
+            return "openai@" + base_url.rstrip("/")
+    return provider
+
+
+def get_saved_api_key(provider: str, base_url: Optional[str] = None) -> Optional[str]:
+    """Look up the API key stored in cli_config.json for this provider/base_url."""
+    keys = load_cli_config().get("api_keys") or {}
+    if not isinstance(keys, dict):
+        return None
+    slot = _api_key_slot(provider, base_url)
+    value = keys.get(slot)
+    if value:
+        return value
+    # For a Custom endpoint (slot != provider) we deliberately do NOT fall
+    # back to the bare ``openai`` slot: a Custom endpoint must never silently
+    # reuse the real OpenAI key. The reverse direction (canonical OpenAI base
+    # falling back to a custom slot) is not needed because the slot computed
+    # for the canonical base_url is just ``openai``.
+    return None
+
+
+def save_api_key(provider: str, value: str, base_url: Optional[str] = None) -> None:
+    """Persist an API key into cli_config.json under a provider/base_url slot."""
+    config = load_cli_config()
+    keys = config.get("api_keys")
+    if not isinstance(keys, dict):
+        keys = {}
+    keys[_api_key_slot(provider, base_url)] = value
+    config["api_keys"] = keys
+    save_cli_config(config)
+
+
+def has_api_key(provider: str, base_url: Optional[str] = None) -> bool:
+    """True if an API key is available either in cli_config.json or the env.
+
+    Resolution order matches what ``resolve_model_config`` hands to the model
+    factory: cli_config first (single source of truth), then env vars (kept
+    as a backwards-compatible fallback for users who still export keys in
+    their shell or maintain ``~/.agentica/.env`` by hand).
+
+    For a custom OpenAI-compatible endpoint we do NOT consult ``OPENAI_API_KEY``
+    as a fallback: that env var belongs to OpenAI proper, and silently using
+    it for an unrelated endpoint is a footgun the wizard explicitly avoids.
+    """
+    if get_saved_api_key(provider, base_url):
+        return True
+    if _api_key_slot(provider, base_url) != provider:
+        # Custom endpoint - no env-var fallback (see docstring above).
+        return False
     env_var = provider_env_var(provider)
     if os.getenv(env_var):
         return True
@@ -147,7 +250,16 @@ def has_api_key(provider: str) -> bool:
 
 
 def save_api_key_to_env(env_var: str, value: str) -> None:
-    """Write/update a key in ~/.agentica/.env and the current process env."""
+    """Deprecated: write a key to ``~/.agentica/.env``.
+
+    Kept only for backwards compatibility with external callers. The CLI
+    wizard now stores keys in cli_config.json via :func:`save_api_key` to
+    avoid colliding with shell-exported env vars (the previous design wrote
+    a literal ``OPENAI_API_KEY=...`` line to .env, but a key already exported
+    in ``.zshrc``/``.bashrc`` would shadow it via dotenv's no-override
+    semantics, so the value the user just typed had no effect on the next
+    launch).
+    """
     os.makedirs(os.path.dirname(AGENTICA_DOTENV_PATH), exist_ok=True)
 
     lines = []
@@ -155,15 +267,15 @@ def save_api_key_to_env(env_var: str, value: str) -> None:
         with open(AGENTICA_DOTENV_PATH, "r", encoding="utf-8") as f:
             lines = f.read().splitlines()
 
-    prefix = f"{env_var}="
+    prefix = env_var + "="
     replaced = False
     for i, line in enumerate(lines):
         if line.strip().startswith(prefix):
-            lines[i] = f"{env_var}={value}"
+            lines[i] = prefix + value
             replaced = True
             break
     if not replaced:
-        lines.append(f"{env_var}={value}")
+        lines.append(prefix + value)
 
     with open(AGENTICA_DOTENV_PATH, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
@@ -172,14 +284,14 @@ def save_api_key_to_env(env_var: str, value: str) -> None:
     os.environ[env_var] = value
 
 
-def should_onboard(provider: str) -> bool:
+def should_onboard(provider: str, base_url: Optional[str] = None) -> bool:
     """Decide whether to run the first-launch wizard.
 
     Run the wizard whenever either side of the CLI setup is incomplete:
     non-secret config (provider/model/base_url) or the provider API key.
     A complete config plus an API key skips onboarding.
     """
-    if is_cli_config_complete() and has_api_key(provider):
+    if is_cli_config_complete() and has_api_key(provider, base_url):
         return False
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -214,9 +326,12 @@ def _select_provider(console) -> str:
 
 
 def run_onboarding(console) -> Dict:
-    """Interactive first-run wizard. Returns resolved {provider, model, base_url}.
+    """Interactive first-run wizard.
 
-    Persists the non-secret choice to cli_config.json and the API key to .env.
+    Persists provider/model/base_url and the API key to cli_config.json
+    (single file, 0o600). Returns ``{model_provider, model_name, base_url,
+    api_key}``; the api_key field may be the freshly entered value, a
+    previously saved one, or ``None`` if the user declined to enter one.
     """
     console.print()
     console.print("=" * min(getattr(console, "width", 80), 80), style="bright_cyan")
@@ -226,7 +341,8 @@ def run_onboarding(console) -> Dict:
 
     provider_choice = _select_provider(console)
 
-    if provider_choice == "custom":
+    is_custom = provider_choice == "custom"
+    if is_custom:
         provider = "openai"
         console.print()
         console.print("  Custom OpenAI-compatible endpoint", style="bold cyan")
@@ -234,7 +350,6 @@ def run_onboarding(console) -> Dict:
         while not base_url:
             console.print("  [red]Base URL is required for a custom endpoint.[/red]")
             base_url = pt_prompt("  Base URL: ").strip()
-        env_var = "OPENAI_API_KEY"
         default_model = ""
     else:
         provider = provider_choice
@@ -243,20 +358,27 @@ def run_onboarding(console) -> Dict:
         console.print()
         console.print(f"  {preset['label']} selected", style="bold cyan")
         base_url = pt_prompt(f"  Base URL [{default_base}]: ").strip() or default_base
-        env_var = preset["env"]
         default_model = preset["default_model"]
 
-    # API key — masked input.
-    existing_key = os.getenv(env_var)
+    # API key - masked input. Prefer a previously saved cli_config.json key,
+    # then fall back to the provider env var (so users with shell-exported keys
+    # don't get re-prompted unnecessarily). For Custom endpoints we never look
+    # at OPENAI_API_KEY: that variable belongs to OpenAI proper and would
+    # silently mislead the user about which key the custom endpoint will use.
+    existing_key = get_saved_api_key(provider, base_url)
+    if not existing_key and not is_custom:
+        existing_key = os.getenv(provider_env_var(provider))
     key_hint = " (press Enter to keep existing)" if existing_key else ""
-    api_key = pt_prompt(f"  API key{key_hint}: ", is_password=True).strip()
-    if api_key:
-        save_api_key_to_env(env_var, api_key)
-        console.print("  [green]API key saved to ~/.agentica/.env[/green]")
+    entered_key = pt_prompt(f"  API key{key_hint}: ", is_password=True).strip()
+    if entered_key:
+        save_api_key(provider, entered_key, base_url=base_url)
+        console.print("  [green]API key saved to ~/.agentica/cli_config.json[/green]")
     elif existing_key:
         console.print("  [dim]Keeping existing API key.[/dim]")
     else:
-        console.print("  [yellow]No API key entered - set it later in ~/.agentica/.env[/yellow]")
+        console.print(
+            "  [yellow]No API key entered - re-run `agentica setup` or pass --api_key later.[/yellow]"
+        )
 
     # Model name.
     model_prompt = f"  Model name [{default_model}]: " if default_model else "  Model name: "
@@ -279,14 +401,25 @@ def run_onboarding(console) -> Dict:
     console.print(f"  [dim]Endpoint: {base_url}[/dim]")
     console.print()
 
-    return {"model_provider": provider, "model_name": model_name, "base_url": base_url}
+    return {
+        "model_provider": provider,
+        "model_name": model_name,
+        "base_url": base_url,
+        "api_key": entered_key or existing_key,
+    }
 
 
 def resolve_model_config(args, console=None) -> Dict:
-    """Resolve provider/model/base_url with CLI args > saved config > defaults.
+    """Resolve provider/model/base_url/api_key with CLI args > saved > env.
 
     Triggers the first-run wizard when appropriate. Returns a dict with
-    ``model_provider``, ``model_name`` and ``base_url`` keys.
+    ``model_provider``, ``model_name``, ``base_url`` and ``api_key`` keys.
+
+    The ``api_key`` is the key stored in cli_config.json for the resolved
+    provider/base_url (or freshly entered during onboarding). ``None`` means
+    the model factory should fall back to its env-var lookup. The CLI
+    ``--api_key`` flag, when provided, still wins at the call site
+    (see ``cli/main.py``).
     """
     saved = load_cli_config()
     saved_provider = saved.get("model_provider")
@@ -305,10 +438,20 @@ def resolve_model_config(args, console=None) -> Dict:
     )
 
     # Only consider onboarding when the user didn't pin a provider via flags.
-    if args.model_provider is None and console is not None and should_onboard(provider):
+    resolved_key: Optional[str] = None
+    if args.model_provider is None and console is not None and should_onboard(provider, base_url):
         result = run_onboarding(console)
         provider = args.model_provider or result["model_provider"]
         model_name = args.model_name or result["model_name"]
         base_url = args.base_url or result["base_url"]
+        resolved_key = result.get("api_key")
 
-    return {"model_provider": provider, "model_name": model_name, "base_url": base_url}
+    if resolved_key is None:
+        resolved_key = get_saved_api_key(provider, base_url)
+
+    return {
+        "model_provider": provider,
+        "model_name": model_name,
+        "base_url": base_url,
+        "api_key": resolved_key,
+    }

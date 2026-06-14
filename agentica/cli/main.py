@@ -57,7 +57,10 @@ def main():
         "model_provider": resolved["model_provider"],
         "model_name": resolved["model_name"],
         "base_url": resolved["base_url"],
-        "api_key": args.api_key,
+        # CLI flag wins; otherwise use the key stored in cli_config.json for
+        # the resolved provider/base_url. If both are None the model factory
+        # falls back to the provider's env var (backwards-compat).
+        "api_key": args.api_key or resolved.get("api_key"),
         "max_tokens": args.max_tokens,
         "temperature": args.temperature,
         "reasoning_effort": args.reasoning_effort,

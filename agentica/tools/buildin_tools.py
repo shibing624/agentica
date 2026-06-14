@@ -29,7 +29,7 @@ import time
 import uuid
 from pathlib import Path
 from textwrap import dedent
-from typing import Optional, List, Dict, Any, Literal, TYPE_CHECKING, Union
+from typing import Optional, List, Dict, Any, Literal, Tuple, TYPE_CHECKING, Union
 
 import aiofiles
 
@@ -38,6 +38,7 @@ from agentica.tools.builtin.web_tools import BuiltinFetchUrlTool, BuiltinWebSear
 from agentica.tools.base import Tool
 from agentica.tools.builtin_task_tool import BuiltinTaskTool  # re-export after extraction
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
+from agentica.security.redact import redact_tool_outputs_enabled
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
 
@@ -105,6 +106,53 @@ def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
     if cmd_semantics and exit_code in cmd_semantics:
         return cmd_semantics[exit_code]
 
+    return None
+
+
+# Patterns that signal the script source itself is broken (rather than the
+# logic under test), so the LLM should re-read / rewrite the source instead
+# of retrying the same command. The classic case: a model substitutes JSON
+# `null` / `true` / `false` for Python `None` / `True` / `False` when
+# generating an inline heredoc, producing NameError at runtime.
+_PYTHON_ERROR_HINTS: List[Tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"NameError: name '(null|true|false)' is not defined"),
+        "Python source contains a JSON literal "
+        "(`null`/`true`/`false`). Rewrite using `None`/`True`/`False`.",
+    ),
+    (
+        re.compile(r"\bSyntaxError:\s*invalid syntax", re.IGNORECASE),
+        "Python source has a SyntaxError. Re-read the file and fix the "
+        "offending line — do not re-run the same command.",
+    ),
+    (
+        re.compile(r"\bIndentationError\b"),
+        "Python source has inconsistent indentation. Re-read the file and "
+        "fix the indentation before retrying.",
+    ),
+    (
+        re.compile(r"json\.decoder\.JSONDecodeError|json\.JSONDecodeError"),
+        "Input is not valid JSON. Inspect the raw payload before retrying.",
+    ),
+    (
+        re.compile(r"ModuleNotFoundError:\s*No module named ['\"]([^'\"]+)['\"]"),
+        "Missing Python dependency. Install it (pip install <pkg>) or "
+        "switch to a stdlib alternative — re-running won't help.",
+    ),
+]
+
+
+def _detect_python_error_hint(output: str) -> Optional[str]:
+    """Return a short remediation hint when the output shows a script-source
+    error (NameError, SyntaxError, ...) rather than a logic failure.
+
+    Empty when nothing matches — callers must treat ``None`` as no-op.
+    """
+    if not output:
+        return None
+    for pattern, hint in _PYTHON_ERROR_HINTS:
+        if pattern.search(output):
+            return hint
     return None
 
 if TYPE_CHECKING:
@@ -748,15 +796,27 @@ class BuiltinFileTool(Tool):
             self,
             file_path: str,
             edits: List[Dict[str, Any]],
+            continue_on_error: bool = True,
     ) -> str:
-        """Apply multiple edits to a single file atomically.
+        """Apply multiple edits to a single file.
 
-        All edits are applied sequentially on the same in-memory content,
-        then written back once. If any edit fails, no changes are made.
+        Edits are applied sequentially on the same in-memory content, then
+        the result is written back atomically once.
 
         This is preferred over multiple parallel `edit_file` calls when you need
         to make several changes to the same file — it is faster, uses fewer tokens,
-        and guarantees atomicity.
+        and the write-back step is atomic.
+
+        Failure semantics — controlled by ``continue_on_error``:
+
+        - ``True`` (default, recommended): each edit is independent. Successful
+          edits are written, failed edits are reported back per-item so the
+          model can retry just the failing ones. This avoids the "1-failure
+          poisons all 7 edits" footgun where a slightly wrong ``old_string``
+          forces the model to redo every edit from scratch.
+        - ``False``: classic atomic mode. If ANY edit fails, NO edits are
+          applied. Use only when the edits genuinely depend on each other
+          (e.g. an earlier edit introduces text the next edit references).
 
         Args:
             file_path: Path to the file to edit.
@@ -764,15 +824,11 @@ class BuiltinFileTool(Tool):
                 - old_string (str): The existing text to find
                 - new_string (str): The replacement text
                 - replace_all (bool, optional): Replace all occurrences. Default: False
+            continue_on_error: Apply successful edits even when some fail.
+                Default: True.
 
         Returns:
-            Summary of all applied edits, or error message if any edit fails.
-
-        Examples:
-            multi_edit_file("app.py", [
-                {"old_string": "foo", "new_string": "bar"},
-                {"old_string": "DEBUG = True", "new_string": "DEBUG = False"},
-            ])
+            Summary listing which edits applied and which failed.
         """
         self._validate_write_path(file_path)
         path = self._resolve_path(file_path)
@@ -807,23 +863,43 @@ class BuiltinFileTool(Tool):
             self._file_snapshots.setdefault(abs_path, []).append(content)
 
             # Apply edits sequentially on in-memory content
-            results = []
+            results: List[str] = []
+            failures: List[str] = []
+            applied_count = 0
             for i, edit in enumerate(edits):
                 old_string = edit.get("old_string", "")
                 new_string = edit.get("new_string", "")
                 replace_all = edit.get("replace_all", False)
 
                 if not old_string:
-                    raise ValueError(f"Edit {i + 1} has empty old_string. No changes were made.")
+                    err = f"Edit {i + 1}/{len(edits)}: empty old_string"
+                    if continue_on_error:
+                        failures.append(err)
+                        results.append(f"Edit {i + 1}: SKIPPED ({err})")
+                        continue
+                    raise ValueError(f"{err}. No changes were made.")
 
                 result = self._str_replace(content, old_string, new_string, replace_all)
                 if not result["success"]:
-                    raise ValueError(
-                        f"Edit {i + 1}/{len(edits)}: {result['error']}. No changes were made."
-                    )
+                    err = f"Edit {i + 1}/{len(edits)}: {result['error']}"
+                    if continue_on_error:
+                        failures.append(err)
+                        results.append(f"Edit {i + 1}: FAILED ({result['error']})")
+                        continue
+                    raise ValueError(f"{err}. No changes were made.")
 
                 content = result["new_content"]
+                applied_count += 1
                 results.append(f"Edit {i + 1}: replaced {result['count']} occurrence(s)")
+
+            # If nothing applied (all failed in best-effort mode), don't touch the file —
+            # surface the failures so the LLM can retry without producing an empty diff.
+            if applied_count == 0:
+                summary_lines = [
+                    f"No edits applied to '{file_path}' ({len(failures)}/{len(edits)} failed):",
+                    *results,
+                ]
+                return "\n".join(summary_lines)
 
             # Atomic write (once)
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -839,7 +915,17 @@ class BuiltinFileTool(Tool):
                     pass
                 raise
 
-        summary = f"Successfully applied {len(edits)} edits to '{file_path}':\n" + "\n".join(results)
+        if failures:
+            header = (
+                f"Partially applied edits to '{file_path}' "
+                f"({applied_count}/{len(edits)} succeeded, {len(failures)} failed). "
+                "Successful edits have been written. "
+                "Re-issue ONLY the failing edits (likely with adjusted old_string) — "
+                "do not resend the successful ones:"
+            )
+        else:
+            header = f"Successfully applied {len(edits)} edits to '{file_path}':"
+        summary = header + "\n" + "\n".join(results)
         logger.debug(summary)
         # Update mtime state so subsequent edits don't trigger stale-read warning
         try:
@@ -1532,8 +1618,20 @@ class BuiltinExecuteTool(Tool):
         if not output:
             output = f"Command executed successfully (exit code: {proc.returncode})"
 
-        # Redact sensitive text early so raised error messages are also safe.
-        output = redact_sensitive_text(output)
+        # Detect language-level errors in stderr (NameError, SyntaxError, ...)
+        # so the LLM doesn't mistake a malformed Python literal (e.g. `null`
+        # leaking from a JSON template into Python source) for a logic bug
+        # in the script under test. Append a short structured hint that
+        # nudges it to inspect the source rather than re-running blindly.
+        py_hint = _detect_python_error_hint(output)
+        if py_hint:
+            output = f"{output}\n\n[Heuristic: {py_hint}]"
+
+        # Redact sensitive text only when the operator opts in. Default is
+        # off because rewriting tool output corrupts byte-exact round-trips
+        # for downstream edit_file calls.
+        if redact_tool_outputs_enabled():
+            output = redact_sensitive_text(output)
 
         # A non-zero exit code that is NOT covered by _interpret_exit_code
         # (i.e. no benign-hint returned) is a real failure — raise so the

@@ -24,7 +24,11 @@ from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.model.usage import Usage, RequestUsage, TokenDetails
-from agentica.security.redact import redact_sensitive_text
+from agentica.security.redact import (
+    redact_sensitive_text,
+    redact_streamed_text_enabled,
+    redact_tool_outputs_enabled,
+)
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
 from agentica.utils.timer import Timer
 from agentica.cost_tracker import CostTracker, get_model_context_window
@@ -101,11 +105,38 @@ async def _emit_run_hook(
 
 
 def _redact_unterminated_private_key_block(text: str) -> str:
+    """Force-redact any unterminated PEM private-key block, plus full secret
+    redaction on the surrounding text.
+
+    This is the *unconditional* safety floor — it runs regardless of the
+    ``AGENTICA_REDACT_TOOL_OUTPUTS`` toggle so a leaking private key can
+    never reach the LLM context, even when the user has disabled general
+    redaction to preserve byte-exact tool round-trips.
+    """
     key_begin = _STREAM_PRIVATE_KEY_BEGIN_RE.search(text)
     if key_begin and not _STREAM_PRIVATE_KEY_END_RE.search(text, key_begin.end()):
         prefix = redact_sensitive_text(text[:key_begin.start()]) or ""
         return prefix + "***REDACTED_PRIVATE_KEY***"
     return redact_sensitive_text(text) or ""
+
+
+def _maybe_redact_tool_output(text: str) -> str:
+    """Apply the safety floor unconditionally; full redaction only when enabled.
+
+    Without the toggle, we still scan for and mask unterminated private-key
+    blocks (a hard floor — those are never legitimate), but ordinary text
+    flows through verbatim so ``read_file`` -> ``edit_file`` round-trips
+    keep working.
+    """
+    key_begin = _STREAM_PRIVATE_KEY_BEGIN_RE.search(text)
+    if key_begin and not _STREAM_PRIVATE_KEY_END_RE.search(text, key_begin.end()):
+        prefix_text = text[:key_begin.start()]
+        if redact_tool_outputs_enabled():
+            prefix_text = redact_sensitive_text(prefix_text) or ""
+        return prefix_text + "***REDACTED_PRIVATE_KEY***"
+    if redact_tool_outputs_enabled():
+        return redact_sensitive_text(text) or ""
+    return text
 
 
 def _take_redactable_stream_text(buffer: str, final: bool = False) -> tuple[str, str]:
@@ -875,18 +906,31 @@ class Model(ABC):
 
             function_call_output: Optional[Union[List[Any], str]] = ""
             if isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
+                # Stream redaction is an opt-in safety net (default OFF) because
+                # it rewrites byte-exact text the LLM later has to match with
+                # edit_file. When disabled we pass each generator chunk straight
+                # through; the unterminated-private-key floor still applies
+                # below to the assembled result.
+                stream_redact = redact_streamed_text_enabled()
                 stream_redaction_buffer = ""
                 for item in function_call.result:
                     item_text = str(item)
                     function_call_output += item_text
                     if function_call.function.show_result:
-                        stream_redaction_buffer += item_text
-                        redacted_chunk, stream_redaction_buffer = _take_redactable_stream_text(
-                            stream_redaction_buffer
-                        )
-                        if redacted_chunk:
-                            yield ModelResponse(content=redacted_chunk)
-                if function_call.function.show_result and stream_redaction_buffer:
+                        if stream_redact:
+                            stream_redaction_buffer += item_text
+                            redacted_chunk, stream_redaction_buffer = _take_redactable_stream_text(
+                                stream_redaction_buffer
+                            )
+                            if redacted_chunk:
+                                yield ModelResponse(content=redacted_chunk)
+                        else:
+                            yield ModelResponse(content=item_text)
+                if (
+                    function_call.function.show_result
+                    and stream_redact
+                    and stream_redaction_buffer
+                ):
                     redacted_chunk, stream_redaction_buffer = _take_redactable_stream_text(
                         stream_redaction_buffer,
                         final=True,
@@ -901,7 +945,9 @@ class Model(ABC):
                     function_call_output = str(function_call_output)
 
             if isinstance(function_call_output, str):
-                function_call_output = _redact_unterminated_private_key_block(function_call_output)
+                # Always run the safety floor (private-key block detection).
+                # Full secret redaction only fires when explicitly enabled.
+                function_call_output = _maybe_redact_tool_output(function_call_output)
             if function_call.function.show_result and not isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
                 yield ModelResponse(content=function_call_output)
 

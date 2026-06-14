@@ -192,6 +192,77 @@ class TestBuiltinFileToolEditFile:
         assert "Successfully" in result2
         assert Path(fp).read_text() == "111 bbb 333"
 
+    def test_multi_edit_best_effort_partial_success(self, file_tool, tmp_dir):
+        """Default best-effort: successful edits land, failing ones are reported."""
+        fp = os.path.join(tmp_dir, "be.txt")
+        Path(fp).write_text("alpha bravo charlie")
+        # First edit succeeds, second fails (string absent), third succeeds.
+        result = asyncio.run(file_tool.multi_edit_file(fp, [
+            {"old_string": "alpha", "new_string": "ALPHA"},
+            {"old_string": "DOES_NOT_EXIST", "new_string": "x"},
+            {"old_string": "charlie", "new_string": "CHARLIE"},
+        ]))
+        # Successful edits MUST be persisted.
+        assert Path(fp).read_text() == "ALPHA bravo CHARLIE"
+        # Output names which edits failed so the LLM can retry only those.
+        assert "Partially applied" in result
+        assert "Edit 2: FAILED" in result
+        assert "2/3 succeeded" in result
+
+    def test_multi_edit_best_effort_all_fail_no_write(self, file_tool, tmp_dir):
+        """If every edit fails in best-effort mode the file is left untouched."""
+        fp = os.path.join(tmp_dir, "be_all.txt")
+        Path(fp).write_text("untouched")
+        result = asyncio.run(file_tool.multi_edit_file(fp, [
+            {"old_string": "nope1", "new_string": "x"},
+            {"old_string": "nope2", "new_string": "y"},
+        ]))
+        assert Path(fp).read_text() == "untouched"
+        assert "No edits applied" in result
+        assert "2/2 failed" in result
+
+    def test_python_error_hint_null_literal(self):
+        """NameError on JSON `null`/`true`/`false` gets a structured hint
+        pointing the LLM at the source rather than retrying blindly."""
+        from agentica.tools.buildin_tools import _detect_python_error_hint
+        sample = "Traceback ...\n  File ...\nNameError: name 'null' is not defined"
+        hint = _detect_python_error_hint(sample)
+        assert hint is not None
+        assert "JSON literal" in hint
+        assert "None" in hint
+
+    def test_python_error_hint_syntax_error(self):
+        from agentica.tools.buildin_tools import _detect_python_error_hint
+        sample = "  File 'x.py', line 5\n    if x = 1\nSyntaxError: invalid syntax"
+        hint = _detect_python_error_hint(sample)
+        assert hint is not None
+        assert "SyntaxError" in hint
+
+    def test_python_error_hint_module_not_found(self):
+        from agentica.tools.buildin_tools import _detect_python_error_hint
+        sample = "ModuleNotFoundError: No module named 'foobar_widget'"
+        hint = _detect_python_error_hint(sample)
+        assert hint is not None
+        assert "dependency" in hint or "pip install" in hint
+
+    def test_python_error_hint_returns_none_for_normal_output(self):
+        from agentica.tools.buildin_tools import _detect_python_error_hint
+        assert _detect_python_error_hint("") is None
+        assert _detect_python_error_hint("Hello world") is None
+        assert _detect_python_error_hint("AssertionError: 1 != 2") is None  # genuine logic bug
+
+    def test_multi_edit_atomic_mode_rolls_back_on_failure(self, file_tool, tmp_dir):
+        """continue_on_error=False keeps the historical atomic semantics."""
+        fp = os.path.join(tmp_dir, "atomic.txt")
+        Path(fp).write_text("alpha bravo")
+        with pytest.raises(ValueError):
+            asyncio.run(file_tool.multi_edit_file(fp, [
+                {"old_string": "alpha", "new_string": "ALPHA"},
+                {"old_string": "MISSING", "new_string": "x"},
+            ], continue_on_error=False))
+        # Atomic mode: alpha edit MUST be rolled back too.
+        assert Path(fp).read_text() == "alpha bravo"
+
     def test_edit_replace_all(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "replall.txt")
         Path(fp).write_text("x x x")

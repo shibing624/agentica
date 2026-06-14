@@ -339,11 +339,18 @@ class TestSecretRedaction:
         assert redact_sensitive_text(None) is None
 
     def test_redact_assignment_pattern(self):
+        # Plain ``api_key=value`` is intentionally NOT masked at the default
+        # ``high_confidence`` level - that pattern matches ordinary source
+        # code identifiers and rewriting it breaks edit_file round-trips.
+        # Strict level (opt-in for log sinks) still catches it.
         from agentica.tools.safety import redact_sensitive_text
         text = "api_key=example_secret_value_1234567890"
-        result = redact_sensitive_text(text)
-        assert "sk_test_" not in result
-        assert "api_key=" in result
+        # Default level: pass-through.
+        assert redact_sensitive_text(text) == text
+        # Strict level: masked.
+        result = redact_sensitive_text(text, level="strict")
+        assert "example_secret_value_1234567890" not in result
+        assert "REDACTED" in result
 
 
 # ============== TestInterrupt ==============
