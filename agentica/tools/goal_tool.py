@@ -22,6 +22,7 @@ The tool writes through ``SessionLog.append_goal()`` so the persisted
 state is authoritative; the caller's ``GoalManager.evaluate_after_turn()``
 re-reads from disk and respects the tool's decision (skipping the judge).
 """
+
 from __future__ import annotations
 
 import time
@@ -45,12 +46,15 @@ class GoalTool(Tool):
         self._session_log = session_log
         self.register(self.update_goal)
 
-    async def update_goal(self, status: str, reason: str = "") -> str:
+    async def update_goal(self, status: str, reason: str = "", final_answer: str = "") -> str:
         """Mark the user's standing goal as complete or paused.
 
-        Use ``status="complete"`` ONLY when the goal is actually finished
-        and evidence is in your last message. Do NOT call for partial
-        progress.
+        Use ``status="complete"`` ONLY when the goal is actually finished.
+        When completing, ALWAYS pass the substantive deliverable in
+        ``final_answer`` (the full answer / report / code the user asked
+        for) — do NOT rely on your chat message, because any text you write
+        AFTER this call would otherwise overwrite the captured result.
+        Do NOT call for partial progress.
 
         Use ``status="paused"`` when you are blocked and need new input
         from the user (e.g. ambiguous requirements, missing credentials).
@@ -59,6 +63,9 @@ class GoalTool(Tool):
         Args:
             status: ``"complete"`` or ``"paused"``.
             reason: One-sentence rationale shown to the user.
+            final_answer: The complete substantive result for the user.
+                Required in practice when ``status="complete"`` — this is
+                what ``run_goal()`` returns as the final answer.
         """
         status = (status or "").strip().lower()
         if status not in ("complete", "paused"):
@@ -71,10 +78,7 @@ class GoalTool(Tool):
         if payload is None:
             return "No standing goal is set — nothing to update."
         if payload.get("status") != "active":
-            return (
-                f"Goal is not active (current status: {payload.get('status')}). "
-                f"Cannot update."
-            )
+            return f"Goal is not active (current status: {payload.get('status')}). Cannot update."
 
         payload["status"] = status
         payload["last_verdict"] = "tool_signal"
@@ -82,6 +86,10 @@ class GoalTool(Tool):
         payload["updated_at"] = time.time()
         if status == "paused":
             payload["paused_reason"] = "agent-tool"
+        # Persist the substantive deliverable separately from chat content so
+        # it survives any closing chatter the model emits after this call.
+        if final_answer and final_answer.strip():
+            payload["final_answer"] = final_answer.strip()
 
         try:
             state = GoalState.from_dict(payload)

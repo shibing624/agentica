@@ -218,6 +218,15 @@ Agent Communication Protocol 集成。
 | [customer_service/main.py](applications/customer_service/main.py) | 客服系统 |
 | [financial_research/main.py](applications/financial_research/main.py) | 金融研究：6-Agent 流水线（规划→搜索→分析→风控→写作→审核） |
 
+### 16. 目标循环 (`goal/`)
+
+`run_goal()` 驱动 Agent 在循环中自动运行，直到任务完成、暂停或预算耗尽。
+
+| # | 示例 | 描述 | 关键概念 |
+|---|------|------|----------|
+| 01 | [task_runner.py](goal/task_runner.py) | 从 `tasks.md` 读取多任务 → `run_goal()` 并发处理 → 写回 `task_results.md` | `Agent.run_goal()`, 多任务并发 |
+| 02 | [task_dag_runner.py](goal/task_dag_runner.py) | Agent 自主决策并行/串行分发，SDK 自动执行 | 同 turn=并行, 跨 turn=串行 |
+
 ---
 
 ## Async-First 架构亮点
@@ -330,9 +339,10 @@ for chunk in agent.run_stream_sync("Hello"):
 2. `agent_patterns/08_swarm.py` — Swarm 并行/自治协作
 3. `workflow/01_data_pipeline.py` — 工作流编排
 4. `agent_patterns/10_subagent_demo.py` — 子 Agent 委派
-5. `agent_patterns/11_model_hooks.py` — 模型层保护（溢出/重复检测）
-6. `mcp/01_stdio.py` — MCP 协议集成
-7. `applications/financial_research/main.py` — 6-Agent 金融研究流水线
+5. `goal/task_runner.py` — `run_goal()` 多任务循环（tasks.md → 处理 → 写回）
+6. `agent_patterns/11_model_hooks.py` — 模型层保护（溢出/重复检测）
+7. `mcp/01_stdio.py` — MCP 协议集成
+8. `applications/financial_research/main.py` — 6-Agent 金融研究流水线
 
 ---
 

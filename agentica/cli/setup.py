@@ -23,6 +23,7 @@ long-standing problems with the previous design:
 ``~/.agentica/.env`` is still loaded at startup (for users who maintain it by
 hand for MCP tools and similar), but the wizard no longer writes to it.
 """
+
 import json
 import os
 import sys
@@ -31,6 +32,14 @@ from typing import Dict, Optional
 from prompt_toolkit import prompt as pt_prompt
 
 from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH
+from agentica.global_config import (
+    DEFAULT_PROFILE_NAME,
+    get_profile,
+    get_profiles,
+    get_active_profile_name,
+    upsert_profile,
+    set_active_profile,
+)
 
 CLI_CONFIG_PATH = os.path.join(AGENTICA_HOME, "cli_config.json")
 
@@ -163,10 +172,7 @@ def is_cli_config_complete(config: Optional[Dict] = None) -> bool:
     """Return True when non-secret CLI model config is complete."""
     data = load_cli_config() if config is None else config
     return bool(
-        data.get("onboarded")
-        and data.get("model_provider")
-        and data.get("model_name")
-        and data.get("base_url")
+        data.get("onboarded") and data.get("model_provider") and data.get("model_name") and data.get("base_url")
     )
 
 
@@ -192,6 +198,23 @@ def _api_key_slot(provider: str, base_url: Optional[str] = None) -> str:
         canonical = PROVIDER_PRESETS["openai"]["base_url"].rstrip("/")
         if base_url.rstrip("/") != canonical:
             return "openai@" + base_url.rstrip("/")
+    return provider
+
+
+def _profile_name_for(provider: str, base_url: Optional[str] = None) -> str:
+    """Derive a stable agentica.json profile name from provider + base_url.
+
+    Known providers map to their slug (``deepseek``, ``openai``, ...). A custom
+    OpenAI-compatible endpoint gets a host-suffixed name (``openai@my-llm.local``)
+    so it does not clobber the canonical ``openai`` profile.
+    """
+    if provider == "openai" and base_url:
+        canonical = PROVIDER_PRESETS["openai"]["base_url"].rstrip("/")
+        if base_url.rstrip("/") != canonical:
+            from urllib.parse import urlparse
+
+            host = urlparse(base_url).netloc or base_url.rstrip("/")
+            return f"openai@{host}"
     return provider
 
 
@@ -237,6 +260,17 @@ def has_api_key(provider: str, base_url: Optional[str] = None) -> bool:
     """
     if get_saved_api_key(provider, base_url):
         return True
+    # New unified config: a matching active profile with an api_key counts.
+    # For a custom endpoint the profile's base_url must also match, so a
+    # generic ``openai`` profile never satisfies an unrelated custom endpoint.
+    active_profile = get_profile()
+    if active_profile.get("model_provider") == provider and active_profile.get("api_key"):
+        slot = _api_key_slot(provider, base_url)
+        if slot == provider:
+            return True
+        profile_slot = _api_key_slot(provider, active_profile.get("base_url"))
+        if profile_slot == slot:
+            return True
     if _api_key_slot(provider, base_url) != provider:
         # Custom endpoint - no env-var fallback (see docstring above).
         return False
@@ -289,8 +323,18 @@ def should_onboard(provider: str, base_url: Optional[str] = None) -> bool:
 
     Run the wizard whenever either side of the CLI setup is incomplete:
     non-secret config (provider/model/base_url) or the provider API key.
-    A complete config plus an API key skips onboarding.
+    A complete config plus an API key skips onboarding. A complete active
+    profile in agentica.json (provider/model/base_url/api_key) also skips it.
     """
+    # New unified config: a fully-specified active profile is sufficient.
+    active_profile = get_profile()
+    if (
+        active_profile.get("model_provider")
+        and active_profile.get("model_name")
+        and active_profile.get("base_url")
+        and active_profile.get("api_key")
+    ):
+        return False
     if is_cli_config_complete() and has_api_key(provider, base_url):
         return False
     return sys.stdin.isatty() and sys.stdout.isatty()
@@ -323,6 +367,79 @@ def _select_provider(console) -> str:
         if slug in PROVIDER_PRESETS or slug == "custom":
             return slug
         console.print(f"  [red]Invalid choice: {raw}[/red]")
+
+
+_REASONING_EFFORT_CHOICES = ("low", "medium", "high", "max")
+
+
+def _prompt_int(label: str) -> Optional[int]:
+    """Prompt for an optional positive integer (blank = skip)."""
+    while True:
+        raw = pt_prompt(label).strip()
+        if not raw:
+            return None
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+        # Re-prompt on invalid input; the label already says "blank to skip".
+
+
+def _prompt_float(label: str) -> Optional[float]:
+    """Prompt for an optional float (blank = skip)."""
+    while True:
+        raw = pt_prompt(label).strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            pass
+
+
+def _prompt_advanced_params(console, provider: str) -> Dict:
+    """Optionally collect advanced model tuning params during onboarding.
+
+    Returns a dict that may contain ``reasoning_effort``, ``max_tokens``,
+    ``context_window``, ``temperature`` and ``top_p`` (only the keys the user
+    set). Keys left blank are omitted so the model factory keeps its defaults.
+    """
+    console.print()
+    answer = pt_prompt("  Configure advanced model params (thinking depth, limits)? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        return {}
+
+    params: Dict = {}
+    console.print("  [dim]Press Enter to skip any field.[/dim]")
+
+    # Thinking depth / reasoning effort.
+    effort = pt_prompt(f"  Reasoning effort {list(_REASONING_EFFORT_CHOICES)} (blank to skip): ").strip().lower()
+    if effort in _REASONING_EFFORT_CHOICES:
+        params["reasoning_effort"] = effort
+    elif effort:
+        console.print(f"  [yellow]Ignored invalid reasoning effort: {effort}[/yellow]")
+
+    # Output limit.
+    max_tokens = _prompt_int("  Max output tokens (output limit, blank to skip): ")
+    if max_tokens is not None:
+        params["max_tokens"] = max_tokens
+
+    # Context limit (overrides the catalog auto-detected value).
+    context_window = _prompt_int("  Context window (context limit, blank to skip): ")
+    if context_window is not None:
+        params["context_window"] = context_window
+
+    # Sampling.
+    temperature = _prompt_float("  Temperature (blank to skip): ")
+    if temperature is not None:
+        params["temperature"] = temperature
+    top_p = _prompt_float("  Top-p (blank to skip): ")
+    if top_p is not None:
+        params["top_p"] = top_p
+
+    return params
 
 
 def run_onboarding(console) -> Dict:
@@ -376,9 +493,7 @@ def run_onboarding(console) -> Dict:
     elif existing_key:
         console.print("  [dim]Keeping existing API key.[/dim]")
     else:
-        console.print(
-            "  [yellow]No API key entered - re-run `agentica setup` or pass --api_key later.[/yellow]"
-        )
+        console.print("  [yellow]No API key entered - re-run `agentica setup` or pass --api_key later.[/yellow]")
 
     # Model name.
     model_prompt = f"  Model name [{default_model}]: " if default_model else "  Model name: "
@@ -387,25 +502,48 @@ def run_onboarding(console) -> Dict:
         console.print("  [red]Model name is required.[/red]")
         model_name = pt_prompt("  Model name: ").strip()
 
+    # Optional advanced tuning (thinking depth, output/context limits, sampling).
+    # Skipped by default to keep first-run quick; users can also hand-edit
+    # ~/.agentica/agentica.json afterwards.
+    advanced = _prompt_advanced_params(console, provider)
+
     config = load_cli_config()
-    config.update({
-        "onboarded": True,
+    config.update(
+        {
+            "onboarded": True,
+            "model_provider": provider,
+            "model_name": model_name,
+            "base_url": base_url,
+        }
+    )
+    save_cli_config(config)
+
+    # Persist to the unified, SDK+CLI-shared config (~/.agentica/agentica.json)
+    # as a named profile. This is the new single source of truth; the profile is
+    # made active so the SDK picks up the api_key via env injection on next run.
+    resolved_key = entered_key or existing_key
+    profile_name = _profile_name_for(provider, base_url)
+    profile_data = {
         "model_provider": provider,
         "model_name": model_name,
         "base_url": base_url,
-    })
-    save_cli_config(config)
+        "api_key": resolved_key,
+    }
+    profile_data.update(advanced)  # None values are dropped by upsert_profile
+    upsert_profile(profile_name, profile_data, make_active=True)
 
     console.print()
     console.print(f"  [bright_green]Configured: {provider}/{model_name}[/bright_green]")
     console.print(f"  [dim]Endpoint: {base_url}[/dim]")
+    console.print(f"  [dim]Saved as profile '{profile_name}' in ~/.agentica/agentica.json[/dim]")
     console.print()
 
     return {
         "model_provider": provider,
         "model_name": model_name,
         "base_url": base_url,
-        "api_key": entered_key or existing_key,
+        "api_key": resolved_key,
+        **advanced,
     }
 
 
@@ -415,24 +553,41 @@ def resolve_model_config(args, console=None) -> Dict:
     Triggers the first-run wizard when appropriate. Returns a dict with
     ``model_provider``, ``model_name``, ``base_url`` and ``api_key`` keys.
 
-    The ``api_key`` is the key stored in cli_config.json for the resolved
-    provider/base_url (or freshly entered during onboarding). ``None`` means
-    the model factory should fall back to its env-var lookup. The CLI
+    Resolution precedence (highest first):
+        1. CLI flags (``--model_provider``/``--model_name``/...)
+        2. ``~/.agentica/agentica.json`` active profile (new single source)
+        3. ``~/.agentica/cli_config.json`` (legacy CLI config)
+        4. provider preset defaults
+
+    The ``api_key`` is the key stored in agentica.json/cli_config.json for the
+    resolved provider/base_url (or freshly entered during onboarding). ``None``
+    means the model factory should fall back to its env-var lookup. The CLI
     ``--api_key`` flag, when provided, still wins at the call site
     (see ``cli/main.py``).
     """
+    # New unified config first: the active profile in agentica.json.
+    active_profile = get_profile()
+    profile_provider = active_profile.get("model_provider")
+
+    # Legacy CLI config (kept for backwards compatibility / migration).
     saved = load_cli_config()
     saved_provider = saved.get("model_provider")
 
-    provider = args.model_provider or saved_provider or DEFAULT_PROVIDER
+    provider = args.model_provider or profile_provider or saved_provider or DEFAULT_PROVIDER
+
+    # A saved value is only reused when it belongs to the resolved provider.
+    use_profile = provider == profile_provider
     use_saved_provider_config = provider == saved_provider
+
     model_name = (
         args.model_name
+        or (active_profile.get("model_name") if use_profile else None)
         or (saved.get("model_name") if use_saved_provider_config else None)
         or default_model_name(provider)
     )
     base_url = (
         args.base_url
+        or (active_profile.get("base_url") if use_profile else None)
         or (saved.get("base_url") if use_saved_provider_config else None)
         or default_base_url(provider)
     )
@@ -445,13 +600,30 @@ def resolve_model_config(args, console=None) -> Dict:
         model_name = args.model_name or result["model_name"]
         base_url = args.base_url or result["base_url"]
         resolved_key = result.get("api_key")
+        # Onboarding may have written/activated a new profile.
+        active_profile = get_profile()
+        use_profile = provider == active_profile.get("model_provider")
 
+    # API key resolution: agentica.json active profile -> legacy cli_config slots.
+    if resolved_key is None and use_profile:
+        resolved_key = active_profile.get("api_key")
     if resolved_key is None:
         resolved_key = get_saved_api_key(provider, base_url)
+
+    # Model tuning params come from the active profile only (no preset
+    # defaults): reasoning_effort / max_tokens / context_window / temperature /
+    # top_p. They are None unless the user set them, so the model factory keeps
+    # its own defaults. CLI flags still override these at the call site.
+    profile_params = active_profile if use_profile else {}
 
     return {
         "model_provider": provider,
         "model_name": model_name,
         "base_url": base_url,
         "api_key": resolved_key,
+        "max_tokens": profile_params.get("max_tokens"),
+        "temperature": profile_params.get("temperature"),
+        "reasoning_effort": profile_params.get("reasoning_effort"),
+        "top_p": profile_params.get("top_p"),
+        "context_window": profile_params.get("context_window"),
     }

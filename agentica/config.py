@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: 
+@description:
 """
+
 import os
 from datetime import datetime
 from dotenv import load_dotenv  # noqa
@@ -16,11 +17,23 @@ load_dotenv()
 AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
 load_dotenv(AGENTICA_DOTENV_PATH)
 
+# Project the unified, hand-editable config (~/.agentica/agentica.json) into the
+# process environment. This is the single source of truth shared by the SDK and
+# the CLI. It runs AFTER .env so precedence (highest first) is:
+#     shell env  >  .env  >  agentica.json
+# Injection uses setdefault semantics, so an already-set variable is never
+# overwritten. The SDK keeps reading plain env vars; nothing else has to change.
+try:
+    from agentica.global_config import apply_global_config
+
+    apply_global_config()
+except Exception:
+    # Never let a malformed agentica.json break import of the SDK.
+    pass
+
 AGENTICA_SKILL_DIR = os.getenv("AGENTICA_SKILL_DIR", f"{AGENTICA_HOME}/skills")
 AGENTICA_EXTRA_SKILL_PATHS = [
-    os.path.expanduser(path)
-    for path in os.getenv("AGENTICA_EXTRA_SKILL_PATH", "").split(os.pathsep)
-    if path.strip()
+    os.path.expanduser(path) for path in os.getenv("AGENTICA_EXTRA_SKILL_PATH", "").split(os.pathsep) if path.strip()
 ]
 AGENTICA_CRON_DIR = os.getenv("AGENTICA_CRON_DIR", f"{AGENTICA_HOME}/cron")
 AGENTICA_WORKSPACE_DIR = os.getenv("AGENTICA_WORKSPACE_DIR", f"{AGENTICA_HOME}/workspace")

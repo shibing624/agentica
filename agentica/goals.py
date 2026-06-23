@@ -23,13 +23,25 @@ Design constraints (see docs/learn_cc/goal.md):
   lets the caller render the message.
 - No defensive ``getattr`` — fields are formally declared on dataclasses.
 """
+
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import time
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Union,
+)
 
 from agentica.prompts.base.goal import (
     GOAL_JUDGE_SYSTEM_PROMPT,
@@ -79,6 +91,7 @@ CONTINUATION_PROMPT_PREFIX = "[Continuing toward your standing goal]"
 # Data models
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class GoalState:
     """Persistent per-session goal state.
@@ -101,7 +114,7 @@ class GoalState:
 
     session_id: str
     objective: str
-    status: str = "active"            # active | paused | complete | cleared | budget_limited
+    status: str = "active"  # active | paused | complete | cleared | budget_limited
     turn_budget: int = DEFAULT_TURN_BUDGET
     turns_used: int = 0
     token_budget: Optional[int] = None
@@ -117,9 +130,17 @@ class GoalState:
     # tool call. Tripping ``MAX_CONSECUTIVE_TOOL_FAILURES`` auto-pauses
     # the loop with ``paused_reason="tool-stuck"``.
     consecutive_tool_failures: int = 0
-    last_verdict: Optional[str] = None      # "done" | "continue" | "parse_failed" | "tool_signal"
+    last_verdict: Optional[str] = None  # "done" | "continue" | "parse_failed" | "tool_signal"
     last_reason: Optional[str] = None
-    paused_reason: Optional[str] = None     # user | interrupted | budget | judge-broken | resume-safety | agent-tool | tool-stuck
+    # The substantive deliverable the agent produced, captured explicitly via
+    # ``update_goal(final_answer=...)``. Kept separate from the last assistant
+    # message so loop-control chatter (e.g. "Task done, see above.") emitted
+    # AFTER the tool call cannot overwrite the real answer. ``run_goal``
+    # prefers this over ``run_response.content`` when present.
+    final_answer: Optional[str] = None
+    paused_reason: Optional[str] = (
+        None  # user | interrupted | budget | judge-broken | resume-safety | agent-tool | tool-stuck
+    )
     created_at: float = 0.0
     updated_at: float = 0.0
 
@@ -147,40 +168,167 @@ class GoalRunResult:
         run_response: The agent's last ``RunResponse`` (same shape as
                       ``Agent.run_response``). Full access to ``content``,
                       ``cost_tracker``, ``messages``, ``tool_calls`` for
-                      callers that need them. May be ``None`` only if the
-                      loop terminated before the first ``agent.run()``.
+                      callers that need them. ``None`` if the loop terminated
+                      before the first ``agent.run()``.
         goal:         Final ``GoalState`` snapshot (objective, counters,
-                      subgoals, last_verdict).
+                      subgoals, last_verdict). ``None`` if no goal state was
+                      persisted (e.g. the loop never started a turn).
         turns_used:   Convenience copy of ``goal.turns_used``.
 
-    Convenience accessor: ``result.response_content`` returns
-    ``run_response.content or ""`` so the 90% case stays a one-liner.
+    Convenience accessor: ``result.response_content`` prefers the
+    substantive deliverable the agent captured via
+    ``update_goal(final_answer=...)`` and only falls back to the last
+    assistant message when no explicit final answer was recorded. This
+    avoids returning loop-control chatter (e.g. "Task done, see above.")
+    that the model emits AFTER the completion tool call.
     """
 
     status: str
     reason: str
     run_response: Optional["RunResponse"]
-    goal: "GoalState"
+    goal: Optional["GoalState"]
     turns_used: int
 
     @property
     def response_content(self) -> str:
-        """Last assistant message content, or "" if no response was produced."""
-        if self.run_response is None:
-            return ""
-        return self.run_response.content or ""
+        """The agent's substantive result.
+
+        Priority: explicit ``final_answer`` (via ``update_goal``) > last
+        assistant message > "". The candidate chain skips loop-control
+        chatter the model emits after the completion tool call.
+        """
+        final_answer = self.goal.final_answer if self.goal else None
+        last_message = self.run_response.content if self.run_response else None
+        return final_answer or last_message or ""
 
 
 @dataclass
 class GoalDecision:
     """Returned by ``GoalManager.evaluate_after_turn()``. UI-neutral."""
 
-    status: str                               # active | paused | complete
+    status: str  # active | paused | complete
     should_continue: bool
     continuation_prompt: Optional[str]
-    verdict: str                              # done | continue | parse_failed
+    verdict: str  # done | continue | parse_failed | verifier
     reason: str
-    message: str                              # human-readable summary for UI
+    message: str  # human-readable summary for UI
+
+
+# ---------------------------------------------------------------------------
+# Callable verifier (Gap 1)
+# ---------------------------------------------------------------------------
+#
+# A ``GoalVerifier`` is a user-supplied callable that decides whether the
+# goal is satisfied *without* an LLM call. It runs **before** the judge in
+# ``evaluate_after_turn`` so deterministic ground truth (pytest exit code,
+# HTTP status, schema validation) can short-circuit expensive LLM judge
+# calls — and so SDK users can stop a loop on machine-checkable conditions
+# that an LLM verifier would only approximate.
+#
+# Priority each turn (highest first):
+#   1. Hard budget caps (turn / token / wall-clock)
+#   2. Tool short-circuit (``GoalTool.update_goal(status="complete")``)
+#   3. Consecutive tool-failure auto-pause
+#   4. **Callable verifier** ← inserted here
+#   5. LLM judge (fallback when verifier returns ``None``)
+#
+# Verifier may be sync or async. Exceptions are caught and treated as
+# ``None`` (fail-open to judge) — a buggy verifier must not crash the
+# whole loop.
+
+
+@dataclass
+class VerifierContext:
+    """Read-only snapshot passed to ``GoalVerifier`` callbacks each turn.
+
+    The verifier sees the same state the judge does (objective, last
+    response, subgoals, tool calls), plus live counters so it can make
+    decisions like "stop after 5 turns even if pytest still fails".
+    Mutating these fields has no effect — ``GoalManager`` owns the source
+    of truth.
+    """
+
+    objective: str
+    final_response: str
+    subgoals: List[str]
+    tool_calls: List[Tuple[str, bool]]  # (tool_name, is_error)
+    turns_used: int
+    tokens_used: int
+    wall_clock_used_sec: float
+    run_response: Optional["RunResponse"] = None
+
+
+@dataclass
+class VerifierResult:
+    """Result of a ``GoalVerifier`` call.
+
+    Three terminal verdicts (``done`` / ``paused`` / ``budget_limited``)
+    stop the loop. ``continue`` means "not done, keep going" — judge is
+    skipped this turn. Returning ``None`` from the verifier defers to the
+    LLM judge (this is the explicit fallback path).
+
+    Attributes:
+        done: True ⇒ goal complete, loop stops with ``status="complete"``.
+              False ⇒ either keep going (default) or honour ``status``.
+        reason: Human-readable rationale (echoed into ``GoalDecision`` and
+                event payloads).
+        status: Override terminal status. Default ``None`` means
+                "complete if done else active". Set to ``"paused"`` to
+                explicitly pause (e.g. verifier detected a hard error
+                that needs user intervention), or ``"budget_limited"`` to
+                signal a custom budget overrun.
+    """
+
+    done: bool
+    reason: str = ""
+    status: Optional[str] = None  # None | paused | budget_limited
+
+
+#: A ``GoalVerifier`` is a callable that decides per-turn whether the goal
+#: is satisfied. Returning ``None`` defers to the LLM judge — this is the
+#: explicit fallback path. Returning a ``VerifierResult`` is authoritative
+#: and the LLM judge is NOT called that turn.
+GoalVerifier = Callable[
+    [VerifierContext],
+    Union[Optional[VerifierResult], Awaitable[Optional[VerifierResult]]],
+]
+
+
+async def _invoke_verifier(
+    verifier: GoalVerifier,
+    ctx: VerifierContext,
+) -> Optional[VerifierResult]:
+    """Call a sync-or-async verifier with the standard fail-open contract.
+
+    - Raises caught and logged → returns None (fall back to judge).
+    - Non-``VerifierResult`` truthy returns coerced to ``VerifierResult(done=True)``
+      for ergonomics (lets ``lambda c: pytest_exit_code() == 0`` work as a
+      one-liner if the user prefers booleans).
+    - ``None`` returned verbatim (explicit "defer to judge").
+    """
+    try:
+        result = verifier(ctx)
+        if inspect.isawaitable(result):
+            result = await result
+    except Exception as exc:  # noqa: BLE001 — fail-open by design
+        logger.warning(
+            "GoalVerifier raised %s: %s. Falling back to LLM judge.",
+            type(exc).__name__,
+            exc,
+        )
+        return None
+
+    if result is None:
+        return None
+    if isinstance(result, VerifierResult):
+        return result
+    if isinstance(result, bool):
+        return VerifierResult(done=result, reason="verifier returned bool")
+    logger.warning(
+        "GoalVerifier returned unexpected type %s; treating as None.",
+        type(result).__name__,
+    )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -274,10 +422,7 @@ def _build_judge_user_prompt(
     parts = [f"Goal: {objective}"]
     if subgoals:
         parts.append("")
-        parts.append(
-            "Acceptance criteria the user added mid-loop (ALL must be "
-            "satisfied for DONE):"
-        )
+        parts.append("Acceptance criteria the user added mid-loop (ALL must be satisfied for DONE):")
         for i, sg in enumerate(subgoals, 1):
             parts.append(f"  {i}. {sg}")
     tool_summary = _format_tool_calls_for_judge(tool_calls)
@@ -362,6 +507,7 @@ async def judge_goal(
 # Manager
 # ---------------------------------------------------------------------------
 
+
 class GoalManager:
     """Per-session goal lifecycle controller.
 
@@ -378,6 +524,7 @@ class GoalManager:
         default_turn_budget: int = DEFAULT_TURN_BUDGET,
         judge_model: Optional["Model"] = None,
         event_callback: Optional[Callable[[RunEventType, Dict[str, Any]], None]] = None,
+        verifier: Optional[GoalVerifier] = None,
     ):
         self.session_log = session_log
         self.default_turn_budget = default_turn_budget
@@ -385,6 +532,14 @@ class GoalManager:
         # Optional emit-site for RunEventType.goal_* (A2). Caller wires it to
         # tracing exporter / hooks / printer. Must NOT raise.
         self.event_callback = event_callback
+        # Optional callable verifier (Gap 1). When set, runs each turn before
+        # the LLM judge; ``VerifierResult`` is authoritative and skips judge.
+        # Returning ``None`` defers to the judge (explicit fallback). When
+        # ``judge_model`` is None and verifier always returns ``None``, the
+        # loop falls into the same "no judge configured" pause path as
+        # before — verifier is purely additive, never replaces existing
+        # safety floors.
+        self.verifier = verifier
         self._state: Optional[GoalState] = None
         self._loaded = False
 
@@ -392,18 +547,21 @@ class GoalManager:
         if self.event_callback is None or self._state is None:
             return
         try:
-            self.event_callback(event, {
-                "session_id": self._state.session_id,
-                "objective": self._state.objective,
-                "status": self._state.status,
-                "turns_used": self._state.turns_used,
-                "turn_budget": self._state.turn_budget,
-                "tokens_used": self._state.tokens_used,
-                "token_budget": self._state.token_budget,
-                "wall_clock_used_sec": self._state.wall_clock_used_sec,
-                "wall_clock_budget_sec": self._state.wall_clock_budget_sec,
-                **payload,
-            })
+            self.event_callback(
+                event,
+                {
+                    "session_id": self._state.session_id,
+                    "objective": self._state.objective,
+                    "status": self._state.status,
+                    "turns_used": self._state.turns_used,
+                    "turn_budget": self._state.turn_budget,
+                    "tokens_used": self._state.tokens_used,
+                    "token_budget": self._state.token_budget,
+                    "wall_clock_used_sec": self._state.wall_clock_used_sec,
+                    "wall_clock_budget_sec": self._state.wall_clock_budget_sec,
+                    **payload,
+                },
+            )
         except Exception as exc:  # pragma: no cover - callback bug isolation
             logger.warning("GoalManager event_callback raised: %s", exc)
 
@@ -468,7 +626,7 @@ class GoalManager:
             updated_at=now,
         )
         self._persist()
-        self._emit(RunEventType.goal_set, reason="user")
+        self._emit(RunEventType.goal_set, reason="user", message=f"◆ Goal set: {self._state.objective}")
         return self._state
 
     def pause(self, reason: str = "user") -> Optional[GoalState]:
@@ -491,14 +649,8 @@ class GoalManager:
             return None
         if s.token_budget is not None and s.tokens_used >= s.token_budget:
             return f"token budget exhausted ({s.tokens_used}/{s.token_budget})"
-        if (
-            s.wall_clock_budget_sec is not None
-            and s.wall_clock_used_sec >= s.wall_clock_budget_sec
-        ):
-            return (
-                f"wall-clock budget exhausted "
-                f"({s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s)"
-            )
+        if s.wall_clock_budget_sec is not None and s.wall_clock_used_sec >= s.wall_clock_budget_sec:
+            return f"wall-clock budget exhausted ({s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s)"
         return None
 
     def _reload_from_disk(self) -> None:
@@ -624,9 +776,7 @@ class GoalManager:
         elif s.tokens_used:
             budget_bits.append(f"tokens {s.tokens_used:,}")
         if s.wall_clock_budget_sec is not None:
-            budget_bits.append(
-                f"wall {s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s"
-            )
+            budget_bits.append(f"wall {s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s")
         elif s.wall_clock_used_sec:
             budget_bits.append(f"wall {s.wall_clock_used_sec:.0f}s")
         if budget_bits:
@@ -733,8 +883,12 @@ class GoalManager:
             self._state.status = "budget_limited"
             self._state.paused_reason = "budget"
             self._persist()
-            self._emit(RunEventType.goal_paused, paused_reason="budget",
-                       budget_message=budget_msg)
+            self._emit(
+                RunEventType.goal_paused,
+                paused_reason="budget",
+                budget_message=budget_msg,
+                message=f"⊙ Goal budget-limited: {budget_msg}. Use /goal resume to continue.",
+            )
             return GoalDecision(
                 status="budget_limited",
                 should_continue=False,
@@ -752,6 +906,7 @@ class GoalManager:
                     RunEventType.goal_completed,
                     verdict="tool_signal",
                     reason=self._state.last_reason or "agent marked complete",
+                    message=f"✓ Goal complete (agent-marked): {self._state.last_reason or ''}",
                 )
                 return GoalDecision(
                     status="complete",
@@ -766,6 +921,7 @@ class GoalManager:
                 self._emit(
                     RunEventType.goal_paused,
                     paused_reason=self._state.paused_reason or "agent-tool",
+                    message=f"⊙ Goal paused (agent-marked): {self._state.last_reason or ''}",
                 )
                 return GoalDecision(
                     status="paused",
@@ -791,16 +947,21 @@ class GoalManager:
             self._state.status = "paused"
             self._state.paused_reason = "tool-stuck"
             self._persist()
-            self._emit(RunEventType.goal_paused, paused_reason="tool-stuck")
+            self._emit(
+                RunEventType.goal_paused,
+                paused_reason="tool-stuck",
+                message=(
+                    f"⊙ Goal paused: every tool call failed "
+                    f"{self._state.consecutive_tool_failures} turns in a row. "
+                    f"Inspect the last errors, then /goal resume to continue."
+                ),
+            )
             return GoalDecision(
                 status="paused",
                 should_continue=False,
                 continuation_prompt=None,
                 verdict="continue",
-                reason=(
-                    f"every tool call failed for "
-                    f"{self._state.consecutive_tool_failures} turns in a row"
-                ),
+                reason=(f"every tool call failed for {self._state.consecutive_tool_failures} turns in a row"),
                 message=(
                     f"⊙ Goal paused: every tool call failed "
                     f"{self._state.consecutive_tool_failures} turns in a row. "
@@ -808,9 +969,114 @@ class GoalManager:
                 ),
             )
 
+        # ── Callable verifier (Gap 1) ───────────────────────────────────
+        # Runs *before* the LLM judge so deterministic ground truth (pytest
+        # exit code, schema check, etc.) can stop the loop without a judge
+        # round-trip. Returning ``None`` from the verifier defers to the
+        # judge — that's the documented fallback path.
+        if self.verifier is not None:
+            ctx = VerifierContext(
+                objective=self._state.objective,
+                final_response=final_response,
+                subgoals=list(self._state.subgoals or []),
+                tool_calls=list(tool_calls or []),
+                turns_used=self._state.turns_used,
+                tokens_used=self._state.tokens_used,
+                wall_clock_used_sec=self._state.wall_clock_used_sec,
+            )
+            v_result = await _invoke_verifier(self.verifier, ctx)
+            if v_result is not None:
+                # Authoritative: skip judge entirely this turn.
+                self._state.last_verdict = "verifier"
+                self._state.last_reason = v_result.reason or ("verifier=done" if v_result.done else "verifier=continue")
+                if v_result.done:
+                    self._state.status = "complete"
+                    self._persist()
+                    self._emit(
+                        RunEventType.goal_completed,
+                        verdict="verifier",
+                        reason=self._state.last_reason,
+                        message=f"✓ Goal complete (verifier): {self._state.last_reason}",
+                    )
+                    return GoalDecision(
+                        status="complete",
+                        should_continue=False,
+                        continuation_prompt=None,
+                        verdict="verifier",
+                        reason=self._state.last_reason,
+                        message=f"✓ Goal complete (verifier): {self._state.last_reason}",
+                    )
+                if v_result.status in ("paused", "budget_limited"):
+                    self._state.status = v_result.status
+                    self._state.paused_reason = "verifier" if v_result.status == "paused" else "budget"
+                    self._persist()
+                    label = "paused" if v_result.status == "paused" else "budget-limited"
+                    self._emit(
+                        RunEventType.goal_paused,
+                        paused_reason=self._state.paused_reason,
+                        verdict="verifier",
+                        message=f"⊙ Goal {label} (verifier): {self._state.last_reason}",
+                    )
+                    return GoalDecision(
+                        status=v_result.status,
+                        should_continue=False,
+                        continuation_prompt=None,
+                        verdict="verifier",
+                        reason=self._state.last_reason,
+                        message=f"⊙ Goal {label} (verifier): {self._state.last_reason}",
+                    )
+                # done=False, no override status → continue, but still
+                # respect turn budget.
+                if self._state.turns_used >= self._state.turn_budget:
+                    self._state.status = "budget_limited"
+                    self._state.paused_reason = "budget"
+                    self._persist()
+                    self._emit(
+                        RunEventType.goal_paused,
+                        paused_reason="budget",
+                        budget_message="turn budget exhausted",
+                        message=(
+                            f"⊙ Goal budget-limited: turn budget exhausted "
+                            f"({self._state.turns_used}/{self._state.turn_budget})."
+                        ),
+                    )
+                    return GoalDecision(
+                        status="budget_limited",
+                        should_continue=False,
+                        continuation_prompt=None,
+                        verdict="verifier",
+                        reason=self._state.last_reason,
+                        message=(
+                            f"⊙ Goal budget-limited: turn budget exhausted "
+                            f"({self._state.turns_used}/{self._state.turn_budget})."
+                        ),
+                    )
+                self._persist()
+                self._emit(
+                    RunEventType.goal_continuing,
+                    verdict="verifier",
+                    reason=self._state.last_reason,
+                    message=(
+                        f"↻ Goal continuing ({self._state.turns_used}/"
+                        f"{self._state.turn_budget}): {self._state.last_reason}"
+                    ),
+                )
+                return GoalDecision(
+                    status="active",
+                    should_continue=True,
+                    continuation_prompt=self.next_continuation_prompt(),
+                    verdict="verifier",
+                    reason=self._state.last_reason,
+                    message=(
+                        f"↻ Goal continuing ({self._state.turns_used}/"
+                        f"{self._state.turn_budget}): {self._state.last_reason}"
+                    ),
+                )
+            # v_result is None → fall through to LLM judge.
+
         if self.judge_model is None:
-            # Caller forgot to pass a model — fail-open: treat as continue
-            # but do NOT auto-loop because we have no way to ever say done.
+            # No judge AND verifier didn't produce a verdict (or no verifier).
+            # Fail-open: pause so the user sees the configuration gap.
             self._state.status = "paused"
             self._state.paused_reason = "judge-broken"
             self._persist()
@@ -819,8 +1085,8 @@ class GoalManager:
                 should_continue=False,
                 continuation_prompt=None,
                 verdict="parse_failed",
-                reason="no judge model configured",
-                message="⊙ Goal paused: no judge model configured.",
+                reason="no judge model configured and verifier deferred",
+                message=("⊙ Goal paused: no judge model configured (and verifier returned None / not provided)."),
             )
 
         verdict, reason, parse_failed = await judge_goal(
@@ -846,8 +1112,7 @@ class GoalManager:
                     verdict="parse_failed",
                     reason=reason,
                     message=(
-                        f"⊙ Goal paused: judge JSON unparseable "
-                        f"{self._state.consecutive_parse_failures}x in a row."
+                        f"⊙ Goal paused: judge JSON unparseable {self._state.consecutive_parse_failures}x in a row."
                     ),
                 )
             # Soft retry — keep going.
@@ -859,7 +1124,7 @@ class GoalManager:
                 verdict="parse_failed",
                 reason=reason,
                 message=f"⊙ Goal: judge unparseable ({self._state.consecutive_parse_failures}/"
-                        f"{MAX_CONSECUTIVE_PARSE_FAILURES}); continuing.",
+                f"{MAX_CONSECUTIVE_PARSE_FAILURES}); continuing.",
             )
 
         self._state.consecutive_parse_failures = 0
@@ -867,7 +1132,7 @@ class GoalManager:
         if verdict == "done":
             self._state.status = "complete"
             self._persist()
-            self._emit(RunEventType.goal_completed, verdict="done", reason=reason)
+            self._emit(RunEventType.goal_completed, verdict="done", reason=reason, message=f"✓ Goal complete: {reason}")
             return GoalDecision(
                 status="complete",
                 should_continue=False,
@@ -881,8 +1146,16 @@ class GoalManager:
             self._state.status = "budget_limited"
             self._state.paused_reason = "budget"
             self._persist()
-            self._emit(RunEventType.goal_paused, paused_reason="budget",
-                       budget_message="turn budget exhausted")
+            self._emit(
+                RunEventType.goal_paused,
+                paused_reason="budget",
+                budget_message="turn budget exhausted",
+                message=(
+                    f"⊙ Goal budget-limited: turn budget exhausted "
+                    f"({self._state.turns_used}/{self._state.turn_budget}). "
+                    f"Use /goal resume to continue."
+                ),
+            )
             return GoalDecision(
                 status="budget_limited",
                 should_continue=False,
@@ -897,7 +1170,12 @@ class GoalManager:
             )
 
         self._persist()
-        self._emit(RunEventType.goal_continuing, verdict="continue", reason=reason)
+        self._emit(
+            RunEventType.goal_continuing,
+            verdict="continue",
+            reason=reason,
+            message=f"↻ Goal continuing ({self._state.turns_used}/{self._state.turn_budget}): {reason}",
+        )
         return GoalDecision(
             status="active",
             should_continue=True,

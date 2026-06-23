@@ -77,13 +77,18 @@ class BuiltinFetchUrlTool(Tool):
             url: URL to fetch, url starts with http:// or https://
 
         Returns:
-            str, JSON formatted fetch result containing url, content, and save_path
+            str, JSON formatted fetch result containing url and content.
 
         IMPORTANT: After using this tool:
-        1. Read through the return content
-        2. Extract relevant information that answers the user's question
-        3. Synthesize this into a clear, natural language response
-        4. NEVER show the raw JSON to the user unless specifically requested
+        1. The ``content`` field already holds the extracted, ready-to-use
+           text. Work directly from it — do NOT open or read any cache/file
+           path; the content here is what you need.
+        2. If the page was truncated and you need a different section, call
+           fetch_url again or use web_search for a more specific source —
+           never try to read a raw cached file.
+        3. Extract the relevant information that answers the user's question
+           and synthesize a clear, natural-language response.
+        4. NEVER show the raw JSON to the user unless specifically requested.
         """
         result = await self._crawler.url_crawl(url)
         logger.debug(f"Fetched URL: {url}, result length: {len(result)} characters.")

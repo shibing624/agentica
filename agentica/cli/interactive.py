@@ -3,6 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: CLI interactive mode - main interaction loop
 """
+
 import json
 import os
 import queue
@@ -76,6 +77,7 @@ from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 
 # ==================== SessionState ====================
 
+
 @dataclass
 class SessionState:
     """All mutable session state in one place.
@@ -83,6 +85,7 @@ class SessionState:
     Replaces the scattered single-element list containers
     (``[False]``, ``[0]``, ``[agent]``) with typed fields.
     """
+
     shell_mode: bool = False
     should_exit: bool = False
     agent_running: bool = False
@@ -106,6 +109,7 @@ class SessionState:
 
 
 # ==================== Output bridge for patch_stdout ====================
+
 
 def _cprint(text: str):
     """Print ANSI text through prompt_toolkit's renderer.
@@ -150,6 +154,7 @@ class ChatConsole:
 
 # ==================== Image Attachment Helpers ====================
 
+
 def _split_path_input(raw: str) -> tuple:
     """Split a leading file path token from trailing free-form text."""
     raw = str(raw or "").strip()
@@ -161,12 +166,12 @@ def _split_path_input(raw: str) -> tuple:
         pos = 1
         while pos < len(raw):
             ch = raw[pos]
-            if ch == '\\' and pos + 1 < len(raw):
+            if ch == "\\" and pos + 1 < len(raw):
                 pos += 2
                 continue
             if ch == quote:
                 token = raw[1:pos]
-                remainder = raw[pos + 1:].strip()
+                remainder = raw[pos + 1 :].strip()
                 return token, remainder
             pos += 1
         return raw[1:], ""
@@ -174,14 +179,14 @@ def _split_path_input(raw: str) -> tuple:
     pos = 0
     while pos < len(raw):
         ch = raw[pos]
-        if ch == '\\' and pos + 1 < len(raw) and raw[pos + 1] == ' ':
+        if ch == "\\" and pos + 1 < len(raw) and raw[pos + 1] == " ":
             pos += 2
-        elif ch == ' ':
+        elif ch == " ":
             break
         else:
             pos += 1
 
-    token = raw[:pos].replace('\\ ', ' ')
+    token = raw[:pos].replace("\\ ", " ")
     remainder = raw[pos:].strip()
     return token, remainder
 
@@ -263,13 +268,17 @@ def _try_attach_clipboard_image(attached_images: list, image_counter: list) -> b
 
 # ==================== Shell command ====================
 
+
 def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> None:
     """Execute a shell command directly."""
     con = get_console()
     con.print(f"[dim]$ {user_input}[/dim]")
     try:
         result = subprocess.run(
-            user_input, shell=True, capture_output=True, text=True,
+            user_input,
+            shell=True,
+            capture_output=True,
+            text=True,
             cwd=work_dir or os.getcwd(),
         )
         if result.stdout:
@@ -284,6 +293,7 @@ def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> No
 
 
 # ==================== BTW concurrent handler ====================
+
 
 def _print_boxed_result(label: str, question: str, result_text: str, color: str = "cyan"):
     """Print a question + answer inside a colored box.
@@ -304,7 +314,7 @@ def _print_boxed_result(label: str, question: str, result_text: str, color: str 
     con.print()
     con.print(f"[{color}]╭─ {label} {'─' * fill}╮[/{color}]")
     # Question — truncate display for readability
-    q_display = question[:tw - 8] + ("..." if len(question) > tw - 8 else "")
+    q_display = question[: tw - 8] + ("..." if len(question) > tw - 8 else "")
     con.print(f"  [dim]Q: {q_display}[/dim]")
     # Answer — show in full, never truncate
     if result_text:
@@ -342,8 +352,8 @@ def _run_btw_concurrent(agent, question: str, tui_state: dict):
             model=agent.model,
             tools=[],
             instructions="You are a helpful assistant answering a quick side question. "
-                         "You have NO tools, NO skills, NO file access. "
-                         "Answer concisely based on your knowledge and conversation context.",
+            "You have NO tools, NO skills, NO file access. "
+            "Answer concisely based on your knowledge and conversation context.",
             session_id=_generate_session_id(),
             debug=False,
             add_history_to_context=True,
@@ -376,6 +386,7 @@ def _ocr_single_image(image_path: str) -> str:
     """OCR a single image, returning extracted text (truncated to limit)."""
     try:
         from imgocr import ImgOcr
+
         ocr = ImgOcr()
         result = ocr.ocr(image_path)
         text = " ".join(item["text"] for item in result if "text" in item)
@@ -424,6 +435,7 @@ def _ocr_images_parallel(image_paths: list) -> str:
 
 
 # ==================== Goal loop hook ====================
+
 
 def _maybe_continue_goal(
     state: "SessionState",
@@ -519,9 +531,14 @@ def _maybe_continue_goal(
 
 # ==================== Stream response ====================
 
+
 def _process_stream_response(
-    current_agent, final_input: str, session_tokens: list,
-    tui_state: dict, *, images: Optional[list] = None,
+    current_agent,
+    final_input: str,
+    session_tokens: list,
+    tui_state: dict,
+    *,
+    images: Optional[list] = None,
     permission_manager: Optional[PermissionManager] = None,
 ) -> None:
     """Process the agent's streaming response and display it."""
@@ -543,11 +560,13 @@ def _process_stream_response(
     try:
         from agentica.run_config import RunConfig
         from agentica.run_context import RunSource
+
         run_config = RunConfig(stream_intermediate_steps=True, source=RunSource.cli)
 
         # Permission integration: restrict tools based on permission mode
         if permission_manager and permission_manager.mode == "strict":
             from agentica.cli.permissions import READ_ONLY_TOOLS
+
             run_config.enabled_tools = list(READ_ONLY_TOOLS)
 
         run_kwargs = {"config": run_config}
@@ -659,6 +678,7 @@ def _process_stream_response(
                         # Permission info display
                         if permission_manager and permission_manager.mode != "allow-all":
                             from agentica.cli.permissions import WRITE_TOOLS
+
                             if tool_name in WRITE_TOOLS:
                                 con.print(f"  [yellow]! {tool_name} (write)[/yellow]")
 
@@ -679,8 +699,10 @@ def _process_stream_response(
                             is_error = tool_info.get("tool_call_error", False)
                             elapsed = (tool_info.get("metrics") or {}).get("time")
                             display.display_tool_result(
-                                tool_name, str(result_content) if result_content else "",
-                                is_error=is_error, elapsed=elapsed,
+                                tool_name,
+                                str(result_content) if result_content else "",
+                                is_error=is_error,
+                                elapsed=elapsed,
                             )
                             break
                 continue
@@ -725,9 +747,7 @@ def _process_stream_response(
         cost_tracker = current_agent.run_response.cost_tracker
         if cost_tracker and cost_tracker.turns > 0:
             context_tokens = cost_tracker.last_input_tokens
-            context_window = (
-                current_agent.model.context_window if current_agent.model else 128000
-            )
+            context_window = current_agent.model.context_window if current_agent.model else 128000
             tui_state["context_tokens"] = context_tokens
             tui_state["context_window"] = context_window
             tui_state["cost_usd"] = tui_state.get("cost_usd", 0.0) + cost_tracker.total_cost_usd
@@ -761,10 +781,15 @@ def _process_stream_response(
 
 # ==================== TUI setup ====================
 
-def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
-               pending_queue: PendingQueue,
-               image_counter_ref: list,
-               dispatch_cmd=None):
+
+def _setup_tui(
+    state: SessionState,
+    skills_registry,
+    tui_state: dict,
+    pending_queue: PendingQueue,
+    image_counter_ref: list,
+    dispatch_cmd=None,
+):
     """Build the prompt_toolkit Application with fixed-bottom input area."""
 
     _image_counter_ref = image_counter_ref
@@ -780,21 +805,24 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
                         skill_cmds = skills_registry.auto_commands()
                         skill = skill_cmds.get(cmd)
                         if skill and skill.argument_hint:
-                            yield Completion(skill.argument_hint, start_position=0,
-                                             display=skill.argument_hint, display_meta="argument")
+                            yield Completion(
+                                skill.argument_hint,
+                                start_position=0,
+                                display=skill.argument_hint,
+                                display_meta="argument",
+                            )
                     return
                 q = text.lower()
                 for cmd_name, (_, desc) in COMMAND_REGISTRY.items():
                     if cmd_name.startswith(q):
-                        yield Completion(cmd_name, start_position=-len(text),
-                                         display=cmd_name, display_meta=desc)
+                        yield Completion(cmd_name, start_position=-len(text), display=cmd_name, display_meta=desc)
                 if skills_registry:
                     for slug, skill in skills_registry.auto_commands().items():
                         if slug.startswith(q) and slug not in COMMAND_REGISTRY:
                             desc = skill.description[:50] if skill.description else ""
-                            yield Completion(slug, start_position=-len(text),
-                                             display=f"{slug} ({skill.name})",
-                                             display_meta=desc)
+                            yield Completion(
+                                slug, start_position=-len(text), display=f"{slug} ({skill.name})", display_meta=desc
+                            )
                 return
             m = re.search(r"@([\w./-]*)$", text)
             if m:
@@ -871,7 +899,8 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
                 cmd_parts = text.split(maxsplit=1)
                 cmd_args = cmd_parts[1] if len(cmd_parts) > 1 else ""
                 threading.Thread(
-                    target=dispatch_cmd, args=(first_word, cmd_args),
+                    target=dispatch_cmd,
+                    args=(first_word, cmd_args),
                     daemon=True,
                 ).start()
                 event.app.current_buffer.reset(append_to_history=True)
@@ -883,7 +912,8 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
             cmd_args = text[5:].strip()
             if cmd_args:
                 threading.Thread(
-                    target=dispatch_cmd, args=("/btw", cmd_args),
+                    target=dispatch_cmd,
+                    args=("/btw", cmd_args),
                     daemon=True,
                 ).start()
                 event.app.current_buffer.reset(append_to_history=True)
@@ -936,7 +966,7 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
 
     @kb.add(Keys.BracketedPaste, eager=True)
     def _handle_paste(event):
-        pasted = (event.data or "").replace('\r\n', '\n').replace('\r', '\n')
+        pasted = (event.data or "").replace("\r\n", "\n").replace("\r", "\n")
         if _try_attach_clipboard_image(state.attached_images, _image_counter_ref):
             n = len(state.attached_images)
             img = state.attached_images[-1]
@@ -944,10 +974,11 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
             _cprint(f"  📎 Image #{n} attached: {img.name} ({size_kb}KB)")
             event.app.invalidate()
         if pasted:
-            line_count = pasted.count('\n')
+            line_count = pasted.count("\n")
             buf = event.current_buffer
             if line_count >= 5 and not buf.text.strip().startswith("/"):
                 from agentica.config import AGENTICA_HOME
+
                 paste_dir = Path(AGENTICA_HOME) / "pastes"
                 paste_dir.mkdir(parents=True, exist_ok=True)
                 state.paste_counter += 1
@@ -957,7 +988,7 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
                 state.pasted_files.append((paste_file, line_count + 1))
                 placeholder = f"[Pasted text #{state.paste_counter}: {line_count + 1} lines -> {paste_file}]"
                 prefix = ""
-                if buf.cursor_position > 0 and buf.text[buf.cursor_position - 1] != '\n':
+                if buf.cursor_position > 0 and buf.text[buf.cursor_position - 1] != "\n":
                     prefix = "\n"
                 buf.insert_text(prefix + placeholder)
             else:
@@ -987,9 +1018,7 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
             if not ti.document.text and ti.lineno == 0:
                 text = self._get_text()
                 if text:
-                    return Transformation(
-                        fragments=ti.fragments + [('class:placeholder', text)]
-                    )
+                    return Transformation(fragments=ti.fragments + [("class:placeholder", text)])
             return Transformation(fragments=ti.fragments)
 
     def _get_placeholder():
@@ -1021,18 +1050,35 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
     if history_dir:
         os.makedirs(history_dir, exist_ok=True)
 
+    _MAX_INPUT_ROWS = 12
+
     def _get_input_height() -> Dimension:
         widget = input_area
         if widget is None:
-            return Dimension(min=1, max=8, preferred=1)
-        line_count = max(1, widget.buffer.document.line_count)
-        preferred = min(8, line_count)
-        return Dimension(min=1, max=8, preferred=preferred)
+            return Dimension(min=1, max=_MAX_INPUT_ROWS, preferred=1)
+        # Count *visual* rows, not just logical lines. With wrap_lines=True a
+        # single long line wraps onto multiple terminal rows; counting only
+        # explicit '\n' (document.line_count) would keep the box one row tall
+        # and hide the wrapped text. We estimate wrapped rows from the usable
+        # text width (terminal width minus the 2-char prompt like "❯ ").
+        try:
+            term_width = shutil.get_terminal_size((80, 24)).columns
+        except OSError:
+            term_width = 80
+        usable_width = max(1, term_width - 2)
+        total_rows = 0
+        for line in widget.buffer.document.lines:
+            # A line of N chars occupies ceil(N / usable_width) rows
+            # (empty line still occupies 1 row).
+            total_rows += max(1, -(-len(line) // usable_width))
+        total_rows = max(1, total_rows)
+        preferred = min(_MAX_INPUT_ROWS, total_rows)
+        return Dimension(min=1, max=_MAX_INPUT_ROWS, preferred=preferred)
 
     input_area = TextArea(
         height=_get_input_height,
         prompt=_get_prompt,
-        style='class:input-area',
+        style="class:input-area",
         multiline=True,
         wrap_lines=True,
         history=FileHistory(history_file),
@@ -1094,7 +1140,7 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
         filter=Condition(lambda: not pending_queue.empty()),
     )
 
-    input_rule = Window(char='─', height=1, style='class:input-rule')
+    input_rule = Window(char="─", height=1, style="class:input-rule")
 
     body = HSplit([spinner_widget, queue_bar, input_rule, input_area, status_bar])
     layout = Layout(
@@ -1104,34 +1150,39 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
         )
     )
 
-    style = PTStyle.from_dict({
-        "input-area": "#FFF8DC",
-        "placeholder": "#555555 italic",
-        "prompt": "ansicyan bold",
-        "prompt-working": "#888888 italic",
-        "shell-prompt": "ansigreen bold",
-        "hint": "#555555 italic",
-        "input-rule": "#CD7F32",
-        "queue-label": "#FFD700 bold",
-        "queue-dim": "#8B8682 italic",
-        "queue-time": "#8FBC8F",
-        "spinner": "#FFD700 italic",
-        "sb": "bg:#1a1a2e #C0C0C0",
-        "sb-strong": "bg:#1a1a2e #FFD700 bold",
-        "sb-dim": "bg:#1a1a2e #8B8682",
-        "sb-good": "bg:#1a1a2e #8FBC8F bold",
-        "sb-warn": "bg:#1a1a2e #FFD700 bold",
-        "sb-bad": "bg:#1a1a2e #FF8C00 bold",
-        "sb-critical": "bg:#1a1a2e #FF6B6B bold",
-        "sb-spin": "bg:#1a1a2e #FFD700 italic",
-        "completion-menu": "bg:#1a1a2e #FFF8DC",
-        "completion-menu.completion": "bg:#1a1a2e #FFF8DC",
-        "completion-menu.completion.current": "bg:#333355 #FFD700",
-    })
+    style = PTStyle.from_dict(
+        {
+            "input-area": "#FFF8DC",
+            "placeholder": "#555555 italic",
+            "prompt": "ansicyan bold",
+            "prompt-working": "#888888 italic",
+            "shell-prompt": "ansigreen bold",
+            "hint": "#555555 italic",
+            "input-rule": "#CD7F32",
+            "queue-label": "#FFD700 bold",
+            "queue-dim": "#8B8682 italic",
+            "queue-time": "#8FBC8F",
+            "spinner": "#FFD700 italic",
+            "sb": "bg:#1a1a2e #C0C0C0",
+            "sb-strong": "bg:#1a1a2e #FFD700 bold",
+            "sb-dim": "bg:#1a1a2e #8B8682",
+            "sb-good": "bg:#1a1a2e #8FBC8F bold",
+            "sb-warn": "bg:#1a1a2e #FFD700 bold",
+            "sb-bad": "bg:#1a1a2e #FF8C00 bold",
+            "sb-critical": "bg:#1a1a2e #FF6B6B bold",
+            "sb-spin": "bg:#1a1a2e #FFD700 italic",
+            "completion-menu": "bg:#1a1a2e #FFF8DC",
+            "completion-menu.completion": "bg:#1a1a2e #FFF8DC",
+            "completion-menu.completion.current": "bg:#333355 #FFD700",
+        }
+    )
 
     app = Application(
-        layout=layout, key_bindings=kb, style=style,
-        full_screen=False, mouse_support=False,
+        layout=layout,
+        key_bindings=kb,
+        style=style,
+        full_screen=False,
+        mouse_support=False,
     )
 
     return app
@@ -1139,8 +1190,13 @@ def _setup_tui(state: SessionState, skills_registry, tui_state: dict,
 
 # ==================== Main entry ====================
 
-def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = None,
-                    workspace: Optional[Workspace] = None, skills_registry=None):
+
+def run_interactive(
+    agent_config: dict,
+    extra_tool_names: Optional[List[str]] = None,
+    workspace: Optional[Workspace] = None,
+    skills_registry=None,
+):
     """Run the interactive CLI with fixed-bottom input area TUI."""
 
     if not agent_config.get("debug"):
@@ -1272,7 +1328,9 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             state.goal_tokens_baseline = 0
 
     app = _setup_tui(
-        state, skills_registry, tui_state,
+        state,
+        skills_registry,
+        tui_state,
         pending_queue,
         image_counter_ref=_image_counter_ref,
         dispatch_cmd=_dispatch_concurrent_cmd,
@@ -1346,7 +1404,13 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             # Shell mode
             if state.shell_mode:
                 if user_input.startswith("/") and user_input.split()[0].lower() in {
-                    "/exit", "/quit", "/help", "/model", "/debug", "/clear", "/reset"
+                    "/exit",
+                    "/quit",
+                    "/help",
+                    "/model",
+                    "/debug",
+                    "/clear",
+                    "/reset",
                 }:
                     pass
                 else:
@@ -1395,18 +1459,20 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
                         user_input = skill_msg
 
             # Expand paste references
-            _paste_ref_re = re.compile(r'\[Pasted text #\d+: \d+ lines -> (.+?)\]')
+            _paste_ref_re = re.compile(r"\[Pasted text #\d+: \d+ lines -> (.+?)\]")
             paste_refs = list(_paste_ref_re.finditer(user_input))
             n_pasted_blocks = len(paste_refs) + len(state.pasted_files)
             n_pasted_lines = sum(n for _, n in state.pasted_files) if state.pasted_files else 0
             if paste_refs:
+
                 def _expand_ref(m):
                     p = Path(m.group(1))
                     if p.exists():
                         return p.read_text(encoding="utf-8")
                     return m.group(0)
+
                 expanded = _paste_ref_re.sub(_expand_ref, user_input)
-                n_pasted_lines += expanded.count('\n') + 1
+                n_pasted_lines += expanded.count("\n") + 1
                 user_input = expanded
             state.pasted_files.clear()
 
@@ -1436,7 +1502,10 @@ def run_interactive(agent_config: dict, extra_tool_names: Optional[List[str]] = 
             state.agent_running = True
             app.invalidate()
             _process_stream_response(
-                state.current_agent, final_input, session_tokens, tui_state,
+                state.current_agent,
+                final_input,
+                session_tokens,
+                tui_state,
                 images=turn_images,
                 permission_manager=permission_manager,
             )

@@ -1,0 +1,4 @@
+{"task": "Write a recursive Python function fib(n) for the n-th Fibonacci number, then compute fib(10). code under /tmp/ dir.", "turn_budget": 3}
+{"task": "Explain Markov chains in one sentence."}
+{"task": "What is the CAP theorem? Answer in 1-2 sentences."}
+{"task": "Write a curl command to fetch JSON from https://httpbin.org/json and extract the first key.", "turn_budget": 3}

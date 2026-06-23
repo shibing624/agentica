@@ -15,6 +15,7 @@ Parameters organized in three layers:
 2. Common config (~5): add_history_to_context, debug, enable_tracing, etc.
 3. Packed config (3): PromptConfig, ToolConfig, WorkspaceMemoryConfig
 """
+
 from typing import (
     Any,
     AsyncIterator,
@@ -56,14 +57,28 @@ from agentica.memory.session_log import SessionLog
 from agentica.compression import CompressionManager
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY
 from agentica.agent.config import (
-    PromptConfig, ToolConfig, WorkspaceMemoryConfig, HistoryConfig, SandboxConfig,
-    ToolRuntimeConfig, SkillRuntimeConfig, ExperienceConfig,
-    AgentDefinition, AgentExecutionConfig, AgentMemoryConfig, AgentSafetyConfig,
+    PromptConfig,
+    ToolConfig,
+    WorkspaceMemoryConfig,
+    HistoryConfig,
+    SandboxConfig,
+    ToolRuntimeConfig,
+    SkillRuntimeConfig,
+    ExperienceConfig,
+    AgentDefinition,
+    AgentExecutionConfig,
+    AgentMemoryConfig,
+    AgentSafetyConfig,
 )
 from agentica.agent.history_filter import HistoryFilter
 from agentica.hooks import (
-    AgentHooks, RunHooks, ConversationArchiveHooks, MemoryExtractHooks,
-    ExperienceCaptureHooks, _CompositeRunHooks, _CompositeAgentHooks,
+    AgentHooks,
+    RunHooks,
+    ConversationArchiveHooks,
+    MemoryExtractHooks,
+    ExperienceCaptureHooks,
+    _CompositeRunHooks,
+    _CompositeAgentHooks,
 )
 from agentica.runner import Runner
 
@@ -258,53 +273,53 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     context: Optional[Dict[str, Any]] = None
 
     def __init__(
-            self,
-            *,
-            # ---- Core definition ----
-            model: Optional[Model] = None,
-            auxiliary_model: Optional[Model] = None,
-            auxiliary_task_models: Optional[Dict[str, Model]] = None,
-            fallback_models: Optional[List[Model]] = None,
-            fallback_on_break: bool = False,
-            max_api_retry: int = 1,
-            name: Optional[str] = None,
-            agent_id: Optional[str] = None,
-            description: Optional[str] = None,
-            when_to_use: Optional[str] = None,
-            instructions: Optional[Union[str, List[str], Callable]] = None,
-            tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
-            knowledge: Optional[Any] = None,
-            workspace: Optional[Union[Any, str]] = None,  # Workspace or str path
-            user_id: Optional[str] = None,  # User ID for multi-user workspace isolation
-            work_dir: Optional[str] = None,  # Working directory for file operations
-            enable_long_term_memory: bool = False,  # Enable long-term memory tools and hooks
-            enable_experience_capture: bool = False,  # Enable experience capture (self-evolution)
-            response_model: Optional[Type[Any]] = None,
-            # ---- Common config ----
-            add_history_to_context: bool = False,
-            num_history_turns: int = 8,
-            use_structured_outputs: bool = False,
-            debug: bool = False,
-            enable_tracing: bool = False,
-            hooks: Optional[Union[AgentHooks, List[AgentHooks]]] = None,
-            # ---- Session persistence ----
-            session_id: Optional[str] = None,
-            # ---- Packed config ----
-            prompt_config: Optional[PromptConfig] = None,
-            tool_config: Optional[ToolConfig] = None,
-            long_term_memory_config: Optional[WorkspaceMemoryConfig] = None,
-            experience_config: Optional[ExperienceConfig] = None,
-            sandbox_config: Optional[SandboxConfig] = None,
-            history_config: Optional[HistoryConfig] = None,
-            history_filter: Optional[HistoryFilter] = None,
-            tool_input_guardrails: Optional[List[Any]] = None,
-            tool_output_guardrails: Optional[List[Any]] = None,
-            # ---- Agent-level guardrails (run on user input / agent output) ----
-            input_guardrails: Optional[List[Any]] = None,
-            output_guardrails: Optional[List[Any]] = None,
-            # ---- Runtime ----
-            working_memory: Optional[WorkingMemory] = None,
-            context: Optional[Dict[str, Any]] = None,
+        self,
+        *,
+        # ---- Core definition ----
+        model: Optional[Model] = None,
+        auxiliary_model: Optional[Model] = None,
+        auxiliary_task_models: Optional[Dict[str, Model]] = None,
+        fallback_models: Optional[List[Model]] = None,
+        fallback_on_break: bool = False,
+        max_api_retry: int = 1,
+        name: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        description: Optional[str] = None,
+        when_to_use: Optional[str] = None,
+        instructions: Optional[Union[str, List[str], Callable]] = None,
+        tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
+        knowledge: Optional[Any] = None,
+        workspace: Optional[Union[Any, str]] = None,  # Workspace or str path
+        user_id: Optional[str] = None,  # User ID for multi-user workspace isolation
+        work_dir: Optional[str] = None,  # Working directory for file operations
+        enable_long_term_memory: bool = False,  # Enable long-term memory tools and hooks
+        enable_experience_capture: bool = False,  # Enable experience capture (self-evolution)
+        response_model: Optional[Type[Any]] = None,
+        # ---- Common config ----
+        add_history_to_context: bool = False,
+        num_history_turns: int = 8,
+        use_structured_outputs: bool = False,
+        debug: bool = False,
+        enable_tracing: bool = False,
+        hooks: Optional[Union[AgentHooks, List[AgentHooks]]] = None,
+        # ---- Session persistence ----
+        session_id: Optional[str] = None,
+        # ---- Packed config ----
+        prompt_config: Optional[PromptConfig] = None,
+        tool_config: Optional[ToolConfig] = None,
+        long_term_memory_config: Optional[WorkspaceMemoryConfig] = None,
+        experience_config: Optional[ExperienceConfig] = None,
+        sandbox_config: Optional[SandboxConfig] = None,
+        history_config: Optional[HistoryConfig] = None,
+        history_filter: Optional[HistoryFilter] = None,
+        tool_input_guardrails: Optional[List[Any]] = None,
+        tool_output_guardrails: Optional[List[Any]] = None,
+        # ---- Agent-level guardrails (run on user input / agent output) ----
+        input_guardrails: Optional[List[Any]] = None,
+        output_guardrails: Optional[List[Any]] = None,
+        # ---- Runtime ----
+        working_memory: Optional[WorkingMemory] = None,
+        context: Optional[Dict[str, Any]] = None,
     ):
         self._init_definition(
             model=model,
@@ -390,10 +405,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.fallback_models = list(fallback_models) if fallback_models else []
         self.fallback_on_break = fallback_on_break
         if max_api_retry < 1:
-            raise ValueError(
-                "max_api_retry must be >= 1; "
-                "use 1 to disable Runner-level same-model retry"
-            )
+            raise ValueError("max_api_retry must be >= 1; use 1 to disable Runner-level same-model retry")
         self.max_api_retry = max_api_retry
         self.name = name
         self.agent_id = agent_id or str(uuid4())
@@ -410,6 +422,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
         if isinstance(workspace, str):
             from agentica.workspace import Workspace
+
             self.workspace = Workspace(workspace, user_id=user_id)
             self.user_id = self.workspace.user_id
         else:
@@ -417,9 +430,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             if user_id is not None and workspace is not None:
                 existing = workspace.user_id
                 if existing not in (None, "default") and existing != user_id:
-                    logger.warning(
-                        f"Agent user_id={user_id!r} overrides Workspace user_id={existing!r}"
-                    )
+                    logger.warning(f"Agent user_id={user_id!r} overrides Workspace user_id={existing!r}")
                 workspace.set_user(user_id)
             if self.workspace is not None:
                 self.user_id = self.workspace.user_id
@@ -571,6 +582,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # Register BuiltinMemoryTool when long-term memory is enabled and workspace exists
         if self.enable_long_term_memory and self.workspace is not None:
             from agentica.tools.buildin_tools import BuiltinMemoryTool
+
             has_memory_tool = any(isinstance(t, BuiltinMemoryTool) for t in (self.tools or []))
             if not has_memory_tool:
                 memory_tool = BuiltinMemoryTool()
@@ -692,9 +704,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 tool.set_parent_agent(self)
             elif isinstance(tool, BuiltinMemoryTool):
                 tool.set_workspace(self.workspace)
-                tool.set_sync_global_agent_md(
-                    self.long_term_memory_config.sync_memories_to_global_agent_md
-                )
+                tool.set_sync_global_agent_md(self.long_term_memory_config.sync_memories_to_global_agent_md)
             elif isinstance(tool, SkillTool):
                 tool._agent = self
 
@@ -801,6 +811,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
             if loop is not None:
                 import concurrent.futures
+
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, init_mcp())
                     future.result(timeout=30)
@@ -865,7 +876,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._session_guidance_prompts = []
 
         for tool in self.tools:
-            if isinstance(tool, Tool) and hasattr(tool, 'get_system_prompt'):
+            if isinstance(tool, Tool) and hasattr(tool, "get_system_prompt"):
                 prompt = tool.get_system_prompt()
                 if not prompt:
                     continue
@@ -969,11 +980,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
     @classmethod
     def from_workspace(
-        cls,
-        workspace_path: str,
-        model: Optional["Model"] = None,
-        initialize: bool = True,
-        **kwargs
+        cls, workspace_path: str, model: Optional["Model"] = None, initialize: bool = True, **kwargs
     ) -> "Agent":
         """Create Agent from workspace path."""
         from agentica.workspace import Workspace
@@ -1129,6 +1136,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # subagent path's reset semantics.
         if self.model is not None:
             from agentica.subagent import SubagentRegistry
+
             clone.model = SubagentRegistry._clone_parent_model(self.model)
         clone.agent_id = str(uuid4())
         clone._init_runtime(
@@ -1140,11 +1148,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # explicit re-init, ``copy.copy`` aliases them, so ``clone.enable_tool``
         # / ``clone.disable_tool`` would silently mutate the source agent's
         # tool gating. Same for skill runtime configs.
-        clone._tool_runtime_configs = dict(self._tool_runtime_configs)
-        clone._skill_runtime_configs = dict(self._skill_runtime_configs)
+        clone._tool_runtime_configs = dict(getattr(self, "_tool_runtime_configs", {}))
+        clone._skill_runtime_configs = dict(getattr(self, "_skill_runtime_configs", {}))
         # Inherit hook dedup state from source so cloned sub-agents do not
         # re-emit the same overflow warning that the parent already handled.
-        clone._overflow_warning_emitted = self._overflow_warning_emitted
+        clone._overflow_warning_emitted = getattr(self, "_overflow_warning_emitted", False)
         # Fresh Runner bound to the clone
         clone._runner = Runner(clone)
         # Tool isolation: stateful tools (todos, parent_agent, workspace, skill
@@ -1227,6 +1235,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     def update_model(self) -> None:
         if self.model is None:
             from agentica.model.defaults import create_default_model
+
             logger.debug("Model not set, resolving default model from configured provider credentials")
             self.model = create_default_model()
             self._wire_tools_to_self()
@@ -1268,9 +1277,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if agent_tools is not None and self.tool_config.support_tool_calls:
             for tool in agent_tools:
                 if (
-                        self.response_model is not None
-                        and self.use_structured_outputs
-                        and self.model.supports_structured_outputs
+                    self.response_model is not None
+                    and self.use_structured_outputs
+                    and self.model.supports_structured_outputs
                 ):
                     self.model.add_tool(tool=tool, strict=True, agent=self)
                 else:
@@ -1325,10 +1334,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         agent_ref = self  # captured in closure
 
         def _estimate_usage_ratio(msgs: list, ctx_window: int) -> float:
-            total_chars = sum(
-                len(str(m.content)) if m.content else 0
-                for m in msgs
-            )
+            total_chars = sum(len(str(m.content)) if m.content else 0 for m in msgs)
             return (total_chars / 4.0) / ctx_window
 
         async def _pre_tool_hook(messages: list, function_calls: list) -> bool:
@@ -1351,11 +1357,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             compression_manager = agent_ref.tool_config.compression_manager
             compressed = False
             if compression_manager is not None:
-                _uid_compress = (
-                    agent_ref.workspace.user_id
-                    if agent_ref.workspace is not None
-                    else None
-                )
+                _uid_compress = agent_ref.workspace.user_id if agent_ref.workspace is not None else None
                 await compression_manager.compress(messages, user_id=_uid_compress)
                 compressed = True
                 usage_ratio = _estimate_usage_ratio(messages, context_window)
@@ -1459,8 +1461,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
             # Build reminder message (mirrors CC's todo_reminder attachment content)
             todo_items = "\n".join(
-                f"  {i + 1}. [{t.get('status', 'pending')}] {t.get('content', '')}"
-                for i, t in enumerate(todos)
+                f"  {i + 1}. [{t.get('status', 'pending')}] {t.get('content', '')}" for i, t in enumerate(todos)
             )
             reminder_content = (
                 "[Todo Reminder] The write_todos tool hasn't been used recently. "
@@ -1502,9 +1503,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # Rebuild model.tools list to match remaining functions
         if self.model.tools is not None:
             self.model.tools = [
-                t for t in self.model.tools
-                if not (isinstance(t, dict) and t.get("type") == "function"
-                        and t.get("function", {}).get("name") in disabled_funcs)
+                t
+                for t in self.model.tools
+                if not (
+                    isinstance(t, dict)
+                    and t.get("type") == "function"
+                    and t.get("function", {}).get("name") in disabled_funcs
+                )
             ]
 
         logger.debug(f"Filtered {len(disabled_funcs)} disabled tools: {disabled_funcs}")
@@ -1580,6 +1585,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         *,
         default_turn_budget: Optional[int] = None,
         event_callback: Optional[Callable[..., None]] = None,
+        verifier: Optional[Callable[..., Any]] = None,
     ) -> Any:
         """Return (and lazily create) this agent's ``GoalManager``.
 
@@ -1610,18 +1616,20 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if self.goal_manager is None:
             self.goal_manager = GoalManager(
                 self._session_log,
-                default_turn_budget=(
-                    default_turn_budget if default_turn_budget is not None
-                    else DEFAULT_TURN_BUDGET
-                ),
+                default_turn_budget=(default_turn_budget if default_turn_budget is not None else DEFAULT_TURN_BUDGET),
                 judge_model=self.resolve_auxiliary_model("goal_judge"),
                 event_callback=event_callback,
+                verifier=verifier,
             )
             # Load any persisted state from a previous session.
             self.goal_manager.load()
-        elif event_callback is not None:
-            # Allow re-binding the callback (cheap, no-mutation otherwise).
-            self.goal_manager.event_callback = event_callback
+        else:
+            # Allow re-binding the callback / verifier on a pre-existing
+            # manager (cheap, no-mutation otherwise).
+            if event_callback is not None:
+                self.goal_manager.event_callback = event_callback
+            if verifier is not None:
+                self.goal_manager.verifier = verifier
 
         return self.goal_manager
 
@@ -1649,6 +1657,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         wall_clock_budget_sec: Optional[float] = None,
         attach_goal_tool: bool = True,
         event_callback: Optional[Callable[..., None]] = None,
+        verifier: Optional[Callable[..., Any]] = None,
     ) -> "GoalRunResult":
         """Drive the standing-goal loop until completion / pause / budget.
 
@@ -1682,6 +1691,17 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             attach_goal_tool: Register ``GoalTool`` on this agent. Set
                 False if you want the external judge to be authoritative.
             event_callback: ``goal.*`` event hook.
+            verifier: Optional callable that decides per-turn whether the
+                goal is satisfied, WITHOUT an LLM call. Signature:
+                ``(VerifierContext) -> Optional[VerifierResult]`` (sync or
+                async). Returning ``VerifierResult(done=True, ...)`` stops
+                the loop immediately; ``done=False`` continues; ``None``
+                falls back to the LLM judge. A bare ``bool`` is accepted
+                as shorthand for ``VerifierResult(done=bool_value)``.
+                Exceptions raised by the verifier are caught and treated
+                as ``None`` — a buggy verifier must not crash the loop.
+                Priority: budget > tool short-circuit > tool-stuck >
+                verifier > judge.
 
         Returns:
             ``agentica.goals.GoalRunResult`` with final status / reason /
@@ -1689,7 +1709,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         """
         from agentica.goals import GoalRunResult
 
-        mgr = self.get_goal_manager(event_callback=event_callback)
+        # Clone the agent so concurrent run_goal() calls on the same instance
+        # are safe.  Swarm._clone_agent_for_task() uses the same pattern.
+        agent = self.clone()
+        mgr = agent.get_goal_manager(event_callback=event_callback, verifier=verifier)
         state = mgr.set(
             objective,
             turn_budget=turn_budget,
@@ -1701,14 +1724,15 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # source="goal" → anchor is rendered into the system prompt every
         # turn for long-task drift defense; this is the whole point of
         # run_goal().
-        self.task_anchor = TaskAnchor(
-            goal=state.objective, source_query=state.objective,
+        agent.task_anchor = TaskAnchor(
+            goal=state.objective,
+            source_query=state.objective,
             source="goal",
         )
-        self._anchor_session_id = self.session_id
+        agent._anchor_session_id = agent.session_id
 
         if attach_goal_tool:
-            self.enable_goal_tool()
+            agent.enable_goal_tool()
 
         prompt = state.objective
         last_run_response: Optional[RunResponse] = None
@@ -1716,16 +1740,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
         while True:
             t0 = time.monotonic()
-            response = await self.run(prompt)
+            response = await agent.run(prompt)
             elapsed = time.monotonic() - t0
             last_run_response = response
 
             token_delta = 0
             if response.cost_tracker is not None:
-                total_now = (
-                    response.cost_tracker.total_input_tokens
-                    + response.cost_tracker.total_output_tokens
-                )
+                total_now = response.cost_tracker.total_input_tokens + response.cost_tracker.total_output_tokens
                 token_delta = max(0, total_now - tokens_baseline)
                 tokens_baseline = total_now
 
@@ -1858,6 +1879,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         :meth:`run_sync` wraps :meth:`run`.
         """
         import asyncio
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

@@ -3,6 +3,7 @@
 @author: XuMing(xuming624@qq.com)
 @description: Unit tests for the CLI first-run model provider onboarding.
 """
+
 import argparse
 import os
 import sys
@@ -26,7 +27,8 @@ class TestCliConfigPersistence(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._patch = patch.object(
-            cli_setup, "CLI_CONFIG_PATH",
+            cli_setup,
+            "CLI_CONFIG_PATH",
             os.path.join(self._tmp.name, "cli_config.json"),
         )
         self._patch.start()
@@ -46,12 +48,16 @@ class TestCliConfigPersistence(unittest.TestCase):
 
     def test_config_complete_requires_provider_model_and_base_url(self):
         self.assertFalse(cli_setup.is_cli_config_complete({"onboarded": True}))
-        self.assertTrue(cli_setup.is_cli_config_complete({
-            "onboarded": True,
-            "model_provider": "deepseek",
-            "model_name": "deepseek-v4-flash",
-            "base_url": "https://api.deepseek.com",
-        }))
+        self.assertTrue(
+            cli_setup.is_cli_config_complete(
+                {
+                    "onboarded": True,
+                    "model_provider": "deepseek",
+                    "model_name": "deepseek-v4-flash",
+                    "base_url": "https://api.deepseek.com",
+                }
+            )
+        )
 
     def test_is_onboarded(self):
         self.assertFalse(cli_setup.is_onboarded())
@@ -82,8 +88,7 @@ class TestProviderHelpers(unittest.TestCase):
             self.assertTrue(cli_setup.has_api_key("deepseek"))
 
     def test_has_api_key_zhipuai_legacy_fallback(self):
-        env = {k: v for k, v in os.environ.items()
-               if k not in ("ZAI_API_KEY", "ZHIPUAI_API_KEY")}
+        env = {k: v for k, v in os.environ.items() if k not in ("ZAI_API_KEY", "ZHIPUAI_API_KEY")}
         env["ZHIPUAI_API_KEY"] = "legacy"
         with patch.dict(os.environ, env, clear=True):
             self.assertTrue(cli_setup.has_api_key("zhipuai"))
@@ -92,13 +97,13 @@ class TestProviderHelpers(unittest.TestCase):
         """cli_config.json wins over an env var of the same provider."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        with patch.object(cli_setup, "CLI_CONFIG_PATH",
-                          os.path.join(tmp.name, "cli_config.json")):
+        with patch.object(cli_setup, "CLI_CONFIG_PATH", os.path.join(tmp.name, "cli_config.json")):
             cli_setup.save_api_key("deepseek", "sk-from-config")
             with patch.dict(os.environ, {}, clear=True):
                 self.assertTrue(cli_setup.has_api_key("deepseek"))
                 self.assertEqual(
-                    cli_setup.get_saved_api_key("deepseek"), "sk-from-config",
+                    cli_setup.get_saved_api_key("deepseek"),
+                    "sk-from-config",
                 )
 
     def test_custom_endpoint_does_not_fall_back_to_openai_env(self):
@@ -108,16 +113,24 @@ class TestProviderHelpers(unittest.TestCase):
         """
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        with patch.object(cli_setup, "CLI_CONFIG_PATH",
-                          os.path.join(tmp.name, "cli_config.json")), \
-             patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True):
-            self.assertFalse(cli_setup.has_api_key(
-                "openai", base_url="https://my-llm.local/v1",
-            ))
+        with (
+            patch.object(cli_setup, "CLI_CONFIG_PATH", os.path.join(tmp.name, "cli_config.json")),
+            patch("agentica.global_config.global_config_path", return_value=os.path.join(tmp.name, "agentica.json")),
+            patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True),
+        ):
+            self.assertFalse(
+                cli_setup.has_api_key(
+                    "openai",
+                    base_url="https://my-llm.local/v1",
+                )
+            )
             # Canonical OpenAI endpoint still picks the env var up.
-            self.assertTrue(cli_setup.has_api_key(
-                "openai", base_url="https://api.openai.com/v1",
-            ))
+            self.assertTrue(
+                cli_setup.has_api_key(
+                    "openai",
+                    base_url="https://api.openai.com/v1",
+                )
+            )
 
     def test_api_key_slot_custom_is_base_url_scoped(self):
         """Custom keys live under ``openai@<base_url>``, not the bare slug."""
@@ -136,11 +149,12 @@ class TestProviderHelpers(unittest.TestCase):
         """Saving a key for a Custom endpoint must not stomp the real OpenAI key."""
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        with patch.object(cli_setup, "CLI_CONFIG_PATH",
-                          os.path.join(tmp.name, "cli_config.json")):
+        with patch.object(cli_setup, "CLI_CONFIG_PATH", os.path.join(tmp.name, "cli_config.json")):
             cli_setup.save_api_key("openai", "sk-real-openai")
             cli_setup.save_api_key(
-                "openai", "sk-custom", base_url="https://my-llm.local/v1",
+                "openai",
+                "sk-custom",
+                base_url="https://my-llm.local/v1",
             )
             keys = cli_setup.load_cli_config()["api_keys"]
             self.assertEqual(keys["openai"], "sk-real-openai")
@@ -148,13 +162,15 @@ class TestProviderHelpers(unittest.TestCase):
             # And lookups stay isolated.
             self.assertEqual(
                 cli_setup.get_saved_api_key(
-                    "openai", base_url="https://my-llm.local/v1",
+                    "openai",
+                    base_url="https://my-llm.local/v1",
                 ),
                 "sk-custom",
             )
             self.assertEqual(
                 cli_setup.get_saved_api_key(
-                    "openai", base_url="https://api.openai.com/v1",
+                    "openai",
+                    base_url="https://api.openai.com/v1",
                 ),
                 "sk-real-openai",
             )
@@ -195,12 +211,21 @@ class TestResolveModelConfig(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._patch = patch.object(
-            cli_setup, "CLI_CONFIG_PATH",
+            cli_setup,
+            "CLI_CONFIG_PATH",
             os.path.join(self._tmp.name, "cli_config.json"),
         )
         self._patch.start()
+        # Isolate the unified agentica.json too, so a real one on the dev
+        # machine does not leak an active profile into resolution/onboarding.
+        self._gc_patch = patch(
+            "agentica.global_config.global_config_path",
+            return_value=os.path.join(self._tmp.name, "agentica.json"),
+        )
+        self._gc_patch.start()
 
     def tearDown(self):
+        self._gc_patch.stop()
         self._patch.stop()
         self._tmp.cleanup()
 
@@ -212,24 +237,28 @@ class TestResolveModelConfig(unittest.TestCase):
         self.assertEqual(resolved["base_url"], "https://api.deepseek.com")
 
     def test_saved_config_used(self):
-        cli_setup.save_cli_config({
-            "onboarded": True,
-            "model_provider": "openai",
-            "model_name": "gpt-4o",
-            "base_url": "https://example/v1",
-        })
+        cli_setup.save_cli_config(
+            {
+                "onboarded": True,
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://example/v1",
+            }
+        )
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["model_provider"], "openai")
         self.assertEqual(resolved["model_name"], "gpt-4o")
         self.assertEqual(resolved["base_url"], "https://example/v1")
 
     def test_cli_args_override_saved(self):
-        cli_setup.save_cli_config({
-            "onboarded": True,
-            "model_provider": "openai",
-            "model_name": "gpt-4o",
-            "base_url": "https://api.openai.com/v1",
-        })
+        cli_setup.save_cli_config(
+            {
+                "onboarded": True,
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1",
+            }
+        )
         args = _make_args(model_provider="deepseek", model_name="deepseek-chat")
         resolved = cli_setup.resolve_model_config(args, console=None)
         self.assertEqual(resolved["model_provider"], "deepseek")
@@ -237,12 +266,14 @@ class TestResolveModelConfig(unittest.TestCase):
         self.assertEqual(resolved["base_url"], "https://api.deepseek.com")
 
     def test_cli_model_override_keeps_saved_base_url_for_same_provider(self):
-        cli_setup.save_cli_config({
-            "onboarded": True,
-            "model_provider": "openai",
-            "model_name": "gpt-4o",
-            "base_url": "https://proxy.example/v1",
-        })
+        cli_setup.save_cli_config(
+            {
+                "onboarded": True,
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://proxy.example/v1",
+            }
+        )
         args = _make_args(model_name="gpt-5")
         resolved = cli_setup.resolve_model_config(args, console=None)
         self.assertEqual(resolved["model_provider"], "openai")
@@ -259,13 +290,19 @@ class TestResolveModelConfig(unittest.TestCase):
 
     def test_onboarding_triggered_and_applied(self):
         mock_console = MagicMock()
-        with patch.object(cli_setup, "should_onboard", return_value=True), \
-             patch.object(cli_setup, "run_onboarding", return_value={
-                 "model_provider": "openai",
-                 "model_name": "gpt-4o",
-                 "base_url": "https://api.openai.com/v1",
-                 "api_key": "sk-from-wizard",
-             }) as mock_wizard:
+        with (
+            patch.object(cli_setup, "should_onboard", return_value=True),
+            patch.object(
+                cli_setup,
+                "run_onboarding",
+                return_value={
+                    "model_provider": "openai",
+                    "model_name": "gpt-4o",
+                    "base_url": "https://api.openai.com/v1",
+                    "api_key": "sk-from-wizard",
+                },
+            ) as mock_wizard,
+        ):
             resolved = cli_setup.resolve_model_config(_make_args(), console=mock_console)
             mock_wizard.assert_called_once()
             self.assertEqual(resolved["model_provider"], "openai")
@@ -276,13 +313,15 @@ class TestResolveModelConfig(unittest.TestCase):
         """resolve_model_config hands the saved api_key to main.py so the
         model factory does not need to fall back to env vars.
         """
-        cli_setup.save_cli_config({
-            "onboarded": True,
-            "model_provider": "deepseek",
-            "model_name": "deepseek-v4-flash",
-            "base_url": "https://api.deepseek.com",
-            "api_keys": {"deepseek": "sk-from-cli-config"},
-        })
+        cli_setup.save_cli_config(
+            {
+                "onboarded": True,
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+                "api_keys": {"deepseek": "sk-from-cli-config"},
+            }
+        )
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["api_key"], "sk-from-cli-config")
 
@@ -291,12 +330,19 @@ class TestShouldOnboard(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._patch = patch.object(
-            cli_setup, "CLI_CONFIG_PATH",
+            cli_setup,
+            "CLI_CONFIG_PATH",
             os.path.join(self._tmp.name, "cli_config.json"),
         )
         self._patch.start()
+        self._gc_patch = patch(
+            "agentica.global_config.global_config_path",
+            return_value=os.path.join(self._tmp.name, "agentica.json"),
+        )
+        self._gc_patch.start()
 
     def tearDown(self):
+        self._gc_patch.stop()
         self._patch.stop()
         self._tmp.cleanup()
 
@@ -308,12 +354,14 @@ class TestShouldOnboard(unittest.TestCase):
         )
 
     def test_skips_when_config_complete_and_key_present(self):
-        cli_setup.save_cli_config({
-            "onboarded": True,
-            "model_provider": "deepseek",
-            "model_name": "deepseek-v4-flash",
-            "base_url": "https://api.deepseek.com",
-        })
+        cli_setup.save_cli_config(
+            {
+                "onboarded": True,
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+            }
+        )
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "x"}, clear=True), self._tty():
             self.assertFalse(cli_setup.should_onboard("deepseek"))
 
@@ -322,18 +370,19 @@ class TestShouldOnboard(unittest.TestCase):
             self.assertTrue(cli_setup.should_onboard("deepseek"))
 
     def test_onboards_when_config_complete_but_key_missing(self):
-        cli_setup.save_cli_config({
-            "onboarded": True,
-            "model_provider": "deepseek",
-            "model_name": "deepseek-v4-flash",
-            "base_url": "https://api.deepseek.com",
-        })
+        cli_setup.save_cli_config(
+            {
+                "onboarded": True,
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+            }
+        )
         with patch.dict(os.environ, {}, clear=True), self._tty():
             self.assertTrue(cli_setup.should_onboard("deepseek"))
 
     def test_requires_tty(self):
-        with patch.dict(os.environ, {}, clear=True), \
-             patch.object(cli_setup.sys.stdin, "isatty", return_value=False):
+        with patch.dict(os.environ, {}, clear=True), patch.object(cli_setup.sys.stdin, "isatty", return_value=False):
             self.assertFalse(cli_setup.should_onboard("deepseek"))
 
 
@@ -343,17 +392,25 @@ class TestRunOnboarding(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._cfg_patch = patch.object(
-            cli_setup, "CLI_CONFIG_PATH",
+            cli_setup,
+            "CLI_CONFIG_PATH",
             os.path.join(self._tmp.name, "cli_config.json"),
         )
         self._env_patch = patch.object(
-            cli_setup, "AGENTICA_DOTENV_PATH",
+            cli_setup,
+            "AGENTICA_DOTENV_PATH",
             os.path.join(self._tmp.name, ".env"),
+        )
+        self._gc_patch = patch(
+            "agentica.global_config.global_config_path",
+            return_value=os.path.join(self._tmp.name, "agentica.json"),
         )
         self._cfg_patch.start()
         self._env_patch.start()
+        self._gc_patch.start()
 
     def tearDown(self):
+        self._gc_patch.stop()
         self._cfg_patch.stop()
         self._env_patch.stop()
         self._tmp.cleanup()
@@ -362,10 +419,12 @@ class TestRunOnboarding(unittest.TestCase):
         console = MagicMock()
         console.width = 80
         # prompts in order: provider pick("2"=openai), base_url(""=default),
-        # api_key("sk-test"), model_name(""=default gpt-4o)
-        inputs = iter(["2", "", "sk-test", ""])
-        with patch.dict(os.environ, {}, clear=True), \
-             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+        # api_key("sk-test"), model_name(""=default gpt-4o), advanced("n"=skip)
+        inputs = iter(["2", "", "sk-test", "", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
             result = cli_setup.run_onboarding(console)
 
         self.assertEqual(result["model_provider"], "openai")
@@ -394,9 +453,11 @@ class TestRunOnboarding(unittest.TestCase):
         console.width = 80
         # provider pick (custom = last index after all presets), base_url, api_key, model_name
         custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
-        inputs = iter([custom_index, "https://my-llm.local/v1", "sk-custom", "my-model"])
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True), \
-             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+        inputs = iter([custom_index, "https://my-llm.local/v1", "sk-custom", "my-model", "n"])
+        with (
+            patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
             result = cli_setup.run_onboarding(console)
 
         self.assertEqual(result["model_provider"], "openai")
@@ -410,7 +471,8 @@ class TestRunOnboarding(unittest.TestCase):
         # written under "openai" (which would shadow the real OpenAI key)
         # and must NOT be exported as OPENAI_API_KEY in the process env.
         self.assertEqual(
-            saved["api_keys"]["openai@https://my-llm.local/v1"], "sk-custom",
+            saved["api_keys"]["openai@https://my-llm.local/v1"],
+            "sk-custom",
         )
         self.assertNotIn("openai", saved["api_keys"])
         # Wizard must not have written to ~/.agentica/.env (the old path that
@@ -419,6 +481,32 @@ class TestRunOnboarding(unittest.TestCase):
         # Sentinel env var (one the test harness does not intercept) confirms
         # the wizard did not export the entered key as a process-env var.
         self.assertNotIn("AGENTICA_TEST_CUSTOM_KEY_LEAKED", os.environ)
+
+    def test_advanced_params_saved_to_profile(self):
+        from agentica import global_config as gc
+
+        console = MagicMock()
+        console.width = 80
+        # provider("2"=openai), base_url(""), api_key("sk"), model_name(""),
+        # advanced("y"), reasoning_effort("high"), max_tokens("4096"),
+        # context_window("500000"), temperature("0.3"), top_p("0.9")
+        inputs = iter(["2", "", "sk", "", "y", "high", "4096", "500000", "0.3", "0.9"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
+            result = cli_setup.run_onboarding(console)
+
+        self.assertEqual(result["reasoning_effort"], "high")
+        self.assertEqual(result["max_tokens"], 4096)
+        self.assertEqual(result["context_window"], 500000)
+        self.assertEqual(result["temperature"], 0.3)
+        self.assertEqual(result["top_p"], 0.9)
+        # And they are persisted to the active agentica.json profile.
+        profile = gc.get_profile()
+        self.assertEqual(profile["reasoning_effort"], "high")
+        self.assertEqual(profile["max_tokens"], 4096)
+        self.assertEqual(profile["context_window"], 500000)
 
 
 if __name__ == "__main__":

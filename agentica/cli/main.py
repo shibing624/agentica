@@ -3,6 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: CLI main entry point
 """
+
 from agentica.cli.config import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.interactive import run_interactive
 from agentica.cli.setup import resolve_model_config, run_onboarding
@@ -14,21 +15,24 @@ from agentica.skills import load_skills, get_skill_registry
 def main():
     args = parse_args()
 
-    if getattr(args, 'chat_only', False):
+    if getattr(args, "chat_only", False):
         from agentica.utils.log import logger, CHAT_LEVEL
+
         logger.setLevel(CHAT_LEVEL)
         for h in logger.handlers:
             h.setLevel(CHAT_LEVEL)
 
     # Handle ACP mode for IDE integration
-    if args is None or (hasattr(args, 'command') and args.command == 'acp'):
+    if args is None or (hasattr(args, "command") and args.command == "acp"):
         from agentica.acp.server import ACPServer
+
         server = ACPServer()
         server.run()
         return
 
     if hasattr(args, "command") and args.command in ("skills", "extensions"):
         from agentica.cli.extensions import run_extensions_command
+
         run_extensions_command(args)
         return
 
@@ -40,6 +44,7 @@ def main():
     # `agentica doctor` — run the environment health check and exit.
     if hasattr(args, "command") and args.command == "doctor":
         from agentica.cli.doctor_display import show_doctor
+
         show_doctor(
             get_console(),
             enable_diagnostics=args.enable_diagnostics,
@@ -61,9 +66,13 @@ def main():
         # the resolved provider/base_url. If both are None the model factory
         # falls back to the provider's env var (backwards-compat).
         "api_key": args.api_key or resolved.get("api_key"),
-        "max_tokens": args.max_tokens,
-        "temperature": args.temperature,
-        "reasoning_effort": args.reasoning_effort,
+        # Model tuning params: CLI flag wins, else the active profile's value
+        # (resolved from agentica.json), else None (model/factory default).
+        "max_tokens": args.max_tokens if args.max_tokens is not None else resolved.get("max_tokens"),
+        "temperature": args.temperature if args.temperature is not None else resolved.get("temperature"),
+        "reasoning_effort": args.reasoning_effort or resolved.get("reasoning_effort"),
+        "top_p": args.top_p if args.top_p is not None else resolved.get("top_p"),
+        "context_window": args.context_window if args.context_window is not None else resolved.get("context_window"),
         # Auxiliary model (None means reuse main model).
         "aux_model_provider": args.aux_model_provider,
         "aux_model_name": args.aux_model_name,
@@ -112,9 +121,7 @@ def main():
         con = get_console()
         con.print(f"Running query: {args.query}", style="cyan")
         tools_info = f", Extra Tools: {', '.join(extra_tool_names)}" if extra_tool_names else ""
-        con.print(
-            f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}",
-            style="magenta")
+        con.print(f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}", style="magenta")
 
         extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
         agent_instance = create_agent(agent_config, extra_tools, workspace, skills_registry)

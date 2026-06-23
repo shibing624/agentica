@@ -3,12 +3,14 @@
 @author: XuMing(xuming624@qq.com)
 @description: Unit tests for CLI module.
 """
+
 import logging
 import os
 import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch, MagicMock
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.cost_tracker import CostTracker
@@ -88,7 +90,8 @@ class TestCLIHelpers(unittest.TestCase):
 
         fake_console = MagicMock()
         display_token_stats(
-            fake_console, tracker,
+            fake_console,
+            tracker,
             context_window=128000,
             session_total_tokens=64000,
             tool_use_count=2,
@@ -109,7 +112,8 @@ class TestCLIHelpers(unittest.TestCase):
 
         fake_console = MagicMock()
         display_token_stats(
-            fake_console, tracker,
+            fake_console,
+            tracker,
             context_window=128000,
             session_total_tokens=700,
             tool_use_count=1,
@@ -128,7 +132,8 @@ class TestCLIHelpers(unittest.TestCase):
 
         fake_console = MagicMock()
         display_token_stats(
-            fake_console, tracker,
+            fake_console,
+            tracker,
             context_window=128000,
             session_total_tokens=150,
             tool_use_count=0,
@@ -164,6 +169,7 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_context_pct_style(self):
         from agentica.cli.display import context_pct_style
+
         self.assertEqual(context_pct_style(30), "green")
         self.assertEqual(context_pct_style(50), "yellow")
         self.assertEqual(context_pct_style(80), "red")
@@ -171,6 +177,7 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_build_context_bar(self):
         from agentica.cli.display import build_context_bar
+
         bar = build_context_bar(50.0, width=10)
         self.assertEqual(bar.count("█"), 5)
         self.assertEqual(bar.count("░"), 5)
@@ -181,9 +188,12 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_build_status_bar_fragments_narrow(self):
         from agentica.cli.display import build_status_bar_fragments
+
         frags = build_status_bar_fragments(
-            model_name="gpt-4o", context_tokens=64000,
-            context_window=128000, last_turn_seconds=12.3,
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            last_turn_seconds=12.3,
             terminal_width=40,
         )
         text = "".join(v for _, v in frags)
@@ -193,10 +203,14 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_build_status_bar_fragments_wide(self):
         from agentica.cli.display import build_status_bar_fragments
+
         frags = build_status_bar_fragments(
-            model_name="gpt-4o", context_tokens=64000,
-            context_window=128000, cost_usd=0.05,
-            active_seconds=105.0, last_turn_seconds=12.3,
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            cost_usd=0.05,
+            active_seconds=105.0,
+            last_turn_seconds=12.3,
             terminal_width=100,
         )
         text = "".join(v for _, v in frags)
@@ -208,10 +222,14 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_build_status_bar_fragments_cost_in_medium(self):
         from agentica.cli.display import build_status_bar_fragments
+
         frags = build_status_bar_fragments(
-            model_name="gpt-4o", context_tokens=64000,
-            context_window=128000, cost_usd=0.002,
-            last_turn_seconds=5.0, terminal_width=60,
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            cost_usd=0.002,
+            last_turn_seconds=5.0,
+            terminal_width=60,
         )
         text = "".join(v for _, v in frags)
         self.assertIn("$0.0020", text)
@@ -220,6 +238,7 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_stream_display_manager_box_decorations(self):
         from agentica.cli.display import StreamDisplayManager
+
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
@@ -235,6 +254,7 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_stream_display_manager_suppresses_micro_compact(self):
         from agentica.cli.display import StreamDisplayManager
+
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
@@ -246,6 +266,7 @@ class TestCLIHelpers(unittest.TestCase):
         Every tool call has a real cost — silent <0.1s suppression made fast
         ops look like they didn't run."""
         from agentica.cli.display import StreamDisplayManager
+
         f = StreamDisplayManager._fmt_elapsed
         # None / negative — no measurement, render nothing
         self.assertEqual(f(None), "")
@@ -268,16 +289,19 @@ class TestCLIHelpers(unittest.TestCase):
 
     def test_stream_display_manager_keeps_rule_based_compact_visible(self):
         from agentica.cli.display import StreamDisplayManager
+
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
-        dm.handle_event({
-            "type": "compact.rule_based",
-            "agent_name": "Agent",
-            "before": 20,
-            "after": 8,
-            "elapsed": 0.25,
-        })
+        dm.handle_event(
+            {
+                "type": "compact.rule_based",
+                "agent_name": "Agent",
+                "before": 20,
+                "after": 8,
+                "elapsed": 0.25,
+            }
+        )
         calls = [str(c) for c in fake.print.call_args_list]
         self.assertTrue(any("compact" in c for c in calls))
 
@@ -287,6 +311,7 @@ class TestStreamDisplayManagerSubagent(unittest.TestCase):
 
     def _make(self, verbosity: str = "all"):
         from agentica.cli.display import StreamDisplayManager
+
         fake = MagicMock()
         fake.width = 80
         return fake, StreamDisplayManager(fake, subagent_verbosity=verbosity)
@@ -297,88 +322,144 @@ class TestStreamDisplayManagerSubagent(unittest.TestCase):
 
     def test_default_renders_tool_started_not_completed(self):
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "explore", "task": "look"})
-        dm.handle_event({"type": "subagent.tool_started", "run_id": "r1",
-                         "agent_name": "explore", "tool_name": "read_file",
-                         "info": "a.py", "args": {}})
-        dm.handle_event({"type": "subagent.tool_completed", "run_id": "r1",
-                         "agent_name": "explore", "tool_name": "read_file",
-                         "info": "a.py", "elapsed": 0.5, "is_error": False})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "explore", "task": "look"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r1",
+                "agent_name": "explore",
+                "tool_name": "read_file",
+                "info": "a.py",
+                "args": {},
+            }
+        )
+        dm.handle_event(
+            {
+                "type": "subagent.tool_completed",
+                "run_id": "r1",
+                "agent_name": "explore",
+                "tool_name": "read_file",
+                "info": "a.py",
+                "elapsed": 0.5,
+                "is_error": False,
+            }
+        )
         out = self._printed(fake)
         self.assertIn("read_file", out, "tool_started must render in default mode")
         self.assertNotIn("✓", out, "tool_completed checkmark must not render in default mode")
 
     def test_default_dedups_consecutive_identical_tool(self):
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "explore", "task": "loop"})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "explore", "task": "loop"})
         for _ in range(3):
-            dm.handle_event({"type": "subagent.tool_started", "run_id": "r1",
-                             "agent_name": "explore", "tool_name": "read_file",
-                             "info": "a.py", "args": {}})
+            dm.handle_event(
+                {
+                    "type": "subagent.tool_started",
+                    "run_id": "r1",
+                    "agent_name": "explore",
+                    "tool_name": "read_file",
+                    "info": "a.py",
+                    "args": {},
+                }
+            )
         out = self._printed(fake)
-        self.assertEqual(out.count("read_file"), 1,
-                         "consecutive identical tool calls must collapse to one line")
+        self.assertEqual(out.count("read_file"), 1, "consecutive identical tool calls must collapse to one line")
 
     def test_default_does_not_dedup_when_args_change(self):
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "explore", "task": "loop"})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "explore", "task": "loop"})
         for path in ("a.py", "b.py", "c.py"):
-            dm.handle_event({"type": "subagent.tool_started", "run_id": "r1",
-                             "agent_name": "explore", "tool_name": "read_file",
-                             "info": path, "args": {}})
+            dm.handle_event(
+                {
+                    "type": "subagent.tool_started",
+                    "run_id": "r1",
+                    "agent_name": "explore",
+                    "tool_name": "read_file",
+                    "info": path,
+                    "args": {},
+                }
+            )
         out = self._printed(fake)
-        self.assertEqual(out.count("read_file"), 3,
-                         "different args must each render their own line")
+        self.assertEqual(out.count("read_file"), 3, "different args must each render their own line")
 
     def test_concurrent_subagents_get_index_prefix(self):
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "a", "task": "t1"})
-        dm.handle_event({"type": "subagent.start", "run_id": "r2",
-                         "agent_name": "b", "task": "t2"})
-        dm.handle_event({"type": "subagent.tool_started", "run_id": "r1",
-                         "agent_name": "a", "tool_name": "glob",
-                         "info": "*.py", "args": {}})
-        dm.handle_event({"type": "subagent.tool_started", "run_id": "r2",
-                         "agent_name": "b", "tool_name": "glob",
-                         "info": "*.md", "args": {}})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "a", "task": "t1"})
+        dm.handle_event({"type": "subagent.start", "run_id": "r2", "agent_name": "b", "task": "t2"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r1",
+                "agent_name": "a",
+                "tool_name": "glob",
+                "info": "*.py",
+                "args": {},
+            }
+        )
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r2",
+                "agent_name": "b",
+                "tool_name": "glob",
+                "info": "*.md",
+                "args": {},
+            }
+        )
         out = self._printed(fake)
         self.assertIn("[1]", out, "first concurrent subagent must get [1] prefix")
         self.assertIn("[2]", out, "second concurrent subagent must get [2] prefix")
 
     def test_single_subagent_has_no_index_prefix(self):
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "solo", "task": "t"})
-        dm.handle_event({"type": "subagent.tool_started", "run_id": "r1",
-                         "agent_name": "solo", "tool_name": "glob",
-                         "info": "*.py", "args": {}})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "solo", "task": "t"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r1",
+                "agent_name": "solo",
+                "tool_name": "glob",
+                "info": "*.py",
+                "args": {},
+            }
+        )
         out = self._printed(fake)
         self.assertNotIn("[1]", out, "single subagent must not get noisy [N] prefix")
 
     def test_verbose_mode_renders_completion_with_elapsed(self):
         fake, dm = self._make("verbose")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "x", "task": "t"})
-        dm.handle_event({"type": "subagent.tool_completed", "run_id": "r1",
-                         "agent_name": "x", "tool_name": "read_file",
-                         "info": "a.py", "elapsed": 1.234, "is_error": False})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "x", "task": "t"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_completed",
+                "run_id": "r1",
+                "agent_name": "x",
+                "tool_name": "read_file",
+                "info": "a.py",
+                "elapsed": 1.234,
+                "is_error": False,
+            }
+        )
         out = self._printed(fake)
         self.assertIn("✓", out, "verbose mode must render completion checkmark")
         self.assertIn("1.2", out, "verbose mode must surface elapsed time")
 
     def test_off_mode_suppresses_intermediate_events_but_keeps_end(self):
         fake, dm = self._make("off")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "x", "task": "t"})
-        dm.handle_event({"type": "subagent.tool_started", "run_id": "r1",
-                         "agent_name": "x", "tool_name": "read_file",
-                         "info": "a.py", "args": {}})
-        dm.handle_event({"type": "subagent.end", "run_id": "r1",
-                         "agent_name": "x", "response": "done", "tool_count": 1})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "x", "task": "t"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r1",
+                "agent_name": "x",
+                "tool_name": "read_file",
+                "info": "a.py",
+                "args": {},
+            }
+        )
+        dm.handle_event(
+            {"type": "subagent.end", "run_id": "r1", "agent_name": "x", "response": "done", "tool_count": 1}
+        )
         out = self._printed(fake)
         self.assertNotIn("read_file", out, "off mode must hide intermediate tools")
         self.assertNotIn("⮕", out, "off mode must hide start banner")
@@ -388,27 +469,38 @@ class TestStreamDisplayManagerSubagent(unittest.TestCase):
         # is_error completions are exempt from the "hide completed" policy:
         # silent failures are worse than slightly noisier output.
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "x", "task": "t"})
-        dm.handle_event({"type": "subagent.tool_completed", "run_id": "r1",
-                         "agent_name": "x", "tool_name": "exec",
-                         "info": "boom", "elapsed": 0.1, "is_error": True})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "x", "task": "t"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_completed",
+                "run_id": "r1",
+                "agent_name": "x",
+                "tool_name": "exec",
+                "info": "boom",
+                "elapsed": 0.1,
+                "is_error": True,
+            }
+        )
         out = self._printed(fake)
         self.assertIn("⚠", out, "errors must surface even in default mode")
         self.assertIn("exec", out)
 
     def test_subagent_slot_reclaimed_on_end(self):
         fake, dm = self._make("all")
-        dm.handle_event({"type": "subagent.start", "run_id": "r1",
-                         "agent_name": "a", "task": "t1"})
-        dm.handle_event({"type": "subagent.end", "run_id": "r1",
-                         "agent_name": "a", "response": "x", "tool_count": 0})
+        dm.handle_event({"type": "subagent.start", "run_id": "r1", "agent_name": "a", "task": "t1"})
+        dm.handle_event({"type": "subagent.end", "run_id": "r1", "agent_name": "a", "response": "x", "tool_count": 0})
         # New subagent — only one active at a time again, so no [N] prefix.
-        dm.handle_event({"type": "subagent.start", "run_id": "r2",
-                         "agent_name": "b", "task": "t2"})
-        dm.handle_event({"type": "subagent.tool_started", "run_id": "r2",
-                         "agent_name": "b", "tool_name": "glob",
-                         "info": "*.py", "args": {}})
+        dm.handle_event({"type": "subagent.start", "run_id": "r2", "agent_name": "b", "task": "t2"})
+        dm.handle_event(
+            {
+                "type": "subagent.tool_started",
+                "run_id": "r2",
+                "agent_name": "b",
+                "tool_name": "glob",
+                "info": "*.py",
+                "args": {},
+            }
+        )
         out = self._printed(fake)
         self.assertNotIn("[2]", out)
         self.assertNotIn("[1]", out)
@@ -428,16 +520,112 @@ class TestSuppressConsoleLogging(unittest.TestCase):
         try:
             logger.handlers = [stdout_handler, stderr_handler, file_handler]
             suppress_console_logging()
-            self.assertFalse(any(
-                isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler)
-                for handler in logger.handlers
-            ))
+            self.assertFalse(
+                any(
+                    isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler)
+                    for handler in logger.handlers
+                )
+            )
             self.assertTrue(any(isinstance(handler, logging.FileHandler) for handler in logger.handlers))
         finally:
             for handler in [stdout_handler, stderr_handler, file_handler]:
                 handler.close()
             logger.handlers = original_handlers
             os.unlink(temp_file.name)
+
+
+class TestCLIModelParams(unittest.TestCase):
+    """get_model() and resolution should honour the extended tuning params."""
+
+    def test_get_model_passes_top_p_and_context_window(self):
+        from agentica.cli.config import get_model
+
+        model = get_model(
+            "deepseek",
+            "deepseek-v4-flash",
+            api_key="fake_key",
+            max_tokens=4096,
+            temperature=0.3,
+            reasoning_effort="high",
+            top_p=0.9,
+            context_window=500000,
+        )
+        self.assertEqual(model.top_p, 0.9)
+        self.assertEqual(model.context_window, 500000)
+        self.assertEqual(model.max_tokens, 4096)
+        self.assertEqual(model.reasoning_effort, "high")
+
+    def test_get_model_context_window_overrides_catalog(self):
+        from agentica.cli.config import get_model
+
+        # Without an explicit value the catalog fills it (deepseek -> 1_000_000);
+        # an explicit value must win.
+        default_model = get_model("deepseek", "deepseek-v4-flash", api_key="k")
+        override_model = get_model(
+            "deepseek",
+            "deepseek-v4-flash",
+            api_key="k",
+            context_window=42000,
+        )
+        self.assertNotEqual(default_model.context_window, 42000)
+        self.assertEqual(override_model.context_window, 42000)
+
+    def test_anthropic_accepts_top_p_skips_reasoning_effort(self):
+        from agentica.cli.config import get_model
+
+        model = get_model(
+            "anthropic",
+            "claude-opus-4-8",
+            api_key="k",
+            top_p=0.8,
+            context_window=300000,
+            reasoning_effort="high",
+            base_url="https://ignored",
+        )
+        self.assertEqual(model.top_p, 0.8)
+        self.assertEqual(model.context_window, 300000)
+        self.assertFalse(hasattr(model, "reasoning_effort"))
+
+    def test_reasoning_effort_accepts_low_medium(self):
+        import sys
+        from agentica.cli.config import parse_args
+
+        with patch.object(sys, "argv", ["agentica", "--reasoning_effort", "low"]):
+            args = parse_args()
+        self.assertEqual(args.reasoning_effort, "low")
+
+    def test_resolve_model_config_carries_profile_tuning_params(self):
+        import argparse
+        from agentica.cli.setup import resolve_model_config
+
+        profile = {
+            "model_provider": "deepseek",
+            "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "api_key": "sk-x",
+            "reasoning_effort": "high",
+            "max_tokens": 4096,
+            "context_window": 500000,
+            "temperature": 0.3,
+            "top_p": 0.9,
+        }
+        args = argparse.Namespace(
+            model_provider=None,
+            model_name=None,
+            base_url=None,
+            api_key=None,
+        )
+        with (
+            patch("agentica.cli.setup.load_cli_config", return_value={}),
+            patch("agentica.cli.setup.get_profile", return_value=profile),
+        ):
+            resolved = resolve_model_config(args, console=None)
+
+        self.assertEqual(resolved["reasoning_effort"], "high")
+        self.assertEqual(resolved["max_tokens"], 4096)
+        self.assertEqual(resolved["context_window"], 500000)
+        self.assertEqual(resolved["temperature"], 0.3)
+        self.assertEqual(resolved["top_p"], 0.9)
 
 
 class TestCLIImports(unittest.TestCase):
@@ -447,6 +635,7 @@ class TestCLIImports(unittest.TestCase):
         """Test CLI module can be imported."""
         try:
             import agentica.cli
+
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import cli module: {e}")
@@ -455,6 +644,7 @@ class TestCLIImports(unittest.TestCase):
         """Test Agent can be imported from CLI."""
         try:
             from agentica import Agent
+
             self.assertTrue(True)
         except ImportError as e:
             self.fail(f"Failed to import Agent: {e}")
@@ -466,6 +656,7 @@ class TestCLIConfiguration(unittest.TestCase):
     def test_history_file_path(self):
         """Test history file path is set."""
         from agentica.cli import history_file
+
         self.assertIsInstance(history_file, str)
         self.assertTrue(history_file.endswith("cli_history.txt"))
 
@@ -492,7 +683,14 @@ class TestCLIConfiguration(unittest.TestCase):
         with patch.object(
             sys,
             "argv",
-            ["agentica", "--enable-diagnostics", "--diagnostics-server", "pyright", "--diagnostics-server", "typescript-language-server"],
+            [
+                "agentica",
+                "--enable-diagnostics",
+                "--diagnostics-server",
+                "pyright",
+                "--diagnostics-server",
+                "typescript-language-server",
+            ],
         ):
             args = parse_args()
 
@@ -520,9 +718,15 @@ class TestCLIConfiguration(unittest.TestCase):
         from agentica.cli.setup import resolve_model_config
 
         args = argparse.Namespace(
-            model_provider=None, model_name=None, base_url=None, api_key=None,
+            model_provider=None,
+            model_name=None,
+            base_url=None,
+            api_key=None,
         )
-        with patch("agentica.cli.setup.load_cli_config", return_value={}):
+        with (
+            patch("agentica.cli.setup.load_cli_config", return_value={}),
+            patch("agentica.cli.setup.get_profile", return_value={}),
+        ):
             resolved = resolve_model_config(args, console=None)
 
         self.assertEqual(resolved["model_provider"], "deepseek")
@@ -585,9 +789,12 @@ class TestCLIConfiguration(unittest.TestCase):
                 captured.update(kwargs)
                 self.tools = []
 
-        with patch("agentica.cli.config.get_model", return_value=MagicMock()), patch(
-            "agentica.agent.deep.DeepAgent",
-            FakeDeepAgent,
+        with (
+            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch(
+                "agentica.agent.deep.DeepAgent",
+                FakeDeepAgent,
+            ),
         ):
             create_agent(
                 {
@@ -611,7 +818,9 @@ class TestCLIConfiguration(unittest.TestCase):
             config_path = os.path.join(tmp, "cli_config.json")
             with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path):
                 cli_commands._persist_model_choice(
-                    "openai", "gpt-5", "https://api.openai.com/v1",
+                    "openai",
+                    "gpt-5",
+                    "https://api.openai.com/v1",
                 )
                 saved = cli_setup.load_cli_config()
 
@@ -637,10 +846,12 @@ class TestCLIConfiguration(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             config_path = os.path.join(tmp, "cli_config.json")
-            with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path), \
-                 patch.object(cli_commands, "get_console", return_value=MagicMock()), \
-                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model, \
-                 patch.object(cli_commands, "create_agent", return_value=MagicMock()):
+            with (
+                patch.object(cli_setup, "CLI_CONFIG_PATH", config_path),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
+                patch.object(cli_commands, "create_agent", return_value=MagicMock()),
+            ):
                 cli_commands._cmd_model(ctx, "openai/gpt-5")
                 saved = cli_setup.load_cli_config()
 
@@ -667,10 +878,12 @@ class TestCLIConfiguration(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as tmp:
             config_path = os.path.join(tmp, "cli_config.json")
-            with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path), \
-                 patch.object(cli_commands, "get_console", return_value=MagicMock()), \
-                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model, \
-                 patch.object(cli_commands, "create_agent", return_value=MagicMock()):
+            with (
+                patch.object(cli_setup, "CLI_CONFIG_PATH", config_path),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
+                patch.object(cli_commands, "create_agent", return_value=MagicMock()),
+            ):
                 cli_commands._cmd_model(ctx, "gpt-5")
                 saved = cli_setup.load_cli_config()
 
@@ -681,9 +894,7 @@ class TestCLIConfiguration(unittest.TestCase):
     def test_parse_goal_budget_flags(self):
         from agentica.cli.commands import _parse_goal_set_args
 
-        objective, budgets, err = _parse_goal_set_args(
-            "--turns 5 --tokens 80000 --wall 1800 修复 API"
-        )
+        objective, budgets, err = _parse_goal_set_args("--turns 5 --tokens 80000 --wall 1800 修复 API")
 
         self.assertIsNone(err)
         self.assertEqual(objective, "修复 API")
@@ -798,17 +1009,20 @@ class TestCLIConfiguration(unittest.TestCase):
         )
 
         printed = []
+
         def mock_print(*args, **kwargs):
             if args:
                 printed.append(str(args[0]))
 
-        with patch.object(commands, "install_skills", side_effect=fake_install_skills), \
-             patch.object(commands, "reset_skill_registry"), \
-             patch.object(commands, "load_skills"), \
-             patch.object(commands, "get_skill_registry", return_value=refreshed_registry), \
-             patch.object(commands, "create_agent", return_value=MagicMock()), \
-             patch("agentica.cli.commands.Path") as MockPath, \
-             patch("agentica.cli.commands.get_console") as mock_get_console:
+        with (
+            patch.object(commands, "install_skills", side_effect=fake_install_skills),
+            patch.object(commands, "reset_skill_registry"),
+            patch.object(commands, "load_skills"),
+            patch.object(commands, "get_skill_registry", return_value=refreshed_registry),
+            patch.object(commands, "create_agent", return_value=MagicMock()),
+            patch("agentica.cli.commands.Path") as MockPath,
+            patch("agentica.cli.commands.get_console") as mock_get_console,
+        ):
             # Make Path(source).expanduser().exists() return True so the local
             # install branch is taken instead of falling through to hub_install.
             mock_path_inst = MagicMock()
@@ -849,9 +1063,12 @@ class TestCLIConfiguration(unittest.TestCase):
             def add_session_guidance(self, text):
                 self.session_guidance.append(text)
 
-        with patch("agentica.cli.config.get_model", return_value=MagicMock()), patch(
-            "agentica.agent.deep.DeepAgent",
-            FakeDeepAgent,
+        with (
+            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch(
+                "agentica.agent.deep.DeepAgent",
+                FakeDeepAgent,
+            ),
         ):
             agent = create_agent(
                 {
@@ -880,9 +1097,12 @@ class TestCLIConfiguration(unittest.TestCase):
                 captured.update(kwargs)
                 self.tools = []
 
-        with patch("agentica.cli.config.get_model", return_value=MagicMock()), patch(
-            "agentica.agent.deep.DeepAgent",
-            FakeDeepAgent,
+        with (
+            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch(
+                "agentica.agent.deep.DeepAgent",
+                FakeDeepAgent,
+            ),
         ):
             create_agent(
                 {
@@ -919,9 +1139,12 @@ class TestCLIConfiguration(unittest.TestCase):
                 captured.update(kwargs)
                 self.tools = []
 
-        with patch("agentica.cli.config.get_model", return_value=MagicMock()), patch(
-            "agentica.agent.deep.DeepAgent",
-            FakeDeepAgent,
+        with (
+            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch(
+                "agentica.agent.deep.DeepAgent",
+                FakeDeepAgent,
+            ),
         ):
             create_agent(
                 {
@@ -936,9 +1159,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 skills_registry=None,
             )
 
-        self.assertTrue(
-            captured["long_term_memory_config"].sync_memories_to_global_agent_md
-        )
+        self.assertTrue(captured["long_term_memory_config"].sync_memories_to_global_agent_md)
 
 
 class TestToolRegistryIntegrity(unittest.TestCase):
@@ -952,10 +1173,7 @@ class TestToolRegistryIntegrity(unittest.TestCase):
             # Class name should not be empty
             self.assertTrue(len(class_name) > 0, f"Empty class name for {tool_name}")
             # Class name should be PascalCase (start with uppercase)
-            self.assertTrue(
-                class_name[0].isupper(),
-                f"Class name {class_name} should start with uppercase"
-            )
+            self.assertTrue(class_name[0].isupper(), f"Class name {class_name} should start with uppercase")
 
     def test_no_duplicate_tools(self):
         """Test no duplicate tool names in registry."""
@@ -1002,20 +1220,22 @@ class TestPendingQueueTimestamps(unittest.TestCase):
         from agentica.cli.commands import PendingQueue
 
         q = PendingQueue()
-        q.put("a"); q.put("b"); q.put("c")
+        q.put("a")
+        q.put("b")
+        q.put("c")
         ts_b = q.peek_all_with_timestamps()[1][1]
 
         self.assertTrue(q.remove_index(0))
         pairs = q.peek_all_with_timestamps()
         self.assertEqual([p[0] for p in pairs], ["b", "c"])
-        self.assertEqual(pairs[0][1], ts_b,
-                         "after removing index 0, 'b' must keep its original timestamp")
+        self.assertEqual(pairs[0][1], ts_b, "after removing index 0, 'b' must keep its original timestamp")
 
     def test_clear_drops_timestamps(self):
         from agentica.cli.commands import PendingQueue
 
         q = PendingQueue()
-        q.put("a"); q.put("b")
+        q.put("a")
+        q.put("b")
         q.clear()
         self.assertEqual(q.peek_all_with_timestamps(), [])
         self.assertTrue(q.empty())
@@ -1048,8 +1268,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
 
         out = self._capture(render)
         self.assertIn("Response", out)
-        self.assertRegex(out, r"\(\d{2}:\d{2}:\d{2}\)",
-                         "close rule must embed a HH:MM:SS timestamp")
+        self.assertRegex(out, r"\(\d{2}:\d{2}:\d{2}\)", "close rule must embed a HH:MM:SS timestamp")
         # Timestamp must appear on the closing rule (the line containing ╯),
         # not somewhere in the body.
         close_lines = [ln for ln in out.splitlines() if "╯" in ln]

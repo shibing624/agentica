@@ -6,6 +6,7 @@
 All _cmd_* functions live here. interactive.py imports COMMAND_REGISTRY
 and COMMAND_HANDLERS to wire them into the TUI process_loop.
 """
+
 import asyncio
 import collections
 import json
@@ -36,9 +37,17 @@ from agentica.cli.display import (
 )
 from agentica.cli.setup import (
     default_base_url,
+    default_model_name,
     get_saved_api_key,
     load_cli_config,
     save_cli_config,
+)
+from agentica.global_config import (
+    get_profile,
+    get_profiles,
+    get_active_profile_name,
+    set_active_profile,
+    upsert_profile,
 )
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
@@ -58,6 +67,7 @@ from agentica.skills.skill_registry import reset_skill_registry
 
 # ==================== CommandContext ====================
 
+
 @dataclass
 class CommandContext:
     """Shared context passed to all command handlers.
@@ -65,6 +75,7 @@ class CommandContext:
     Replaces the scattered **kwargs parameter bags with a single,
     type-checkable object.
     """
+
     agent_config: dict
     current_agent: Any  # Agent instance
     extra_tools: Optional[List] = None
@@ -84,10 +95,11 @@ class CommandContext:
     # Persistent goal loop (see agentica/goals.py). Same instance is shared
     # between the post-turn hook and /goal handlers, guarded by goal_lock.
     goal_manager: Any = None  # Optional[GoalManager]
-    goal_lock: Any = None     # Optional[threading.Lock]
+    goal_lock: Any = None  # Optional[threading.Lock]
 
 
 # ==================== PendingQueue ====================
+
 
 class PendingQueue:
     """Thread-safe observable queue with list/clear/remove support.
@@ -152,25 +164,50 @@ class PendingQueue:
 
 # Commands that can execute while the agent is streaming (non-blocking).
 # Readonly info commands + queue/bg management.
-CONCURRENT_CMDS = frozenset({
-    "/bg", "/background", "/stop",
-    "/q", "/queue", "/steer",
-    "/cost", "/usage", "/config", "/debug",
-    "/history", "/help", "/tools", "/skills",
-    "/permissions", "/statusbar", "/sb",
-    "/reasoning",
-    # /goal and /subgoal: status/pause/clear/list subcommands are concurrent-safe.
-    # Handlers reject "set new objective" when agent_running.
-    "/goal", "/subgoal",
-})
+CONCURRENT_CMDS = frozenset(
+    {
+        "/bg",
+        "/background",
+        "/stop",
+        "/q",
+        "/queue",
+        "/steer",
+        "/cost",
+        "/usage",
+        "/config",
+        "/debug",
+        "/history",
+        "/help",
+        "/tools",
+        "/skills",
+        "/permissions",
+        "/statusbar",
+        "/sb",
+        "/reasoning",
+        # /goal and /subgoal: status/pause/clear/list subcommands are concurrent-safe.
+        # Handlers reject "set new objective" when agent_running.
+        "/goal",
+        "/subgoal",
+    }
+)
 
 
 # ==================== Helpers ====================
 
-IMAGE_EXTENSIONS = frozenset({
-    '.png', '.jpg', '.jpeg', '.gif', '.webp',
-    '.bmp', '.tiff', '.tif', '.svg', '.ico',
-})
+IMAGE_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".tiff",
+        ".tif",
+        ".svg",
+        ".ico",
+    }
+)
 
 
 def _cmd_title(name: str):
@@ -225,12 +262,14 @@ def _run_async_safe(coro):
     if loop is not None and loop.is_running():
         # Already inside an event loop — create a new one in a thread
         import concurrent.futures
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
     return asyncio.run(coro)
 
 
 # ==================== Command Handlers ====================
+
 
 def _cmd_help(ctx: CommandContext, cmd_args: str = ""):
     _cmd_title(f"/help {cmd_args.strip()}" if cmd_args.strip() else "/help")
@@ -340,7 +379,7 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
         if is_active and agent and agent.tools:
             for tool in agent.tools:
                 if type(tool).__name__ == _cls:
-                    funcs = tool.functions if hasattr(tool, 'functions') else {}
+                    funcs = tool.functions if hasattr(tool, "functions") else {}
                     if funcs:
                         con.print(f"  Functions: {', '.join(funcs.keys())}")
                     break
@@ -394,7 +433,9 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"    [dim]○[/dim] [dim]{name:<20}[/dim] [dim]{desc}[/dim]")
     con.print()
     active_count = sum(1 for _, (_, a) in all_tools.items() if a)
-    con.print(f"  [green]● = active ({active_count})[/green]  [dim]○ = available ({len(all_tools) - active_count})[/dim]")
+    con.print(
+        f"  [green]● = active ({active_count})[/green]  [dim]○ = available ({len(all_tools) - active_count})[/dim]"
+    )
     con.print(f"  [dim]Commands: /tools add <name> | remove <name> | info <name> | search <keyword>[/dim]")
     con.print()
 
@@ -432,6 +473,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
             con.print("  [dim]Usage: /skills search <query>[/dim]")
             return
         from agentica.skills.hub import unified_search
+
         con.print(f"  Searching for: {query}...")
         results = unified_search(query, limit=15, deduplicate=False)
         if not results:
@@ -441,7 +483,9 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
         con.print()
         for r in results:
             trust_style = {"trusted": "green"}.get(r.trust_level, "yellow")
-            con.print(f"    [bold]{r.name:<25}[/bold] [{trust_style}]{r.trust_level:<10}[/{trust_style}] [dim]{r.source}[/dim]")
+            con.print(
+                f"    [bold]{r.name:<25}[/bold] [{trust_style}]{r.trust_level:<10}[/{trust_style}] [dim]{r.source}[/dim]"
+            )
             if r.description:
                 con.print(f"      [dim]{r.description[:70]}{'...' if len(r.description) > 70 else ''}[/dim]")
             con.print(f"      [dim]identifier: {r.identifier}[/dim]")
@@ -464,6 +508,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
         query = " ".join(query_parts)
 
         from agentica.skills.hub import unified_search
+
         con.print(f"  Loading skills from all sources{f' (filter: {query})' if query else ''}...")
         results = unified_search(query, limit=500)
         if not results:
@@ -499,12 +544,14 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
         total_pages = max(1, (total + page_size - 1) // page_size)
         page = max(1, min(page, total_pages))
         start = (page - 1) * page_size
-        page_items = results[start:start + page_size]
+        page_items = results[start : start + page_size]
         con.print(f"  [bold cyan]Skills Hub ({total} skills, page {page}/{total_pages})[/bold cyan]")
         con.print()
         for i, r in enumerate(page_items, start=start + 1):
             trust_style = {"trusted": "green"}.get(r.trust_level, "yellow")
-            con.print(f"    {i:>3}. [bold]{r.name:<25}[/bold] [{trust_style}]{r.trust_level:<10}[/{trust_style}] [dim]{r.source}[/dim]")
+            con.print(
+                f"    {i:>3}. [bold]{r.name:<25}[/bold] [{trust_style}]{r.trust_level:<10}[/{trust_style}] [dim]{r.source}[/dim]"
+            )
         con.print()
         nav = []
         browse_cmd = f"/skills browse {query}" if query else "/skills browse"
@@ -551,6 +598,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
 
         # Hub identifier or short name: use hub pipeline
         from agentica.skills.hub import hub_install
+
         con.print(f"  Fetching: {source}...")
         success, msg = hub_install(source, category=category, force=force)
         if success:
@@ -565,6 +613,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
             con.print("  [dim]Usage: /skills uninstall <name>[/dim]")
             return
         from agentica.skills.hub import uninstall_skill as hub_uninstall
+
         success, msg = hub_uninstall(sub_args[0])
         if success:
             con.print(f"  [green]{msg}[/green]")
@@ -627,6 +676,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
 
         # Try hub inspect
         from agentica.skills.hub import create_source_router, resolve_short_name
+
         sources = create_source_router()
         identifier = query
         if "/" not in identifier:
@@ -649,6 +699,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
     # ── /skills tap — manage custom GitHub sources ──
     if subcommand == "tap":
         from agentica.skills.hub import TapsManager
+
         mgr = TapsManager()
         tap_action = sub_args[0].lower() if sub_args else "list"
         tap_repo = sub_args[1] if len(sub_args) > 1 else ""
@@ -689,6 +740,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
 
     if ctx.current_agent and ctx.current_agent.tools:
         from agentica.tools.skill_tool import SkillTool
+
         for tool in ctx.current_agent.tools:
             if isinstance(tool, SkillTool):
                 for skill in tool._get_enabled_skills():
@@ -720,7 +772,9 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
         con.print("  No installed skills.")
         con.print()
 
-    con.print("  [dim]Commands: search <q> | browse | install <name> | remove <name> | inspect <name> | tap | reload[/dim]")
+    con.print(
+        "  [dim]Commands: search <q> | browse | install <name> | remove <name> | inspect <name> | tap | reload[/dim]"
+    )
 
 
 def _cmd_history(ctx: CommandContext, cmd_args: str = ""):
@@ -866,6 +920,7 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
     """Resume a previous session from JSONL log."""
     from agentica.memory.session_log import SessionLog
+
     con = get_console()
 
     sessions = SessionLog.list_sessions()
@@ -914,12 +969,12 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         if resume_at_uuid and current_agent._session_log:
             current_agent.working_memory.clear()
             for rm in current_agent._session_log.load(resume_at=resume_at_uuid):
-                current_agent.working_memory.add_message(
-                    Message(role=rm["role"], content=rm.get("content", ""))
-                )
+                current_agent.working_memory.add_message(Message(role=rm["role"], content=rm.get("content", "")))
 
-        con.print(f"[green]Resumed session: {chosen['session_id']}"
-                  f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}[/green]")
+        con.print(
+            f"[green]Resumed session: {chosen['session_id']}"
+            f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}[/green]"
+        )
 
         # If the resumed session had an active goal, demote to paused for
         # safety — automatic continuation on resume is too surprising
@@ -927,22 +982,15 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         resumed_goal_manager = None
         if current_agent._session_log is not None:
             judge_model = current_agent.auxiliary_model or current_agent.model
-            resumed_goal_manager = GoalManager(
-                current_agent._session_log, judge_model=judge_model
-            )
+            resumed_goal_manager = GoalManager(current_agent._session_log, judge_model=judge_model)
             state = resumed_goal_manager.load()
             if state is not None:
                 if state.status == "active":
                     resumed_goal_manager.force_pause_on_resume()
-                    con.print(
-                        f"  [yellow]⊙ Standing goal detected and paused for safety:[/yellow] "
-                        f"{state.objective}"
-                    )
+                    con.print(f"  [yellow]⊙ Standing goal detected and paused for safety:[/yellow] {state.objective}")
                     con.print("  [dim]Use /goal resume to continue working on it.[/dim]")
                 elif state.status in ("paused", "complete"):
-                    con.print(
-                        f"  [dim]⊙ Previous goal ({state.status}): {state.objective}[/dim]"
-                    )
+                    con.print(f"  [dim]⊙ Previous goal ({state.status}): {state.objective}[/dim]")
 
         return {"current_agent": current_agent, "goal_manager": resumed_goal_manager}
     else:
@@ -961,7 +1009,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
-    os.system('clear' if os.name != 'nt' else 'cls')
+    os.system("clear" if os.name != "nt" else "cls")
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
     print_header(
         ctx.agent_config["model_provider"],
@@ -984,9 +1032,110 @@ def _persist_model_choice(provider: str, model_name: str, base_url: Optional[str
     save_cli_config(config)
 
 
+def _apply_profile(ctx: CommandContext, name: str):
+    """Switch the live agent to a named agentica.json profile."""
+    con = get_console()
+    profile = get_profile(name)
+    if not profile or not profile.get("model_provider"):
+        con.print(f"[red]Profile not found or incomplete: {name}[/red]")
+        names = list(get_profiles().keys())
+        if names:
+            con.print(f"Available profiles: {', '.join(names)}", style="dim")
+        return
+
+    new_provider = profile["model_provider"]
+    new_model = profile.get("model_name") or default_model_name(new_provider)
+    new_base_url = profile.get("base_url") or default_base_url(new_provider)
+    new_key = profile.get("api_key") or get_saved_api_key(new_provider, new_base_url)
+
+    # Model tuning params: a profile-switch fully replaces the previous model's
+    # tuning, so unset profile fields reset to None (the model factory default)
+    # rather than leaking the old profile's values.
+    new_max_tokens = profile.get("max_tokens")
+    new_temperature = profile.get("temperature")
+    new_reasoning_effort = profile.get("reasoning_effort")
+    new_top_p = profile.get("top_p")
+    new_context_window = profile.get("context_window")
+
+    ctx.agent_config["model_provider"] = new_provider
+    ctx.agent_config["model_name"] = new_model
+    ctx.agent_config["base_url"] = new_base_url
+    ctx.agent_config["api_key"] = new_key
+    ctx.agent_config["max_tokens"] = new_max_tokens
+    ctx.agent_config["temperature"] = new_temperature
+    ctx.agent_config["reasoning_effort"] = new_reasoning_effort
+    ctx.agent_config["top_p"] = new_top_p
+    ctx.agent_config["context_window"] = new_context_window
+    set_active_profile(name)
+    _persist_model_choice(new_provider, new_model, new_base_url)
+
+    model_kwargs = {
+        "model_provider": new_provider,
+        "model_name": new_model,
+        "base_url": new_base_url,
+        "api_key": new_key,
+        "max_tokens": new_max_tokens,
+        "temperature": new_temperature,
+        "reasoning_effort": new_reasoning_effort,
+        "top_p": new_top_p,
+        "context_window": new_context_window,
+    }
+    new_model_obj = get_model(**model_kwargs)
+    if ctx.current_agent is not None:
+        ctx.current_agent.model = new_model_obj
+        _sanitize_history_for_model_switch(ctx.current_agent)
+        con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model} (session preserved)[/green]")
+        return {"model_switched": True}
+    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+    con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
+    return {"current_agent": current_agent}
+
+
+def _list_profiles():
+    """Print all configured agentica.json profiles."""
+    con = get_console()
+    profiles = get_profiles()
+    active = get_active_profile_name()
+    if not profiles:
+        con.print("[yellow]No profiles configured in ~/.agentica/agentica.json[/yellow]")
+        con.print("Create one with: agentica setup", style="dim")
+        return
+    con.print("Configured profiles:", style="cyan")
+    for name, p in profiles.items():
+        marker = " [active]" if name == active else ""
+        provider = p.get("model_provider", "?")
+        model = p.get("model_name", "?")
+        has_key = "key set" if p.get("api_key") else "no key"
+        con.print(f"  {name}{marker}: [dim]{provider}/{model} ({has_key})[/dim]")
+        tuning = []
+        if p.get("reasoning_effort"):
+            tuning.append(f"effort={p['reasoning_effort']}")
+        if p.get("max_tokens"):
+            tuning.append(f"max_tokens={p['max_tokens']}")
+        if p.get("context_window"):
+            tuning.append(f"context={p['context_window']}")
+        if p.get("temperature") is not None:
+            tuning.append(f"temp={p['temperature']}")
+        if p.get("top_p") is not None:
+            tuning.append(f"top_p={p['top_p']}")
+        if tuning:
+            con.print(f"      [dim]{', '.join(tuning)}[/dim]")
+    con.print()
+    con.print("Switch with: /model profile <name>", style="dim")
+
+
 def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     supported_providers = set(MODEL_REGISTRY.keys())
+
+    # Profile sub-commands: `/model profile`, `/model profile <name>`.
+    stripped = cmd_args.strip()
+    parts = stripped.split(None, 1)
+    if parts and parts[0].lower() in ("profile", "profiles"):
+        if len(parts) == 1:
+            return _list_profiles()
+        return _apply_profile(ctx, parts[1].strip())
+
     if cmd_args:
         if "/" in cmd_args:
             new_provider, new_model = cmd_args.split("/", 1)
@@ -1009,12 +1158,16 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
 
         # When switching providers we must also re-resolve the api_key:
         # reusing the old provider's key (e.g. deepseek) against a different
-        # endpoint (e.g. openai) is guaranteed to 401. Look up the saved key
-        # in cli_config.json for the new provider/base_url; if the user has
-        # never configured it there, fall back to ``None`` so the model
-        # factory resolves it from env vars.
+        # endpoint (e.g. openai) is guaranteed to 401. Prefer a matching
+        # agentica.json profile, then a saved cli_config.json key; if neither
+        # exists, fall back to ``None`` so the model factory resolves it from
+        # env vars.
         if new_provider != old_provider:
-            ctx.agent_config["api_key"] = get_saved_api_key(new_provider, new_base_url)
+            matching_profile = get_profile(new_provider)
+            if matching_profile.get("model_provider") == new_provider and matching_profile.get("api_key"):
+                ctx.agent_config["api_key"] = matching_profile["api_key"]
+            else:
+                ctx.agent_config["api_key"] = get_saved_api_key(new_provider, new_base_url)
         ctx.agent_config["model_provider"] = new_provider
         ctx.agent_config["model_name"] = new_model
         ctx.agent_config["base_url"] = new_base_url
@@ -1030,6 +1183,10 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
             "api_key": ctx.agent_config.get("api_key"),
             "max_tokens": ctx.agent_config.get("max_tokens"),
             "temperature": ctx.agent_config.get("temperature"),
+            "reasoning_effort": ctx.agent_config.get("reasoning_effort"),
+            "top_p": ctx.agent_config.get("top_p"),
+            # context_window is model-specific; let the new model auto-detect it
+            # from the catalog rather than carrying over the old model's value.
         }
         new_model_obj = get_model(**model_kwargs)
         if ctx.current_agent is not None:
@@ -1042,15 +1199,27 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"[green]Switched to: {new_provider}/{new_model}[/green]")
             return {"current_agent": current_agent}
     else:
-        con.print(f"Current model: [bold cyan]{ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}[/bold cyan]")
+        con.print(
+            f"Current model: [bold cyan]{ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}[/bold cyan]"
+        )
         con.print()
         con.print("Supported providers and example models:", style="cyan")
         for provider in sorted(EXAMPLE_MODELS.keys()):
             marker = " [current]" if provider == ctx.agent_config["model_provider"] else ""
             models_str = ", ".join(EXAMPLE_MODELS[provider][:3]) + ", ..."
             con.print(f"  {provider}{marker}: [dim]{models_str}[/dim]")
+        profiles = get_profiles()
+        if profiles:
+            active = get_active_profile_name()
+            con.print()
+            con.print("Saved profiles (~/.agentica/agentica.json):", style="cyan")
+            for name, p in profiles.items():
+                marker = " [active]" if name == active else ""
+                con.print(f"  {name}{marker}: [dim]{p.get('model_provider', '?')}/{p.get('model_name', '?')}[/dim]")
         con.print()
         con.print("Usage: /model <provider>/<model>  (any model name accepted)", style="dim")
+        con.print("       /model profile             (list saved profiles)", style="dim")
+        con.print("       /model profile <name>      (switch to a saved profile)", style="dim")
         con.print("Examples: /model openai/gpt-5, /model deepseek/deepseek-chat", style="dim")
 
 
@@ -1075,10 +1244,15 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         model = agent.model
         wm = agent.working_memory
 
-        compacted = _run_async_safe(cm.auto_compact(
-            messages, model=model, force=True, working_memory=wm,
-            custom_instructions=custom_instructions,
-        ))
+        compacted = _run_async_safe(
+            cm.auto_compact(
+                messages,
+                model=model,
+                force=True,
+                working_memory=wm,
+                custom_instructions=custom_instructions,
+            )
+        )
         if compacted:
             con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} summary.[/green]")
         else:
@@ -1103,7 +1277,7 @@ def _rule_based_compact(current_agent, messages, msg_count):
 
     summary_parts = []
     for msg in old_messages:
-        content = msg.content or ''
+        content = msg.content or ""
         if isinstance(content, str) and content:
             preview = content[:300] + "..." if len(content) > 300 else content
             summary_parts.append(f"[{msg.role}] {preview}")
@@ -1300,6 +1474,7 @@ def _cmd_paste(ctx: CommandContext, cmd_args: str = ""):
         return
     from agentica.cli.clipboard import has_clipboard_image
     from agentica.cli.interactive import _try_attach_clipboard_image
+
     if has_clipboard_image():
         if _try_attach_clipboard_image(ctx.attached_images, ctx.image_counter):
             img = ctx.attached_images[-1]
@@ -1322,6 +1497,7 @@ def _cmd_image(ctx: CommandContext, cmd_args: str = ""):
         return
 
     from agentica.cli.interactive import _split_path_input, _resolve_attachment_path
+
     path_token, _ = _split_path_input(raw_args)
     image_path = _resolve_attachment_path(path_token)
     if image_path is None:
@@ -1426,6 +1602,7 @@ def _cmd_steer(ctx: CommandContext, cmd_args: str = ""):
 def _checkpoint_manager(ctx: CommandContext):
     """Build a disk-backed CheckpointManager scoped to the current session."""
     from agentica.checkpoint import CheckpointManager
+
     session_id = ctx.current_agent.session_id or "default"
     return CheckpointManager(session_id=session_id)
 
@@ -1511,9 +1688,7 @@ def _cmd_checkpoint(ctx: CommandContext, cmd_args: str = ""):
         root = _work_dir_root(ctx)
         outside = [f.path for f in ck.files if not _is_inside_work_dir(f.path, root)]
         if outside:
-            con.print(
-                f"  [red]Refusing to restore checkpoint files outside work_dir: {root}[/red]"
-            )
+            con.print(f"  [red]Refusing to restore checkpoint files outside work_dir: {root}[/red]")
             for path in outside[:5]:
                 con.print(f"    [dim]{path}[/dim]")
             return
@@ -1706,8 +1881,11 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
 
         # Use shared box printer from interactive
         from agentica.cli.interactive import _print_boxed_result
+
         _print_boxed_result(
-            f"Background #{task_num}", prompt, result_text or "",
+            f"Background #{task_num}",
+            prompt,
+            result_text or "",
             color="bright_magenta",
         )
 
@@ -1732,6 +1910,7 @@ def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
 
 
 # ==================== /goal & /subgoal ====================
+
 
 def _attach_goal_tool(agent: Any) -> None:
     """Idempotently attach the GoalTool so the model can break the loop.
@@ -1901,8 +2080,10 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
 
     # ── set new objective ──
     if ctx.agent_running:
-        con.print("  [yellow]Cannot set a new goal while the agent is running. "
-                  "Wait for the current turn or use /goal pause/clear.[/yellow]")
+        con.print(
+            "  [yellow]Cannot set a new goal while the agent is running. "
+            "Wait for the current turn or use /goal pause/clear.[/yellow]"
+        )
         return {"goal_manager": mgr}
 
     objective, budgets, parse_error = _parse_goal_set_args(arg)
@@ -1921,7 +2102,8 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     agent = ctx.current_agent
     if agent is not None:
         agent.task_anchor = TaskAnchor(
-            goal=state.objective, source_query=state.objective,
+            goal=state.objective,
+            source_query=state.objective,
             source="goal",
         )
         agent._anchor_session_id = agent.session_id
@@ -2017,49 +2199,52 @@ def _cmd_subgoal(ctx: CommandContext, cmd_args: str = ""):
 
 COMMAND_REGISTRY = {
     # Session
-    "/new":           (_cmd_newchat,       "Start a new chat session"),
-    "/clear":         (_cmd_clear,         "Clear screen and reset"),
-    "/reset":         (_cmd_clear,         "Clear screen and reset (alias)"),
-    "/history":       (_cmd_history,       "Show conversation history"),
-    "/export":        (_cmd_export,        "Save conversation to JSON"),
-    "/save":          (_cmd_export,        "Save conversation to JSON (alias)"),
-    "/retry":         (_cmd_retry,         "Retry the last message (resend to agent)"),
-    "/undo":          (_cmd_undo,          "Remove the last user/assistant exchange"),
-    "/compact":       (_cmd_compact,       "Compact context (summarize history)"),
-    "/resume":        (_cmd_resume,        "Resume a previous session"),
-    "/goal":          (_cmd_goal,          "Set or manage a standing goal (auto-continues until done)"),
-    "/subgoal":       (_cmd_subgoal,       "Add or manage acceptance criteria on the active goal"),
-    "/btw":           (_cmd_btw,           "Quick aside answered in parallel \u2014 no tools, not persisted"),
-    "/queue":         (_cmd_queue,         "Run as the NEXT turn after the current run finishes | list | clear | remove <n>"),
-    "/q":             (_cmd_queue,         "Run as the next turn after current run (alias)"),
-    "/background":    (_cmd_background,    "Run NOW in a parallel independent agent (own session)"),
-    "/bg":            (_cmd_background,    "Run now in a parallel independent agent (alias)"),
-    "/stop":          (_cmd_stop,          "Kill all running background tasks"),
-    "/steer":         (_cmd_steer,         "Course-correct the CURRENT run mid-task (injected between tool batches)"),
-    "/checkpoint":    (_cmd_checkpoint,    "Durable file snapshots: list | create <label> <path...> | diff <id> | restore <id>"),
+    "/new": (_cmd_newchat, "Start a new chat session"),
+    "/clear": (_cmd_clear, "Clear screen and reset"),
+    "/reset": (_cmd_clear, "Clear screen and reset (alias)"),
+    "/history": (_cmd_history, "Show conversation history"),
+    "/export": (_cmd_export, "Save conversation to JSON"),
+    "/save": (_cmd_export, "Save conversation to JSON (alias)"),
+    "/retry": (_cmd_retry, "Retry the last message (resend to agent)"),
+    "/undo": (_cmd_undo, "Remove the last user/assistant exchange"),
+    "/compact": (_cmd_compact, "Compact context (summarize history)"),
+    "/resume": (_cmd_resume, "Resume a previous session"),
+    "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done)"),
+    "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
+    "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),
+    "/queue": (_cmd_queue, "Run as the NEXT turn after the current run finishes | list | clear | remove <n>"),
+    "/q": (_cmd_queue, "Run as the next turn after current run (alias)"),
+    "/background": (_cmd_background, "Run NOW in a parallel independent agent (own session)"),
+    "/bg": (_cmd_background, "Run now in a parallel independent agent (alias)"),
+    "/stop": (_cmd_stop, "Kill all running background tasks"),
+    "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (injected between tool batches)"),
+    "/checkpoint": (
+        _cmd_checkpoint,
+        "Durable file snapshots: list | create <label> <path...> | diff <id> | restore <id>",
+    ),
     # Model & Config
-    "/model":         (_cmd_model,         "View or switch model"),
-    "/config":        (_cmd_config,        "Show current configuration"),
-    "/cost":          (_cmd_cost,          "Show token usage and cost"),
-    "/usage":         (_cmd_cost,          "Show token usage and cost (alias)"),
-    "/debug":         (_cmd_debug,         "Show debug info"),
-    "/reasoning":     (_cmd_reasoning,     "Toggle reasoning display: on | off"),
-    "/statusbar":     (_cmd_statusbar,     "Toggle the status bar visibility"),
-    "/sb":            (_cmd_statusbar,     "Toggle the status bar (alias)"),
+    "/model": (_cmd_model, "View or switch model"),
+    "/config": (_cmd_config, "Show current configuration"),
+    "/cost": (_cmd_cost, "Show token usage and cost"),
+    "/usage": (_cmd_cost, "Show token usage and cost (alias)"),
+    "/debug": (_cmd_debug, "Show debug info"),
+    "/reasoning": (_cmd_reasoning, "Toggle reasoning display: on | off"),
+    "/statusbar": (_cmd_statusbar, "Toggle the status bar visibility"),
+    "/sb": (_cmd_statusbar, "Toggle the status bar (alias)"),
     # Tools & Skills
-    "/tools":         (_cmd_tools,         "Manage tools: add | remove | info | search"),
-    "/skills":        (_cmd_skills,        "Manage skills: search | browse | install | remove | inspect | tap"),
-    "/extensions":    (_cmd_skills,        "Manage skills (alias for /skills)"),
+    "/tools": (_cmd_tools, "Manage tools: add | remove | info | search"),
+    "/skills": (_cmd_skills, "Manage skills: search | browse | install | remove | inspect | tap"),
+    "/extensions": (_cmd_skills, "Manage skills (alias for /skills)"),
     # Permissions
-    "/permissions":   (_cmd_permissions,   "View or set permission mode"),
-    "/yolo":          (_cmd_yolo,          "Toggle YOLO mode (auto-approve all)"),
+    "/permissions": (_cmd_permissions, "View or set permission mode"),
+    "/yolo": (_cmd_yolo, "Toggle YOLO mode (auto-approve all)"),
     # Media
-    "/paste":         (_cmd_paste,         "Paste image from clipboard"),
-    "/image":         (_cmd_image,         "Attach a local image file"),
+    "/paste": (_cmd_paste, "Paste image from clipboard"),
+    "/image": (_cmd_image, "Attach a local image file"),
     # Other
-    "/help":          (_cmd_help,          "Show available commands"),
-    "/exit":          (_cmd_exit,          "Exit the CLI"),
-    "/quit":          (_cmd_exit,          "Exit the CLI (alias)"),
+    "/help": (_cmd_help, "Show available commands"),
+    "/exit": (_cmd_exit, "Exit the CLI"),
+    "/quit": (_cmd_exit, "Exit the CLI (alias)"),
 }
 
 COMMAND_HANDLERS = {cmd: handler for cmd, (handler, _) in COMMAND_REGISTRY.items()}

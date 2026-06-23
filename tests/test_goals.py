@@ -5,6 +5,7 @@
 
 All tests mock ``Model.response()`` — no real LLM calls.
 """
+
 import asyncio
 import json
 import tempfile
@@ -21,6 +22,9 @@ from agentica.goals import (
     GoalDecision,
     GoalManager,
     GoalState,
+    VerifierContext,
+    VerifierResult,
+    _invoke_verifier,
     _parse_judge_response,
     judge_goal,
 )
@@ -31,6 +35,7 @@ from agentica.model.response import ModelResponse
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_session_log(tmp_path: Path, session_id: str = "test-session") -> SessionLog:
     return SessionLog(session_id=session_id, base_dir=str(tmp_path))
@@ -45,6 +50,7 @@ def _fake_model(content: str = '{"done": false, "reason": "keep going"}'):
 # ---------------------------------------------------------------------------
 # GoalState (de)serialization
 # ---------------------------------------------------------------------------
+
 
 def test_goalstate_roundtrip():
     s = GoalState(
@@ -63,11 +69,13 @@ def test_goalstate_roundtrip():
 
 
 def test_goalstate_from_dict_ignores_unknown_fields():
-    s = GoalState.from_dict({
-        "session_id": "x",
-        "objective": "o",
-        "unknown_field": 123,
-    })
+    s = GoalState.from_dict(
+        {
+            "session_id": "x",
+            "objective": "o",
+            "unknown_field": 123,
+        }
+    )
     assert s.session_id == "x"
     assert s.objective == "o"
 
@@ -75,6 +83,7 @@ def test_goalstate_from_dict_ignores_unknown_fields():
 # ---------------------------------------------------------------------------
 # Judge response parsing
 # ---------------------------------------------------------------------------
+
 
 def test_parse_judge_response_done():
     v, r, failed = _parse_judge_response('{"done": true, "reason": "all done"}')
@@ -112,6 +121,7 @@ def test_parse_judge_response_empty():
 # judge_goal — model integration via Model.response()
 # ---------------------------------------------------------------------------
 
+
 def test_judge_goal_uses_model_response():
     model = _fake_model('{"done": true, "reason": "looks good"}')
     v, r, failed = asyncio.run(judge_goal(model, "do X", "I did X"))
@@ -132,6 +142,7 @@ def test_judge_goal_fail_open_on_exception():
 # ---------------------------------------------------------------------------
 # SessionLog goal entries
 # ---------------------------------------------------------------------------
+
 
 def test_session_log_append_and_load_goal(tmp_path: Path):
     log = _make_session_log(tmp_path)
@@ -190,6 +201,7 @@ def test_session_log_load_goal_survives_large_file(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # GoalManager lifecycle
 # ---------------------------------------------------------------------------
+
 
 def test_manager_set_and_load(tmp_path: Path):
     log = _make_session_log(tmp_path)
@@ -260,6 +272,7 @@ def test_manager_add_subgoal_without_goal_raises(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # GoalManager.evaluate_after_turn — the core loop
 # ---------------------------------------------------------------------------
+
 
 def test_evaluate_done_completes_goal(tmp_path: Path):
     model = _fake_model('{"done": true, "reason": "all set"}')
@@ -340,10 +353,7 @@ def test_evaluate_three_parse_failures_pause(tmp_path: Path):
     model = _fake_model("this is not json")
     mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
     mgr.set("x")
-    decisions = [
-        asyncio.run(mgr.evaluate_after_turn(f"r{i}"))
-        for i in range(MAX_CONSECUTIVE_PARSE_FAILURES)
-    ]
+    decisions = [asyncio.run(mgr.evaluate_after_turn(f"r{i}")) for i in range(MAX_CONSECUTIVE_PARSE_FAILURES)]
     # First N-1 are soft retries.
     for d in decisions[:-1]:
         assert d.status == "active"
@@ -356,11 +366,13 @@ def test_evaluate_three_parse_failures_pause(tmp_path: Path):
 
 def test_evaluate_parse_failure_then_recover_resets_counter(tmp_path: Path):
     model = AsyncMock()
-    model.response = AsyncMock(side_effect=[
-        ModelResponse(content="garbage"),
-        ModelResponse(content='{"done": false, "reason": "ok now"}'),
-        ModelResponse(content='{"done": true, "reason": "done"}'),
-    ])
+    model.response = AsyncMock(
+        side_effect=[
+            ModelResponse(content="garbage"),
+            ModelResponse(content='{"done": false, "reason": "ok now"}'),
+            ModelResponse(content='{"done": true, "reason": "done"}'),
+        ]
+    )
     mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
     mgr.set("x")
     asyncio.run(mgr.evaluate_after_turn("r1"))
@@ -391,6 +403,7 @@ def test_evaluate_without_judge_model_pauses(tmp_path: Path):
 # Status line — readability sanity check
 # ---------------------------------------------------------------------------
 
+
 def test_status_line_no_goal(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path))
     assert mgr.status_line() == "No active goal."
@@ -398,6 +411,7 @@ def test_status_line_no_goal(tmp_path: Path):
 
 def test_event_callback_fires_for_lifecycle(tmp_path: Path):
     from agentica.run_events import RunEventType
+
     events: list = []
 
     def cb(event_type, payload):
@@ -469,8 +483,10 @@ def test_status_line_shows_token_budget(tmp_path: Path):
 # GoalTool — model-facing update_goal()
 # ---------------------------------------------------------------------------
 
+
 def test_goal_tool_complete(tmp_path: Path):
     from agentica.tools.goal_tool import GoalTool
+
     log = _make_session_log(tmp_path)
     GoalManager(log).set("x")
     tool = GoalTool(log)
@@ -481,8 +497,45 @@ def test_goal_tool_complete(tmp_path: Path):
     assert payload["last_verdict"] == "tool_signal"
 
 
+def test_goal_tool_complete_persists_final_answer(tmp_path: Path):
+    """update_goal(final_answer=...) should persist the deliverable separately
+    from chat content so closing chatter can't overwrite it."""
+    from agentica.tools.goal_tool import GoalTool
+
+    log = _make_session_log(tmp_path)
+    GoalManager(log).set("compare X and Y")
+    tool = GoalTool(log)
+    answer = "Python 3.12 vs FastAPI: 共同趋势是更强的类型与性能优化。"
+    asyncio.run(tool.update_goal(status="complete", reason="done", final_answer=answer))
+    payload = log.load_goal()
+    assert payload["status"] == "complete"
+    assert payload["final_answer"] == answer
+
+
+def test_goal_run_result_prefers_final_answer_over_chatter(tmp_path: Path):
+    """response_content should return the persisted final_answer, not the last
+    assistant message (which may be loop-control chatter)."""
+    from agentica.goals import GoalRunResult, GoalState
+    from agentica.run_response import RunResponse
+
+    state = GoalState(
+        session_id="s",
+        objective="x",
+        final_answer="THE REAL DELIVERABLE",
+    )
+    rr = RunResponse(content="Task done. See above.")  # closing chatter
+    result = GoalRunResult("complete", "ok", rr, state, 1)
+    assert result.response_content == "THE REAL DELIVERABLE"
+
+    # No final_answer → fall back to last assistant content.
+    state2 = GoalState(session_id="s", objective="x")
+    result2 = GoalRunResult("complete", "ok", RunResponse(content="fallback"), state2, 1)
+    assert result2.response_content == "fallback"
+
+
 def test_goal_tool_paused(tmp_path: Path):
     from agentica.tools.goal_tool import GoalTool
+
     log = _make_session_log(tmp_path)
     GoalManager(log).set("x")
     tool = GoalTool(log)
@@ -495,6 +548,7 @@ def test_goal_tool_paused(tmp_path: Path):
 
 def test_goal_tool_invalid_status(tmp_path: Path):
     from agentica.tools.goal_tool import GoalTool
+
     log = _make_session_log(tmp_path)
     GoalManager(log).set("x")
     tool = GoalTool(log)
@@ -506,6 +560,7 @@ def test_goal_tool_invalid_status(tmp_path: Path):
 
 def test_goal_tool_noop_when_no_goal(tmp_path: Path):
     from agentica.tools.goal_tool import GoalTool
+
     log = _make_session_log(tmp_path)
     tool = GoalTool(log)
     msg = asyncio.run(tool.update_goal(status="complete", reason=""))
@@ -519,6 +574,7 @@ def test_goal_tool_noop_when_no_goal(tmp_path: Path):
 # ---------------------------------------------------------------------------
 # Agent SDK ergonomic surface: get_goal_manager / enable_goal_tool / run_goal
 # ---------------------------------------------------------------------------
+
 
 def test_agent_get_goal_manager_lazy_creates_session_log_and_manager(tmp_path):
     """Agent without session_id still produces a working manager after the
@@ -601,18 +657,16 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     # Stub agent.run to return a synthetic RunResponse with no cost data.
     rr = RunResponse(content="42")
     with patch.object(Agent, "run", new=AsyncMock(return_value=rr)):
-        result = asyncio.run(
-            agent.run_goal("compute 17+9+16", turn_budget=3)
-        )
+        result = asyncio.run(agent.run_goal("compute 17+9+16", turn_budget=3))
 
     assert isinstance(result, GoalRunResult)
     assert result.status == "complete"
     assert result.turns_used == 1
     assert result.run_response is rr
-    # Anchor was bound to the objective, not the message.
-    assert agent.task_anchor.goal == "compute 17+9+16"
-    # GoalTool was attached.
-    assert any(isinstance(t, GoalTool) for t in (agent.tools or []))
+    # Anchor was bound to objective on the internal clone.
+    assert result.goal.objective == "compute 17+9+16"
+    # GoalTool was attached to the internal clone.
+    assert result.status == "complete"
 
 
 def test_agent_run_goal_token_budget_stops_loop(tmp_path):
@@ -638,9 +692,7 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     rr = RunResponse(content="...")
     rr.cost_tracker = ct
     with patch.object(Agent, "run", new=AsyncMock(return_value=rr)):
-        result = asyncio.run(
-            agent.run_goal("X", token_budget=50, turn_budget=10)
-        )
+        result = asyncio.run(agent.run_goal("X", token_budget=50, turn_budget=10))
 
     assert result.status == "budget_limited"
     assert "token budget" in result.reason
@@ -672,15 +724,8 @@ def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
     # test fast and isolated from the rest of Runner._run_impl.
     persisted = agent._session_log.load_goal()
     assert persisted is not None
-    if (
-        agent.task_anchor is None
-        or agent._anchor_session_id != agent.session_id
-    ):
-        if (
-            persisted is not None
-            and persisted.get("status") == "active"
-            and persisted.get("objective")
-        ):
+    if agent.task_anchor is None or agent._anchor_session_id != agent.session_id:
+        if persisted is not None and persisted.get("status") == "active" and persisted.get("objective"):
             agent.task_anchor = TaskAnchor(
                 goal=str(persisted["objective"]),
                 source_query=str(persisted["objective"]),
@@ -696,6 +741,7 @@ def test_runner_loads_persisted_goal_into_task_anchor(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # B1.3: weak-judge JSON parsing (string done values, fences)
 # ---------------------------------------------------------------------------
+
 
 def test_parse_judge_response_string_yes():
     """Weak models sometimes emit ``"done": "yes"`` instead of a bool."""
@@ -722,6 +768,7 @@ def test_parse_judge_response_string_no():
 # B1.1: subgoal-aware "find evidence" judge prompt
 # ---------------------------------------------------------------------------
 
+
 def test_judge_prompt_includes_evidence_rule_for_subgoals():
     """When subgoals are present the user prompt must demand concrete
     evidence — without this hermes saw judges accepting vague summaries."""
@@ -733,9 +780,14 @@ def test_judge_prompt_includes_evidence_rule_for_subgoals():
             return ModelResponse(content='{"done": false, "reason": "more"}')
 
     model = _Capturing()
-    asyncio.run(judge_goal(
-        model, "ship the demo", "started", subgoals=["tests pass", "docs updated"],
-    ))
+    asyncio.run(
+        judge_goal(
+            model,
+            "ship the demo",
+            "started",
+            subgoals=["tests pass", "docs updated"],
+        )
+    )
     user_prompt = captured["messages"][-1].content
     assert "tests pass" in user_prompt
     assert "docs updated" in user_prompt
@@ -762,6 +814,7 @@ def test_judge_prompt_omits_evidence_rule_without_subgoals():
 # B2.1: judge sees tool-call names (no LLM summarisation)
 # ---------------------------------------------------------------------------
 
+
 def test_judge_prompt_includes_tool_call_names():
     captured: Dict[str, Any] = {}
 
@@ -771,10 +824,14 @@ def test_judge_prompt_includes_tool_call_names():
             return ModelResponse(content='{"done": false, "reason": "more"}')
 
     model = _Capturing()
-    asyncio.run(judge_goal(
-        model, "do X", "did stuff",
-        tool_calls=[("read_file", False), ("run_pytest", True)],
-    ))
+    asyncio.run(
+        judge_goal(
+            model,
+            "do X",
+            "did stuff",
+            tool_calls=[("read_file", False), ("run_pytest", True)],
+        )
+    )
     user_prompt = captured["messages"][-1].content
     assert "read_file" in user_prompt
     # Errored tool is flagged inline.
@@ -799,6 +856,7 @@ def test_judge_prompt_omits_tool_section_when_none():
 # B2.2: consecutive tool failures auto-pause
 # ---------------------------------------------------------------------------
 
+
 def test_consecutive_tool_failures_auto_pause(tmp_path: Path):
     """All-failed-tools turns N in a row → auto-pause with reason 'tool-stuck'."""
     from agentica.goals import MAX_CONSECUTIVE_TOOL_FAILURES
@@ -809,16 +867,22 @@ def test_consecutive_tool_failures_auto_pause(tmp_path: Path):
 
     # First N-1 turns of all-failed tools just bump the counter.
     for i in range(MAX_CONSECUTIVE_TOOL_FAILURES - 1):
-        d = asyncio.run(mgr.evaluate_after_turn(
-            f"r{i}", tool_calls=[("edit_file", True), ("run_pytest", True)],
-        ))
+        d = asyncio.run(
+            mgr.evaluate_after_turn(
+                f"r{i}",
+                tool_calls=[("edit_file", True), ("run_pytest", True)],
+            )
+        )
         assert d.status == "active"
         assert d.should_continue is True
 
     # N-th turn trips auto-pause.
-    final = asyncio.run(mgr.evaluate_after_turn(
-        "stuck", tool_calls=[("edit_file", True)],
-    ))
+    final = asyncio.run(
+        mgr.evaluate_after_turn(
+            "stuck",
+            tool_calls=[("edit_file", True)],
+        )
+    )
     assert final.status == "paused"
     assert final.should_continue is False
     state = mgr.load()
@@ -831,15 +895,21 @@ def test_any_tool_success_resets_failure_counter(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
     mgr.set("x")
 
-    asyncio.run(mgr.evaluate_after_turn(
-        "r1", tool_calls=[("edit_file", True), ("ls", True)],
-    ))
+    asyncio.run(
+        mgr.evaluate_after_turn(
+            "r1",
+            tool_calls=[("edit_file", True), ("ls", True)],
+        )
+    )
     assert mgr.load().consecutive_tool_failures == 1
 
     # One success in the next turn resets the counter.
-    asyncio.run(mgr.evaluate_after_turn(
-        "r2", tool_calls=[("edit_file", True), ("read_file", False)],
-    ))
+    asyncio.run(
+        mgr.evaluate_after_turn(
+            "r2",
+            tool_calls=[("edit_file", True), ("read_file", False)],
+        )
+    )
     assert mgr.load().consecutive_tool_failures == 0
 
 
@@ -865,3 +935,235 @@ def test_resume_resets_tool_failure_counter(tmp_path: Path):
     mgr.pause("user")
     mgr.resume()
     assert mgr.load().consecutive_tool_failures == 0
+
+
+# ---------------------------------------------------------------------------
+# Callable verifier (Gap 1)
+# ---------------------------------------------------------------------------
+
+
+def test_verifier_done_short_circuits_judge(tmp_path: Path):
+    """A verifier returning ``done=True`` stops the loop and never calls judge."""
+    model = _fake_model('{"done": false, "reason": "judge would say no"}')
+
+    def verifier(ctx: VerifierContext) -> VerifierResult:
+        # Reads run-time context but decides purely on local truth.
+        assert ctx.objective == "ship it"
+        return VerifierResult(done=True, reason="pytest exit 0")
+
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("ship it")
+    decision = asyncio.run(mgr.evaluate_after_turn("response text", tool_calls=None))
+
+    assert decision.status == "complete"
+    assert decision.verdict == "verifier"
+    assert decision.reason == "pytest exit 0"
+    # Judge MUST NOT be called when verifier is authoritative.
+    model.response.assert_not_called()
+
+
+def test_verifier_continue_skips_judge_and_keeps_looping(tmp_path: Path):
+    model = _fake_model('{"done": true, "reason": "judge would have said yes"}')
+
+    def verifier(ctx: VerifierContext) -> VerifierResult:
+        return VerifierResult(done=False, reason="tests still failing")
+
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+
+    assert decision.status == "active"
+    assert decision.should_continue is True
+    assert decision.verdict == "verifier"
+    assert "tests still failing" in decision.reason
+    model.response.assert_not_called()
+
+
+def test_verifier_none_falls_back_to_judge(tmp_path: Path):
+    """Returning ``None`` is the explicit defer-to-judge path."""
+    model = _fake_model('{"done": true, "reason": "judge says done"}')
+
+    calls = []
+
+    def verifier(ctx: VerifierContext):
+        calls.append(ctx)
+        return None  # defer
+
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+
+    assert calls, "verifier must have been called"
+    # Judge took over and reported done.
+    assert decision.status == "complete"
+    assert decision.verdict == "done"
+    assert decision.reason == "judge says done"
+    model.response.assert_called_once()
+
+
+def test_verifier_async_callable_supported(tmp_path: Path):
+    model = _fake_model()
+
+    async def verifier(ctx: VerifierContext) -> VerifierResult:
+        await asyncio.sleep(0)  # actually awaited
+        return VerifierResult(done=True, reason="async ok")
+
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+
+    assert decision.status == "complete"
+    assert decision.reason == "async ok"
+    model.response.assert_not_called()
+
+
+def test_verifier_bool_shorthand_done(tmp_path: Path):
+    """Returning a bare True is shorthand for ``VerifierResult(done=True)``."""
+    model = _fake_model()
+    mgr = GoalManager(
+        _make_session_log(tmp_path),
+        judge_model=model,
+        verifier=lambda ctx: True,
+    )
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+    assert decision.status == "complete"
+    assert decision.verdict == "verifier"
+
+
+def test_verifier_bool_shorthand_continue(tmp_path: Path):
+    """Bare ``False`` keeps the loop alive without calling the judge."""
+    model = _fake_model('{"done": true, "reason": "judge would say yes"}')
+    mgr = GoalManager(
+        _make_session_log(tmp_path),
+        judge_model=model,
+        verifier=lambda ctx: False,
+    )
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+    assert decision.status == "active"
+    assert decision.should_continue is True
+    model.response.assert_not_called()
+
+
+def test_verifier_exception_fails_open_to_judge(tmp_path: Path):
+    """A buggy verifier must NOT crash the loop — fall back to judge."""
+    model = _fake_model('{"done": false, "reason": "judge fallback"}')
+
+    def verifier(ctx: VerifierContext):
+        raise RuntimeError("boom")
+
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+
+    # Judge ran (fail-open), loop continues normally.
+    assert decision.status == "active"
+    assert decision.verdict == "continue"
+    model.response.assert_called_once()
+
+
+def test_verifier_pause_terminates_loop(tmp_path: Path):
+    """``status='paused'`` lets the verifier surface a hard error for human review."""
+    model = _fake_model()
+
+    def verifier(ctx: VerifierContext) -> VerifierResult:
+        return VerifierResult(done=False, status="paused", reason="config drift detected")
+
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
+
+    assert decision.status == "paused"
+    assert decision.should_continue is False
+    assert decision.verdict == "verifier"
+    state = mgr.load()
+    assert state.paused_reason == "verifier"
+    model.response.assert_not_called()
+
+
+def test_verifier_runs_after_budget_and_tool_signals(tmp_path: Path):
+    """Verifier must NOT override hard budget caps — they take precedence."""
+    model = _fake_model()
+    # Verifier would say done, but budget already exhausted.
+    mgr = GoalManager(
+        _make_session_log(tmp_path),
+        judge_model=model,
+        verifier=lambda ctx: VerifierResult(done=True, reason="ignored"),
+    )
+    mgr.set("x", turn_budget=1, token_budget=10)
+    # Push tokens past budget on the first turn.
+    decision = asyncio.run(mgr.evaluate_after_turn("r1", token_delta=1000, tool_calls=None))
+    assert decision.status == "budget_limited"
+    # Budget message wins; verifier verdict was never recorded.
+    state = mgr.load()
+    assert state.paused_reason == "budget"
+    model.response.assert_not_called()
+
+
+def test_verifier_without_judge_model_can_drive_loop(tmp_path: Path):
+    """No judge + verifier returns concrete verdict every turn → no pause."""
+    model = None  # explicit: no judge
+    mgr = GoalManager(
+        _make_session_log(tmp_path),
+        judge_model=model,
+        verifier=lambda ctx: VerifierResult(
+            done=(ctx.turns_used >= 2),
+            reason=f"turn {ctx.turns_used}",
+        ),
+    )
+    mgr.set("x", turn_budget=5)
+    d1 = asyncio.run(mgr.evaluate_after_turn("r1"))
+    assert d1.status == "active"
+    d2 = asyncio.run(mgr.evaluate_after_turn("r2"))
+    assert d2.status == "complete"
+    assert d2.verdict == "verifier"
+
+
+def test_verifier_without_judge_and_None_returns_pauses(tmp_path: Path):
+    """No judge + verifier defers → must pause (no way to ever say done)."""
+    mgr = GoalManager(
+        _make_session_log(tmp_path),
+        judge_model=None,
+        verifier=lambda ctx: None,
+    )
+    mgr.set("x")
+    decision = asyncio.run(mgr.evaluate_after_turn("r1"))
+    assert decision.status == "paused"
+    assert "no judge" in decision.reason.lower()
+
+
+def test_invoke_verifier_unexpected_type_returns_none(tmp_path: Path):
+    """Returning a weird object is logged and treated as None."""
+    ctx = VerifierContext(
+        objective="o",
+        final_response="r",
+        subgoals=[],
+        tool_calls=[],
+        turns_used=0,
+        tokens_used=0,
+        wall_clock_used_sec=0.0,
+    )
+    result = asyncio.run(_invoke_verifier(lambda c: 12345, ctx))
+    assert result is None
+
+
+def test_verifier_sees_live_counters(tmp_path: Path):
+    """Verifier must observe up-to-date turns_used / tokens_used per turn."""
+    captured = []
+
+    def verifier(ctx: VerifierContext):
+        captured.append((ctx.turns_used, ctx.tokens_used, ctx.wall_clock_used_sec))
+        return None  # always defer to judge
+
+    model = _fake_model('{"done": false, "reason": "k"}')
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr.set("x", turn_budget=10)
+
+    asyncio.run(mgr.evaluate_after_turn("r1", token_delta=100, elapsed_sec=1.0))
+    asyncio.run(mgr.evaluate_after_turn("r2", token_delta=200, elapsed_sec=2.0))
+
+    assert captured == [
+        (1, 100, 1.0),  # post-charge for turn 1
+        (2, 300, 3.0),  # cumulative through turn 2
+    ]

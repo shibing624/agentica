@@ -5,6 +5,7 @@
 
 bs4 is included in agentica core dependencies (since v1.3.6).
 """
+
 import asyncio
 import hashlib
 import os
@@ -34,18 +35,23 @@ def clean_text(text: str) -> str:
         return ""
     # Remove control characters (ASCII 0-31 except tab, newline, carriage return)
     # Also remove Unicode control characters like \u000b (vertical tab)
-    cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]', '', text)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
     return cleaned
 
 
 class UrlCrawlerTool(Tool):
     # Default cache directory for crawled web pages
     DEFAULT_CACHE_DIR = os.path.join(AGENTICA_HOME, "web_cache")
+    # Hard cap on the bytes persisted to the on-disk cache. Without this a
+    # single large page (e.g. a framework doc dump) can write a multi-MB file
+    # that a model is then tempted to read_file in full, blowing the context
+    # token budget. The cache is a convenience, not an archive — keep it bounded.
+    MAX_CACHE_FILE_CHARS = 200_000
 
     def __init__(
-            self,
-            work_dir: str = None,
-            max_content_length: int = 16000,
+        self,
+        work_dir: str = None,
+        max_content_length: int = 16000,
     ):
         """Initialize UrlCrawlerTool.
 
@@ -69,7 +75,7 @@ class UrlCrawlerTool(Tool):
         parsed_url: ParseResult = urlparse(url)
         file_name = os.path.basename(url)
         prefix = f"{parsed_url.netloc}_{file_name}"
-        end = hash[:min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]
+        end = hash[: min(8, max_length - len(parsed_url.netloc) - len(file_name) - 1)]
         file_name = f"{prefix}_{end}"
         return file_name
 
@@ -118,9 +124,9 @@ class UrlCrawlerTool(Tool):
             str: Detected encoding
         """
         # 1. Check Content-Type header
-        content_type = response.headers.get('Content-Type', '').lower()
-        if 'charset=' in content_type:
-            charset = content_type.split('charset=')[-1].split(';')[0].strip()
+        content_type = response.headers.get("Content-Type", "").lower()
+        if "charset=" in content_type:
+            charset = content_type.split("charset=")[-1].split(";")[0].strip()
             if charset:
                 return charset
 
@@ -129,7 +135,7 @@ class UrlCrawlerTool(Tool):
         raw_content = response.content[:4096]  # Check first 4KB
         try:
             # Try to decode as ASCII to find charset declaration
-            text_sample = raw_content.decode('ascii', errors='ignore')
+            text_sample = raw_content.decode("ascii", errors="ignore")
 
             # Look for <meta charset="xxx">
             charset_match = re.search(r'<meta[^>]+charset=["\']?([^"\'\s>]+)', text_sample, re.IGNORECASE)
@@ -138,9 +144,7 @@ class UrlCrawlerTool(Tool):
 
             # Look for <meta http-equiv="Content-Type" content="text/html; charset=xxx">
             content_type_match = re.search(
-                r'<meta[^>]+content=["\'][^"\']*charset=([^"\'\s;]+)',
-                text_sample,
-                re.IGNORECASE
+                r'<meta[^>]+content=["\'][^"\']*charset=([^"\'\s;]+)', text_sample, re.IGNORECASE
             )
             if content_type_match:
                 return content_type_match.group(1)
@@ -149,15 +153,15 @@ class UrlCrawlerTool(Tool):
 
         # 3. Use charset_encoding from httpx (similar to apparent_encoding)
         apparent = response.encoding
-        if apparent and apparent != 'utf-8':
+        if apparent and apparent != "utf-8":
             apparent_lower = apparent.lower()
             # GB2312/GBK/GB18030 are all compatible, use GB18030 for best coverage
-            if apparent_lower in ('gb2312', 'gbk', 'gb18030'):
-                return 'gb18030'
+            if apparent_lower in ("gb2312", "gbk", "gb18030"):
+                return "gb18030"
             return apparent
 
         # 4. Default to UTF-8
-        return 'utf-8'
+        return "utf-8"
 
     async def url_crawl(self, url: str) -> str:
         """Crawl a website url and return the content of the website as a json string.
@@ -179,10 +183,10 @@ class UrlCrawlerTool(Tool):
         try:
             logger.debug(f"Crawling URL: {url}")
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate',
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Accept-Encoding": "gzip, deflate",
             }
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, headers=headers, timeout=10, follow_redirects=True)
@@ -190,28 +194,37 @@ class UrlCrawlerTool(Tool):
 
             # Improved encoding detection for Chinese websites
             encoding = self._detect_encoding(response)
-            text = response.content.decode(encoding, errors='replace')
+            text = response.content.decode(encoding, errors="replace")
 
-            soup = BeautifulSoup(text, 'html.parser')
+            soup = BeautifulSoup(text, "html.parser")
             for script in soup(["script", "style", "noscript", "iframe", "svg"]):
                 script.extract()
 
             # Handle links: Convert <a> tags to Markdown format [Text](URL)
-            for a in soup.find_all('a', href=True):
+            for a in soup.find_all("a", href=True):
                 link_text = a.get_text(strip=True)
                 if link_text:
-                    href = a['href']
+                    href = a["href"]
                     full_url = urljoin(url, href)
                     a.replace_with(f" [{link_text}]({full_url}) ")
 
-            text = soup.get_text(separator='\n')
+            text = soup.get_text(separator="\n")
             lines = (line.strip() for line in text.splitlines())
-            content = '\n'.join(line for line in lines if line)
+            content = "\n".join(line for line in lines if line)
             # Clean control characters from content
             content = clean_text(content)
 
             loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self._write_file, save_path, content)
+            # Persist a BOUNDED copy. The cache is for convenience/debugging,
+            # not a full archive — capping it prevents a model from later
+            # read_file-ing a multi-MB dump and exhausting the token budget.
+            cache_content = content
+            if len(cache_content) > self.MAX_CACHE_FILE_CHARS:
+                cache_content = (
+                    cache_content[: self.MAX_CACHE_FILE_CHARS]
+                    + "\n\n... (cache truncated; re-run fetch_url for fresh content)"
+                )
+            await loop.run_in_executor(None, self._write_file, save_path, cache_content)
             logger.debug(f"Successfully crawled: {url}, saved to: {save_path}, content length: {len(content)}")
         except httpx.HTTPStatusError as e:
             error_msg = f"HTTP {e.response.status_code} {e.response.reason_phrase}"
@@ -241,10 +254,10 @@ class UrlCrawlerTool(Tool):
             f.write(content)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     import asyncio
 
     m = UrlCrawlerTool()
     url = "https://baike.baidu.com/item/%E6%9D%8E%E7%91%9E"
     r = asyncio.run(m.url_crawl(url))
-    print(url, '\n\n', r)
+    print(url, "\n\n", r)
