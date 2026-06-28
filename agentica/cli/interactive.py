@@ -124,12 +124,19 @@ def _cprint(text: str):
 
 def _less_supports_lesskey(pager: str) -> bool:
     """True if this ``less`` accepts ``--lesskey-content`` (needed to bind Ctrl+o
-    to quit). Cached per-process; old BSD less builds lack the option."""
+    to quit). Cached per-process. Probed by invoking the real option rather than
+    parsing ``--help`` text — less's own help misprints the option as
+    ``--lesskey-context``, so a substring check on help would always be False.
+    """
     global _LESS_LESSKEY_OK
     if _LESS_LESSKEY_OK is None:
         try:
-            r = subprocess.run([pager, "--help"], capture_output=True, text=True, timeout=3)
-            _LESS_LESSKEY_OK = "lesskey-content" in (r.stdout or "")
+            r = subprocess.run(
+                [pager, "--lesskey-content=\n#command\n^O quit\n", os.devnull],
+                capture_output=True, text=True, timeout=3,
+            )
+            # Unsupported builds print "There is no lesskey-content=... option".
+            _LESS_LESSKEY_OK = "no lesskey-content" not in (r.stderr or "").lower()
         except Exception:
             _LESS_LESSKEY_OK = False
     return _LESS_LESSKEY_OK
@@ -138,21 +145,69 @@ def _less_supports_lesskey(pager: str) -> bool:
 _LESS_LESSKEY_OK: Optional[bool] = None
 
 
+def _compile_lesskey(bindings: str):
+    """Compile a lesskey ``bindings`` source (e.g. ``\\n#command\\n^O quit\\n``)
+    to a temp file via the ``lesskey`` binary and return its path, or ``None``
+    when no compiler is available. Used to inject key bindings on old ``less``
+    builds that lack ``--lesskey-content``.
+    """
+    import tempfile
+
+    lesskey_bin = shutil.which("lesskey")
+    if not lesskey_bin:
+        return None
+    with tempfile.NamedTemporaryFile("w", suffix=".lesskey", delete=False, encoding="utf-8") as src:
+        src.write(bindings)
+        src_path = src.name
+    compiled_path = src_path + ".bin"
+    try:
+        r = subprocess.run([lesskey_bin, "-o", compiled_path, src_path],
+                           capture_output=True, text=True, timeout=3)
+        if r.returncode != 0 or not os.path.exists(compiled_path):
+            return None
+        return compiled_path
+    except Exception:
+        return None
+    finally:
+        try:
+            os.unlink(src_path)
+        except OSError:
+            pass
+
+
 def _open_in_pager(title: str, content: str) -> None:
     """Open ``content`` in a pager so the user can view the full truncated
     block, then press ``Ctrl+o`` to return — the terminal is restored, giving
     CC-style expand/hide semantics without flooding the inline transcript.
 
-    Uses ``less`` with a lesskey binding so ``Ctrl+o`` (not ``q``) quits, to
-    match the expand key. Falls back to plain ``less`` (quit with ``q``) when
-    ``--lesskey-content`` is unsupported, with the header hint adjusted so the
-    user is told the right key.
+    Key binding strategy (in order of preference):
+    1. ``less --lesskey-content``: bind ``Ctrl+o`` to quit. Hint:
+       ``Ctrl+o to return`` (Ctrl+o mirrors the expand key).
+    2. Old ``less`` without ``--lesskey-content`` but with the ``lesskey``
+       compiler: compile a lesskey file (``^O quit``) and feed it via the
+       ``LESSKEY`` env var. Hint: ``Ctrl+o to return`` (same key as primary).
+       Esc is intentionally not bound — it prefixes escape sequences (arrow
+       keys), so binding it would break scrolling.
+    3. No ``lesskey`` compiler: plain ``less`` — only the built-in ``q`` quits.
+       Hint: ``q to return``.
     """
     import tempfile
 
     pager = shutil.which("less") or shutil.which("more")
+    # lesskey source binding Ctrl+o (^O) to quit. Esc (^[) is intentionally NOT
+    # bound: it is the prefix for escape sequences (arrow keys send ESC[A etc.),
+    # so binding it would break arrow-key scrolling in the pager. Ctrl+o is not a
+    # sequence prefix, so it is safe and matches the expand key.
+    lesskey_src = "\n#command\n^O quit\n"
     lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
-    return_hint = "Ctrl+o to return" if lesskey_ok else "q to return"
+
+    if lesskey_ok:
+        return_hint = "Ctrl+o to return"
+    elif pager is not None and "less" in pager and _compile_lesskey(lesskey_src):
+        return_hint = "Ctrl+o to return"
+    else:
+        return_hint = "q to return"
+
     header = (
         f"=== {title} · {len(content.splitlines())} lines "
         f"({return_hint}) ===\n\n"
@@ -167,15 +222,23 @@ def _open_in_pager(title: str, content: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(full)
         path = f.name
+    compiled_lesskey = None
     try:
         if lesskey_ok:
-            # lesskey source: bind Ctrl+o (^O) to quit so the same key expands/returns.
-            lesskey = "\n#command\n^O quit\n"
             subprocess.run(
-                [pager, "-R", f"--lesskey-content={lesskey}", "-P", "Ctrl+o to return", path],
+                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", "Ctrl+o to return", path],
             )
+        elif "less" in pager:
+            compiled_lesskey = _compile_lesskey(lesskey_src)
+            if compiled_lesskey:
+                env = dict(os.environ, LESSKEY=compiled_lesskey)
+                subprocess.run(
+                    [pager, "-R", "-P", "Ctrl+o to return", path], env=env,
+                )
+            else:
+                subprocess.run([pager, "-R", "-P", "q to return", path])
         else:
-            subprocess.run([pager, "-R", "-P", "q to return", path])
+            subprocess.run([pager, "-P", "q to return", path])
     except KeyboardInterrupt:
         pass
     finally:
@@ -183,6 +246,11 @@ def _open_in_pager(title: str, content: str) -> None:
             os.unlink(path)
         except OSError:
             pass
+        if compiled_lesskey:
+            try:
+                os.unlink(compiled_lesskey)
+            except OSError:
+                pass
 
 
 class ChatConsole:

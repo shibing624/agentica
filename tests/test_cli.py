@@ -1475,5 +1475,60 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         self.assertRegex(close_lines[-1], r"\(\d{2}:\d{2}:\d{2}\)")
 
 
+class TestLessLesskeyDetection(unittest.TestCase):
+    """Ctrl+o expand pager: detect --lesskey-content support (less's help
+    misprints the option as --lesskey-context, so detection must probe the real
+    option, not parse help text)."""
+
+    def setUp(self):
+        # Reset the module-level cache between tests.
+        from agentica.cli import interactive as it
+        it._LESS_LESSKEY_OK = None
+
+    def test_supported_when_no_error(self):
+        from agentica.cli import interactive as it
+        fake = MagicMock(returncode=0, stderr="")
+        with patch("agentica.cli.interactive.subprocess.run", return_value=fake):
+            self.assertTrue(it._less_supports_lesskey("/usr/bin/less"))
+
+    def test_unsupported_when_stderr_mentions_option(self):
+        from agentica.cli import interactive as it
+        fake = MagicMock(returncode=0, stderr="There is no lesskey-content=... option")
+        with patch("agentica.cli.interactive.subprocess.run", return_value=fake):
+            self.assertFalse(it._less_supports_lesskey("/usr/bin/less"))
+
+
+class TestCompileLesskey(unittest.TestCase):
+    """Old-less fallback: compile a lesskey file to bind Ctrl+o to quit when
+    --lesskey-content is unavailable. Esc is not bound (escape-sequence
+    prefix would break arrow keys)."""
+
+    def test_returns_path_when_lesskey_compiles(self):
+        from agentica.cli import interactive as it
+        run_calls = []
+
+        def fake_run(cmd, **kw):
+            run_calls.append(cmd)
+            # lesskey -o <out> <src>: create the compiled file to simulate success.
+            if cmd[0].endswith("lesskey"):
+                with open(cmd[2], "w") as fh:
+                    fh.write("COMPILED")
+                return MagicMock(returncode=0, stderr="")
+            return MagicMock(returncode=0, stderr="")
+
+        with patch("agentica.cli.interactive.shutil.which", return_value="/usr/bin/lesskey"), \
+             patch("agentica.cli.interactive.subprocess.run", side_effect=fake_run):
+            out = it._compile_lesskey("\n#command\n^O quit\n")
+        self.assertTrue(out and out.endswith(".bin"))
+        self.assertTrue(run_calls and run_calls[0][0].endswith("lesskey"))
+        import os as _os
+        _os.unlink(out)
+
+    def test_returns_none_when_no_lesskey_binary(self):
+        from agentica.cli import interactive as it
+        with patch("agentica.cli.interactive.shutil.which", return_value=None):
+            self.assertIsNone(it._compile_lesskey("\n#command\n^O quit\n"))
+
+
 if __name__ == "__main__":
     unittest.main()
