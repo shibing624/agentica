@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from io import StringIO
 
 from prompt_toolkit import print_formatted_text
-from prompt_toolkit.application import Application
+from prompt_toolkit.application import Application, run_in_terminal
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import Condition
@@ -54,6 +54,7 @@ from agentica.cli.display import (
     inject_file_contents,
     display_user_message,
     get_file_completions,
+    get_last_truncated,
 )
 from agentica.cli.permissions import PermissionManager
 from agentica.run_display import RunDisplayEventKind, classify_run_response
@@ -119,6 +120,42 @@ def _cprint(text: str):
     prompt_toolkit parse the escapes and render colors correctly.
     """
     print_formatted_text(ANSI(text))
+
+
+def _open_in_pager(title: str, content: str) -> None:
+    """Open ``content`` in a pager (``less``) so the user can view the full
+    truncated block, then press ``q`` to return — the terminal is restored.
+
+    Falls back to printing the full content if no pager is available.
+    """
+    import tempfile
+
+    header = (
+        f"=== {title} · {len(content.splitlines())} lines "
+        f"(press q to return) ===\n\n"
+    )
+    full = header + content
+    pager = shutil.which("less") or shutil.which("more")
+    if not pager:
+        con = get_console()
+        con.print()
+        con.print(f"[dim]{title}[/dim]")
+        con.print(full)
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
+        f.write(full)
+        path = f.name
+    try:
+        # -R: pass through ANSI colors. Alternate-screen (default) restores the
+        # terminal on exit, giving the "expand then hide" semantics.
+        subprocess.run([pager, "-R", path])
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 class ChatConsole:
@@ -691,11 +728,13 @@ def _process_stream_response(
                             result_content = tool_info.get("content", "")
                             is_error = tool_info.get("tool_call_error", False)
                             elapsed = (tool_info.get("metrics") or {}).get("time")
+                            tool_args = tool_info.get("tool_args") or tool_info.get("arguments") or {}
                             display.display_tool_result(
                                 tool_name,
                                 str(result_content) if result_content else "",
                                 is_error=is_error,
                                 elapsed=elapsed,
+                                tool_args=tool_args,
                             )
                             break
                 continue
@@ -1007,6 +1046,21 @@ def _setup_tui(
             size_kb = img.stat().st_size // 1024 if img.exists() else 0
             _cprint(f"  📎 Image #{len(state.attached_images)} attached: {img.name} ({size_kb}KB)")
             event.app.invalidate()
+
+    @kb.add("c-o")
+    def _expand_last_truncated(event):
+        """Expand the most recently truncated block (user input or tool output)
+        in a pager. Press ``q`` to return — the terminal is restored, giving
+        CC-style expand/hide semantics without flooding the inline transcript.
+        """
+        block = get_last_truncated()
+        content = block.get("content", "")
+        if not content:
+            _cprint("  [dim]Nothing to expand yet.[/dim]")
+            return
+        title = block.get("title", "Content")
+        run_in_terminal(lambda: _open_in_pager(title, content))
+        event.app.invalidate()
 
     class _PlaceholderProcessor(Processor):
         def __init__(self, get_text):

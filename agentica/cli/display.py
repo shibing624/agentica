@@ -65,6 +65,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
     get_console().print("  [bright_green]Alt+V[/bright_green]       Paste image from clipboard")
+    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand last truncated input/tool output in pager")
     get_console().print()
     # Input features
     get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files and inject content")
@@ -119,6 +120,26 @@ def inject_file_contents(prompt_text: str, mentioned_files: List[Path]) -> str:
 _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 
 
+# Most recent block (user input or tool output) that was truncated in the
+# CLI display. Remembered so the user can expand it on demand (Ctrl+O opens
+# it in a pager) instead of flooding the terminal with full content inline.
+_last_truncated: Dict[str, str] = {"title": "", "content": ""}
+
+
+def remember_truncated(title: str, content: str) -> None:
+    """Stash the most recent truncated block for on-demand expansion."""
+    _last_truncated["title"] = title
+    _last_truncated["content"] = content
+
+
+def get_last_truncated() -> Dict[str, str]:
+    """Return a copy of the most recent truncated block."""
+    return {
+        "title": _last_truncated.get("title", ""),
+        "content": _last_truncated.get("content", ""),
+    }
+
+
 def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int = 0) -> None:
     """Display user message with file mentions colored.
 
@@ -137,7 +158,8 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
         remaining = len(lines) - 3
         rich_text = Text()
         rich_text.append(preview, style=COLORS["user"])
-        rich_text.append(f"\n... (+{remaining} more lines)", style="dim")
+        rich_text.append(f"\n... (+{remaining} more lines · Ctrl+O 展开)", style="dim")
+        remember_truncated("User input", cleaned)
     else:
         pattern = r"(@[\w./-]+)"
         parts = re.split(pattern, cleaned)
@@ -273,6 +295,7 @@ def show_help(skills_registry=None):
         "Ctrl+C":            "Interrupt current operation",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Alt+V":             "Paste image from clipboard",
+        "Ctrl+O":            "Expand last truncated input/tool output in pager",
     }
     for key, desc in shortcuts.items():
         get_console().print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
@@ -574,7 +597,15 @@ class StreamDisplayManager:
             self.in_tool_section = True
 
     def display_tool(self, tool_name: str, tool_args: dict):
-        """Display a single tool call."""
+        """Display a single tool call.
+
+        Read-only tools (``_DEFERRED_TOOLS``) skip the start-time call line and
+        collapse into a single completion line that folds in elapsed time, e.g.
+        ``  🔎 grep 'pat' in path - 5 lines (13ms)``. The live spinner still
+        announces the running tool, so deferring the print costs no feedback.
+        """
+        if tool_name in self._DEFERRED_TOOLS:
+            return
         self.start_tool_section()
         self.tool_count += 1
         _display_tool_impl(self.console, tool_name, tool_args, self.tool_count)
@@ -603,19 +634,79 @@ class StreamDisplayManager:
             return f" ({elapsed:.2f}s)"
         return f" ({elapsed:.1f}s)"
 
-    # Tools whose result is pure noise on success. The tool-call line itself
-    # already tells the user what happened (e.g. ``📖 read_file foo.py (L1-500)``);
-    # dumping a ``⎿ N lines`` footer adds bulk without information. Errors are
-    # still surfaced so failures don't go silent.
-    _SUPPRESS_RESULT_TOOLS = frozenset({"read_file", "ls", "glob", "write_todos"})
+    @staticmethod
+    def _result_count_summary(tool_name: str, result_content: str) -> str:
+        """One-word count summary for a deferred read-only tool's result."""
+        if not result_content:
+            return "no matches" if tool_name == "grep" else ""
+        n = len(str(result_content).splitlines())
+        if n == 0:
+            return "no matches" if tool_name == "grep" else ""
+        if tool_name == "grep":
+            return f"{n} lines"
+        if tool_name == "ls":
+            return f"{n} items"
+        if tool_name == "glob":
+            return f"{n} files"
+        if tool_name == "web_search":
+            return f"{n} results"
+        return f"{n} lines"
 
-    # Tools that get a single one-line count summary instead of content lines.
-    _COMPACT_TOOLS = frozenset({"grep", "write_file", "fetch_url", "web_search"})
+    def _display_deferred_merged(self, tool_name: str, tool_args: dict,
+                                 result_content: str, is_error: bool,
+                                 elapsed_str: str) -> None:
+        """Print the single merged line for a deferred read-only tool.
+
+        Format: ``  {icon} {name} {params} - {count} {elapsed}``
+        (errors surface a truncated message instead of the count).
+        """
+        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+        params = format_tool_display(tool_name, tool_args)
+        line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
+        if params:
+            line += f" [dim]{params}[/dim]"
+        if is_error:
+            err = str(result_content).replace("\n", " ").strip()
+            if len(err) > 80:
+                err = err[:77] + "..."
+                remember_truncated(f"Tool error · {tool_name}", str(result_content))
+            line += f" [red]- error: {err}{elapsed_str}[/red]"
+        else:
+            summary = self._result_count_summary(tool_name, result_content)
+            if summary:
+                line += f" [dim]- {summary}{elapsed_str}[/dim]"
+            else:
+                line += f" [dim]{elapsed_str}[/dim]"
+        self.console.print(line)
+
+    # Read-only tools whose call line is deferred to completion so the call
+    # line and elapsed time collapse into ONE line, e.g.
+    # ``  🔎 grep 'pat' in path - 5 lines (13ms)``. No separate result footer.
+    _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
+
+    # Tools whose success result is pure noise on success. The call line itself
+    # already tells the user what happened; errors are still surfaced.
+    _SUPPRESS_RESULT_TOOLS = frozenset({"write_todos"})
+
+    # Tools that get a single one-line count summary as a footer below the call.
+    _COMPACT_TOOLS = frozenset({"write_file"})
 
     def display_tool_result(self, tool_name: str, result_content: str,
-                            is_error: bool = False, elapsed: float = None):
-        """Display tool execution result as a compact preview."""
+                            is_error: bool = False, elapsed: float = None,
+                            tool_args: Optional[dict] = None):
+        """Display tool execution result.
+
+        For ``_DEFERRED_TOOLS`` the call line was suppressed at start time, so
+        here we emit the merged single line ``icon name params - count (elapsed)``.
+        """
         elapsed_str = self._fmt_elapsed(elapsed)
+
+        if tool_name in self._DEFERRED_TOOLS:
+            self.start_tool_section()
+            self._display_deferred_merged(
+                tool_name, tool_args or {}, result_content, is_error, elapsed_str
+            )
+            return
 
         # Suppress noisy success results; the call line is enough.
         if tool_name in self._SUPPRESS_RESULT_TOOLS and not is_error:
@@ -639,12 +730,7 @@ class StreamDisplayManager:
         lines = result_str.splitlines()
 
         if tool_name in self._COMPACT_TOOLS and not is_error:
-            if tool_name == "grep":
-                summary = f"{len(lines)} lines" if lines else "no matches"
-            elif len(lines) > 1:
-                summary = f"{len(lines)} lines"
-            else:
-                summary = lines[0][:80] if lines else "ok"
+            summary = f"{len(lines)} lines" if len(lines) > 1 else lines[0][:80] if lines else "ok"
             self.console.print(f"    [dim]⎿ {summary}{elapsed_str}[/dim]")
             return
 
@@ -664,7 +750,10 @@ class StreamDisplayManager:
 
         remaining = len(lines) - max_lines
         if remaining > 0:
-            self.console.print(f"{cont_prefix}... ({remaining} more lines)", style="dim italic")
+            self.console.print(
+                f"{cont_prefix}... ({remaining} more lines · Ctrl+O 展开)", style="dim italic"
+            )
+            remember_truncated(f"Tool output · {tool_name}", result_str)
         if elapsed_str:
             self.console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
     

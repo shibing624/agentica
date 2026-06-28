@@ -305,19 +305,29 @@ class TestCLIHelpers(unittest.TestCase):
         calls = [str(c) for c in fake.print.call_args_list]
         self.assertTrue(any("compact" in c for c in calls))
 
-    def test_display_tool_result_suppresses_noisy_read_tools(self):
-        """read_file / ls / glob / write_todos drop the result footer on success."""
+    def test_display_tool_result_suppresses_write_todos_footer(self):
+        """write_todos drops the result footer on success (call line lists tasks)."""
         from agentica.cli.display import StreamDisplayManager
 
-        for name in ("read_file", "ls", "glob", "write_todos"):
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("write_todos", '{"message":"ok"}', is_error=False, elapsed=0.002)
+        fake.print.assert_not_called()
+
+    def test_display_tool_defers_read_only_call_line(self):
+        """Read-only tools skip the start-time call line (deferred to completion)."""
+        from agentica.cli.display import StreamDisplayManager
+
+        for name in ("read_file", "ls", "glob", "grep", "web_search", "fetch_url"):
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
-            dm.display_tool_result(name, "line1\nline2\nline3", is_error=False, elapsed=0.02)
-            fake.print.assert_not_called(), f"{name} should not print a success result"
+            dm.display_tool(name, {"file_path": "x.py"})
+            fake.print.assert_not_called(), f"{name} call line must be deferred"
 
-    def test_display_tool_result_grep_one_line_summary(self):
-        """grep renders a single count line, never the matched content."""
+    def test_display_tool_result_merged_single_line_for_read_ops(self):
+        """Read-only tools collapse call + result into one line with elapsed."""
         from agentica.cli.display import StreamDisplayManager
 
         fake = MagicMock()
@@ -328,22 +338,77 @@ class TestCLIHelpers(unittest.TestCase):
             "path/a.py:1:match\npath/b.py:2:match\npath/c.py:3:match",
             is_error=False,
             elapsed=2.23,
+            tool_args={"pattern": "foo", "path": "dual_mem"},
         )
         text = "\n".join(str(c) for c in fake.print.call_args_list)
+        # one merged line: icon name params - count (elapsed)
+        self.assertIn("grep", text)
+        self.assertIn("'foo'", text)
         self.assertIn("3 lines", text)
         self.assertIn("(2.23s)", text)
         # matched content must not leak into the CLI
         self.assertNotIn("match", text)
+        # no separate ⎿ footer — everything is on the merged line
+        self.assertNotIn("⎿", text)
 
-    def test_display_tool_result_surfaces_errors_even_for_suppressed_tools(self):
+    def test_display_tool_result_merged_line_always_has_elapsed(self):
         from agentica.cli.display import StreamDisplayManager
 
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
-        dm.display_tool_result("read_file", "FileNotFoundError: nope", is_error=True, elapsed=0.01)
+        dm.display_tool_result(
+            "read_file",
+            "\n".join(f"line {i}" for i in range(311)),
+            is_error=False,
+            elapsed=0.027,
+            tool_args={"file_path": "config.py", "offset": 130, "limit": 40},
+        )
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("config.py", text)
+        self.assertIn("311 lines", text)
+        self.assertIn("(27ms)", text)
+
+    def test_display_tool_result_surfaces_errors_even_for_deferred_tools(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "read_file", "FileNotFoundError: nope", is_error=True, elapsed=0.01,
+            tool_args={"file_path": "x.py"},
+        )
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("FileNotFoundError", text)
+
+    def test_truncated_blocks_are_remembered_for_expand(self):
+        """Long user input and long tool output are stashed for Ctrl+O expansion."""
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        # Long user input (>5 lines) is remembered.
+        disp.remember_truncated("", "")  # reset
+        long_input = "\n".join(f"line {i}" for i in range(20))
+        disp.display_user_message(long_input)
+        block = disp.get_last_truncated()
+        self.assertIn("User input", block["title"])
+        self.assertEqual(block["content"], long_input)
+
+        # Long tool output (>max_lines) is remembered.
+        long_output = "\n".join(f"out {i}" for i in range(50))
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("execute", long_output, is_error=False, elapsed=0.5)
+        block = disp.get_last_truncated()
+        self.assertIn("execute", block["title"])
+        self.assertEqual(block["content"], long_output)
+
+        # Short output is NOT remembered (no truncation → nothing to expand).
+        disp.remember_truncated("", "")
+        dm.display_tool_result("execute", "only one line", is_error=False, elapsed=0.1)
+        self.assertEqual(disp.get_last_truncated()["content"], "")
 
 
 class TestStreamDisplayManagerSubagent(unittest.TestCase):
