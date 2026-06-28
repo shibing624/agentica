@@ -304,6 +304,45 @@ class TestListSessions:
         assert sessions == []
 
 
+class TestSessionPreview:
+    """session_preview: first user message + user turn count for /resume list."""
+
+    def test_first_user_and_turn_count(self, tmp_dir):
+        log = SessionLog("p1", base_dir=tmp_dir)
+        log.append("system", "sys-ctx")
+        log.append("user", "Build a CLI tool for parsing nginx logs")
+        log.append("assistant", "sure")
+        log.append("user", "now add tests")
+        pv = SessionLog.session_preview(log.path)
+        assert pv["first_user"] == "Build a CLI tool for parsing nginx logs"
+        assert pv["user_count"] == 2
+
+    def test_empty_session(self, tmp_dir):
+        log = SessionLog("p2", base_dir=tmp_dir)
+        log.append("system", "sys-ctx")
+        pv = SessionLog.session_preview(log.path)
+        assert pv["first_user"] == ""
+        assert pv["user_count"] == 0
+
+    def test_truncates_long_first_user(self, tmp_dir):
+        log = SessionLog("p3", base_dir=tmp_dir)
+        long_msg = "x" * 500
+        log.append("user", long_msg)
+        pv = SessionLog.session_preview(log.path, max_chars=80)
+        assert len(pv["first_user"]) == 80
+        assert pv["user_count"] == 1
+
+    def test_malformed_lines_skipped(self, tmp_dir):
+        log = SessionLog("p4", base_dir=tmp_dir)
+        log.append("user", "real first message")
+        # Append a couple of garbage lines directly to the file.
+        with open(log.path, "a") as f:
+            f.write("{not valid json\n\n")
+        pv = SessionLog.session_preview(log.path)
+        assert pv["first_user"] == "real first message"
+        assert pv["user_count"] == 1
+
+
 class TestToolResultLogging:
     """Test that tool results are properly logged and restored."""
 

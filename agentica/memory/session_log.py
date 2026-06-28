@@ -421,6 +421,39 @@ class SessionLog:
 
         return sessions
 
+    @classmethod
+    def session_preview(cls, path: str, max_chars: int = 200) -> Dict[str, Any]:
+        """Lightweight preview of a session file for the /resume picker.
+
+        Returns ``{"first_user": str, "user_count": int}`` — the first user
+        message (the task that started the session, truncated) and the number
+        of user turns. Reads the file once line-by-line so even multi-MB logs
+        stay cheap; malformed lines are skipped. This is what makes the resume
+        list show *what* a session was about instead of just an opaque id.
+        """
+        first_user = ""
+        user_count = 0
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    s = line.strip()
+                    if not s:
+                        continue
+                    try:
+                        entry = json.loads(s)
+                    except Exception:
+                        continue
+                    if entry.get("type") != "user":
+                        continue
+                    user_count += 1
+                    if not first_user:
+                        content = entry.get("content") or ""
+                        if isinstance(content, str):
+                            first_user = content[:max_chars]
+        except Exception:
+            pass
+        return {"first_user": first_user, "user_count": user_count}
+
     # ------------------------------------------------------------------
     # Fork: create a new session branching from a specific message
     # ------------------------------------------------------------------

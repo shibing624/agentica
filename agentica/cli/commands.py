@@ -996,11 +996,25 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         for i, s in enumerate(sessions[:10], 1):
             ts_str = s.get("last_timestamp", "") or ""
             if ts_str:
-                ts_str = ts_str[:19].replace("T", " ")
+                ts_str = ts_str[:16].replace("T", " ")
             size_kb = s["size_bytes"] / 1024
             sid = s["session_id"]
             display_id = f"{sid[:8]}...{sid[-4:]}" if len(sid) > 20 else sid
-            con.print(f"  {i}. [cyan]{display_id}[/cyan]  {ts_str}  ({size_kb:.0f}KB)")
+            # Show what the session was about: first user message (the task
+            # that started it) + user turn count. Reads the log once; cheap.
+            preview = SessionLog.session_preview(s["path"])
+            turns = preview["user_count"]
+            first_user = preview["first_user"]
+            if first_user:
+                # Collapse to a single line and trim for the picker row.
+                summary = " ".join(first_user.split())[:80]
+            else:
+                summary = "(empty session)"
+            con.print(
+                f"  {i}. [cyan]{display_id}[/cyan]  {ts_str}  "
+                f"({size_kb:.0f}KB, {turns} turns)"
+            )
+            con.print(f"     [dim]> {summary}[/dim]")
         con.print(f"\n[dim]Usage: /resume <number> or /resume <session_id>[/dim]")
         return
 

@@ -519,9 +519,11 @@ class FunctionCall(BaseModel):
             # sees as the tool result and what we surface in the CLI. Avoid
             # ``logger.exception`` here — it dumps a full Python traceback to
             # the user's terminal for routine "model passed bad args" cases.
-            # The traceback is preserved at DEBUG level for developers.
+            # The friendly message is logged at DEBUG (not WARNING) so it does
+            # not duplicate the CLI's own tool-error line (``🔎 ... - error:
+            # ...``); the traceback is preserved at DEBUG for developers.
             friendly = _format_tool_error(self.function.name, e)
-            logger.warning("Tool call failed: %s — %s", self.function.name, friendly)
+            logger.debug("Tool call failed: %s — %s", self.function.name, friendly)
             logger.debug("Tool call traceback for %s:", self.function.name, exc_info=True)
             self.error = friendly
             return False

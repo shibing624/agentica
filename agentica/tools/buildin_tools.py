@@ -44,8 +44,11 @@ from agentica.utils.string import truncate_if_too_long
 
 # grep self-imposed timeout (seconds). Covers both the rg subprocess and the
 # pure-Python fallback so a missing rg can't walk huge trees for the outer
-# 120s executor timeout. grep is marked manages_own_timeout=True.
-_GREP_TIMEOUT = 10
+# 120s executor timeout. grep is marked manages_own_timeout=True. 30s gives rg
+# enough headroom on large monorepos (a whole-tree grep can take ~25s) while
+# still bounding a genuine hang (no rg + pure-Python fallback over millions of
+# files) well under the outer executor limit.
+_GREP_TIMEOUT = 30
 
 
 def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
@@ -275,7 +278,7 @@ class BuiltinFileTool(Tool):
         self.register(self.multi_edit_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
-        # grep enforces its own 10s timeout on both the rg and pure-Python
+        # grep enforces its own 30s timeout on both the rg and pure-Python
         # fallback paths, so skip the outer 120s executor wrapper — a missing
         # rg used to let the fallback walk huge trees for the full 120s.
         self.functions["grep"].manages_own_timeout = True
