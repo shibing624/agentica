@@ -603,23 +603,30 @@ class StreamDisplayManager:
             return f" ({elapsed:.2f}s)"
         return f" ({elapsed:.1f}s)"
 
+    # Tools whose result is pure noise on success. The tool-call line itself
+    # already tells the user what happened (e.g. ``📖 read_file foo.py (L1-500)``);
+    # dumping a ``⎿ N lines`` footer adds bulk without information. Errors are
+    # still surfaced so failures don't go silent.
+    _SUPPRESS_RESULT_TOOLS = frozenset({"read_file", "ls", "glob", "write_todos"})
+
+    # Tools that get a single one-line count summary instead of content lines.
+    _COMPACT_TOOLS = frozenset({"grep", "write_file", "fetch_url", "web_search"})
+
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: float = None):
         """Display tool execution result as a compact preview."""
         elapsed_str = self._fmt_elapsed(elapsed)
+
+        # Suppress noisy success results; the call line is enough.
+        if tool_name in self._SUPPRESS_RESULT_TOOLS and not is_error:
+            return
+
         if not result_content:
             self.console.print(f"    [dim]⎿ done{elapsed_str}[/dim]")
             return
 
         if tool_name == "task":
             self._display_task_result(result_content, is_error)
-            return
-
-        # write_todos result is a verbose acknowledgment JSON ({"message": ...,
-        # "todos": [...]}). The new todo list is already rendered inline with
-        # the tool args, so dumping the result adds noise without information.
-        if tool_name == "write_todos" and not is_error:
-            self.console.print(f"    [dim]⎿ updated{elapsed_str}[/dim]")
             return
 
         result_str = str(result_content)
@@ -631,18 +638,18 @@ class StreamDisplayManager:
 
         lines = result_str.splitlines()
 
-        _COMPACT_TOOLS = {"read_file", "ls", "glob", "write_file", "fetch_url", "web_search"}
-        if tool_name in _COMPACT_TOOLS and not is_error:
-            summary = f"{len(lines)} lines" if len(lines) > 1 else lines[0][:80] if lines else "ok"
+        if tool_name in self._COMPACT_TOOLS and not is_error:
+            if tool_name == "grep":
+                summary = f"{len(lines)} lines" if lines else "no matches"
+            elif len(lines) > 1:
+                summary = f"{len(lines)} lines"
+            else:
+                summary = lines[0][:80] if lines else "ok"
             self.console.print(f"    [dim]⎿ {summary}{elapsed_str}[/dim]")
             return
 
-        if tool_name == "grep":
-            max_lines = 3
-            max_line_width = 100
-        else:
-            max_lines = 4
-            max_line_width = 120
+        max_lines = 4
+        max_line_width = 120
 
         style = "dim red" if is_error else "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "

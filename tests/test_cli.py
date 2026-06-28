@@ -305,6 +305,46 @@ class TestCLIHelpers(unittest.TestCase):
         calls = [str(c) for c in fake.print.call_args_list]
         self.assertTrue(any("compact" in c for c in calls))
 
+    def test_display_tool_result_suppresses_noisy_read_tools(self):
+        """read_file / ls / glob / write_todos drop the result footer on success."""
+        from agentica.cli.display import StreamDisplayManager
+
+        for name in ("read_file", "ls", "glob", "write_todos"):
+            fake = MagicMock()
+            fake.width = 80
+            dm = StreamDisplayManager(fake)
+            dm.display_tool_result(name, "line1\nline2\nline3", is_error=False, elapsed=0.02)
+            fake.print.assert_not_called(), f"{name} should not print a success result"
+
+    def test_display_tool_result_grep_one_line_summary(self):
+        """grep renders a single count line, never the matched content."""
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "grep",
+            "path/a.py:1:match\npath/b.py:2:match\npath/c.py:3:match",
+            is_error=False,
+            elapsed=2.23,
+        )
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("3 lines", text)
+        self.assertIn("(2.23s)", text)
+        # matched content must not leak into the CLI
+        self.assertNotIn("match", text)
+
+    def test_display_tool_result_surfaces_errors_even_for_suppressed_tools(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("read_file", "FileNotFoundError: nope", is_error=True, elapsed=0.01)
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("FileNotFoundError", text)
+
 
 class TestStreamDisplayManagerSubagent(unittest.TestCase):
     """Subagent rendering policy: tool-first by default, dedup, batch prefix."""

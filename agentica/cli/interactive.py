@@ -675,13 +675,6 @@ def _process_stream_response(
                             except ValueError:
                                 tool_args = {"args": tool_args}
 
-                        # Permission info display
-                        if permission_manager and permission_manager.mode != "allow-all":
-                            from agentica.cli.permissions import WRITE_TOOLS
-
-                            if tool_name in WRITE_TOOLS:
-                                con.print(f"  [yellow]! {tool_name} (write)[/yellow]")
-
                         display.display_tool(tool_name, tool_args)
                         tui_state["_thinking"] = False
                         _set_spinner(f"🔧 {tool_name}")
@@ -773,7 +766,12 @@ def _process_stream_response(
         con.print("\n[yellow]⚡ Agent cancelled.[/yellow]")
     except Exception as e:
         _set_spinner("")
-        con.print(f"\n[bold red]Error during agent execution: {str(e)}[/bold red]")
+        msg = str(e)
+        con.print(f"\n[bold red]Error during agent execution: {msg}[/bold red]")
+        # Transient connection / gateway failures are usually worth a retry.
+        low = msg.lower()
+        if any(h in low for h in ("connection", "timeout", "502", "503", "504", "gateway", "remote disconnected")):
+            con.print("[dim]  Transient network error — type /retry to resend the last message.[/dim]")
     finally:
         # Clear the live-event callback so it doesn't outlive this run.
         current_agent._event_callback = None

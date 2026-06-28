@@ -111,7 +111,7 @@ class OpenAIChat(Model):
     organization: Optional[str] = None
     base_url: Optional[Union[str, httpx.URL]] = None
     timeout: Optional[float] = None
-    max_retries: Optional[int] = 0
+    max_retries: Optional[int] = 2
     default_headers: Optional[Any] = None
     default_query: Optional[Any] = None
     http_client: Optional[httpx.Client] = None
