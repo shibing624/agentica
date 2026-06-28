@@ -42,6 +42,11 @@ from agentica.security.redact import redact_tool_outputs_enabled
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
 
+# grep self-imposed timeout (seconds). Covers both the rg subprocess and the
+# pure-Python fallback so a missing rg can't walk huge trees for the outer
+# 120s executor timeout. grep is marked manages_own_timeout=True.
+_GREP_TIMEOUT = 10
+
 
 def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
     """Return a human-readable note when a non-zero exit code is non-erroneous.
@@ -270,6 +275,10 @@ class BuiltinFileTool(Tool):
         self.register(self.multi_edit_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
+        # grep enforces its own 10s timeout on both the rg and pure-Python
+        # fallback paths, so skip the outer 120s executor wrapper — a missing
+        # rg used to let the fallback walk huge trees for the full 120s.
+        self.functions["grep"].manages_own_timeout = True
         self.register(self.undo_edit, is_destructive=True)
 
     def _resolve_path(self, path: str) -> Path:
@@ -1175,9 +1184,9 @@ class BuiltinFileTool(Tool):
         # Check if rg is available
         rg_path = shutil.which("rg")
         if rg_path is None:
-            return await asyncio.get_event_loop().run_in_executor(
-                None, self._grep_fallback, pattern, path, include, output_mode,
-                limit, fixed_strings, case_insensitive,
+            return await self._run_grep_fallback(
+                pattern, path, include, output_mode, limit, fixed_strings,
+                case_insensitive,
             )
 
         # Build rg command arguments
@@ -1226,7 +1235,7 @@ class BuiltinFileTool(Tool):
         cmd.append(pattern)
         cmd.append(str(base_path))
 
-        # rg is normally millisecond-fast; 5s asyncio timeout catches hangs
+        # rg is normally millisecond-fast; a hard _GREP_TIMEOUT catches hangs
         # (pathological regex, huge binary files, or zombie processes).
         proc = None
         try:
@@ -1235,18 +1244,18 @@ class BuiltinFileTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=5)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GREP_TIMEOUT)
         except asyncio.TimeoutError:
             if proc is not None:
                 try:
                     proc.kill()
                 except ProcessLookupError:
                     pass
-            raise TimeoutError("grep timed out after 5 seconds")
+            raise TimeoutError(f"grep timed out after {_GREP_TIMEOUT} seconds")
         except FileNotFoundError:
-            return await asyncio.get_event_loop().run_in_executor(
-                None, self._grep_fallback, pattern, path, include, output_mode,
-                limit, fixed_strings, case_insensitive,
+            return await self._run_grep_fallback(
+                pattern, path, include, output_mode, limit, fixed_strings,
+                case_insensitive,
             )
 
         # rg exit codes: 0=matches found, 1=no matches, 2=error
@@ -1268,6 +1277,35 @@ class BuiltinFileTool(Tool):
         result = truncate_if_too_long(output)
         logger.debug(f"Grep(rg) for '{pattern}': result length {len(result)} chars")
         return result
+
+    async def _run_grep_fallback(
+            self,
+            pattern: str,
+            path: str,
+            include: Optional[str],
+            output_mode: str,
+            limit: int,
+            fixed_strings: bool,
+            case_insensitive: bool = False,
+    ) -> str:
+        """Run the pure-Python fallback in an executor with a hard timeout.
+
+        The fallback walks the tree in a thread, so on timeout we can only
+        drop the result — the thread keeps running — but the tool returns a
+        clear timeout error at ``_GREP_TIMEOUT`` instead of hanging to the
+        outer 120s executor limit.
+        """
+        loop = asyncio.get_event_loop()
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, self._grep_fallback, pattern, path, include,
+                    output_mode, limit, fixed_strings, case_insensitive,
+                ),
+                timeout=_GREP_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(f"grep timed out after {_GREP_TIMEOUT} seconds")
 
     def _grep_fallback(
             self,

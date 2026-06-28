@@ -65,7 +65,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
     get_console().print("  [bright_green]Alt+V[/bright_green]       Paste image from clipboard")
-    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand last truncated input/tool output in pager")
+    get_console().print("  [bright_green]Ctrl+o[/bright_green]      Expand last truncated input/tool output in pager")
     get_console().print()
     # Input features
     get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files and inject content")
@@ -121,7 +121,7 @@ _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 
 
 # Most recent block (user input or tool output) that was truncated in the
-# CLI display. Remembered so the user can expand it on demand (Ctrl+O opens
+# CLI display. Remembered so the user can expand it on demand (Ctrl+o opens
 # it in a pager) instead of flooding the terminal with full content inline.
 _last_truncated: Dict[str, str] = {"title": "", "content": ""}
 
@@ -149,16 +149,17 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
     if not cleaned and pasted_blocks:
         cleaned = f"[Pasted text: {pasted_lines} lines]"
 
-    # For very long content (from expanded paste), show a trimmed preview
+    # Show the message nearly in full; only fold when it exceeds 12 lines so
+    # typical multi-line questions and pastes stay visible without Ctrl+o.
     lines = cleaned.split('\n')
-    if len(lines) > 5:
-        # Show first 3 lines + summary
-        preview_lines = lines[:3]
+    if len(lines) > 12:
+        # Show first 10 lines + summary
+        preview_lines = lines[:10]
         preview = '\n'.join(preview_lines)
-        remaining = len(lines) - 3
+        remaining = len(lines) - 10
         rich_text = Text()
         rich_text.append(preview, style=COLORS["user"])
-        rich_text.append(f"\n... (+{remaining} more lines · Ctrl+O 展开)", style="dim")
+        rich_text.append(f"\n... (+{remaining} more lines · Ctrl+o 展开)", style="dim")
         remember_truncated("User input", cleaned)
     else:
         pattern = r"(@[\w./-]+)"
@@ -295,7 +296,7 @@ def show_help(skills_registry=None):
         "Ctrl+C":            "Interrupt current operation",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Alt+V":             "Paste image from clipboard",
-        "Ctrl+O":            "Expand last truncated input/tool output in pager",
+        "Ctrl+o":            "Expand last truncated input/tool output in pager",
     }
     for key, desc in shortcuts.items():
         get_console().print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
@@ -359,6 +360,11 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     
     # File editing tools - show filename only
     if tool_name == "edit_file":
+        file_path = tool_args.get("file_path", "")
+        return _extract_filename(file_path)
+
+    # Multi-edit: filename only (edit count goes in the completion summary)
+    if tool_name == "multi_edit_file":
         file_path = tool_args.get("file_path", "")
         return _extract_filename(file_path)
     
@@ -606,6 +612,8 @@ class StreamDisplayManager:
         """
         if tool_name in self._DEFERRED_TOOLS:
             return
+        if tool_name in self._WRITE_DIFF_TOOLS:
+            return
         self.start_tool_section()
         self.tool_count += 1
         _display_tool_impl(self.console, tool_name, tool_args, self.tool_count)
@@ -679,10 +687,105 @@ class StreamDisplayManager:
                 line += f" [dim]{elapsed_str}[/dim]"
         self.console.print(line)
 
+    # Max diff lines shown inline beneath an edit_file/multi_edit_file summary.
+    _EDIT_DIFF_MAX_LINES = 8
+
+    def _display_edit_merged(self, tool_name: str, tool_args: dict,
+                             result_content: str, is_error: bool,
+                             elapsed_str: str) -> None:
+        """One summary line + a truncated unified diff for edit tools.
+
+        ``  ✎ edit_file config.py - ✓ 1 edit (120ms)`` followed by a short
+        CC/opencode-style diff so the user sees the actual code change. Errors
+        surface a truncated message instead. The full diff is remembered for
+        Ctrl+o expansion when truncated.
+        """
+        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+        filename = _extract_filename(tool_args.get("file_path", ""))
+        params = filename
+
+        # Count edits from args (multi_edit_file) or treat edit_file as 1.
+        if tool_name == "multi_edit_file":
+            edits = tool_args.get("edits") or []
+            n_edits = len(edits) if isinstance(edits, list) else 0
+        else:
+            n_edits = 1
+
+        line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
+        if params:
+            line += f" [dim]{params}[/dim]"
+        if is_error:
+            err = str(result_content).replace("\n", " ").strip()
+            if len(err) > 80:
+                err = err[:77] + "..."
+                remember_truncated(f"Tool error · {tool_name}", str(result_content))
+            line += f" [red]- error: {err}{elapsed_str}[/red]"
+        else:
+            unit = "edit" if n_edits == 1 else "edits"
+            line += f" [dim]- ✓ {n_edits} {unit}{elapsed_str}[/dim]"
+        self.console.print(line)
+
+        # Render a truncated unified diff from the edit args (skip on error).
+        if is_error:
+            return
+        diff_text = self._build_edit_diff(tool_name, tool_args, filename)
+        if not diff_text:
+            return
+        diff_lines = diff_text.splitlines()
+        show = diff_lines[: self._EDIT_DIFF_MAX_LINES]
+        self.console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
+                                  line_numbers=False))
+        remaining = len(diff_lines) - self._EDIT_DIFF_MAX_LINES
+        if remaining > 0:
+            self.console.print(
+                f"      [dim italic]... ({remaining} more diff lines · Ctrl+o 展开)[/dim italic]"
+            )
+            remember_truncated(f"Edit diff · {filename}", diff_text)
+
+    @staticmethod
+    def _build_edit_diff(tool_name: str, tool_args: dict, filename: str) -> str:
+        """Build a unified diff string from edit_file/multi_edit_file args."""
+        if tool_name == "multi_edit_file":
+            edits = tool_args.get("edits") or []
+            if not isinstance(edits, list) or not edits:
+                return ""
+            parts = []
+            for i, e in enumerate(edits):
+                if not isinstance(e, dict):
+                    continue
+                old = str(e.get("old_string", ""))
+                new = str(e.get("new_string", ""))
+                d = list(difflib.unified_diff(
+                    old.splitlines(keepends=True),
+                    new.splitlines(keepends=True),
+                    fromfile=f"a/{filename}#{i + 1}",
+                    tofile=f"b/{filename}#{i + 1}",
+                    n=2,
+                ))
+                if d:
+                    parts.append("".join(d))
+            return "\n".join(parts).rstrip("\n")
+        # edit_file
+        old = str(tool_args.get("old_string", ""))
+        new = str(tool_args.get("new_string", ""))
+        d = list(difflib.unified_diff(
+            old.splitlines(keepends=True),
+            new.splitlines(keepends=True),
+            fromfile=f"a/{filename}",
+            tofile=f"b/{filename}",
+            n=2,
+        ))
+        return "".join(d).rstrip("\n")
+
     # Read-only tools whose call line is deferred to completion so the call
     # line and elapsed time collapse into ONE line, e.g.
     # ``  🔎 grep 'pat' in path - 5 lines (13ms)``. No separate result footer.
     _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
+
+    # Write tools that edit files: call line is deferred to completion and
+    # rendered as one summary line + a truncated unified diff (CC/opencode-style)
+    # so the user sees the actual code change, not an absolute path or noise.
+    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file"})
 
     # Tools whose success result is pure noise on success. The call line itself
     # already tells the user what happened; errors are still surfaced.
@@ -690,6 +793,10 @@ class StreamDisplayManager:
 
     # Tools that get a single one-line count summary as a footer below the call.
     _COMPACT_TOOLS = frozenset({"write_file"})
+
+    # Max result lines shown inline before folding (per-tool overrides below).
+    _DEFAULT_MAX_RESULT_LINES = 4
+    _MAX_RESULT_LINES = {"execute": 10}
 
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: float = None,
@@ -704,6 +811,13 @@ class StreamDisplayManager:
         if tool_name in self._DEFERRED_TOOLS:
             self.start_tool_section()
             self._display_deferred_merged(
+                tool_name, tool_args or {}, result_content, is_error, elapsed_str
+            )
+            return
+
+        if tool_name in self._WRITE_DIFF_TOOLS:
+            self.start_tool_section()
+            self._display_edit_merged(
                 tool_name, tool_args or {}, result_content, is_error, elapsed_str
             )
             return
@@ -734,7 +848,7 @@ class StreamDisplayManager:
             self.console.print(f"    [dim]⎿ {summary}{elapsed_str}[/dim]")
             return
 
-        max_lines = 4
+        max_lines = self._MAX_RESULT_LINES.get(tool_name, self._DEFAULT_MAX_RESULT_LINES)
         max_line_width = 120
 
         style = "dim red" if is_error else "dim"
@@ -751,7 +865,7 @@ class StreamDisplayManager:
         remaining = len(lines) - max_lines
         if remaining > 0:
             self.console.print(
-                f"{cont_prefix}... ({remaining} more lines · Ctrl+O 展开)", style="dim italic"
+                f"{cont_prefix}... ({remaining} more lines · Ctrl+o 展开)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
         if elapsed_str:

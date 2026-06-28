@@ -123,16 +123,18 @@ def _cprint(text: str):
 
 
 def _open_in_pager(title: str, content: str) -> None:
-    """Open ``content`` in a pager (``less``) so the user can view the full
-    truncated block, then press ``q`` to return — the terminal is restored.
+    """Open ``content`` in a pager so the user can view the full truncated
+    block, then press ``Ctrl+o`` to return — the terminal is restored, giving
+    CC-style expand/hide semantics without flooding the inline transcript.
 
-    Falls back to printing the full content if no pager is available.
+    Uses ``less`` with a lesskey binding so ``Ctrl+o`` (not ``q``) quits, to
+    match the expand key. Falls back to plain ``less`` or full print.
     """
     import tempfile
 
     header = (
         f"=== {title} · {len(content.splitlines())} lines "
-        f"(press q to return) ===\n\n"
+        f"(Ctrl+o to return) ===\n\n"
     )
     full = header + content
     pager = shutil.which("less") or shutil.which("more")
@@ -145,10 +147,15 @@ def _open_in_pager(title: str, content: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(full)
         path = f.name
+    # lesskey source: bind Ctrl+o (^O) to quit so the same key expands/returns.
+    lesskey = "\n#command\n^O quit\n"
     try:
-        # -R: pass through ANSI colors. Alternate-screen (default) restores the
-        # terminal on exit, giving the "expand then hide" semantics.
-        subprocess.run([pager, "-R", path])
+        rc = subprocess.run(
+            [pager, "-R", f"--lesskey-content={lesskey}", "-P", "Ctrl+o to return", path],
+        )
+        # Older less builds don't understand --lesskey-content; retry plain.
+        if rc.returncode != 0:
+            subprocess.run([pager, "-R", path])
     except KeyboardInterrupt:
         pass
     finally:
@@ -797,12 +804,12 @@ def _process_stream_response(
             time.sleep(0.05)
         current_agent._running = False
         current_agent._cancelled = False
-        con.print("\n[yellow]⚡ Agent cancelled.[/yellow]")
+        con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
     except AgentCancelledError:
         _set_spinner("")
         current_agent._running = False
         current_agent._cancelled = False
-        con.print("\n[yellow]⚡ Agent cancelled.[/yellow]")
+        con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
     except Exception as e:
         _set_spinner("")
         msg = str(e)
@@ -1050,8 +1057,9 @@ def _setup_tui(
     @kb.add("c-o")
     def _expand_last_truncated(event):
         """Expand the most recently truncated block (user input or tool output)
-        in a pager. Press ``q`` to return — the terminal is restored, giving
-        CC-style expand/hide semantics without flooding the inline transcript.
+        in a pager. Press ``Ctrl+o`` to return — the terminal is restored,
+        giving CC-style expand/hide semantics without flooding the inline
+        transcript. The same key toggles in and out.
         """
         block = get_last_truncated()
         content = block.get("content", "")

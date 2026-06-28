@@ -89,6 +89,60 @@ class TestRunnerRunTimeout(unittest.TestCase):
         self.assertIsInstance(response, RunResponse)
 
 
+class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
+    """On user cancel, the turn (question + partial answer + marker) is kept
+    instead of being discarded entirely."""
+
+    def test_persist_interrupted_turn_keeps_question_and_partial(self):
+        from agentica.memory.models import AgentRun
+
+        agent = _make_agent()
+        user_msg = Message(role="user", content="What is 2+2?")
+        partial_assistant = Message(role="assistant", content="2 + 2 = ")
+        messages_for_model = [user_msg, partial_assistant]
+        model_response = ModelResponse(content="2 + 2 = ")
+
+        agent._runner._persist_interrupted_turn(
+            agent,
+            message="What is 2+2?",
+            messages=None,
+            user_messages=[user_msg],
+            system_message=None,
+            messages_for_model=messages_for_model,
+            num_input_messages=1,
+            model_response=model_response,
+        )
+
+        # run_response carries the partial answer + interruption marker
+        self.assertIn("2 + 2 = ", agent.run_response.content)
+        self.assertIn("[用户中断了回答]", agent.run_response.content)
+
+        # working_memory has the user question and the assistant (with marker)
+        wm = agent.working_memory
+        roles = [m.role for m in wm.messages]
+        self.assertIn("user", roles)
+        self.assertIn("assistant", roles)
+        assistant_msg = next(m for m in wm.messages if m.role == "assistant")
+        self.assertIn("[用户中断了回答]", assistant_msg.content)
+        self.assertTrue(any(isinstance(r, AgentRun) for r in wm.runs))
+
+    def test_persist_interrupted_turn_skips_prebuilt_messages(self):
+        """Pre-built ``messages`` runs manage their own history — no persistence."""
+        agent = _make_agent()
+        before = list(agent.working_memory.messages)
+        agent._runner._persist_interrupted_turn(
+            agent,
+            message=None,
+            messages=[Message(role="user", content="hi")],
+            user_messages=[],
+            system_message=None,
+            messages_for_model=[],
+            num_input_messages=0,
+            model_response=ModelResponse(content="x"),
+        )
+        self.assertEqual(agent.working_memory.messages, before)
+
+
 class TestRunnerStructuredOutputFallback(unittest.TestCase):
     """Structured output parse failure should fallback to text, not crash."""
 

@@ -1190,6 +1190,76 @@ class Runner:
             event=event.value,
         )
 
+    def _persist_interrupted_turn(
+        self,
+        agent,
+        message: Any,
+        messages: Any,
+        user_messages: List[Message],
+        system_message: Optional[Message],
+        messages_for_model: List[Message],
+        num_input_messages: int,
+        model_response: Any,
+    ) -> None:
+        """On user cancel, preserve the turn instead of discarding it.
+
+        Mirrors the success-path memory + session-log persistence: the user
+        question and the partial assistant answer (up to the interruption
+        point) are kept as a completed Q&A turn, with an ``[用户中断了回答]``
+        marker appended. Only applies to message-based runs (``messages`` is
+        None) — the CLI path; pre-built ``messages`` runs manage their own
+        history and are left untouched.
+        """
+        if messages is not None:
+            return
+        # Capture the partial streamed content as the authoritative answer.
+        if model_response.content:
+            agent.run_response.content = model_response.content
+        partial = agent.run_response.content or ""
+        marker = "[用户中断了回答]"
+        persisted = (f"{partial}\n\n{marker}") if partial else marker
+        agent.run_response.content = persisted
+
+        # The model layer appends the assistant message only AFTER the stream
+        # completes, so on a mid-stream cancel it's absent from
+        # messages_for_model. Patch the turn's last assistant message if one
+        # exists (cancel during tool exec / between turns), else synthesize one
+        # (cancel mid-stream) so /history surfaces the partial + marker.
+        turn_msgs = list(messages_for_model[num_input_messages:])
+        last_asst = None
+        for _m in reversed(turn_msgs):
+            if isinstance(_m, Message) and _m.role == "assistant":
+                last_asst = _m
+                break
+        if last_asst is not None:
+            last_asst.content = persisted
+        else:
+            turn_msgs.append(Message(role="assistant", content=persisted))
+
+        # working_memory so /history shows this exchange.
+        if system_message is not None:
+            agent.working_memory.add_system_message(
+                system_message,
+                system_message_role=agent.prompt_config.system_message_role,
+            )
+        agent.working_memory.add_messages(messages=(user_messages + turn_msgs))
+        agent_run = AgentRun(response=agent.run_response)
+        if user_messages:
+            agent_run.message = user_messages[0]
+            agent_run.messages = list(user_messages)
+        agent.working_memory.add_run(agent_run)
+
+        # session log so /resume restores this turn.
+        if agent._session_log is not None:
+            _user_text = None
+            if isinstance(message, str):
+                _user_text = message
+            elif isinstance(message, Message):
+                _user_text = message.content if isinstance(message.content, str) else str(message.content)
+            if _user_text:
+                agent._session_log.append("user", _user_text)
+            agent._session_log.append("assistant", persisted, finish_reason="cancelled")
+
     # =========================================================================
     # Core execution engine (async-only, single-round)
     # =========================================================================
@@ -2080,6 +2150,17 @@ class Runner:
                     RunEventType.run_cancelled,
                     {"reason": _run_ctx.error},
                 )
+                # Preserve the interrupted turn (question + partial answer) so
+                # history doesn't lose the whole exchange on Ctrl+C.
+                try:
+                    self._persist_interrupted_turn(
+                        agent, message, messages, user_messages, system_message,
+                        messages_for_model, num_input_messages, model_response,
+                    )
+                except Exception:
+                    logger.debug(
+                        "interrupted-turn persistence failed", exc_info=True
+                    )
                 raise
             except Exception as _run_exc:
                 _run_ctx.mark_failed(error=f"{type(_run_exc).__name__}: {_run_exc}")

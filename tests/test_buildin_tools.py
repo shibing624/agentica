@@ -379,6 +379,30 @@ class TestBuiltinFileToolGrep:
         result = asyncio.run(file_tool.grep("$10.00", tmp_dir, fixed_strings=True, output_mode="content"))
         assert "$10.00" in result
 
+    def test_grep_manages_own_timeout(self, file_tool):
+        """grep must self-limit so the outer 120s executor wrapper is skipped."""
+        fn = file_tool.functions["grep"]
+        assert fn.manages_own_timeout is True
+
+    def test_grep_fallback_times_out(self, tmp_dir):
+        """When rg is unavailable, the pure-Python fallback still hard-times-out
+        instead of running up to the outer 120s executor limit."""
+        import time as _time
+        from agentica.tools import buildin_tools
+        tool = BuiltinFileTool(work_dir=tmp_dir)
+
+        # Slow sync fallback worker; the real _run_grep_fallback wraps it with
+        # asyncio.wait_for, so the timeout fires well before this returns.
+        def slow_worker(*args, **kwargs):
+            _time.sleep(0.5)
+            return "should not reach"
+        tool._grep_fallback = slow_worker
+
+        with patch("agentica.tools.buildin_tools.shutil.which", return_value=None), \
+             patch("agentica.tools.buildin_tools._GREP_TIMEOUT", 0.1):
+            with pytest.raises(TimeoutError, match=r"grep timed out"):
+                asyncio.run(tool.grep("x", str(tmp_dir)))
+
 
 # ===========================================================================
 # BuiltinExecuteTool tests

@@ -382,12 +382,106 @@ class TestCLIHelpers(unittest.TestCase):
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("FileNotFoundError", text)
 
+    def test_display_tool_defers_edit_tools_call_line(self):
+        """edit_file/multi_edit_file defer the start-time call line (merged at completion)."""
+        from agentica.cli.display import StreamDisplayManager
+
+        for name in ("edit_file", "multi_edit_file"):
+            fake = MagicMock()
+            fake.width = 80
+            dm = StreamDisplayManager(fake)
+            dm.display_tool(name, {"file_path": "/abs/path/to/config.py"})
+            fake.print.assert_not_called(), f"{name} call line must be deferred"
+
+    def test_display_edit_file_merged_shows_filename_and_diff(self):
+        """edit_file: one summary line with filename (not abs path) + ✓ + a diff."""
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "edit_file",
+            "Successfully applied 1 edit to config.py",
+            is_error=False,
+            elapsed=0.12,
+            tool_args={
+                "file_path": "/apdcephfs_cq11/share_2973545/flemingxu/config.py",
+                "old_string": "DEBUG = False\n",
+                "new_string": "DEBUG = True\n",
+            },
+        )
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("edit_file", text)
+        self.assertIn("config.py", text)
+        # absolute path must NOT leak
+        self.assertNotIn("/apdcephfs_cq11", text)
+        self.assertIn("✓", text)
+        self.assertIn("(120ms)", text)
+        # diff content surfaces the change (rendered as a Syntax object)
+        syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
+        self.assertTrue(syntax_args, "expected a diff Syntax block")
+        self.assertIn("DEBUG", getattr(syntax_args[0], "code", ""))
+
+    def test_display_multi_edit_file_shows_filename_and_edit_count(self):
+        """multi_edit_file: filename + edit count, no absolute path."""
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "multi_edit_file",
+            "Successfully applied 2 edits to config.py",
+            is_error=False,
+            elapsed=0.42,
+            tool_args={
+                "file_path": "/apdcephfs_cq11/share_2973545/flemingxu/config.py",
+                "edits": [
+                    {"old_string": "a=1\n", "new_string": "a=2\n"},
+                    {"old_string": "b=3\n", "new_string": "b=4\n"},
+                ],
+            },
+        )
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("multi_edit_file", text)
+        self.assertIn("config.py", text)
+        self.assertNotIn("/apdcephfs_cq11", text)
+        self.assertIn("2 edits", text)
+        self.assertIn("(420ms)", text)
+
+    def test_display_execute_folds_at_ten_lines(self):
+        """execute shows up to 10 lines then folds; other tools still fold at 4."""
+        from agentica.cli.display import StreamDisplayManager
+
+        # 10 lines: fully shown, no fold hint
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "execute", "\n".join(f"line {i}" for i in range(10)),
+            is_error=False, elapsed=0.1,
+        )
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertNotIn("more lines", text)
+
+        # 12 lines: folds, hint shows 2 more
+        fake2 = MagicMock()
+        fake2.width = 80
+        dm2 = StreamDisplayManager(fake2)
+        dm2.display_tool_result(
+            "execute", "\n".join(f"line {i}" for i in range(12)),
+            is_error=False, elapsed=0.1,
+        )
+        text2 = "\n".join(str(c) for c in fake2.print.call_args_list)
+        self.assertIn("2 more lines", text2)
+
     def test_truncated_blocks_are_remembered_for_expand(self):
-        """Long user input and long tool output are stashed for Ctrl+O expansion."""
+        """Long user input and long tool output are stashed for Ctrl+o expansion."""
         from agentica.cli import display as disp
         from agentica.cli.display import StreamDisplayManager
 
-        # Long user input (>5 lines) is remembered.
+        # Long user input (>12 lines) is remembered.
         disp.remember_truncated("", "")  # reset
         long_input = "\n".join(f"line {i}" for i in range(20))
         disp.display_user_message(long_input)
