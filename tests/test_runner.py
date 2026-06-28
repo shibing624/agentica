@@ -142,6 +142,71 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         )
         self.assertEqual(agent.working_memory.messages, before)
 
+    def test_cancel_after_completion_does_not_double_persist(self):
+        """Ctrl+C during post-completion hooks must NOT re-persist the turn or
+        stamp an interruption marker on a fully-finished answer.
+
+        Mirrors the real CLI path: the background run is cancelled (asyncio
+        task cancel) after the answer has streamed and the success path has
+        already persisted, while a slow on_end hook is still awaiting.
+        """
+        from agentica.agent import Agent
+        from agentica.hooks import AgentHooks
+        from agentica.model.openai import OpenAIChat
+        from agentica.model.response import ModelResponse, ModelResponseEvent
+        from agentica.run_response import AgentCancelledError
+
+        agent = Agent(model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"))
+
+        async def fast_stream(messages=None, **_kw):
+            chunk = ModelResponse()
+            chunk.event = ModelResponseEvent.assistant_response.value
+            chunk.content = "The answer is 4."
+            yield chunk
+            # Mirror the real model layer: append the assistant message after
+            # the stream completes so the success-path add_messages sees it.
+            messages.append(Message(role="assistant", content="The answer is 4."))
+
+        agent.model.response_stream = fast_stream
+
+        reached_end = asyncio.Event()
+        block_event = asyncio.Event()
+
+        class BlockingHook(AgentHooks):
+            async def on_end(self, agent, output, **kwargs):
+                reached_end.set()
+                await block_event.wait()
+
+        agent.hooks = BlockingHook()
+
+        async def consume():
+            async for _ in agent.run_stream("What is 2+2?"):
+                pass
+
+        async def driver():
+            task = asyncio.ensure_future(consume())
+            await asyncio.wait_for(reached_end.wait(), timeout=5)
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, AgentCancelledError):
+                pass
+            finally:
+                block_event.set()
+
+        asyncio.run(driver())
+
+        msgs = agent.working_memory.messages
+        users = [m for m in msgs if m.role == "user"]
+        assistants = [m for m in msgs if m.role == "assistant"]
+        self.assertEqual(len(users), 1, "user message double-added on post-completion cancel")
+        self.assertEqual(len(assistants), 1, "assistant double-added on post-completion cancel")
+        self.assertNotIn(
+            "[用户中断了回答]", assistants[0].content or "",
+            "interruption marker must not stamp a finished answer",
+        )
+        self.assertIn("The answer is 4.", assistants[0].content or "")
+
 
 class TestRunnerStructuredOutputFallback(unittest.TestCase):
     """Structured output parse failure should fallback to text, not crash."""

@@ -1258,6 +1258,19 @@ class Runner:
                 _user_text = message.content if isinstance(message.content, str) else str(message.content)
             if _user_text:
                 agent._session_log.append("user", _user_text)
+            # Log tool results from this run so /resume matches /history.
+            for tc in (agent.run_response.tools or []):
+                _tool_content = tc.get("content", "") or ""
+                if len(_tool_content) > 2000:
+                    _tool_content = _tool_content[:2000] + "\n... [truncated]"
+                _log_role = "tool_audit" if tc.get("replay") is False else "tool"
+                agent._session_log.append(
+                    _log_role, _tool_content,
+                    tool_name=tc.get("tool_name", ""),
+                    tool_call_id=tc.get("tool_call_id", ""),
+                    is_error=tc.get("tool_call_error", False),
+                    replay=tc.get("replay", True),
+                )
             agent._session_log.append("assistant", persisted, finish_reason="cancelled")
 
     # =========================================================================
@@ -1417,6 +1430,11 @@ class Runner:
                 agent.stream_intermediate_steps = stream_intermediate_steps and agent.stream
                 agent.run_response = RunResponse(run_id=agent.run_id, agent_id=agent.agent_id)
                 agent._hook_recorder.reset()
+                # Guards the cancel handler: once the success path has persisted
+                # this turn to working_memory, a Ctrl+C during the post-completion
+                # hooks must NOT re-persist (which would double-add the exchange
+                # and wrongly stamp an interruption marker on a finished answer).
+                _memory_persisted = False
                 _run_ctx.mark_running()
                 self._emit_event(
                     RunEventType.run_started,
@@ -2033,6 +2051,7 @@ class Runner:
                         agent_run.message = user_messages[0]
                         agent_run.messages = list(user_messages)
                     agent.working_memory.add_run(agent_run)
+                    _memory_persisted = True
 
                     if agent.working_memory.create_session_summary and agent.working_memory.update_session_summary_after_run:
                         await agent.working_memory.update_summary()
@@ -2151,16 +2170,20 @@ class Runner:
                     {"reason": _run_ctx.error},
                 )
                 # Preserve the interrupted turn (question + partial answer) so
-                # history doesn't lose the whole exchange on Ctrl+C.
-                try:
-                    self._persist_interrupted_turn(
-                        agent, message, messages, user_messages, system_message,
-                        messages_for_model, num_input_messages, model_response,
-                    )
-                except Exception:
-                    logger.debug(
-                        "interrupted-turn persistence failed", exc_info=True
-                    )
+                # history doesn't lose the whole exchange on Ctrl+C. Skip if the
+                # success path already persisted this turn (cancel struck during
+                # post-completion hooks) — otherwise we'd double-add and stamp an
+                # interruption marker on a fully-finished answer.
+                if not _memory_persisted:
+                    try:
+                        self._persist_interrupted_turn(
+                            agent, message, messages, user_messages, system_message,
+                            messages_for_model, num_input_messages, model_response,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "interrupted-turn persistence failed", exc_info=True
+                        )
                 raise
             except Exception as _run_exc:
                 _run_ctx.mark_failed(error=f"{type(_run_exc).__name__}: {_run_exc}")

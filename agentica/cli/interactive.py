@@ -122,22 +122,42 @@ def _cprint(text: str):
     print_formatted_text(ANSI(text))
 
 
+def _less_supports_lesskey(pager: str) -> bool:
+    """True if this ``less`` accepts ``--lesskey-content`` (needed to bind Ctrl+o
+    to quit). Cached per-process; old BSD less builds lack the option."""
+    global _LESS_LESSKEY_OK
+    if _LESS_LESSKEY_OK is None:
+        try:
+            r = subprocess.run([pager, "--help"], capture_output=True, text=True, timeout=3)
+            _LESS_LESSKEY_OK = "lesskey-content" in (r.stdout or "")
+        except Exception:
+            _LESS_LESSKEY_OK = False
+    return _LESS_LESSKEY_OK
+
+
+_LESS_LESSKEY_OK: Optional[bool] = None
+
+
 def _open_in_pager(title: str, content: str) -> None:
     """Open ``content`` in a pager so the user can view the full truncated
     block, then press ``Ctrl+o`` to return — the terminal is restored, giving
     CC-style expand/hide semantics without flooding the inline transcript.
 
     Uses ``less`` with a lesskey binding so ``Ctrl+o`` (not ``q``) quits, to
-    match the expand key. Falls back to plain ``less`` or full print.
+    match the expand key. Falls back to plain ``less`` (quit with ``q``) when
+    ``--lesskey-content`` is unsupported, with the header hint adjusted so the
+    user is told the right key.
     """
     import tempfile
 
+    pager = shutil.which("less") or shutil.which("more")
+    lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
+    return_hint = "Ctrl+o to return" if lesskey_ok else "q to return"
     header = (
         f"=== {title} · {len(content.splitlines())} lines "
-        f"(Ctrl+o to return) ===\n\n"
+        f"({return_hint}) ===\n\n"
     )
     full = header + content
-    pager = shutil.which("less") or shutil.which("more")
     if not pager:
         con = get_console()
         con.print()
@@ -147,15 +167,15 @@ def _open_in_pager(title: str, content: str) -> None:
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(full)
         path = f.name
-    # lesskey source: bind Ctrl+o (^O) to quit so the same key expands/returns.
-    lesskey = "\n#command\n^O quit\n"
     try:
-        rc = subprocess.run(
-            [pager, "-R", f"--lesskey-content={lesskey}", "-P", "Ctrl+o to return", path],
-        )
-        # Older less builds don't understand --lesskey-content; retry plain.
-        if rc.returncode != 0:
-            subprocess.run([pager, "-R", path])
+        if lesskey_ok:
+            # lesskey source: bind Ctrl+o (^O) to quit so the same key expands/returns.
+            lesskey = "\n#command\n^O quit\n"
+            subprocess.run(
+                [pager, "-R", f"--lesskey-content={lesskey}", "-P", "Ctrl+o to return", path],
+            )
+        else:
+            subprocess.run([pager, "-R", "-P", "q to return", path])
     except KeyboardInterrupt:
         pass
     finally:

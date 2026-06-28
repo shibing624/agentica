@@ -108,6 +108,11 @@ You have access to the `user_input` tool to request input or confirmation from t
         # Register the user_input function
         self.register(self.user_input)
         self.register(self.confirm)
+        # Human-in-the-loop: wait indefinitely for the user (like CC/Cursor),
+        # don't let the outer ~120s tool-executor timeout auto-pass the prompt
+        # and silently continue without an answer.
+        self.functions["user_input"].manages_own_timeout = True
+        self.functions["confirm"].manages_own_timeout = True
     
     def get_system_prompt(self) -> Optional[str]:
         """Get the system prompt for user input tool usage guidance."""

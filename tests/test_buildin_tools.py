@@ -1044,3 +1044,33 @@ class TestFileToolRegistrationGuard:
             f"Functions missing from Model.get_tools_for_api(): {missing}. "
             f"Likely cause: self.register() not called in __init__."
         )
+
+
+# ===========================================================================
+# AskUserQuestionTool tests
+# ===========================================================================
+
+class TestAskUserQuestionTool:
+    def test_user_input_manages_own_timeout(self):
+        """user_input/confirm must wait indefinitely for the user (CC/Cursor
+        semantics), not be auto-passed by the outer ~120s tool-executor timeout."""
+        from agentica.tools.user_input_tool import AskUserQuestionTool
+
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "ok")
+        assert tool.functions["user_input"].manages_own_timeout is True
+        assert tool.functions["confirm"].manages_own_timeout is True
+
+    def test_user_input_uses_callback(self):
+        from agentica.tools.user_input_tool import AskUserQuestionTool
+
+        captured = {}
+
+        def cb(prompt, options=None):
+            captured["prompt"] = prompt
+            captured["options"] = options
+            return "my answer"
+
+        tool = AskUserQuestionTool(input_callback=cb)
+        result = json.loads(tool.user_input(prompt="What now?", mode="text"))
+        assert result["response"] == "my answer"
+        assert "What now?" in captured["prompt"]
