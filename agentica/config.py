@@ -17,10 +17,10 @@ load_dotenv()
 AGENTICA_DOTENV_PATH = os.path.expanduser(os.getenv("AGENTICA_DOTENV_PATH", f"{AGENTICA_HOME}/.env"))
 load_dotenv(AGENTICA_DOTENV_PATH)
 
-# Project the unified, hand-editable config (~/.agentica/agentica.json) into the
+# Project the unified, hand-editable config (~/.agentica/config.yaml) into the
 # process environment. This is the single source of truth shared by the SDK and
 # the CLI. It runs AFTER .env so precedence (highest first) is:
-#     shell env  >  .env  >  agentica.json
+#     shell env  >  .env  >  config.yaml
 # Injection uses setdefault semantics, so an already-set variable is never
 # overwritten. The SDK keeps reading plain env vars; nothing else has to change.
 try:
@@ -28,7 +28,7 @@ try:
 
     apply_global_config()
 except Exception:
-    # Never let a malformed agentica.json break import of the SDK.
+    # Never let a malformed config.yaml break import of the SDK.
     pass
 
 AGENTICA_SKILL_DIR = os.getenv("AGENTICA_SKILL_DIR", f"{AGENTICA_HOME}/skills")

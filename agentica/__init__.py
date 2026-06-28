@@ -67,7 +67,7 @@ from agentica.config import (
     AGENTICA_CRON_DIR,
 )
 
-# ── Unified config (agentica.json) shared by SDK + CLI ──
+# ── Unified config (config.yaml) shared by SDK + CLI ──
 from agentica.global_config import (
     global_config_path,
     load_global_config,

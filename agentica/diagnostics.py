@@ -112,11 +112,12 @@ def _check_dirs(report: DoctorReport) -> None:
 
 
 def _check_provider(report: DoctorReport) -> None:
-    from agentica.cli.setup import load_cli_config, provider_env_var, has_api_key, DEFAULT_PROVIDER, DEFAULT_MODEL
+    from agentica.cli.setup import provider_env_var, has_api_key, DEFAULT_PROVIDER, DEFAULT_MODEL
+    from agentica.global_config import get_profile
 
-    saved = load_cli_config()
-    provider = saved.get("model_provider") or DEFAULT_PROVIDER
-    model = saved.get("model_name") or DEFAULT_MODEL
+    profile = get_profile()
+    provider = profile.get("model_provider") or DEFAULT_PROVIDER
+    model = profile.get("model_name") or DEFAULT_MODEL
     report.add("Configured provider", OK, f"{provider}/{model}")
 
     env_var = provider_env_var(provider)

@@ -35,8 +35,6 @@ from agentica.cli.interactive import run_interactive
 from agentica.cli.setup import (
     resolve_model_config,
     run_onboarding,
-    load_cli_config,
-    save_cli_config,
     PROVIDER_PRESETS,
 )
 from agentica.cli.main import main
@@ -66,8 +64,6 @@ __all__ = [
     "run_interactive",
     "resolve_model_config",
     "run_onboarding",
-    "load_cli_config",
-    "save_cli_config",
     "PROVIDER_PRESETS",
     "main",
 ]

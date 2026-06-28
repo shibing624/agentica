@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author: XuMing(xuming624@qq.com)
-@description: Unit tests for the unified agentica.json config (SDK + CLI shared).
+@description: Unit tests for the unified config.yaml (SDK + CLI shared, YAML).
 """
 
 import os
@@ -22,7 +22,7 @@ class TestGlobalConfig(unittest.TestCase):
         self._patch = patch.object(
             gc,
             "global_config_path",
-            return_value=os.path.join(self._tmp.name, "agentica.json"),
+            return_value=os.path.join(self._tmp.name, "config.yaml"),
         )
         self._patch.start()
         # Snapshot env so injected keys don't leak between tests.
@@ -132,12 +132,48 @@ class TestGlobalConfig(unittest.TestCase):
         gc.apply_global_config()
         self.assertEqual(os.environ.get("OPENAI_BASE_URL"), "https://my-llm.local/v1")
 
-    def test_malformed_json_returns_empty(self):
+    def test_malformed_yaml_returns_empty(self):
         path = gc.global_config_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
-            f.write("{not valid json")
+            f.write("active_profile: default\n  profiles: [this is : not : valid yaml\n")
         self.assertEqual(gc.load_global_config(), {})
+
+    def test_find_profile_for_provider(self):
+        gc.upsert_profile("default", {
+            "model_provider": "deepseek", "model_name": "x",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-d",
+        })
+        gc.upsert_profile("zhipuai", {
+            "model_provider": "zhipuai", "model_name": "glm",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "sk-z",
+        }, make_active=False)
+        self.assertEqual(gc.find_profile_for_provider("zhipuai").get("api_key"), "sk-z")
+        # base_url scoping: zhipuai with a different base_url is not matched.
+        self.assertEqual(gc.find_profile_for_provider("zhipuai", "https://other/v4"), {})
+        self.assertEqual(gc.find_profile_for_provider("anthropic"), {})
+
+    def test_aux_model_block_round_trips(self):
+        gc.upsert_profile("default", {
+            "model_provider": "anthropic", "model_name": "claude",
+            "base_url": "https://api.anthropic.com", "api_key": "sk-main",
+            "aux_model": {
+                "model_provider": "zhipuai", "model_name": "glm-flash",
+                "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "sk-z",
+            },
+        })
+        am = gc.get_profile().get("aux_model")
+        self.assertEqual(am["model_provider"], "zhipuai")
+        self.assertEqual(am["api_key"], "sk-z")
+
+    def test_upsert_preserves_user_comments(self):
+        gc.write_commented_template()
+        gc.upsert_profile("default", {
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-x",
+        })
+        txt = open(gc.global_config_path()).read()
+        self.assertIn("Hand-edit freely", txt)
 
 
 if __name__ == "__main__":

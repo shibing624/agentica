@@ -3,19 +3,11 @@
 @author:XuMing(xuming624@qq.com)
 @description: Unified, hand-editable configuration shared by the SDK and the CLI.
 
-Historically agentica had three disconnected configuration surfaces:
-
-* the SDK core (``agentica/config.py`` + model classes) read **only** process
-  environment variables (populated at import time by ``python-dotenv`` from the
-  project ``.env`` and ``~/.agentica/.env``);
-* the CLI (``agentica/cli/setup.py``) read ``~/.agentica/cli_config.json``;
-* the gateway (``agentica/gateway/config.py``) read its own ``AGENTICA_*`` env
-  vars.
-
-This module introduces a single, structured, human-editable file —
-``~/.agentica/agentica.json`` — that both the SDK and the CLI can share. It
-supports **named profiles** (e.g. ``default``, ``gpt``, ``local``) so a user can
-keep several provider/model setups and switch the active one at runtime.
+A single hand-editable file — ``~/.agentica/config.yaml`` — is the source of
+truth for both the SDK and the CLI. It is **YAML** (not JSON) so users can add
+comments and read it easily. Named profiles (e.g. ``default``, ``gpt``,
+``local``) let a user keep several provider/model setups and switch the active
+one at runtime (``/model profile <name>``).
 
 Design principles
 -----------------
@@ -29,53 +21,67 @@ Design principles
   "stale key in a file silently shadows my shell export" footgun.
 * **``.env`` stays supported.** ``~/.agentica/.env`` is still loaded (for users
   who maintain it by hand, MCP tools, CI, etc.). Precedence, highest first:
-  shell env  >  .env  >  agentica.json.
-* **Hand-editable.** The file is plain JSON with a stable schema; ``agentica
-  setup`` writes it, but users may edit it directly.
+  shell env  >  .env  >  config.yaml.
+* **Hand-editable + comments preserved.** The file is plain YAML with a stable
+  schema; ``agentica setup`` writes it, but users may edit it directly and add
+  comments. Programmatic writes (onboarding, ``/model profile``) use
+  ``ruamel.yaml`` round-tripping so user comments are NOT lost.
 
-Schema (``~/.agentica/agentica.json``)::
+Two model concepts
+------------------
+The SDK has two model roles: the **main model** (user-facing turns) and the
+**auxiliary model** (background LLM calls: memory extraction, context
+compression, user-correction classification, goal judging, skill upgrade — and
+the ``task`` subagent tool). The CLI config follows this: each profile has the
+main model fields at the top, plus an optional ``aux_model`` sub-block for a
+cheaper/faster model. When ``aux_model`` is omitted, the aux role reuses the
+main model.
 
-    {
-      "active_profile": "default",
-      "profiles": {
-        "default": {
-          "model_provider": "deepseek",
-          "model_name": "deepseek-v4-flash",
-          "base_url": "https://api.deepseek.com",
-          "api_key": "sk-...",
+Schema (``~/.agentica/config.yaml``)::
 
-          // --- optional model tuning (omit to use model/factory defaults) ---
-          "reasoning_effort": "max",   // thinking depth: low|medium|high|max
-          "max_tokens": 8192,          // output limit (max output tokens)
-          "context_window": 1000000,   // context limit; overrides catalog value
-          "temperature": 0.7,
-          "top_p": 0.95
-        },
-        "gpt": {
-          "model_provider": "openai",
-          "model_name": "gpt-4o",
-          "base_url": "https://api.openai.com/v1",
-          "api_key": "sk-...",
-          "reasoning_effort": "high"
-        }
-      },
-      "env": {
-        "SERPER_API_KEY": "..."
-      }
-    }
+    # Active profile name; switch at runtime with: /model profile <name>
+    active_profile: default
 
-``reasoning_effort`` maps a model's "thinking depth" (OpenAI o-series / gpt-5.x
-and DeepSeek use this; Claude uses a separate thinking budget). ``max_tokens``
-is the output token cap. ``context_window`` is a capability value used for
-context-budget display and compression — it is NOT sent to the API; setting it
-overrides the value auto-detected from the model catalog.
+    profiles:
+      default:
+        # --- main model (user-facing turns) ---
+        model_provider: deepseek
+        model_name: deepseek-v4-flash
+        base_url: https://api.deepseek.com
+        api_key: sk-...
+
+        # optional model tuning (omit to use model/factory defaults)
+        # reasoning_effort: max      # low|medium|high|max (OpenAI/DeepSeek)
+        # max_tokens: 8192           # output token limit
+        # context_window: 1000000    # context limit; overrides catalog value
+        # temperature: 0.7
+        # top_p: 0.95
+
+        # --- optional aux model (background calls + `task` subagent tool) ---
+        # Omit the whole block to reuse the main model for aux work. When aux
+        # shares the main provider, any field may be omitted and inherits from
+        # the main model. When it uses a different provider, base_url defaults
+        # to that provider's preset and api_key must be set here or available
+        # via the provider env var.
+        # aux_model:
+        #   model_provider: zhipuai
+        #   model_name: glm-4.7-flash
+        #   base_url: https://open.bigmodel.cn/api/paas/v4
+        #   api_key: sk-...
+
+    # Free-form env block: arbitrary keys injected into os.environ (tool API
+    # keys, tracing, etc.). Shell/env-file values still win over these.
+    env:
+      SERPER_API_KEY: "..."
 
 The file is written with ``chmod 0o600`` because profiles hold secrets.
 """
 
-import json
 import os
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
+
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
 
 # Map a provider slug to the environment variable its model factory reads for
 # the API key. Kept in sync with the provider factories in agentica/__init__.py
@@ -102,20 +108,24 @@ PROVIDER_API_KEY_ENV = {
 }
 
 # The base_url env var used by the OpenAI-compatible base client. Injecting this
-# lets a custom endpoint defined purely in agentica.json work without flags.
+# lets a custom endpoint defined purely in config.yaml work without flags.
 OPENAI_BASE_URL_ENV = "OPENAI_BASE_URL"
 
 DEFAULT_PROFILE_NAME = "default"
 
+_yaml = YAML()
+_yaml.preserve_quotes = True
+_yaml.indent(mapping=2, sequence=4, offset=2)
+
 
 def global_config_path() -> str:
-    """Return the path to ``agentica.json`` (honours ``AGENTICA_HOME``).
+    """Return the path to ``config.yaml`` (honours ``AGENTICA_HOME``).
 
     Resolved lazily (not import-time-frozen) so tests can point
     ``AGENTICA_HOME`` elsewhere.
     """
     home = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
-    return os.path.join(home, "agentica.json")
+    return os.path.join(home, "config.yaml")
 
 
 def provider_api_key_env(provider: str) -> str:
@@ -123,30 +133,71 @@ def provider_api_key_env(provider: str) -> str:
     return PROVIDER_API_KEY_ENV.get(provider, "OPENAI_API_KEY")
 
 
-def load_global_config() -> Dict[str, Any]:
-    """Load ``agentica.json``, or an empty dict if missing/invalid."""
+def _load_commented() -> CommentedMap:
+    """Load config.yaml as a ruamel CommentedMap (preserves comments).
+
+    Returns an empty CommentedMap when the file is missing or invalid.
+    """
     path = global_config_path()
     if not os.path.exists(path):
-        return {}
+        return CommentedMap()
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
+            data = _yaml.load(f)
+    except Exception:
+        return CommentedMap()
+    return data if isinstance(data, CommentedMap) else CommentedMap()
 
 
-def save_global_config(config: Dict[str, Any]) -> None:
-    """Persist ``agentica.json`` to disk with ``0o600`` perms (holds secrets)."""
+def _to_plain(obj: Any) -> Any:
+    """Recursively convert ruamel containers to plain dict/list for read API."""
+    if isinstance(obj, CommentedMap):
+        return {k: _to_plain(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_plain(v) for v in obj]
+    return obj
+
+
+def _to_commented(obj: Any) -> Any:
+    """Recursively convert plain dict/list to ruamel containers."""
+    if isinstance(obj, dict):
+        cm = CommentedMap()
+        for k, v in obj.items():
+            cm[k] = _to_commented(v)
+        return cm
+    if isinstance(obj, list):
+        return [_to_commented(v) for v in obj]
+    return obj
+
+
+def load_global_config() -> Dict[str, Any]:
+    """Load ``config.yaml`` as a plain dict, or an empty dict if missing/invalid."""
+    return _to_plain(_load_commented())
+
+
+def _save_commented(data: CommentedMap) -> None:
+    """Persist a CommentedMap to config.yaml with ``0o600`` perms (holds secrets)."""
     path = global_config_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+        _yaml.dump(data, f)
     try:
         os.chmod(path, 0o600)
     except OSError:
         # Non-fatal on platforms where chmod has no effect; contents are saved.
         pass
+
+
+def save_global_config(config: Dict[str, Any]) -> None:
+    """Persist a plain dict to config.yaml with ``0o600`` perms.
+
+    Note: this performs a fresh dump from a plain dict, so any comments that
+    existed in the file are lost. For comment-preserving writes use
+    :func:`upsert_profile` / :func:`set_active_profile`, which round-trip the
+    existing file. This function is kept for tests and ad-hoc callers that
+    build a config dict from scratch.
+    """
+    _save_commented(_to_commented(config))
 
 
 def get_active_profile_name(config: Optional[Dict[str, Any]] = None) -> str:
@@ -173,27 +224,54 @@ def get_profile(name: Optional[str] = None, config: Optional[Dict[str, Any]] = N
 
 
 def set_active_profile(name: str) -> bool:
-    """Mark ``name`` as the active profile. Returns False if it does not exist."""
-    config = load_global_config()
-    if name not in get_profiles(config):
+    """Mark ``name`` as the active profile. Returns False if it does not exist.
+
+    Round-trips the YAML file so user comments are preserved.
+    """
+    data = _load_commented()
+    profiles = data.get("profiles")
+    if not isinstance(profiles, CommentedMap) or name not in profiles:
         return False
-    config["active_profile"] = name
-    save_global_config(config)
+    data["active_profile"] = name
+    _save_commented(data)
     return True
 
 
 def upsert_profile(name: str, profile: Dict[str, Any], make_active: bool = True) -> None:
-    """Create or update a named profile and optionally make it active."""
-    config = load_global_config()
-    profiles = config.get("profiles")
-    if not isinstance(profiles, dict):
-        profiles = {}
-    # Drop None values so the stored profile stays clean / hand-editable.
-    profiles[name] = {k: v for k, v in profile.items() if v is not None}
-    config["profiles"] = profiles
-    if make_active or "active_profile" not in config:
-        config["active_profile"] = name
-    save_global_config(config)
+    """Create or update a named profile and optionally make it active.
+
+    Round-trips the YAML file so user comments are preserved. ``None`` values
+    are dropped so the stored profile stays clean / hand-editable.
+    """
+    data = _load_commented()
+    profiles = data.get("profiles")
+    if not isinstance(profiles, CommentedMap):
+        profiles = CommentedMap()
+        data["profiles"] = profiles
+    profiles[name] = CommentedMap(
+        (k, _to_commented(v)) for k, v in profile.items() if v is not None
+    )
+    if make_active or "active_profile" not in data:
+        data["active_profile"] = name
+    _save_commented(data)
+
+
+def find_profile_for_provider(provider: str, base_url: Optional[str] = None) -> Dict[str, Any]:
+    """Return the first profile matching ``provider`` (and ``base_url`` if given).
+
+    Profiles are the key store now that cli_config.json is gone, so this is how
+    a previously-saved key for a different provider is looked up (e.g. when the
+    user switches providers in ``/model``, or when the aux model uses a
+    different provider whose key lives in another profile).
+    """
+    for p in get_profiles().values():
+        if p.get("model_provider") == provider:
+            if base_url is None:
+                return p
+            p_base = (p.get("base_url") or "").rstrip("/")
+            if p_base == base_url.rstrip("/"):
+                return p
+    return {}
 
 
 def _inject_env(key: str, value: Optional[str]) -> None:
@@ -208,11 +286,11 @@ def apply_global_config() -> Dict[str, Any]:
     Called once at import time from :mod:`agentica.config`, *after* ``.env`` has
     been loaded, so the precedence (highest first) is::
 
-        shell env  >  .env  >  agentica.json
+        shell env  >  .env  >  config.yaml
 
-    Injection uses ``setdefault`` semantics — an already-present env var is never
-    overwritten. Returns the active profile dict (possibly empty) so callers can
-    reuse the resolved model config without re-reading the file.
+    Injection uses ``setdefault`` semantics — an already-present env var is
+    never overwritten. Returns the active profile dict (possibly empty) so
+    callers can reuse the resolved model config without re-reading the file.
     """
     config = load_global_config()
     if not config:
@@ -233,7 +311,62 @@ def apply_global_config() -> Dict[str, Any]:
         if provider and api_key:
             _inject_env(provider_api_key_env(provider), api_key)
         # For OpenAI-compatible custom endpoints, also seed OPENAI_BASE_URL so a
-        # base_url defined purely in agentica.json takes effect without a flag.
+        # base_url defined purely in config.yaml takes effect without a flag.
         if provider in ("openai",) and base_url:
             _inject_env(OPENAI_BASE_URL_ENV, base_url)
     return profile
+
+
+def write_commented_template(path: Optional[str] = None) -> None:
+    """Write a fresh, fully-commented config.yaml template (first-run onboarding).
+
+    Overwrites ``path`` (defaults to :func:`global_config_path`) with the
+    documented schema and ``0o600`` perms. Intended only when no config.yaml
+    exists yet, so we never clobber a user's hand-edited file.
+    """
+    target = path or global_config_path()
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    template = _CONFIG_TEMPLATE
+    with open(target, "w", encoding="utf-8") as f:
+        f.write(template)
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass
+
+
+_CONFIG_TEMPLATE = """\
+# Agentica configuration — shared by the SDK and the CLI.
+# Hand-edit freely; comments are preserved on programmatic writes.
+# Switch the active profile at runtime with: /model profile <name>
+
+active_profile: default
+
+profiles:
+  default:
+    # --- main model (user-facing turns) ---
+    model_provider: deepseek
+    model_name: deepseek-v4-flash
+    base_url: https://api.deepseek.com
+    api_key: REPLACE_ME
+
+    # optional model tuning (omit to use model/factory defaults)
+    # reasoning_effort: max      # low|medium|high|max (OpenAI/DeepSeek)
+    # max_tokens: 8192           # output token limit
+    # context_window: 1000000    # context limit; overrides catalog value
+    # temperature: 0.7
+    # top_p: 0.95
+
+    # --- optional aux model (background calls + `task` subagent tool) ---
+    # A cheaper/faster model here saves cost on memory extraction, context
+    # compression, and delegated subtasks. Omit to reuse the main model.
+    # aux_model:
+    #   model_provider: zhipuai
+    #   model_name: glm-4.7-flash
+    #   base_url: https://open.bigmodel.cn/api/paas/v4
+    #   api_key: sk-...
+
+# Free-form env block: arbitrary keys injected into os.environ.
+# Shell / .env values still win over these (setdefault semantics).
+env: {}
+"""

@@ -38,6 +38,7 @@ dependencies = [
     "aiofiles>=23.0",
     "tiktoken>=0.5",
     "pyyaml>=6.0",
+    "ruamel.yaml>=0.17",
     "python-dotenv>=1.0",
     "typing_extensions>=4.0",
     # ── 默认产品化能力（agentica 差异化卖点，必装）──

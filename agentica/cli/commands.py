@@ -38,9 +38,7 @@ from agentica.cli.display import (
 from agentica.cli.setup import (
     default_base_url,
     default_model_name,
-    get_saved_api_key,
-    load_cli_config,
-    save_cli_config,
+    get_profile_api_key,
 )
 from agentica.global_config import (
     get_profile,
@@ -1023,17 +1021,22 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _persist_model_choice(provider: str, model_name: str, base_url: Optional[str]) -> None:
-    """Remember a live /model switch so it survives the next launch."""
-    config = load_cli_config()
-    config["onboarded"] = True
-    config["model_provider"] = provider
-    config["model_name"] = model_name
-    config["base_url"] = base_url
-    save_cli_config(config)
+    """Remember a live /model switch so it survives the next launch.
+
+    Updates the active profile in config.yaml (round-trips, preserving user
+    comments). The api_key already stored in the profile is left untouched.
+    """
+    name = get_active_profile_name()
+    existing = get_profile(name)
+    profile = dict(existing)
+    profile["model_provider"] = provider
+    profile["model_name"] = model_name
+    profile["base_url"] = base_url
+    upsert_profile(name, profile, make_active=True)
 
 
 def _apply_profile(ctx: CommandContext, name: str):
-    """Switch the live agent to a named agentica.json profile."""
+    """Switch the live agent to a named config.yaml profile."""
     con = get_console()
     profile = get_profile(name)
     if not profile or not profile.get("model_provider"):
@@ -1046,7 +1049,7 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_provider = profile["model_provider"]
     new_model = profile.get("model_name") or default_model_name(new_provider)
     new_base_url = profile.get("base_url") or default_base_url(new_provider)
-    new_key = profile.get("api_key") or get_saved_api_key(new_provider, new_base_url)
+    new_key = profile.get("api_key") or get_profile_api_key(new_provider, new_base_url)
 
     # Model tuning params: a profile-switch fully replaces the previous model's
     # tuning, so unset profile fields reset to None (the model factory default)
@@ -1092,12 +1095,12 @@ def _apply_profile(ctx: CommandContext, name: str):
 
 
 def _list_profiles():
-    """Print all configured agentica.json profiles."""
+    """Print all configured config.yaml profiles."""
     con = get_console()
     profiles = get_profiles()
     active = get_active_profile_name()
     if not profiles:
-        con.print("[yellow]No profiles configured in ~/.agentica/agentica.json[/yellow]")
+        con.print("[yellow]No profiles configured in ~/.agentica/config.yaml[/yellow]")
         con.print("Create one with: agentica setup", style="dim")
         return
     con.print("Configured profiles:", style="cyan")
@@ -1159,15 +1162,15 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
         # When switching providers we must also re-resolve the api_key:
         # reusing the old provider's key (e.g. deepseek) against a different
         # endpoint (e.g. openai) is guaranteed to 401. Prefer a matching
-        # agentica.json profile, then a saved cli_config.json key; if neither
-        # exists, fall back to ``None`` so the model factory resolves it from
-        # env vars.
+        # config.yaml profile, then any profile storing a key for this
+        # provider/base_url; if neither exists, fall back to ``None`` so the
+        # model factory resolves it from env vars.
         if new_provider != old_provider:
             matching_profile = get_profile(new_provider)
             if matching_profile.get("model_provider") == new_provider and matching_profile.get("api_key"):
                 ctx.agent_config["api_key"] = matching_profile["api_key"]
             else:
-                ctx.agent_config["api_key"] = get_saved_api_key(new_provider, new_base_url)
+                ctx.agent_config["api_key"] = get_profile_api_key(new_provider, new_base_url)
         ctx.agent_config["model_provider"] = new_provider
         ctx.agent_config["model_name"] = new_model
         ctx.agent_config["base_url"] = new_base_url
@@ -1212,7 +1215,7 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
         if profiles:
             active = get_active_profile_name()
             con.print()
-            con.print("Saved profiles (~/.agentica/agentica.json):", style="cyan")
+            con.print("Saved profiles (~/.agentica/config.yaml):", style="cyan")
             for name, p in profiles.items():
                 marker = " [active]" if name == active else ""
                 con.print(f"  {name}{marker}: [dim]{p.get('model_provider', '?')}/{p.get('model_name', '?')}[/dim]")

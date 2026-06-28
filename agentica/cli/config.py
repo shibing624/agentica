@@ -286,31 +286,22 @@ def parse_args():
         help="Reasoning/thinking depth for thinking models; DeepSeek CLI defaults to max",
     )
 
-    # Auxiliary model (compression / memory extraction / experience lifecycle).
-    # Omit to reuse the main model (single API key). Any field can differ — a
-    # different provider, a different API key, a different base_url, etc.
+    # Aux model: the cheap/fast model for all non-user-facing LLM work — memory
+    # extraction, context compression, user-correction classification, goal
+    # judging, skill upgrade, AND the `task` subagent tool. Omit to reuse the
+    # main model. Any field can differ (provider / api_key / base_url).
     parser.add_argument(
         "--aux_model_provider",
         type=str,
         choices=list(MODEL_REGISTRY.keys()),
-        help="Provider for DeepAgent auxiliary_model (defaults to --model_provider)",
+        help="Provider for the aux model (defaults to --model_provider)",
     )
     parser.add_argument(
-        "--aux_model_name", type=str, help="Model id for auxiliary_model (required to enable a different aux)"
+        "--aux_model_name", type=str,
+        help="Model id for the aux model (background tasks + `task` subagent; required to enable a separate aux)",
     )
-    parser.add_argument("--aux_base_url", type=str, help="Base URL for auxiliary_model")
-    parser.add_argument("--aux_api_key", type=str, help="API key for auxiliary_model")
-
-    # Task model (used by the `task` subagent tool). Same rules as aux.
-    parser.add_argument(
-        "--task_model_provider",
-        type=str,
-        choices=list(MODEL_REGISTRY.keys()),
-        help="Provider for the task-subagent model (defaults to --model_provider)",
-    )
-    parser.add_argument("--task_model_name", type=str, help="Model id for the task-subagent model")
-    parser.add_argument("--task_base_url", type=str, help="Base URL for the task-subagent model")
-    parser.add_argument("--task_api_key", type=str, help="API key for the task-subagent model")
+    parser.add_argument("--aux_base_url", type=str, help="Base URL for the aux model")
+    parser.add_argument("--aux_api_key", type=str, help="API key for the aux model")
 
     parser.add_argument("--debug", type=int, help="enable verbose mode", default=0)
     parser.add_argument(
@@ -457,18 +448,28 @@ def _build_sibling_model(agent_config: dict, prefix: str):
     the caller should either not pass the arg to DeepAgent (so it reuses
     the main model) or pass the main model explicitly.
 
-    Fields fall through to main-model values when a sibling field is None,
-    so the user can override just the pieces that differ (e.g. only the
-    model name, or only the base_url+api_key).
+    Fields fall through to main-model values when a sibling field is None AND
+    the sibling shares the main model's provider, so the user can override just
+    the pieces that differ (e.g. only the model name, or only the
+    base_url+api_key). When the sibling uses a *different* provider, base_url
+    and api_key are NOT inherited from the main model — a different provider's
+    endpoint/key never works for the main provider, so falling back would
+    silently produce a broken client. In that case a None base_url/api_key is
+    passed to the model factory, which uses the provider preset / env var.
     """
     sibling_name = agent_config.get(f"{prefix}_model_name")
     if not sibling_name:
         return None
+    main_provider = agent_config["model_provider"]
+    sibling_provider = agent_config.get(f"{prefix}_model_provider") or main_provider
+    same_provider = sibling_provider == main_provider
     return get_model(
-        model_provider=agent_config.get(f"{prefix}_model_provider") or agent_config["model_provider"],
+        model_provider=sibling_provider,
         model_name=sibling_name,
-        base_url=agent_config.get(f"{prefix}_base_url") or agent_config.get("base_url"),
-        api_key=agent_config.get(f"{prefix}_api_key") or agent_config.get("api_key"),
+        base_url=agent_config.get(f"{prefix}_base_url")
+        or (agent_config.get("base_url") if same_provider else None),
+        api_key=agent_config.get(f"{prefix}_api_key")
+        or (agent_config.get("api_key") if same_provider else None),
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
         reasoning_effort=agent_config.get("reasoning_effort"),
@@ -529,11 +530,14 @@ def create_agent(
         context_window=agent_config.get("context_window"),
     )
 
-    # Optional sibling models. When the user doesn't pass --aux_model_name /
-    # --task_model_name, these stay None and DeepAgent falls back to the
-    # main model — same API key drives the whole stack.
+    # Aux model: the cheap/fast model for all background LLM work (memory
+    # extraction, compression, classification, goal judging, skill upgrade) AND
+    # the `task` subagent tool. When --aux_model_name is unset this stays None
+    # and DeepAgent falls back to the main model for aux work.
     auxiliary_model = _build_sibling_model(agent_config, "aux")
-    task_model = _build_sibling_model(agent_config, "task")
+    # The task subagent tool shares the aux model (one cheap model for all
+    # non-user-facing LLM work), so the CLI exposes only main + aux.
+    task_model = auxiliary_model
     experience_config = _build_cli_experience_config(agent_config)
     long_term_memory_config = _build_cli_memory_config(agent_config)
 

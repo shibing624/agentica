@@ -1,37 +1,32 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: First-run model provider onboarding wizard for the CLI.
+@description: First-run model provider onboarding wizard + model config resolution.
 
-On first launch (missing saved CLI config or missing API key) the user is
-walked through picking a model provider and filling in base_url, api_key and
-model_name. **All** wizard output - including the API key - is persisted to a
-single file: ``~/.agentica/cli_config.json`` (chmod 0o600). This avoids three
-long-standing problems with the previous design:
-
-* Writing ``OPENAI_API_KEY=...`` into ``~/.agentica/.env`` collides with the
-  same variable already exported by the user's shell (``.zshrc`` / ``.bashrc``);
-  ``python-dotenv`` does not override existing process env, so the value the
-  user just typed silently has no effect on the next launch.
-* Splitting non-secret config (cli_config.json) and secrets (.env) forces the
-  user to look in two places to understand or fix their setup.
-* For a ``Custom (OpenAI-compatible)`` endpoint, reusing the literal
-  ``OPENAI_API_KEY`` env name guarantees a clash with the real OpenAI key.
-  Custom keys are now stored under a base_url-scoped slot in cli_config.json
-  and are never written to a generic env var.
+The single source of truth for SDK + CLI model configuration is
+``~/.agentica/config.yaml`` (see :mod:`agentica.global_config`). It holds named
+profiles, each with a **main model** and an optional **aux model**. The aux
+model is the cheap/fast model used for all non-user-facing LLM work: memory
+extraction, context compression, user-correction classification, goal judging,
+skill upgrade, AND the ``task`` subagent tool. Omit ``aux_model`` to reuse the
+main model for aux work.
 
 ``~/.agentica/.env`` is still loaded at startup (for users who maintain it by
-hand for MCP tools and similar), but the wizard no longer writes to it.
+hand for MCP tools and similar); the wizard never writes to it. Precedence
+(highest first): shell env > .env > config.yaml.
+
+There is no longer a separate ``cli_config.json`` — API keys live in the
+profile's ``api_key`` field (or provider env vars). A custom OpenAI-compatible
+endpoint is just a host-suffixed profile (e.g. ``openai@my-llm.local``) with its
+own ``api_key``, so it can never silently reuse the real OpenAI key.
 """
 
-import json
 import os
 import sys
 from typing import Dict, Optional
 
 from prompt_toolkit import prompt as pt_prompt
 
-from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH
 from agentica.global_config import (
     DEFAULT_PROFILE_NAME,
     get_profile,
@@ -39,30 +34,16 @@ from agentica.global_config import (
     get_active_profile_name,
     upsert_profile,
     set_active_profile,
+    find_profile_for_provider,
+    global_config_path,
+    write_commented_template,
 )
-
-CLI_CONFIG_PATH = os.path.join(AGENTICA_HOME, "cli_config.json")
-
-# cli_config.json schema (only ``api_keys`` is new; older files are migrated
-# transparently - missing fields are simply treated as absent):
-#
-#   {
-#     "onboarded": true,
-#     "model_provider": "openai",
-#     "model_name": "gpt-4o",
-#     "base_url": "https://api.openai.com/v1",
-#     "api_keys": {
-#         "deepseek": "...",              # one slot per known provider
-#         "openai": "...",
-#         "openai@https://x.ai/v1": "..." # custom endpoints: base_url-scoped
-#     }
-#   }
 
 # Provider presets: provider slug -> metadata used by the wizard.
 # ``env`` is the environment variable each provider factory reads for its key
 # (see agentica/__init__.py). It is consulted as a *fallback* only when no key
-# is stored in cli_config.json. ``base_url`` is the default endpoint shown to
-# the user. Every provider here is backed by MODEL_REGISTRY in cli/config.py.
+# is stored in a profile. ``base_url`` is the default endpoint shown to the
+# user. Every provider here is backed by MODEL_REGISTRY in cli/config.py.
 PROVIDER_PRESETS = {
     "deepseek": {
         "label": "DeepSeek",
@@ -117,41 +98,6 @@ DEFAULT_PROVIDER = "deepseek"
 DEFAULT_MODEL = "deepseek-v4-flash"
 
 
-def load_cli_config() -> Dict:
-    """Load the saved CLI config, or an empty dict if none/invalid."""
-    if not os.path.exists(CLI_CONFIG_PATH):
-        return {}
-    try:
-        with open(CLI_CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_cli_config(config: Dict) -> None:
-    """Persist the CLI config (including API keys) to disk with 0o600 perms.
-
-    The file is the single source of truth for the CLI: provider, model,
-    base_url and api_keys all live here. Permissions are restricted to the
-    current user because ``api_keys`` contains secrets.
-    """
-    os.makedirs(os.path.dirname(CLI_CONFIG_PATH), exist_ok=True)
-    with open(CLI_CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
-    try:
-        os.chmod(CLI_CONFIG_PATH, 0o600)
-    except OSError:
-        # Non-fatal on platforms (e.g. some Windows setups) where chmod has
-        # no effect; the contents are still saved.
-        pass
-
-
-def is_onboarded() -> bool:
-    """True once the user has completed (or explicitly skipped) onboarding."""
-    return bool(load_cli_config().get("onboarded"))
-
-
 def default_base_url(provider: str) -> Optional[str]:
     """Return the default base_url for a known provider."""
     preset = PROVIDER_PRESETS.get(provider)
@@ -168,41 +114,31 @@ def default_model_name(provider: str) -> str:
     return preset["default_model"]
 
 
-def is_cli_config_complete(config: Optional[Dict] = None) -> bool:
-    """Return True when non-secret CLI model config is complete."""
-    data = load_cli_config() if config is None else config
-    return bool(
-        data.get("onboarded") and data.get("model_provider") and data.get("model_name") and data.get("base_url")
-    )
-
-
 def provider_env_var(provider: str) -> str:
     """Return the API-key env var name for a provider (OPENAI_API_KEY fallback).
 
-    Used as a *fallback* lookup only when no key is stored in cli_config.json
-    - the wizard itself no longer writes to env vars.
+    Used as a *fallback* lookup only when no key is stored in a profile — the
+    wizard itself no longer writes to env vars.
     """
     preset = PROVIDER_PRESETS.get(provider)
     return preset["env"] if preset else "OPENAI_API_KEY"
 
 
-def _api_key_slot(provider: str, base_url: Optional[str] = None) -> str:
-    """Return the slot under which an api_key is stored in cli_config['api_keys'].
+def _is_custom_openai(provider: str, base_url: Optional[str] = None) -> bool:
+    """True for a Custom OpenAI-compatible endpoint (openai + non-default base_url).
 
-    For known providers the slot is just the provider slug (``deepseek``,
-    ``openai``, ...). For a Custom OpenAI-compatible endpoint we scope the
-    slot by base_url (``openai@https://my-llm.local/v1``) so that storing a
-    custom key never overwrites the user's real OpenAI key.
+    Such an endpoint must NOT fall back to ``OPENAI_API_KEY``: that variable
+    belongs to OpenAI proper, and silently reusing it for an unrelated endpoint
+    is a footgun.
     """
-    if provider == "openai" and base_url:
-        canonical = PROVIDER_PRESETS["openai"]["base_url"].rstrip("/")
-        if base_url.rstrip("/") != canonical:
-            return "openai@" + base_url.rstrip("/")
-    return provider
+    if provider != "openai":
+        return False
+    canonical = PROVIDER_PRESETS["openai"]["base_url"].rstrip("/")
+    return bool(base_url) and base_url.rstrip("/") != canonical
 
 
 def _profile_name_for(provider: str, base_url: Optional[str] = None) -> str:
-    """Derive a stable agentica.json profile name from provider + base_url.
+    """Derive a stable config.yaml profile name from provider + base_url.
 
     Known providers map to their slug (``deepseek``, ``openai``, ...). A custom
     OpenAI-compatible endpoint gets a host-suffixed name (``openai@my-llm.local``)
@@ -218,61 +154,31 @@ def _profile_name_for(provider: str, base_url: Optional[str] = None) -> str:
     return provider
 
 
-def get_saved_api_key(provider: str, base_url: Optional[str] = None) -> Optional[str]:
-    """Look up the API key stored in cli_config.json for this provider/base_url."""
-    keys = load_cli_config().get("api_keys") or {}
-    if not isinstance(keys, dict):
-        return None
-    slot = _api_key_slot(provider, base_url)
-    value = keys.get(slot)
-    if value:
-        return value
-    # For a Custom endpoint (slot != provider) we deliberately do NOT fall
-    # back to the bare ``openai`` slot: a Custom endpoint must never silently
-    # reuse the real OpenAI key. The reverse direction (canonical OpenAI base
-    # falling back to a custom slot) is not needed because the slot computed
-    # for the canonical base_url is just ``openai``.
-    return None
+def get_profile_api_key(provider: str, base_url: Optional[str] = None) -> Optional[str]:
+    """Look up an API key stored in a config.yaml profile for this provider/base_url.
 
-
-def save_api_key(provider: str, value: str, base_url: Optional[str] = None) -> None:
-    """Persist an API key into cli_config.json under a provider/base_url slot."""
-    config = load_cli_config()
-    keys = config.get("api_keys")
-    if not isinstance(keys, dict):
-        keys = {}
-    keys[_api_key_slot(provider, base_url)] = value
-    config["api_keys"] = keys
-    save_cli_config(config)
+    Profiles are the key store now that cli_config.json is gone. Returns the
+    ``api_key`` of the first profile whose main model matches the given
+    provider (and base_url if given), else ``None``.
+    """
+    p = find_profile_for_provider(provider, base_url)
+    return p.get("api_key") if p else None
 
 
 def has_api_key(provider: str, base_url: Optional[str] = None) -> bool:
-    """True if an API key is available either in cli_config.json or the env.
+    """True if an API key is available in a profile or the process env.
 
-    Resolution order matches what ``resolve_model_config`` hands to the model
-    factory: cli_config first (single source of truth), then env vars (kept
-    as a backwards-compatible fallback for users who still export keys in
-    their shell or maintain ``~/.agentica/.env`` by hand).
+    Resolution order: a config.yaml profile matching provider/base_url with an
+    ``api_key`` wins; otherwise the provider env var is consulted (kept as a
+    backwards-compatible fallback for users who still export keys in their
+    shell or maintain ``~/.agentica/.env`` by hand).
 
-    For a custom OpenAI-compatible endpoint we do NOT consult ``OPENAI_API_KEY``
-    as a fallback: that env var belongs to OpenAI proper, and silently using
-    it for an unrelated endpoint is a footgun the wizard explicitly avoids.
+    For a custom OpenAI-compatible endpoint we do NOT consult
+    ``OPENAI_API_KEY`` as a fallback (see :func:`_is_custom_openai`).
     """
-    if get_saved_api_key(provider, base_url):
+    if get_profile_api_key(provider, base_url):
         return True
-    # New unified config: a matching active profile with an api_key counts.
-    # For a custom endpoint the profile's base_url must also match, so a
-    # generic ``openai`` profile never satisfies an unrelated custom endpoint.
-    active_profile = get_profile()
-    if active_profile.get("model_provider") == provider and active_profile.get("api_key"):
-        slot = _api_key_slot(provider, base_url)
-        if slot == provider:
-            return True
-        profile_slot = _api_key_slot(provider, active_profile.get("base_url"))
-        if profile_slot == slot:
-            return True
-    if _api_key_slot(provider, base_url) != provider:
-        # Custom endpoint - no env-var fallback (see docstring above).
+    if _is_custom_openai(provider, base_url):
         return False
     env_var = provider_env_var(provider)
     if os.getenv(env_var):
@@ -283,59 +189,26 @@ def has_api_key(provider: str, base_url: Optional[str] = None) -> bool:
     return False
 
 
-def save_api_key_to_env(env_var: str, value: str) -> None:
-    """Deprecated: write a key to ``~/.agentica/.env``.
-
-    Kept only for backwards compatibility with external callers. The CLI
-    wizard now stores keys in cli_config.json via :func:`save_api_key` to
-    avoid colliding with shell-exported env vars (the previous design wrote
-    a literal ``OPENAI_API_KEY=...`` line to .env, but a key already exported
-    in ``.zshrc``/``.bashrc`` would shadow it via dotenv's no-override
-    semantics, so the value the user just typed had no effect on the next
-    launch).
-    """
-    os.makedirs(os.path.dirname(AGENTICA_DOTENV_PATH), exist_ok=True)
-
-    lines = []
-    if os.path.exists(AGENTICA_DOTENV_PATH):
-        with open(AGENTICA_DOTENV_PATH, "r", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-
-    prefix = env_var + "="
-    replaced = False
-    for i, line in enumerate(lines):
-        if line.strip().startswith(prefix):
-            lines[i] = prefix + value
-            replaced = True
-            break
-    if not replaced:
-        lines.append(prefix + value)
-
-    with open(AGENTICA_DOTENV_PATH, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-    # Make the key visible to the running process immediately.
-    os.environ[env_var] = value
+def is_profile_complete(profile: Optional[Dict] = None) -> bool:
+    """True when a profile has all four main-model fields set."""
+    p = profile if profile is not None else get_profile()
+    return bool(
+        p.get("model_provider")
+        and p.get("model_name")
+        and p.get("base_url")
+        and p.get("api_key")
+    )
 
 
 def should_onboard(provider: str, base_url: Optional[str] = None) -> bool:
     """Decide whether to run the first-launch wizard.
 
-    Run the wizard whenever either side of the CLI setup is incomplete:
-    non-secret config (provider/model/base_url) or the provider API key.
-    A complete config plus an API key skips onboarding. A complete active
-    profile in agentica.json (provider/model/base_url/api_key) also skips it.
+    Skip when the active profile is complete, or when a profile matching the
+    resolved provider already has a key. Otherwise require a TTY.
     """
-    # New unified config: a fully-specified active profile is sufficient.
-    active_profile = get_profile()
-    if (
-        active_profile.get("model_provider")
-        and active_profile.get("model_name")
-        and active_profile.get("base_url")
-        and active_profile.get("api_key")
-    ):
+    if is_profile_complete():
         return False
-    if is_cli_config_complete() and has_api_key(provider, base_url):
+    if has_api_key(provider, base_url):
         return False
     return sys.stdin.isatty() and sys.stdout.isatty()
 
@@ -442,13 +315,80 @@ def _prompt_advanced_params(console, provider: str) -> Dict:
     return params
 
 
+def _prompt_aux_model(console, main_provider: str) -> Dict:
+    """Optionally configure the aux model (background calls + `task` subagent).
+
+    Fully skippable: the whole section is gated by a ``[y/N]`` question. When
+    the user declines, returns ``{}``. Otherwise prompts for provider, base_url,
+    api_key and model_name (with sensible defaults / blank-to-skip) and returns
+    an ``aux_model`` block dict suitable for storing in a config.yaml profile.
+    The key is persisted into the profile (no separate key-slot file).
+    """
+    console.print()
+    console.print("  Aux model (background tasks + `task` subagent) - optional", style="bold cyan")
+    console.print("  [dim]A cheaper/faster model here saves cost on memory extraction,[/dim]")
+    console.print("  [dim]context compression, and delegated subtasks.[/dim]")
+    answer = pt_prompt("  Configure a separate aux model? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        return {}
+
+    provider_choice = _select_provider(console)
+    is_custom = provider_choice == "custom"
+    if is_custom:
+        provider = "openai"
+        console.print()
+        console.print("  Custom OpenAI-compatible endpoint", style="bold cyan")
+        base_url = pt_prompt("  Base URL: ").strip()
+        while not base_url:
+            console.print("  [red]Base URL is required for a custom endpoint.[/red]")
+            base_url = pt_prompt("  Base URL: ").strip()
+        default_model = ""
+    else:
+        provider = provider_choice
+        preset = PROVIDER_PRESETS[provider]
+        default_base = preset["base_url"]
+        console.print()
+        console.print(f"  {preset['label']} selected", style="bold cyan")
+        base_url = pt_prompt(f"  Base URL [{default_base}]: ").strip() or default_base
+        default_model = preset["default_model"]
+
+    # API key: prefer a previously stored profile key, else the provider env
+    # var (so users with shell-exported keys don't get re-prompted). Custom
+    # endpoints never look at OPENAI_API_KEY.
+    existing_key = get_profile_api_key(provider, base_url)
+    if not existing_key and not is_custom:
+        existing_key = os.getenv(provider_env_var(provider))
+    key_hint = " (press Enter to keep existing)" if existing_key else " (blank to skip)"
+    entered_key = pt_prompt(f"  API key{key_hint}: ", is_password=True).strip()
+    key = entered_key or existing_key
+
+    model_prompt = f"  Model name [{default_model}]: " if default_model else "  Model name: "
+    model_name = pt_prompt(model_prompt).strip() or default_model
+    while not model_name:
+        console.print("  [red]Model name is required (or answer N to skip the aux model).[/red]")
+        model_name = pt_prompt("  Model name: ").strip()
+
+    block: Dict = {
+        "model_provider": provider,
+        "model_name": model_name,
+        "base_url": base_url,
+    }
+    if key:
+        block["api_key"] = key
+    if provider == main_provider:
+        console.print("  [dim]Same provider as main model — you could also just set model_name.[/dim]")
+    return block
+
+
 def run_onboarding(console) -> Dict:
     """Interactive first-run wizard.
 
-    Persists provider/model/base_url and the API key to cli_config.json
-    (single file, 0o600). Returns ``{model_provider, model_name, base_url,
-    api_key}``; the api_key field may be the freshly entered value, a
-    previously saved one, or ``None`` if the user declined to enter one.
+    Persists the main model (provider/model/base_url/api_key + optional tuning)
+    and the optional aux model to ``~/.agentica/config.yaml`` as a named profile,
+    made active so the SDK picks up the api_key via env injection on next run.
+    Returns ``{model_provider, model_name, base_url, api_key, ...aux fields}``;
+    the api_key field may be the freshly entered value, a previously stored one,
+    or ``None`` if the user declined to enter one.
     """
     console.print()
     console.print("=" * min(getattr(console, "width", 80), 80), style="bright_cyan")
@@ -477,19 +417,16 @@ def run_onboarding(console) -> Dict:
         base_url = pt_prompt(f"  Base URL [{default_base}]: ").strip() or default_base
         default_model = preset["default_model"]
 
-    # API key - masked input. Prefer a previously saved cli_config.json key,
-    # then fall back to the provider env var (so users with shell-exported keys
-    # don't get re-prompted unnecessarily). For Custom endpoints we never look
-    # at OPENAI_API_KEY: that variable belongs to OpenAI proper and would
-    # silently mislead the user about which key the custom endpoint will use.
-    existing_key = get_saved_api_key(provider, base_url)
+    # API key - masked input. Prefer a previously stored profile key, then fall
+    # back to the provider env var. Custom endpoints never look at
+    # OPENAI_API_KEY (see _is_custom_openai).
+    existing_key = get_profile_api_key(provider, base_url)
     if not existing_key and not is_custom:
         existing_key = os.getenv(provider_env_var(provider))
     key_hint = " (press Enter to keep existing)" if existing_key else ""
     entered_key = pt_prompt(f"  API key{key_hint}: ", is_password=True).strip()
     if entered_key:
-        save_api_key(provider, entered_key, base_url=base_url)
-        console.print("  [green]API key saved to ~/.agentica/cli_config.json[/green]")
+        console.print("  [green]API key will be saved to ~/.agentica/config.yaml[/green]")
     elif existing_key:
         console.print("  [dim]Keeping existing API key.[/dim]")
     else:
@@ -504,23 +441,17 @@ def run_onboarding(console) -> Dict:
 
     # Optional advanced tuning (thinking depth, output/context limits, sampling).
     # Skipped by default to keep first-run quick; users can also hand-edit
-    # ~/.agentica/agentica.json afterwards.
+    # ~/.agentica/config.yaml afterwards.
     advanced = _prompt_advanced_params(console, provider)
 
-    config = load_cli_config()
-    config.update(
-        {
-            "onboarded": True,
-            "model_provider": provider,
-            "model_name": model_name,
-            "base_url": base_url,
-        }
-    )
-    save_cli_config(config)
+    # Optional aux model (background calls + `task` subagent) — fully skippable.
+    aux_block = _prompt_aux_model(console, provider)
 
-    # Persist to the unified, SDK+CLI-shared config (~/.agentica/agentica.json)
-    # as a named profile. This is the new single source of truth; the profile is
-    # made active so the SDK picks up the api_key via env injection on next run.
+    # Persist to config.yaml as a named profile. On first run (no file yet)
+    # write a fully-commented template first so the user gets a readable base;
+    # upsert then round-trips the file, preserving those comments.
+    if not os.path.exists(global_config_path()):
+        write_commented_template()
     resolved_key = entered_key or existing_key
     profile_name = _profile_name_for(provider, base_url)
     profile_data = {
@@ -530,65 +461,101 @@ def run_onboarding(console) -> Dict:
         "api_key": resolved_key,
     }
     profile_data.update(advanced)  # None values are dropped by upsert_profile
+    if aux_block:
+        profile_data["aux_model"] = aux_block
     upsert_profile(profile_name, profile_data, make_active=True)
 
     console.print()
     console.print(f"  [bright_green]Configured: {provider}/{model_name}[/bright_green]")
     console.print(f"  [dim]Endpoint: {base_url}[/dim]")
-    console.print(f"  [dim]Saved as profile '{profile_name}' in ~/.agentica/agentica.json[/dim]")
+    console.print(f"  [dim]Saved as profile '{profile_name}' in ~/.agentica/config.yaml[/dim]")
+    if aux_block:
+        console.print(
+            f"  [dim]Aux model: {aux_block['model_provider']}/{aux_block['model_name']}[/dim]"
+        )
     console.print()
 
-    return {
+    result = {
         "model_provider": provider,
         "model_name": model_name,
         "base_url": base_url,
         "api_key": resolved_key,
         **advanced,
     }
+    result.update(_aux_resolution(aux_block, provider, base_url, resolved_key))
+    return result
+
+
+def _aux_resolution(
+    aux_block: Dict, main_provider: str, main_base_url: Optional[str], main_api_key: Optional[str]
+) -> Dict:
+    """Resolve the aux_model block into flat aux_model_* fields (no CLI flags).
+
+    Same provider as main -> inherit main base_url/api_key for omitted fields.
+    Different provider -> base_url from that provider's preset, api_key from the
+    block (or a matching profile), never the main key.
+    """
+    aux_name = aux_block.get("model_name")
+    if not aux_name:
+        return {"aux_model_provider": None, "aux_model_name": None,
+                "aux_base_url": None, "aux_api_key": None}
+    aux_provider = aux_block.get("model_provider") or main_provider
+    aux_base = aux_block.get("base_url")
+    aux_key = aux_block.get("api_key")
+    if not aux_base:
+        aux_base = main_base_url if aux_provider == main_provider else default_base_url(aux_provider)
+    if not aux_key:
+        if aux_provider == main_provider:
+            aux_key = main_api_key
+        else:
+            aux_key = get_profile_api_key(aux_provider, aux_base)
+    return {
+        "aux_model_provider": aux_provider,
+        "aux_model_name": aux_name,
+        "aux_base_url": aux_base,
+        "aux_api_key": aux_key,
+    }
 
 
 def resolve_model_config(args, console=None) -> Dict:
-    """Resolve provider/model/base_url/api_key with CLI args > saved > env.
+    """Resolve provider/model/base_url/api_key with CLI args > profile > env.
 
-    Triggers the first-run wizard when appropriate. Returns a dict with
-    ``model_provider``, ``model_name``, ``base_url`` and ``api_key`` keys.
+    Triggers the first-run wizard when appropriate. Returns a dict with the
+    main ``model_provider``/``model_name``/``base_url``/``api_key``, optional
+    model-tuning keys, and the optional aux model keys ``aux_model_provider`` /
+    ``aux_model_name`` / ``aux_base_url`` / ``aux_api_key`` (all None when no
+    aux model is configured, in which case aux work reuses the main model).
 
     Resolution precedence (highest first):
-        1. CLI flags (``--model_provider``/``--model_name``/...)
-        2. ``~/.agentica/agentica.json`` active profile (new single source)
-        3. ``~/.agentica/cli_config.json`` (legacy CLI config)
-        4. provider preset defaults
+        1. CLI flags (``--model_provider``/``--model_name``/... and
+           ``--aux_model_*``)
+        2. ``~/.agentica/config.yaml`` active profile (new single source;
+           includes the optional ``aux_model`` sub-block)
+        3. provider preset defaults
 
-    The ``api_key`` is the key stored in agentica.json/cli_config.json for the
-    resolved provider/base_url (or freshly entered during onboarding). ``None``
-    means the model factory should fall back to its env-var lookup. The CLI
-    ``--api_key`` flag, when provided, still wins at the call site
-    (see ``cli/main.py``).
+    The ``api_key`` is the key stored in a profile for the resolved
+    provider/base_url (or freshly entered during onboarding). ``None`` means the
+    model factory should fall back to its env-var lookup. The CLI ``--api_key``
+    flag, when provided, still wins at the call site (see ``cli/main.py``). The
+    aux model follows the same precedence via ``--aux_model_*`` flags over the
+    profile ``aux_model`` block; a different provider never reuses the main
+    model's api_key or base_url.
     """
-    # New unified config first: the active profile in agentica.json.
+    # Active profile in config.yaml is the single source of truth.
     active_profile = get_profile()
     profile_provider = active_profile.get("model_provider")
 
-    # Legacy CLI config (kept for backwards compatibility / migration).
-    saved = load_cli_config()
-    saved_provider = saved.get("model_provider")
-
-    provider = args.model_provider or profile_provider or saved_provider or DEFAULT_PROVIDER
-
-    # A saved value is only reused when it belongs to the resolved provider.
+    provider = args.model_provider or profile_provider or DEFAULT_PROVIDER
     use_profile = provider == profile_provider
-    use_saved_provider_config = provider == saved_provider
 
     model_name = (
         args.model_name
         or (active_profile.get("model_name") if use_profile else None)
-        or (saved.get("model_name") if use_saved_provider_config else None)
         or default_model_name(provider)
     )
     base_url = (
         args.base_url
         or (active_profile.get("base_url") if use_profile else None)
-        or (saved.get("base_url") if use_saved_provider_config else None)
         or default_base_url(provider)
     )
 
@@ -604,17 +571,45 @@ def resolve_model_config(args, console=None) -> Dict:
         active_profile = get_profile()
         use_profile = provider == active_profile.get("model_provider")
 
-    # API key resolution: agentica.json active profile -> legacy cli_config slots.
+    # API key resolution: active profile -> any profile matching provider/base_url.
     if resolved_key is None and use_profile:
         resolved_key = active_profile.get("api_key")
     if resolved_key is None:
-        resolved_key = get_saved_api_key(provider, base_url)
+        resolved_key = get_profile_api_key(provider, base_url)
 
     # Model tuning params come from the active profile only (no preset
     # defaults): reasoning_effort / max_tokens / context_window / temperature /
     # top_p. They are None unless the user set them, so the model factory keeps
     # its own defaults. CLI flags still override these at the call site.
     profile_params = active_profile if use_profile else {}
+
+    # Optional aux model. Resolution precedence (highest first):
+    #   1. CLI flags (--aux_model_provider / --aux_model_name / ...)
+    #   2. profile ``aux_model`` block in config.yaml
+    #   3. main model (when same provider) or provider preset / matching profile
+    # When no aux_model_name is resolved, all aux fields are None and aux work
+    # reuses the main model (see cli/config.py::_build_sibling_model).
+    aux_block = (active_profile.get("aux_model") or {}) if use_profile else {}
+    aux_provider = args.aux_model_provider or aux_block.get("model_provider") or provider
+    aux_name = args.aux_model_name or aux_block.get("model_name")
+    aux_base = args.aux_base_url or aux_block.get("base_url")
+    aux_key = args.aux_api_key or aux_block.get("api_key")
+    if aux_name:
+        if not aux_base:
+            # Same provider as main -> reuse main endpoint; otherwise use the
+            # aux provider's preset default (a different provider's endpoint is
+            # never the main model's base_url).
+            aux_base = base_url if aux_provider == provider else default_base_url(aux_provider)
+        if not aux_key:
+            if aux_provider == provider:
+                aux_key = resolved_key
+            else:
+                # Different provider: never reuse the main key. Fall back to a
+                # key stored in a matching profile, else None so the model
+                # factory tries the provider env var.
+                aux_key = get_profile_api_key(aux_provider, aux_base)
+    else:
+        aux_provider = aux_base = aux_key = None
 
     return {
         "model_provider": provider,
@@ -626,4 +621,8 @@ def resolve_model_config(args, console=None) -> Dict:
         "reasoning_effort": profile_params.get("reasoning_effort"),
         "top_p": profile_params.get("top_p"),
         "context_window": profile_params.get("context_window"),
+        "aux_model_provider": aux_provider,
+        "aux_model_name": aux_name,
+        "aux_base_url": aux_base,
+        "aux_api_key": aux_key,
     }

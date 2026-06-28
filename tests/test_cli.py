@@ -813,11 +813,12 @@ class TestCLIModelParams(unittest.TestCase):
             model_name=None,
             base_url=None,
             api_key=None,
+            aux_model_provider=None,
+            aux_model_name=None,
+            aux_base_url=None,
+            aux_api_key=None,
         )
-        with (
-            patch("agentica.cli.setup.load_cli_config", return_value={}),
-            patch("agentica.cli.setup.get_profile", return_value=profile),
-        ):
+        with patch("agentica.cli.setup.get_profile", return_value=profile):
             resolved = resolve_model_config(args, console=None)
 
         self.assertEqual(resolved["reasoning_effort"], "high")
@@ -863,7 +864,7 @@ class TestCLIConfiguration(unittest.TestCase):
         """parse_args leaves provider/model as None so saved config can apply.
 
         Final defaults (deepseek/deepseek-v4-flash) are filled in by
-        resolve_model_config (args > saved cli_config.json > hardcoded).
+        resolve_model_config (args > config.yaml profile > hardcoded).
         """
         from agentica.cli.config import parse_args
 
@@ -921,11 +922,12 @@ class TestCLIConfiguration(unittest.TestCase):
             model_name=None,
             base_url=None,
             api_key=None,
+            aux_model_provider=None,
+            aux_model_name=None,
+            aux_base_url=None,
+            aux_api_key=None,
         )
-        with (
-            patch("agentica.cli.setup.load_cli_config", return_value={}),
-            patch("agentica.cli.setup.get_profile", return_value={}),
-        ):
+        with patch("agentica.cli.setup.get_profile", return_value={}):
             resolved = resolve_model_config(args, console=None)
 
         self.assertEqual(resolved["model_provider"], "deepseek")
@@ -1013,22 +1015,29 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(captured["diagnostics_servers"], ["pyright"])
 
     def test_persist_model_choice_writes_base_url(self):
+        from agentica import global_config as gc
         with tempfile.TemporaryDirectory() as tmp:
-            config_path = os.path.join(tmp, "cli_config.json")
-            with patch.object(cli_setup, "CLI_CONFIG_PATH", config_path):
+            cfg_path = os.path.join(tmp, "config.yaml")
+            with patch("agentica.global_config.global_config_path", return_value=cfg_path):
+                gc.upsert_profile("default", {
+                    "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+                    "base_url": "https://api.deepseek.com", "api_key": "sk-x",
+                })
                 cli_commands._persist_model_choice(
                     "openai",
                     "gpt-5",
                     "https://api.openai.com/v1",
                 )
-                saved = cli_setup.load_cli_config()
+                saved = gc.get_profile("default")
 
-        self.assertTrue(saved["onboarded"])
         self.assertEqual(saved["model_provider"], "openai")
         self.assertEqual(saved["model_name"], "gpt-5")
         self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
+        # api_key already in the profile is preserved across the live switch.
+        self.assertEqual(saved["api_key"], "sk-x")
 
     def test_model_command_switch_provider_resets_and_persists_base_url(self):
+        from agentica import global_config as gc
         ctx = cli_commands.CommandContext(
             agent_config={
                 "model_provider": "deepseek",
@@ -1044,15 +1053,19 @@ class TestCLIConfiguration(unittest.TestCase):
             skills_registry=None,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            config_path = os.path.join(tmp, "cli_config.json")
+            cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch.object(cli_setup, "CLI_CONFIG_PATH", config_path),
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
             ):
+                gc.upsert_profile("default", {
+                    "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+                    "base_url": "https://api.deepseek.com", "api_key": "sk-x",
+                })
                 cli_commands._cmd_model(ctx, "openai/gpt-5")
-                saved = cli_setup.load_cli_config()
+                saved = gc.get_profile("default")
 
         self.assertEqual(ctx.agent_config["base_url"], "https://api.openai.com/v1")
         self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
@@ -1061,6 +1074,7 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(mock_get_model.call_args.kwargs["base_url"], "https://api.openai.com/v1")
 
     def test_model_command_same_provider_preserves_custom_base_url(self):
+        from agentica import global_config as gc
         ctx = cli_commands.CommandContext(
             agent_config={
                 "model_provider": "openai",
@@ -1076,15 +1090,19 @@ class TestCLIConfiguration(unittest.TestCase):
             skills_registry=None,
         )
         with tempfile.TemporaryDirectory() as tmp:
-            config_path = os.path.join(tmp, "cli_config.json")
+            cfg_path = os.path.join(tmp, "config.yaml")
             with (
-                patch.object(cli_setup, "CLI_CONFIG_PATH", config_path),
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
             ):
+                gc.upsert_profile("default", {
+                    "model_provider": "openai", "model_name": "gpt-4o",
+                    "base_url": "https://proxy.example/v1", "api_key": "sk-x",
+                })
                 cli_commands._cmd_model(ctx, "gpt-5")
-                saved = cli_setup.load_cli_config()
+                saved = gc.get_profile("default")
 
         self.assertEqual(ctx.agent_config["base_url"], "https://proxy.example/v1")
         self.assertEqual(saved["base_url"], "https://proxy.example/v1")
@@ -1528,6 +1546,86 @@ class TestCompileLesskey(unittest.TestCase):
         from agentica.cli import interactive as it
         with patch("agentica.cli.interactive.shutil.which", return_value=None):
             self.assertIsNone(it._compile_lesskey("\n#command\n^O quit\n"))
+
+
+class TestBuildSiblingModel(unittest.TestCase):
+    """_build_sibling_model: same-provider inherits main base_url/api_key;
+    cross-provider does NOT (would silently produce a broken client)."""
+
+    def _cfg(self, **over):
+        base = dict(
+            model_provider="deepseek",
+            model_name="deepseek-v4-flash",
+            base_url="https://api.deepseek.com",
+            api_key="sk-main",
+            max_tokens=None,
+            temperature=None,
+            reasoning_effort=None,
+            top_p=None,
+            context_window=None,
+        )
+        base.update(over)
+        return base
+
+    def test_none_when_no_sibling_name(self):
+        from agentica.cli.config import _build_sibling_model
+        with patch("agentica.cli.config.get_model") as gm:
+            self.assertIsNone(_build_sibling_model(self._cfg(), "aux"))
+            gm.assert_not_called()
+
+    def test_same_provider_inherits_main_base_and_key(self):
+        from agentica.cli.config import _build_sibling_model
+        cfg = self._cfg(aux_model_name="deepseek-chat")  # only name; same provider
+        with patch("agentica.cli.config.get_model") as gm:
+            _build_sibling_model(cfg, "aux")
+        _args, kw = gm.call_args
+        self.assertEqual(kw["model_provider"], "deepseek")
+        self.assertEqual(kw["model_name"], "deepseek-chat")
+        self.assertEqual(kw["base_url"], "https://api.deepseek.com")
+        self.assertEqual(kw["api_key"], "sk-main")
+
+    def test_cross_provider_uses_sibling_base_and_key(self):
+        from agentica.cli.config import _build_sibling_model
+        cfg = self._cfg(
+            aux_model_provider="zhipuai",
+            aux_model_name="glm-4.7-flash",
+            aux_base_url="https://open.bigmodel.cn/api/paas/v4",
+            aux_api_key="sk-zhipu",
+        )
+        with patch("agentica.cli.config.get_model") as gm:
+            _build_sibling_model(cfg, "aux")
+        _args, kw = gm.call_args
+        self.assertEqual(kw["model_provider"], "zhipuai")
+        self.assertEqual(kw["base_url"], "https://open.bigmodel.cn/api/paas/v4")
+        self.assertEqual(kw["api_key"], "sk-zhipu")
+
+    def test_cross_provider_missing_key_not_filled_with_main_key(self):
+        from agentica.cli.config import _build_sibling_model
+        cfg = self._cfg(
+            aux_model_provider="zhipuai",
+            aux_model_name="glm-4.7-flash",
+            aux_base_url="https://open.bigmodel.cn/api/paas/v4",
+            aux_api_key=None,  # no sibling key
+        )
+        with patch("agentica.cli.config.get_model") as gm:
+            _build_sibling_model(cfg, "aux")
+        _args, kw = gm.call_args
+        self.assertIsNone(kw["api_key"])  # must NOT fall back to sk-main
+        self.assertEqual(kw["base_url"], "https://open.bigmodel.cn/api/paas/v4")
+
+    def test_cross_provider_missing_base_not_filled_with_main_base(self):
+        from agentica.cli.config import _build_sibling_model
+        cfg = self._cfg(
+            aux_model_provider="zhipuai",
+            aux_model_name="glm-4.7-flash",
+            aux_base_url=None,  # no sibling base_url
+            aux_api_key="sk-zhipu",
+        )
+        with patch("agentica.cli.config.get_model") as gm:
+            _build_sibling_model(cfg, "aux")
+        _args, kw = gm.call_args
+        self.assertIsNone(kw["base_url"])  # must NOT fall back to deepseek base_url
+        self.assertEqual(kw["api_key"], "sk-zhipu")
 
 
 if __name__ == "__main__":

@@ -62,27 +62,25 @@ def main():
         "model_provider": resolved["model_provider"],
         "model_name": resolved["model_name"],
         "base_url": resolved["base_url"],
-        # CLI flag wins; otherwise use the key stored in cli_config.json for
-        # the resolved provider/base_url. If both are None the model factory
+        # CLI flag wins; otherwise use the key stored in a config.yaml profile
+        # for the resolved provider/base_url. If both are None the model factory
         # falls back to the provider's env var (backwards-compat).
         "api_key": args.api_key or resolved.get("api_key"),
         # Model tuning params: CLI flag wins, else the active profile's value
-        # (resolved from agentica.json), else None (model/factory default).
+        # (resolved from config.yaml), else None (model/factory default).
         "max_tokens": args.max_tokens if args.max_tokens is not None else resolved.get("max_tokens"),
         "temperature": args.temperature if args.temperature is not None else resolved.get("temperature"),
         "reasoning_effort": args.reasoning_effort or resolved.get("reasoning_effort"),
         "top_p": args.top_p if args.top_p is not None else resolved.get("top_p"),
         "context_window": args.context_window if args.context_window is not None else resolved.get("context_window"),
-        # Auxiliary model (None means reuse main model).
-        "aux_model_provider": args.aux_model_provider,
-        "aux_model_name": args.aux_model_name,
-        "aux_base_url": args.aux_base_url,
-        "aux_api_key": args.aux_api_key,
-        # Task-subagent model (None means reuse main model).
-        "task_model_provider": args.task_model_provider,
-        "task_model_name": args.task_model_name,
-        "task_base_url": args.task_base_url,
-        "task_api_key": args.task_api_key,
+        # Aux model (None means reuse main model). CLI flags win (applied
+        # inside resolve_model_config); otherwise the active profile's optional
+        # ``aux_model`` block is used; else None. The aux model drives all
+        # background LLM work AND the `task` subagent tool.
+        "aux_model_provider": resolved.get("aux_model_provider"),
+        "aux_model_name": resolved.get("aux_model_name"),
+        "aux_base_url": resolved.get("aux_base_url"),
+        "aux_api_key": resolved.get("aux_api_key"),
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
         "enable_experience_capture": not args.no_experience,
