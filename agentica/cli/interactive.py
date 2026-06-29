@@ -201,16 +201,16 @@ def _open_in_pager(title: str, content: str) -> None:
     inline transcript.
 
     Key binding strategy (in order of preference):
-    1. ``less --lesskey-content``: bind ``Ctrl+o`` AND ``Esc`` to quit, and bind
-       the up/down arrow sequences to ``back-line``/``forw-line`` so they are
-       not shadowed by the Esc binding (arrow keys start with ESC). Hint:
-       ``Ctrl+o or Esc to return`` (Ctrl+o mirrors the expand key; Esc is the
-       conventional CC close key).
+    1. ``less --lesskey-content``: bind ``Ctrl+o`` to quit and the up/down
+       arrow sequences to ``back-line``/``forw-line``. Esc is NOT bound (a lone
+       ``^[`` leaf would shadow the arrow keys, which also start with ESC —
+       see the comment above ``lesskey_src``), so quitting is Ctrl+o or the
+       built-in ``q``. The bottom prompt line (``-P``) shows a one-line cheat
+       sheet (scroll / search / jump / return) so the user knows how to drive
+       less without leaving the CLI.
     2. Old ``less`` without ``--lesskey-content`` but with the ``lesskey``
-       compiler: compile the same lesskey source (quit keys + arrow scrolls)
-       and feed it via the ``LESSKEY`` env var. Same hint.
+       compiler: compile the same lesskey source and feed it via ``LESSKEY``.
     3. No ``lesskey`` compiler: plain ``less`` — only the built-in ``q`` quits.
-       Hint: ``q to return``.
     """
     import tempfile
 
@@ -238,11 +238,14 @@ def _open_in_pager(title: str, content: str) -> None:
     lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
 
     if lesskey_ok:
-        return_hint = "\u2191\u2193 scroll, Ctrl+o/q to return"
+        return_hint = "Ctrl+o/q to return"
+        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+o/q 返回"
     elif pager is not None and "less" in pager and _compile_lesskey(lesskey_src):
-        return_hint = "\u2191\u2193 scroll, Ctrl+o/q to return"
+        return_hint = "Ctrl+o/q to return"
+        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+o/q 返回"
     else:
-        return_hint = "\u2191\u2193 scroll, q to return"
+        return_hint = "q to return"
+        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · q 返回"
 
     header = (
         f"=== {title} · {len(content.splitlines())} lines "
@@ -262,19 +265,19 @@ def _open_in_pager(title: str, content: str) -> None:
     try:
         if lesskey_ok:
             subprocess.run(
-                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", return_hint, path],
+                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", prompt_line, path],
             )
         elif "less" in pager:
             compiled_lesskey = _compile_lesskey(lesskey_src)
             if compiled_lesskey:
                 env = dict(os.environ, LESSKEY=compiled_lesskey)
                 subprocess.run(
-                    [pager, "-R", "-P", return_hint, path], env=env,
+                    [pager, "-R", "-P", prompt_line, path], env=env,
                 )
             else:
-                subprocess.run([pager, "-R", "-P", return_hint, path])
+                subprocess.run([pager, "-R", "-P", prompt_line, path])
         else:
-            subprocess.run([pager, "-P", return_hint, path])
+            subprocess.run([pager, "-P", prompt_line, path])
     except KeyboardInterrupt:
         pass
     finally:
