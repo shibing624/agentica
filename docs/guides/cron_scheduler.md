@@ -1,0 +1,114 @@
+# 定时任务（Cron 调度器）
+
+Agentica CLI 内置一个定时任务调度器：你可以让 agent 按计划（每天 9 点、每 30 分钟、某个具体时间）自动执行任务，比如"每天早上汇总未读邮件""每小时检查一次构建状态"。
+
+调度器**默认关闭**——定时跑 agent 会消耗 token，所以必须显式开启。
+
+---
+
+## 一、两种运行模式
+
+| 模式 | 何时跑任务 | 适用场景 |
+|------|-----------|---------|
+| **CLI 内嵌**（默认推荐） | 仅在交互式 CLI 开着时 | 日常使用，开着终端就顺带跑 |
+| **独立 daemon** | 前台常驻进程，与 CLI 解耦 | 服务器 / 想关掉终端也持续跑 |
+
+两种模式共用同一把**文件锁**，即使同时开着也不会重复执行同一个任务。
+
+---
+
+## 二、开启调度器
+
+### 方式 1：setup 向导
+```bash
+agentica setup
+```
+走到 "Scheduled tasks (cron)" 一步时输入 `y`，并可设置检查间隔（默认 60 秒）。
+
+### 方式 2：CLI 内命令
+进入交互式 CLI 后：
+```
+/cron daemon on      # 开启（并写入 config.yaml，重启后仍生效）
+/cron daemon off     # 关闭
+/cron daemon status  # 查看当前状态
+```
+
+### 方式 3：直接改配置
+编辑 `~/.agentica/config.yaml`：
+```yaml
+settings:
+  cron.enabled: true
+  cron.interval: 60      # 检查间隔（秒）
+```
+也可以让 agent 自己改：在对话里说"帮我开启 cron 调度器"，它会调用 `self_manage` / 配置工具完成。
+
+---
+
+## 三、管理定时任务（`/cron` 命令）
+
+```
+/cron                                列出所有任务
+/cron add "<prompt>" <schedule>      新建任务
+/cron pause <id>                     暂停
+/cron resume <id>                    恢复
+/cron remove <id>                    删除（需确认）
+/cron runs [<id>]                    查看最近执行记录
+/cron run <id>                       立即手动执行一次
+/cron daemon on|off|status           控制调度器开关
+```
+
+### schedule 支持的格式
+- **Cron 表达式**：`0 9 * * *`（每天 9:00）、`*/30 * * * *`（每 30 分钟）
+- **间隔语法**：`every 30m`、`every 2h`
+- **具体时间**：`2026-07-01T09:00:00`
+
+### 示例
+```
+/cron add "用一句话总结今天的 GitHub 通知" 0 9 * * *
+/cron add "检查 CI 是否有失败的构建" every 1h
+/cron                # 确认任务已建
+/cron run abc123     # 先手动跑一次验证效果
+```
+
+> 提示：每个任务运行时都会**新建一个独立的 agent 实例**，不会和你当前交互会话的上下文/工具状态相互污染。
+
+---
+
+## 四、独立 daemon（关掉 CLI 也能跑）
+
+适合放在服务器、`tmux` / `screen` 里常驻。
+
+```bash
+# 前台运行，Ctrl-C 停止
+agentica cron daemon
+
+# 自定义检查间隔（秒）与日志
+agentica cron daemon --interval 30 --verbose
+```
+
+daemon 会读取 `~/.agentica/config.yaml` 里**当前激活的 profile**（模型、API key 等）来构建 agent。如果还没配置过，会提示你先跑 `agentica setup`。
+
+### 放进 tmux 后台常驻
+```bash
+tmux new -s agentica-cron 'agentica cron daemon --interval 60'
+# 之后 Ctrl-b d 脱离；tmux attach -t agentica-cron 重新查看
+```
+
+### 关于开机自启
+当前**不提供** launchd / systemd 自启集成（避免过度设计）。如确有需要，可自行把上面的 `agentica cron daemon` 命令包进一个 systemd user service 或 macOS LaunchAgent。
+
+---
+
+## 五、数据与排错
+
+- 任务定义和运行记录存放在 `~/.agentica/cron/`。
+- 任务**建了但不跑**？检查调度器是否开启：`/cron daemon status`，或确认 `config.yaml` 里 `settings.cron.enabled: true`。
+- 想验证某个任务的效果而不等到计划时间：用 `/cron run <id>` 立即触发一次。
+- 想看历史执行成败：`/cron runs`。
+
+---
+
+## 六、安全须知
+
+- 定时任务会**自动、无人值守地**让 agent 执行你写的 prompt，并消耗 token。请确认 prompt 的副作用可控。
+- 删除任务需二次确认；开关状态会持久化到 `config.yaml`，重启后保持。

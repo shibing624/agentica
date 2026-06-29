@@ -53,6 +53,13 @@ def main():
         )
         return
 
+    # `agentica cron daemon` — run the standalone cron scheduler in foreground.
+    if hasattr(args, "command") and args.command == "cron":
+        from agentica.cli.cron_daemon import run_cron_daemon
+
+        run_cron_daemon(args, get_console())
+        return
+
     # Resolve provider/model/base_url: CLI args > saved config > defaults.
     # Triggers the first-run wizard when no key/config is present on a TTY.
     resolved = resolve_model_config(args, console=get_console())

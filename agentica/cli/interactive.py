@@ -126,6 +126,9 @@ class SessionState:
     # and sets this field so the main prompt_toolkit thread routes the next typed
     # line into the queue instead of pending_queue. None when no request pending.
     input_request: Optional["_InputRequest"] = None
+    # Cron scheduler daemon thread (started when settings cron.enabled is true).
+    cron_thread: Optional[threading.Thread] = None
+    cron_stop_event: Optional[threading.Event] = None
 
 
 # ==================== Output bridge for patch_stdout ====================
@@ -1408,6 +1411,47 @@ def _setup_tui(
 # ==================== Main entry ====================
 
 
+def _maybe_start_cron(state: "SessionState", agent_config, extra_tools,
+                      workspace, skills_registry) -> None:
+    """Start the cron scheduler daemon thread if settings.cron.enabled is true.
+
+    Idempotent: does nothing if a thread is already running. Failures are logged
+    but never block CLI startup.
+    """
+    if state.cron_thread is not None and state.cron_thread.is_alive():
+        return
+    try:
+        from agentica.global_config import get_setting
+        if not bool(get_setting("cron.enabled", False)):
+            return
+        interval = int(get_setting("cron.interval", 60) or 60)
+        from agentica.cron.cli_runner import (
+            CliAgentRunner, build_cli_agent_factory, start_cron_thread,
+        )
+        factory = build_cli_agent_factory(
+            agent_config, extra_tools, workspace, skills_registry)
+        runner = CliAgentRunner(factory)
+        thread, stop_event = start_cron_thread(runner, interval=interval)
+        state.cron_thread = thread
+        state.cron_stop_event = stop_event
+        try:
+            from agentica.cli.display import get_console
+            get_console().print(
+                f"[dim]cron scheduler started (interval={interval}s). "
+                f"Use /cron to manage jobs.[/dim]")
+        except Exception:
+            pass
+    except Exception as e:  # noqa: BLE001
+        from loguru import logger
+        logger.warning(f"failed to start cron scheduler: {e}")
+
+
+def _stop_cron(state: "SessionState") -> None:
+    """Signal the cron daemon thread to stop. Safe to call when not running."""
+    if state.cron_stop_event is not None:
+        state.cron_stop_event.set()
+
+
 def run_interactive(
     agent_config: dict,
     extra_tool_names: Optional[List[str]] = None,
@@ -1540,6 +1584,28 @@ def run_interactive(
         "total_api_calls": 0,
         "debug": bool(agent_config.get("debug")),
     }
+
+    # Cron control surface for the /cron daemon on|off command. We expose
+    # start/stop closures via tui_state so the slash command can toggle the
+    # live scheduler thread without reaching into module internals.
+    def _start_cron():
+        _maybe_start_cron(state, agent_config, extra_tools, workspace, skills_registry)
+        return state.cron_thread is not None and state.cron_thread.is_alive()
+
+    def _stop_cron_cb():
+        _stop_cron(state)
+        state.cron_thread = None
+        state.cron_stop_event = None
+
+    tui_state["cron_start"] = _start_cron
+    tui_state["cron_stop"] = _stop_cron_cb
+    tui_state["cron_is_running"] = lambda: (
+        state.cron_thread is not None and state.cron_thread.is_alive())
+
+    # Start the cron scheduler in a daemon thread when enabled in settings.
+    # Default OFF: scheduled agent runs cost tokens, so the user must opt in
+    # (via `agentica setup`, config.yaml settings.cron.enabled, or `/cron daemon on`).
+    _maybe_start_cron(state, agent_config, extra_tools, workspace, skills_registry)
 
     pending_queue = PendingQueue()
     # Keep a mutable list wrapper for image_counter (needed by _try_attach_clipboard_image)
@@ -1848,6 +1914,7 @@ def run_interactive(
         pass
     finally:
         state.should_exit = True
+        _stop_cron(state)
         set_active_console(None)
 
     get_console().print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")

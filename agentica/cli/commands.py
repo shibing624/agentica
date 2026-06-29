@@ -1555,6 +1555,174 @@ def _cmd_upgrade(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"[red]  pip exited with code {code}. See output above.[/red]")
 
 
+def _fmt_next_run(job) -> str:
+    """Human-friendly 'next run' time for a job, or '-' when not scheduled."""
+    import datetime as _dt
+    ms = getattr(job, "next_run_at_ms", None)
+    if not ms:
+        return "-"
+    try:
+        return _dt.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(ms)
+
+
+def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
+    """Manage scheduled (cron) jobs.
+
+    /cron                          list all jobs
+    /cron add "<prompt>" <schedule>  create a job (schedule: cron expr / 'every 5m' / ISO time)
+    /cron pause <id>               pause a job
+    /cron resume <id>              resume a job
+    /cron remove <id>              delete a job
+    /cron runs [<id>]              show recent run history
+    /cron run <id>                 run a job once now
+    /cron daemon on|off|status     control the in-CLI scheduler thread
+    """
+    con = get_console()
+    from agentica.cron import jobs as cronjobs
+
+    args = cmd_args.strip()
+    sub = args.split()[0].lower() if args else "list"
+    rest = args[len(sub):].strip() if args else ""
+
+    if sub in ("list", "ls", ""):
+        all_jobs = cronjobs.list_jobs()
+        if not all_jobs:
+            con.print("[dim]No cron jobs. Add one with: /cron add \"<prompt>\" <schedule>[/dim]")
+            return
+        con.print("[bold]Cron jobs[/bold]")
+        for j in all_jobs:
+            status = getattr(getattr(j, "status", None), "value", getattr(j, "status", "?"))
+            human = cronjobs.schedule_to_human(j.schedule)
+            con.print(f"  [cyan]{j.id}[/cyan]  [yellow]{j.name}[/yellow]  "
+                      f"[{'green' if status == 'active' else 'dim'}]{status}[/]  "
+                      f"next: {_fmt_next_run(j)}  [dim]({human})[/dim]")
+        return
+
+    if sub == "add":
+        # Parse: /cron add "prompt with spaces" <schedule>
+        import shlex
+        try:
+            tokens = shlex.split(rest)
+        except ValueError:
+            con.print("[red]Could not parse. Use: /cron add \"<prompt>\" <schedule>[/red]")
+            return
+        if len(tokens) < 2:
+            con.print("[red]Usage: /cron add \"<prompt>\" <schedule>[/red]")
+            con.print("[dim]schedule examples: '0 9 * * *' (9am daily), 'every 30m', "
+                      "'2026-07-01T09:00:00'[/dim]")
+            return
+        prompt = tokens[0]
+        schedule = " ".join(tokens[1:])
+        try:
+            job = cronjobs.create_job(prompt=prompt, schedule=schedule)
+        except Exception as e:
+            con.print(f"[red]Failed to create job: {e}[/red]")
+            return
+        con.print(f"[green]Created job [cyan]{job.id}[/cyan] '{job.name}'[/green] "
+                  f"next: {_fmt_next_run(job)}")
+        if not (ctx.tui_state and ctx.tui_state.get("cron_is_running", lambda: False)()):
+            con.print("[yellow]Scheduler is OFF — job won't run until you enable it: "
+                      "/cron daemon on[/yellow]")
+        return
+
+    if sub in ("pause", "resume", "remove", "rm", "delete"):
+        if not rest:
+            con.print(f"[red]Usage: /cron {sub} <id>[/red]")
+            return
+        job_id = rest.split()[0]
+        try:
+            if sub == "pause":
+                cronjobs.pause_job(job_id)
+                con.print(f"[green]Paused {job_id}[/green]")
+            elif sub == "resume":
+                cronjobs.resume_job(job_id)
+                con.print(f"[green]Resumed {job_id}[/green]")
+            else:
+                from prompt_toolkit import prompt as pt_prompt
+                ans = pt_prompt(f"Delete cron job {job_id}? [y/N] ").strip().lower()
+                if ans in ("y", "yes"):
+                    cronjobs.remove_job(job_id)
+                    con.print(f"[green]Removed {job_id}[/green]")
+                else:
+                    con.print("[dim]cancelled[/dim]")
+        except Exception as e:
+            con.print(f"[red]{e}[/red]")
+        return
+
+    if sub == "runs":
+        job_id = rest.split()[0] if rest else None
+        try:
+            runs = cronjobs.list_task_runs(job_id=job_id) if job_id else cronjobs.list_task_runs()
+        except TypeError:
+            runs = cronjobs.list_task_runs()
+        if not runs:
+            con.print("[dim]No run history.[/dim]")
+            return
+        con.print("[bold]Recent runs[/bold]")
+        for r in runs[:20]:
+            st = getattr(getattr(r, "status", None), "value", getattr(r, "status", "?"))
+            con.print(f"  {getattr(r, 'job_id', '?')}  [{'green' if st == 'success' else 'red'}]{st}[/]  "
+                      f"{getattr(r, 'started_at', '') or ''}")
+        return
+
+    if sub == "run":
+        if not rest:
+            con.print("[red]Usage: /cron run <id>[/red]")
+            return
+        job_id = rest.split()[0]
+        job = cronjobs.get_job(job_id)
+        if not job:
+            con.print(f"[red]No job {job_id}[/red]")
+            return
+        con.print(f"[dim]Running job {job_id} once now...[/dim]")
+        try:
+            import asyncio
+            from agentica.cron.scheduler import _execute_job
+            from agentica.cron.cli_runner import (
+                CliAgentRunner, build_cli_agent_factory)
+            factory = build_cli_agent_factory(
+                ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+            runner = CliAgentRunner(factory)
+            asyncio.run(_execute_job(job, agent_runner=runner))
+            con.print(f"[green]Job {job_id} executed.[/green]")
+        except Exception as e:
+            con.print(f"[red]Run failed: {e}[/red]")
+        return
+
+    if sub == "daemon":
+        action = rest.split()[0].lower() if rest else "status"
+        ts = ctx.tui_state or {}
+        is_running = ts.get("cron_is_running", lambda: False)()
+        if action == "status":
+            con.print(f"  cron scheduler: [{'green' if is_running else 'dim'}]"
+                      f"{'RUNNING' if is_running else 'STOPPED'}[/]")
+            return
+        if action == "on":
+            from agentica.global_config import set_setting
+            set_setting("cron.enabled", True)  # persist so it survives restart
+            start = ts.get("cron_start")
+            if start and start():
+                con.print("[green]Scheduler started (and enabled in config).[/green]")
+            else:
+                con.print("[yellow]Enabled in config; could not start thread "
+                          "in this session. Restart CLI.[/yellow]")
+            return
+        if action == "off":
+            from agentica.global_config import set_setting
+            set_setting("cron.enabled", False)
+            stop = ts.get("cron_stop")
+            if stop:
+                stop()
+            con.print("[green]Scheduler stopped (and disabled in config).[/green]")
+            return
+        con.print("[red]Usage: /cron daemon on|off|status[/red]")
+        return
+
+    con.print(f"[red]Unknown subcommand '{sub}'. See /cron for usage.[/red]")
+
+
 def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
@@ -2962,6 +3130,7 @@ COMMAND_REGISTRY = {
     "/model": (_cmd_model, "View or switch model"),
     "/config": (_cmd_config, "Show config | set <field> <value> | env <KEY> <value> | path"),
     "/upgrade": (_cmd_upgrade, "Self-upgrade agentica via pip (check | --pre)"),
+    "/cron": (_cmd_cron, "Scheduled jobs: list | add | pause | resume | remove | runs | run | daemon"),
     "/cost": (_cmd_cost, "Show token usage and cost"),
     "/usage": (_cmd_cost, "Show token usage and cost (alias)"),
     "/debug": (_cmd_debug, "Show debug info"),

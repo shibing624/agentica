@@ -200,6 +200,21 @@ def parse_args():
         args.command = "doctor"
         return args
 
+    # `agentica cron daemon` — run the standalone cron scheduler (no interactive CLI).
+    if len(sys.argv) > 1 and sys.argv[1] == "cron":
+        cron_parser = argparse.ArgumentParser(description="Agentica cron scheduler")
+        cron_sub = cron_parser.add_subparsers(dest="cron_command", required=True)
+        daemon_parser = cron_sub.add_parser(
+            "daemon", help="Run the cron scheduler in the foreground (Ctrl-C to stop)")
+        daemon_parser.add_argument(
+            "--interval", type=int, default=60,
+            help="Seconds between schedule checks (default: 60)")
+        daemon_parser.add_argument(
+            "--verbose", action="store_true", help="Verbose tick logging")
+        args = cron_parser.parse_args(sys.argv[2:])
+        args.command = "cron"
+        return args
+
     if len(sys.argv) > 1 and sys.argv[1] in ("skills", "extensions"):
         parser = argparse.ArgumentParser(description="Manage Agentica skills")
         subparsers = parser.add_subparsers(dest="skills_command", required=True)
@@ -681,11 +696,13 @@ def create_agent(
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
     from agentica.tools.self_manage_tool import SelfManageTool
+    from agentica.tools.cron_tool import CronTool
 
-    # Always give the CLI agent the self-management tool so it can inspect and
-    # optimize its own config (config.yaml / .env) and self-upgrade. Prepended
-    # so a user-supplied extra tool with the same name could still override.
-    cli_tools = [SelfManageTool()] + list(extra_tools or [])
+    # Always give the CLI agent the self-management + cron tools so it can
+    # inspect/optimize its own config (config.yaml / .env), self-upgrade, and
+    # schedule its own recurring tasks. Prepended so a user-supplied extra tool
+    # with the same name could still override.
+    cli_tools = [SelfManageTool(), CronTool()] + list(extra_tools or [])
 
     new_agent = DeepAgent(
         model=model,

@@ -256,6 +256,36 @@ def upsert_profile(name: str, profile: Dict[str, Any], make_active: bool = True)
     _save_commented(data)
 
 
+def get_setting(key: str, default: Any = None, config: Optional[Dict[str, Any]] = None) -> Any:
+    """Read a value from the top-level ``settings`` block of config.yaml.
+
+    The ``settings`` block holds CLI behaviour toggles (e.g. cron) that are not
+    tied to a model profile. Returns ``default`` when missing.
+    """
+    data = load_global_config() if config is None else config
+    settings = data.get("settings")
+    if not isinstance(settings, dict):
+        return default
+    return settings.get(key, default)
+
+
+def set_setting(key: str, value: Any) -> None:
+    """Upsert a key in the top-level ``settings`` block (comment-preserving).
+
+    Round-trips the YAML file so user comments are kept. ``None`` deletes the key.
+    """
+    data = _load_commented()
+    settings = data.get("settings")
+    if not isinstance(settings, CommentedMap):
+        settings = CommentedMap()
+        data["settings"] = settings
+    if value is None:
+        settings.pop(key, None)
+    else:
+        settings[key] = _to_commented(value)
+    _save_commented(data)
+
+
 def find_profile_for_provider(provider: str, base_url: Optional[str] = None) -> Dict[str, Any]:
     """Return the first profile matching ``provider`` (and ``base_url`` if given).
 

@@ -53,6 +53,7 @@ nav:
       - ACP Integration: advanced/acp.md
       - Gateway (IM Bots & HTTP): advanced/gateway.md
   - Model Providers: guides/models.md
+  - Scheduled Tasks (Cron): guides/cron_scheduler.md
   - Best Practices: guides/best_practices.md
   - API Reference:
       - Agent: api/agent.md

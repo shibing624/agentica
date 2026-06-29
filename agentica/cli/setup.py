@@ -609,7 +609,49 @@ def run_onboarding(console) -> Dict:
         **advanced,
     }
     result.update(_aux_resolution(aux_block, provider, base_url, resolved_key))
+    _prompt_cron(console)
     return result
+
+
+def _prompt_cron(console) -> None:
+    """Optionally enable the cron scheduler (default OFF) during onboarding.
+
+    Persists ``settings.cron.enabled`` (and optional interval) to config.yaml.
+    Scheduled jobs run the agent in the background and cost tokens, so this is
+    strictly opt-in.
+    """
+    from agentica.global_config import get_setting, set_setting
+
+    console.print()
+    console.print("  [bold]Scheduled tasks (cron)[/bold]", style="cyan")
+    console.print("  Run agent jobs on a schedule while the CLI is open.", style="dim")
+    console.print("  Off by default — scheduled runs consume tokens. Manage later with /cron.",
+                  style="dim")
+    cur = bool(get_setting("cron.enabled", False))
+    default_hint = "Y/n" if cur else "y/N"
+    try:
+        answer = pt_prompt(f"  Enable cron scheduler? [{default_hint}]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt, StopIteration):
+        # Non-interactive / Ctrl-D / test harness: keep the current setting.
+        console.print("  [dim]Cron scheduler unchanged.[/dim]")
+        return
+    if not answer:
+        enabled = cur
+    else:
+        enabled = answer in ("y", "yes")
+    set_setting("cron.enabled", enabled)
+    if enabled:
+        try:
+            raw = pt_prompt("  Check interval seconds [60]: ").strip()
+        except (EOFError, KeyboardInterrupt, StopIteration):
+            raw = ""
+        interval = 60
+        if raw.isdigit() and int(raw) > 0:
+            interval = int(raw)
+        set_setting("cron.interval", interval)
+        console.print(f"  [bright_green]Cron scheduler enabled (every {interval}s).[/bright_green]")
+    else:
+        console.print("  [dim]Cron scheduler disabled. Turn on anytime: /cron daemon on[/dim]")
 
 
 def _aux_resolution(
