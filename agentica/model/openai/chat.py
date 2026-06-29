@@ -74,6 +74,17 @@ _DEEPSEEK_THINKING_UNSUPPORTED_PARAMS = (
 _CACHE_CONTROL_BREAKPOINT_BUDGET = 4
 
 
+def _has_cacheable_content(content: Any) -> bool:
+    """True when content has something worth attaching a cache breakpoint to."""
+    if content is None:
+        return False
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return len(content) > 0
+    return False
+
+
 def _tag_content_block_cache_control(content: Any) -> Any:
     """Ensure ``content`` is a list of blocks and tag the last block ephemeral.
 
@@ -427,7 +438,13 @@ class OpenAIChat(Model):
                 budget -= 1
                 break
 
-        # 3) Trailing non-system messages: rolling cache window.
+        # 3) Trailing USER/TOOL messages: rolling cache window. Per the Venus
+        #    cache example, both user turns and tool results carry cache_control
+        #    breakpoints (block-list form). Assistant turns are skipped: in
+        #    OpenAI format their tool_calls live in a separate field, not in
+        #    content blocks, so there is no block to attach cache_control to.
+        #    Empty-content messages are skipped without consuming budget (a
+        #    cache breakpoint on empty content is invalid and would be dropped).
         if budget > 0:
             k = min(max(self.cache_control_messages, 0), budget)
             tagged = 0
@@ -435,7 +452,9 @@ class OpenAIChat(Model):
                 if tagged >= k:
                     break
                 m = out[j]
-                if isinstance(m, dict) and m.get("role") == "system":
+                if not (isinstance(m, dict) and m.get("role") in ("user", "tool")):
+                    continue
+                if not _has_cacheable_content(m.get("content")):
                     continue
                 tagged_msg = dict(m)
                 tagged_msg["content"] = _tag_content_block_cache_control(m.get("content"))

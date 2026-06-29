@@ -1713,5 +1713,246 @@ class TestBuildSiblingModel(unittest.TestCase):
         self.assertEqual(kw["api_key"], "sk-zhipu")
 
 
+class TestCLIAwareness(unittest.TestCase):
+    """CLI self-awareness and capability management (Phase 3).
+
+    Covers environment_context injection at create_agent time, /status and
+    /agents command registration, _apply_profile carrying the aux_model block
+    and refreshing environment_context, and /tools add-from path-traversal
+    rejection. All LLM access is mocked (api_key="fake_openai_key").
+    """
+
+    @staticmethod
+    def _make_demo_tool():
+        """Build a real Tool with one registered function for env-context checks."""
+        from agentica.tools.base import Tool
+
+        def custom_demo_tool(file_path: str) -> str:
+            """Read a file's contents (demo)."""
+            return ""
+
+        tool = Tool(name="builtin_file")
+        tool.register(custom_demo_tool)
+        return tool
+
+    @staticmethod
+    def _fake_agent_class():
+        """A DeepAgent stand-in that stores tools and accepts session guidance."""
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                self.tools = list(kwargs.get("tools") or [])
+                self.session_guidance = []
+                self.environment_context = None
+
+            def add_session_guidance(self, text):
+                self.session_guidance.append(text)
+
+        return FakeDeepAgent
+
+    def test_environment_context_injected(self):
+        """create_agent injects framework/model/tools/subagent/aux self-description."""
+        from agentica.cli.config import create_agent
+
+        agent_config = {
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "fake_openai_key",
+            "debug": False,
+            "work_dir": None,
+            "session_id": "test-session",
+            "aux_model_provider": "zhipuai",
+            "aux_model_name": "glm-4.7-flash",
+            "aux_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "aux_api_key": "fake_openai_key",
+        }
+        with patch("agentica.agent.deep.DeepAgent", self._fake_agent_class()):
+            agent = create_agent(
+                agent_config,
+                extra_tools=[self._make_demo_tool()],
+                workspace=None,
+                skills_registry=None,
+            )
+
+        ctx = agent.environment_context
+        self.assertIsNotNone(ctx)
+        self.assertIn("Agentica", ctx)
+        self.assertIn("Model: openai/gpt-4o", ctx)
+        self.assertIn("Active tools:", ctx)
+        self.assertIn("custom_demo_tool", ctx)
+        self.assertIn("Subagent types: explore, research, code", ctx)
+        self.assertIn("Auxiliary model: zhipuai/glm-4.7-flash", ctx)
+
+    def test_environment_context_omits_aux_when_none(self):
+        """No aux_model_* fields -> environment_context has no aux line."""
+        from agentica.cli.config import create_agent
+
+        agent_config = {
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "fake_openai_key",
+            "debug": False,
+            "work_dir": None,
+            "session_id": "test-session",
+        }
+        with patch("agentica.agent.deep.DeepAgent", self._fake_agent_class()):
+            agent = create_agent(
+                agent_config,
+                extra_tools=[self._make_demo_tool()],
+                workspace=None,
+                skills_registry=None,
+            )
+
+        ctx = agent.environment_context
+        self.assertIsNotNone(ctx)
+        self.assertIn("Model: openai/gpt-4o", ctx)
+        self.assertNotIn("Auxiliary model:", ctx)
+
+    def test_cmd_status_registered(self):
+        self.assertIn("/status", cli_commands.COMMAND_REGISTRY)
+        self.assertIs(cli_commands.COMMAND_REGISTRY["/status"][0], cli_commands._cmd_status)
+
+    def test_cmd_agents_registered(self):
+        self.assertIn("/agents", cli_commands.COMMAND_REGISTRY)
+        self.assertIn("/agent", cli_commands.COMMAND_REGISTRY)
+        self.assertIs(cli_commands.COMMAND_REGISTRY["/agents"][0], cli_commands._cmd_agents)
+        self.assertIs(cli_commands.COMMAND_REGISTRY["/agent"][0], cli_commands._cmd_agents)
+
+    def _make_apply_profile_ctx(self):
+        """Build a CommandContext whose mock agent survives a profile switch.
+
+        Pre-state carries a zhipuai aux so a profile switch to a different aux
+        (or to no aux) is observable in agent_config and environment_context.
+        """
+        mock_agent = MagicMock()
+        mock_agent.tools = []
+        mock_agent.working_memory.runs = []
+        return cli_commands.CommandContext(
+            agent_config={
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "fake_openai_key",
+                "debug": False,
+                "work_dir": None,
+                "aux_model_provider": "zhipuai",
+                "aux_model_name": "glm-4.7-flash",
+                "aux_base_url": "https://open.bigmodel.cn/api/paas/v4",
+                "aux_api_key": "fake_openai_key",
+            },
+            current_agent=mock_agent,
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
+        )
+
+    def test_apply_profile_carries_aux_model(self):
+        """Switching to a profile with an aux_model block rebuilds the aux model
+        and refreshes environment_context with the new aux line."""
+        from agentica import global_config as gc
+
+        ctx = self._make_apply_profile_ctx()
+        # Pre-state is zhipuai/glm-4.7-flash; the profile switches aux to deepseek.
+        self.assertEqual(ctx.agent_config["aux_model_name"], "glm-4.7-flash")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, "config.yaml")
+            with (
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model", return_value=MagicMock()),
+                patch.object(cli_commands, "_build_sibling_model", return_value=MagicMock()) as mock_aux,
+            ):
+                gc.upsert_profile(
+                    "withaux",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "gpt-4o",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-main",
+                        "aux_model": {
+                            "model_provider": "deepseek",
+                            "model_name": "deepseek-chat",
+                            "base_url": "https://api.deepseek.com",
+                            "api_key": "sk-aux",
+                        },
+                    },
+                    make_active=True,
+                )
+                cli_commands._apply_profile(ctx, "withaux")
+
+        self.assertEqual(ctx.agent_config["aux_model_name"], "deepseek-chat")
+        self.assertEqual(ctx.agent_config["aux_model_provider"], "deepseek")
+        self.assertIs(ctx.agent_config["auxiliary_model"], mock_aux.return_value)
+        self.assertIsNotNone(ctx.current_agent.environment_context)
+        self.assertIn(
+            "Auxiliary model: deepseek/deepseek-chat",
+            ctx.current_agent.environment_context,
+        )
+
+    def test_apply_profile_without_aux_clears(self):
+        """Switching to a profile without an aux_model block clears the aux fields."""
+        from agentica import global_config as gc
+
+        ctx = self._make_apply_profile_ctx()
+        self.assertIsNotNone(ctx.agent_config["aux_model_name"])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, "config.yaml")
+            with (
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model", return_value=MagicMock()),
+                patch.object(cli_commands, "_build_sibling_model") as mock_sibling,
+            ):
+                gc.upsert_profile(
+                    "noaux",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "gpt-4o",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-main",
+                    },
+                    make_active=True,
+                )
+                cli_commands._apply_profile(ctx, "noaux")
+
+        self.assertIsNone(ctx.agent_config["aux_model_name"])
+        self.assertIsNone(ctx.agent_config["aux_model_provider"])
+        self.assertIsNone(ctx.agent_config["auxiliary_model"])
+        mock_sibling.assert_not_called()
+        self.assertNotIn("Auxiliary model:", ctx.current_agent.environment_context)
+
+    def test_cmd_tools_add_from_rejects_path_traversal(self):
+        """/tools add-from ../evil is rejected before any module is loaded."""
+        ctx = cli_commands.CommandContext(
+            agent_config={
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "fake_openai_key",
+                "debug": False,
+                "work_dir": None,
+            },
+            current_agent=MagicMock(),
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
+        )
+        mock_console = MagicMock()
+        with (
+            patch.object(cli_commands, "get_console", return_value=mock_console),
+            patch.object(cli_commands, "_load_custom_tool_module") as mock_load,
+        ):
+            cli_commands._cmd_tools(ctx, "add-from ../evil")
+
+        printed = "\n".join(str(c) for c in mock_console.print.call_args_list)
+        self.assertIn("Invalid tool name", printed)
+        self.assertIn("../evil", printed)
+        mock_load.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

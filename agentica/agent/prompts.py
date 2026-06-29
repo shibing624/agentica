@@ -409,13 +409,10 @@ class PromptsMixin:
 
         workspace_context = await self.get_workspace_context_prompt()
 
-        # Dynamic tool list + descriptions from built-in tools or None for plain Agent
+        # Dynamic tool list + descriptions are not derived from the agent here;
+        # PromptBuilder.build_system_prompt defaults them to None (plain Agent).
         active_tools = None
         tool_descriptions = None
-        if hasattr(self, 'get_builtin_tool_names'):
-            active_tools = self.get_builtin_tool_names()
-        if hasattr(self, 'get_builtin_tool_descriptions'):
-            tool_descriptions = self.get_builtin_tool_descriptions()
 
         has_tools = self.tools is not None and len(self.tools) > 0
 
@@ -431,6 +428,12 @@ class PromptsMixin:
         )
 
         system_message_lines: List[str] = [base_prompt]
+
+        if self.environment_context:
+            system_message_lines.append("\n## Environment & Capabilities")
+            system_message_lines.append(
+                self._render_xml_cdata_block("environment", self.environment_context)
+            )
 
         user_instructions = self._get_instructions_list()
 

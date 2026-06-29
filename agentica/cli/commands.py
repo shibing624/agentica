@@ -30,6 +30,8 @@ from agentica.cli.config import (
     create_agent,
     get_model,
     _generate_session_id,
+    _build_environment_context,
+    _build_sibling_model,
 )
 from agentica.cli.display import (
     print_header,
@@ -52,6 +54,12 @@ from agentica.memory.models import AgentRun
 from agentica.model.message import Message
 from agentica.run_context import TaskAnchor
 from agentica.run_response import RunResponse
+from agentica.subagent import (
+    CODE_SUBAGENT_CONFIG,
+    EXPLORE_SUBAGENT_CONFIG,
+    RESEARCH_SUBAGENT_CONFIG,
+    get_custom_subagent_configs,
+)
 from agentica.tools.goal_tool import GoalTool
 from agentica.skills import (
     get_skill_registry,
@@ -182,6 +190,9 @@ CONCURRENT_CMDS = frozenset(
         "/statusbar",
         "/sb",
         "/reasoning",
+        "/status",
+        "/agents",
+        "/agent",
         # /goal and /subgoal: status/pause/clear/list subcommands are concurrent-safe.
         # Handlers reject "set new objective" when agent_running.
         "/goal",
@@ -266,6 +277,215 @@ def _run_async_safe(coro):
     return asyncio.run(coro)
 
 
+# ==================== Capability helpers ====================
+
+
+def _count_enabled_skills(agent) -> Optional[int]:
+    """Count enabled skills on the agent's SkillTool, or None when no SkillTool.
+
+    External boundary: SkillTool registry / disk-backed usage loading can fail
+    in odd environments, and /status must never crash on it, so any failure
+    reports "unavailable" (None) instead of raising.
+    """
+    from agentica.tools.skill_tool import SkillTool
+
+    if not agent or not agent.tools:
+        return None
+    for tool in agent.tools:
+        if isinstance(tool, SkillTool):
+            try:
+                return len(tool._get_enabled_skills())
+            except Exception:
+                return None
+    return None
+
+
+def _get_subagent_loader():
+    """Return the subagent_loader module, or None if not installed yet.
+
+    The loader is built by a parallel work stream; importing it lazily here
+    keeps commands.py loadable before it exists. An ImportError is the only
+    swallowed case — once the module is present, errors propagate normally.
+    """
+    try:
+        import agentica.subagent_loader as loader  # noqa: PLC0415
+        return loader
+    except ImportError:
+        return None
+
+
+def _get_defined_agents_for_display() -> list:
+    """Custom subagent descriptors for /agents listing.
+
+    Prefers the loader's on-disk view (includes file paths); falls back to the
+    in-memory custom registry when the loader is not installed yet.
+    """
+    loader = _get_subagent_loader()
+    if loader is not None:
+        return loader.list_defined_agents()
+    return [
+        {
+            "name": name,
+            "description": cfg.description,
+            "allowed_tools": cfg.allowed_tools,
+            "denied_tools": cfg.denied_tools,
+            "tool_call_limit": cfg.tool_call_limit,
+            "path": None,
+        }
+        for name, cfg in get_custom_subagent_configs().items()
+    ]
+
+
+def _runtime_config_path(ctx: CommandContext) -> Path:
+    """Resolve the runtime_config.yaml path used for skill enable/disable.
+
+    Mirrors Agent._load_runtime_config's read priority: an existing file under
+    the workspace wins, then cwd; when neither exists we create it at the
+    workspace location (or cwd) so the next read picks up the change.
+    """
+    config_name = ".agentica/runtime_config.yaml"
+    agent = ctx.current_agent
+    if agent is not None and agent.workspace is not None:
+        candidate = agent.workspace.path / config_name
+        if candidate.exists():
+            return candidate
+    cwd_candidate = Path(os.getcwd()) / config_name
+    if cwd_candidate.exists():
+        return cwd_candidate
+    if agent is not None and agent.workspace is not None:
+        return agent.workspace.path / config_name
+    return cwd_candidate
+
+
+def _set_skill_runtime_state(ctx: CommandContext, name: str, enabled: bool) -> Optional[Path]:
+    """Write a skill's enabled state into runtime_config.yaml (schema: skills.<name>.enabled).
+
+    External I/O boundary: YAML read/write failures return None so /skills can
+    print a clear error instead of crashing. Returns the path written on success.
+    """
+    con = get_console()
+    try:
+        import yaml  # noqa: PLC0415
+    except ImportError:
+        con.print("  [red]PyYAML not installed; cannot edit runtime_config.yaml.[/red]")
+        return None
+
+    path = _runtime_config_path(ctx)
+    data: dict = {}
+    if path.exists():
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                data = loaded
+        except (OSError, yaml.YAMLError) as exc:
+            con.print(f"  [red]Cannot read {path}: {exc}[/red]")
+            return None
+
+    skills = data.get("skills")
+    if not isinstance(skills, dict):
+        skills = {}
+        data["skills"] = skills
+    skills[name] = {"enabled": enabled}
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.safe_dump(data, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        con.print(f"  [red]Cannot write {path}: {exc}[/red]")
+        return None
+    return path
+
+
+def _update_task_tool_model_override(agent, model_override) -> None:
+    """Repoint the BuiltinTaskTool's model override on the live agent."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    if not agent or not agent.tools:
+        return
+    for tool in agent.tools:
+        if isinstance(tool, BuiltinTaskTool):
+            tool._model_override = model_override
+            return
+
+
+def _safe_tool_module_name(name: str) -> Optional[str]:
+    """Sanitize a /tools add-from name to a plain module basename.
+
+    Rejects anything path-like (separators, ~, leading dot, traversal, colon)
+    so the resolved path can never escape .agentica/tools/. Strips a trailing
+    .py the user may have added.
+    """
+    if not name:
+        return None
+    if name.endswith(".py"):
+        name = name[:-3]
+    if not name or "/" in name or "\\" in name or "~" in name or ":" in name or ".." in name:
+        return None
+    if name in (".", "") or name.startswith("."):
+        return None
+    return name
+
+
+def _load_custom_tool_module(name: str, file_path: Path):
+    """Import a .agentica/tools/<name>.py module and extract its exported tool.
+
+    Looks for, in order: a ``tool`` Tool/Function (or @tool-decorated callable),
+    a ``get_tool`` callable returning one, then any @tool-decorated function
+    exposed on the module. Returns the addable tool, or None after printing a
+    clear error. Module execution is an explicit boundary — arbitrary user code
+    failures are reported, not raised.
+    """
+    con = get_console()
+    import importlib.util  # noqa: PLC0415
+    from agentica.tools.base import Function, Tool  # noqa: PLC0415
+
+    def _is_export(obj) -> bool:
+        return isinstance(obj, (Tool, Function)) or (
+            callable(obj) and not isinstance(obj, type) and hasattr(obj, "_tool_metadata")
+        )
+
+    spec = importlib.util.spec_from_file_location(f"agentica_user_tool_{name}", file_path)
+    if spec is None or spec.loader is None:
+        con.print(f"  [red]Cannot load module spec for {file_path}[/red]")
+        return None
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        con.print(f"  [red]Error executing {file_path}: {exc}[/red]")
+        return None
+
+    candidate = None
+    explicit_tool = getattr(module, "tool", None)
+    if _is_export(explicit_tool):
+        candidate = explicit_tool
+    if candidate is None:
+        factory = getattr(module, "get_tool", None)
+        if callable(factory) and not isinstance(factory, type):
+            try:
+                produced = factory()
+            except Exception as exc:
+                con.print(f"  [red]get_tool() failed: {exc}[/red]")
+                return None
+            if _is_export(produced):
+                candidate = produced
+    if candidate is None:
+        for attr in vars(module).values():
+            if _is_export(attr):
+                candidate = attr
+                break
+    if candidate is None:
+        con.print(
+            f"  [red]No exported tool found in {file_path}. Export `tool` (Tool), "
+            "`get_tool()` (callable), or use the @tool decorator.[/red]"
+        )
+        return None
+    return candidate
+
+
 # ==================== Command Handlers ====================
 
 
@@ -276,6 +496,194 @@ def _cmd_help(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_exit(ctx: CommandContext, cmd_args: str = ""):
     return "EXIT"
+
+
+def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
+    """Print a compact one-screen overview of the current session."""
+    _cmd_title("/status")
+    con = get_console()
+    ac = ctx.agent_config
+
+    try:
+        from agentica.version import __version__
+    except ImportError:
+        __version__ = "unknown"
+
+    provider = ac.get("model_provider")
+    model_name = ac.get("model_name")
+    base_url = ac.get("base_url")
+    profile = get_active_profile_name()
+
+    aux_provider = ac.get("aux_model_provider")
+    aux_model_name = ac.get("aux_model_name")
+
+    agent = ctx.current_agent
+    tools_count = len(agent.tools) if agent and agent.tools else 0
+    skills_count = _count_enabled_skills(agent)
+    custom_subagents = len(get_custom_subagent_configs())
+    subagent_total = 3 + custom_subagents
+
+    perm_mode = ctx.permission_manager.mode if ctx.permission_manager else None
+
+    # Context usage and session cost are best-effort from the TUI state.
+    ts = ctx.tui_state or {}
+    ctx_tokens = ts.get("context_tokens")
+    ctx_window = ts.get("context_window")
+    ctx_pct = None
+    if isinstance(ctx_tokens, (int, float)) and isinstance(ctx_window, (int, float)) and ctx_window > 0:
+        ctx_pct = ctx_tokens / ctx_window * 100
+
+    session_cost = ts.get("cost_usd") if ts else None
+    if session_cost is None and agent is not None:
+        cost_tracker = agent.run_response.cost_tracker
+        if cost_tracker is not None:
+            session_cost = cost_tracker.total_cost_usd
+
+    model_str = f"{provider}/{model_name}" if provider and model_name else "(unset)"
+    aux_str = (
+        f"{aux_provider}/{aux_model_name}" if aux_provider and aux_model_name else "(reuse main)"
+    )
+    skills_str = str(skills_count) if skills_count is not None else "n/a"
+    perm_str = perm_mode or "(default)"
+    ctx_str = f"{ctx_pct:.0f}% ({int(ctx_tokens):,}/{int(ctx_window):,})" if ctx_pct is not None else "n/a"
+    cost_str = f"${session_cost:.4f}" if isinstance(session_cost, (int, float)) else "n/a"
+
+    con.print(f"  [bold]Agentica[/bold] [dim]v{__version__}[/dim]  profile: [cyan]{profile or '(none)'}[/cyan]")
+    con.print(f"  Model:     [bold]{model_str}[/bold]")
+    if base_url:
+        con.print(f"  Endpoint:  [dim]{base_url}[/dim]")
+    con.print(f"  Auxiliary model: {aux_str}")
+    con.print(
+        f"  Tools: {tools_count}  |  Skills: {skills_str}  |  "
+        f"Subagents: {subagent_total} (3 builtin + {custom_subagents} custom)"
+    )
+    con.print(f"  Permissions: {perm_str}  |  Context: {ctx_str}  |  Cost: {cost_str}")
+
+
+def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
+    """Manage subagents: list, create, reload, remove.
+
+    Built-in types (explore/research/code) come from subagent.py defaults;
+    custom types come from .agentica/agents/*.md via the subagent loader.
+    """
+    con = get_console()
+    args_str = cmd_args.strip()
+    parts = shlex.split(args_str) if args_str else []
+    subcmd = parts[0].lower() if parts else ""
+    sub_args = parts[1:]
+
+    _cmd_title(f"/agents {args_str}" if args_str else "/agents")
+
+    # ── /agents create <name> — interactive, writes .agentica/agents/<name>.md ──
+    if subcmd == "create":
+        if not sub_args:
+            con.print("  [dim]Usage: /agents create <name>[/dim]")
+            return
+        name = sub_args[0]
+        loader = _get_subagent_loader()
+        if loader is None:
+            con.print("  [red]Subagent loader not available.[/red]")
+            return
+        from prompt_toolkit import prompt as pt_prompt
+
+        description = pt_prompt("  Description: ").strip()
+        if not description:
+            con.print("  [red]Description is required.[/red]")
+            return
+        tools_raw = pt_prompt(
+            "  Allowed tools (comma-separated, blank to inherit parent): "
+        ).strip()
+        allowed_tools = None
+        if tools_raw:
+            allowed_tools = [t.strip() for t in tools_raw.split(",") if t.strip()]
+        system_prompt = (
+            f"You are a {name} specialist. {description}\n\n"
+            "(Describe how this subagent should behave.)"
+        )
+        try:
+            path = loader.create_agent_file(
+                name=name,
+                description=description,
+                system_prompt=system_prompt,
+                allowed_tools=allowed_tools,
+            )
+        except Exception as exc:
+            con.print(f"  [red]Failed to create agent: {exc}[/red]")
+            return
+        con.print(f"  [green]Created subagent '{name}' at {path}[/green]")
+        con.print(
+            "  [dim]Edit the .md file to customize its system prompt, "
+            "then /agents reload.[/dim]"
+        )
+        return
+
+    # ── /agents reload — rescan disk and re-register ──
+    if subcmd == "reload":
+        loader = _get_subagent_loader()
+        if loader is None:
+            con.print("  [red]Subagent loader not available.[/red]")
+            return
+        count = loader.load_all_agents()
+        con.print(f"  [green]Loaded {count} subagent(s) from disk.[/green]")
+        return
+
+    # ── /agents remove <name> — delete file + unregister ──
+    if subcmd in ("remove", "rm"):
+        if not sub_args:
+            con.print("  [dim]Usage: /agents remove <name>[/dim]")
+            return
+        name = sub_args[0]
+        loader = _get_subagent_loader()
+        if loader is None:
+            con.print("  [red]Subagent loader not available.[/red]")
+            return
+        removed = loader.remove_agent_file(name)
+        if removed:
+            con.print(f"  [green]Removed subagent '{name}'.[/green]")
+        else:
+            con.print(f"  [dim]No agent file found for '{name}'.[/dim]")
+        return
+
+    # ── /agents (no args) or /agents list ──
+    if subcmd and subcmd != "list":
+        con.print(f"  [red]Unknown subcommand: {subcmd}[/red]")
+        con.print(
+            "  [dim]Usage: /agents [list | create <name> | reload | remove <name>][/dim]"
+        )
+        return
+
+    builtin_configs = [
+        ("explore", EXPLORE_SUBAGENT_CONFIG),
+        ("research", RESEARCH_SUBAGENT_CONFIG),
+        ("code", CODE_SUBAGENT_CONFIG),
+    ]
+    con.print("  [bold]Built-in subagents:[/bold]")
+    for type_name, cfg in builtin_configs:
+        desc_first = cfg.description.split("\n")[0].strip()
+        con.print(f"    [green]●[/green] [bold]{type_name:<12}[/bold] {desc_first}")
+        con.print(f"      [dim]tools: {', '.join(cfg.allowed_tools or [])}[/dim]")
+
+    custom_agents = _get_defined_agents_for_display()
+    con.print()
+    if custom_agents:
+        con.print(f"  [bold]Custom subagents ({len(custom_agents)}):[/bold]")
+        for agent in custom_agents:
+            agent_name = agent.get("name", "?")
+            desc = agent.get("description") or ""
+            desc_first = desc.split("\n")[0].strip()
+            tools = agent.get("allowed_tools")
+            tools_str = ", ".join(tools) if tools else "(inherit parent)"
+            con.print(f"    [green]●[/green] [bold]{agent_name:<12}[/bold] {desc_first}")
+            con.print(f"      [dim]tools: {tools_str}[/dim]")
+            path = agent.get("path")
+            if path:
+                con.print(f"      [dim]file: {path}[/dim]")
+    else:
+        con.print("  [dim]No custom subagents. Create one with /agents create <name>.[/dim]")
+    con.print()
+    con.print(
+        "  [dim]Commands: /agents [list] | create <name> | reload | remove <name>[/dim]"
+    )
 
 
 def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
@@ -317,6 +725,45 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
                     ctx.extra_tool_names.append(name)
                 con.print(f"  [green]{name} loaded.[/green]")
         return {"extra_tool_names": ctx.extra_tool_names}
+
+    # ── /tools add-from <name> — load a custom tool from .agentica/tools/<name>.py ──
+    if subcmd == "add-from":
+        raw_name = sub_args.strip()
+        if not raw_name:
+            con.print("  [dim]Usage: /tools add-from <name>  (loads .agentica/tools/<name>.py)[/dim]")
+            return
+        name = _safe_tool_module_name(raw_name)
+        if name is None:
+            con.print(
+                f"  [red]Invalid tool name: {raw_name!r}. Use a plain filename "
+                "(no path, no ~, no module:attr).[/red]"
+            )
+            return
+        agent = ctx.current_agent
+        if not agent:
+            con.print("  [red]No active agent.[/red]")
+            return
+        work_dir = agent.work_dir or os.getcwd()
+        file_path = Path(work_dir) / ".agentica" / "tools" / f"{name}.py"
+        if not file_path.is_file():
+            con.print(f"  [red]Tool file not found: {file_path}[/red]")
+            return
+        con.print(f"  [yellow]About to load and execute: {file_path}[/yellow]")
+        con.print("  [yellow]This runs the module's top-level code (arbitrary code execution).[/yellow]")
+        from prompt_toolkit import prompt as pt_prompt
+
+        answer = pt_prompt("  Proceed? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            con.print("  [dim]Aborted.[/dim]")
+            return
+        loaded = _load_custom_tool_module(name, file_path)
+        if loaded is None:
+            return
+        if agent.tools is None:
+            agent.tools = []
+        agent.tools.append(loaded)
+        con.print(f"  [green]Loaded tool '{name}' from {file_path}[/green]")
+        return
 
     # ── /tools remove <name> ──
     if subcmd in ("remove", "rm"):
@@ -434,7 +881,7 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
     con.print(
         f"  [green]● = active ({active_count})[/green]  [dim]○ = available ({len(all_tools) - active_count})[/dim]"
     )
-    con.print(f"  [dim]Commands: /tools add <name> | remove <name> | info <name> | search <keyword>[/dim]")
+    con.print(f"  [dim]Commands: /tools add <name> | add-from <name> | remove <name> | info <name> | search <keyword>[/dim]")
     con.print()
 
 
@@ -633,6 +1080,19 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
     if subcommand == "reload":
         return _cmd_reload_skills(ctx)
 
+    # ── /skills enable|disable <name> — runtime enable/disable via runtime_config.yaml ──
+    if subcommand in ("enable", "disable"):
+        if not sub_args:
+            con.print(f"  [dim]Usage: /skills {subcommand} <name>[/dim]")
+            return
+        name = sub_args[0]
+        path = _set_skill_runtime_state(ctx, name, subcommand == "enable")
+        if path is None:
+            return
+        state = "enabled" if subcommand == "enable" else "disabled"
+        con.print(f"  [green]Skill '{name}' {state} in {path}[/green]")
+        return _cmd_reload_skills(ctx)
+
     # ── /skills inspect <name-or-identifier> — local or hub preview ──
     if subcommand == "inspect":
         query = " ".join(sub_args).strip()
@@ -771,7 +1231,7 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
         con.print()
 
     con.print(
-        "  [dim]Commands: search <q> | browse | install <name> | remove <name> | inspect <name> | tap | reload[/dim]"
+        "  [dim]Commands: search <q> | browse | install <name> | remove <name> | inspect <name> | tap | reload | enable <name> | disable <name>[/dim]"
     )
 
 
@@ -1083,6 +1543,39 @@ def _apply_profile(ctx: CommandContext, name: str):
     ctx.agent_config["reasoning_effort"] = new_reasoning_effort
     ctx.agent_config["top_p"] = new_top_p
     ctx.agent_config["context_window"] = new_context_window
+
+    # Aux model: a profile switch fully replaces the aux model too. An
+    # aux_model block rebuilds the sibling (background calls + task subagent);
+    # a profile without one clears the aux fields so they fall back to the
+    # main model. _build_sibling_model handles same-provider base_url/api_key
+    # inheritance; cross-provider reads the block's own key (or env). The aux
+    # rebuild is a tolerance boundary — a broken aux config falls back to the
+    # main model with a warning instead of blocking the core model switch.
+    aux_block = profile.get("aux_model")
+    if isinstance(aux_block, dict) and aux_block.get("model_name"):
+        ctx.agent_config["aux_model_provider"] = aux_block.get("model_provider") or new_provider
+        ctx.agent_config["aux_model_name"] = aux_block.get("model_name")
+        ctx.agent_config["aux_base_url"] = aux_block.get("base_url")
+        ctx.agent_config["aux_api_key"] = aux_block.get("api_key")
+        try:
+            new_aux_model = _build_sibling_model(ctx.agent_config, "aux")
+        except Exception as exc:
+            con.print(
+                f"[yellow]Auxiliary model build failed, falling back to main model: {exc}[/yellow]"
+            )
+            ctx.agent_config["aux_model_provider"] = None
+            ctx.agent_config["aux_model_name"] = None
+            ctx.agent_config["aux_base_url"] = None
+            ctx.agent_config["aux_api_key"] = None
+            new_aux_model = None
+    else:
+        ctx.agent_config["aux_model_provider"] = None
+        ctx.agent_config["aux_model_name"] = None
+        ctx.agent_config["aux_base_url"] = None
+        ctx.agent_config["aux_api_key"] = None
+        new_aux_model = None
+    ctx.agent_config["auxiliary_model"] = new_aux_model
+
     set_active_profile(name)
     _persist_model_choice(new_provider, new_model, new_base_url)
 
@@ -1100,8 +1593,26 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_model_obj = get_model(**model_kwargs)
     if ctx.current_agent is not None:
         ctx.current_agent.model = new_model_obj
+        ctx.current_agent.auxiliary_model = new_aux_model
+        # Repoint the task subagent tool onto the new aux model (None = clone
+        # the parent's main model, matching create_agent's default).
+        _update_task_tool_model_override(ctx.current_agent, new_aux_model)
         _sanitize_history_for_model_switch(ctx.current_agent)
-        con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model} (session preserved)[/green]")
+        # Refresh the self-description block so the agent reports its new
+        # model/aux model on the next turn.
+        ctx.current_agent.environment_context = _build_environment_context(
+            ctx.current_agent, ctx.agent_config
+        )
+        aux_provider = ctx.agent_config.get("aux_model_provider")
+        aux_model_name = ctx.agent_config.get("aux_model_name")
+        aux_str = (
+            f"{aux_provider}/{aux_model_name}" if aux_provider and aux_model_name else "reuse main"
+        )
+        con.print(
+            f"[green]Switched to profile '{name}': {new_provider}/{new_model} "
+            f"(session preserved)[/green]"
+        )
+        con.print(f"[dim]Auxiliary model: {aux_str}[/dim]")
         return {"model_switched": True}
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
@@ -2248,10 +2759,16 @@ COMMAND_REGISTRY = {
     "/reasoning": (_cmd_reasoning, "Toggle reasoning display: on | off"),
     "/statusbar": (_cmd_statusbar, "Toggle the status bar visibility"),
     "/sb": (_cmd_statusbar, "Toggle the status bar (alias)"),
+    "/status": (_cmd_status, "Show session status overview"),
     # Tools & Skills
     "/tools": (_cmd_tools, "Manage tools: add | remove | info | search"),
     "/skills": (_cmd_skills, "Manage skills: search | browse | install | remove | inspect | tap"),
     "/extensions": (_cmd_skills, "Manage skills (alias for /skills)"),
+    "/agents": (
+        _cmd_agents,
+        "Manage subagents: list | create <name> | reload | remove <name>",
+    ),
+    "/agent": (_cmd_agents, "Manage subagents (alias for /agents)"),
     # Permissions
     "/permissions": (_cmd_permissions, "View or set permission mode"),
     "/yolo": (_cmd_yolo, "Toggle YOLO mode (auto-approve all)"),

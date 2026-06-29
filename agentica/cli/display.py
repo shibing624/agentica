@@ -1484,6 +1484,8 @@ def format_duration_compact(seconds: float) -> str:
 def build_status_bar_fragments(
     *,
     model_name: str = "",
+    model_provider: str = "",
+    profile_name: str = "",
     context_tokens: int = 0,
     context_window: int = 0,
     cost_usd: float = 0.0,
@@ -1502,10 +1504,22 @@ def build_status_bar_fragments(
       <52 cols:  ▸ model · ⏱12.3s
       <76 cols:  ▸ model · 45% · $0.02 · ⏱12.3s
       >=76 cols: ▸ model │ 64K/128K │ [████░░] 45% │ $0.02 │ ⏱12.3s Σ1m45s
+
+    The model label is rendered as ``provider/model`` when a provider is
+    supplied (e.g. ``openai/gpt-4o``); a non-default profile name is shown
+    as a ``profile:`` prefix on wider terminals.
     """
-    short = model_name.split("/")[-1] if "/" in model_name else model_name
-    if len(short) > 26:
-        short = short[:23] + "..."
+    base = model_name.split("/")[-1] if "/" in model_name else model_name
+    if model_provider:
+        label = f"{model_provider}/{base}"
+    else:
+        label = base
+    if len(label) > 26:
+        label = label[:23] + "..."
+    # Optional profile prefix (only when not the default profile).
+    profile_prefix = ""
+    if profile_name and profile_name != "default":
+        profile_prefix = f"profile:{profile_name} "
     pct = (context_tokens / context_window * 100) if context_window > 0 else 0.0
     pct_label = f"{pct:.0f}%"
     fg = _ctx_fg_style(pct)
@@ -1519,7 +1533,7 @@ def build_status_bar_fragments(
     if terminal_width < 52:
         frags = [
             ("class:sb", " ▸ "),
-            ("class:sb-strong", short),
+            ("class:sb-strong", label),
         ]
         if turn_str:
             frags.append(sep)
@@ -1527,7 +1541,7 @@ def build_status_bar_fragments(
     elif terminal_width < 76:
         frags = [
             ("class:sb", " ▸ "),
-            ("class:sb-strong", short),
+            ("class:sb-strong", label),
             sep,
             (fg, pct_label),
             sep,
@@ -1541,7 +1555,7 @@ def build_status_bar_fragments(
         ctx_total = _format_tokens_short(context_window) if context_window else "?"
         frags = [
             ("class:sb", " ▸ "),
-            ("class:sb-strong", short),
+            ("class:sb-strong", label),
             ("class:sb-dim", " │ "),
             ("class:sb", f"{ctx_used}/{ctx_total}"),
             ("class:sb-dim", " │ "),
@@ -1557,6 +1571,11 @@ def build_status_bar_fragments(
         if total_str:
             frags.append(("class:sb-dim", "  "))
             frags.append(("class:sb-dim", total_str))
+
+    # Non-default profile prefix (dim), shown on medium/wide terminals only
+    # right after the leading marker to keep the narrow layout intact.
+    if profile_prefix and terminal_width >= 52:
+        frags.insert(1, ("class:sb-dim", profile_prefix))
 
     frags.append(("class:sb", " "))
     return frags

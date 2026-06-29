@@ -200,6 +200,46 @@ class TestHelperFunctions(unittest.TestCase):
         msg = Message(role="system", content="You are helpful")
         self.assertFalse(_is_history_message(msg))
 
+    def test_is_history_message_empty_user_excluded(self):
+        """Empty-content user message must be excluded.
+
+        Regression: an empty-content message persisted into history was
+        re-sent every turn, triggering Venus 400 'message has no content'
+        and poisoning the whole session.
+        """
+        self.assertFalse(_is_history_message(Message(role="user", content="")))
+        self.assertFalse(_is_history_message(Message(role="user", content=None)))
+        self.assertFalse(_is_history_message(Message(role="user", content="   ")))
+
+    def test_is_history_message_empty_assistant_excluded(self):
+        """Empty-content assistant message (no tool_calls) must be excluded."""
+        self.assertFalse(_is_history_message(Message(role="assistant", content="")))
+        self.assertFalse(_is_history_message(Message(role="assistant", content=None)))
+        self.assertFalse(_is_history_message(Message(role="assistant", content="  \n ")))
+
+    def test_is_history_message_empty_assistant_with_tool_calls_kept(self):
+        """Assistant with tool_calls is valid even with empty content - keep it."""
+        msg = Message(role="assistant", content=None, tool_calls=[{"id": "1"}])
+        self.assertTrue(_is_history_message(msg))
+
+    def test_is_history_message_tool_empty_kept(self):
+        """Tool messages are paired by tool_call_id; keep even if content empty."""
+        self.assertTrue(_is_history_message(Message(role="tool", content="")))
+        self.assertTrue(_is_history_message(Message(role="tool", content=None)))
+
+    def test_clean_history_empty_tool_gets_placeholder(self):
+        """An empty tool result (e.g. after base64 stripping) must not be sent
+        with empty content (Venus 400 "message has no content"). It can't be
+        dropped either (tool_call_id pairing), so substitute a placeholder."""
+        m = _clean_message_for_history(Message(role="tool", content="", tool_call_id="x"))
+        self.assertEqual(m.content, "(tool returned no output)")
+        m2 = _clean_message_for_history(Message(role="tool", content=None, tool_call_id="y"))
+        self.assertEqual(m2.content, "(tool returned no output)")
+
+    def test_clean_history_nonempty_tool_unchanged(self):
+        m = _clean_message_for_history(Message(role="tool", content="real result", tool_call_id="x"))
+        self.assertEqual(m.content, "real result")
+
     def test_truncate_tool_content_short(self):
         """Test _truncate_tool_content keeps short tool content unchanged."""
         msg = Message(role="tool", content="short text")

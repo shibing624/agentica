@@ -19,6 +19,17 @@ from agentica.memory.models import (
 from agentica.memory.summarizer import MemorySummarizer
 
 
+def _content_has_text(content: Any) -> bool:
+    """True when a message's content carries any text worth sending."""
+    if content is None:
+        return False
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return len(content) > 0
+    return bool(content)
+
+
 def _clean_content_list(content_list: list) -> list:
     """Clean a list-type content by removing BASE64 placeholder items."""
     cleaned = []
@@ -98,6 +109,14 @@ def _clean_message_for_history(msg: Message) -> Message:
     if cleaned_msg.videos is not None:
         cleaned_msg.videos = _clean_media_list(cleaned_msg.videos)
 
+    # A tool result must be sent to pair with its assistant tool_call, but
+    # Venus/Anthropic reject empty tool_result content ("message has no
+    # content"). After placeholder stripping a tool result can become "" —
+    # substitute a placeholder so pairing is preserved without poisoning the
+    # request. (Dropping it would break tool_call_id pairing.)
+    if cleaned_msg.role == "tool" and not _content_has_text(cleaned_msg.content):
+        cleaned_msg.content = "(tool returned no output)"
+
     return cleaned_msg
 
 
@@ -106,11 +125,26 @@ def _is_history_message(msg: Message) -> bool:
 
     Includes tool-related messages (assistant tool_calls, tool responses) to preserve
     tool call context across turns, preventing the model from forgetting tool usage.
+
+    Empty-content user/assistant messages are excluded: re-sending a message with
+    no content poisons the whole session (e.g. Venus returns 400 "message has no
+    content" on every subsequent turn). Assistant messages carrying tool_calls and
+    tool responses are kept even when content is empty, because their value lives in
+    tool_calls / tool_call_id pairing rather than text content.
     """
     if msg.role == "system":
         return False
-    if msg.role in ("user", "assistant", "tool"):
+    if msg.role == "tool":
         return True
+    if msg.role == "assistant" and msg.tool_calls:
+        return True
+    if msg.role in ("user", "assistant"):
+        # Keep only if there is real content. Empty text is dropped (re-sending
+        # it poisons the session — e.g. Venus 400 "message has no content").
+        # List content (multimodal blocks) is kept when non-empty.
+        if isinstance(msg.content, str):
+            return bool(msg.content.strip())
+        return bool(msg.content)
     return False
 
 

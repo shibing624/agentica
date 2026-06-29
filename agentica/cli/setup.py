@@ -213,22 +213,34 @@ def should_onboard(provider: str, base_url: Optional[str] = None) -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _select_provider(console) -> str:
-    """Show the numbered provider picker and return the chosen slug."""
+def _select_provider(console, current: Optional[str] = None) -> str:
+    """Show the numbered provider picker and return the chosen slug.
+
+    ``current`` (the active profile's provider, if any) is marked and used as
+    the default so a re-run of ``agentica setup`` can be walked through with
+    Enter-Enter-Enter to keep the existing provider.
+    """
+    default_slug = current or DEFAULT_PROVIDER
     console.print()
     console.print("  Select a model provider:", style="bold cyan")
     for idx, slug in enumerate(_PROVIDER_ORDER, start=1):
         preset = PROVIDER_PRESETS[slug]
-        marker = " [dim](default)[/dim]" if slug == DEFAULT_PROVIDER else ""
+        if slug == current:
+            marker = " [dim](current)[/dim]"
+        elif slug == default_slug:
+            marker = " [dim](default)[/dim]"
+        else:
+            marker = ""
         console.print(f"    {idx}. {preset['label']}{marker}")
     custom_idx = len(_PROVIDER_ORDER) + 1
     console.print(f"    {custom_idx}. Custom (any OpenAI-compatible endpoint)")
     console.print()
 
+    default_idx = _PROVIDER_ORDER.index(default_slug) + 1 if default_slug in _PROVIDER_ORDER else 1
     while True:
-        raw = pt_prompt(f"  Provider [1-{custom_idx}, default 1]: ").strip()
+        raw = pt_prompt(f"  Provider [1-{custom_idx}, default {default_idx}]: ").strip()
         if not raw:
-            return _PROVIDER_ORDER[0]
+            return default_slug
         if raw.isdigit():
             n = int(raw)
             if 1 <= n <= len(_PROVIDER_ORDER):
@@ -243,6 +255,18 @@ def _select_provider(console) -> str:
 
 
 _REASONING_EFFORT_CHOICES = ("low", "medium", "high", "max")
+
+# Profile keys that are optional model-tuning params. Used to carry existing
+# values through a re-run of `agentica setup` when the user declines to edit.
+_TUNING_KEYS = ("reasoning_effort", "max_tokens", "context_window", "temperature", "top_p")
+_CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header")
+
+
+def _pick_keys(d: Optional[dict], keys) -> Dict:
+    """Return a new dict with only the given keys that are present and non-None."""
+    if not d:
+        return {}
+    return {k: d[k] for k in keys if d.get(k) is not None}
 
 
 def _prompt_int(label: str) -> Optional[int]:
@@ -272,100 +296,136 @@ def _prompt_float(label: str) -> Optional[float]:
             pass
 
 
-def _prompt_advanced_params(console, provider: str) -> Dict:
-    """Optionally collect advanced model tuning params during onboarding.
+def _prompt_advanced_params(console, provider: str, current: Optional[dict] = None) -> Dict:
+    """Optionally collect / edit advanced model tuning params during onboarding.
 
-    Returns a dict that may contain ``reasoning_effort``, ``max_tokens``,
-    ``context_window``, ``temperature`` and ``top_p`` (only the keys the user
-    set). Keys left blank are omitted so the model factory keeps its defaults.
+    ``current`` carries the active profile's existing tuning values so a re-run
+    can pre-fill them. Declining to edit RETURNS the existing values (so they
+    survive the upsert that replaces the profile), not an empty dict. Keys the
+    user blanks out are omitted so the model factory keeps its defaults.
     """
-    console.print()
-    answer = pt_prompt("  Configure advanced model params (thinking depth, limits)? [y/N]: ").strip().lower()
+    existing = _pick_keys(current, _TUNING_KEYS)
+    has_existing = bool(existing)
+    prompt_label = "Edit advanced model params (thinking depth, limits)?" if has_existing else "Configure advanced model params (thinking depth, limits)?"
+    answer = pt_prompt(f"  {prompt_label} [y/N]: ").strip().lower()
     if answer not in ("y", "yes"):
-        return {}
+        return existing  # keep whatever's already there (possibly empty)
 
-    params: Dict = {}
-    console.print("  [dim]Press Enter to skip any field.[/dim]")
+    params: Dict = dict(existing)  # start from existing so blank = keep
+    console.print("  [dim]Press Enter to keep the current value for any field.[/dim]")
 
     # Thinking depth / reasoning effort.
-    effort = pt_prompt(f"  Reasoning effort {list(_REASONING_EFFORT_CHOICES)} (blank to skip): ").strip().lower()
+    cur_effort = existing.get("reasoning_effort")
+    eff_label = f"  Reasoning effort {list(_REASONING_EFFORT_CHOICES)} [{cur_effort}]: " if cur_effort else f"  Reasoning effort {list(_REASONING_EFFORT_CHOICES)} (blank to skip): "
+    effort = pt_prompt(eff_label).strip().lower()
     if effort in _REASONING_EFFORT_CHOICES:
         params["reasoning_effort"] = effort
     elif effort:
         console.print(f"  [yellow]Ignored invalid reasoning effort: {effort}[/yellow]")
+    elif "reasoning_effort" in params and not cur_effort:
+        pass  # keep
 
     # Output limit.
-    max_tokens = _prompt_int("  Max output tokens (output limit, blank to skip): ")
-    if max_tokens is not None:
-        params["max_tokens"] = max_tokens
+    cur_mt = existing.get("max_tokens")
+    mt = _prompt_int(f"  Max output tokens (output limit [{cur_mt}]): " if cur_mt else "  Max output tokens (output limit, blank to skip): ")
+    if mt is not None:
+        params["max_tokens"] = mt
 
     # Context limit (overrides the catalog auto-detected value).
-    context_window = _prompt_int("  Context window (context limit, blank to skip): ")
-    if context_window is not None:
-        params["context_window"] = context_window
+    cur_cw = existing.get("context_window")
+    cw = _prompt_int(f"  Context window (context limit [{cur_cw}]): " if cur_cw else "  Context window (context limit, blank to skip): ")
+    if cw is not None:
+        params["context_window"] = cw
 
     # Sampling.
-    temperature = _prompt_float("  Temperature (blank to skip): ")
-    if temperature is not None:
-        params["temperature"] = temperature
-    top_p = _prompt_float("  Top-p (blank to skip): ")
+    cur_temp = existing.get("temperature")
+    temp = _prompt_float(f"  Temperature [{cur_temp}]: " if cur_temp is not None else "  Temperature (blank to skip): ")
+    if temp is not None:
+        params["temperature"] = temp
+    cur_top_p = existing.get("top_p")
+    top_p = _prompt_float(f"  Top-p [{cur_top_p}]: " if cur_top_p is not None else "  Top-p (blank to skip): ")
     if top_p is not None:
         params["top_p"] = top_p
 
     return params
 
 
-def _prompt_cache_control(console, provider: str) -> Dict:
-    """Optionally enable Anthropic-style prompt caching during onboarding.
+def _prompt_cache_control(console, provider: str, current: Optional[dict] = None) -> Dict:
+    """Optionally enable / edit Anthropic-style prompt caching during onboarding.
 
     Returns ``{"enable_cache_control": True, ...}`` when the user opts in (plus
     optional ``cache_control_messages`` / ``cache_control_session_header``),
     else ``{}``. Skipped for the ``anthropic`` provider, which manages its own
     native cache_control. Design: the user filling this in == turning it on.
+
+    ``current`` carries existing cache settings so a re-run pre-fills them;
+    declining to edit returns the existing block unchanged (survives upsert).
     """
     if provider == "anthropic":
         return {}
+    existing = _pick_keys(current, _CACHE_KEYS)
+    has_existing = existing.get("enable_cache_control") is True
     console.print()
     console.print("  Prompt caching reuses the system prompt + recent messages", style="dim")
     console.print("  so repeat turns cost less. Useful for OpenAI-compatible proxies", style="dim")
     console.print("  that front Anthropic Claude (e.g. Venus).", style="dim")
-    answer = pt_prompt("  Enable prompt caching? [y/N]: ").strip().lower()
+    gate = "Edit prompt caching?" if has_existing else "Enable prompt caching?"
+    answer = pt_prompt(f"  {gate} [y/N]: ").strip().lower()
     if answer not in ("y", "yes"):
-        return {}
+        return existing  # keep existing (possibly empty)
+
     params: Dict = {"enable_cache_control": True}
-    msgs = _prompt_int("  Cache breakpoints on recent messages (blank for 3): ")
+    cur_msgs = existing.get("cache_control_messages")
+    msgs = _prompt_int(f"  Cache breakpoints on recent messages [{cur_msgs}]: " if cur_msgs else "  Cache breakpoints on recent messages (blank for 3): ")
     if msgs is not None:
         params["cache_control_messages"] = msgs
-    header = pt_prompt("  Sticky routing header (e.g. Venus-Session-Id, blank to skip): ").strip()
+    elif cur_msgs is not None:
+        params["cache_control_messages"] = cur_msgs
+    cur_header = existing.get("cache_control_session_header")
+    header = pt_prompt(f"  Sticky routing header (e.g. Venus-Session-Id) [{cur_header}]: " if cur_header else "  Sticky routing header (e.g. Venus-Session-Id, blank to skip): ").strip()
     if header:
         params["cache_control_session_header"] = header
+    elif cur_header:
+        params["cache_control_session_header"] = cur_header
     return params
 
 
-def _prompt_aux_model(console, main_provider: str) -> Dict:
-    """Optionally configure the aux model (background calls + `task` subagent).
+def _prompt_aux_model(console, main_provider: str, existing_aux: Optional[dict] = None) -> Dict:
+    """Optionally configure / edit the aux model (background calls + `task`).
 
     Fully skippable: the whole section is gated by a ``[y/N]`` question. When
-    the user declines, returns ``{}``. Otherwise prompts for provider, base_url,
-    api_key and model_name (with sensible defaults / blank-to-skip) and returns
-    an ``aux_model`` block dict suitable for storing in a config.yaml profile.
-    The key is persisted into the profile (no separate key-slot file).
+    the user declines, RETURNS the existing aux block unchanged (so it survives
+    the upsert that replaces the profile) — or ``{}`` if there was none. When
+    the user opts in, prompts for provider, base_url, api_key (shown in full)
+    and model_name, pre-filled from ``existing_aux``. Returns an ``aux_model``
+    block dict suitable for storing in a config.yaml profile.
     """
+    has_existing = bool(existing_aux)
     console.print()
-    console.print("  Aux model (background tasks + `task` subagent) - optional", style="bold cyan")
+    console.print("  Auxiliary model (background tasks + `task` subagent) - optional", style="bold cyan")
     console.print("  [dim]A cheaper/faster model here saves cost on memory extraction,[/dim]")
     console.print("  [dim]context compression, and delegated subtasks.[/dim]")
-    answer = pt_prompt("  Configure a separate aux model? [y/N]: ").strip().lower()
+    if has_existing:
+        ap = existing_aux.get("model_provider", "?")
+        am = existing_aux.get("model_name", "?")
+        console.print(f"  [dim]Current: {ap}/{am}[/dim]")
+        gate = "Reconfigure the auxiliary model?"
+    else:
+        gate = "Configure a separate auxiliary model?"
+    answer = pt_prompt(f"  {gate} [y/N]: ").strip().lower()
     if answer not in ("y", "yes"):
-        return {}
+        return dict(existing_aux) if has_existing else {}
 
-    provider_choice = _select_provider(console)
+    cur_provider = existing_aux.get("model_provider") if existing_aux else None
+    provider_choice = _select_provider(console, current=cur_provider or main_provider)
     is_custom = provider_choice == "custom"
     if is_custom:
         provider = "openai"
         console.print()
         console.print("  Custom OpenAI-compatible endpoint", style="bold cyan")
-        base_url = pt_prompt("  Base URL: ").strip()
+        cur_base = existing_aux.get("base_url", "") if existing_aux else ""
+        base_label = f"  Base URL [{cur_base}]: " if cur_base else "  Base URL: "
+        base_url = pt_prompt(base_label).strip() or cur_base
         while not base_url:
             console.print("  [red]Base URL is required for a custom endpoint.[/red]")
             base_url = pt_prompt("  Base URL: ").strip()
@@ -374,25 +434,33 @@ def _prompt_aux_model(console, main_provider: str) -> Dict:
         provider = provider_choice
         preset = PROVIDER_PRESETS[provider]
         default_base = preset["base_url"]
+        cur_base = existing_aux.get("base_url") if existing_aux else None
+        shown_base = cur_base or default_base
         console.print()
         console.print(f"  {preset['label']} selected", style="bold cyan")
-        base_url = pt_prompt(f"  Base URL [{default_base}]: ").strip() or default_base
+        base_url = pt_prompt(f"  Base URL [{shown_base}]: ").strip() or shown_base
         default_model = preset["default_model"]
 
-    # API key: prefer a previously stored profile key, else the provider env
-    # var (so users with shell-exported keys don't get re-prompted). Custom
-    # endpoints never look at OPENAI_API_KEY.
-    existing_key = get_profile_api_key(provider, base_url)
+    # API key: shown IN FULL (this is the dedicated key-config place). Prefer a
+    # previously stored profile key, else the provider env var. Custom endpoints
+    # never look at OPENAI_API_KEY.
+    existing_key = existing_aux.get("api_key") if existing_aux else None
+    if not existing_key:
+        existing_key = get_profile_api_key(provider, base_url)
     if not existing_key and not is_custom:
         existing_key = os.getenv(provider_env_var(provider))
-    key_hint = " (press Enter to keep existing)" if existing_key else " (blank to skip)"
-    entered_key = pt_prompt(f"  API key{key_hint}: ", is_password=True).strip()
-    key = entered_key or existing_key
+    if existing_key:
+        entered_key = pt_prompt(f"  API key [{existing_key}]: ", is_password=False).strip()
+        key = entered_key or existing_key
+    else:
+        key = pt_prompt("  API key (blank to skip): ", is_password=False).strip()
 
-    model_prompt = f"  Model name [{default_model}]: " if default_model else "  Model name: "
-    model_name = pt_prompt(model_prompt).strip() or default_model
+    cur_model = existing_aux.get("model_name") if existing_aux else None
+    shown_model = cur_model or default_model
+    model_prompt = f"  Model name [{shown_model}]: " if shown_model else "  Model name: "
+    model_name = pt_prompt(model_prompt).strip() or shown_model
     while not model_name:
-        console.print("  [red]Model name is required (or answer N to skip the aux model).[/red]")
+        console.print("  [red]Model name is required (or answer N to skip the auxiliary model).[/red]")
         model_name = pt_prompt("  Model name: ").strip()
 
     block: Dict = {
@@ -408,29 +476,48 @@ def _prompt_aux_model(console, main_provider: str) -> Dict:
 
 
 def run_onboarding(console) -> Dict:
-    """Interactive first-run wizard.
+    """Interactive first-run / re-configuration wizard.
 
     Persists the main model (provider/model/base_url/api_key + optional tuning)
     and the optional aux model to ``~/.agentica/config.yaml`` as a named profile,
     made active so the SDK picks up the api_key via env injection on next run.
+
+    On a re-run, the existing active profile is loaded and used to PRE-FILL every
+    prompt (provider, base_url, model name, api key, advanced tuning, aux model),
+    so walking through with Enter keeps the current setup instead of re-entering
+    it. API keys are shown in full — this is the dedicated key-config place.
     Returns ``{model_provider, model_name, base_url, api_key, ...aux fields}``;
     the api_key field may be the freshly entered value, a previously stored one,
     or ``None`` if the user declined to enter one.
     """
+    # Load the current active profile so we can pre-fill / keep its values.
+    existing = get_profile()
+    existing_provider = existing.get("model_provider")
+    existing_aux = existing.get("aux_model") or {}
+
     console.print()
     console.print("=" * min(getattr(console, "width", 80), 80), style="bright_cyan")
-    console.print("  Welcome to Agentica CLI - let's set up your model provider", style="bold bright_green")
+    if existing_provider:
+        console.print("  Agentica CLI - reconfigure your model provider", style="bold bright_green")
+        console.print("  [dim]Press Enter at any prompt to keep the current value.[/dim]", style="dim")
+    else:
+        console.print("  Welcome to Agentica CLI - let's set up your model provider", style="bold bright_green")
     console.print("  (You can change this later with /model or by running: agentica setup)", style="dim")
     console.print("=" * min(getattr(console, "width", 80), 80), style="bright_cyan")
 
-    provider_choice = _select_provider(console)
+    provider_choice = _select_provider(console, current=existing_provider)
+    # Whether the chosen provider matches the existing profile (so its base_url
+    # / model / key can be reused as defaults).
+    same_provider = provider_choice != "custom" and provider_choice == existing_provider
 
     is_custom = provider_choice == "custom"
     if is_custom:
         provider = "openai"
         console.print()
         console.print("  Custom OpenAI-compatible endpoint", style="bold cyan")
-        base_url = pt_prompt("  Base URL: ").strip()
+        cur_base = existing.get("base_url", "") if existing_provider == "openai" else ""
+        base_label = f"  Base URL [{cur_base}]: " if cur_base else "  Base URL: "
+        base_url = pt_prompt(base_label).strip() or cur_base
         while not base_url:
             console.print("  [red]Base URL is required for a custom endpoint.[/red]")
             base_url = pt_prompt("  Base URL: ").strip()
@@ -439,51 +526,58 @@ def run_onboarding(console) -> Dict:
         provider = provider_choice
         preset = PROVIDER_PRESETS[provider]
         default_base = preset["base_url"]
+        cur_base = existing.get("base_url") if same_provider else None
+        shown_base = cur_base or default_base
         console.print()
         console.print(f"  {preset['label']} selected", style="bold cyan")
-        base_url = pt_prompt(f"  Base URL [{default_base}]: ").strip() or default_base
+        base_url = pt_prompt(f"  Base URL [{shown_base}]: ").strip() or shown_base
         default_model = preset["default_model"]
 
-    # API key - masked input. Prefer a previously stored profile key, then fall
-    # back to the provider env var. Custom endpoints never look at
-    # OPENAI_API_KEY (see _is_custom_openai).
-    existing_key = get_profile_api_key(provider, base_url)
+    # API key - shown IN FULL (dedicated key-config place). Prefer the active
+    # profile's key (same provider), then any profile matching provider/base_url,
+    # then the provider env var. Custom endpoints never look at OPENAI_API_KEY.
+    existing_key = existing.get("api_key") if same_provider else None
+    if not existing_key:
+        existing_key = get_profile_api_key(provider, base_url)
     if not existing_key and not is_custom:
         existing_key = os.getenv(provider_env_var(provider))
-    key_hint = " (press Enter to keep existing)" if existing_key else ""
-    entered_key = pt_prompt(f"  API key{key_hint}: ", is_password=True).strip()
-    if entered_key:
-        console.print("  [green]API key will be saved to ~/.agentica/config.yaml[/green]")
-    elif existing_key:
-        console.print("  [dim]Keeping existing API key.[/dim]")
+    if existing_key:
+        entered_key = pt_prompt(f"  API key [{existing_key}]: ", is_password=False).strip()
+        resolved_key = entered_key or existing_key
+        if entered_key:
+            console.print("  [green]API key will be saved to ~/.agentica/config.yaml[/green]")
+        else:
+            console.print("  [dim]Keeping existing API key.[/dim]")
     else:
-        console.print("  [yellow]No API key entered - re-run `agentica setup` or pass --api_key later.[/yellow]")
+        entered_key = pt_prompt("  API key (blank to skip): ", is_password=False).strip()
+        resolved_key = entered_key or None
+        if not entered_key:
+            console.print("  [yellow]No API key entered - re-run `agentica setup` or pass --api_key later.[/yellow]")
 
-    # Model name.
-    model_prompt = f"  Model name [{default_model}]: " if default_model else "  Model name: "
-    model_name = pt_prompt(model_prompt).strip() or default_model
+    # Model name - pre-fill from the existing profile (same provider) or preset.
+    cur_model = existing.get("model_name") if same_provider else None
+    shown_model = cur_model or default_model
+    model_prompt = f"  Model name [{shown_model}]: " if shown_model else "  Model name: "
+    model_name = pt_prompt(model_prompt).strip() or shown_model
     while not model_name:
         console.print("  [red]Model name is required.[/red]")
         model_name = pt_prompt("  Model name: ").strip()
 
-    # Optional advanced tuning (thinking depth, output/context limits, sampling).
-    # Skipped by default to keep first-run quick; users can also hand-edit
-    # ~/.agentica/config.yaml afterwards.
-    advanced = _prompt_advanced_params(console, provider)
+    # Optional advanced tuning — pre-filled; declining keeps existing values.
+    advanced = _prompt_advanced_params(console, provider, current=existing if same_provider else None)
 
     # Optional prompt caching (OpenAI-compatible proxies fronting Claude, e.g.
-    # Venus). Skipped for anthropic. Filling it in == enabling it.
-    cache_block = _prompt_cache_control(console, provider)
+    # Venus). Skipped for anthropic. Pre-filled; declining keeps existing.
+    cache_block = _prompt_cache_control(console, provider, current=existing if same_provider else None)
 
-    # Optional aux model (background calls + `task` subagent) — fully skippable.
-    aux_block = _prompt_aux_model(console, provider)
+    # Optional aux model — pre-filled; declining keeps the existing aux block.
+    aux_block = _prompt_aux_model(console, provider, existing_aux=existing_aux if same_provider else None)
 
     # Persist to config.yaml as a named profile. On first run (no file yet)
     # write a fully-commented template first so the user gets a readable base;
     # upsert then round-trips the file, preserving those comments.
     if not os.path.exists(global_config_path()):
         write_commented_template()
-    resolved_key = entered_key or existing_key
     profile_name = _profile_name_for(provider, base_url)
     profile_data = {
         "model_provider": provider,
@@ -503,7 +597,7 @@ def run_onboarding(console) -> Dict:
     console.print(f"  [dim]Saved as profile '{profile_name}' in ~/.agentica/config.yaml[/dim]")
     if aux_block:
         console.print(
-            f"  [dim]Aux model: {aux_block['model_provider']}/{aux_block['model_name']}[/dim]"
+            f"  [dim]Auxiliary model: {aux_block['model_provider']}/{aux_block['model_name']}[/dim]"
         )
     console.print()
 

@@ -489,6 +489,97 @@ class TestRunOnboarding(unittest.TestCase):
         self.assertEqual(am["base_url"], cli_setup.default_base_url("zhipuai"))
         self.assertEqual(am["api_key"], "sk-zhipu")
 
+    def test_rerun_keeps_existing_on_all_enter(self):
+        """A re-run walked through with Enter/decline preserves the whole profile."""
+        from agentica import global_config as gc
+
+        # Pre-seed a fully-configured active profile (main + tuning + cache + aux).
+        gc.upsert_profile(
+            "openai",
+            {
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-keep-main",
+                "reasoning_effort": "high",
+                "max_tokens": 4096,
+                "enable_cache_control": True,
+                "cache_control_messages": 3,
+                "aux_model": {
+                    "model_provider": "zhipuai",
+                    "model_name": "glm-4.7-flash",
+                    "base_url": cli_setup.default_base_url("zhipuai"),
+                    "api_key": "sk-keep-aux",
+                },
+            },
+            make_active=True,
+        )
+        console = MagicMock()
+        console.width = 80
+        # 7 prompts, all "keep": provider(Enter), base_url(Enter), api_key(Enter),
+        # model_name(Enter), advanced(edit? n), cache(edit? n), aux(reconfigure? n).
+        inputs = iter(["", "", "", "", "n", "n", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
+            result = cli_setup.run_onboarding(console)
+
+        # Main model kept.
+        self.assertEqual(result["model_provider"], "openai")
+        self.assertEqual(result["model_name"], "gpt-4o")
+        self.assertEqual(result["base_url"], "https://api.openai.com/v1")
+        self.assertEqual(result["api_key"], "sk-keep-main")
+        profile = gc.get_profile()
+        # Tuning kept without re-entry.
+        self.assertEqual(profile.get("reasoning_effort"), "high")
+        self.assertEqual(profile.get("max_tokens"), 4096)
+        # Cache kept.
+        self.assertTrue(profile.get("enable_cache_control"))
+        self.assertEqual(profile.get("cache_control_messages"), 3)
+        # Aux block kept verbatim (not dropped by the decline).
+        self.assertIn("aux_model", profile)
+        am = profile["aux_model"]
+        self.assertEqual(am["model_provider"], "zhipuai")
+        self.assertEqual(am["model_name"], "glm-4.7-flash")
+        self.assertEqual(am["api_key"], "sk-keep-aux")
+
+    def test_rerun_shows_api_key_in_full(self):
+        """The api key prompt must NOT be masked (is_password=False) in setup."""
+        from agentica import global_config as gc
+
+        gc.upsert_profile(
+            "openai",
+            {
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-visible",
+            },
+            make_active=True,
+        )
+        console = MagicMock()
+        console.width = 80
+        inputs = iter(["", "", "", "", "n", "n", "n"])
+        calls: list = []
+
+        def fake_prompt(*args, **kwargs):
+            calls.append((args, kwargs))
+            return next(inputs)
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=fake_prompt),
+        ):
+            cli_setup.run_onboarding(console)
+
+        api_key_calls = [c for c in calls if "API key" in (c[0][0] if c[0] else "")]
+        self.assertTrue(api_key_calls, "expected an API key prompt")
+        self.assertFalse(
+            api_key_calls[0][1].get("is_password", False),
+            "API key must be shown in full during setup (not masked)",
+        )
+
 
 class TestConfigYamlRoundTrip(unittest.TestCase):
     """config.yaml is YAML with ruamel round-trip: user comments survive writes."""

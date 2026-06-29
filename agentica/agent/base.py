@@ -271,6 +271,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
     # Context for tools and prompt functions (runtime input)
     context: Optional[Dict[str, Any]] = None
+    # Stable self-description block (framework / model / tools / skills) injected
+    # into the system prompt so the agent can answer "what model am I / what
+    # tools do I have". Set by the CLI after construction; None for plain SDK
+    # agents. Not reset by _init_runtime so Agent.clone() preserves it.
+    environment_context: Optional[str] = None
 
     def __init__(
         self,
@@ -320,6 +325,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # ---- Runtime ----
         working_memory: Optional[WorkingMemory] = None,
         context: Optional[Dict[str, Any]] = None,
+        environment_context: Optional[str] = None,
     ):
         self._init_definition(
             model=model,
@@ -368,6 +374,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             working_memory=working_memory,
             context=context,
         )
+
+        # Set after the _init_* helpers so Agent.clone()'s copy.copy + _init_runtime
+        # path preserves it (clone does not call _init_definition / _init_execution).
+        self.environment_context = environment_context
 
         # Create Runner instance
         self._runner = Runner(self)

@@ -117,6 +117,63 @@ def test_enabled_with_tools_reduces_message_budget():
     assert len(cached_user) == 2
 
 
+def test_tool_result_tagged_per_venus_example():
+    # Venus cache example: tool results carry cache_control in block-list form.
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True, cache_control_messages=2)
+    formatted = [
+        {"role": "system", "content": "sys"},
+        {"role": "user", "content": "u1"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "x", "type": "function", "function": {"name": "f"}}]},
+        {"role": "tool", "content": "tool result", "tool_call_id": "x"},
+        {"role": "user", "content": "u2"},
+    ]
+    out, _ = model._apply_cache_control(formatted, _rk())
+    # system tagged
+    assert out[0]["content"][-1].get("cache_control") == {"type": "ephemeral"}
+    # tool result wrapped into a cached block list (Venus format), string preserved
+    assert out[3]["content"] == [{"type": "text", "text": "tool result", "cache_control": {"type": "ephemeral"}}]
+    # last user tagged
+    assert out[4]["content"][-1].get("cache_control") == {"type": "ephemeral"}
+
+
+def test_assistant_with_tool_calls_not_tagged():
+    # Assistant tool_calls live in a separate field, not content blocks, so no
+    # cache_control is attached and budget is not consumed on them.
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True, cache_control_messages=3)
+    formatted = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "x", "type": "function", "function": {"name": "f"}}]},
+        {"role": "tool", "content": "r", "tool_call_id": "x"},
+        {"role": "user", "content": "u"},
+    ]
+    out, _ = model._apply_cache_control(formatted, _rk())
+    asst = [m for m in out if m["role"] == "assistant"][0]
+    assert asst["content"] is None
+    assert "tool_calls" in asst
+    # budget: system(1) + 3 message slots, but only tool+user are cacheable -> 2 tagged
+    tagged = [m for m in out if isinstance(m.get("content"), list)
+              and m["content"][-1].get("cache_control")]
+    assert len(tagged) == 3  # system + tool + user
+
+
+def test_empty_content_messages_skipped_without_consuming_budget():
+    # Empty user/tool content must not consume a breakpoint slot (a breakpoint
+    # on empty content is invalid). A later non-empty message still gets cached.
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True, cache_control_messages=1)
+    formatted = [
+        {"role": "system", "content": "sys"},
+        {"role": "tool", "content": "", "tool_call_id": "x"},
+        {"role": "user", "content": "real"},
+    ]
+    out, _ = model._apply_cache_control(formatted, _rk())
+    # empty tool content unchanged (no block, no cache_control)
+    tool = [m for m in out if m["role"] == "tool"][0]
+    assert tool["content"] == ""
+    # the one message breakpoint went to the non-empty user, not the empty tool
+    user = [m for m in out if m["role"] == "user"][0]
+    assert user["content"][-1].get("cache_control") == {"type": "ephemeral"}
+
+
 def test_breakpoint_budget_never_exceeds_four():
     model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True, cache_control_messages=10)
     tools = [{"type": "function", "function": {"name": "a"}}]

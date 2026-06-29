@@ -21,6 +21,7 @@ from agentica.agent.config import (
     WorkspaceMemoryConfig,
 )
 from agentica.config import AGENTICA_HOME
+from agentica.tools.base import Tool
 from agentica.workspace import Workspace
 
 # Plain Rich console — used outside TUI mode (non-interactive queries, startup).
@@ -557,6 +558,84 @@ def _build_cli_memory_config(agent_config: dict) -> WorkspaceMemoryConfig:
     )
 
 
+def _get_active_skill_names(agent) -> List[str]:
+    """Best-effort enabled skill names from the agent's SkillTool.
+
+    External boundary: SkillTool registry init / disk-backed usage loading can
+    fail in odd environments, and environment_context construction must never
+    break agent creation, so any failure omits the line instead of raising.
+    Returns [] when the agent has no SkillTool.
+    """
+    from agentica.tools.skill_tool import SkillTool
+
+    for tool in agent.tools or []:
+        if isinstance(tool, SkillTool):
+            try:
+                skills = tool._get_enabled_skills()
+            except Exception:
+                return []
+            return [s.name for s in skills]
+    return []
+
+
+def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
+    """Build a stable self-description block for the agent's system prompt.
+
+    Only includes information that rarely changes during a session so the
+    prompt prefix stays cache-friendly: framework, model endpoint, aux model,
+    active tools/skills, builtin subagent types, slash commands, and extension
+    hints. Intentionally excludes work_dir (already injected by prompts.py) and
+    cost/context usage (owned by /status). Reused by _apply_profile to refresh
+    the block after a model/profile switch — call with the live agent and the
+    post-switch agent_config.
+    """
+    provider = agent_config.get("model_provider")
+    model_name = agent_config.get("model_name")
+    base_url = agent_config.get("base_url")
+
+    lines: List[str] = ["You are an Agentica agent running in CLI mode."]
+    lines.append("- Framework: Agentica")
+    if provider and model_name:
+        endpoint = f"  (endpoint: {base_url})" if base_url else ""
+        lines.append(f"- Model: {provider}/{model_name}{endpoint}")
+
+    aux_provider = agent_config.get("aux_model_provider")
+    aux_model_name = agent_config.get("aux_model_name")
+    if aux_provider and aux_model_name:
+        lines.append(
+            f"- Auxiliary model: {aux_provider}/{aux_model_name}  "
+            "(background calls + task subagent)"
+        )
+
+    tool_names = sorted(
+        name
+        for t in (agent.tools or [])
+        if isinstance(t, Tool) and t.functions
+        for name in t.functions.keys()
+    )
+    lines.append(f"- Active tools: {', '.join(tool_names) if tool_names else 'none'}")
+
+    skill_names = _get_active_skill_names(agent)
+    if skill_names:
+        lines.append(f"- Active skills: {', '.join(sorted(skill_names))}")
+
+    subagent_types = ["explore", "research", "code"]
+    try:
+        from agentica.subagent import get_custom_subagent_configs
+
+        subagent_types.extend(sorted(get_custom_subagent_configs().keys()))
+    except Exception:
+        pass
+    lines.append(f"- Subagent types: {', '.join(subagent_types)}")
+    lines.append(
+        "- Slash commands: /status /model /tools /skills /agents /config "
+        "/cost /permissions /help /exit"
+    )
+    lines.append("- To extend: /skills install <name>, /agents create <name>")
+
+    return "\n".join(lines)
+
+
 def create_agent(
     agent_config: dict, extra_tools: Optional[List] = None, workspace: Optional[Workspace] = None, skills_registry=None
 ):
@@ -617,4 +696,10 @@ def create_agent(
             skills_summary = skills_registry.get_skills_summary()
             if skills_summary:
                 new_agent.add_session_guidance(skills_summary)
+
+    # Inject a stable self-description (framework / model / tools / skills) so
+    # the agent can answer "what model am I / what tools do I have". Built from
+    # the live agent + agent_config so _apply_profile can refresh it after a
+    # model/profile switch by calling _build_environment_context again.
+    new_agent.environment_context = _build_environment_context(new_agent, agent_config)
     return new_agent

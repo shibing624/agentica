@@ -59,9 +59,10 @@ from agentica.cli.display import (
 from agentica.cli.permissions import PermissionManager
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
-from agentica.utils.log import suppress_console_logging
+from agentica.utils.log import logger, suppress_console_logging
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
+from agentica.global_config import get_active_profile_name
 
 from agentica.cli.commands import (
     CommandContext,
@@ -182,24 +183,38 @@ def _open_in_pager(title: str, content: str) -> None:
     inline transcript.
 
     Key binding strategy (in order of preference):
-    1. ``less --lesskey-content``: bind ``Ctrl+o`` AND ``Esc`` to quit. Hint:
+    1. ``less --lesskey-content``: bind ``Ctrl+o`` AND ``Esc`` to quit, and bind
+       the up/down arrow sequences to ``back-line``/``forw-line`` so they are
+       not shadowed by the Esc binding (arrow keys start with ESC). Hint:
        ``Ctrl+o or Esc to return`` (Ctrl+o mirrors the expand key; Esc is the
        conventional CC close key).
     2. Old ``less`` without ``--lesskey-content`` but with the ``lesskey``
-       compiler: compile a lesskey file (``^O quit`` + ``^[ quit``) and feed it
-       via the ``LESSKEY`` env var. Same hint. less disambiguates a lone Esc
-       from arrow-key sequences (ESC[B etc.) via its key timeout, so binding
-       Esc does not break arrow scrolling.
+       compiler: compile the same lesskey source (quit keys + arrow scrolls)
+       and feed it via the ``LESSKEY`` env var. Same hint.
     3. No ``lesskey`` compiler: plain ``less`` — only the built-in ``q`` quits.
        Hint: ``q to return``.
     """
     import tempfile
 
     pager = shutil.which("less") or shutil.which("more")
-    # lesskey source binding Ctrl+o (^O) and Esc (^[) to quit. less tells a lone
-    # Esc from an arrow-key sequence (ESC[B ...) by its key-read timeout, so
-    # binding Esc is safe and matches the CC close convention.
-    lesskey_src = "\n#command\n^O quit\n^[ quit\n"
+    # lesskey source binding Ctrl+o (^O) and Esc (^[) to quit, PLUS the
+    # up/down arrow sequences explicitly bound to back-line/forw-line. Without
+    # the arrow bindings, ^[ quit would shadow the arrow keys (which start with
+    # ESC, e.g. ESC[A / ESCOA) — a lone ^[ leaf matches immediately and less
+    # never reads the rest of the sequence, so pressing Up would quit. Binding
+    # the full arrow sequences makes less do longest-prefix matching: ESC[A →
+    # back-line (scroll up), a lone ^[ (Esc held with no following byte within
+    # less's key timeout) → quit. Both cursor-key modes are covered (^[ [ A
+    # normal mode, ^[ O A application mode).
+    lesskey_src = (
+        "\n#command\n"
+        "^O quit\n"
+        "^[ quit\n"
+        "^[[A back-line\n"
+        "^[[B forw-line\n"
+        "^[OA back-line\n"
+        "^[OB forw-line\n"
+    )
     lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
 
     if lesskey_ok:
@@ -1155,7 +1170,6 @@ def _setup_tui(
         """
         blocks = get_truncated_blocks()
         if not blocks:
-            _cprint("  [dim]Nothing to expand yet.[/dim]")
             return
         # Single block → keep its own title; many → one combined view.
         if len(blocks) == 1:
@@ -1199,6 +1213,8 @@ def _setup_tui(
         tw = shutil.get_terminal_size().columns
         return build_status_bar_fragments(
             model_name=tui_state.get("model_name", ""),
+            model_provider=tui_state.get("model_provider", ""),
+            profile_name=tui_state.get("profile_name", ""),
             context_tokens=tui_state.get("context_tokens", 0),
             context_window=tui_state.get("context_window", 128000),
             cost_usd=tui_state.get("cost_usd", 0.0),
@@ -1370,6 +1386,16 @@ def run_interactive(
     extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
     current_agent = create_agent(agent_config, extra_tools, workspace, skills_registry)
 
+    # Load custom subagent definitions (.agentica/agents/*.md) before the TUI
+    # starts. load_all_agents is fail-soft internally; the outer guard keeps a
+    # broken agent file from ever blocking the CLI.
+    try:
+        from agentica.subagent_loader import load_all_agents
+
+        load_all_agents()
+    except Exception as e:
+        logger.warning(f"Failed to load custom subagents at startup: {e}")
+
     con = get_console()
 
     # Print header BEFORE entering TUI
@@ -1405,6 +1431,8 @@ def run_interactive(
 
     tui_state = {
         "model_name": agent_config.get("model_name", ""),
+        "model_provider": agent_config.get("model_provider", ""),
+        "profile_name": get_active_profile_name(),
         "context_tokens": 0,
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
