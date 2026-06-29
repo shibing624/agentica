@@ -680,12 +680,18 @@ def create_agent(
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
+    from agentica.tools.self_manage_tool import SelfManageTool
+
+    # Always give the CLI agent the self-management tool so it can inspect and
+    # optimize its own config (config.yaml / .env) and self-upgrade. Prepended
+    # so a user-supplied extra tool with the same name could still override.
+    cli_tools = [SelfManageTool()] + list(extra_tools or [])
 
     new_agent = DeepAgent(
         model=model,
         auxiliary_model=auxiliary_model,
         task_model=task_model,
-        tools=extra_tools or [],  # user-specified extra tools
+        tools=cli_tools,  # self-management + user-specified extra tools
         work_dir=work_dir,
         workspace=workspace,
         session_id=agent_config.get("session_id") or _generate_session_id(),

@@ -69,6 +69,7 @@ from agentica.skills import (
     remove_skill,
 )
 from agentica.skills.skill_registry import reset_skill_registry
+from agentica.cli import self_manage
 
 
 # ==================== CommandContext ====================
@@ -1310,7 +1311,29 @@ def _cmd_history(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
-    """Display current configuration and workspace status."""
+    """Display or edit configuration.
+
+    Subcommands:
+      /config                 show current config + workspace status
+      /config show            same as above, with config.yaml + .env summary
+      /config path            print config file locations
+      /config set <field> <value> [profile]   edit a config.yaml profile field
+      /config env <KEY> <value|->             set (or delete with '-') a .env var
+    """
+    args = cmd_args.strip()
+    sub = args.split()[0].lower() if args else ""
+    if sub == "set":
+        return _cmd_config_set(ctx, args[len(sub):].strip())
+    if sub == "env":
+        return _cmd_config_env(ctx, args[len(sub):].strip())
+    if sub == "path":
+        con = get_console()
+        con.print(f"  config.yaml: [cyan]{self_manage.config_file_path()}[/cyan]")
+        con.print(f"  .env:        [cyan]{self_manage.dotenv_path()}[/cyan]")
+        return
+    if sub == "show":
+        _cmd_config_show_files(ctx)
+        # fall through to the regular status display too
     _cmd_title(f"/config {cmd_args.strip()}" if cmd_args.strip() else "/config")
     con = get_console()
 
@@ -1369,6 +1392,167 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     else:
         con.print("  Workspace:   (not configured)")
     con.print()
+
+
+def _cmd_config_show_files(ctx: CommandContext):
+    """Print a masked summary of config.yaml profiles and .env vars."""
+    con = get_console()
+    summary = self_manage.read_config_summary()
+    if summary:
+        con.print(f"[bold]config.yaml[/bold] [dim]({self_manage.config_file_path()})[/dim]")
+        con.print(f"  active profile: [cyan]{summary.get('active_profile')}[/cyan]")
+        for pname, profile in (summary.get("profiles") or {}).items():
+            marker = "*" if pname == summary.get("active_profile") else " "
+            con.print(f"  {marker} [yellow]{pname}[/yellow]")
+            for k, v in profile.items():
+                con.print(f"      {k} = [green]{v}[/green]")
+    env_vars = self_manage.read_dotenv()
+    con.print(f"[bold].env[/bold] [dim]({self_manage.dotenv_path()})[/dim]")
+    if env_vars:
+        for k, v in env_vars.items():
+            con.print(f"  {k} = [green]{v}[/green]")
+    else:
+        con.print("  [dim](empty)[/dim]")
+
+
+def _rebuild_live_model(ctx: CommandContext):
+    """Rebuild the running agent's model from the current ctx.agent_config.
+
+    Used after a config edit so changes take effect without restarting. Mirrors
+    the rebuild path in _cmd_model's profile-apply branch.
+    """
+    if ctx.current_agent is None:
+        return
+    model_kwargs = {
+        "model_provider": ctx.agent_config.get("model_provider"),
+        "model_name": ctx.agent_config.get("model_name"),
+        "base_url": ctx.agent_config.get("base_url"),
+        "api_key": ctx.agent_config.get("api_key"),
+        "max_tokens": ctx.agent_config.get("max_tokens"),
+        "temperature": ctx.agent_config.get("temperature"),
+        "reasoning_effort": ctx.agent_config.get("reasoning_effort"),
+        "top_p": ctx.agent_config.get("top_p"),
+        "context_window": ctx.agent_config.get("context_window"),
+    }
+    ctx.current_agent.model = get_model(**model_kwargs)
+    ctx.current_agent.environment_context = _build_environment_context(
+        ctx.current_agent, ctx.agent_config
+    )
+
+
+def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
+    """Edit a config.yaml profile field at runtime: set <field> <value> [profile]."""
+    con = get_console()
+    parts = cmd_args.split()
+    if len(parts) < 2:
+        con.print("[red]Usage: /config set <field> <value> [profile][/red]")
+        con.print(f"[dim]Editable fields: {', '.join(sorted(self_manage._EDITABLE_PROFILE_FIELDS))}[/dim]")
+        return
+    field = parts[0]
+    # Value may contain spaces only if a profile is NOT given; keep it simple:
+    # last token is treated as profile only when 3+ tokens AND it names a profile.
+    profile_name = None
+    if len(parts) >= 3:
+        candidate = parts[-1]
+        from agentica.global_config import load_global_config
+        cfg = load_global_config() or {}
+        if candidate in (cfg.get("profiles") or {}):
+            profile_name = candidate
+            value = " ".join(parts[1:-1])
+        else:
+            value = " ".join(parts[1:])
+    else:
+        value = parts[1]
+    try:
+        updated = self_manage.set_profile_field(field, value, profile_name)
+    except ValueError as e:
+        con.print(f"[red]{e}[/red]")
+        return
+    target = profile_name or get_active_profile_name()
+    con.print(f"[green]Updated profile '{target}': {field} = "
+              f"{self_manage.mask_secret(field, value)}[/green]")
+    # If editing the active profile, sync ctx + rebuild the live model.
+    if target == get_active_profile_name():
+        coerced = self_manage._coerce_profile_value(field, value)
+        ctx.agent_config[field] = coerced
+        try:
+            _rebuild_live_model(ctx)
+            con.print("[dim]Applied to running agent (no restart needed).[/dim]")
+            return {"model_switched": True}
+        except Exception as e:
+            con.print(f"[yellow]Saved, but live-apply failed: {e}. "
+                      f"Restart to take effect.[/yellow]")
+    return
+
+
+def _cmd_config_env(ctx: CommandContext, cmd_args: str = ""):
+    """Set or delete a .env variable: env <KEY> <value>  |  env <KEY> -"""
+    con = get_console()
+    parts = cmd_args.split(maxsplit=1)
+    if len(parts) < 2:
+        con.print("[red]Usage: /config env <KEY> <value>   (use '-' as value to delete)[/red]")
+        return
+    key, value = parts[0], parts[1].strip()
+    try:
+        if value == "-":
+            self_manage.set_dotenv_var(key, None)
+            con.print(f"[green]Deleted .env var {key}[/green]")
+        else:
+            self_manage.set_dotenv_var(key, value)
+            con.print(f"[green]Set .env var {key} = "
+                      f"{self_manage.mask_secret(key, value)}[/green]")
+        con.print("[dim]Applied to current process environment.[/dim]")
+    except ValueError as e:
+        con.print(f"[red]{e}[/red]")
+
+
+def _cmd_upgrade(ctx: CommandContext, cmd_args: str = ""):
+    """Self-upgrade the agentica package via pip.
+
+    /upgrade           check + (after confirm) upgrade to latest PyPI release
+    /upgrade check     only report current vs latest, do not install
+    /upgrade --pre     allow pre-release versions
+    """
+    con = get_console()
+    args = cmd_args.strip().lower()
+    pre = "--pre" in args
+    check_only = "check" in args
+
+    current = self_manage.get_current_version()
+    con.print(f"  current version: [cyan]{current}[/cyan]")
+    con.print("  checking PyPI for latest...")
+    latest = self_manage.get_latest_version()
+    if latest is None:
+        con.print("[yellow]  could not reach PyPI (offline?). Try again later.[/yellow]")
+        return
+    con.print(f"  latest version:  [cyan]{latest}[/cyan]")
+
+    if not self_manage.is_upgrade_available(current, latest):
+        con.print("[green]  already up to date.[/green]")
+        return
+    con.print(f"[bold yellow]  upgrade available: {current} -> {latest}[/bold yellow]")
+    if check_only:
+        con.print("[dim]  run /upgrade to install.[/dim]")
+        return
+
+    try:
+        from prompt_toolkit import prompt as pt_prompt
+        answer = pt_prompt(f"Upgrade agentica {current} -> {latest}? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        con.print("[dim]  cancelled.[/dim]")
+        return
+    if answer not in ("y", "yes"):
+        con.print("[dim]  cancelled.[/dim]")
+        return
+
+    con.print("  running pip install -U agentica ...")
+    code, output = self_manage.run_pip_upgrade("agentica", pre=pre)
+    # Surface the real pip output rather than swallowing it.
+    con.print(output.strip() or "[dim](no output)[/dim]")
+    if code == 0:
+        con.print(f"[green]  upgraded. Restart the CLI to load {latest}.[/green]")
+    else:
+        con.print(f"[red]  pip exited with code {code}. See output above.[/red]")
 
 
 def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
@@ -2776,7 +2960,8 @@ COMMAND_REGISTRY = {
     ),
     # Model & Config
     "/model": (_cmd_model, "View or switch model"),
-    "/config": (_cmd_config, "Show current configuration"),
+    "/config": (_cmd_config, "Show config | set <field> <value> | env <KEY> <value> | path"),
+    "/upgrade": (_cmd_upgrade, "Self-upgrade agentica via pip (check | --pre)"),
     "/cost": (_cmd_cost, "Show token usage and cost"),
     "/usage": (_cmd_cost, "Show token usage and cost (alias)"),
     "/debug": (_cmd_debug, "Show debug info"),
