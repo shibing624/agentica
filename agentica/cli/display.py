@@ -156,6 +156,14 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
 
     For long pasted content, shows a trimmed preview with line count.
     """
+    # A new user turn starts here: drop the previous turn's folded blocks so
+    # Ctrl+o expands the CURRENT turn (this query + its tool results), not
+    # stale history. The clear is done here rather than in
+    # StreamDisplayManager.__init__ because display_user_message runs BEFORE
+    # the manager is created — clearing in __init__ would wipe the
+    # just-remembered user input, which is exactly why Ctrl+o used to show
+    # only tool results and never the long query.
+    clear_truncated_blocks()
     cleaned = _PASTE_PATH_RE.sub("", text).strip()
     if not cleaned and pasted_blocks:
         cleaned = f"[Pasted text: {pasted_lines} lines]"
@@ -543,9 +551,11 @@ class StreamDisplayManager:
         # the overwrite) so the result display can show a real old→new diff.
         # Keyed by the raw file_path arg; popped when the result is rendered.
         self._write_old: Dict[str, str] = {}
-        # Start each run with a fresh set of expandable truncated blocks so
-        # Ctrl+o shows the CURRENT run's folded content, not stale history.
-        clear_truncated_blocks()
+        # Truncated blocks are cleared at the start of each user turn in
+        # display_user_message(), NOT here. Clearing here would wipe the
+        # user's just-remembered long query (display_user_message runs before
+        # the manager is created), which used to make Ctrl+o show only tool
+        # results and never the folded query.
 
     def _open_box(self, label: str = "Response"):
         w = self._term_width

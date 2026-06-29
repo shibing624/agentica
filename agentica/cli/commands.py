@@ -1408,9 +1408,21 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 con.print("[red]Invalid number.[/red]")
                 return
         except ValueError:
-            matching = [s for s in sessions if args_str in s["session_id"]]
+            # Accept the exact id, any unique prefix, or the truncated
+            # "7154826e...0358" form printed by the picker (strip the
+            # ellipsis and match on the leading prefix). This makes the
+            # displayed id directly copy-pasteable.
+            needle = args_str
+            if "..." in needle:
+                needle = needle.split("...", 1)[0].strip()
+            matching = [s for s in sessions if needle and needle in s["session_id"]]
+            if not matching:
+                matching = [s for s in sessions if needle and s["session_id"].startswith(needle)]
             if not matching:
                 con.print(f"[red]No session matching '{args_str}'[/red]")
+                return
+            if len(matching) > 1:
+                con.print(f"[red]Ambiguous: '{args_str}' matches {len(matching)} sessions. Use a longer prefix or the number.[/red]")
                 return
             chosen = matching[0]
 
@@ -1465,7 +1477,10 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 ts_str = ts_str[:16].replace("T", " ")
             size_kb = s["size_bytes"] / 1024
             sid = s["session_id"]
-            display_id = f"{sid[:8]}...{sid[-4:]}" if len(sid) > 20 else sid
+            # Show a clean, copy-pasteable 8-char prefix that /resume accepts
+            # directly. Avoid the old "abc...wxyz" form which users would copy
+            # verbatim (ellipsis included) and which then failed to match.
+            short_id = sid if len(sid) <= 12 else sid[:8]
             # Show what the session was about: first user message (the task
             # that started it) + user turn count. Reads the log once; cheap.
             preview = SessionLog.session_preview(s["path"])
@@ -1477,11 +1492,11 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             else:
                 summary = "(empty session)"
             con.print(
-                f"  {i}. [cyan]{display_id}[/cyan]  {ts_str}  "
+                f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
                 f"({size_kb:.0f}KB, {turns} turns)"
             )
             con.print(f"     [dim]> {summary}[/dim]")
-        con.print(f"\n[dim]Usage: /resume <number> or /resume <session_id>[/dim]")
+        con.print(f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {sessions[0]['session_id'][:8]})[/dim]")
         return
 
 

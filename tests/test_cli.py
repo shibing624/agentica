@@ -566,6 +566,16 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("execute", block["title"])
         self.assertEqual(block["content"], long_output)
 
+        # The long query survives StreamDisplayManager construction — the
+        # per-turn clear lives in display_user_message now, not __init__, so
+        # Ctrl+o expands BOTH the query and the tool result (regression guard:
+        # previously __init__'s clear wiped the query, so Ctrl+o showed only
+        # tool results).
+        blocks = disp.get_truncated_blocks()
+        self.assertEqual(len(blocks), 2)
+        self.assertIn("User input", blocks[0]["title"])
+        self.assertIn("execute", blocks[1]["title"])
+
         # Short output is NOT remembered (no truncation → nothing to expand).
         disp.clear_truncated_blocks()
         dm.display_tool_result("execute", "only one line", is_error=False, elapsed=0.1)
