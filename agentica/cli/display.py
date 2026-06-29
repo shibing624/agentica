@@ -65,7 +65,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
     get_console().print("  [bright_green]Alt+V[/bright_green]       Paste image from clipboard")
-    get_console().print("  [bright_green]Ctrl+o[/bright_green]      Expand last truncated input/tool output in pager")
+    get_console().print("  [bright_green]Ctrl+o[/bright_green]      Expand all truncated inputs/tool outputs in pager (Ctrl+o or Esc to return)")
     get_console().print()
     # Input features
     get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files and inject content")
@@ -120,24 +120,35 @@ def inject_file_contents(prompt_text: str, mentioned_files: List[Path]) -> str:
 _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 
 
-# Most recent block (user input or tool output) that was truncated in the
-# CLI display. Remembered so the user can expand it on demand (Ctrl+o opens
-# it in a pager) instead of flooding the terminal with full content inline.
-_last_truncated: Dict[str, str] = {"title": "", "content": ""}
+# All blocks (user input or tool output) truncated in the CLI display during
+# the current run. Remembered so the user can expand them on demand: Ctrl+o
+# opens EVERY folded block in one pager (CC-style "expand all"), instead of
+# only the most recent one. Cleared at the start of each run.
+_truncated_blocks: List[Dict[str, str]] = []
 
 
 def remember_truncated(title: str, content: str) -> None:
-    """Stash the most recent truncated block for on-demand expansion."""
-    _last_truncated["title"] = title
-    _last_truncated["content"] = content
+    """Stash a truncated block for on-demand expansion (Ctrl+o opens all)."""
+    if not content:
+        return
+    _truncated_blocks.append({"title": title, "content": content})
 
 
 def get_last_truncated() -> Dict[str, str]:
-    """Return a copy of the most recent truncated block."""
-    return {
-        "title": _last_truncated.get("title", ""),
-        "content": _last_truncated.get("content", ""),
-    }
+    """Return a copy of the most recent truncated block (or empty)."""
+    if not _truncated_blocks:
+        return {"title": "", "content": ""}
+    return dict(_truncated_blocks[-1])
+
+
+def get_truncated_blocks() -> List[Dict[str, str]]:
+    """Return all truncated blocks accumulated this run (newest last)."""
+    return [dict(b) for b in _truncated_blocks]
+
+
+def clear_truncated_blocks() -> None:
+    """Drop all remembered truncated blocks (called at run start)."""
+    _truncated_blocks.clear()
 
 
 def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int = 0) -> None:
@@ -296,7 +307,7 @@ def show_help(skills_registry=None):
         "Ctrl+C":            "Interrupt current operation",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Alt+V":             "Paste image from clipboard",
-        "Ctrl+o":            "Expand last truncated input/tool output in pager",
+        "Ctrl+o":            "Expand all truncated inputs/tool outputs in pager",
     }
     for key, desc in shortcuts.items():
         get_console().print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
@@ -528,6 +539,13 @@ class StreamDisplayManager:
         self._subagent_index: "OrderedDict[str, int]" = OrderedDict()
         self._subagent_last_tool: Dict[str, tuple] = {}
         self._next_subagent_slot: int = 0
+        # write_file: old file content captured at tool-call START time (before
+        # the overwrite) so the result display can show a real old→new diff.
+        # Keyed by the raw file_path arg; popped when the result is rendered.
+        self._write_old: Dict[str, str] = {}
+        # Start each run with a fresh set of expandable truncated blocks so
+        # Ctrl+o shows the CURRENT run's folded content, not stale history.
+        clear_truncated_blocks()
 
     def _open_box(self, label: str = "Response"):
         w = self._term_width
@@ -613,10 +631,35 @@ class StreamDisplayManager:
         if tool_name in self._DEFERRED_TOOLS:
             return
         if tool_name in self._WRITE_DIFF_TOOLS:
+            # write_file: capture the on-disk content BEFORE the overwrite so
+            # the result display can render a real old→new unified diff. edit
+            # tools don't need this (their old/new come from the args).
+            if tool_name == "write_file":
+                self._stash_write_file_old(tool_args)
             return
         self.start_tool_section()
         self.tool_count += 1
         _display_tool_impl(self.console, tool_name, tool_args, self.tool_count)
+
+    def _stash_write_file_old(self, tool_args: dict) -> None:
+        """Best-effort read of a write_file target's current content (pre-write).
+
+        Resolves the path the same way the user would (cwd-relative; the tool
+        itself resolves against its base dir, but cwd is close enough for a
+        display-only diff). Failures (missing/binary/large file) → empty
+        string, which yields an all-additions "new file" diff.
+        """
+        fp = tool_args.get("file_path")
+        if not fp:
+            return
+        try:
+            p = Path(fp).expanduser()
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            if p.exists() and p.is_file() and p.stat().st_size < 512_000:
+                self._write_old[fp] = p.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
     
     @staticmethod
     def _fmt_elapsed(elapsed: Optional[float]) -> str:
@@ -777,26 +820,97 @@ class StreamDisplayManager:
         ))
         return "".join(d).rstrip("\n")
 
+    def _display_write_merged(self, tool_name: str, tool_args: dict,
+                              result_content: str, is_error: bool,
+                              elapsed_str: str) -> None:
+        """One summary line + a truncated old→new diff for write_file.
+
+        ``  ✎ write_file config.py - ✓ created 42 lines (120ms)`` followed by
+        a head/tail unified diff (old content was stashed at call-start; for a
+        brand-new file the "old" side is empty so the diff is all additions).
+        Errors surface a truncated message instead. The full diff is remembered
+        for Ctrl+o expansion when truncated.
+        """
+        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+        filename = _extract_filename(tool_args.get("file_path", ""))
+        new_content = str(tool_args.get("content", ""))
+        result_str = str(result_content)
+        created = "Created" in result_str
+
+        line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
+        if filename:
+            line += f" [dim]{filename}[/dim]"
+        if is_error:
+            err = result_str.replace("\n", " ").strip()
+            if len(err) > 80:
+                err = err[:77] + "..."
+                remember_truncated(f"Tool error · {tool_name}", result_str)
+            line += f" [red]- error: {err}{elapsed_str}[/red]"
+        else:
+            n_lines = len(new_content.splitlines())
+            verb = "created" if created else "updated"
+            unit = "line" if n_lines == 1 else "lines"
+            line += f" [dim]- ✓ {verb} {n_lines} {unit}{elapsed_str}[/dim]"
+        self.console.print(line)
+
+        if is_error:
+            return
+
+        # Old content stashed at call start; pop so the slot is reusable.
+        old_content = self._write_old.pop(tool_args.get("file_path", ""), "")
+        diff_text = "".join(difflib.unified_diff(
+            old_content.splitlines(keepends=True),
+            new_content.splitlines(keepends=True),
+            fromfile=f"a/{filename}",
+            tofile=f"b/{filename}",
+            n=2,
+        )).rstrip("\n")
+        if not diff_text:
+            return
+        diff_lines = diff_text.splitlines()
+        # Render the diff itself as head/tail (the new tail of a file is often
+        # the most relevant part), with the middle hidden.
+        n = len(diff_lines)
+        head, tail = self._WRITE_DIFF_HEAD_LINES, self._WRITE_DIFF_TAIL_LINES
+        if n <= head + tail:
+            show = diff_lines
+            hidden = 0
+        else:
+            show = diff_lines[:head] + diff_lines[-tail:]
+            hidden = n - head - tail
+        self.console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
+                                  line_numbers=False))
+        if hidden > 0:
+            self.console.print(
+                f"      [dim italic]... ({hidden} hidden diff lines · Ctrl+o 展开)[/dim italic]"
+            )
+            remember_truncated(f"Write diff · {filename}", diff_text)
+
     # Read-only tools whose call line is deferred to completion so the call
     # line and elapsed time collapse into ONE line, e.g.
     # ``  🔎 grep 'pat' in path - 5 lines (13ms)``. No separate result footer.
     _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
 
-    # Write tools that edit files: call line is deferred to completion and
-    # rendered as one summary line + a truncated unified diff (CC/opencode-style)
-    # so the user sees the actual code change, not an absolute path or noise.
-    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file"})
+    # Write tools that edit/create files: call line is deferred to completion
+    # and rendered as one summary line + a truncated unified diff
+    # (CC/opencode-style) so the user sees the actual code change, not an
+    # absolute path or noise. write_file diffs the pre-write content (stashed
+    # at call start) against the new content arg.
+    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file", "write_file"})
 
     # Tools whose success result is pure noise on success. The call line itself
     # already tells the user what happened; errors are still surfaced.
     _SUPPRESS_RESULT_TOOLS = frozenset({"write_todos"})
 
-    # Tools that get a single one-line count summary as a footer below the call.
-    _COMPACT_TOOLS = frozenset({"write_file"})
-
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
-    _MAX_RESULT_LINES = {"execute": 10}
+    # execute: head/tail window (middle hidden) — the tail carries the
+    # command's final status/output which is usually what the user needs.
+    _EXECUTE_HEAD_LINES = 6
+    _EXECUTE_TAIL_LINES = 4
+    # write_file diff window (head/tail, middle hidden).
+    _WRITE_DIFF_HEAD_LINES = 6
+    _WRITE_DIFF_TAIL_LINES = 4
 
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: float = None,
@@ -817,9 +931,14 @@ class StreamDisplayManager:
 
         if tool_name in self._WRITE_DIFF_TOOLS:
             self.start_tool_section()
-            self._display_edit_merged(
-                tool_name, tool_args or {}, result_content, is_error, elapsed_str
-            )
+            if tool_name == "write_file":
+                self._display_write_merged(
+                    tool_name, tool_args or {}, result_content, is_error, elapsed_str
+                )
+            else:
+                self._display_edit_merged(
+                    tool_name, tool_args or {}, result_content, is_error, elapsed_str
+                )
             return
 
         # Suppress noisy success results; the call line is enough.
@@ -843,12 +962,22 @@ class StreamDisplayManager:
 
         lines = result_str.splitlines()
 
-        if tool_name in self._COMPACT_TOOLS and not is_error:
-            summary = f"{len(lines)} lines" if len(lines) > 1 else lines[0][:80] if lines else "ok"
-            self.console.print(f"    [dim]⎿ {summary}{elapsed_str}[/dim]")
+        # execute: head/tail window with the middle hidden — the tail carries
+        # the command's final status/output, which is usually what the user
+        # needs to see at a glance.
+        if tool_name == "execute":
+            self._display_head_tail(
+                lines, self._EXECUTE_HEAD_LINES, self._EXECUTE_TAIL_LINES,
+                prefix="    ⎿ ", cont_prefix="      ",
+                style="dim red" if is_error else "dim",
+                error_prefix="    ⎿ ⚠ " if is_error else None,
+                truncated_title=f"Tool output · {tool_name}",
+                full_content=result_str,
+                elapsed_str=elapsed_str,
+            )
             return
 
-        max_lines = self._MAX_RESULT_LINES.get(tool_name, self._DEFAULT_MAX_RESULT_LINES)
+        max_lines = self._DEFAULT_MAX_RESULT_LINES
         max_line_width = 120
 
         style = "dim red" if is_error else "dim"
@@ -868,6 +997,43 @@ class StreamDisplayManager:
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+o 展开)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
+        if elapsed_str:
+            self.console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
+
+    def _display_head_tail(self, lines: List[str], head: int, tail: int,
+                           *, prefix: str, cont_prefix: str, style: str,
+                           error_prefix: Optional[str] = None,
+                           truncated_title: str, full_content: str,
+                           elapsed_str: str = "",
+                           max_line_width: int = 120) -> None:
+        """Render a head/tail window with the middle hidden.
+
+        Shows the first ``head`` lines and the last ``tail`` lines; anything in
+        between is collapsed into a ``... (N hidden lines · Ctrl+o 展开)``
+        separator. The full content is remembered for Ctrl+o expansion. Used
+        for execute output and write_file diffs where the tail matters.
+        """
+        first_prefix = error_prefix or prefix
+        n = len(lines)
+        if n <= head + tail:
+            show = lines
+            hidden = 0
+        else:
+            show = lines[:head] + lines[-tail:]
+            hidden = n - head - tail
+
+        for i, line in enumerate(show):
+            if len(line) > max_line_width:
+                line = line[:max_line_width - 3] + "..."
+            p = first_prefix if i == 0 else cont_prefix
+            self.console.print(f"{p}{line}", style=style)
+
+        if hidden > 0:
+            self.console.print(
+                f"{cont_prefix}... ({hidden} hidden lines · Ctrl+o 展开)",
+                style="dim italic",
+            )
+            remember_truncated(truncated_title, full_content)
         if elapsed_str:
             self.console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
     
@@ -1263,6 +1429,17 @@ def display_token_stats(
 
     if elapsed_seconds > 0:
         parts.append(f"[dim]{elapsed_seconds:.2f}s[/dim]")
+
+    # Prompt-cache hits / writes (Anthropic-style, e.g. Venus proxying Claude).
+    cache_read = sum(s.cache_read_tokens for s in cost_tracker.model_usage.values())
+    cache_write = sum(s.cache_write_tokens for s in cost_tracker.model_usage.values())
+    if cache_read or cache_write:
+        seg = []
+        if cache_read:
+            seg.append(f"{_format_tokens_short(cache_read)} cache_read")
+        if cache_write:
+            seg.append(f"{_format_tokens_short(cache_write)} cache_write")
+        parts.append(f"[dim]{' · '.join(seg)}[/dim]")
 
     cost = cost_tracker.total_cost_usd
     cost_str = f"${cost:.4f}" if cost < 0.01 else f"${cost:.2f}"

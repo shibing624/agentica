@@ -16,6 +16,13 @@ class TokenDetails(BaseModel):
     """Detailed token breakdown (cached, reasoning, etc.)."""
     cached_tokens: int = 0
     reasoning_tokens: int = 0
+    # Anthropic-style prompt-cache accounting (also returned by OpenAI-compatible
+    # proxies that front Claude, e.g. Venus). ``cached_tokens`` is kept as the
+    # OpenAI-native alias for cache reads; ``cache_read_tokens`` is the
+    # Anthropic name for the same concept. ``cache_creation_tokens`` is the
+    # one-time write cost (priced higher than a normal input token).
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 class RequestUsage(BaseModel):
@@ -70,9 +77,13 @@ class Usage(BaseModel):
         if entry.input_tokens_details:
             self.input_tokens_details.cached_tokens += entry.input_tokens_details.cached_tokens
             self.input_tokens_details.reasoning_tokens += entry.input_tokens_details.reasoning_tokens
+            self.input_tokens_details.cache_read_tokens += entry.input_tokens_details.cache_read_tokens
+            self.input_tokens_details.cache_creation_tokens += entry.input_tokens_details.cache_creation_tokens
         if entry.output_tokens_details:
             self.output_tokens_details.cached_tokens += entry.output_tokens_details.cached_tokens
             self.output_tokens_details.reasoning_tokens += entry.output_tokens_details.reasoning_tokens
+            self.output_tokens_details.cache_read_tokens += entry.output_tokens_details.cache_read_tokens
+            self.output_tokens_details.cache_creation_tokens += entry.output_tokens_details.cache_creation_tokens
         self.request_usage_entries.append(entry)
 
     def merge(self, other: "Usage") -> None:
@@ -83,6 +94,10 @@ class Usage(BaseModel):
         self.requests += other.requests
         self.input_tokens_details.cached_tokens += other.input_tokens_details.cached_tokens
         self.input_tokens_details.reasoning_tokens += other.input_tokens_details.reasoning_tokens
+        self.input_tokens_details.cache_read_tokens += other.input_tokens_details.cache_read_tokens
+        self.input_tokens_details.cache_creation_tokens += other.input_tokens_details.cache_creation_tokens
         self.output_tokens_details.cached_tokens += other.output_tokens_details.cached_tokens
         self.output_tokens_details.reasoning_tokens += other.output_tokens_details.reasoning_tokens
+        self.output_tokens_details.cache_read_tokens += other.output_tokens_details.cache_read_tokens
+        self.output_tokens_details.cache_creation_tokens += other.output_tokens_details.cache_creation_tokens
         self.request_usage_entries.extend(other.request_usage_entries)

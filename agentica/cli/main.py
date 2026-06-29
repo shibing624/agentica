@@ -73,6 +73,12 @@ def main():
         "reasoning_effort": args.reasoning_effort or resolved.get("reasoning_effort"),
         "top_p": args.top_p if args.top_p is not None else resolved.get("top_p"),
         "context_window": args.context_window if args.context_window is not None else resolved.get("context_window"),
+        # Prompt caching (OpenAI-compatible proxies fronting Claude, e.g. Venus).
+        # CLI flag wins; otherwise the active profile's value; else None (auto:
+        # on for known proxy base_urls, off otherwise).
+        "enable_cache_control": args.enable_cache_control if args.enable_cache_control is not None else resolved.get("enable_cache_control"),
+        "cache_control_messages": args.cache_control_messages if args.cache_control_messages is not None else resolved.get("cache_control_messages"),
+        "cache_control_session_header": args.cache_control_session_header or resolved.get("cache_control_session_header"),
         # Aux model (None means reuse main model). CLI flags win (applied
         # inside resolve_model_config); otherwise the active profile's optional
         # ``aux_model`` block is used; else None. The aux model drives all

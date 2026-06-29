@@ -315,6 +315,33 @@ def _prompt_advanced_params(console, provider: str) -> Dict:
     return params
 
 
+def _prompt_cache_control(console, provider: str) -> Dict:
+    """Optionally enable Anthropic-style prompt caching during onboarding.
+
+    Returns ``{"enable_cache_control": True, ...}`` when the user opts in (plus
+    optional ``cache_control_messages`` / ``cache_control_session_header``),
+    else ``{}``. Skipped for the ``anthropic`` provider, which manages its own
+    native cache_control. Design: the user filling this in == turning it on.
+    """
+    if provider == "anthropic":
+        return {}
+    console.print()
+    console.print("  Prompt caching reuses the system prompt + recent messages", style="dim")
+    console.print("  so repeat turns cost less. Useful for OpenAI-compatible proxies", style="dim")
+    console.print("  that front Anthropic Claude (e.g. Venus).", style="dim")
+    answer = pt_prompt("  Enable prompt caching? [y/N]: ").strip().lower()
+    if answer not in ("y", "yes"):
+        return {}
+    params: Dict = {"enable_cache_control": True}
+    msgs = _prompt_int("  Cache breakpoints on recent messages (blank for 3): ")
+    if msgs is not None:
+        params["cache_control_messages"] = msgs
+    header = pt_prompt("  Sticky routing header (e.g. Venus-Session-Id, blank to skip): ").strip()
+    if header:
+        params["cache_control_session_header"] = header
+    return params
+
+
 def _prompt_aux_model(console, main_provider: str) -> Dict:
     """Optionally configure the aux model (background calls + `task` subagent).
 
@@ -444,6 +471,10 @@ def run_onboarding(console) -> Dict:
     # ~/.agentica/config.yaml afterwards.
     advanced = _prompt_advanced_params(console, provider)
 
+    # Optional prompt caching (OpenAI-compatible proxies fronting Claude, e.g.
+    # Venus). Skipped for anthropic. Filling it in == enabling it.
+    cache_block = _prompt_cache_control(console, provider)
+
     # Optional aux model (background calls + `task` subagent) — fully skippable.
     aux_block = _prompt_aux_model(console, provider)
 
@@ -461,6 +492,7 @@ def run_onboarding(console) -> Dict:
         "api_key": resolved_key,
     }
     profile_data.update(advanced)  # None values are dropped by upsert_profile
+    profile_data.update(cache_block)
     if aux_block:
         profile_data["aux_model"] = aux_block
     upsert_profile(profile_name, profile_data, make_active=True)
@@ -625,4 +657,8 @@ def resolve_model_config(args, console=None) -> Dict:
         "aux_model_name": aux_name,
         "aux_base_url": aux_base,
         "aux_api_key": aux_key,
+        # Prompt caching knobs (profile top-level; CLI flags override in main.py).
+        "enable_cache_control": profile_params.get("enable_cache_control"),
+        "cache_control_messages": profile_params.get("cache_control_messages"),
+        "cache_control_session_header": profile_params.get("cache_control_session_header"),
     }

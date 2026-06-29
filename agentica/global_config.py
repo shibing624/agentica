@@ -357,6 +357,16 @@ profiles:
     # temperature: 0.7
     # top_p: 0.95
 
+    # optional prompt caching for OpenAI-compatible proxies fronting Claude
+    # (e.g. Venus). Set enable_cache_control: true to turn on Anthropic-style
+    # cache_control blocks (system + recent messages + tools); omit (or false)
+    # to keep it off. cache_control_messages: trailing-msg breakpoints
+    # (Anthropic caps total at 4). cache_control_session_header: sticky-routing
+    # header name for cache hits (e.g. Venus-Session-Id).
+    # enable_cache_control: true
+    # cache_control_messages: 3
+    # cache_control_session_header: Venus-Session-Id
+
     # --- optional aux model (background calls + `task` subagent tool) ---
     # A cheaper/faster model here saves cost on memory extraction, context
     # compression, and delegated subtasks. Omit to reuse the main model.

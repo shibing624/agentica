@@ -450,11 +450,73 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("2 edits", text)
         self.assertIn("(420ms)", text)
 
-    def test_display_execute_folds_at_ten_lines(self):
-        """execute shows up to 10 lines then folds; other tools still fold at 4."""
+    def test_display_write_file_merged_shows_summary_and_diff(self):
+        """write_file: one summary line (created/updated + line count) + a diff."""
+        import tempfile
         from agentica.cli.display import StreamDisplayManager
 
-        # 10 lines: fully shown, no fold hint
+        new_content = "\n".join(f"line {i}" for i in range(20)) + "\n"
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "new_file.py")
+            fake = MagicMock()
+            fake.width = 80
+            dm = StreamDisplayManager(fake)
+            # Call-start stashes pre-write content (file is new → empty old).
+            dm.display_tool("write_file", {"file_path": path, "content": new_content})
+            dm.display_tool_result(
+                "write_file",
+                f"Created file, absolute path: {path}",
+                is_error=False,
+                elapsed=0.12,
+                tool_args={"file_path": path, "content": new_content},
+            )
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("write_file", text)
+        self.assertIn("new_file.py", text)
+        self.assertIn("created", text)
+        self.assertIn("(120ms)", text)
+        # A diff Syntax block is rendered; for a new file it's all additions.
+        syntax_args = [c.args[0] for c in fake.print.call_args_list
+                       if c.args and "Syntax" in type(c.args[0]).__name__]
+        self.assertTrue(syntax_args, "expected a diff Syntax block")
+        self.assertIn("line 0", getattr(syntax_args[0], "code", ""))
+
+    def test_display_write_file_diff_against_old_content(self):
+        """write_file on an existing file diffs old→new (not all-additions)."""
+        import tempfile
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "cfg.py")
+            with open(path, "w") as f:
+                f.write("DEBUG = False\nKEEP = 1\n")
+            new_content = "DEBUG = True\nKEEP = 1\n"
+            fake = MagicMock()
+            fake.width = 80
+            dm = StreamDisplayManager(fake)
+            dm.display_tool("write_file", {"file_path": path, "content": new_content})
+            dm.display_tool_result(
+                "write_file",
+                f"Updated file, absolute path: {path}",
+                is_error=False,
+                elapsed=0.10,
+                tool_args={"file_path": path, "content": new_content},
+            )
+        syntax_args = [c.args[0] for c in fake.print.call_args_list
+                       if c.args and "Syntax" in type(c.args[0]).__name__]
+        self.assertTrue(syntax_args)
+        code = getattr(syntax_args[0], "code", "")
+        # Real diff: -False / +True, and unchanged KEEP has no +/-.
+        self.assertIn("-DEBUG = False", code)
+        self.assertIn("+DEBUG = True", code)
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("updated", text)
+
+    def test_display_execute_head_tail_window(self):
+        """execute shows head 6 + tail 4 with the middle hidden."""
+        from agentica.cli.display import StreamDisplayManager
+
+        # 10 lines: head+tail = 10, so fully shown, no fold hint.
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
@@ -463,9 +525,9 @@ class TestCLIHelpers(unittest.TestCase):
             is_error=False, elapsed=0.1,
         )
         text = "\n".join(str(c) for c in fake.print.call_args_list)
-        self.assertNotIn("more lines", text)
+        self.assertNotIn("hidden lines", text)
 
-        # 12 lines: folds, hint shows 2 more
+        # 12 lines: head 6 + tail 4 shown, 2 hidden in the middle.
         fake2 = MagicMock()
         fake2.width = 80
         dm2 = StreamDisplayManager(fake2)
@@ -474,7 +536,12 @@ class TestCLIHelpers(unittest.TestCase):
             is_error=False, elapsed=0.1,
         )
         text2 = "\n".join(str(c) for c in fake2.print.call_args_list)
-        self.assertIn("2 more lines", text2)
+        self.assertIn("2 hidden lines", text2)
+        # Head and tail present; middle lines hidden.
+        self.assertIn("line 0", text2)
+        self.assertIn("line 11", text2)
+        self.assertNotIn("line 6", text2)
+        self.assertNotIn("line 7", text2)
 
     def test_truncated_blocks_are_remembered_for_expand(self):
         """Long user input and long tool output are stashed for Ctrl+o expansion."""
@@ -482,14 +549,14 @@ class TestCLIHelpers(unittest.TestCase):
         from agentica.cli.display import StreamDisplayManager
 
         # Long user input (>12 lines) is remembered.
-        disp.remember_truncated("", "")  # reset
+        disp.clear_truncated_blocks()
         long_input = "\n".join(f"line {i}" for i in range(20))
         disp.display_user_message(long_input)
         block = disp.get_last_truncated()
         self.assertIn("User input", block["title"])
         self.assertEqual(block["content"], long_input)
 
-        # Long tool output (>max_lines) is remembered.
+        # Long tool output (>head+tail) is remembered.
         long_output = "\n".join(f"out {i}" for i in range(50))
         fake = MagicMock()
         fake.width = 80
@@ -500,9 +567,27 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertEqual(block["content"], long_output)
 
         # Short output is NOT remembered (no truncation → nothing to expand).
-        disp.remember_truncated("", "")
+        disp.clear_truncated_blocks()
         dm.display_tool_result("execute", "only one line", is_error=False, elapsed=0.1)
         self.assertEqual(disp.get_last_truncated()["content"], "")
+
+    def test_truncated_blocks_list_supports_expand_all(self):
+        """Multiple folded blocks accumulate so Ctrl+o can expand ALL of them."""
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        disp.clear_truncated_blocks()
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("execute", "\n".join(f"a{i}" for i in range(50)),
+                                is_error=False, elapsed=0.1)
+        dm.display_tool_result("execute", "\n".join(f"b{i}" for i in range(50)),
+                                is_error=False, elapsed=0.1)
+        blocks = disp.get_truncated_blocks()
+        self.assertEqual(len(blocks), 2)
+        self.assertIn("a0", blocks[0]["content"])
+        self.assertIn("b0", blocks[1]["content"])
 
 
 class TestStreamDisplayManagerSubagent(unittest.TestCase):

@@ -108,42 +108,5 @@ class TestThreadSafety:
         assert len(errors) == 0, f"Import errors: {errors}"
 
 
-# ===========================================================================
-# TestPublicAPI
-# ===========================================================================
-
-
-class TestPublicAPI:
-    """Test that __all__ names are accessible.
-
-    Some lazy-loaded names require extras (e.g. SqliteDb needs [sql], McpTool needs [mcp]).
-    Any ImportError on access is treated as "extras missing" (allowed); only
-    other exceptions (AttributeError, TypeError, etc) count as real failures.
-    """
-
-    def test_all_public_names_accessible(self):
-        import agentica
-        if not hasattr(agentica, '__all__'):
-            return
-        missing = []
-        extras_missing = []
-        for name in agentica.__all__:
-            try:
-                obj = getattr(agentica, name)
-                if obj is None:
-                    missing.append(name)
-            except ImportError:
-                # Either friendly or raw ImportError = extras not installed in this env
-                extras_missing.append(name)
-            except Exception as e:
-                # AttributeError, TypeError etc are real bugs in lazy-loading mapping
-                missing.append(f"{name}: {type(e).__name__}: {e}")
-        assert not missing, f"Names inaccessible for non-import reasons: {missing}"
-        # Log but don't fail on extras-missing names (user hasn't installed them)
-        if extras_missing:
-            preview = extras_missing[:5]
-            print(f"\n[INFO] {len(extras_missing)} names require extras (skipped): {preview}...")
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

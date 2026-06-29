@@ -6,6 +6,7 @@
 
 import argparse
 import importlib
+import inspect
 import os
 import sys
 from typing import List, Optional, Any
@@ -303,6 +304,29 @@ def parse_args():
     parser.add_argument("--aux_base_url", type=str, help="Base URL for the aux model")
     parser.add_argument("--aux_api_key", type=str, help="API key for the aux model")
 
+    # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude
+    # (e.g. Venus). Default None = use the active profile's value (or off if the
+    # profile doesn't set it); --enable_cache_control / --no-enable_cache_control
+    # force on/off for this run.
+    parser.add_argument(
+        "--enable_cache_control",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Enable Anthropic-style cache_control blocks (for Venus-style proxies).",
+    )
+    parser.add_argument(
+        "--cache_control_messages",
+        type=int,
+        default=None,
+        help="Max cache breakpoints on trailing messages (Anthropic caps total at 4).",
+    )
+    parser.add_argument(
+        "--cache_control_session_header",
+        type=str,
+        default=None,
+        help="Sticky-routing header name for cache hits (e.g. Venus-Session-Id).",
+    )
+
     parser.add_argument("--debug", type=int, help="enable verbose mode", default=0)
     parser.add_argument(
         "--chat-only",
@@ -406,6 +430,9 @@ def get_model(
     reasoning_effort=None,
     top_p=None,
     context_window=None,
+    enable_cache_control=None,
+    cache_control_messages=None,
+    cache_control_session_header=None,
 ):
     """Create a model instance based on the provider name.
 
@@ -438,6 +465,19 @@ def get_model(
     model_class = MODEL_REGISTRY.get(model_provider)
     if model_class is None:
         raise ValueError(f"Unsupported model provider: {model_provider}. Supported: {', '.join(MODEL_REGISTRY.keys())}")
+    # Prompt caching. ``enable_cache_control`` applies to any model class that
+    # declares it (OpenAIChat for OpenAI-compatible proxies fronting Claude,
+    # Claude itself for native Anthropic caching) — filling it in CLI/config
+    # takes effect everywhere. The OpenAIChat-only message/header knobs are not
+    # passed to Claude, which manages its own message caching natively.
+    if inspect.isclass(model_class):
+        if enable_cache_control is not None and hasattr(model_class, "enable_cache_control"):
+            params["enable_cache_control"] = enable_cache_control
+        if issubclass(model_class, OpenAIChat):
+            if cache_control_messages is not None:
+                params["cache_control_messages"] = cache_control_messages
+            if cache_control_session_header is not None:
+                params["cache_control_session_header"] = cache_control_session_header
     return model_class(**params)
 
 
@@ -475,6 +515,9 @@ def _build_sibling_model(agent_config: dict, prefix: str):
         reasoning_effort=agent_config.get("reasoning_effort"),
         top_p=agent_config.get("top_p"),
         context_window=agent_config.get("context_window"),
+        enable_cache_control=agent_config.get("enable_cache_control"),
+        cache_control_messages=agent_config.get("cache_control_messages"),
+        cache_control_session_header=agent_config.get("cache_control_session_header"),
     )
 
 
@@ -528,6 +571,9 @@ def create_agent(
         reasoning_effort=agent_config.get("reasoning_effort"),
         top_p=agent_config.get("top_p"),
         context_window=agent_config.get("context_window"),
+        enable_cache_control=agent_config.get("enable_cache_control"),
+        cache_control_messages=agent_config.get("cache_control_messages"),
+        cache_control_session_header=agent_config.get("cache_control_session_header"),
     )
 
     # Aux model: the cheap/fast model for all background LLM work (memory

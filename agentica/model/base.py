@@ -1261,6 +1261,11 @@ class Model(ABC):
                     if metrics.prompt_tokens_details is not None:
                         entry.input_tokens_details = TokenDetails(
                             cached_tokens=metrics.prompt_tokens_details.get("cached_tokens", 0),
+                            cache_read_tokens=metrics.prompt_tokens_details.get(
+                                "cache_read_tokens",
+                                metrics.prompt_tokens_details.get("cached_tokens", 0),
+                            ),
+                            cache_creation_tokens=metrics.prompt_tokens_details.get("cache_creation_tokens", 0),
                         )
                         if "prompt_tokens_details" not in self.metrics:
                             self.metrics["prompt_tokens_details"] = {}
@@ -1291,14 +1296,22 @@ class Model(ABC):
             # Cost tracking (v3): record USD cost for this invoke()
             if self._cost_tracker is not None:
                 cache_read = 0
+                cache_write = 0
                 prompt_details_dict = metrics.prompt_tokens_details or {}
                 if isinstance(prompt_details_dict, dict):
-                    cache_read = prompt_details_dict.get("cached_tokens", 0)
+                    # OpenAI reports cache hits as cached_tokens; Anthropic-style
+                    # proxies report cache_read_tokens / cache_creation_tokens.
+                    cache_read = prompt_details_dict.get(
+                        "cache_read_tokens",
+                        prompt_details_dict.get("cached_tokens", 0),
+                    )
+                    cache_write = prompt_details_dict.get("cache_creation_tokens", 0)
                 self._cost_tracker.record(
                     model_id=self.id,
                     input_tokens=metrics.input_tokens,
                     output_tokens=metrics.output_tokens,
                     cache_read_tokens=cache_read,
+                    cache_write_tokens=cache_write,
                 )
 
     def update_stream_metrics(self, assistant_message: Message, metrics: Metrics) -> None:
@@ -1339,6 +1352,11 @@ class Model(ABC):
             assistant_message.metrics["prompt_tokens_details"] = metrics.prompt_tokens_details
             entry.input_tokens_details = TokenDetails(
                 cached_tokens=metrics.prompt_tokens_details.get("cached_tokens", 0),
+                cache_read_tokens=metrics.prompt_tokens_details.get(
+                    "cache_read_tokens",
+                    metrics.prompt_tokens_details.get("cached_tokens", 0),
+                ),
+                cache_creation_tokens=metrics.prompt_tokens_details.get("cache_creation_tokens", 0),
             )
             if "prompt_tokens_details" not in self.metrics:
                 self.metrics["prompt_tokens_details"] = {}
@@ -1358,13 +1376,19 @@ class Model(ABC):
         # Cost tracking (v3): record USD cost for this streaming invoke()
         if self._cost_tracker is not None:
             cache_read = 0
+            cache_write = 0
             if metrics.prompt_tokens_details is not None:
-                cache_read = metrics.prompt_tokens_details.get("cached_tokens", 0)
+                cache_read = metrics.prompt_tokens_details.get(
+                    "cache_read_tokens",
+                    metrics.prompt_tokens_details.get("cached_tokens", 0),
+                )
+                cache_write = metrics.prompt_tokens_details.get("cache_creation_tokens", 0)
             self._cost_tracker.record(
                 model_id=self.id,
                 input_tokens=metrics.input_tokens,
                 output_tokens=metrics.output_tokens,
                 cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
             )
 
     def _process_string_image(self, image: str) -> Dict[str, Any]:

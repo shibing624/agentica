@@ -54,7 +54,7 @@ from agentica.cli.display import (
     inject_file_contents,
     display_user_message,
     get_file_completions,
-    get_last_truncated,
+    get_truncated_blocks,
 )
 from agentica.cli.permissions import PermissionManager
 from agentica.run_display import RunDisplayEventKind, classify_run_response
@@ -177,34 +177,35 @@ def _compile_lesskey(bindings: str):
 
 def _open_in_pager(title: str, content: str) -> None:
     """Open ``content`` in a pager so the user can view the full truncated
-    block, then press ``Ctrl+o`` to return — the terminal is restored, giving
-    CC-style expand/hide semantics without flooding the inline transcript.
+    block(s), then press ``Ctrl+o`` or ``Esc`` to return — the terminal is
+    restored, giving CC-style expand/hide semantics without flooding the
+    inline transcript.
 
     Key binding strategy (in order of preference):
-    1. ``less --lesskey-content``: bind ``Ctrl+o`` to quit. Hint:
-       ``Ctrl+o to return`` (Ctrl+o mirrors the expand key).
+    1. ``less --lesskey-content``: bind ``Ctrl+o`` AND ``Esc`` to quit. Hint:
+       ``Ctrl+o or Esc to return`` (Ctrl+o mirrors the expand key; Esc is the
+       conventional CC close key).
     2. Old ``less`` without ``--lesskey-content`` but with the ``lesskey``
-       compiler: compile a lesskey file (``^O quit``) and feed it via the
-       ``LESSKEY`` env var. Hint: ``Ctrl+o to return`` (same key as primary).
-       Esc is intentionally not bound — it prefixes escape sequences (arrow
-       keys), so binding it would break scrolling.
+       compiler: compile a lesskey file (``^O quit`` + ``^[ quit``) and feed it
+       via the ``LESSKEY`` env var. Same hint. less disambiguates a lone Esc
+       from arrow-key sequences (ESC[B etc.) via its key timeout, so binding
+       Esc does not break arrow scrolling.
     3. No ``lesskey`` compiler: plain ``less`` — only the built-in ``q`` quits.
        Hint: ``q to return``.
     """
     import tempfile
 
     pager = shutil.which("less") or shutil.which("more")
-    # lesskey source binding Ctrl+o (^O) to quit. Esc (^[) is intentionally NOT
-    # bound: it is the prefix for escape sequences (arrow keys send ESC[A etc.),
-    # so binding it would break arrow-key scrolling in the pager. Ctrl+o is not a
-    # sequence prefix, so it is safe and matches the expand key.
-    lesskey_src = "\n#command\n^O quit\n"
+    # lesskey source binding Ctrl+o (^O) and Esc (^[) to quit. less tells a lone
+    # Esc from an arrow-key sequence (ESC[B ...) by its key-read timeout, so
+    # binding Esc is safe and matches the CC close convention.
+    lesskey_src = "\n#command\n^O quit\n^[ quit\n"
     lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
 
     if lesskey_ok:
-        return_hint = "Ctrl+o to return"
+        return_hint = "Ctrl+o or Esc to return"
     elif pager is not None and "less" in pager and _compile_lesskey(lesskey_src):
-        return_hint = "Ctrl+o to return"
+        return_hint = "Ctrl+o or Esc to return"
     else:
         return_hint = "q to return"
 
@@ -226,14 +227,14 @@ def _open_in_pager(title: str, content: str) -> None:
     try:
         if lesskey_ok:
             subprocess.run(
-                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", "Ctrl+o to return", path],
+                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", "Ctrl+o or Esc to return", path],
             )
         elif "less" in pager:
             compiled_lesskey = _compile_lesskey(lesskey_src)
             if compiled_lesskey:
                 env = dict(os.environ, LESSKEY=compiled_lesskey)
                 subprocess.run(
-                    [pager, "-R", "-P", "Ctrl+o to return", path], env=env,
+                    [pager, "-R", "-P", "Ctrl+o or Esc to return", path], env=env,
                 )
             else:
                 subprocess.run([pager, "-R", "-P", "q to return", path])
@@ -1144,17 +1145,30 @@ def _setup_tui(
 
     @kb.add("c-o")
     def _expand_last_truncated(event):
-        """Expand the most recently truncated block (user input or tool output)
-        in a pager. Press ``Ctrl+o`` to return — the terminal is restored,
-        giving CC-style expand/hide semantics without flooding the inline
-        transcript. The same key toggles in and out.
+        """Expand truncated blocks in a pager (CC-style expand/hide).
+
+        Opens EVERY block folded during the current run (user input, tool
+        output, edit/write diffs) in one pager so the user can scroll through
+        all of it — not just the most recent one. Press ``Ctrl+o`` or ``Esc``
+        to return; the terminal is restored, giving expand/hide semantics
+        without flooding the inline transcript.
         """
-        block = get_last_truncated()
-        content = block.get("content", "")
-        if not content:
+        blocks = get_truncated_blocks()
+        if not blocks:
             _cprint("  [dim]Nothing to expand yet.[/dim]")
             return
-        title = block.get("title", "Content")
+        # Single block → keep its own title; many → one combined view.
+        if len(blocks) == 1:
+            title = blocks[0].get("title", "Content")
+            content = blocks[0].get("content", "")
+        else:
+            title = f"Expanded blocks ({len(blocks)})"
+            parts = []
+            for b in blocks:
+                bt = b.get("title", "Content")
+                bc = b.get("content", "")
+                parts.append(f"=== {bt} · {len(bc.splitlines())} lines ===\n{bc}")
+            content = "\n\n".join(parts)
         run_in_terminal(lambda: _open_in_pager(title, content))
         event.app.invalidate()
 

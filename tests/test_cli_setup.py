@@ -360,7 +360,7 @@ class TestRunOnboarding(unittest.TestCase):
         console.width = 80
         # prompts: provider("2"=openai), base_url(""=default), api_key("sk-test"),
         # model_name(""=default gpt-4o), advanced("n"), aux("n")
-        inputs = iter(["2", "", "sk-test", "", "n", "n"])
+        inputs = iter(["2", "", "sk-test", "", "n", "n", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
@@ -386,7 +386,7 @@ class TestRunOnboarding(unittest.TestCase):
         console.width = 80
         custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
         # provider(custom), base_url, api_key, model_name, advanced("n"), aux("n")
-        inputs = iter([custom_index, "https://my-llm.local/v1", "sk-custom", "my-model", "n", "n"])
+        inputs = iter([custom_index, "https://my-llm.local/v1", "sk-custom", "my-model", "n", "n", "n"])
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True),
             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
@@ -411,7 +411,7 @@ class TestRunOnboarding(unittest.TestCase):
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("y"),
         # reasoning("high"), max_tokens("4096"), context("500000"), temp("0.3"),
         # top_p("0.9"), aux("n")
-        inputs = iter(["2", "", "sk", "", "y", "high", "4096", "500000", "0.3", "0.9", "n"])
+        inputs = iter(["2", "", "sk", "", "y", "high", "4096", "500000", "0.3", "0.9", "n", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
@@ -430,13 +430,43 @@ class TestRunOnboarding(unittest.TestCase):
         from agentica import global_config as gc
         console = MagicMock()
         console.width = 80
-        inputs = iter(["2", "", "sk-main", "", "n", "n"])
+        inputs = iter(["2", "", "sk-main", "", "n", "n", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
         ):
             cli_setup.run_onboarding(console)
         self.assertNotIn("aux_model", gc.get_profile())
+
+    def test_cache_control_opt_in_persisted_to_profile(self):
+        from agentica import global_config as gc
+        console = MagicMock()
+        console.width = 80
+        # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("n"),
+        # cache: yes("y"), messages("2"), header("Venus-Session-Id"), aux("n")
+        inputs = iter(["2", "", "sk", "", "n", "y", "2", "Venus-Session-Id", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
+            cli_setup.run_onboarding(console)
+        profile = gc.get_profile()
+        self.assertTrue(profile.get("enable_cache_control"))
+        self.assertEqual(profile.get("cache_control_messages"), 2)
+        self.assertEqual(profile.get("cache_control_session_header"), "Venus-Session-Id")
+
+    def test_cache_control_skipped_when_answered_no(self):
+        from agentica import global_config as gc
+        console = MagicMock()
+        console.width = 80
+        inputs = iter(["2", "", "sk", "", "n", "n", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
+            cli_setup.run_onboarding(console)
+        profile = gc.get_profile()
+        self.assertNotIn("enable_cache_control", profile)
 
     def test_aux_model_configured_and_persisted(self):
         from agentica import global_config as gc
@@ -445,7 +475,7 @@ class TestRunOnboarding(unittest.TestCase):
         # main: openai("2"), default base, key("sk-main"), default model, adv("n");
         # aux: yes("y"), zhipuai("4"), default base(""), key("sk-zhipu"), default model
         zhipu_idx = str(cli_setup._PROVIDER_ORDER.index("zhipuai") + 1)
-        inputs = iter(["2", "", "sk-main", "", "n", "y", zhipu_idx, "", "sk-zhipu", ""])
+        inputs = iter(["2", "", "sk-main", "", "n", "n", "y", zhipu_idx, "", "sk-zhipu", ""])
         with (
             patch.dict(os.environ, {}, clear=True),
             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),

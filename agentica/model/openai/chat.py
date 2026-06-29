@@ -2,6 +2,7 @@ from os import getenv
 from dataclasses import dataclass, field
 import sys
 from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
+from uuid import uuid4
 
 if sys.version_info >= (3, 12):
     from typing import override
@@ -67,6 +68,68 @@ _DEEPSEEK_THINKING_UNSUPPORTED_PARAMS = (
     "frequency_penalty",
 )
 
+# ── Prompt caching for OpenAI-compatible proxies that front Anthropic Claude ──
+# Anthropic caps a single request at 4 cache breakpoints total, so the injector
+# below budgets tools(1) + system(1) + trailing messages(remaining) ≤ 4.
+_CACHE_CONTROL_BREAKPOINT_BUDGET = 4
+
+
+def _tag_content_block_cache_control(content: Any) -> Any:
+    """Ensure ``content`` is a list of blocks and tag the last block ephemeral.
+
+    Accepts str (wrapped into one text block) or a list of content blocks.
+    None / empty content is returned unchanged (nothing to cache).
+    """
+    if content is None:
+        return content
+    if isinstance(content, str):
+        if not content:
+            return content
+        return [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+    if isinstance(content, list) and content:
+        new_blocks = []
+        for idx, block in enumerate(content):
+            if idx == len(content) - 1 and isinstance(block, dict):
+                b = dict(block)
+                b["cache_control"] = {"type": "ephemeral"}
+                new_blocks.append(b)
+            else:
+                new_blocks.append(block)
+        return new_blocks
+    return content
+
+
+def _tag_tools_cache_control(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Tag the last tool definition with an ephemeral cache breakpoint.
+
+    Anthropic caches the tools block as a whole by marking the final tool.
+    Returns a shallow copy so the caller's tool defs are not mutated.
+    """
+    if not tools:
+        return tools
+    out = list(tools)
+    last = out[-1]
+    if isinstance(last, dict):
+        tagged = dict(last)
+        tagged["cache_control"] = {"type": "ephemeral"}
+        out[-1] = tagged
+    return out
+
+
+def _request_has_cache_control(messages: List[Dict[str, Any]], tools: Any) -> bool:
+    """True if any message content block or tool already carries cache_control."""
+    for m in messages:
+        content = m.get("content") if isinstance(m, dict) else None
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and "cache_control" in block:
+                    return True
+    if isinstance(tools, list):
+        for t in tools:
+            if isinstance(t, dict) and "cache_control" in t:
+                return True
+    return False
+
 
 @dataclass
 class OpenAIChat(Model):
@@ -105,6 +168,26 @@ class OpenAIChat(Model):
     extra_query: Optional[Any] = None
     extra_body: Optional[Dict[str, Any]] = None
     request_params: Optional[Dict[str, Any]] = None
+
+    # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude
+    # (e.g. Venus). The proxy accepts Anthropic-style ``cache_control`` blocks
+    # inside OpenAI-format system / messages / tools and reports
+    # ``prompt_tokens_details.cache_read_tokens`` / ``cache_creation_tokens``.
+    # Default OFF: pure OpenAI / DeepSeek / Zhipu may reject the non-standard
+    # ``cache_control`` key. Enable explicitly (SDK flag, CLI --enable_cache_control,
+    # or config.yaml profile) for Anthropic-via-OpenAI proxies. If a request
+    # already carries cache_control blocks while this is off, a warning is logged
+    # telling the user to flip it on.
+    enable_cache_control: bool = False
+    # Max cache breakpoints placed on the trailing non-system messages
+    # (rolling cache window). Anthropic caps a request at 4 breakpoints total,
+    # so the effective count is min(cache_control_messages, 4 - tools - system).
+    cache_control_messages: int = 3
+    # Optional sticky-routing header name (e.g. "Venus-Session-Id"): when set,
+    # a per-model-run session id is generated once and injected into
+    # ``extra_headers`` so consecutive invokes land on the same backend and
+    # actually hit the cache written by the first request. None = off.
+    cache_control_session_header: Optional[str] = None
 
     # Client parameters
     api_key: Optional[str] = None
@@ -283,6 +366,89 @@ class OpenAIChat(Model):
 
         return message.to_model_dict()
 
+    # ── Prompt caching (Anthropic-via-OpenAI proxies, e.g. Venus) ──
+
+    def _with_cache_session_header(self, existing: Any) -> Any:
+        """Merge a stable per-run session id into extra_headers for sticky routing.
+
+        Cache hits require consecutive requests to land on the same backend.
+        Proxies like Venus route by a request header (e.g. ``Venus-Session-Id``);
+        we generate one id per model instance and reuse it across invokes.
+        Only merges into a dict-typed extra_headers; other types are returned
+        unchanged (we cannot safely merge into openai Header objects).
+        """
+        if not self.cache_control_session_header:
+            return existing
+        if not getattr(self, "_cache_session_id", None):
+            self._cache_session_id = f"agentica-cache-{uuid4()}"
+        if isinstance(existing, dict):
+            headers = dict(existing)
+        elif existing is None:
+            headers = {}
+        else:
+            return existing
+        headers.setdefault(self.cache_control_session_header, self._cache_session_id)
+        return headers
+
+    def _apply_cache_control(
+        self, formatted: List[Dict[str, Any]], request_kwargs: Dict[str, Any]
+    ) -> tuple:
+        """Inject Anthropic-style cache_control breakpoints within the 4-breakpoint budget.
+
+        Returns ``(messages, request_kwargs)`` (copies, original not mutated).
+        When caching is off, warns if the request already carries manual
+        cache_control blocks (so the user knows to flip enable_cache_control on).
+        """
+        tools = request_kwargs.get("tools")
+        if not self.enable_cache_control:
+            if _request_has_cache_control(formatted, tools):
+                logger.warning(
+                    "cache_control blocks found in the request but "
+                    "enable_cache_control is off; the backend may ignore them. "
+                    "Set enable_cache_control=True to turn on prompt caching."
+                )
+            return formatted, request_kwargs
+
+        budget = _CACHE_CONTROL_BREAKPOINT_BUDGET
+        new_kwargs = dict(request_kwargs)
+
+        # 1) Tools block: tag the last tool definition.
+        if tools:
+            new_kwargs["tools"] = _tag_tools_cache_control(tools)
+            budget -= 1
+
+        # 2) System message: wrap content as a cached text block.
+        out = list(formatted)
+        for i, m in enumerate(out):
+            if isinstance(m, dict) and m.get("role") == "system":
+                tagged = dict(m)
+                tagged["content"] = _tag_content_block_cache_control(m.get("content"))
+                out[i] = tagged
+                budget -= 1
+                break
+
+        # 3) Trailing non-system messages: rolling cache window.
+        if budget > 0:
+            k = min(max(self.cache_control_messages, 0), budget)
+            tagged = 0
+            for j in range(len(out) - 1, -1, -1):
+                if tagged >= k:
+                    break
+                m = out[j]
+                if isinstance(m, dict) and m.get("role") == "system":
+                    continue
+                tagged_msg = dict(m)
+                tagged_msg["content"] = _tag_content_block_cache_control(m.get("content"))
+                out[j] = tagged_msg
+                tagged += 1
+
+        # Sticky routing so consecutive invokes hit the same backend cache.
+        if self.cache_control_session_header:
+            new_kwargs["extra_headers"] = self._with_cache_session_header(
+                new_kwargs.get("extra_headers")
+            )
+        return out, new_kwargs
+
     def _get_langfuse_extra_params(self) -> Dict[str, Any]:
         """Get extra parameters for Langfuse tracing."""
         if not is_langfuse_available():
@@ -312,14 +478,18 @@ class OpenAIChat(Model):
     async def invoke(self, messages: List[Message]) -> Union[ChatCompletion, ParsedChatCompletion]:
         """Send a chat completion request to the OpenAI API (async-only)."""
         langfuse_params = self._get_langfuse_extra_params()
+        formatted = [self.format_message(m) for m in messages]
+        # Inject Anthropic-style cache_control breakpoints for OpenAI-compatible
+        # proxies that front Claude (e.g. Venus). No-op when caching is off.
+        formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
 
         if self.response_format is not None and self.use_structured_outputs:
             try:
                 if isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel):
                     return await self.get_client().beta.chat.completions.parse(
                         model=self.id,
-                        messages=[self.format_message(m) for m in messages],  # type: ignore
-                        **self.request_kwargs,
+                        messages=formatted,  # type: ignore
+                        **request_kwargs,
                         **langfuse_params,
                     )
                 else:
@@ -332,8 +502,8 @@ class OpenAIChat(Model):
         try:
             return await self.get_client().chat.completions.create(
                 model=self.id,
-                messages=[self.format_message(m) for m in messages],  # type: ignore
-                **self.request_kwargs,
+                messages=formatted,  # type: ignore
+                **request_kwargs,
                 **langfuse_params,
             )
         except Exception as e:
@@ -352,6 +522,7 @@ class OpenAIChat(Model):
         """
         langfuse_params = self._get_langfuse_extra_params()
         formatted = [self.format_message(m) for m in messages]
+        formatted, request_kwargs = self._apply_cache_control(formatted, self.request_kwargs)
 
         async def _open() -> AsyncIterator[ChatCompletionChunk]:
             try:
@@ -360,7 +531,7 @@ class OpenAIChat(Model):
                     messages=formatted,  # type: ignore
                     stream=True,
                     stream_options={"include_usage": True},
-                    **self.request_kwargs,
+                    **request_kwargs,
                     **langfuse_params,
                 )
             except Exception as e:
