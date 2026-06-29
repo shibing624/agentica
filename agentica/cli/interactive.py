@@ -81,6 +81,19 @@ from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 
 
 @dataclass
+class _InputRequest:
+    """A pending user_input tool request awaiting a typed reply.
+
+    Created by the user_input_callback on the background agent thread; the main
+    prompt_toolkit thread fulfils it by putting the user's line on ``result``.
+    """
+
+    prompt: str
+    options: Optional[List[str]] = None
+    result: "queue.Queue" = field(default_factory=lambda: queue.Queue(maxsize=1))
+
+
+@dataclass
 class SessionState:
     """All mutable session state in one place.
 
@@ -108,6 +121,11 @@ class SessionState:
     # We snapshot cumulative CostTracker totals BEFORE each turn and diff
     # AFTER so the goal loop sees the delta, not the whole run.
     goal_tokens_baseline: int = 0
+    # Active user_input tool request. When the agent (running in the background
+    # process_loop thread) calls the user_input tool, it parks on a result queue
+    # and sets this field so the main prompt_toolkit thread routes the next typed
+    # line into the queue instead of pending_queue. None when no request pending.
+    input_request: Optional["_InputRequest"] = None
 
 
 # ==================== Output bridge for patch_stdout ====================
@@ -197,19 +215,21 @@ def _open_in_pager(title: str, content: str) -> None:
     import tempfile
 
     pager = shutil.which("less") or shutil.which("more")
-    # lesskey source binding Ctrl+o (^O) and Esc (^[) to quit, PLUS the
-    # up/down arrow sequences explicitly bound to back-line/forw-line. Without
-    # the arrow bindings, ^[ quit would shadow the arrow keys (which start with
-    # ESC, e.g. ESC[A / ESCOA) — a lone ^[ leaf matches immediately and less
-    # never reads the rest of the sequence, so pressing Up would quit. Binding
-    # the full arrow sequences makes less do longest-prefix matching: ESC[A →
-    # back-line (scroll up), a lone ^[ (Esc held with no following byte within
-    # less's key timeout) → quit. Both cursor-key modes are covered (^[ [ A
-    # normal mode, ^[ O A application mode).
+    # lesskey source binding Ctrl+o (^O) to quit, plus the up/down arrow
+    # sequences to back-line/forw-line so they scroll line-by-line.
+    #
+    # We deliberately do NOT bind `^[ quit` (Esc to quit): in lesskey, the
+    # lone `^[` leaf node matches as soon as less reads the ESC byte and never
+    # waits for the rest of an arrow sequence (which also starts with ESC, e.g.
+    # ESC[B / ESCOB). Verified on less 668: with `^[ quit` present, pressing
+    # Down quits every time — the `^[[B forw-line` binding is shadowed and
+    # never reached. Esc-to-quit and arrow-scrolling are mutually exclusive,
+    # so we keep the arrows (the user's intuitive expectation) and rely on
+    # Ctrl+o / q to quit. Both cursor-key modes are covered (^[ [ X normal
+    # mode, ^[ O X application mode).
     lesskey_src = (
         "\n#command\n"
         "^O quit\n"
-        "^[ quit\n"
         "^[[A back-line\n"
         "^[[B forw-line\n"
         "^[OA back-line\n"
@@ -218,11 +238,11 @@ def _open_in_pager(title: str, content: str) -> None:
     lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
 
     if lesskey_ok:
-        return_hint = "Ctrl+o or Esc to return"
+        return_hint = "\u2191\u2193 scroll, Ctrl+o/q to return"
     elif pager is not None and "less" in pager and _compile_lesskey(lesskey_src):
-        return_hint = "Ctrl+o or Esc to return"
+        return_hint = "\u2191\u2193 scroll, Ctrl+o/q to return"
     else:
-        return_hint = "q to return"
+        return_hint = "\u2191\u2193 scroll, q to return"
 
     header = (
         f"=== {title} · {len(content.splitlines())} lines "
@@ -242,19 +262,19 @@ def _open_in_pager(title: str, content: str) -> None:
     try:
         if lesskey_ok:
             subprocess.run(
-                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", "Ctrl+o or Esc to return", path],
+                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", return_hint, path],
             )
         elif "less" in pager:
             compiled_lesskey = _compile_lesskey(lesskey_src)
             if compiled_lesskey:
                 env = dict(os.environ, LESSKEY=compiled_lesskey)
                 subprocess.run(
-                    [pager, "-R", "-P", "Ctrl+o or Esc to return", path], env=env,
+                    [pager, "-R", "-P", return_hint, path], env=env,
                 )
             else:
-                subprocess.run([pager, "-R", "-P", "q to return", path])
+                subprocess.run([pager, "-R", "-P", return_hint, path])
         else:
-            subprocess.run([pager, "-P", "q to return", path])
+            subprocess.run([pager, "-P", return_hint, path])
     except KeyboardInterrupt:
         pass
     finally:
@@ -1033,6 +1053,22 @@ def _setup_tui(
     def _handle_enter(event):
         text = event.app.current_buffer.text.strip()
         has_images = bool(state.attached_images)
+
+        # If the agent is waiting on a user_input tool request, route this line
+        # straight to the request's result queue (unblocking the agent thread)
+        # instead of treating it as a new turn. Empty input is allowed here so
+        # the user can accept a default/blank answer.
+        if state.input_request is not None:
+            req = state.input_request
+            state.input_request = None
+            try:
+                req.result.put(text)
+            except Exception:
+                pass
+            event.app.current_buffer.reset(append_to_history=True)
+            event.app.invalidate()
+            return
+
         if not text and not has_images:
             return
 
@@ -1384,7 +1420,63 @@ def run_interactive(
     permission_manager = PermissionManager(mode=perm_mode)
 
     extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
-    current_agent = create_agent(agent_config, extra_tools, workspace, skills_registry)
+
+    # Holder lets the user_input_callback (built now, needed by create_agent)
+    # reach `state` / `app`, which are created further below. The agent calls
+    # the callback on the background process_loop thread; it parks on a queue
+    # while the main prompt_toolkit thread feeds the typed line back via
+    # _handle_enter. This replaces the tool's default bare input() which
+    # deadlocks against prompt_toolkit's stdin ownership.
+    _ui_holder: dict = {}
+
+    def _cli_user_input_callback(prompt: str, options: Optional[List[str]] = None) -> str:
+        state_ref = _ui_holder.get("state")
+        app_ref = _ui_holder.get("app")
+        con_ref = _ui_holder.get("con")
+        # Fallback to bare input if the TUI isn't up yet (shouldn't happen in
+        # normal flow, but keeps the callback safe).
+        if state_ref is None or app_ref is None:
+            return input(f"{prompt}\nYour response: ").strip()
+
+        req = _InputRequest(prompt=prompt, options=options)
+
+        def _show_prompt():
+            if con_ref is not None:
+                con_ref.print(f"\n[bold cyan]?[/bold cyan] {prompt}")
+                if options:
+                    for i, opt in enumerate(options, 1):
+                        con_ref.print(f"  [cyan]{i}[/cyan]. {opt}")
+                    con_ref.print("[dim]Type the option number or text, then Enter.[/dim]")
+                else:
+                    con_ref.print("[dim]Type your response, then Enter.[/dim]")
+
+        # Arm the request and prompt the user. ChatConsole.print + app.invalidate
+        # is the same pattern process_loop uses to render agent output from this
+        # background thread, so it's safe to call directly here.
+        state_ref.input_request = req
+        _show_prompt()
+        try:
+            app_ref.invalidate()
+        except Exception:
+            pass
+
+        # Block the agent thread until the user submits a line.
+        answer = req.result.get()
+
+        # If the user typed an option number, map it back to the option text.
+        if options and answer:
+            try:
+                idx = int(answer)
+                if 1 <= idx <= len(options):
+                    return options[idx - 1]
+            except ValueError:
+                pass
+        return answer
+
+    current_agent = create_agent(
+        agent_config, extra_tools, workspace, skills_registry,
+        user_input_callback=_cli_user_input_callback,
+    )
 
     # Load custom subagent definitions (.agentica/agents/*.md) before the TUI
     # starts. load_all_agents is fail-soft internally; the outer guard keeps a
@@ -1471,6 +1563,7 @@ def run_interactive(
             bg_task_counter=state.bg_task_counter,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
+            user_input_callback=_cli_user_input_callback,
         )
 
     def _dispatch_concurrent_cmd(cmd: str, cmd_args: str):
@@ -1529,6 +1622,12 @@ def run_interactive(
     # Activate ChatConsole for TUI — all get_console() calls now return this
     chat_console = ChatConsole()
     set_active_console(chat_console)
+
+    # Wire the user_input callback holder now that state/app/console all exist,
+    # so the user_input tool reads via the TUI instead of a blocking input().
+    _ui_holder["state"] = state
+    _ui_holder["app"] = app
+    _ui_holder["con"] = chat_console
 
     # ── Background thread: process input queue and run agent ──
     def process_loop():

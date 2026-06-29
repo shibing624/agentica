@@ -637,9 +637,17 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
 
 
 def create_agent(
-    agent_config: dict, extra_tools: Optional[List] = None, workspace: Optional[Workspace] = None, skills_registry=None
+    agent_config: dict, extra_tools: Optional[List] = None, workspace: Optional[Workspace] = None, skills_registry=None,
+    user_input_callback=None,
 ):
-    """Helper to create or recreate an Agent with built-in tools and current config."""
+    """Helper to create or recreate an Agent with built-in tools and current config.
+
+    user_input_callback: optional ``(prompt, options) -> str`` used by the
+        user_input/confirm tools. The interactive CLI passes a prompt_toolkit-aware
+        callback so the tool reads via the TUI input box instead of a bare
+        ``input()`` (which deadlocks against prompt_toolkit's stdin ownership in
+        the background agent thread).
+    """
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -686,6 +694,7 @@ def create_agent(
         experience_config=experience_config,
         long_term_memory_config=long_term_memory_config,
         include_user_input=True,  # CLI is interactive, always enable human-in-the-loop
+        user_input_callback=user_input_callback,
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
         diagnostics_servers=agent_config.get("diagnostics_servers"),
     )

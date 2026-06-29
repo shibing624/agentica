@@ -102,6 +102,10 @@ class CommandContext:
     # between the post-turn hook and /goal handlers, guarded by goal_lock.
     goal_manager: Any = None  # Optional[GoalManager]
     goal_lock: Any = None  # Optional[threading.Lock]
+    # Callback the user_input/confirm tools use to read via the TUI input box
+    # instead of a blocking input(). Must be preserved across agent rebuilds
+    # (/model, /newchat, /reload, …) or those paths reintroduce the deadlock.
+    user_input_callback: Any = None
 
 
 # ==================== PendingQueue ====================
@@ -250,7 +254,8 @@ def _refresh_skills_session(ctx: CommandContext):
     reset_skill_registry()
     load_skills()
     new_registry = get_skill_registry()
-    new_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, new_registry)
+    new_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, new_registry,
+                             user_input_callback=ctx.user_input_callback)
     return {
         "skills_registry": new_registry,
         "current_agent": new_agent,
@@ -1368,7 +1373,8 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
-    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
+                                 user_input_callback=ctx.user_input_callback)
     con.print("[green]New chat session created.[/green]")
     con.print("[dim]Conversation history cleared.[/dim]")
     # Drop any goal manager — the new session has a new SessionLog.
@@ -1482,7 +1488,8 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     os.system("clear" if os.name != "nt" else "cls")
-    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
+                                 user_input_callback=ctx.user_input_callback)
     print_header(
         ctx.agent_config["model_provider"],
         ctx.agent_config["model_name"],
@@ -1614,7 +1621,8 @@ def _apply_profile(ctx: CommandContext, name: str):
         )
         con.print(f"[dim]Auxiliary model: {aux_str}[/dim]")
         return {"model_switched": True}
-    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
+                                 user_input_callback=ctx.user_input_callback)
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
     return {"current_agent": current_agent}
 
@@ -1723,7 +1731,8 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"[green]Switched to: {new_provider}/{new_model} (session preserved)[/green]")
             return {"model_switched": True}
         else:
-            current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+            current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
+                                 user_input_callback=ctx.user_input_callback)
             con.print(f"[green]Switched to: {new_provider}/{new_model}[/green]")
             return {"current_agent": current_agent}
     else:
