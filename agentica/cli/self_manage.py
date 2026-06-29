@@ -19,7 +19,6 @@ import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
 from agentica.version import __version__
-from agentica.config import AGENTICA_DOTENV_PATH
 from agentica.global_config import (
     load_global_config,
     get_profile,
@@ -184,8 +183,13 @@ def set_profile_field(
 # ==================== .env editing ====================
 
 def dotenv_path() -> str:
-    """Absolute path of the global .env file."""
-    return AGENTICA_DOTENV_PATH
+    """Absolute path of the global .env file.
+
+    Read dynamically from agentica.config rather than snapshotting at import
+    time, so the resolved path always reflects the authoritative source.
+    """
+    import agentica.config as _cfg
+    return _cfg.AGENTICA_DOTENV_PATH
 
 
 def read_dotenv(reveal_secrets: bool = False) -> Dict[str, str]:
