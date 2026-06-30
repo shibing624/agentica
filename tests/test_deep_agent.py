@@ -111,7 +111,7 @@ class TestDeepAgentDefaults(unittest.TestCase):
         from agentica.agent.deep import DeepAgent
         from agentica.model.openai import OpenAIChat
 
-        custom_aux = OpenAIChat(id="gpt-4o-mini-custom", api_key="fake_openai_key")
+        custom_auxiliary = OpenAIChat(id="gpt-4o-mini-custom", api_key="fake_openai_key")
         with tempfile.TemporaryDirectory() as tmpdir, patch(
             "agentica.agent.base.Agent._load_mcp_tools"
         ), patch(
@@ -120,10 +120,10 @@ class TestDeepAgentDefaults(unittest.TestCase):
             agent = DeepAgent(
                 model=MagicMock(),
                 workspace=tmpdir,
-                auxiliary_model=custom_aux,
+                auxiliary_model=custom_auxiliary,
             )
 
-        self.assertIs(agent.auxiliary_model, custom_aux)
+        self.assertIs(agent.auxiliary_model, custom_auxiliary)
 
 
 if __name__ == "__main__":

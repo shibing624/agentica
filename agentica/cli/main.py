@@ -86,14 +86,14 @@ def main():
         "enable_cache_control": args.enable_cache_control if args.enable_cache_control is not None else resolved.get("enable_cache_control"),
         "cache_control_messages": args.cache_control_messages if args.cache_control_messages is not None else resolved.get("cache_control_messages"),
         "cache_control_session_header": args.cache_control_session_header or resolved.get("cache_control_session_header"),
-        # Aux model (None means reuse main model). CLI flags win (applied
+        # Auxiliary model (None means reuse main model). CLI flags win (applied
         # inside resolve_model_config); otherwise the active profile's optional
-        # ``aux_model`` block is used; else None. The aux model drives all
+        # ``auxiliary_model`` block is used; else None. The auxiliary model drives all
         # background LLM work AND the `task` subagent tool.
-        "aux_model_provider": resolved.get("aux_model_provider"),
-        "aux_model_name": resolved.get("aux_model_name"),
-        "aux_base_url": resolved.get("aux_base_url"),
-        "aux_api_key": resolved.get("aux_api_key"),
+        "auxiliary_model_provider": resolved.get("auxiliary_model_provider"),
+        "auxiliary_model_name": resolved.get("auxiliary_model_name"),
+        "auxiliary_base_url": resolved.get("auxiliary_base_url"),
+        "auxiliary_api_key": resolved.get("auxiliary_api_key"),
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
         "enable_experience_capture": not args.no_experience,

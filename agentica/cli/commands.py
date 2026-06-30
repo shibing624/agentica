@@ -170,6 +170,34 @@ class PendingQueue:
                 return True
             return False
 
+    def replace_index(self, idx: int, item) -> bool:
+        """Replace the item at ``idx`` in place and refresh its timestamp.
+
+        Returns ``False`` if ``idx`` is out of range. Refreshing the timestamp
+        makes the TUI queue bar treat the edit as a re-submission so the
+        "x seconds ago" label reflects the latest user intent.
+        """
+        with self._lock:
+            if 0 <= idx < len(self._deque):
+                self._deque[idx] = item
+                self._timestamps[idx] = time.time()
+                return True
+            return False
+
+    def insert_index(self, idx: int, item) -> bool:
+        """Insert ``item`` at position ``idx`` (0-based).
+
+        ``idx == len(queue)`` is allowed and equivalent to ``put`` (append).
+        Returns ``False`` for any other out-of-range index so callers can
+        report the error with the same shape as ``remove_index``.
+        """
+        with self._lock:
+            if 0 <= idx <= len(self._deque):
+                self._deque.insert(idx, item)
+                self._timestamps.insert(idx, time.time())
+                return True
+            return False
+
 
 # ==================== Concurrent commands ====================
 
@@ -222,11 +250,6 @@ IMAGE_EXTENSIONS = frozenset(
         ".ico",
     }
 )
-
-
-def _cmd_title(name: str):
-    """Print a command header."""
-    get_console().print(f"\n  [bold]{name}[/bold]")
 
 
 def _sanitize_history_for_model_switch(agent) -> None:
@@ -496,7 +519,6 @@ def _load_custom_tool_module(name: str, file_path: Path):
 
 
 def _cmd_help(ctx: CommandContext, cmd_args: str = ""):
-    _cmd_title(f"/help {cmd_args.strip()}" if cmd_args.strip() else "/help")
     show_help(skills_registry=ctx.skills_registry)
 
 
@@ -506,7 +528,6 @@ def _cmd_exit(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     """Print a compact one-screen overview of the current session."""
-    _cmd_title("/status")
     con = get_console()
     ac = ctx.agent_config
 
@@ -520,8 +541,8 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     base_url = ac.get("base_url")
     profile = get_active_profile_name()
 
-    aux_provider = ac.get("aux_model_provider")
-    aux_model_name = ac.get("aux_model_name")
+    auxiliary_provider = ac.get("auxiliary_model_provider")
+    auxiliary_model_name = ac.get("auxiliary_model_name")
 
     agent = ctx.current_agent
     tools_count = len(agent.tools) if agent and agent.tools else 0
@@ -546,8 +567,8 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
             session_cost = cost_tracker.total_cost_usd
 
     model_str = f"{provider}/{model_name}" if provider and model_name else "(unset)"
-    aux_str = (
-        f"{aux_provider}/{aux_model_name}" if aux_provider and aux_model_name else "(reuse main)"
+    auxiliary_str = (
+        f"{auxiliary_provider}/{auxiliary_model_name}" if auxiliary_provider and auxiliary_model_name else "(reuse main)"
     )
     skills_str = str(skills_count) if skills_count is not None else "n/a"
     perm_str = perm_mode or "(default)"
@@ -558,7 +579,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"  Model:     [bold]{model_str}[/bold]")
     if base_url:
         con.print(f"  Endpoint:  [dim]{base_url}[/dim]")
-    con.print(f"  Auxiliary model: {aux_str}")
+    con.print(f"  Auxiliary model: {auxiliary_str}")
     con.print(
         f"  Tools: {tools_count}  |  Skills: {skills_str}  |  "
         f"Subagents: {subagent_total} (3 builtin + {custom_subagents} custom)"
@@ -577,8 +598,6 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
     parts = shlex.split(args_str) if args_str else []
     subcmd = parts[0].lower() if parts else ""
     sub_args = parts[1:]
-
-    _cmd_title(f"/agents {args_str}" if args_str else "/agents")
 
     # ── /agents create <name> — interactive, writes .agentica/agents/<name>.md ──
     if subcmd == "create":
@@ -699,8 +718,6 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
     parts = args_str.split(None, 1) if args_str else []
     subcmd = parts[0].lower() if parts else ""
     sub_args = parts[1].strip() if len(parts) > 1 else ""
-
-    _cmd_title(f"/tools {args_str}" if args_str else "/tools")
 
     # ── /tools add <name> ──
     if subcmd == "add":
@@ -915,8 +932,6 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
     sub_args = parts[1:]
 
     # Title shows the full command as user typed it
-    _cmd_title(f"/skills {args_str}" if args_str else "/skills")
-
     # ── /skills search <query> — search hub registries ──
     if subcommand == "search":
         query = " ".join(sub_args)
@@ -1243,7 +1258,6 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_history(ctx: CommandContext, cmd_args: str = ""):
     """Display conversation history in compact format."""
-    _cmd_title(f"/history {cmd_args.strip()}" if cmd_args.strip() else "/history")
     con = get_console()
     agent = ctx.current_agent
     if not agent:
@@ -1334,7 +1348,6 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     if sub == "show":
         _cmd_config_show_files(ctx)
         # fall through to the regular status display too
-    _cmd_title(f"/config {cmd_args.strip()}" if cmd_args.strip() else "/config")
     con = get_console()
 
     con.print()
@@ -1870,21 +1883,6 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     return {"current_agent": current_agent, "goal_manager": None}
 
 
-def _persist_model_choice(provider: str, model_name: str, base_url: Optional[str]) -> None:
-    """Remember a live /model switch so it survives the next launch.
-
-    Updates the active profile in config.yaml (round-trips, preserving user
-    comments). The api_key already stored in the profile is left untouched.
-    """
-    name = get_active_profile_name()
-    existing = get_profile(name)
-    profile = dict(existing)
-    profile["model_provider"] = provider
-    profile["model_name"] = model_name
-    profile["base_url"] = base_url
-    upsert_profile(name, profile, make_active=True)
-
-
 def _apply_profile(ctx: CommandContext, name: str):
     """Switch the live agent to a named config.yaml profile."""
     con = get_console()
@@ -1920,40 +1918,44 @@ def _apply_profile(ctx: CommandContext, name: str):
     ctx.agent_config["top_p"] = new_top_p
     ctx.agent_config["context_window"] = new_context_window
 
-    # Aux model: a profile switch fully replaces the aux model too. An
-    # aux_model block rebuilds the sibling (background calls + task subagent);
-    # a profile without one clears the aux fields so they fall back to the
+    # Auxiliary model: a profile switch fully replaces the auxiliary model too. An
+    # auxiliary_model block rebuilds the sibling (background calls + task subagent);
+    # a profile without one clears the auxiliary fields so they fall back to the
     # main model. _build_sibling_model handles same-provider base_url/api_key
-    # inheritance; cross-provider reads the block's own key (or env). The aux
-    # rebuild is a tolerance boundary — a broken aux config falls back to the
+    # inheritance; cross-provider reads the block's own key (or env). The auxiliary
+    # rebuild is a tolerance boundary — a broken auxiliary config falls back to the
     # main model with a warning instead of blocking the core model switch.
-    aux_block = profile.get("aux_model")
-    if isinstance(aux_block, dict) and aux_block.get("model_name"):
-        ctx.agent_config["aux_model_provider"] = aux_block.get("model_provider") or new_provider
-        ctx.agent_config["aux_model_name"] = aux_block.get("model_name")
-        ctx.agent_config["aux_base_url"] = aux_block.get("base_url")
-        ctx.agent_config["aux_api_key"] = aux_block.get("api_key")
+    auxiliary_block = profile.get("auxiliary_model")
+    if isinstance(auxiliary_block, dict) and auxiliary_block.get("model_name"):
+        ctx.agent_config["auxiliary_model_provider"] = auxiliary_block.get("model_provider") or new_provider
+        ctx.agent_config["auxiliary_model_name"] = auxiliary_block.get("model_name")
+        ctx.agent_config["auxiliary_base_url"] = auxiliary_block.get("base_url")
+        ctx.agent_config["auxiliary_api_key"] = auxiliary_block.get("api_key")
         try:
-            new_aux_model = _build_sibling_model(ctx.agent_config, "aux")
+            new_auxiliary_model = _build_sibling_model(ctx.agent_config, "auxiliary")
         except Exception as exc:
             con.print(
                 f"[yellow]Auxiliary model build failed, falling back to main model: {exc}[/yellow]"
             )
-            ctx.agent_config["aux_model_provider"] = None
-            ctx.agent_config["aux_model_name"] = None
-            ctx.agent_config["aux_base_url"] = None
-            ctx.agent_config["aux_api_key"] = None
-            new_aux_model = None
+            ctx.agent_config["auxiliary_model_provider"] = None
+            ctx.agent_config["auxiliary_model_name"] = None
+            ctx.agent_config["auxiliary_base_url"] = None
+            ctx.agent_config["auxiliary_api_key"] = None
+            new_auxiliary_model = None
     else:
-        ctx.agent_config["aux_model_provider"] = None
-        ctx.agent_config["aux_model_name"] = None
-        ctx.agent_config["aux_base_url"] = None
-        ctx.agent_config["aux_api_key"] = None
-        new_aux_model = None
-    ctx.agent_config["auxiliary_model"] = new_aux_model
+        ctx.agent_config["auxiliary_model_provider"] = None
+        ctx.agent_config["auxiliary_model_name"] = None
+        ctx.agent_config["auxiliary_base_url"] = None
+        ctx.agent_config["auxiliary_api_key"] = None
+        new_auxiliary_model = None
+    ctx.agent_config["auxiliary_model"] = new_auxiliary_model
 
+    # Persist the switch: only the top-level `active:` pointer is rewritten.
+    # Profile bodies (model_*, auxiliary_*, tuning) are write-only-by-setup
+    # — never touched here. That separation is what fixed the original
+    # "config.yaml 乱掉" bug, where the old free-form `/model provider/name`
+    # path rewrote fields of the active profile in place.
     set_active_profile(name)
-    _persist_model_choice(new_provider, new_model, new_base_url)
 
     model_kwargs = {
         "model_provider": new_provider,
@@ -1969,26 +1971,26 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_model_obj = get_model(**model_kwargs)
     if ctx.current_agent is not None:
         ctx.current_agent.model = new_model_obj
-        ctx.current_agent.auxiliary_model = new_aux_model
-        # Repoint the task subagent tool onto the new aux model (None = clone
+        ctx.current_agent.auxiliary_model = new_auxiliary_model
+        # Repoint the task subagent tool onto the new auxiliary model (None = clone
         # the parent's main model, matching create_agent's default).
-        _update_task_tool_model_override(ctx.current_agent, new_aux_model)
+        _update_task_tool_model_override(ctx.current_agent, new_auxiliary_model)
         _sanitize_history_for_model_switch(ctx.current_agent)
         # Refresh the self-description block so the agent reports its new
-        # model/aux model on the next turn.
+        # model/auxiliary model on the next turn.
         ctx.current_agent.environment_context = _build_environment_context(
             ctx.current_agent, ctx.agent_config
         )
-        aux_provider = ctx.agent_config.get("aux_model_provider")
-        aux_model_name = ctx.agent_config.get("aux_model_name")
-        aux_str = (
-            f"{aux_provider}/{aux_model_name}" if aux_provider and aux_model_name else "reuse main"
+        auxiliary_provider = ctx.agent_config.get("auxiliary_model_provider")
+        auxiliary_model_name = ctx.agent_config.get("auxiliary_model_name")
+        auxiliary_str = (
+            f"{auxiliary_provider}/{auxiliary_model_name}" if auxiliary_provider and auxiliary_model_name else "reuse main"
         )
         con.print(
             f"[green]Switched to profile '{name}': {new_provider}/{new_model} "
             f"(session preserved)[/green]"
         )
-        con.print(f"[dim]Auxiliary model: {aux_str}[/dim]")
+        con.print(f"[dim]Auxiliary model: {auxiliary_str}[/dim]")
         return {"model_switched": True}
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
                                  user_input_callback=ctx.user_input_callback)
@@ -1997,7 +1999,7 @@ def _apply_profile(ctx: CommandContext, name: str):
 
 
 def _list_profiles():
-    """Print all configured config.yaml profiles."""
+    """Print all configured config.yaml profiles with main/auxiliary full names."""
     con = get_console()
     profiles = get_profiles()
     active = get_active_profile_name()
@@ -2007,11 +2009,20 @@ def _list_profiles():
         return
     con.print("Configured profiles:", style="cyan")
     for name, p in profiles.items():
-        marker = " [active]" if name == active else ""
+        marker = " [bold green][active][/bold green]" if name == active else ""
         provider = p.get("model_provider", "?")
         model = p.get("model_name", "?")
         has_key = "key set" if p.get("api_key") else "no key"
-        con.print(f"  {name}{marker}: [dim]{provider}/{model} ({has_key})[/dim]")
+        con.print(f"  [bold]{name}[/bold]{marker}")
+        con.print(f"      main: [cyan]{provider}/{model}[/cyan] [dim]({has_key})[/dim]")
+        auxiliary_block = p.get("auxiliary_model")
+        if isinstance(auxiliary_block, dict) and auxiliary_block.get("model_name"):
+            auxiliary_provider = auxiliary_block.get("model_provider") or provider
+            auxiliary_model = auxiliary_block.get("model_name")
+            auxiliary_has_key = "key set" if auxiliary_block.get("api_key") else "inherits main"
+            con.print(f"      auxiliary:  [cyan]{auxiliary_provider}/{auxiliary_model}[/cyan] [dim]({auxiliary_has_key})[/dim]")
+        else:
+            con.print("      auxiliary:  [dim]reuse main[/dim]")
         tuning = []
         if p.get("reasoning_effort"):
             tuning.append(f"effort={p['reasoning_effort']}")
@@ -2024,109 +2035,66 @@ def _list_profiles():
         if p.get("top_p") is not None:
             tuning.append(f"top_p={p['top_p']}")
         if tuning:
-            con.print(f"      [dim]{', '.join(tuning)}[/dim]")
+            con.print(f"      [dim]tuning: {', '.join(tuning)}[/dim]")
     con.print()
-    con.print("Switch with: /model profile <name>", style="dim")
+    con.print("Switch with: /model <profile_name>", style="dim")
+    con.print("Add a new model: agentica setup", style="dim")
 
 
 def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
+    # Profile architecture: each profile in ~/.agentica/config.yaml is a fully
+    # self-contained model setup (main + optional auxiliary + tuning). `/model`
+    # is a *read + switch* command: it lists profiles, and switching persists
+    # only the top-level `active:` pointer — profile bodies are never rewritten
+    # here (that is `agentica setup`'s job).
+    #
+    # Why no free-form `/model openai/gpt-5` path: the old behaviour rewrote
+    # the *currently active* profile's fields in place, silently destroying
+    # whatever main/auxiliary/tuning the user had saved. Mutating profile
+    # bodies is the job of `agentica setup`, which collects a complete profile.
     con = get_console()
-    supported_providers = set(MODEL_REGISTRY.keys())
 
-    # Profile sub-commands: `/model profile`, `/model profile <name>`.
     stripped = cmd_args.strip()
+    if not stripped:
+        return _model_list_overview(ctx)
+
+    # Tolerate (and gently redirect) the legacy `profile <name>` form so users
+    # with muscle memory still get a working switch.
     parts = stripped.split(None, 1)
-    if parts and parts[0].lower() in ("profile", "profiles"):
+    if parts[0].lower() in ("profile", "profiles"):
         if len(parts) == 1:
-            return _list_profiles()
+            return _model_list_overview(ctx)
         return _apply_profile(ctx, parts[1].strip())
 
-    if cmd_args:
-        if "/" in cmd_args:
-            new_provider, new_model = cmd_args.split("/", 1)
-            new_provider = new_provider.strip().lower()
-            new_model = new_model.strip()
-        else:
-            new_model = cmd_args.strip()
-            new_provider = ctx.agent_config["model_provider"]
+    # Anything containing "/" is the old "<provider>/<model>" free-form path.
+    # Reject it with an actionable pointer rather than silently mutating config.
+    if "/" in stripped:
+        con.print(f"[yellow]/model no longer accepts free-form '{stripped}'.[/yellow]")
+        con.print("This used to overwrite the active profile in config.yaml. Run [bold]agentica setup[/bold] to add or edit a profile.", style="dim")
+        con.print("To switch between saved profiles: /model <profile_name>", style="dim")
+        return
 
-        if new_provider not in supported_providers:
-            con.print(f"[red]Unknown provider: {new_provider}[/red]")
-            con.print(f"Supported: {', '.join(sorted(supported_providers))}", style="dim")
-            return
+    # Single token => treat as a profile name to switch to.
+    return _apply_profile(ctx, stripped)
 
-        old_provider = ctx.agent_config["model_provider"]
-        if new_provider == old_provider:
-            new_base_url = ctx.agent_config.get("base_url") or default_base_url(new_provider)
-        else:
-            new_base_url = default_base_url(new_provider)
 
-        # When switching providers we must also re-resolve the api_key:
-        # reusing the old provider's key (e.g. deepseek) against a different
-        # endpoint (e.g. openai) is guaranteed to 401. Prefer a matching
-        # config.yaml profile, then any profile storing a key for this
-        # provider/base_url; if neither exists, fall back to ``None`` so the
-        # model factory resolves it from env vars.
-        if new_provider != old_provider:
-            matching_profile = get_profile(new_provider)
-            if matching_profile.get("model_provider") == new_provider and matching_profile.get("api_key"):
-                ctx.agent_config["api_key"] = matching_profile["api_key"]
-            else:
-                ctx.agent_config["api_key"] = get_profile_api_key(new_provider, new_base_url)
-        ctx.agent_config["model_provider"] = new_provider
-        ctx.agent_config["model_name"] = new_model
-        ctx.agent_config["base_url"] = new_base_url
-        _persist_model_choice(new_provider, new_model, new_base_url)
+def _model_list_overview(ctx: CommandContext) -> None:
+    """Readonly overview: current live model + every saved profile (rich detail).
 
-        # NOTE: model kwargs are assembled into a dict because an upstream
-        # secret-redaction filter mangles literal "api_key=..." kwarg
-        # spellings; the dict-and-splat form is functionally identical.
-        model_kwargs = {
-            "model_provider": new_provider,
-            "model_name": new_model,
-            "base_url": new_base_url,
-            "api_key": ctx.agent_config.get("api_key"),
-            "max_tokens": ctx.agent_config.get("max_tokens"),
-            "temperature": ctx.agent_config.get("temperature"),
-            "reasoning_effort": ctx.agent_config.get("reasoning_effort"),
-            "top_p": ctx.agent_config.get("top_p"),
-            # context_window is model-specific; let the new model auto-detect it
-            # from the catalog rather than carrying over the old model's value.
-        }
-        new_model_obj = get_model(**model_kwargs)
-        if ctx.current_agent is not None:
-            ctx.current_agent.model = new_model_obj
-            _sanitize_history_for_model_switch(ctx.current_agent)
-            con.print(f"[green]Switched to: {new_provider}/{new_model} (session preserved)[/green]")
-            return {"model_switched": True}
-        else:
-            current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 user_input_callback=ctx.user_input_callback)
-            con.print(f"[green]Switched to: {new_provider}/{new_model}[/green]")
-            return {"current_agent": current_agent}
-    else:
-        con.print(
-            f"Current model: [bold cyan]{ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}[/bold cyan]"
-        )
-        con.print()
-        con.print("Supported providers and example models:", style="cyan")
-        for provider in sorted(EXAMPLE_MODELS.keys()):
-            marker = " [current]" if provider == ctx.agent_config["model_provider"] else ""
-            models_str = ", ".join(EXAMPLE_MODELS[provider][:3]) + ", ..."
-            con.print(f"  {provider}{marker}: [dim]{models_str}[/dim]")
-        profiles = get_profiles()
-        if profiles:
-            active = get_active_profile_name()
-            con.print()
-            con.print("Saved profiles (~/.agentica/config.yaml):", style="cyan")
-            for name, p in profiles.items():
-                marker = " [active]" if name == active else ""
-                con.print(f"  {name}{marker}: [dim]{p.get('model_provider', '?')}/{p.get('model_name', '?')}[/dim]")
-        con.print()
-        con.print("Usage: /model <provider>/<model>  (any model name accepted)", style="dim")
-        con.print("       /model profile             (list saved profiles)", style="dim")
-        con.print("       /model profile <name>      (switch to a saved profile)", style="dim")
-        con.print("Examples: /model openai/gpt-5, /model deepseek/deepseek-chat", style="dim")
+    Reuses ``_list_profiles`` for the per-profile rendering so the two views
+    stay in lockstep; this function only adds the live-session header and the
+    "how to use /model" footer.
+    """
+    con = get_console()
+    con.print(
+        f"Current model: [bold cyan]{ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}[/bold cyan]"
+    )
+    con.print()
+    _list_profiles()
+    con.print("Usage:", style="cyan")
+    con.print("  /model                  list saved profiles (this view)", style="dim")
+    con.print("  /model <profile_name>   switch to a saved profile (session only, config.yaml untouched)", style="dim")
+    con.print("To add or edit a profile, run [bold]agentica setup[/bold] outside the session.", style="dim")
 
 
 def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
@@ -2201,7 +2169,6 @@ def _rule_based_compact(current_agent, messages, msg_count):
 
 
 def _cmd_debug(ctx: CommandContext, cmd_args: str = ""):
-    _cmd_title(f"/debug {cmd_args.strip()}" if cmd_args.strip() else "/debug")
     con = get_console()
     con.print("[bold cyan]Debug Info[/bold cyan]")
     con.print(f"  Model: {ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}")
@@ -2228,7 +2195,6 @@ def _cmd_reload_skills(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_cost(ctx: CommandContext, cmd_args: str = ""):
     """Display detailed token usage and cost for the current session."""
-    _cmd_title(f"/usage {cmd_args.strip()}" if cmd_args.strip() else "/usage")
     con = get_console()
     tracker = ctx.current_agent.run_response.cost_tracker if ctx.current_agent else None
 
@@ -2440,7 +2406,7 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
                 preview = _extract_queue_text(item)[:80]
                 con.print(f"    {i + 1}. [dim]{preview}[/dim]")
             con.print()
-        con.print("  [dim]Usage: /queue <prompt>  |  /queue list  |  /queue clear  |  /queue remove <n>[/dim]")
+        con.print("  [dim]Usage: /queue <prompt>  |  /queue list  |  /queue edit <n> <text>  |  /queue insert <n> <text>  |  /queue remove <n>  |  /queue clear[/dim]")
         con.print("  [dim]See also: /steer (nudge current run) · /background (run in parallel)[/dim]")
         return
 
@@ -2477,6 +2443,40 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"  [green]Removed queued message #{idx + 1}.[/green]")
         else:
             con.print(f"  [red]Invalid index: {idx + 1}[/red]")
+        return
+
+    if subcommand == "edit":
+        if pq is None:
+            return
+        rest = sub[1].strip() if len(sub) > 1 else ""
+        parts = rest.split(maxsplit=1)
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].strip():
+            con.print("  [dim]Usage: /queue edit <number> <new text>[/dim]")
+            return
+        idx = int(parts[0]) - 1
+        new_text = parts[1]
+        if pq.replace_index(idx, new_text):
+            preview = new_text[:80] + ("..." if len(new_text) > 80 else "")
+            con.print(f"  [green]Edited queued message #{idx + 1}:[/green] [dim]{preview}[/dim]")
+        else:
+            con.print(f"  [red]Invalid index: {idx + 1}[/red]")
+        return
+
+    if subcommand == "insert":
+        if pq is None:
+            return
+        rest = sub[1].strip() if len(sub) > 1 else ""
+        parts = rest.split(maxsplit=1)
+        if len(parts) < 2 or not parts[0].isdigit() or not parts[1].strip():
+            con.print("  [dim]Usage: /queue insert <number> <text>  (1 = front, qsize+1 = back)[/dim]")
+            return
+        idx = int(parts[0]) - 1
+        new_text = parts[1]
+        if pq.insert_index(idx, new_text):
+            preview = new_text[:80] + ("..." if len(new_text) > 80 else "")
+            con.print(f"  [green]Inserted at position #{idx + 1}:[/green] [dim]{preview}[/dim]")
+        else:
+            con.print(f"  [red]Invalid index: {idx + 1} (valid range: 1..{pq.qsize() + 1})[/red]")
         return
 
     # Default: queue a prompt
@@ -2934,7 +2934,6 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     """
     con = get_console()
     arg = (cmd_args or "").strip()
-    _cmd_title(f"/goal {arg}" if arg else "/goal")
 
     mgr = _ensure_goal_manager(ctx)
     if mgr is None:
@@ -3053,7 +3052,6 @@ def _cmd_subgoal(ctx: CommandContext, cmd_args: str = ""):
     """
     con = get_console()
     arg = (cmd_args or "").strip()
-    _cmd_title(f"/subgoal {arg}" if arg else "/subgoal")
 
     mgr = _ensure_goal_manager(ctx)
     if mgr is None or mgr.load() is None:
@@ -3118,7 +3116,7 @@ COMMAND_REGISTRY = {
     "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done)"),
     "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
     "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),
-    "/queue": (_cmd_queue, "Run as the NEXT turn after the current run finishes | list | clear | remove <n>"),
+    "/queue": (_cmd_queue, "Run as the NEXT turn after the current run finishes | list | edit <n> | insert <n> | remove <n> | clear"),
     "/q": (_cmd_queue, "Run as the next turn after current run (alias)"),
     "/background": (_cmd_background, "Run NOW in a parallel independent agent (own session)"),
     "/bg": (_cmd_background, "Run now in a parallel independent agent (alias)"),
@@ -3162,3 +3160,36 @@ COMMAND_REGISTRY = {
 }
 
 COMMAND_HANDLERS = {cmd: handler for cmd, (handler, _) in COMMAND_REGISTRY.items()}
+
+
+# ---- Slash-command invocation echo ----
+# Commands that produce their own conversational output (so an extra header
+# would just add visual noise) or that are silently no-op control verbs.
+_SILENT_CMDS: set = {
+    "/exit", "/quit",
+    "/clear", "/reset",   # these wipe the screen — the echo would vanish anyway
+    "/btw",               # has its own concurrent UI
+    "/paste", "/image",   # part of the user's message construction, not a query
+}
+
+
+def echo_command_invocation(cmd: str, cmd_args: str = "") -> None:
+    """Print a single, consistent header for every slash-command invocation.
+
+    Centralizing this means individual handlers no longer need to print their
+    own per-command titles, and the user sees uniformly-formatted output
+    regardless of whether the command was typed, replayed, or invoked
+    programmatically (where the prompt's natural echo is absent).
+
+    Silent commands (see ``_SILENT_CMDS``) skip the echo to avoid noise.
+
+    Single call site: ``agentica/cli/interactive.py`` calls this once per slash
+    command at the dispatch entrypoint, immediately before invoking the
+    handler. Do not call this from inside individual command handlers or you
+    will double-print the header.
+    """
+    if cmd in _SILENT_CMDS:
+        return
+    con = get_console()
+    rendered = f"{cmd} {cmd_args}".rstrip()
+    con.print(f"[bold dim]> {rendered}[/bold dim]")

@@ -110,10 +110,10 @@ class AgentService:
         # main-model values so users can override just what differs. When
         # `{prefix}_model_name` is empty, the sibling is not built and DeepAgent
         # reuses the main model.
-        aux_model_provider: Optional[str] = None,
-        aux_model_name: Optional[str] = None,
-        aux_base_url: Optional[str] = None,
-        aux_api_key: Optional[str] = None,
+        auxiliary_model_provider: Optional[str] = None,
+        auxiliary_model_name: Optional[str] = None,
+        auxiliary_base_url: Optional[str] = None,
+        auxiliary_api_key: Optional[str] = None,
         task_model_provider: Optional[str] = None,
         task_model_name: Optional[str] = None,
         task_base_url: Optional[str] = None,
@@ -126,10 +126,10 @@ class AgentService:
         self.extra_instructions = extra_instructions or []
 
         # Sibling model configs — empty string treated as "not set".
-        self.aux_model_provider = aux_model_provider or settings.aux_model_provider
-        self.aux_model_name = aux_model_name or settings.aux_model_name
-        self.aux_base_url = aux_base_url or settings.aux_base_url
-        self.aux_api_key = aux_api_key or settings.aux_api_key
+        self.auxiliary_model_provider = auxiliary_model_provider or settings.auxiliary_model_provider
+        self.auxiliary_model_name = auxiliary_model_name or settings.auxiliary_model_name
+        self.auxiliary_base_url = auxiliary_base_url or settings.auxiliary_base_url
+        self.auxiliary_api_key = auxiliary_api_key or settings.auxiliary_api_key
         self.task_model_provider = task_model_provider or settings.task_model_provider
         self.task_model_name = task_model_name or settings.task_model_name
         self.task_base_url = task_base_url or settings.task_base_url
@@ -146,7 +146,7 @@ class AgentService:
         self._init_lock = asyncio.Lock()
 
     def _build_sibling_model(self, prefix: str) -> Optional[Any]:
-        """Build a sibling (aux/task) model if a model name is configured.
+        """Build a sibling (auxiliary/task) model if a model name is configured.
 
         Fields fall through to main-model values so callers can override
         only what differs (e.g. a different model_name on the same provider,
@@ -207,12 +207,12 @@ class AgentService:
         errors / user corrections / success patterns), memory tools.
 
         auxiliary_model / task_model default to the main model (DeepAgent
-        default). Pass AGENTICA_AUX_* / AGENTICA_TASK_* env vars (or build
+        default). Pass AGENTICA_AUXILIARY_* / AGENTICA_TASK_* env vars (or build
         AgentService with the matching kwargs) to route them to a
         different provider / model / base_url / api_key.
         """
         model = create_model(self.model_provider, self.model_name)
-        auxiliary_model = self._build_sibling_model("aux")
+        auxiliary_model = self._build_sibling_model("auxiliary")
         task_model = self._build_sibling_model("task")
         work_dir = str(settings.base_dir)
 

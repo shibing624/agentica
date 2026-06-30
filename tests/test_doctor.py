@@ -20,9 +20,12 @@ class TestDoctor(unittest.TestCase):
         report = run_doctor()
         self.assertIsInstance(report, DoctorReport)
         names = [c.name for c in report.checks]
+        # The provider check splits the key source into two rows
+        # (config.yaml + env) so users can tell which one is in play.
         for expected in ["Python version", "Agentica version", "Home dir writable",
-                         "Configured provider", "API key", "LSP diagnostics",
-                         "LSP workspace", "LSP server (pyright)", "MCP config"]:
+                         "Active profile", "API key (config.yaml)", "API key (env)",
+                         "LSP diagnostics", "LSP workspace", "LSP server (pyright)",
+                         "MCP config"]:
             self.assertIn(expected, names)
 
     def test_all_statuses_valid(self):
@@ -43,18 +46,29 @@ class TestDoctor(unittest.TestCase):
         self.assertIn("ok", report.summary())
 
     def test_missing_api_key_is_failure(self):
-        with patch("agentica.cli.setup.has_api_key", return_value=False):
+        """Final 'API key' FAIL row appears only when BOTH sources are empty."""
+        with (
+            patch("agentica.cli.setup.get_profile_api_key", return_value=None),
+            patch.dict(os.environ, {}, clear=True),
+        ):
             report = run_doctor()
         api = next(c for c in report.checks if c.name == "API key")
         self.assertEqual(api.status, FAIL)
+        # Remediation copy should steer users toward config.yaml, not .env.
+        self.assertIn("config.yaml", api.detail)
         self.assertFalse(report.ok)
 
-    def test_ok_property_true_when_no_failures(self):
-        with patch("agentica.cli.setup.has_api_key", return_value=True):
+    def test_ok_property_true_when_config_yaml_has_key(self):
+        """A key in config.yaml alone is enough — env var is just a fallback."""
+        with (
+            patch("agentica.cli.setup.get_profile_api_key", return_value="sk-from-config"),
+            patch.dict(os.environ, {}, clear=True),
+        ):
             report = run_doctor()
-        # ok ignores warnings (e.g. pyright/MCP may warn in CI).
-        api = next(c for c in report.checks if c.name == "API key")
-        self.assertEqual(api.status, OK)
+        # No final "API key" FAIL row when config.yaml provides the key.
+        self.assertFalse(any(c.name == "API key" and c.status == FAIL for c in report.checks))
+        profile_row = next(c for c in report.checks if c.name == "API key (config.yaml)")
+        self.assertEqual(profile_row.status, OK)
 
     def test_diagnostics_enabled_is_reported(self):
         report = run_doctor(enable_diagnostics=True, diagnostics_servers=["pyright"], work_dir=os.getcwd())

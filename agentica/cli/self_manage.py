@@ -26,6 +26,7 @@ from agentica.global_config import (
     upsert_profile,
     global_config_path,
 )
+from agentica.cli.setup import _validate_profile
 
 # Keys whose values must never be echoed back in clear text.
 _SECRET_KEY_PATTERN = re.compile(r"(api_key|token|secret|password|passwd)", re.IGNORECASE)
@@ -176,6 +177,11 @@ def set_profile_field(
         profile.pop(field, None)
     else:
         profile[field] = coerced
+    # config.yaml is core: refuse to persist an invalid profile. Catches e.g.
+    # `/model set temperature 99` or `/model set base_url not-a-url`.
+    errors = _validate_profile(profile)
+    if errors:
+        raise ValueError("; ".join(errors))
     upsert_profile(name, profile, make_active=False)
     return {k: mask_secret(k, v) for k, v in get_profile(name).items()}
 

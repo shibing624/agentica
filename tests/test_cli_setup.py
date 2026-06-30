@@ -5,7 +5,7 @@
 
 Configuration lives in ~/.agentica/config.yaml (YAML, named profiles). There is
 no cli_config.json anymore. Each profile has a main model and an optional
-``aux_model`` sub-block (the cheap model for background LLM work + the `task`
+``auxiliary_model`` sub-block (the cheap model for background LLM work + the `task`
 subagent tool).
 """
 
@@ -28,10 +28,10 @@ def _make_args(**overrides):
         model_name=None,
         base_url=None,
         api_key=None,
-        aux_model_provider=None,
-        aux_model_name=None,
-        aux_base_url=None,
-        aux_api_key=None,
+        auxiliary_model_provider=None,
+        auxiliary_model_name=None,
+        auxiliary_base_url=None,
+        auxiliary_api_key=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -170,8 +170,8 @@ class TestResolveModelConfig(unittest.TestCase):
                 return_value={
                     "model_provider": "openai", "model_name": "gpt-4o",
                     "base_url": "https://api.openai.com/v1", "api_key": "sk-from-wizard",
-                    "aux_model_provider": None, "aux_model_name": None,
-                    "aux_base_url": None, "aux_api_key": None,
+                    "auxiliary_model_provider": None, "auxiliary_model_name": None,
+                    "auxiliary_base_url": None, "auxiliary_api_key": None,
                 },
             ) as mock_wizard,
         ):
@@ -190,7 +190,7 @@ class TestResolveModelConfig(unittest.TestCase):
 
 
 class TestResolveAuxModel(unittest.TestCase):
-    """Optional aux model resolution: CLI flag > profile aux_model block >
+    """Optional auxiliary model resolution: CLI flag > profile auxiliary_model block >
     main model (same provider) / preset + matching profile (cross provider)."""
 
     def setUp(self):
@@ -215,43 +215,43 @@ class TestResolveAuxModel(unittest.TestCase):
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
         })
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
-        for k in ("aux_model_name", "aux_model_provider", "aux_base_url", "aux_api_key"):
+        for k in ("auxiliary_model_name", "auxiliary_model_provider", "auxiliary_base_url", "auxiliary_api_key"):
             self.assertIsNone(resolved[k], k)
 
     def test_same_provider_inherits_main_base_and_key(self):
         self._write_profile({
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
-            "aux_model": {"model_name": "deepseek-chat"},  # only name; same provider
+            "auxiliary_model": {"model_name": "deepseek-chat"},  # only name; same provider
         })
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
-        self.assertEqual(resolved["aux_model_provider"], "deepseek")
-        self.assertEqual(resolved["aux_model_name"], "deepseek-chat")
-        self.assertEqual(resolved["aux_base_url"], "https://api.deepseek.com")
-        self.assertEqual(resolved["aux_api_key"], "sk-main")
+        self.assertEqual(resolved["auxiliary_model_provider"], "deepseek")
+        self.assertEqual(resolved["auxiliary_model_name"], "deepseek-chat")
+        self.assertEqual(resolved["auxiliary_base_url"], "https://api.deepseek.com")
+        self.assertEqual(resolved["auxiliary_api_key"], "sk-main")
 
     def test_cross_provider_uses_preset_base_and_block_key(self):
         self._write_profile({
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
-            "aux_model": {
+            "auxiliary_model": {
                 "model_provider": "zhipuai", "model_name": "glm-4.7-flash",
                 "api_key": "sk-zhipu",
             },
         })
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
-        self.assertEqual(resolved["aux_model_provider"], "zhipuai")
-        self.assertEqual(resolved["aux_model_name"], "glm-4.7-flash")
+        self.assertEqual(resolved["auxiliary_model_provider"], "zhipuai")
+        self.assertEqual(resolved["auxiliary_model_name"], "glm-4.7-flash")
         # base_url absent in block -> zhipuai preset default, NOT deepseek's.
-        self.assertEqual(resolved["aux_base_url"], cli_setup.default_base_url("zhipuai"))
+        self.assertEqual(resolved["auxiliary_base_url"], cli_setup.default_base_url("zhipuai"))
         # block key used, NOT main key.
-        self.assertEqual(resolved["aux_api_key"], "sk-zhipu")
+        self.assertEqual(resolved["auxiliary_api_key"], "sk-zhipu")
 
     def test_cross_provider_no_block_key_uses_matching_profile(self):
         self._write_profile({
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
-            "aux_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash"},
+            "auxiliary_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash"},
         })
         # A separate profile stores the zhipuai key (not active).
         self._write_profile({
@@ -259,31 +259,31 @@ class TestResolveAuxModel(unittest.TestCase):
             "base_url": cli_setup.default_base_url("zhipuai"), "api_key": "sk-saved-zhipu",
         }, name="zhipuai", make_active=False)
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
-        self.assertEqual(resolved["aux_api_key"], "sk-saved-zhipu")
+        self.assertEqual(resolved["auxiliary_api_key"], "sk-saved-zhipu")
 
     def test_cross_provider_no_key_anywhere_returns_none_not_main(self):
         self._write_profile({
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
-            "aux_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash"},
+            "auxiliary_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash"},
         })
         with patch.dict(os.environ, {}, clear=True):
             resolved = cli_setup.resolve_model_config(_make_args(), console=None)
-        self.assertIsNone(resolved["aux_api_key"])  # must NOT fall back to sk-main
-        self.assertEqual(resolved["aux_base_url"], cli_setup.default_base_url("zhipuai"))
+        self.assertIsNone(resolved["auxiliary_api_key"])  # must NOT fall back to sk-main
+        self.assertEqual(resolved["auxiliary_base_url"], cli_setup.default_base_url("zhipuai"))
 
     def test_cli_flag_overrides_profile_block(self):
         self._write_profile({
             "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
             "base_url": "https://api.deepseek.com", "api_key": "sk-main",
-            "aux_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash"},
+            "auxiliary_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash"},
         })
-        args = _make_args(aux_model_provider="deepseek", aux_model_name="deepseek-chat")
+        args = _make_args(auxiliary_model_provider="deepseek", auxiliary_model_name="deepseek-chat")
         resolved = cli_setup.resolve_model_config(args, console=None)
-        self.assertEqual(resolved["aux_model_name"], "deepseek-chat")
-        self.assertEqual(resolved["aux_model_provider"], "deepseek")
-        self.assertEqual(resolved["aux_base_url"], "https://api.deepseek.com")
-        self.assertEqual(resolved["aux_api_key"], "sk-main")
+        self.assertEqual(resolved["auxiliary_model_name"], "deepseek-chat")
+        self.assertEqual(resolved["auxiliary_model_provider"], "deepseek")
+        self.assertEqual(resolved["auxiliary_base_url"], "https://api.deepseek.com")
+        self.assertEqual(resolved["auxiliary_api_key"], "sk-main")
 
 
 class TestShouldOnboard(unittest.TestCase):
@@ -359,7 +359,7 @@ class TestRunOnboarding(unittest.TestCase):
         console = MagicMock()
         console.width = 80
         # prompts: provider("2"=openai), base_url(""=default), api_key("sk-test"),
-        # model_name(""=default gpt-4o), advanced("n"), aux("n")
+        # model_name(""=default gpt-4o), advanced("n"), auxiliary("n")
         inputs = iter(["2", "", "sk-test", "", "n", "n", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
@@ -374,7 +374,7 @@ class TestRunOnboarding(unittest.TestCase):
         profile = gc.get_profile()
         self.assertEqual(profile["model_provider"], "openai")
         self.assertEqual(profile["api_key"], "sk-test")
-        self.assertNotIn("aux_model", profile)
+        self.assertNotIn("auxiliary_model", profile)
         # Wizard must NOT touch ~/.agentica/.env anymore.
         self.assertFalse(os.path.exists(os.path.join(self._tmp.name, ".env")))
         # And must NOT have exported the entered key under generic OpenAI env names.
@@ -385,7 +385,7 @@ class TestRunOnboarding(unittest.TestCase):
         console = MagicMock()
         console.width = 80
         custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
-        # provider(custom), base_url, api_key, model_name, advanced("n"), aux("n")
+        # provider(custom), base_url, api_key, model_name, advanced("n"), auxiliary("n")
         inputs = iter([custom_index, "https://my-llm.local/v1", "sk-custom", "my-model", "n", "n", "n"])
         with (
             patch.dict(os.environ, {"OPENAI_API_KEY": "real-openai"}, clear=True),
@@ -401,7 +401,7 @@ class TestRunOnboarding(unittest.TestCase):
         # Custom endpoint -> host-suffixed profile name, isolated from real openai.
         self.assertEqual(profile["base_url"], "https://my-llm.local/v1")
         self.assertEqual(profile["api_key"], "sk-custom")
-        self.assertNotIn("aux_model", profile)
+        self.assertNotIn("auxiliary_model", profile)
         self.assertFalse(os.path.exists(os.path.join(self._tmp.name, ".env")))
 
     def test_advanced_params_saved_to_profile(self):
@@ -410,7 +410,7 @@ class TestRunOnboarding(unittest.TestCase):
         console.width = 80
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("y"),
         # reasoning("high"), max_tokens("4096"), context("500000"), temp("0.3"),
-        # top_p("0.9"), aux("n")
+        # top_p("0.9"), auxiliary("n")
         inputs = iter(["2", "", "sk", "", "y", "high", "4096", "500000", "0.3", "0.9", "n", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
@@ -426,7 +426,7 @@ class TestRunOnboarding(unittest.TestCase):
         self.assertEqual(profile["max_tokens"], 4096)
         self.assertEqual(profile["context_window"], 500000)
 
-    def test_aux_model_skipped_when_answered_no(self):
+    def test_auxiliary_model_skipped_when_answered_no(self):
         from agentica import global_config as gc
         console = MagicMock()
         console.width = 80
@@ -436,14 +436,14 @@ class TestRunOnboarding(unittest.TestCase):
             patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
         ):
             cli_setup.run_onboarding(console)
-        self.assertNotIn("aux_model", gc.get_profile())
+        self.assertNotIn("auxiliary_model", gc.get_profile())
 
     def test_cache_control_opt_in_persisted_to_profile(self):
         from agentica import global_config as gc
         console = MagicMock()
         console.width = 80
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("n"),
-        # cache: yes("y"), messages("2"), header("Venus-Session-Id"), aux("n")
+        # cache: yes("y"), messages("2"), header("Venus-Session-Id"), auxiliary("n")
         inputs = iter(["2", "", "sk", "", "n", "y", "2", "Venus-Session-Id", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
@@ -468,12 +468,12 @@ class TestRunOnboarding(unittest.TestCase):
         profile = gc.get_profile()
         self.assertNotIn("enable_cache_control", profile)
 
-    def test_aux_model_configured_and_persisted(self):
+    def test_auxiliary_model_configured_and_persisted(self):
         from agentica import global_config as gc
         console = MagicMock()
         console.width = 80
         # main: openai("2"), default base, key("sk-main"), default model, adv("n");
-        # aux: yes("y"), zhipuai("4"), default base(""), key("sk-zhipu"), default model
+        # auxiliary: yes("y"), zhipuai("4"), default base(""), key("sk-zhipu"), default model
         zhipu_idx = str(cli_setup._PROVIDER_ORDER.index("zhipuai") + 1)
         inputs = iter(["2", "", "sk-main", "", "n", "n", "y", zhipu_idx, "", "sk-zhipu", ""])
         with (
@@ -482,8 +482,8 @@ class TestRunOnboarding(unittest.TestCase):
         ):
             cli_setup.run_onboarding(console)
         profile = gc.get_profile()
-        self.assertIn("aux_model", profile)
-        am = profile["aux_model"]
+        self.assertIn("auxiliary_model", profile)
+        am = profile["auxiliary_model"]
         self.assertEqual(am["model_provider"], "zhipuai")
         self.assertEqual(am["model_name"], "glm-4.7-flash")
         self.assertEqual(am["base_url"], cli_setup.default_base_url("zhipuai"))
@@ -493,7 +493,7 @@ class TestRunOnboarding(unittest.TestCase):
         """A re-run walked through with Enter/decline preserves the whole profile."""
         from agentica import global_config as gc
 
-        # Pre-seed a fully-configured active profile (main + tuning + cache + aux).
+        # Pre-seed a fully-configured active profile (main + tuning + cache + auxiliary).
         gc.upsert_profile(
             "openai",
             {
@@ -505,11 +505,11 @@ class TestRunOnboarding(unittest.TestCase):
                 "max_tokens": 4096,
                 "enable_cache_control": True,
                 "cache_control_messages": 3,
-                "aux_model": {
+                "auxiliary_model": {
                     "model_provider": "zhipuai",
                     "model_name": "glm-4.7-flash",
                     "base_url": cli_setup.default_base_url("zhipuai"),
-                    "api_key": "sk-keep-aux",
+                    "api_key": "sk-keep-auxiliary",
                 },
             },
             make_active=True,
@@ -517,7 +517,7 @@ class TestRunOnboarding(unittest.TestCase):
         console = MagicMock()
         console.width = 80
         # 7 prompts, all "keep": provider(Enter), base_url(Enter), api_key(Enter),
-        # model_name(Enter), advanced(edit? n), cache(edit? n), aux(reconfigure? n).
+        # model_name(Enter), advanced(edit? n), cache(edit? n), auxiliary(reconfigure? n).
         inputs = iter(["", "", "", "", "n", "n", "n"])
         with (
             patch.dict(os.environ, {}, clear=True),
@@ -537,12 +537,12 @@ class TestRunOnboarding(unittest.TestCase):
         # Cache kept.
         self.assertTrue(profile.get("enable_cache_control"))
         self.assertEqual(profile.get("cache_control_messages"), 3)
-        # Aux block kept verbatim (not dropped by the decline).
-        self.assertIn("aux_model", profile)
-        am = profile["aux_model"]
+        # Auxiliary block kept verbatim (not dropped by the decline).
+        self.assertIn("auxiliary_model", profile)
+        am = profile["auxiliary_model"]
         self.assertEqual(am["model_provider"], "zhipuai")
         self.assertEqual(am["model_name"], "glm-4.7-flash")
-        self.assertEqual(am["api_key"], "sk-keep-aux")
+        self.assertEqual(am["api_key"], "sk-keep-auxiliary")
 
     def test_rerun_shows_api_key_in_full(self):
         """The api key prompt must NOT be masked (is_password=False) in setup."""
@@ -581,6 +581,90 @@ class TestRunOnboarding(unittest.TestCase):
         )
 
 
+class TestMultiProfileWizard(unittest.TestCase):
+    """The wizard supports multiple named profiles per provider.
+
+    Pre-refactor: profile name was derived from provider, so a user
+    couldn't keep both ``opus`` and ``gpt5-fast`` on different OpenAI-style
+    endpoints — re-running setup just overwrote the previous profile. Now
+    the wizard prompts for a profile name and offers a "configure another?"
+    loop so the same session can land multiple profiles.
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._gc_patch = patch(
+            "agentica.global_config.global_config_path",
+            return_value=os.path.join(self._tmp.name, "config.yaml"),
+        )
+        self._gc_patch.start()
+
+    def tearDown(self):
+        self._gc_patch.stop()
+        self._tmp.cleanup()
+
+    def test_profile_name_prompt_creates_named_profile(self):
+        """User-supplied name becomes the YAML key, not the provider slug."""
+        from agentica import global_config as gc
+        console = MagicMock()
+        console.width = 80
+        # provider("2"=openai), base_url(""), api_key("sk"), model_name(""),
+        # advanced("n"), cache("n"), auxiliary("n"), profile_name("opus"),
+        # configure_another("n").
+        inputs = iter(["2", "", "sk-a", "", "n", "n", "n", "opus", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+            patch.object(cli_setup, "_prompt_cron", return_value=None),
+        ):
+            cli_setup.run_onboarding(console)
+
+        profiles = gc.get_profiles()
+        self.assertIn("opus", profiles)
+        self.assertEqual(gc.get_active_profile_name(), "opus")
+
+    def test_two_profiles_same_provider_coexist(self):
+        """Two OpenAI-style profiles with different names both survive."""
+        from agentica import global_config as gc
+        console = MagicMock()
+        console.width = 80
+        # First profile: opus
+        inputs1 = iter(["2", "", "sk-opus", "gpt-5", "n", "n", "n", "opus", "y"])
+        # Second profile (loop iteration 2): gpt5-fast — provider+model differ
+        inputs2 = iter(["2", "", "sk-fast", "gpt-5-mini", "n", "n", "n", "gpt5-fast", "n"])
+        all_inputs = iter(list(inputs1) + list(inputs2))
+        # Active picker: pick "gpt5-fast" (index 2).
+        # Wrapped above into one stream + a final picker answer.
+        all_with_picker = iter(list(all_inputs) + ["2"])
+
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(all_with_picker)),
+            patch.object(cli_setup, "_prompt_cron", return_value=None),
+        ):
+            cli_setup.run_onboarding(console)
+
+        profiles = gc.get_profiles()
+        self.assertIn("opus", profiles)
+        self.assertIn("gpt5-fast", profiles)
+        self.assertEqual(profiles["opus"]["model_name"], "gpt-5")
+        self.assertEqual(profiles["gpt5-fast"]["model_name"], "gpt-5-mini")
+        self.assertEqual(profiles["opus"]["api_key"], "sk-opus")
+        self.assertEqual(profiles["gpt5-fast"]["api_key"], "sk-fast")
+        self.assertEqual(gc.get_active_profile_name(), "gpt5-fast")
+
+    def test_suggest_profile_name_auto_suffixes_on_collision(self):
+        """``_suggest_profile_name`` never returns a name that already exists."""
+        existing = {"openai": {}, "openai-2": {}}
+        suggested = cli_setup._suggest_profile_name("openai", None, existing)
+        self.assertEqual(suggested, "openai-3")
+        # No collision => seed is used unchanged.
+        self.assertEqual(
+            cli_setup._suggest_profile_name("deepseek", None, existing),
+            "deepseek",
+        )
+
+
 class TestConfigYamlRoundTrip(unittest.TestCase):
     """config.yaml is YAML with ruamel round-trip: user comments survive writes."""
 
@@ -600,6 +684,137 @@ class TestConfigYamlRoundTrip(unittest.TestCase):
             self.assertIn("Hand-edit freely", txt)
             # And the data round-trips.
             self.assertEqual(gc.get_profile()["model_provider"], "anthropic")
+
+
+class TestProfileValidation(unittest.TestCase):
+    """config.yaml is core: invalid input is re-prompted, invalid profiles are
+    never written. Tests the validators, the per-field re-prompt loops, and the
+    final pre-write gate in run_onboarding()."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self._gc_patch = patch(
+            "agentica.global_config.global_config_path",
+            return_value=os.path.join(self._tmp.name, "config.yaml"),
+        )
+        self._gc_patch.start()
+
+    def tearDown(self):
+        self._gc_patch.stop()
+        self._tmp.cleanup()
+
+    # ── _validate_base_url ──────────────────────────────────────────────────
+    def test_validate_base_url_accepts_http_https(self):
+        self.assertIsNone(cli_setup._validate_base_url("https://api.example.com/v1"))
+        self.assertIsNone(cli_setup._validate_base_url("http://localhost:8080"))
+
+    def test_validate_base_url_rejects_bad_input(self):
+        self.assertIsNotNone(cli_setup._validate_base_url(""))
+        self.assertIsNotNone(cli_setup._validate_base_url("foo"))
+        self.assertIsNotNone(cli_setup._validate_base_url("ftp://files.example.com"))
+        self.assertIsNotNone(cli_setup._validate_base_url("https:///no-host"))
+
+    # ── _validate_profile ───────────────────────────────────────────────────
+    def test_validate_profile_valid(self):
+        errors = cli_setup._validate_profile({
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-x",
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "max_tokens": 4096,
+        })
+        self.assertEqual(errors, [])
+
+    def test_validate_profile_flags_each_invalid_field(self):
+        errors = cli_setup._validate_profile({
+            "model_provider": "not-a-provider",
+            "model_name": "",
+            "base_url": "no-scheme",
+            "reasoning_effort": "ultra",
+            "max_tokens": 0,
+            "context_window": -1,
+            "temperature": 5.0,
+            "top_p": 2.0,
+            "enable_cache_control": "yes",
+            "cache_control_messages": 0,
+            "cache_control_session_header": "   ",
+            "auxiliary_model": {"model_provider": "x", "model_name": "", "base_url": "bad"},
+        })
+        joined = " | ".join(errors)
+        for needle in (
+            "model_provider", "model_name", "base_url", "reasoning_effort",
+            "max_tokens", "context_window", "temperature", "top_p",
+            "enable_cache_control", "cache_control_messages",
+            "cache_control_session_header", "auxiliary_model",
+        ):
+            self.assertIn(needle, joined)
+
+    # ── per-field re-prompt loops ────────────────────────────────────────────
+    def test_prompt_base_url_reprompts_until_valid(self):
+        console = MagicMock()
+        inputs = iter(["foo", "ftp://x", "https://api.example.com/v1"])
+        with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+            url = cli_setup._prompt_base_url(console, label="  Base URL: ")
+        self.assertEqual(url, "https://api.example.com/v1")
+
+    def test_prompt_float_range_reprompts_until_in_range(self):
+        console = MagicMock()
+        inputs = iter(["99", "-1", "0.5"])
+        with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+            val = cli_setup._prompt_float_range(console, "  Temperature: ", 0.0, 2.0)
+        self.assertEqual(val, 0.5)
+
+    def test_prompt_base_url_accepts_blank_default_when_valid(self):
+        console = MagicMock()
+        inputs = iter([""])
+        with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+            url = cli_setup._prompt_base_url(
+                console, label="  Base URL [https://api.openai.com/v1]: ",
+                default="https://api.openai.com/v1",
+            )
+        self.assertEqual(url, "https://api.openai.com/v1")
+
+    # ── final pre-write gate ────────────────────────────────────────────────
+    def test_onboarding_reprompts_invalid_base_url(self):
+        from agentica import global_config as gc
+        console = MagicMock()
+        console.width = 80
+        custom_index = str(len(cli_setup._PROVIDER_ORDER) + 1)
+        # provider(custom), base_url("foo"->re-prompt->valid), key, model, adv, cache, auxiliary
+        inputs = iter([custom_index, "foo", "https://my-llm.local/v1", "sk", "m", "n", "n", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
+            result = cli_setup.run_onboarding(console)
+        self.assertEqual(result["base_url"], "https://my-llm.local/v1")
+        self.assertEqual(gc.get_profile()["base_url"], "https://my-llm.local/v1")
+
+    def test_onboarding_gate_blocks_invalid_prefill(self):
+        """A corrupted existing profile (out-of-range temperature) carried
+        through by declining to edit must NOT be re-written — the gate aborts."""
+        from agentica import global_config as gc
+        gc.upsert_profile("default", {
+            "model_provider": "openai",
+            "model_name": "gpt-4o",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-x",
+            "temperature": 99,  # invalid, seeded directly (upsert has no gate)
+        }, make_active=True)
+        console = MagicMock()
+        console.width = 80
+        # All-Enter keeps existing values; "n" declines advanced/cache/auxiliary edit.
+        inputs = iter(["", "", "", "", "n", "n", "n"])
+        with (
+            patch.dict(os.environ, {}, clear=True),
+            patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)),
+        ):
+            with self.assertRaises(SystemExit):
+                cli_setup.run_onboarding(console)
+        # The invalid temperature must still be on disk (upsert never ran).
+        self.assertEqual(gc.get_profile().get("temperature"), 99)
 
 
 if __name__ == "__main__":

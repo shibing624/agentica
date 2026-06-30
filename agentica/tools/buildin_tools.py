@@ -44,11 +44,12 @@ from agentica.utils.string import truncate_if_too_long
 
 # grep self-imposed timeout (seconds). Covers both the rg subprocess and the
 # pure-Python fallback so a missing rg can't walk huge trees for the outer
-# 120s executor timeout. grep is marked manages_own_timeout=True. 30s gives rg
-# enough headroom on large monorepos (a whole-tree grep can take ~25s) while
-# still bounding a genuine hang (no rg + pure-Python fallback over millions of
-# files) well under the outer executor limit.
-_GREP_TIMEOUT = 30
+# 120s executor timeout. grep is marked manages_own_timeout=True. The default
+# 10s bounds the common case; the LLM may override it via the `timeout` arg
+# (no upper cap — the caller decides). A timeout must always be set: on a bad
+# disk / network mount, or with a backtracking regex (e.g. nested .*.*) over a
+# large file, grep can hang or go exponential and 10s is already generous.
+_GREP_TIMEOUT = 10
 
 
 def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
@@ -278,9 +279,10 @@ class BuiltinFileTool(Tool):
         self.register(self.multi_edit_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
-        # grep enforces its own 30s timeout on both the rg and pure-Python
-        # fallback paths, so skip the outer 120s executor wrapper — a missing
-        # rg used to let the fallback walk huge trees for the full 120s.
+        # grep enforces its own timeout on both the rg and pure-Python
+        # fallback paths (default 10s, LLM-tunable with no upper cap), so skip
+        # the outer 120s executor wrapper — a missing rg used to let the
+        # fallback walk huge trees for the full 120s.
         self.functions["grep"].manages_own_timeout = True
         self.register(self.undo_edit, is_destructive=True)
 
@@ -1133,6 +1135,7 @@ class BuiltinFileTool(Tool):
             after_context: int = 0,
             limit: int = 100,
             fixed_strings: bool = False,
+            timeout: Optional[int] = None,
     ) -> str:
         """Search file contents for a pattern using ripgrep (rg).
 
@@ -1165,6 +1168,11 @@ class BuiltinFileTool(Tool):
             after_context: Show N lines after each match (default: 0, content mode only)
             limit: Maximum results to return (default: 100)
             fixed_strings: Treat pattern as literal text, not regex (default: False)
+            timeout: Search timeout in seconds (default 10, no upper cap). grep
+                must always be bounded: on a bad disk / network mount, or with a
+                backtracking regex (e.g. nested .*.*) over a large file, it can
+                hang or go exponential. Raise this only when you know a
+                whole-tree grep on a large repo legitimately needs more time.
 
         Returns:
             Search results as formatted string
@@ -1177,6 +1185,7 @@ class BuiltinFileTool(Tool):
             grep(pattern="exact phrase", fixed_strings=True)
             grep(pattern="import", include="*.py", output_mode="count")
             grep(pattern="Foo", output_mode="files_with_matches")  # only when paths suffice
+            grep(pattern="big_table", include="*.sql", timeout=30)  # large repo, allow more time
         """
         # Resolve and validate path
         self._validate_path(path)
@@ -1184,12 +1193,17 @@ class BuiltinFileTool(Tool):
         if not base_path.exists():
             raise FileNotFoundError(f"Directory not found: {path}")
 
+        # Effective timeout: the LLM-provided value is used as-is (no upper
+        # cap — the caller decides); default _GREP_TIMEOUT when not provided.
+        # A timeout must always be set (see _GREP_TIMEOUT comment).
+        effective_timeout = timeout if timeout is not None else _GREP_TIMEOUT
+
         # Check if rg is available
         rg_path = shutil.which("rg")
         if rg_path is None:
             return await self._run_grep_fallback(
                 pattern, path, include, output_mode, limit, fixed_strings,
-                case_insensitive,
+                case_insensitive, effective_timeout,
             )
 
         # Build rg command arguments
@@ -1238,8 +1252,8 @@ class BuiltinFileTool(Tool):
         cmd.append(pattern)
         cmd.append(str(base_path))
 
-        # rg is normally millisecond-fast; a hard _GREP_TIMEOUT catches hangs
-        # (pathological regex, huge binary files, or zombie processes).
+        # rg is normally millisecond-fast; a hard effective_timeout catches hangs
+        # (pathological regex, huge binary files, or a stuck network mount).
         proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1247,18 +1261,24 @@ class BuiltinFileTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_GREP_TIMEOUT)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=effective_timeout)
         except asyncio.TimeoutError:
             if proc is not None:
+                # SIGKILL (rg can ignore SIGTERM); then reap the corpse so the
+                # process is reliably collected instead of leaking.
                 try:
                     proc.kill()
                 except ProcessLookupError:
                     pass
-            raise TimeoutError(f"grep timed out after {_GREP_TIMEOUT} seconds")
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except (asyncio.TimeoutError, ProcessLookupError):
+                    pass
+            raise TimeoutError(f"grep timed out after {effective_timeout} seconds")
         except FileNotFoundError:
             return await self._run_grep_fallback(
                 pattern, path, include, output_mode, limit, fixed_strings,
-                case_insensitive,
+                case_insensitive, effective_timeout,
             )
 
         # rg exit codes: 0=matches found, 1=no matches, 2=error
@@ -1290,13 +1310,14 @@ class BuiltinFileTool(Tool):
             limit: int,
             fixed_strings: bool,
             case_insensitive: bool = False,
+            timeout: int = _GREP_TIMEOUT,
     ) -> str:
         """Run the pure-Python fallback in an executor with a hard timeout.
 
         The fallback walks the tree in a thread, so on timeout we can only
         drop the result — the thread keeps running — but the tool returns a
-        clear timeout error at ``_GREP_TIMEOUT`` instead of hanging to the
-        outer 120s executor limit.
+        clear timeout error at ``timeout`` instead of hanging to the outer
+        120s executor limit.
         """
         loop = asyncio.get_event_loop()
         try:
@@ -1305,10 +1326,10 @@ class BuiltinFileTool(Tool):
                     None, self._grep_fallback, pattern, path, include,
                     output_mode, limit, fixed_strings, case_insensitive,
                 ),
-                timeout=_GREP_TIMEOUT,
+                timeout=timeout,
             )
         except asyncio.TimeoutError:
-            raise TimeoutError(f"grep timed out after {_GREP_TIMEOUT} seconds")
+            raise TimeoutError(f"grep timed out after {timeout} seconds")
 
     def _grep_fallback(
             self,

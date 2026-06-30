@@ -33,8 +33,8 @@ The SDK has two model roles: the **main model** (user-facing turns) and the
 **auxiliary model** (background LLM calls: memory extraction, context
 compression, user-correction classification, goal judging, skill upgrade — and
 the ``task`` subagent tool). The CLI config follows this: each profile has the
-main model fields at the top, plus an optional ``aux_model`` sub-block for a
-cheaper/faster model. When ``aux_model`` is omitted, the aux role reuses the
+main model fields at the top, plus an optional ``auxiliary_model`` sub-block for a
+cheaper/faster model. When ``auxiliary_model`` is omitted, the auxiliary role reuses the
 main model.
 
 Schema (``~/.agentica/config.yaml``)::
@@ -57,13 +57,13 @@ Schema (``~/.agentica/config.yaml``)::
         # temperature: 0.7
         # top_p: 0.95
 
-        # --- optional aux model (background calls + `task` subagent tool) ---
-        # Omit the whole block to reuse the main model for aux work. When aux
+        # --- optional auxiliary model (background calls + `task` subagent tool) ---
+        # Omit the whole block to reuse the main model for auxiliary work. When auxiliary
         # shares the main provider, any field may be omitted and inherits from
         # the main model. When it uses a different provider, base_url defaults
         # to that provider's preset and api_key must be set here or available
         # via the provider env var.
-        # aux_model:
+        # auxiliary_model:
         #   model_provider: zhipuai
         #   model_name: glm-4.7-flash
         #   base_url: https://open.bigmodel.cn/api/paas/v4
@@ -291,7 +291,7 @@ def find_profile_for_provider(provider: str, base_url: Optional[str] = None) -> 
 
     Profiles are the key store now that cli_config.json is gone, so this is how
     a previously-saved key for a different provider is looked up (e.g. when the
-    user switches providers in ``/model``, or when the aux model uses a
+    user switches providers in ``/model``, or when the auxiliary model uses a
     different provider whose key lives in another profile).
     """
     for p in get_profiles().values():
@@ -397,10 +397,10 @@ profiles:
     # cache_control_messages: 3
     # cache_control_session_header: Venus-Session-Id
 
-    # --- optional aux model (background calls + `task` subagent tool) ---
+    # --- optional auxiliary model (background calls + `task` subagent tool) ---
     # A cheaper/faster model here saves cost on memory extraction, context
     # compression, and delegated subtasks. Omit to reuse the main model.
-    # aux_model:
+    # auxiliary_model:
     #   model_provider: zhipuai
     #   model_name: glm-4.7-flash
     #   base_url: https://open.bigmodel.cn/api/paas/v4

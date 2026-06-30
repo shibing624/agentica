@@ -51,8 +51,8 @@ async def example_1_one_liner() -> None:
     print("Example 1: agent.run_goal()  — the one-liner")
     print("=" * 60)
 
-    # Best practice: strong main model + cheap aux for judge / housekeeping.
-    # Aux is called every turn by the judge, so splitting saves 5–10x cost.
+    # Best practice: strong main model + cheap auxiliary for judge / housekeeping.
+    # Auxiliary is called every turn by the judge, so splitting saves 5–10x cost.
     agent = Agent(
         session_id="goal-demo-basic",
         model=DeepSeekChat(id="deepseek-v4-pro"),

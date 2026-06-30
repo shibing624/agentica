@@ -432,9 +432,9 @@ class TestMemoryExtractHooks:
         hooks = MemoryExtractHooks(every_n_turns=1, min_seconds_between=0, background=False)
 
         agent = MagicMock()
-        agent.agent_id = "test_agent_aux"
+        agent.agent_id = "test_agent_auxiliary"
         agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
-        agent.session_id = "sess_aux"
+        agent.session_id = "sess_auxiliary"
         agent.run_input = "x" * 150
         agent.workspace = MagicMock()
         agent.workspace.user_id = "u1"

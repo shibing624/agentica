@@ -16,7 +16,7 @@ Each ``*.md`` file has a YAML frontmatter + Markdown body:
 
 The file stem becomes the subagent name; the body becomes its system prompt.
 ``model`` overrides are intentionally NOT supported (see plan P1.2) - custom
-subagents reuse the parent agent's aux/main model.
+subagents reuse the parent agent's auxiliary/main model.
 
 Search paths (in priority order, higher wins on name collisions):
 1. ``<cwd>/.agentica/agents/`` (project-level)

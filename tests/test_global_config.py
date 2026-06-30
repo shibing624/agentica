@@ -153,16 +153,16 @@ class TestGlobalConfig(unittest.TestCase):
         self.assertEqual(gc.find_profile_for_provider("zhipuai", "https://other/v4"), {})
         self.assertEqual(gc.find_profile_for_provider("anthropic"), {})
 
-    def test_aux_model_block_round_trips(self):
+    def test_auxiliary_model_block_round_trips(self):
         gc.upsert_profile("default", {
             "model_provider": "anthropic", "model_name": "claude",
             "base_url": "https://api.anthropic.com", "api_key": "sk-main",
-            "aux_model": {
+            "auxiliary_model": {
                 "model_provider": "zhipuai", "model_name": "glm-flash",
                 "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "sk-z",
             },
         })
-        am = gc.get_profile().get("aux_model")
+        am = gc.get_profile().get("auxiliary_model")
         self.assertEqual(am["model_provider"], "zhipuai")
         self.assertEqual(am["api_key"], "sk-z")
 

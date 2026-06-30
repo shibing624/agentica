@@ -312,12 +312,20 @@ class ChatConsole:
             highlight=False,
         )
 
-    def print(self, *args, **kwargs):
+    def render_ansi(self, *args, **kwargs) -> str:
+        """Render Rich markup to an ANSI string without emitting it.
+
+        Lets callers batch multiple lines into a single ``run_in_terminal``
+        cycle (see ``_cli_user_input_callback._show_prompt``).
+        """
         self._buffer.seek(0)
         self._buffer.truncate()
         self._inner.width = shutil.get_terminal_size((80, 24)).columns
         self._inner.print(*args, **kwargs)
-        output = self._buffer.getvalue()
+        return self._buffer.getvalue()
+
+    def print(self, *args, **kwargs):
+        output = self.render_ansi(*args, **kwargs)
         for line in output.rstrip("\n").split("\n"):
             _cprint(line)
 
@@ -469,6 +477,30 @@ def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> No
 # ==================== BTW concurrent handler ====================
 
 
+# Braille spinner frames — cycled continuously while the agent is alive so
+# the user can tell a live process (spinner turning) from a hung one
+# (spinner frozen) at a glance.
+_BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) -> str:
+    """Render one spinner line: ``⠋ <phase label> (Ns)``.
+
+    phase: ``thinking`` | ``reasoning`` | ``tool`` | ``answering`` | ``idle``
+    base:  tool label (e.g. ``🔧 grep``) for the ``tool`` phase
+    """
+    if phase == "idle":
+        return ""
+    icon = _BRAILLE_SPINNER[frame_idx % len(_BRAILLE_SPINNER)]
+    if phase == "tool" and base:
+        return f"{icon} {base} ({elapsed:.0f}s)"
+    if phase == "answering":
+        return f"{icon} answering… ({elapsed:.0f}s)"
+    if phase == "reasoning":
+        return f"{icon} reasoning… ({elapsed:.0f}s)"
+    return f"{icon} thinking… ({elapsed:.0f}s)"
+
+
 def _print_boxed_result(label: str, question: str, result_text: str, color: str = "cyan"):
     """Print a question + answer inside a colored box.
 
@@ -522,8 +554,20 @@ def _run_btw_concurrent(agent, question: str, tui_state: dict):
                     context_snapshot.append(Message(role=msg.role, content=content))
             context_snapshot = context_snapshot[-10:]
 
+        # Clone the parent model so the BTW agent owns isolated runtime state
+        # (HTTP client, usage, metrics, error counters). Sharing the main
+        # agent's model instance while it is streaming corrupts that
+        # instance's state and breaks the main agent's subsequent turns — the
+        # classic "/btw causes follow-up bugs" symptom. Same strategy as
+        # Agent.clone() / SubagentRegistry.spawn().
+        btw_model = None
+        if agent and agent.model:
+            from agentica.subagent import SubagentRegistry
+
+            btw_model = SubagentRegistry._clone_parent_model(agent.model)
+
         btw_agent = Agent(
-            model=agent.model,
+            model=btw_model,
             tools=[],
             instructions="You are a helpful assistant answering a quick side question. "
             "You have NO tools, NO skills, NO file access. "
@@ -718,17 +762,33 @@ def _process_stream_response(
     """Process the agent's streaming response and display it."""
     con = get_console()
 
-    def _set_spinner(text: str = ""):
-        tui_state["spinner_text"] = text
-        if text:
-            tui_state["_spinner_base"] = text
-            tui_state["_tool_start"] = time.monotonic()
-        else:
-            tui_state["_spinner_base"] = ""
+    def _set_phase(phase: str, base: str = ""):
+        """Set the spinner phase and reset the per-phase elapsed timer.
 
-    _THINKING_FRAMES = ["✦ thinking...", "✧ thinking..."]
-    tui_state["_thinking"] = True
-    tui_state["spinner_text"] = _THINKING_FRAMES[0]
+        phases:
+          thinking  — waiting for the first token / between tool calls
+          reasoning — streaming reasoning content
+          tool      — running a tool (pass its label as ``base``)
+          answering — streaming the final response
+          idle      — clear the spinner (run ended / cancelled / errored)
+
+        The spinner thread renders a continuously spinning braille glyph +
+        the phase label + elapsed seconds, so the user can always tell a live
+        process (spinner turning) from a hung one (spinner frozen).
+        """
+        if phase == "idle":
+            tui_state["spinner_text"] = ""
+            tui_state["_spinner_base"] = ""
+            tui_state["_phase"] = "idle"
+            tui_state["_thinking"] = False
+            return
+        tui_state["_phase"] = phase
+        tui_state["_phase_start"] = time.monotonic()
+        tui_state["_spinner_base"] = base
+        tui_state["_thinking"] = (phase == "thinking")
+
+    _set_phase("thinking")
+    tui_state["spinner_text"] = "⠋ thinking…"
     request_start = perf_counter()
 
     try:
@@ -750,7 +810,7 @@ def _process_stream_response(
         # If one fails, the other provides a fallback.
         if images:
             image_paths = [str(p) for p in images]
-            _set_spinner("analyzing images")
+            _set_phase("tool", "analyzing images")
 
             ocr_future = None
             vision_result = None
@@ -806,7 +866,7 @@ def _process_stream_response(
                 if wm.messages and wm.messages[-1].role == "user":
                     wm.messages.pop()
 
-            _set_spinner("")
+            _set_phase("thinking")
 
         # Subagent verbosity follows the global ``--debug`` flag (carried
         # via ``tui_state`` since this helper has no direct access to the
@@ -850,14 +910,12 @@ def _process_stream_response(
                                 tool_args = {"args": tool_args}
 
                         display.display_tool(tool_name, tool_args)
-                        tui_state["_thinking"] = False
-                        _set_spinner(f"🔧 {tool_name}")
+                        _set_phase("tool", f"🔧 {tool_name}")
                     shown_tool_count = len(chunk.tools)
                 continue
 
             if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
-                _set_spinner("")
-                tui_state["_thinking"] = True
+                _set_phase("thinking")
                 if chunk.tools:
                     for tool_info in reversed(chunk.tools):
                         if "content" in tool_info:
@@ -884,20 +942,17 @@ def _process_stream_response(
 
             if has_reasoning and not has_content:
                 if tui_state.get("show_reasoning", True):
-                    _set_spinner("")
-                    tui_state["_thinking"] = False
+                    _set_phase("reasoning")
                     display.start_thinking()
                     display.stream_thinking(chunk.reasoning_content)
                 continue
 
             if has_content:
-                _set_spinner("")
-                tui_state["_thinking"] = False
+                _set_phase("answering")
                 display.stream_response(chunk.content)
 
         display.finalize()
-        _set_spinner("")
-        tui_state["_thinking"] = False
+        _set_phase("idle")
 
         # Surface loop-break reasons (death spiral / max turns / cost budget).
         # These no longer ride inside the response content, so render a notice
@@ -923,12 +978,12 @@ def _process_stream_response(
             tui_state["total_api_calls"] = tui_state.get("total_api_calls", 0) + cost_tracker.turns
 
         if not display.has_content_output and display.tool_count == 0 and not display.thinking_shown:
-            _set_spinner("")
+            _set_phase("idle")
             con.print("[info]Agent returned no content.[/info]")
 
     except KeyboardInterrupt:
         current_agent.cancel()
-        _set_spinner("")
+        _set_phase("idle")
         deadline = time.monotonic() + 3.0
         while current_agent._running and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -936,12 +991,12 @@ def _process_stream_response(
         current_agent._cancelled = False
         con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
     except AgentCancelledError:
-        _set_spinner("")
+        _set_phase("idle")
         current_agent._running = False
         current_agent._cancelled = False
         con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
     except Exception as e:
-        _set_spinner("")
+        _set_phase("idle")
         msg = str(e)
         con.print(f"\n[bold red]Error during agent execution: {msg}[/bold red]")
         # Transient connection / gateway failures are usually worth a retry.
@@ -1488,18 +1543,29 @@ def run_interactive(
         req = _InputRequest(prompt=prompt, options=options)
 
         def _show_prompt():
-            if con_ref is not None:
-                con_ref.print(f"\n[bold cyan]?[/bold cyan] {prompt}")
-                if options:
-                    for i, opt in enumerate(options, 1):
-                        con_ref.print(f"  [cyan]{i}[/cyan]. {opt}")
-                    con_ref.print("[dim]Type the option number or text, then Enter.[/dim]")
-                else:
-                    con_ref.print("[dim]Type your response, then Enter.[/dim]")
+            if con_ref is None:
+                return
+            # Batch the whole prompt into ONE run_in_terminal cycle. Calling
+            # con.print line-by-line would trigger N separate run_in_terminal
+            # cycles (each does erase -> CPR wait -> render -> redraw -> CPR
+            # request); on a real terminal those interleave with the 0.4s
+            # spinner invalidates and can desync the inline cursor so the
+            # input box stops reflecting typed characters while the agent
+            # waits for an answer.
+            parts = [f"\n[bold cyan]?[/bold cyan] {prompt}"]
+            if options:
+                for i, opt in enumerate(options, 1):
+                    parts.append(f"  [cyan]{i}[/cyan]. {opt}")
+                parts.append("[dim]Type the option number or text, then Enter.[/dim]")
+            else:
+                parts.append("[dim]Type your response, then Enter.[/dim]")
+            ansi = con_ref.render_ansi("\n".join(parts))
+            print_formatted_text(ANSI(ansi))
 
-        # Arm the request and prompt the user. ChatConsole.print + app.invalidate
-        # is the same pattern process_loop uses to render agent output from this
-        # background thread, so it's safe to call directly here.
+        # Arm the request and prompt the user. A single batched
+        # print_formatted_text -> run_in_terminal is the same mechanism
+        # process_loop uses to render agent output from a background thread,
+        # but collapsed to one cycle to avoid cursor desync.
         state_ref.input_request = req
         _show_prompt()
         try:
@@ -1646,6 +1712,10 @@ def run_interactive(
 
         handler = COMMAND_HANDLERS.get(cmd)
         if handler:
+            # Single source of command-header echo. Individual handlers no
+            # longer print their own titles — see commands.echo_command_invocation.
+            from agentica.cli.commands import echo_command_invocation
+            echo_command_invocation(cmd, cmd_args)
             ctx = _build_ctx()
             result = handler(ctx, cmd_args)
             if isinstance(result, dict):
@@ -1786,6 +1856,8 @@ def run_interactive(
 
                 handler = COMMAND_HANDLERS.get(cmd)
                 if handler:
+                    from agentica.cli.commands import echo_command_invocation
+                    echo_command_invocation(cmd, cmd_args)
                     ctx = _build_ctx()
                     try:
                         result = handler(ctx, cmd_args)
@@ -1880,26 +1952,25 @@ def run_interactive(
     process_thread.start()
 
     # ── Spinner refresh thread ──
-    _SPIN_ICONS = ["✦", "✧", "✦", "✧", "⊹", "✦", "✧", "⊹"]
-    _TOOL_DOTS = ["", ".", "..", "..."]
+    # One braille spinner cycles through all phases (thinking / reasoning /
+    # tool / answering) so the glyph is always turning while the agent is
+    # alive — the user can tell a live process (spinner turning, elapsed
+    # climbing) from a hung one (spinner frozen) at a glance.
     _frame_idx = [0]
 
     def spinner_loop():
         while not state.should_exit:
             if state.agent_running and app.is_running:
-                if tui_state.get("_thinking"):
-                    _frame_idx[0] = (_frame_idx[0] + 1) % len(_SPIN_ICONS)
-                    icon = _SPIN_ICONS[_frame_idx[0]]
-                    tui_state["spinner_text"] = f"{icon} thinking..."
-                elif tui_state.get("_spinner_base", ""):
-                    # Tool running — animate dots + show elapsed time
-                    base = tui_state["_spinner_base"]
-                    _frame_idx[0] = (_frame_idx[0] + 1) % len(_TOOL_DOTS)
-                    dots = _TOOL_DOTS[_frame_idx[0]]
-                    elapsed = time.monotonic() - tui_state.get("_tool_start", time.monotonic())
-                    tui_state["spinner_text"] = f"{base}{dots} ({elapsed:.0f}s)"
+                phase = tui_state.get("_phase", "thinking")
+                base = tui_state.get("_spinner_base", "")
+                start = tui_state.get("_phase_start") or time.monotonic()
+                elapsed = time.monotonic() - start
+                tui_state["spinner_text"] = _render_spinner_text(
+                    _frame_idx[0], phase, base, elapsed
+                )
+                _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
                 app.invalidate()
-                time.sleep(0.4)
+                time.sleep(0.12)
             else:
                 time.sleep(0.3)
 

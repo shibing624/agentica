@@ -90,10 +90,10 @@ class Settings:
 
     # Optional sibling models for DeepAgent. None / empty means reuse the
     # main model (same provider, base_url, api_key).
-    aux_model_provider: str = ""
-    aux_model_name: str = ""
-    aux_base_url: str = ""
-    aux_api_key: str = ""
+    auxiliary_model_provider: str = ""
+    auxiliary_model_name: str = ""
+    auxiliary_base_url: str = ""
+    auxiliary_api_key: str = ""
 
     task_model_provider: str = ""
     task_model_name: str = ""
@@ -213,10 +213,10 @@ class Settings:
             model_reasoning_effort=os.getenv("AGENTICA_REASONING_EFFORT", ""),
 
             # Auxiliary model (leave empty to reuse main model)
-            aux_model_provider=os.getenv("AGENTICA_AUX_MODEL_PROVIDER", ""),
-            aux_model_name=os.getenv("AGENTICA_AUX_MODEL_NAME", ""),
-            aux_base_url=os.getenv("AGENTICA_AUX_BASE_URL", ""),
-            aux_api_key=os.getenv("AGENTICA_AUX_API_KEY", ""),
+            auxiliary_model_provider=os.getenv("AGENTICA_AUXILIARY_MODEL_PROVIDER", ""),
+            auxiliary_model_name=os.getenv("AGENTICA_AUXILIARY_MODEL_NAME", ""),
+            auxiliary_base_url=os.getenv("AGENTICA_AUXILIARY_BASE_URL", ""),
+            auxiliary_api_key=os.getenv("AGENTICA_AUXILIARY_API_KEY", ""),
 
             # Task-subagent model (leave empty to reuse main model)
             task_model_provider=os.getenv("AGENTICA_TASK_MODEL_PROVIDER", ""),

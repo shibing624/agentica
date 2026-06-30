@@ -17,7 +17,7 @@ one model; it does not re-route if the chosen model errors):
     )
     router.resolve("compression")   # -> glm_flash
     router.resolve("goal_judge")    # -> claude_haiku
-    router.resolve("unknown")       # -> glm_flash (then main if no aux)
+    router.resolve("unknown")       # -> glm_flash (then main if no auxiliary)
 
 Task names are plain strings; common ones are exposed as constants.
 """

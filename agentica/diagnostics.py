@@ -112,19 +112,73 @@ def _check_dirs(report: DoctorReport) -> None:
 
 
 def _check_provider(report: DoctorReport) -> None:
-    from agentica.cli.setup import provider_env_var, has_api_key, DEFAULT_PROVIDER, DEFAULT_MODEL
-    from agentica.global_config import get_profile
+    """Report active profile + which source supplies its API key.
+
+    Two valid key sources exist:
+      1. ``api_key`` field inside the active config.yaml profile (preferred —
+         scoped per profile, doesn't leak into other tools' env).
+      2. Provider env var (e.g. ``OPENAI_API_KEY``) — kept for legacy users
+         and CI. Fragile because it can be silently overridden by shell rc,
+         ``.env`` files, or other tooling.
+
+    The check reports BOTH sources distinctly so users can see whether
+    config.yaml is doing its job, and the remediation copy guides them to
+    config.yaml when a key is missing.
+    """
+    from agentica.cli.setup import (
+        provider_env_var,
+        DEFAULT_PROVIDER,
+        DEFAULT_MODEL,
+        _is_custom_openai,
+        get_profile_api_key,
+    )
+    from agentica.global_config import (
+        get_profile,
+        get_active_profile_name,
+        global_config_path,
+    )
 
     profile = get_profile()
     provider = profile.get("model_provider") or DEFAULT_PROVIDER
     model = profile.get("model_name") or DEFAULT_MODEL
-    report.add("Configured provider", OK, f"{provider}/{model}")
+    base_url = profile.get("base_url")
+    active_name = get_active_profile_name() if profile else None
 
-    env_var = provider_env_var(provider)
-    if has_api_key(provider):
-        report.add("API key", OK, f"{env_var} is set")
+    if active_name:
+        report.add("Active profile", OK, f"{active_name} → {provider}/{model}")
     else:
-        report.add("API key", FAIL, f"{env_var} not set — run `agentica setup` or export it")
+        report.add("Active profile", WARN, f"no profile saved; falling back to defaults ({provider}/{model})")
+
+    # Source 1: config.yaml profile.
+    profile_key = get_profile_api_key(provider, base_url)
+    if profile_key:
+        report.add("API key (config.yaml)", OK, f"set in profile '{active_name}' at {global_config_path()}")
+    else:
+        report.add("API key (config.yaml)", WARN, f"not set in profile '{active_name or '?'}'")
+
+    # Source 2: environment / .env file.
+    env_var = provider_env_var(provider)
+    # _is_custom_openai endpoints don't honour OPENAI_API_KEY as a fallback;
+    # advertising that env var would be misleading.
+    env_meaningful = not _is_custom_openai(provider, base_url)
+    env_key_set = env_meaningful and bool(os.environ.get(env_var))
+    if env_key_set:
+        report.add("API key (env)", OK, f"{env_var} is set in the environment")
+    elif env_meaningful:
+        report.add("API key (env)", WARN, f"{env_var} not set (env-var fallback is unused)")
+    else:
+        report.add("API key (env)", OK, f"not applicable for custom endpoint {base_url or ''}".rstrip())
+
+    # Final verdict: at least one source must provide the key.
+    if profile_key or env_key_set:
+        return
+    report.add(
+        "API key",
+        FAIL,
+        "no key available — recommended fix: run `agentica setup` to save the key "
+        "into config.yaml (preferred over .env, which can be silently overridden "
+        "by shell rc files or external tooling).",
+    )
 
 
 def _server_binary_candidates(server: str) -> List[str]:

@@ -303,22 +303,22 @@ def parse_args():
         help="Reasoning/thinking depth for thinking models; DeepSeek CLI defaults to max",
     )
 
-    # Aux model: the cheap/fast model for all non-user-facing LLM work — memory
+    # Auxiliary model: the cheap/fast model for all non-user-facing LLM work — memory
     # extraction, context compression, user-correction classification, goal
     # judging, skill upgrade, AND the `task` subagent tool. Omit to reuse the
     # main model. Any field can differ (provider / api_key / base_url).
     parser.add_argument(
-        "--aux_model_provider",
+        "--auxiliary_model_provider",
         type=str,
         choices=list(MODEL_REGISTRY.keys()),
-        help="Provider for the aux model (defaults to --model_provider)",
+        help="Provider for the auxiliary model (defaults to --model_provider)",
     )
     parser.add_argument(
-        "--aux_model_name", type=str,
-        help="Model id for the aux model (background tasks + `task` subagent; required to enable a separate aux)",
+        "--auxiliary_model_name", type=str,
+        help="Model id for the auxiliary model (background tasks + `task` subagent; required to enable a separate auxiliary)",
     )
-    parser.add_argument("--aux_base_url", type=str, help="Base URL for the aux model")
-    parser.add_argument("--aux_api_key", type=str, help="API key for the aux model")
+    parser.add_argument("--auxiliary_base_url", type=str, help="Base URL for the auxiliary model")
+    parser.add_argument("--auxiliary_api_key", type=str, help="API key for the auxiliary model")
 
     # Prompt caching for OpenAI-compatible proxies that front Anthropic Claude
     # (e.g. Venus). Default None = use the active profile's value (or off if the
@@ -597,7 +597,7 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     """Build a stable self-description block for the agent's system prompt.
 
     Only includes information that rarely changes during a session so the
-    prompt prefix stays cache-friendly: framework, model endpoint, aux model,
+    prompt prefix stays cache-friendly: framework, model endpoint, auxiliary model,
     active tools/skills, builtin subagent types, slash commands, and extension
     hints. Intentionally excludes work_dir (already injected by prompts.py) and
     cost/context usage (owned by /status). Reused by _apply_profile to refresh
@@ -614,11 +614,11 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
         endpoint = f"  (endpoint: {base_url})" if base_url else ""
         lines.append(f"- Model: {provider}/{model_name}{endpoint}")
 
-    aux_provider = agent_config.get("aux_model_provider")
-    aux_model_name = agent_config.get("aux_model_name")
-    if aux_provider and aux_model_name:
+    auxiliary_provider = agent_config.get("auxiliary_model_provider")
+    auxiliary_model_name = agent_config.get("auxiliary_model_name")
+    if auxiliary_provider and auxiliary_model_name:
         lines.append(
-            f"- Auxiliary model: {aux_provider}/{aux_model_name}  "
+            f"- Auxiliary model: {auxiliary_provider}/{auxiliary_model_name}  "
             "(background calls + task subagent)"
         )
 
@@ -678,13 +678,13 @@ def create_agent(
         cache_control_session_header=agent_config.get("cache_control_session_header"),
     )
 
-    # Aux model: the cheap/fast model for all background LLM work (memory
+    # Auxiliary model: the cheap/fast model for all background LLM work (memory
     # extraction, compression, classification, goal judging, skill upgrade) AND
-    # the `task` subagent tool. When --aux_model_name is unset this stays None
-    # and DeepAgent falls back to the main model for aux work.
-    auxiliary_model = _build_sibling_model(agent_config, "aux")
-    # The task subagent tool shares the aux model (one cheap model for all
-    # non-user-facing LLM work), so the CLI exposes only main + aux.
+    # the `task` subagent tool. When --auxiliary_model_name is unset this stays None
+    # and DeepAgent falls back to the main model for auxiliary work.
+    auxiliary_model = _build_sibling_model(agent_config, "auxiliary")
+    # The task subagent tool shares the auxiliary model (one cheap model for all
+    # non-user-facing LLM work), so the CLI exposes only main + auxiliary.
     task_model = auxiliary_model
     experience_config = _build_cli_experience_config(agent_config)
     long_term_memory_config = _build_cli_memory_config(agent_config)

@@ -15,7 +15,7 @@ from agentica import Agent, DeepSeekChat
 
 agent = Agent(
     session_id="my-task",
-    # 主模型 + 便宜的 aux 模型：judge / 压缩 / 记忆抽取等次要工作都走 aux。
+    # 主模型 + 便宜的 auxiliary 模型：judge / 压缩 / 记忆抽取等次要工作都走 auxiliary。
     # 不区分也能跑，但 judge 每轮都调一次，分开后能省 5-10x 成本。
     model=DeepSeekChat(id="deepseek-v4-pro"),
     auxiliary_model=DeepSeekChat(

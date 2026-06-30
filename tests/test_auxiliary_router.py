@@ -27,7 +27,7 @@ class _M:
 class TestAuxiliaryModelRouter(unittest.TestCase):
     def setUp(self):
         self.main = _M("main")
-        self.aux = _M("aux")
+        self.auxiliary = _M("auxiliary")
         self.cheap = _M("cheap")
 
     def test_resolve_falls_back_to_main(self):
@@ -35,16 +35,16 @@ class TestAuxiliaryModelRouter(unittest.TestCase):
         self.assertIs(r.resolve("compression"), self.main)
 
     def test_resolve_uses_auxiliary(self):
-        r = AuxiliaryModelRouter(self.main, self.aux)
-        self.assertIs(r.resolve("anything"), self.aux)
+        r = AuxiliaryModelRouter(self.main, self.auxiliary)
+        self.assertIs(r.resolve("anything"), self.auxiliary)
 
     def test_task_override_wins(self):
-        r = AuxiliaryModelRouter(self.main, self.aux, {COMPRESSION: self.cheap})
+        r = AuxiliaryModelRouter(self.main, self.auxiliary, {COMPRESSION: self.cheap})
         self.assertIs(r.resolve(COMPRESSION), self.cheap)
-        self.assertIs(r.resolve(GOAL_JUDGE), self.aux)  # falls back to aux
+        self.assertIs(r.resolve(GOAL_JUDGE), self.auxiliary)  # falls back to auxiliary
 
     def test_register(self):
-        r = AuxiliaryModelRouter(self.main, self.aux)
+        r = AuxiliaryModelRouter(self.main, self.auxiliary)
         r.register("title", self.cheap)
         self.assertIs(r.resolve("title"), self.cheap)
 
@@ -62,20 +62,20 @@ class TestAgentIntegration(unittest.TestCase):
 
     def test_resolve_uses_auxiliary_model(self):
         from agentica.model.openai import OpenAIChat
-        aux = OpenAIChat(id="aux-model", api_key="fake_openai_key")
-        agent, main = self._make_agent(auxiliary_model=aux)
-        self.assertIs(agent.resolve_auxiliary_model("compression"), aux)
+        auxiliary = OpenAIChat(id="auxiliary-model", api_key="fake_openai_key")
+        agent, main = self._make_agent(auxiliary_model=auxiliary)
+        self.assertIs(agent.resolve_auxiliary_model("compression"), auxiliary)
 
     def test_per_task_override(self):
         from agentica.model.openai import OpenAIChat
-        aux = OpenAIChat(id="aux-model", api_key="fake_openai_key")
+        auxiliary = OpenAIChat(id="auxiliary-model", api_key="fake_openai_key")
         judge = OpenAIChat(id="judge-model", api_key="fake_openai_key")
         agent, main = self._make_agent(
-            auxiliary_model=aux,
+            auxiliary_model=auxiliary,
             auxiliary_task_models={"goal_judge": judge},
         )
         self.assertIs(agent.resolve_auxiliary_model("goal_judge"), judge)
-        self.assertIs(agent.resolve_auxiliary_model("compression"), aux)
+        self.assertIs(agent.resolve_auxiliary_model("compression"), auxiliary)
 
 
 if __name__ == "__main__":

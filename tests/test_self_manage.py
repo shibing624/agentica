@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 class TestSelfManagePrimitives(unittest.TestCase):
@@ -65,6 +66,31 @@ class TestSelfManagePrimitives(unittest.TestCase):
     def test_set_profile_field_rejects_unknown(self):
         with self.assertRaises(ValueError):
             self.sm.set_profile_field("evil_field", "x")
+
+    def test_set_profile_field_rejects_invalid_value(self):
+        """config.yaml is core: `/model set temperature 99` is refused, not written."""
+        from agentica import global_config as gc
+        tmp = tempfile.mkdtemp()
+        import shutil
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        path = os.path.join(tmp, "config.yaml")
+        with patch("agentica.global_config.global_config_path", return_value=path):
+            gc.upsert_profile("default", {
+                "model_provider": "openai", "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1", "api_key": "sk-x",
+            }, make_active=True)
+            with self.assertRaises(ValueError):
+                self.sm.set_profile_field("temperature", "99")
+            with self.assertRaises(ValueError):
+                self.sm.set_profile_field("base_url", "not-a-url")
+            with self.assertRaises(ValueError):
+                self.sm.set_profile_field("top_p", "2.0")
+            # Nothing invalid was written.
+            self.assertNotIn("temperature", gc.get_profile())
+            self.assertEqual(gc.get_profile()["base_url"], "https://api.openai.com/v1")
+            # A valid value is accepted and persisted.
+            self.sm.set_profile_field("temperature", "0.5")
+            self.assertEqual(gc.get_profile()["temperature"], 0.5)
 
 
 class TestSelfManageTool(unittest.TestCase):

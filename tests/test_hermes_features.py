@@ -565,15 +565,15 @@ class TestAuxiliaryModel:
         from agentica import Agent, OpenAIChat
         from agentica.agent.config import ToolConfig
 
-        aux = OpenAIChat(id="gpt-4o-mini", api_key="fake_key")
+        auxiliary = OpenAIChat(id="gpt-4o-mini", api_key="fake_key")
         agent = Agent(
             model=OpenAIChat(id="gpt-4o", api_key="fake_key"),
-            auxiliary_model=aux,
+            auxiliary_model=auxiliary,
             tool_config=ToolConfig(compress_tool_results=True),
         )
         cm = agent.tool_config.compression_manager
         assert cm is not None
-        assert cm.model is aux
+        assert cm.model is auxiliary
 
 
 # ============== TestFileUndoEdit ==============

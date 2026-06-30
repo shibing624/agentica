@@ -403,6 +403,41 @@ class TestBuiltinFileToolGrep:
             with pytest.raises(TimeoutError, match=r"grep timed out"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
 
+    def test_grep_timeout_arg_respected(self, tmp_dir):
+        """The LLM-passed `timeout` arg is used as-is, overriding the default
+        (no clamping, no upper cap)."""
+        import time as _time
+        tool = BuiltinFileTool(work_dir=tmp_dir)
+
+        def slow_worker(*args, **kwargs):
+            _time.sleep(2)
+            return "should not reach"
+        tool._grep_fallback = slow_worker
+
+        # Patch the default _GREP_TIMEOUT up to 100s; passing timeout=1 must
+        # still fire at 1s, proving the caller's value wins and is not clamped
+        # back toward the default.
+        with patch("agentica.tools.buildin_tools._GREP_TIMEOUT", 100), \
+             patch("agentica.tools.buildin_tools.shutil.which", return_value=None):
+            with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
+                asyncio.run(tool.grep("x", str(tmp_dir), timeout=1))
+
+    def test_grep_default_timeout_still_bounds(self, tmp_dir):
+        """When no timeout arg is passed, the module default still bounds the
+        search (a timeout must always be set — bad disk / regex hang)."""
+        import time as _time
+        tool = BuiltinFileTool(work_dir=tmp_dir)
+
+        def slow_worker(*args, **kwargs):
+            _time.sleep(2)
+            return "should not reach"
+        tool._grep_fallback = slow_worker
+
+        with patch("agentica.tools.buildin_tools._GREP_TIMEOUT", 1), \
+             patch("agentica.tools.buildin_tools.shutil.which", return_value=None):
+            with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
+                asyncio.run(tool.grep("x", str(tmp_dir)))
+
 
 # ===========================================================================
 # BuiltinExecuteTool tests

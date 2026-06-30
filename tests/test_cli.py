@@ -69,6 +69,54 @@ class TestToolRegistry(unittest.TestCase):
             self.assertIn(tool, TOOL_REGISTRY)
 
 
+class TestSpinnerRender(unittest.TestCase):
+    """Test the braille spinner renders a live marker for every phase."""
+
+    def test_thinking_phase(self):
+        from agentica.cli.interactive import _render_spinner_text, _BRAILLE_SPINNER
+
+        text = _render_spinner_text(0, "thinking", "", 2.0)
+        self.assertIn(_BRAILLE_SPINNER[0], text)
+        self.assertIn("thinking", text)
+        self.assertIn("(2s)", text)
+
+    def test_reasoning_phase(self):
+        from agentica.cli.interactive import _render_spinner_text
+
+        text = _render_spinner_text(3, "reasoning", "", 1.5)
+        self.assertIn("reasoning", text)
+        self.assertIn("(2s)", text)  # 1.5 -> :.0f rounds to 2
+
+    def test_tool_phase_uses_base_label(self):
+        from agentica.cli.interactive import _render_spinner_text
+
+        text = _render_spinner_text(0, "tool", "🔧 grep", 5.0)
+        self.assertIn("🔧 grep", text)
+        self.assertIn("(5s)", text)
+        self.assertNotIn("thinking", text)
+
+    def test_answering_phase(self):
+        from agentica.cli.interactive import _render_spinner_text
+
+        text = _render_spinner_text(0, "answering", "", 3.0)
+        self.assertIn("answering", text)
+        self.assertIn("(3s)", text)
+
+    def test_idle_phase_returns_empty(self):
+        from agentica.cli.interactive import _render_spinner_text
+
+        self.assertEqual(_render_spinner_text(0, "idle", "", 0.0), "")
+
+    def test_frame_advances(self):
+        from agentica.cli.interactive import _render_spinner_text, _BRAILLE_SPINNER
+
+        t0 = _render_spinner_text(0, "thinking", "", 0.0)
+        t1 = _render_spinner_text(1, "thinking", "", 0.0)
+        self.assertIn(_BRAILLE_SPINNER[0], t0)
+        self.assertIn(_BRAILLE_SPINNER[1], t1)
+        self.assertNotEqual(t0, t1)
+
+
 class TestCLIHelpers(unittest.TestCase):
     """Test cases for CLI helper functions."""
 
@@ -908,10 +956,10 @@ class TestCLIModelParams(unittest.TestCase):
             model_name=None,
             base_url=None,
             api_key=None,
-            aux_model_provider=None,
-            aux_model_name=None,
-            aux_base_url=None,
-            aux_api_key=None,
+            auxiliary_model_provider=None,
+            auxiliary_model_name=None,
+            auxiliary_base_url=None,
+            auxiliary_api_key=None,
         )
         with patch("agentica.cli.setup.get_profile", return_value=profile):
             resolved = resolve_model_config(args, console=None)
@@ -1017,10 +1065,10 @@ class TestCLIConfiguration(unittest.TestCase):
             model_name=None,
             base_url=None,
             api_key=None,
-            aux_model_provider=None,
-            aux_model_name=None,
-            aux_base_url=None,
-            aux_api_key=None,
+            auxiliary_model_provider=None,
+            auxiliary_model_name=None,
+            auxiliary_base_url=None,
+            auxiliary_api_key=None,
         )
         with patch("agentica.cli.setup.get_profile", return_value={}):
             resolved = resolve_model_config(args, console=None)
@@ -1109,36 +1157,20 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertTrue(captured["enable_diagnostics"])
         self.assertEqual(captured["diagnostics_servers"], ["pyright"])
 
-    def test_persist_model_choice_writes_base_url(self):
-        from agentica import global_config as gc
-        with tempfile.TemporaryDirectory() as tmp:
-            cfg_path = os.path.join(tmp, "config.yaml")
-            with patch("agentica.global_config.global_config_path", return_value=cfg_path):
-                gc.upsert_profile("default", {
-                    "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
-                    "base_url": "https://api.deepseek.com", "api_key": "sk-x",
-                })
-                cli_commands._persist_model_choice(
-                    "openai",
-                    "gpt-5",
-                    "https://api.openai.com/v1",
-                )
-                saved = gc.get_profile("default")
+    def test_model_command_freeform_is_rejected_and_does_not_mutate_config(self):
+        """`/model openai/gpt-5` must NOT silently overwrite the active profile.
 
-        self.assertEqual(saved["model_provider"], "openai")
-        self.assertEqual(saved["model_name"], "gpt-5")
-        self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
-        # api_key already in the profile is preserved across the live switch.
-        self.assertEqual(saved["api_key"], "sk-x")
-
-    def test_model_command_switch_provider_resets_and_persists_base_url(self):
+        This is the regression test for the original "config.yaml 乱掉" bug:
+        the legacy free-form path called ``_persist_model_choice`` which
+        clobbered whatever main/aux/tuning the active profile had stored.
+        """
         from agentica import global_config as gc
         ctx = cli_commands.CommandContext(
             agent_config={
                 "model_provider": "deepseek",
                 "model_name": "deepseek-v4-flash",
                 "base_url": "https://api.deepseek.com",
-                "api_key": "fake_openai_key",
+                "api_key": "sk-original",
                 "debug": False,
                 "work_dir": None,
             },
@@ -1152,30 +1184,38 @@ class TestCLIConfiguration(unittest.TestCase):
             with (
                 patch("agentica.global_config.global_config_path", return_value=cfg_path),
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
-                patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
+                patch.object(cli_commands, "get_model", return_value=MagicMock()),
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
             ):
                 gc.upsert_profile("default", {
                     "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
-                    "base_url": "https://api.deepseek.com", "api_key": "sk-x",
+                    "base_url": "https://api.deepseek.com", "api_key": "sk-original",
                 })
                 cli_commands._cmd_model(ctx, "openai/gpt-5")
                 saved = gc.get_profile("default")
 
-        self.assertEqual(ctx.agent_config["base_url"], "https://api.openai.com/v1")
-        self.assertEqual(saved["base_url"], "https://api.openai.com/v1")
-        self.assertEqual(saved["model_provider"], "openai")
-        self.assertEqual(saved["model_name"], "gpt-5")
-        self.assertEqual(mock_get_model.call_args.kwargs["base_url"], "https://api.openai.com/v1")
+        # Config.yaml is byte-for-byte unchanged.
+        self.assertEqual(saved["model_provider"], "deepseek")
+        self.assertEqual(saved["model_name"], "deepseek-v4-flash")
+        self.assertEqual(saved["base_url"], "https://api.deepseek.com")
+        # Live session config is also untouched (no partial mutation).
+        self.assertEqual(ctx.agent_config["model_provider"], "deepseek")
+        self.assertEqual(ctx.agent_config["model_name"], "deepseek-v4-flash")
 
-    def test_model_command_same_provider_preserves_custom_base_url(self):
+    def test_model_command_switch_to_saved_profile_does_not_mutate_config(self):
+        """`/model <profile_name>` is session-only; config.yaml is not rewritten.
+
+        It MAY update the ``active_profile`` pointer (that's a pointer flip,
+        not a profile body change), but each profile's main/aux/tuning fields
+        must survive intact.
+        """
         from agentica import global_config as gc
         ctx = cli_commands.CommandContext(
             agent_config={
-                "model_provider": "openai",
-                "model_name": "gpt-4o",
-                "base_url": "https://proxy.example/v1",
-                "api_key": "fake_openai_key",
+                "model_provider": "deepseek",
+                "model_name": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com",
+                "api_key": "sk-ds",
                 "debug": False,
                 "work_dir": None,
             },
@@ -1192,16 +1232,25 @@ class TestCLIConfiguration(unittest.TestCase):
                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
             ):
-                gc.upsert_profile("default", {
-                    "model_provider": "openai", "model_name": "gpt-4o",
-                    "base_url": "https://proxy.example/v1", "api_key": "sk-x",
+                gc.upsert_profile("deepseek", {
+                    "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+                    "base_url": "https://api.deepseek.com", "api_key": "sk-ds",
+                }, make_active=True)
+                gc.upsert_profile("opus", {
+                    "model_provider": "anthropic", "model_name": "claude-opus-4",
+                    "base_url": "https://api.anthropic.com", "api_key": "sk-anthropic",
                 })
-                cli_commands._cmd_model(ctx, "gpt-5")
-                saved = gc.get_profile("default")
+                cli_commands._cmd_model(ctx, "opus")
+                ds_after = gc.get_profile("deepseek")
+                opus_after = gc.get_profile("opus")
 
-        self.assertEqual(ctx.agent_config["base_url"], "https://proxy.example/v1")
-        self.assertEqual(saved["base_url"], "https://proxy.example/v1")
-        self.assertEqual(mock_get_model.call_args.kwargs["base_url"], "https://proxy.example/v1")
+        # Each profile body survives intact.
+        self.assertEqual(ds_after["model_name"], "deepseek-v4-flash")
+        self.assertEqual(opus_after["model_name"], "claude-opus-4")
+        # Live session swapped to the opus profile.
+        self.assertEqual(ctx.agent_config["model_provider"], "anthropic")
+        self.assertEqual(ctx.agent_config["model_name"], "claude-opus-4")
+        self.assertEqual(mock_get_model.call_args.kwargs["model_provider"], "anthropic")
 
     def test_parse_goal_budget_flags(self):
         from agentica.cli.commands import _parse_goal_set_args
@@ -1552,6 +1601,160 @@ class TestPendingQueueTimestamps(unittest.TestCase):
         self.assertEqual(q.peek_all_with_timestamps(), [])
         self.assertTrue(q.empty())
 
+    def test_replace_index_updates_item_and_timestamp(self):
+        """``replace_index`` edits in place and bumps the timestamp so the
+        TUI queue bar's 'x seconds ago' label reflects the latest user
+        intent. Other slots' timestamps must stay untouched.
+        """
+        from agentica.cli.commands import PendingQueue
+
+        q = PendingQueue()
+        q.put("a")
+        q.put("b")
+        q.put("c")
+        pairs_before = q.peek_all_with_timestamps()
+        ts_a, ts_b, ts_c = (p[1] for p in pairs_before)
+
+        # tiny sleep so the new timestamp is strictly greater
+        import time
+        time.sleep(0.001)
+
+        self.assertTrue(q.replace_index(1, "b2"))
+        pairs_after = q.peek_all_with_timestamps()
+        self.assertEqual([p[0] for p in pairs_after], ["a", "b2", "c"])
+        self.assertEqual(pairs_after[0][1], ts_a, "slot 0 timestamp must stay")
+        self.assertEqual(pairs_after[2][1], ts_c, "slot 2 timestamp must stay")
+        self.assertGreater(pairs_after[1][1], ts_b, "edited slot must get a fresher timestamp")
+
+    def test_replace_index_out_of_range_returns_false(self):
+        from agentica.cli.commands import PendingQueue
+
+        q = PendingQueue()
+        q.put("a")
+        self.assertFalse(q.replace_index(5, "x"))
+        self.assertFalse(q.replace_index(-1, "x"))
+        # original untouched
+        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()], ["a"])
+
+    def test_insert_index_at_front_middle_and_end(self):
+        """``insert_index`` accepts ``0..len`` (inclusive on the upper bound,
+        equivalent to append) and keeps timestamps aligned with their slots.
+        """
+        from agentica.cli.commands import PendingQueue
+
+        q = PendingQueue()
+        q.put("a")
+        q.put("c")
+
+        # insert at front
+        self.assertTrue(q.insert_index(0, "head"))
+        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()], ["head", "a", "c"])
+
+        # insert in the middle
+        self.assertTrue(q.insert_index(2, "mid"))
+        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()], ["head", "a", "mid", "c"])
+
+        # insert at the end (idx == len) is valid → append
+        n = q.qsize()
+        self.assertTrue(q.insert_index(n, "tail"))
+        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()],
+                         ["head", "a", "mid", "c", "tail"])
+
+    def test_insert_index_out_of_range_returns_false(self):
+        from agentica.cli.commands import PendingQueue
+
+        q = PendingQueue()
+        q.put("a")
+        # idx == len(q) is allowed (append); idx == len(q) + 1 is not.
+        self.assertFalse(q.insert_index(5, "x"))
+        self.assertFalse(q.insert_index(-1, "x"))
+        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()], ["a"])
+
+
+class TestQueueCommandEditInsert(unittest.TestCase):
+    """``/queue edit <n> <text>`` and ``/queue insert <n> <text>`` give users
+    in-place editing of the pending queue without the
+    remove-then-append dance (which would silently shuffle order).
+    """
+
+    def _ctx_with_queue(self):
+        from unittest.mock import MagicMock
+        from agentica.cli import commands as cli_commands
+
+        pq = cli_commands.PendingQueue()
+        ctx = cli_commands.CommandContext(
+            agent_config={"model_provider": "zhipuai", "model_name": "glm-5", "debug": False, "work_dir": None},
+            current_agent=MagicMock(),
+            extra_tools=[],
+            workspace=None,
+            pending_queue=pq,
+        )
+        # _cmd_queue checks ctx.agent_running; mark as not running so the
+        # "Queued: ..." preview path is exercised cleanly when needed.
+        ctx.agent_running = False
+        return ctx, pq
+
+    def test_edit_replaces_item_in_place(self):
+        from agentica.cli.commands import _cmd_queue
+
+        ctx, pq = self._ctx_with_queue()
+        pq.put("first")
+        pq.put("second")
+        pq.put("third")
+
+        _cmd_queue(ctx, "edit 2 SECOND v2")
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()],
+                         ["first", "SECOND v2", "third"])
+
+    def test_edit_rejects_missing_text(self):
+        from agentica.cli.commands import _cmd_queue
+
+        ctx, pq = self._ctx_with_queue()
+        pq.put("first")
+        # No new text → must NOT mutate the queue.
+        _cmd_queue(ctx, "edit 1")
+        _cmd_queue(ctx, "edit 1   ")  # whitespace-only also rejected
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["first"])
+
+    def test_edit_rejects_bad_index(self):
+        from agentica.cli.commands import _cmd_queue
+
+        ctx, pq = self._ctx_with_queue()
+        pq.put("only")
+        _cmd_queue(ctx, "edit 99 nope")
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["only"])
+
+    def test_insert_at_front(self):
+        from agentica.cli.commands import _cmd_queue
+
+        ctx, pq = self._ctx_with_queue()
+        pq.put("a")
+        pq.put("b")
+        _cmd_queue(ctx, "insert 1 head")
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()],
+                         ["head", "a", "b"])
+
+    def test_insert_at_back_equivalent_to_append(self):
+        """``/queue insert <qsize+1> text`` is documented as 'back' and must
+        be accepted, mapping to the same slot as a plain ``/queue text``."""
+        from agentica.cli.commands import _cmd_queue
+
+        ctx, pq = self._ctx_with_queue()
+        pq.put("a")
+        pq.put("b")
+        # qsize+1 (1-based) → idx == len (0-based) → append
+        _cmd_queue(ctx, f"insert {pq.qsize() + 1} tail")
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()],
+                         ["a", "b", "tail"])
+
+    def test_insert_rejects_bad_index(self):
+        from agentica.cli.commands import _cmd_queue
+
+        ctx, pq = self._ctx_with_queue()
+        pq.put("a")
+        _cmd_queue(ctx, "insert 99 nope")
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["a"])
+
 
 class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
     """The Response box must close with a small ``(HH:MM:SS)`` label embedded
@@ -1665,14 +1868,14 @@ class TestBuildSiblingModel(unittest.TestCase):
     def test_none_when_no_sibling_name(self):
         from agentica.cli.config import _build_sibling_model
         with patch("agentica.cli.config.get_model") as gm:
-            self.assertIsNone(_build_sibling_model(self._cfg(), "aux"))
+            self.assertIsNone(_build_sibling_model(self._cfg(), "auxiliary"))
             gm.assert_not_called()
 
     def test_same_provider_inherits_main_base_and_key(self):
         from agentica.cli.config import _build_sibling_model
-        cfg = self._cfg(aux_model_name="deepseek-chat")  # only name; same provider
+        cfg = self._cfg(auxiliary_model_name="deepseek-chat")  # only name; same provider
         with patch("agentica.cli.config.get_model") as gm:
-            _build_sibling_model(cfg, "aux")
+            _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertEqual(kw["model_provider"], "deepseek")
         self.assertEqual(kw["model_name"], "deepseek-chat")
@@ -1682,13 +1885,13 @@ class TestBuildSiblingModel(unittest.TestCase):
     def test_cross_provider_uses_sibling_base_and_key(self):
         from agentica.cli.config import _build_sibling_model
         cfg = self._cfg(
-            aux_model_provider="zhipuai",
-            aux_model_name="glm-4.7-flash",
-            aux_base_url="https://open.bigmodel.cn/api/paas/v4",
-            aux_api_key="sk-zhipu",
+            auxiliary_model_provider="zhipuai",
+            auxiliary_model_name="glm-4.7-flash",
+            auxiliary_base_url="https://open.bigmodel.cn/api/paas/v4",
+            auxiliary_api_key="sk-zhipu",
         )
         with patch("agentica.cli.config.get_model") as gm:
-            _build_sibling_model(cfg, "aux")
+            _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertEqual(kw["model_provider"], "zhipuai")
         self.assertEqual(kw["base_url"], "https://open.bigmodel.cn/api/paas/v4")
@@ -1697,13 +1900,13 @@ class TestBuildSiblingModel(unittest.TestCase):
     def test_cross_provider_missing_key_not_filled_with_main_key(self):
         from agentica.cli.config import _build_sibling_model
         cfg = self._cfg(
-            aux_model_provider="zhipuai",
-            aux_model_name="glm-4.7-flash",
-            aux_base_url="https://open.bigmodel.cn/api/paas/v4",
-            aux_api_key=None,  # no sibling key
+            auxiliary_model_provider="zhipuai",
+            auxiliary_model_name="glm-4.7-flash",
+            auxiliary_base_url="https://open.bigmodel.cn/api/paas/v4",
+            auxiliary_api_key=None,  # no sibling key
         )
         with patch("agentica.cli.config.get_model") as gm:
-            _build_sibling_model(cfg, "aux")
+            _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertIsNone(kw["api_key"])  # must NOT fall back to sk-main
         self.assertEqual(kw["base_url"], "https://open.bigmodel.cn/api/paas/v4")
@@ -1711,13 +1914,13 @@ class TestBuildSiblingModel(unittest.TestCase):
     def test_cross_provider_missing_base_not_filled_with_main_base(self):
         from agentica.cli.config import _build_sibling_model
         cfg = self._cfg(
-            aux_model_provider="zhipuai",
-            aux_model_name="glm-4.7-flash",
-            aux_base_url=None,  # no sibling base_url
-            aux_api_key="sk-zhipu",
+            auxiliary_model_provider="zhipuai",
+            auxiliary_model_name="glm-4.7-flash",
+            auxiliary_base_url=None,  # no sibling base_url
+            auxiliary_api_key="sk-zhipu",
         )
         with patch("agentica.cli.config.get_model") as gm:
-            _build_sibling_model(cfg, "aux")
+            _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertIsNone(kw["base_url"])  # must NOT fall back to deepseek base_url
         self.assertEqual(kw["api_key"], "sk-zhipu")
@@ -1727,7 +1930,7 @@ class TestCLIAwareness(unittest.TestCase):
     """CLI self-awareness and capability management (Phase 3).
 
     Covers environment_context injection at create_agent time, /status and
-    /agents command registration, _apply_profile carrying the aux_model block
+    /agents command registration, _apply_profile carrying the auxiliary_model block
     and refreshing environment_context, and /tools add-from path-traversal
     rejection. All LLM access is mocked (api_key="fake_openai_key").
     """
@@ -1761,7 +1964,7 @@ class TestCLIAwareness(unittest.TestCase):
         return FakeDeepAgent
 
     def test_environment_context_injected(self):
-        """create_agent injects framework/model/tools/subagent/aux self-description."""
+        """create_agent injects framework/model/tools/subagent/auxiliary self-description."""
         from agentica.cli.config import create_agent
 
         agent_config = {
@@ -1772,10 +1975,10 @@ class TestCLIAwareness(unittest.TestCase):
             "debug": False,
             "work_dir": None,
             "session_id": "test-session",
-            "aux_model_provider": "zhipuai",
-            "aux_model_name": "glm-4.7-flash",
-            "aux_base_url": "https://open.bigmodel.cn/api/paas/v4",
-            "aux_api_key": "fake_openai_key",
+            "auxiliary_model_provider": "zhipuai",
+            "auxiliary_model_name": "glm-4.7-flash",
+            "auxiliary_base_url": "https://open.bigmodel.cn/api/paas/v4",
+            "auxiliary_api_key": "fake_openai_key",
         }
         with patch("agentica.agent.deep.DeepAgent", self._fake_agent_class()):
             agent = create_agent(
@@ -1794,8 +1997,8 @@ class TestCLIAwareness(unittest.TestCase):
         self.assertIn("Subagent types: explore, research, code", ctx)
         self.assertIn("Auxiliary model: zhipuai/glm-4.7-flash", ctx)
 
-    def test_environment_context_omits_aux_when_none(self):
-        """No aux_model_* fields -> environment_context has no aux line."""
+    def test_environment_context_omits_auxiliary_when_none(self):
+        """No auxiliary_model_* fields -> environment_context has no auxiliary line."""
         from agentica.cli.config import create_agent
 
         agent_config = {
@@ -1833,8 +2036,8 @@ class TestCLIAwareness(unittest.TestCase):
     def _make_apply_profile_ctx(self):
         """Build a CommandContext whose mock agent survives a profile switch.
 
-        Pre-state carries a zhipuai aux so a profile switch to a different aux
-        (or to no aux) is observable in agent_config and environment_context.
+        Pre-state carries a zhipuai auxiliary so a profile switch to a different auxiliary
+        (or to no auxiliary) is observable in agent_config and environment_context.
         """
         mock_agent = MagicMock()
         mock_agent.tools = []
@@ -1847,10 +2050,10 @@ class TestCLIAwareness(unittest.TestCase):
                 "api_key": "fake_openai_key",
                 "debug": False,
                 "work_dir": None,
-                "aux_model_provider": "zhipuai",
-                "aux_model_name": "glm-4.7-flash",
-                "aux_base_url": "https://open.bigmodel.cn/api/paas/v4",
-                "aux_api_key": "fake_openai_key",
+                "auxiliary_model_provider": "zhipuai",
+                "auxiliary_model_name": "glm-4.7-flash",
+                "auxiliary_base_url": "https://open.bigmodel.cn/api/paas/v4",
+                "auxiliary_api_key": "fake_openai_key",
             },
             current_agent=mock_agent,
             extra_tools=[],
@@ -1858,14 +2061,14 @@ class TestCLIAwareness(unittest.TestCase):
             skills_registry=None,
         )
 
-    def test_apply_profile_carries_aux_model(self):
-        """Switching to a profile with an aux_model block rebuilds the aux model
-        and refreshes environment_context with the new aux line."""
+    def test_apply_profile_carries_auxiliary_model(self):
+        """Switching to a profile with an auxiliary_model block rebuilds the auxiliary model
+        and refreshes environment_context with the new auxiliary line."""
         from agentica import global_config as gc
 
         ctx = self._make_apply_profile_ctx()
-        # Pre-state is zhipuai/glm-4.7-flash; the profile switches aux to deepseek.
-        self.assertEqual(ctx.agent_config["aux_model_name"], "glm-4.7-flash")
+        # Pre-state is zhipuai/glm-4.7-flash; the profile switches auxiliary to deepseek.
+        self.assertEqual(ctx.agent_config["auxiliary_model_name"], "glm-4.7-flash")
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
@@ -1873,7 +2076,7 @@ class TestCLIAwareness(unittest.TestCase):
                 patch("agentica.global_config.global_config_path", return_value=cfg_path),
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
                 patch.object(cli_commands, "get_model", return_value=MagicMock()),
-                patch.object(cli_commands, "_build_sibling_model", return_value=MagicMock()) as mock_aux,
+                patch.object(cli_commands, "_build_sibling_model", return_value=MagicMock()) as mock_auxiliary,
             ):
                 gc.upsert_profile(
                     "withaux",
@@ -1882,32 +2085,32 @@ class TestCLIAwareness(unittest.TestCase):
                         "model_name": "gpt-4o",
                         "base_url": "https://api.openai.com/v1",
                         "api_key": "sk-main",
-                        "aux_model": {
+                        "auxiliary_model": {
                             "model_provider": "deepseek",
                             "model_name": "deepseek-chat",
                             "base_url": "https://api.deepseek.com",
-                            "api_key": "sk-aux",
+                            "api_key": "sk-auxiliary",
                         },
                     },
                     make_active=True,
                 )
                 cli_commands._apply_profile(ctx, "withaux")
 
-        self.assertEqual(ctx.agent_config["aux_model_name"], "deepseek-chat")
-        self.assertEqual(ctx.agent_config["aux_model_provider"], "deepseek")
-        self.assertIs(ctx.agent_config["auxiliary_model"], mock_aux.return_value)
+        self.assertEqual(ctx.agent_config["auxiliary_model_name"], "deepseek-chat")
+        self.assertEqual(ctx.agent_config["auxiliary_model_provider"], "deepseek")
+        self.assertIs(ctx.agent_config["auxiliary_model"], mock_auxiliary.return_value)
         self.assertIsNotNone(ctx.current_agent.environment_context)
         self.assertIn(
             "Auxiliary model: deepseek/deepseek-chat",
             ctx.current_agent.environment_context,
         )
 
-    def test_apply_profile_without_aux_clears(self):
-        """Switching to a profile without an aux_model block clears the aux fields."""
+    def test_apply_profile_without_auxiliary_clears(self):
+        """Switching to a profile without an auxiliary_model block clears the auxiliary fields."""
         from agentica import global_config as gc
 
         ctx = self._make_apply_profile_ctx()
-        self.assertIsNotNone(ctx.agent_config["aux_model_name"])
+        self.assertIsNotNone(ctx.agent_config["auxiliary_model_name"])
 
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, "config.yaml")
@@ -1929,8 +2132,8 @@ class TestCLIAwareness(unittest.TestCase):
                 )
                 cli_commands._apply_profile(ctx, "noaux")
 
-        self.assertIsNone(ctx.agent_config["aux_model_name"])
-        self.assertIsNone(ctx.agent_config["aux_model_provider"])
+        self.assertIsNone(ctx.agent_config["auxiliary_model_name"])
+        self.assertIsNone(ctx.agent_config["auxiliary_model_provider"])
         self.assertIsNone(ctx.agent_config["auxiliary_model"])
         mock_sibling.assert_not_called()
         self.assertNotIn("Auxiliary model:", ctx.current_agent.environment_context)
