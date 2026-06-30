@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+from agentica.utils.log import logger
+
 try:
     import yaml
 except ImportError:
@@ -148,12 +150,22 @@ class Skill:
         frontmatter, _ = cls._parse_frontmatter(content.strip())
 
         if not frontmatter:
+            logger.warning(
+                f"Skill skipped: {skill_md_path} has no valid YAML frontmatter. "
+                f"A SKILL.md must start with a '---' fenced block containing at least "
+                f"'name' and 'description', e.g.:\n---\nname: my-skill\ndescription: ...\n---"
+            )
             return None
 
         name = frontmatter.get('name')
         description = frontmatter.get('description')
 
         if not name or not description:
+            missing = [k for k in ("name", "description") if not frontmatter.get(k)]
+            logger.warning(
+                f"Skill skipped: {skill_md_path} frontmatter is missing required "
+                f"field(s): {', '.join(missing)}. Both 'name' and 'description' are required."
+            )
             return None
 
         return cls(
