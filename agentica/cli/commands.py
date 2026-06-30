@@ -1555,16 +1555,20 @@ def _cmd_upgrade(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"[red]  pip exited with code {code}. See output above.[/red]")
 
 
-def _fmt_next_run(job) -> str:
-    """Human-friendly 'next run' time for a job, or '-' when not scheduled."""
+def _fmt_ms(ms) -> str:
+    """Format an epoch-millis timestamp as 'YYYY-MM-DD HH:MM:SS', or '-' if falsy."""
     import datetime as _dt
-    ms = getattr(job, "next_run_at_ms", None)
     if not ms:
         return "-"
     try:
         return _dt.datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return str(ms)
+
+
+def _fmt_next_run(job) -> str:
+    """Human-friendly 'next run' time for a job, or '-' when not scheduled."""
+    return _fmt_ms(getattr(job, "next_run_at_ms", None))
 
 
 def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
@@ -1653,18 +1657,16 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
 
     if sub == "runs":
         job_id = rest.split()[0] if rest else None
-        try:
-            runs = cronjobs.list_task_runs(job_id=job_id) if job_id else cronjobs.list_task_runs()
-        except TypeError:
-            runs = cronjobs.list_task_runs()
+        runs = cronjobs.list_task_runs(job_id=job_id)
         if not runs:
             con.print("[dim]No run history.[/dim]")
             return
         con.print("[bold]Recent runs[/bold]")
         for r in runs[:20]:
-            st = getattr(getattr(r, "status", None), "value", getattr(r, "status", "?"))
-            con.print(f"  {getattr(r, 'job_id', '?')}  [{'green' if st == 'success' else 'red'}]{st}[/]  "
-                      f"{getattr(r, 'started_at', '') or ''}")
+            st = r.status.value if hasattr(r.status, "value") else str(r.status)
+            when = _fmt_ms(r.started_at_ms)
+            color = "green" if st == "ok" else ("yellow" if st == "timeout" else "red")
+            con.print(f"  [cyan]{r.task_id}[/cyan]  [{color}]{st}[/]  {when}")
         return
 
     if sub == "run":
@@ -1685,7 +1687,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
             factory = build_cli_agent_factory(
                 ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
             runner = CliAgentRunner(factory)
-            asyncio.run(_execute_job(job, agent_runner=runner))
+            asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
             con.print(f"[green]Job {job_id} executed.[/green]")
         except Exception as e:
             con.print(f"[red]Run failed: {e}[/red]")

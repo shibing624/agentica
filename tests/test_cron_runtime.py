@@ -100,6 +100,41 @@ class TestCronCommand(unittest.TestCase):
         from agentica.cli import commands
         self.assertIn("/cron", commands.COMMAND_REGISTRY)
 
+    def test_execute_job_signature(self):
+        """Regression: _execute_job requires positional `verbose`; ensure calling
+        it the way /cron run does works end-to-end with a stub runner (offline)."""
+        import asyncio
+        from agentica.cron.scheduler import _execute_job
+
+        commands_jid = self.cronjobs.create_job(prompt="say hi", schedule="0 9 * * *").id
+
+        class StubRunner:
+            async def run(self, prompt, context=None):
+                return "hi"
+
+        job = self.cronjobs.get_job(commands_jid)
+        # Must not raise (TypeError on missing verbose would mean a real bug).
+        result = asyncio.run(_execute_job(job, agent_runner=StubRunner(), verbose=False))
+        self.assertIsInstance(result, dict)
+
+    def test_runs_reads_real_fields(self):
+        """Regression: /cron runs must read task_id/started_at_ms/RunStatus.OK,
+        not the wrong job_id/started_at/'success' names it once used."""
+        from agentica.cli import commands
+        from agentica.cron.types import RunStatus
+        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        jid = self.cronjobs.list_jobs()[0].id
+        # Record a successful run, then list runs.
+        self.cronjobs.mark_job_run(jid, status=RunStatus.OK, result="done")
+        runs = self.cronjobs.list_task_runs(job_id=jid)
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0].task_id, jid)
+        self.assertEqual(runs[0].status, RunStatus.OK)
+        self.assertTrue(runs[0].started_at_ms > 0)
+        # The command itself must not raise on real records.
+        commands._cmd_cron(self.ctx, "runs")
+        commands._cmd_cron(self.ctx, f"runs {jid}")
+
 
 class TestCronInCliTools(unittest.TestCase):
     def test_cli_agent_has_cron_tool(self):

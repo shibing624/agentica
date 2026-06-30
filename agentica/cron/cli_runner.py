@@ -28,33 +28,48 @@ class CliAgentRunner:
     """Adapt a CLI agent factory to the cron ``AgentRunner`` protocol.
 
     Args:
-        agent_factory: zero-arg callable returning a fresh agent instance.
-            A new agent is built per job run to isolate state.
+        agent_factory: callable returning a fresh agent instance. A new agent
+            is built per job run to isolate state. The factory may accept
+            optional ``workspace`` / ``user_id`` overrides so a job that targets
+            a specific workspace is honored (the scheduler passes these in the
+            run context).
     """
 
-    def __init__(self, agent_factory: Callable[[], Any]):
+    def __init__(self, agent_factory: Callable[..., Any]):
         self._factory = agent_factory
 
     async def run(self, prompt: str, context: Optional[Dict[str, Any]] = None) -> str:
-        agent = self._factory()
+        context = context or {}
+        # Honor a per-job workspace from the cron run context instead of
+        # silently dropping it. The scheduler passes a path string (or None);
+        # wrap it in a Workspace. None -> the CLI's own default workspace.
+        ws = context.get("workspace")
+        if isinstance(ws, str) and ws:
+            from agentica.workspace import Workspace
+            ws = Workspace(path=ws)
+        agent = self._factory(workspace=ws)
         response = await agent.run(message=prompt)
-        # RunResponse.content is the final text; fall back to str for safety.
+        # RunResponse.content is the final text; fall back to "" for safety.
         return getattr(response, "content", None) or ""
 
 
 def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
-                            workspace=None, skills_registry=None) -> Callable[[], Any]:
+                            workspace=None, skills_registry=None) -> Callable[..., Any]:
     """Return a factory that builds a fresh CLI agent from the given config.
 
-    Imported lazily to avoid a circular import (cli.config imports tools which
-    may import cron).
+    The returned factory accepts an optional ``workspace`` override (used by
+    cron jobs that target a specific workspace); when not provided it falls back
+    to the default captured here. Imported lazily to avoid a circular import
+    (cli.config imports tools which may import cron).
     """
-    def _factory():
+    workspace_default = workspace
+
+    def _factory(workspace=None):
         from agentica.cli.config import create_agent
         return create_agent(
             agent_config,
             extra_tools=extra_tools or [],
-            workspace=workspace,
+            workspace=workspace if workspace is not None else workspace_default,
             skills_registry=skills_registry,
         )
 
