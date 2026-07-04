@@ -629,11 +629,25 @@ class StreamDisplayManager:
             self.response_started = False
 
     def start_tool_section(self):
-        """Start tool section."""
+        """Start tool section.
+
+        Tool calls are part of the assistant's response, so they must render
+        UNDER the ``╭─ Response ─╮`` header exactly like the text does. When a
+        turn leads with a tool call and no preamble text (very common — the
+        model often goes straight to a tool), the box hasn't been opened yet,
+        so open it here. Without this the *first* tool call prints bare above
+        the box while later tool calls (which follow some text) sit inside it —
+        the "偶发第一个 tool call 跑到 Response 前面" inconsistency.
+        """
         if not self.in_tool_section:
             if self.in_thinking:
                 self.end_thinking()
-            if self.has_content_output and not self.response_started:
+            if not self._box_opened:
+                self.console.print()
+                self._open_box("Response")
+                self._box_opened = True
+                self.response_started = True
+            elif self.has_content_output and not self.response_started:
                 self.console.print()
             self.console.print()
             self.in_tool_section = True

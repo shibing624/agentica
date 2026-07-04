@@ -38,9 +38,16 @@ _DATA_IMAGE_RE = re.compile(r"data:image/[a-zA-Z0-9.+-]+;base64,", re.IGNORECASE
 
 
 def _looks_binary(content: str) -> bool:
-    """Heuristic: NUL byte, or a high share of non-printable characters."""
-    if "\x00" in content:
-        return True
+    """Heuristic: a high share of control / non-printable characters.
+
+    NUL is counted toward the control-char ratio below, but is deliberately
+    NOT an instant "binary" trigger on its own. A single stray NUL inside
+    otherwise-readable text (e.g. a shell command whose stdout echoed a
+    literal ``\\x00``, or a ``tail`` of a log that happens to contain one)
+    must not flip a 13 KB text output to BINARY and divert it to disk as an
+    opaque ``<binary .../>`` note. Genuine binary content carries a *dense*
+    run of control bytes and still trips the 30% ratio.
+    """
     sample = content[:4096]
     if not sample:
         return False
