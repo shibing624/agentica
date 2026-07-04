@@ -20,6 +20,7 @@
 
 ## 🔥 News
 
+- [2026/07/05] **v1.4.7**：CLI に統一 braille スピナー（thinking/tool/answering 全フェーズで回転し、稼働中とハングを目視で判別可能）を追加；`ask_user_input` の入力フリーズと `/btw` が主モデルを汚染するバグを修正；cron ランタイム（`/cron` コマンド + デーモン）、自己管理（`/upgrade`、`/config set|env`）を追加；設定を `~/.agentica/config.yaml` に統一（main + aux model、`cli_config.json`/`task_model` を削除、コメントを保持）；`/resume` が完全/プレフィックス/省略 session id に対応。stream upload の OOM と `/api/upload` のパストラバーサル（CWE-22）も修正。詳細は [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
 - [2026/06/03] **v1.4.6**：クロスプロバイダー fallback がツール呼び出しターンに対応——fallback モデルがツールを呼び出して最終回答を生成でき、そのプロバイダー固有の履歴は圧縮され、主モデルへのリプレイがクリーンに保たれます。fallback モデルは run ごとにクローンされ並行安全性を確保。編集時 LSP 診断 CLI フラグ（`--enable-diagnostics`/`--diagnostics-server`）、強化版 `agentica doctor`、`/checkpoint restore --yes` 確認、`/goal` 予算フラグを追加。詳細は [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
 - [2026/05/11] **v1.4.4**：MemoryExtractHooks の最適化——新しい `auto_extract_memory_background` がメモリ抽出をバックグラウンドで実行（`on_agent_end` をブロックしなくなりました）、抽出は高速・低コストな `auxiliary_model` を優先。詳細は [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
 - [2026/05/10] **v1.4.3**：Skill ライフサイクルのリファクタリング + VaG の分離——VaG 実験コードは `evaluation/vag/` 研究モジュールへ移動、統一された `SkillLifecycleHooks` 拡張ポイントを追加。詳細は [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)

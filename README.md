@@ -30,6 +30,7 @@
 
 ## 🔥 News
 
+- [2026/07/05] **v1.4.7**：CLI 统一 braille spinner（thinking/tool/answering 全阶段转圈，活进程与卡死一目了然）；修复 `ask_user_input` 输入卡顿与 `/btw` 污染主 model 的 bug；新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`（main + aux model，移除 `cli_config.json`/`task_model`，注释可保留）；`/resume` 支持完整/前缀/省略 session id。修复 stream upload OOM 与 `/api/upload` 路径穿越（CWE-22）。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
 - [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
 - [2026/05/11] **v1.4.4**：MemoryExtractHooks 优化，新增 `auto_extract_memory_background` 后台抽取（不再阻塞 `on_agent_end`），memory 抽取优先走更快更便宜的 `auxiliary_model`。详见 [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
 - [2026/05/10] **v1.4.3**：Skill 生命周期重构 + VaG 解耦，新增 `SkillLifecycleHooks` 统一扩展点。详见 [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
