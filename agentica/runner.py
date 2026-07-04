@@ -46,7 +46,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel
 
-from agentica.utils.log import logger
+from agentica.utils.log import logger, _run_id_var, _parent_run_id_var, _short as _short_run_id
 from agentica.utils.async_utils import run_sync
 from agentica.compression.micro import micro_compact
 from agentica.compression.tool_result_storage import enforce_tool_result_budget
@@ -1317,6 +1317,25 @@ class Runner:
         """
         agent = self.agent
 
+        # Pre-generate this run's id and bind it to the log ContextVar *before*
+        # any log records are emitted. Every log line for this run (including
+        # the ``[user] -> ...`` chat line, tool calls, and any child asyncio
+        # Tasks that inherit our Context) will carry a ``run=<8hex>`` prefix,
+        # letting concurrent runs be reconstructed from a shared log file.
+        #
+        # We deliberately do NOT reset the ContextVar on exit: wrapping the
+        # entire async-generator body in try/finally is more surgery than the
+        # benefit warrants, and the three public entry points (``run``,
+        # ``arun``, ``run_stream``) already give clean isolation for typical
+        # usage — ``run`` starts a fresh event loop, and separate ``arun``
+        # calls typically run on their own asyncio Tasks. Users who chain
+        # multiple ``arun`` calls on the *same* Task and need strict per-run
+        # isolation can wrap them in ``agentica.utils.log.bind_run_context``.
+        _pregen_run_id = str(uuid4())
+        _run_id_var.set(_short_run_id(_pregen_run_id))
+        if agent._parent_run_id:
+            _parent_run_id_var.set(_short_run_id(agent._parent_run_id))
+
         async def _run_core() -> AsyncIterator[RunResponse]:
             nonlocal message  # on_user_prompt hook may reassign message
             # Guard: warn if this agent instance is already running concurrently.
@@ -1351,9 +1370,12 @@ class Runner:
                 return
 
             agent._running = True
+            # CHAT-level lines are the conversation flow record. Print the
+            # full user message — turn boundaries are *the* thing to keep at
+            # CHAT level, so truncating them defeats the purpose of the level.
             logger.chat(
                 f"[user] -> {agent.identifier}: "
-                f"{str(message)[:120] if message else '<no message>'}"
+                f"{str(message) if message else '<no message>'}"
             )
             # Capture asyncio handles so cancel() can hard-cancel from another thread
             try:
@@ -1417,6 +1439,7 @@ class Runner:
 
             _run_source = RunSource.subagent if agent._parent_run_id else source
             _run_ctx = RunContext(
+                run_id=_pregen_run_id,
                 session_id=agent.session_id,
                 parent_run_id=agent._parent_run_id,
                 agent_id=agent.agent_id,
@@ -2230,6 +2253,17 @@ class Runner:
                         trace.set_output(output_content)
                         trace.set_metadata("run_id", final_response.run_id)
                         trace.set_metadata("model", final_response.model)
+                        # Symmetric counterpart of the "[user] -> agent" chat log
+                        # at run entry: record the agent's final reply so each
+                        # turn has both inbound and outbound lines at CHAT level.
+                        # Print the full reply for the same reason the inbound
+                        # line is full — CHAT level is the authoritative
+                        # conversation transcript.
+                        reply_preview = str(output_content) if output_content else "<no reply>"
+                        logger.chat(
+                            f"[{agent.identifier}] -> user: "
+                            f"{reply_preview}"
+                        )
                 finally:
                     # Issue #3 fix: dump hook_calls even on exception, so
                     # failure traces still carry the hook timeline that's

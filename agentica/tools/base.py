@@ -7,6 +7,7 @@ It includes an abstract base class for tools and a class for managing tool insta
 """
 
 import asyncio
+import ast
 import inspect
 import json
 import re
@@ -481,7 +482,10 @@ class FunctionCall(BaseModel):
             logger.warning(self.error)
             return False
 
-        logger.debug(f"Running: {self.get_call_str()}")
+        # INFO: per-tool-call summary so `tail -f` users can watch agent
+        # behavior without enabling full DEBUG. Args are already trimmed by
+        # get_call_str() (long strings -> "..."), keeping the line bounded.
+        logger.info(f"[tool] {self.get_call_str()}")
 
         # Input validation — runs BEFORE pre_hook and execution.
         # Mirrors CC's validateInput() → checkPermissions() → call() pipeline.
@@ -508,6 +512,13 @@ class FunctionCall(BaseModel):
         try:
             self.result = await self._call_func(self.function.entrypoint, **entrypoint_args)
             function_call_success = True
+            # Pair with the "[tool] name(args)" line above so each call has a
+            # visible result at INFO. Keep the preview short — full result is
+            # available via the model's tool-message at DEBUG / in storage.
+            _result_preview = str(self.result) if self.result is not None else ""
+            if len(_result_preview) > 150:
+                _result_preview = _result_preview[:150] + "..."
+            logger.info(f"[tool] {self.function.name} -> {_result_preview}")
         except ToolCallException as e:
             logger.debug(f"{e.__class__.__name__}: {e}")
             self.error = str(e)
@@ -523,7 +534,10 @@ class FunctionCall(BaseModel):
             # not duplicate the CLI's own tool-error line (``🔎 ... - error:
             # ...``); the traceback is preserved at DEBUG for developers.
             friendly = _format_tool_error(self.function.name, e)
-            logger.debug("Tool call failed: %s — %s", self.function.name, friendly)
+            # Mirror the success-path INFO line: every tool call gets one
+            # visible outcome line at INFO, success or failure.
+            logger.info(f"[tool] {self.function.name} -> error: {friendly}")
+            logger.debug("Tool call failed: %s \u2014 %s", self.function.name, friendly)
             logger.debug("Tool call traceback for %s:", self.function.name, exc_info=True)
             self.error = friendly
             return False
@@ -599,10 +613,21 @@ def _coerce_value(value: str, expected_type):
     if expected_type == "boolean":
         return _coerce_boolean(value)
     if expected_type in ("array", "object"):
+        stripped = value.strip()
         try:
-            return json.loads(value)
+            return json.loads(stripped)
         except (json.JSONDecodeError, ValueError):
+            pass
+        # Some models serialise nested array/object args as a Python-repr
+        # string (single quotes, True/None) instead of valid JSON. literal_eval
+        # recovers those safely (literals only, no code execution).
+        try:
+            parsed = ast.literal_eval(stripped)
+        except (ValueError, SyntaxError):
             return value
+        if isinstance(parsed, (list, dict)):
+            return parsed
+        return value
     return value
 
 

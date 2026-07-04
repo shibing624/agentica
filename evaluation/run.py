@@ -15,7 +15,7 @@ import json
 import asyncio
 import re
 from typing import List, Dict, Any, Optional
-from loguru import logger
+from agentica.utils.log import logger
 from tqdm import tqdm
 import sys
 

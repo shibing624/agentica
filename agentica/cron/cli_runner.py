@@ -19,7 +19,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, Optional
 
-from loguru import logger
+from agentica.utils.log import logger
 
 from agentica.cron.scheduler import tick
 

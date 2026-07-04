@@ -1756,6 +1756,129 @@ class TestQueueCommandEditInsert(unittest.TestCase):
         self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["a"])
 
 
+class TestSessionCommand(unittest.TestCase):
+    """``/session`` shows / lists / renames the user-facing label that
+    overrides the auto-generated preview in /resume and /status.
+    """
+
+    def _ctx_with_agent(self, tmp_dir, session_id="sess-cli"):
+        from unittest.mock import MagicMock
+        from agentica.cli import commands as cli_commands
+        from agentica.memory.session_log import SessionLog
+
+        # Use a *real* SessionLog rooted at tmp_dir so the rename actually
+        # writes a sidecar we can verify on disk.
+        slog = SessionLog(session_id, base_dir=str(tmp_dir))
+        slog.append("user", "first turn")  # ensure the JSONL exists for list_sessions
+
+        agent = MagicMock()
+        agent.session_id = session_id
+        agent._session_log = slog
+
+        ctx = cli_commands.CommandContext(
+            agent_config={"model_provider": "zhipuai", "model_name": "glm-5", "debug": False, "work_dir": None},
+            current_agent=agent,
+            extra_tools=[],
+            workspace=None,
+        )
+        return ctx, slog
+
+    def test_rename_current_session_writes_sidecar(self):
+        import tempfile
+        from agentica.cli.commands import _cmd_session
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx, slog = self._ctx_with_agent(d)
+            _cmd_session(ctx, "rename My favourite session")
+            self.assertEqual(slog.get_name(), "My favourite session")
+
+    def test_rename_rejects_empty(self):
+        import tempfile
+        from agentica.cli.commands import _cmd_session
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx, slog = self._ctx_with_agent(d)
+            _cmd_session(ctx, "rename")          # missing name
+            _cmd_session(ctx, "rename    ")      # whitespace-only
+            self.assertIsNone(slog.get_name())
+
+    def test_rename_by_id_prefix(self):
+        """``/session rename <prefix> <name>`` renames a *different*
+        session when the prefix uniquely matches an existing session. The
+        agent's own session must stay untouched."""
+        import tempfile
+        from agentica.cli.commands import _cmd_session
+        from agentica.memory.session_log import SessionLog
+
+        with tempfile.TemporaryDirectory() as d:
+            # Active session (the one the agent owns).
+            ctx, active = self._ctx_with_agent(d, session_id="sess-active")
+            # Another historical session.
+            other = SessionLog("sess-other-9876", base_dir=str(d))
+            other.append("user", "other turn")
+
+            _cmd_session(ctx, "rename sess-other Historical archive")
+
+            self.assertEqual(other.get_name(), "Historical archive")
+            # Active session not touched.
+            self.assertIsNone(active.get_name())
+
+    def test_rename_ambiguous_prefix_refuses(self):
+        """If the id-prefix matches multiple sessions, we must NOT pick
+        one silently — the operation has to fail loudly so the user can
+        disambiguate. (Falling back to "rename current session" here
+        would silently rewrite the *active* session's name and lose the
+        user's intent.)
+        """
+        import tempfile
+        from agentica.cli.commands import _cmd_session
+        from agentica.memory.session_log import SessionLog
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx, active = self._ctx_with_agent(d, session_id="sess-active")
+            # Two sessions sharing a prefix.
+            for sid in ("sess-dup-1111", "sess-dup-2222"):
+                s = SessionLog(sid, base_dir=str(d))
+                s.append("user", "x")
+
+            _cmd_session(ctx, "rename sess-dup AmbiguousName")
+
+            # Neither the active session nor either duplicate got named.
+            self.assertIsNone(active.get_name())
+            self.assertIsNone(SessionLog("sess-dup-1111", base_dir=str(d)).get_name())
+            self.assertIsNone(SessionLog("sess-dup-2222", base_dir=str(d)).get_name())
+
+    def test_rename_short_first_token_treated_as_name(self):
+        """A first token that isn't long enough / id-ish to be a prefix
+        (e.g. ``rename Hi there``) must rename the current session and
+        keep the full text as the name — otherwise users with short
+        names get a confusing 'unknown id prefix' error.
+        """
+        import tempfile
+        from agentica.cli.commands import _cmd_session
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx, slog = self._ctx_with_agent(d)
+            _cmd_session(ctx, "rename Hi there")
+            self.assertEqual(slog.get_name(), "Hi there")
+
+    def test_session_show_no_args(self):
+        """``/session`` with no args must not crash, regardless of whether
+        a name has been set."""
+        import tempfile
+        from agentica.cli.commands import _cmd_session
+
+        with tempfile.TemporaryDirectory() as d:
+            ctx, slog = self._ctx_with_agent(d)
+            _cmd_session(ctx, "")        # unnamed branch
+            slog.set_name("Named")
+            _cmd_session(ctx, "")        # named branch
+
+    def test_session_command_registered(self):
+        from agentica.cli.commands import COMMAND_REGISTRY
+        self.assertIn("/session", COMMAND_REGISTRY)
+
+
 class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
     """The Response box must close with a small ``(HH:MM:SS)`` label embedded
     on its bottom-right corner so users reviewing a long session can see
@@ -2165,6 +2288,65 @@ class TestCLIAwareness(unittest.TestCase):
         self.assertIn("Invalid tool name", printed)
         self.assertIn("../evil", printed)
         mock_load.assert_not_called()
+
+
+class TestInputRequestCancel(unittest.TestCase):
+    """Regression tests for the Ctrl+C escape path through an ask-user prompt.
+
+    Motivating bug: when the agent called a user_input / confirm tool, the CLI
+    armed an ``_InputRequest`` and the tool thread blocked on
+    ``req.result.get()``. Pressing Ctrl+C only reached ``asyncio.Task.cancel()``,
+    which cannot interrupt a synchronous blocking ``queue.Queue.get()`` running
+    on the thread-pool worker, so the whole REPL froze on the spinner.
+
+    The fix threads a ``_InputRequest.CANCELLED`` sentinel through the queue.
+    These tests lock that contract in.
+    """
+
+    def _import_input_request(self):
+        # Imported lazily so a broken import surfaces as a test failure rather
+        # than a collection error.
+        from agentica.cli.interactive import _InputRequest
+        return _InputRequest
+
+    def test_cancel_unblocks_pending_get(self):
+        _InputRequest = self._import_input_request()
+        req = _InputRequest(prompt="?", options=None)
+        import threading
+
+        got = {}
+
+        def worker():
+            got["value"] = req.result.get(timeout=5)
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        # Simulate the Ctrl+C handler waking the worker.
+        req.cancel()
+        t.join(timeout=2)
+        self.assertFalse(t.is_alive(), "worker thread must unblock after cancel()")
+        self.assertIs(got["value"], _InputRequest.CANCELLED)
+
+    def test_cancel_is_idempotent_when_answer_already_present(self):
+        _InputRequest = self._import_input_request()
+        req = _InputRequest(prompt="?", options=None)
+        # A real user typed an answer first — cancel() must not blow up trying
+        # to overfill the maxsize=1 queue.
+        req.result.put("hi")
+        req.cancel()  # should silently no-op, not raise
+        self.assertEqual(req.result.get_nowait(), "hi")
+
+    def test_sentinel_is_singleton_and_unique(self):
+        _InputRequest = self._import_input_request()
+        # Callers distinguish "cancelled" from "the user typed empty string" via
+        # ``is _InputRequest.CANCELLED``. If the sentinel were, e.g., a plain
+        # empty string, an empty user reply would be indistinguishable.
+        self.assertIsNot(_InputRequest.CANCELLED, "")
+        self.assertIsNot(_InputRequest.CANCELLED, None)
+        # Same object across all instances.
+        req_a = _InputRequest(prompt="a")
+        req_b = _InputRequest(prompt="b")
+        self.assertIs(req_a.CANCELLED, req_b.CANCELLED)
 
 
 if __name__ == "__main__":

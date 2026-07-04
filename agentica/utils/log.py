@@ -6,10 +6,100 @@
 import sys
 import os
 import logging
+import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Optional
+from typing import Iterator, Optional
 
 from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
+
+
+# ----------------------------------------------------------------------
+# Per-run log context (concurrency-safe via contextvars)
+# ----------------------------------------------------------------------
+#
+# ``agentica`` is an SDK: multiple agents / workflows / tools can run
+# concurrently in a single process (asyncio tasks, thread-pool executors,
+# subagents). When they all share a single log file, records interleave and
+# it becomes impossible to reconstruct the full trace for a single query.
+#
+# We attach the active ``run_id`` (and optional ``parent_run_id`` for
+# subagent/workflow children) to the logging record via ``ContextVar``s.
+# ``ContextVar`` is the right primitive here: asyncio propagates the context
+# per-Task automatically, and ``contextvars.copy_context()`` covers thread
+# handoffs. The formatters below read these vars and emit a compact
+# ``run=<8-hex>`` prefix so a user can do::
+#
+#     grep 'run=a1b2c3d4' ~/.agentica/logs/*.log
+#
+# to reconstruct a single query's full timeline even when concurrent runs
+# are interleaved in the same file.
+_run_id_var: ContextVar[Optional[str]] = ContextVar("agentica_run_id", default=None)
+_parent_run_id_var: ContextVar[Optional[str]] = ContextVar("agentica_parent_run_id", default=None)
+
+
+def _short(run_id: Optional[str]) -> Optional[str]:
+    """Truncate a UUID-shaped run id to its first 8 hex chars for log display.
+
+    Full UUIDs (36 chars) make every log line noisy; 8 hex chars are still
+    unique enough within a single process's log window (~4B combinations)
+    and stay readable. Non-UUID ids are returned as-is up to 8 chars.
+    """
+    if not run_id:
+        return None
+    return str(run_id).replace("-", "")[:8]
+
+
+@contextmanager
+def bind_run_context(
+    run_id: Optional[str] = None,
+    parent_run_id: Optional[str] = None,
+) -> Iterator[None]:
+    """Bind a run's identifiers to the log context for the duration of the block.
+
+    Meant to wrap a single ``Agent.run`` / ``Workflow.run`` invocation so every
+    log record emitted from that call (including from tools and subagents
+    running on child asyncio Tasks) carries the same ``run=<id>`` prefix.
+
+    ``ContextVar`` tokens are reset on exit to avoid leaking the id into
+    unrelated code that happens to run afterwards on the same task.
+    """
+    tokens = []
+    if run_id:
+        tokens.append((_run_id_var, _run_id_var.set(_short(run_id))))
+    if parent_run_id:
+        tokens.append((_parent_run_id_var, _parent_run_id_var.set(_short(parent_run_id))))
+    try:
+        yield
+    finally:
+        # Reset in reverse order so nested bind_run_context calls unwind cleanly.
+        for var, token in reversed(tokens):
+            try:
+                var.reset(token)
+            except (ValueError, LookupError):
+                # ContextVar.reset raises if the token was created in a
+                # different Context (rare, but can happen across thread
+                # boundaries). Fall back to clearing the value.
+                var.set(None)
+
+
+def _run_prefix() -> str:
+    """Render the current run context as a formatter fragment.
+
+    Returns an empty string when no run is bound (so SDK usage outside a
+    ``Runner.run`` — e.g. module import time — doesn't gain a noisy
+    ``run=none`` column). When a parent id is present we render it as
+    ``run=<child>/parent=<parent>`` to make subagent hierarchies greppable.
+    """
+    rid = _run_id_var.get()
+    if not rid:
+        return ""
+    pid = _parent_run_id_var.get()
+    if pid:
+        return f"run={rid}/parent={pid}"
+    return f"run={rid}"
 
 
 # CHAT_LEVEL is a custom log level dedicated to inter-agent conversation
@@ -115,6 +205,14 @@ class LoguruStyleFormatter(logging.Formatter):
         # Format message with level color
         message = f"{level_color}{record.getMessage()}{self.RESET}"
 
+        # Include the active run context (if any) between level and module so
+        # concurrent runs stay visually separable. Empty string when unbound
+        # (import-time logs, direct SDK helpers outside a Runner) keeps the
+        # non-run case as clean as before.
+        run_ctx = _run_prefix()
+        if run_ctx:
+            run_ctx_col = f"{self.CYAN}{run_ctx}{self.RESET}"
+            return f"{timestamp} | {level} | {run_ctx_col} | {module_info} - {message}"
         return f"{timestamp} | {level} | {module_info} - {message}"
 
 
@@ -131,6 +229,12 @@ class _PlainLoguruStyleFormatter(logging.Formatter):
             f".{record.msecs:03.0f}"
         )
         module_path = _dotted_module_from_path(record.pathname)
+        run_ctx = _run_prefix()
+        if run_ctx:
+            return (
+                f"{timestamp} | {record.levelname:<8} | {run_ctx} | "
+                f"{module_path}:{record.funcName}:{record.lineno} - {record.getMessage()}"
+            )
         return (
             f"{timestamp} | {record.levelname:<8} | "
             f"{module_path}:{record.funcName}:{record.lineno} - {record.getMessage()}"
@@ -164,7 +268,14 @@ def get_agentica_logger(log_level: str = "INFO", log_file: Optional[str] = None)
         if log_dir:
             os.makedirs(log_dir, exist_ok=True)
 
-        file_handler = logging.FileHandler(log_file)
+        # delay=True: defer opening the file until the first log record is
+        # actually emitted. Without this, merely `import agentica` creates a
+        # 0-byte YYYYMMDD.log every day (import → get_agentica_logger() at
+        # module load → FileHandler.__init__ → open()), even when no INFO
+        # event ever gets logged (e.g. pytest collection, IDE indexer,
+        # a script that imports and exits). See ~/.agentica/logs/ history
+        # for the 0-byte file pattern this eliminates.
+        file_handler = logging.FileHandler(log_file, delay=True)
         file_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
         # Plain (no-ANSI) variant of LoguruStyleFormatter so the file copy
         # carries the same module.path:function:line locator as the console.
@@ -193,6 +304,60 @@ def set_log_level_to_info():
     logger.setLevel(logging.INFO)
     for handler in logger.handlers:
         handler.setLevel(logging.INFO)
+
+
+# ----------------------------------------------------------------------
+# Log file retention (called from CLI startup)
+# ----------------------------------------------------------------------
+#
+# We match filenames like ``20260705.log`` and ``20260705-12345.log``
+# (date + optional ``-<pid>`` suffix added by CLI). Files that don't
+# match this shape are never touched, so unrelated files in the same
+# directory are safe.
+_LOG_FILENAME_RE = re.compile(r"^(\d{8})(?:-\d+)?\.log$")
+
+
+def cleanup_old_logs(log_dir: str, keep_days: int = 14) -> int:
+    """Delete agentica log files older than ``keep_days`` in ``log_dir``.
+
+    Only removes files whose name matches ``YYYYMMDD.log`` or
+    ``YYYYMMDD-<pid>.log`` — the two shapes this module produces. Unrelated
+    files are left alone so this is safe to call even if the log directory
+    contains other content.
+
+    Called lazily from the CLI startup path (not at module import) so pure
+    SDK usage never touches the filesystem. Errors are swallowed with a
+    debug log — a stale file failing to delete must never break user code.
+
+    Returns the number of files removed (mostly useful for tests).
+    """
+    if keep_days <= 0 or not log_dir or not os.path.isdir(log_dir):
+        return 0
+
+    cutoff = datetime.now().date() - timedelta(days=keep_days)
+    removed = 0
+    try:
+        entries = os.listdir(log_dir)
+    except OSError:
+        return 0
+
+    for name in entries:
+        m = _LOG_FILENAME_RE.match(name)
+        if not m:
+            continue
+        try:
+            file_date = datetime.strptime(m.group(1), "%Y%m%d").date()
+        except ValueError:
+            continue
+        if file_date >= cutoff:
+            continue
+        path = os.path.join(log_dir, name)
+        try:
+            os.remove(path)
+            removed += 1
+        except OSError as exc:  # pragma: no cover — best-effort cleanup
+            logger.debug("cleanup_old_logs: failed to remove %s: %s", path, exc)
+    return removed
 
 
 def print_llm_stream(msg):

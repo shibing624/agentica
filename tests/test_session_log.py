@@ -516,5 +516,76 @@ class TestListUserMessages:
         assert len(msgs) == 3
 
 
+class TestSidecarSessionName:
+    """``set_name`` / ``get_name`` / ``clear_name`` form the public sidecar
+    API used by ``/session rename``. The on-disk layout
+    (``<session_id>.meta.json``) is an implementation detail — these tests
+    deliberately go through the public methods only so downstream
+    callers (CLI, future TUI) get a single stable surface.
+    """
+
+    def test_get_name_returns_none_when_no_sidecar(self, tmp_path):
+        log = SessionLog("s-no-meta", base_dir=str(tmp_path))
+        assert log.get_name() is None
+
+    def test_set_then_get_round_trips_and_strips(self, tmp_path):
+        log = SessionLog("s-1", base_dir=str(tmp_path))
+        log.set_name("  My research project  ")
+        # set_name must strip leading/trailing whitespace so the name
+        # displayed in /status matches what the user "really" wrote.
+        assert log.get_name() == "My research project"
+
+    def test_set_name_overwrites(self, tmp_path):
+        log = SessionLog("s-2", base_dir=str(tmp_path))
+        log.set_name("v1")
+        log.set_name("v2")
+        assert log.get_name() == "v2"
+
+    def test_set_name_rejects_empty(self, tmp_path):
+        log = SessionLog("s-3", base_dir=str(tmp_path))
+        with pytest.raises(ValueError):
+            log.set_name("")
+        with pytest.raises(ValueError):
+            log.set_name("   ")
+
+    def test_clear_name_removes_sidecar(self, tmp_path):
+        log = SessionLog("s-4", base_dir=str(tmp_path))
+        log.set_name("temp")
+        assert log.clear_name() is True
+        assert log.get_name() is None
+        # Idempotent: clearing again returns False but does NOT raise.
+        assert log.clear_name() is False
+
+    def test_get_name_silently_ignores_corrupt_sidecar(self, tmp_path):
+        """A garbled meta file must NOT crash /resume rendering. The
+        contract: bad sidecar == no name set."""
+        log = SessionLog("s-5", base_dir=str(tmp_path))
+        log.meta_path.write_text("{not json", encoding="utf-8")
+        assert log.get_name() is None
+
+    def test_list_sessions_includes_name_field(self, tmp_path):
+        log = SessionLog("s-listed", base_dir=str(tmp_path))
+        log.append("user", "hi")  # need a jsonl entry for list_sessions
+        log.set_name("Headline")
+
+        sessions = SessionLog.list_sessions(base_dir=str(tmp_path))
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == "s-listed"
+        assert sessions[0]["name"] == "Headline"
+
+    def test_list_sessions_name_is_none_when_no_sidecar(self, tmp_path):
+        log = SessionLog("s-unnamed", base_dir=str(tmp_path))
+        log.append("user", "hi")
+        sessions = SessionLog.list_sessions(base_dir=str(tmp_path))
+        assert sessions[0]["name"] is None
+
+    def test_rename_session_classmethod(self, tmp_path):
+        """``rename_session`` lets callers update a name without
+        instantiating ``SessionLog`` themselves — used by the CLI when the
+        user types ``/session rename <id-prefix> <name>``."""
+        SessionLog.rename_session("s-by-cls", "via-classmethod", base_dir=str(tmp_path))
+        assert SessionLog("s-by-cls", base_dir=str(tmp_path)).get_name() == "via-classmethod"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

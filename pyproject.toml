@@ -1,6 +1,6 @@
 [project]
 name = "agentica"
-version = "1.4.6"
+version = "1.4.7"
 description = "Agentica: A lightweight Python SDK for building AI agents with persistent memory and self-evolution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,7 +34,6 @@ dependencies = [
     "anthropic>=0.40",            # Claude 直接默认装（agentica 主推 provider）
     "pydantic>=2.0",
     "httpx>=0.24",
-    "loguru>=0.7",
     "aiofiles>=23.0",
     "tiktoken>=0.5",
     "pyyaml>=6.0",

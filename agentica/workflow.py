@@ -24,7 +24,7 @@ from types import GeneratorType
 from typing import Any, AsyncIterator, Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
-from agentica.utils.log import logger, set_log_level_to_debug
+from agentica.utils.log import logger, set_log_level_to_debug, _run_id_var, _short as _short_run_id
 from agentica.utils.async_utils import run_sync
 from agentica.run_response import RunResponse
 from agentica.memory import WorkflowMemory, WorkflowRun
@@ -156,6 +156,17 @@ class Workflow(BaseModel):
     async def _wrap_user_run(self, *args, **kwargs):
         """Wrapper: lifecycle management -> user run -> result wrapping."""
         await self._prepare_run(args, kwargs)
+        # Bind this workflow run's id to the log ContextVar so every record
+        # emitted from the user's Workflow.run() body (and any agents it
+        # invokes) carries a ``run=<id>`` prefix, letting concurrent workflows
+        # be reconstructed from a shared log file. We intentionally do NOT
+        # reset the token: this coroutine is the top of its asyncio Task, so
+        # the ContextVar dies with the Task and cannot leak. Resetting here
+        # would also break the streaming case where ``_wrap_generator``
+        # returns a sync generator that continues logging after this coroutine
+        # returns — those subsequent ``next()`` calls should still carry the
+        # workflow's run id.
+        _run_id_var.set(_short_run_id(self.run_id))
         result = self._user_run(self, *args, **kwargs)
         # Await if the subclass run() is async
         if inspect.isawaitable(result):

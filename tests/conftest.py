@@ -9,6 +9,18 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# IMPORTANT: disable agentica's default file sink (~/.agentica/logs/<date>.log)
+# for the entire pytest session. Tests deliberately trigger error paths
+# (e.g. "fts unavailable" mocks, fake corrupt sessions) and the resulting
+# WARNING/ERROR lines must NOT pollute the user's real CLI log file —
+# users tail that file and would mistake test-induced warnings for runtime
+# bugs.
+#
+# Must be set BEFORE any `import agentica.*` because agentica/config.py
+# reads this env var at import time and wires up loguru sinks immediately.
+# Empty string is the documented "disable file sink" sentinel in config.py.
+os.environ.setdefault("AGENTICA_LOG_FILE", "")
+
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 from agentica.agent import Agent

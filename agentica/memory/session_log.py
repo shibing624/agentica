@@ -66,6 +66,7 @@ class SessionLog:
         self.session_id = session_id
         self.base_dir = Path(base_dir) if base_dir else Path(_get_default_base_dir())
         self.path = self.base_dir / f"{session_id}.jsonl"
+        self.meta_path = self.base_dir / f"{session_id}.meta.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._last_uuid: Optional[str] = None
         self._cwd: str = os.getcwd()
@@ -417,6 +418,7 @@ class SessionLog:
                 "path": str(f),
                 "size_bytes": stat.st_size,
                 "last_timestamp": last_timestamp,
+                "name": cls._read_meta_name(base / f"{session_id}.meta.json"),
             })
 
         return sessions
@@ -453,6 +455,105 @@ class SessionLog:
         except Exception:
             pass
         return {"first_user": first_user, "user_count": user_count}
+
+    # ---- sidecar metadata (session name) -----------------------------------
+    #
+    # Each session may have an optional sidecar JSON at
+    # ``<base_dir>/<session_id>.meta.json`` carrying user-supplied metadata.
+    # Today the only field is ``name`` (a short, human-friendly title shown
+    # in /resume picker and /status), but the schema is open so we can add
+    # more fields later without touching the JSONL data file.
+    #
+    # The sidecar is owned by SessionLog so all downstream callers (CLI,
+    # TUI, future web UI) get one unified API and never hand-roll the path
+    # or JSON shape — that's what
+    # ``fix_at_library_layer_for_downstream`` mandates.
+
+    @staticmethod
+    def _read_meta_name(meta_path: Path) -> Optional[str]:
+        """Return the ``name`` field from a sidecar file, or ``None`` if the
+        file is missing / malformed / empty. Never raises — callers treat
+        a missing name as "no name set" and fall back to a preview."""
+        try:
+            if not meta_path.exists():
+                return None
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            name = data.get("name")
+            if isinstance(name, str) and name.strip():
+                return name.strip()
+            return None
+        except Exception:
+            return None
+
+    def get_name(self) -> Optional[str]:
+        """Return the human-friendly name for THIS session, or ``None``
+        if the user has never renamed it."""
+        return self._read_meta_name(self.meta_path)
+
+    def set_name(self, name: str) -> None:
+        """Set (or overwrite) the human-friendly name for this session.
+
+        Writes ``<session_id>.meta.json`` atomically: write to a temp file
+        first then ``os.replace`` so a crash mid-write can never leave a
+        corrupt sidecar. Empty / whitespace-only names raise ``ValueError``
+        — for "clear the name" callers should use :meth:`clear_name`.
+        """
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("session name must be a non-empty string")
+        name = name.strip()
+        self.meta_path.parent.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime, timezone
+        payload = {
+            "name": name,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        tmp = self.meta_path.with_suffix(self.meta_path.suffix + ".tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.meta_path)
+        except Exception:
+            # Abandoned .tmp fragments would otherwise pile up on repeated
+            # write failures; the real sidecar is safe (os.replace only runs
+            # on success), but clean up the orphaned temp either way.
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise
+
+    def clear_name(self) -> bool:
+        """Delete the sidecar file. Returns ``True`` if a file was removed,
+        ``False`` if there was nothing to clear. Never raises on a missing
+        file — clearing an already-empty name is a no-op success path from
+        the caller's POV."""
+        try:
+            if self.meta_path.exists():
+                self.meta_path.unlink()
+                return True
+        except Exception:
+            pass
+        return False
+
+    @classmethod
+    def rename_session(
+        cls,
+        session_id: str,
+        name: str,
+        base_dir: Optional[str] = None,
+    ) -> bool:
+        """Convenience classmethod to rename a session by id without
+        instantiating the full ``SessionLog`` (no JSONL must exist either —
+        the sidecar can be written ahead of any logged turn).
+
+        Returns ``True`` on success. Raises ``ValueError`` for empty names.
+        """
+        base = Path(base_dir) if base_dir else Path(_get_default_base_dir())
+        log = cls(session_id=session_id, base_dir=str(base))
+        log.set_name(name)
+        return True
 
     # ------------------------------------------------------------------
     # Fork: create a new session branching from a specific message

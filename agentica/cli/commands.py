@@ -1384,6 +1384,15 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     con.print("  [bold]-- Session --[/bold]")
     if ctx.current_agent:
         con.print(f"  Session ID:  {ctx.current_agent.session_id}")
+        # Surface the user-set session name (via /session rename), if any.
+        # Quiet line — only render when a name exists, to keep /status
+        # output minimal for unnamed sessions. get_name() never raises
+        # (corrupt sidecar == no name), so no defensive try/except needed.
+        _slog = ctx.current_agent._session_log
+        if _slog is not None:
+            _sname = _slog.get_name()
+            if _sname:
+                con.print(f"  Session name: {_sname}")
     started = ctx.tui_state.get("session_start") if ctx.tui_state else None
     if started:
         con.print(f"  Started:     {started}")
@@ -1848,23 +1857,163 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             # directly. Avoid the old "abc...wxyz" form which users would copy
             # verbatim (ellipsis included) and which then failed to match.
             short_id = sid if len(sid) <= 12 else sid[:8]
-            # Show what the session was about: first user message (the task
-            # that started it) + user turn count. Reads the log once; cheap.
+            # Show what the session was about: prefer the user-set name
+            # (via /session rename) for an at-a-glance label; if unset,
+            # fall back to the first user message (the task that started
+            # the session). Reads the log once; cheap.
             preview = SessionLog.session_preview(s["path"])
             turns = preview["user_count"]
             first_user = preview["first_user"]
-            if first_user:
-                # Collapse to a single line and trim for the picker row.
+            user_name = s.get("name")
+            if user_name:
+                # Named session: name is the headline, preview is the subline.
+                summary = user_name[:80]
+                subline = " ".join(first_user.split())[:80] if first_user else "(no messages yet)"
+            elif first_user:
+                # Unnamed session: keep the legacy single-line preview.
                 summary = " ".join(first_user.split())[:80]
+                subline = None
             else:
                 summary = "(empty session)"
+                subline = None
             con.print(
                 f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
                 f"({size_kb:.0f}KB, {turns} turns)"
             )
-            con.print(f"     [dim]> {summary}[/dim]")
+            if user_name:
+                con.print(f"     [bold]{summary}[/bold]")
+                if subline:
+                    con.print(f"     [dim]> {subline}[/dim]")
+            else:
+                con.print(f"     [dim]> {summary}[/dim]")
         con.print(f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {sessions[0]['session_id'][:8]})[/dim]")
         return
+
+
+def _cmd_session(ctx: CommandContext, cmd_args: str = ""):
+    """Show / rename / list sessions.
+
+    Subcommands:
+      /session                       Show the current session (id + name).
+      /session rename <new name>     Rename the current session.
+      /session rename <id> <name>    Rename a session by id (or unique prefix).
+      /session list                  List all sessions (alias of /resume's list view).
+    """
+    from agentica.memory.session_log import SessionLog
+
+    con = get_console()
+    args = (cmd_args or "").strip()
+    agent = ctx.current_agent
+
+    # Resolve which sessions directory we operate on. Prefer the active
+    # agent's live SessionLog.base_dir so tests / custom workspaces that
+    # use a non-default location keep working; only fall back to the
+    # SessionLog default when no agent is attached.
+    _agent_log = agent._session_log if agent is not None else None
+    base_dir = str(_agent_log.base_dir) if _agent_log is not None else None
+
+    # ---- /session (no args) → show current ------------------------------
+    if not args:
+        if agent is None or not agent.session_id:
+            con.print("[yellow]No active session.[/yellow]")
+            return
+        sid = agent.session_id
+        # Prefer the live SessionLog on the agent so we read the same
+        # base_dir the agent is writing to.
+        log = _agent_log or SessionLog(sid, base_dir=base_dir)
+        name = log.get_name()
+        con.print()
+        con.print("  [bold]-- Session --[/bold]")
+        con.print(f"  ID:    {sid}")
+        con.print(f"  Name:  {name if name else '[dim](unnamed — use /session rename <name>)[/dim]'}")
+        con.print(f"  File:  [dim]{log.path}[/dim]")
+        return
+
+    parts = args.split(maxsplit=1)
+    sub = parts[0].lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    # ---- /session list --------------------------------------------------
+    if sub == "list":
+        sessions = SessionLog.list_sessions(base_dir=base_dir)
+        if not sessions:
+            con.print("[yellow]No sessions found.[/yellow]")
+            return
+        con.print(f"\n  [cyan]Sessions ({len(sessions)}):[/cyan]")
+        for i, s in enumerate(sessions, start=1):
+            label = (
+                s.get("name")
+                or SessionLog.session_preview(s["path"]).get("first_user", "")
+                or "(empty)"
+            )
+            con.print(f"  {i:>3}. [bold]{s['session_id'][:12]}[/bold]  {label[:60]}")
+        return
+
+    # ---- /session rename ------------------------------------------------
+    if sub == "rename":
+        if not rest:
+            con.print("  [dim]Usage: /session rename <new name>   |   /session rename <id-or-prefix> <new name>[/dim]")
+            return
+
+        # Two shapes:
+        #   rename <name...>                  → rename current session
+        #   rename <id-or-prefix> <name...>   → rename a specific session
+        sub_parts = rest.split(maxsplit=1)
+        first = sub_parts[0]
+        looks_like_id = (
+            len(sub_parts) > 1
+            and len(first) >= 4
+            and all(c.isalnum() or c in "-_" for c in first)
+            and not first[0].isspace()
+        )
+
+        target_id: Optional[str] = None
+        new_name: str = ""
+
+        if looks_like_id:
+            # Try to resolve <first> as an id prefix. If exactly one session
+            # matches, treat the rest as the new name. Otherwise fall back
+            # to "everything renames the current session".
+            sessions = SessionLog.list_sessions(base_dir=base_dir)
+            matches = [s for s in sessions if s["session_id"].startswith(first)]
+            if len(matches) == 1:
+                target_id = matches[0]["session_id"]
+                new_name = sub_parts[1].strip()
+            elif len(matches) > 1:
+                con.print(f"  [red]Ambiguous id prefix '{first}' — matches {len(matches)} sessions.[/red]")
+                return
+
+        if target_id is None:
+            # Rename current session, treating the full `rest` as the name.
+            if agent is None or not agent.session_id:
+                con.print("[yellow]No active session to rename.[/yellow]")
+                return
+            target_id = agent.session_id
+            new_name = rest
+
+        if not new_name:
+            con.print("  [dim]Usage: /session rename <new name>[/dim]")
+            return
+
+        try:
+            # Reuse the agent's live SessionLog when targeting the current
+            # session — it already knows the right base_dir.
+            if _agent_log is not None and target_id == agent.session_id:
+                _agent_log.set_name(new_name)
+            else:
+                SessionLog.rename_session(target_id, new_name, base_dir=base_dir)
+        except ValueError as e:
+            con.print(f"  [red]{e}[/red]")
+            return
+        except Exception as e:
+            con.print(f"  [red]Failed to rename: {e}[/red]")
+            return
+
+        con.print(f"  [green]Renamed[/green] [bold]{target_id[:12]}[/bold] → [cyan]{new_name}[/cyan]")
+        return
+
+    con.print(f"  [red]Unknown subcommand: {sub}[/red]")
+    con.print("  [dim]Usage: /session [rename <name> | list][/dim]")
 
 
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
@@ -3113,6 +3262,7 @@ COMMAND_REGISTRY = {
     "/undo": (_cmd_undo, "Remove the last user/assistant exchange"),
     "/compact": (_cmd_compact, "Compact context (summarize history)"),
     "/resume": (_cmd_resume, "Resume a previous session"),
+    "/session": (_cmd_session, "Show / rename / list sessions | /session rename <name>"),
     "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done)"),
     "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
     "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),

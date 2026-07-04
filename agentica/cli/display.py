@@ -56,6 +56,14 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
             tools_str = tools_str[:52] + "..."
         get_console().print(f"  Extra Tools: [bright_green]{tools_str}[/bright_green]")
 
+    # Log file location (helps users find logs when debugging)
+    from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
+    if AGENTICA_LOG_FILE:
+        log_path = AGENTICA_LOG_FILE
+        if log_path.startswith(home):
+            log_path = "~" + log_path[len(home):]
+        get_console().print(f"  Log File ({AGENTICA_LOG_LEVEL}): [white]{log_path}[/white]")
+
     get_console().print("=" * box_width, style="bright_cyan")
     get_console().print()
     # Keyboard shortcuts
@@ -808,27 +816,34 @@ class StreamDisplayManager:
                     continue
                 old = str(e.get("old_string", ""))
                 new = str(e.get("new_string", ""))
+                # splitlines() WITHOUT keepends + lineterm="" so every diff
+                # line (incl. ---/+++/@@ headers) is uniformly newline-free;
+                # joining with "\n" then guarantees clean line boundaries.
+                # Using keepends=True + "".join() would glue "-old" onto the
+                # next "+new" whenever the edited text lacks a trailing newline.
                 d = list(difflib.unified_diff(
-                    old.splitlines(keepends=True),
-                    new.splitlines(keepends=True),
+                    old.splitlines(),
+                    new.splitlines(),
                     fromfile=f"a/{filename}#{i + 1}",
                     tofile=f"b/{filename}#{i + 1}",
                     n=2,
+                    lineterm="",
                 ))
                 if d:
-                    parts.append("".join(d))
+                    parts.append("\n".join(d))
             return "\n".join(parts).rstrip("\n")
         # edit_file
         old = str(tool_args.get("old_string", ""))
         new = str(tool_args.get("new_string", ""))
         d = list(difflib.unified_diff(
-            old.splitlines(keepends=True),
-            new.splitlines(keepends=True),
+            old.splitlines(),
+            new.splitlines(),
             fromfile=f"a/{filename}",
             tofile=f"b/{filename}",
             n=2,
+            lineterm="",
         ))
-        return "".join(d).rstrip("\n")
+        return "\n".join(d).rstrip("\n")
 
     def _display_write_merged(self, tool_name: str, tool_args: dict,
                               result_content: str, is_error: bool,
@@ -868,12 +883,13 @@ class StreamDisplayManager:
 
         # Old content stashed at call start; pop so the slot is reusable.
         old_content = self._write_old.pop(tool_args.get("file_path", ""), "")
-        diff_text = "".join(difflib.unified_diff(
-            old_content.splitlines(keepends=True),
-            new_content.splitlines(keepends=True),
+        diff_text = "\n".join(difflib.unified_diff(
+            old_content.splitlines(),
+            new_content.splitlines(),
             fromfile=f"a/{filename}",
             tofile=f"b/{filename}",
             n=2,
+            lineterm="",
         )).rstrip("\n")
         if not diff_text:
             return
@@ -1357,14 +1373,15 @@ def render_markdown_response(console_instance, text: str) -> None:
 def display_diff(console_instance, file_path: str, old_content: str, new_content: str) -> None:
     """Display unified diff between old and new file content."""
     diff_lines = list(difflib.unified_diff(
-        old_content.splitlines(keepends=True),
-        new_content.splitlines(keepends=True),
+        old_content.splitlines(),
+        new_content.splitlines(),
         fromfile=f"a/{file_path}",
         tofile=f"b/{file_path}",
         n=3,
+        lineterm="",
     ))
     if diff_lines:
-        diff_text = "".join(diff_lines)
+        diff_text = "\n".join(diff_lines)
         console_instance.print(Syntax(diff_text, "diff", theme="monokai", line_numbers=False))
 
 

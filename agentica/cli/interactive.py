@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
 from io import StringIO
 
@@ -86,11 +86,23 @@ class _InputRequest:
 
     Created by the user_input_callback on the background agent thread; the main
     prompt_toolkit thread fulfils it by putting the user's line on ``result``.
+    Putting the ``CANCELLED`` sentinel unblocks the agent thread so it can raise
+    :class:`AgentCancelledError` — this is how Ctrl+C escapes a pending prompt.
     """
+
+    CANCELLED: ClassVar[object] = object()
 
     prompt: str
     options: Optional[List[str]] = None
     result: "queue.Queue" = field(default_factory=lambda: queue.Queue(maxsize=1))
+
+    def cancel(self) -> None:
+        """Wake up the blocked agent thread and tell it the user aborted."""
+        try:
+            self.result.put_nowait(_InputRequest.CANCELLED)
+        except queue.Full:
+            # Someone already answered — nothing to unblock.
+            pass
 
 
 @dataclass
@@ -481,6 +493,11 @@ def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> No
 # the user can tell a live process (spinner turning) from a hung one
 # (spinner frozen) at a glance.
 _BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+# Shown in the spinner line while the agent is parked on a user_input/confirm
+# tool. Steady (no animation) so the spinner thread can stop invalidate() churn
+# that would otherwise fight the input renderer.
+_WAITING_FOR_INPUT_TEXT = "⏸  waiting for your answer…"
 
 
 def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) -> str:
@@ -1011,6 +1028,36 @@ def _process_stream_response(
 # ==================== TUI setup ====================
 
 
+class _CleanResizeApplication(Application):
+    """Application that does a full screen clear on terminal resize.
+
+    In non-full-screen mode prompt_toolkit erases its bottom frame (spinner /
+    hint / queue / rule / input box / status bar) using a *relative* cursor
+    offset (``renderer._cursor_pos``). On resize the terminal reflows the whole
+    visible area (including the scrollback transcript printed via patch_stdout)
+    at the new width, so that recorded offset becomes stale: the default
+    ``_on_resize`` moves the cursor up by the old row count and erases the wrong
+    region, leaving ghost copies of the frame stacked on screen.
+
+    An unconditional full clear (``erase_screen`` + ``cursor_goto(0, 0)``) does
+    not depend on the stale offset, so the frame is redrawn cleanly with no
+    ghosts. ``renderer.erase`` already resets ``_cursor_pos`` and
+    ``_last_screen`` (forcing a fresh, non-diff redraw); we only insert the full
+    clear between erase and redraw. The transcript stays in the terminal's
+    native scrollback (ESC[2J does not clear scrollback), so scrolling up still
+    shows prior output.
+    """
+
+    def _on_resize(self) -> None:
+        renderer = self.renderer
+        renderer.erase(leave_alternate_screen=False)
+        renderer.output.erase_screen()
+        renderer.output.cursor_goto(0, 0)
+        renderer.output.flush()
+        self._request_absolute_cursor_position()
+        self._redraw()
+
+
 def _setup_tui(
     state: SessionState,
     skills_registry,
@@ -1085,6 +1132,22 @@ def _setup_tui(
                 return
             state.last_ctrl_c = now
             _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit)")
+            # If the agent is currently blocked in a user_input tool call, the
+            # asyncio task.cancel() route alone won't help: the tool runs on a
+            # worker thread waiting on a queue.Queue.get(), and Python threads
+            # can't be interrupted from asyncio. We must wake that thread by
+            # putting a sentinel on the queue; the tool callback raises
+            # AgentCancelledError, which the agent runtime unwinds cleanly.
+            pending_req = state.input_request
+            if pending_req is not None:
+                pending_req.cancel()
+                state.input_request = None
+                # Clear whatever the user was typing into the answer field so
+                # the next prompt starts fresh.
+                try:
+                    event.app.current_buffer.reset()
+                except Exception:
+                    pass
             state.current_agent.cancel()
             # Pause any active standing goal so the post-turn hook doesn't
             # auto-requeue a continuation right after the user cancelled.
@@ -1295,6 +1358,8 @@ def _setup_tui(
             return Transformation(fragments=ti.fragments)
 
     def _get_placeholder():
+        if state.input_request is not None:
+            return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
             return "type + Enter to queue, Ctrl+C to cancel"
         return ""
@@ -1381,6 +1446,43 @@ def _setup_tui(
         filter=Condition(lambda: bool(tui_state.get("spinner_text", ""))),
     )
 
+    # ── user_input prompt widget ──
+    # When the agent parks on a user_input/confirm tool it sets
+    # state.input_request. We render the question here, as part of the layout
+    # on the main prompt_toolkit thread, instead of having the background
+    # agent thread call print_formatted_text(). In a non-full-screen app that
+    # background print triggers run_in_terminal (CPR + full redraw), which
+    # races the spinner's invalidate() and desyncs the input cursor so the
+    # box stops echoing keystrokes. Rendering inline in the layout removes
+    # that race entirely.
+    def _get_input_prompt_fragments():
+        req = state.input_request
+        if req is None:
+            return []
+        lines = [f"  ? {req.prompt}"]
+        if req.options:
+            for i, opt in enumerate(req.options, 1):
+                lines.append(f"    {i}. {opt}")
+        return [("class:input-prompt", "\n".join(lines))]
+
+    def _get_input_prompt_height() -> int:
+        req = state.input_request
+        if req is None:
+            return 0
+        n = 1 + str(req.prompt).count("\n")
+        if req.options:
+            n += len(req.options)
+        return n
+
+    input_prompt_widget = ConditionalContainer(
+        Window(
+            content=FormattedTextControl(_get_input_prompt_fragments),
+            height=_get_input_prompt_height,
+            wrap_lines=True,
+        ),
+        filter=Condition(lambda: state.input_request is not None),
+    )
+
     def _get_queue_bar():
         pairs = pending_queue.peek_all_with_timestamps()
         if not pairs:
@@ -1417,7 +1519,7 @@ def _setup_tui(
 
     input_rule = Window(char="─", height=1, style="class:input-rule")
 
-    body = HSplit([spinner_widget, queue_bar, input_rule, input_area, status_bar])
+    body = HSplit([spinner_widget, input_prompt_widget, queue_bar, input_rule, input_area, status_bar])
     layout = Layout(
         FloatContainer(
             content=body,
@@ -1438,6 +1540,7 @@ def _setup_tui(
             "queue-dim": "#8B8682 italic",
             "queue-time": "#8FBC8F",
             "spinner": "#FFD700 italic",
+            "input-prompt": "#FFD700 bold",
             "sb": "bg:#1a1a2e #C0C0C0",
             "sb-strong": "bg:#1a1a2e #FFD700 bold",
             "sb-dim": "bg:#1a1a2e #8B8682",
@@ -1452,7 +1555,7 @@ def _setup_tui(
         }
     )
 
-    app = Application(
+    app = _CleanResizeApplication(
         layout=layout,
         key_bindings=kb,
         style=style,
@@ -1497,7 +1600,7 @@ def _maybe_start_cron(state: "SessionState", agent_config, extra_tools,
         except Exception:
             pass
     except Exception as e:  # noqa: BLE001
-        from loguru import logger
+        from agentica.utils.log import logger
         logger.warning(f"failed to start cron scheduler: {e}")
 
 
@@ -1534,7 +1637,6 @@ def run_interactive(
     def _cli_user_input_callback(prompt: str, options: Optional[List[str]] = None) -> str:
         state_ref = _ui_holder.get("state")
         app_ref = _ui_holder.get("app")
-        con_ref = _ui_holder.get("con")
         # Fallback to bare input if the TUI isn't up yet (shouldn't happen in
         # normal flow, but keeps the callback safe).
         if state_ref is None or app_ref is None:
@@ -1542,39 +1644,30 @@ def run_interactive(
 
         req = _InputRequest(prompt=prompt, options=options)
 
-        def _show_prompt():
-            if con_ref is None:
-                return
-            # Batch the whole prompt into ONE run_in_terminal cycle. Calling
-            # con.print line-by-line would trigger N separate run_in_terminal
-            # cycles (each does erase -> CPR wait -> render -> redraw -> CPR
-            # request); on a real terminal those interleave with the 0.4s
-            # spinner invalidates and can desync the inline cursor so the
-            # input box stops reflecting typed characters while the agent
-            # waits for an answer.
-            parts = [f"\n[bold cyan]?[/bold cyan] {prompt}"]
-            if options:
-                for i, opt in enumerate(options, 1):
-                    parts.append(f"  [cyan]{i}[/cyan]. {opt}")
-                parts.append("[dim]Type the option number or text, then Enter.[/dim]")
-            else:
-                parts.append("[dim]Type your response, then Enter.[/dim]")
-            ansi = con_ref.render_ansi("\n".join(parts))
-            print_formatted_text(ANSI(ansi))
-
-        # Arm the request and prompt the user. A single batched
-        # print_formatted_text -> run_in_terminal is the same mechanism
-        # process_loop uses to render agent output from a background thread,
-        # but collapsed to one cycle to avoid cursor desync.
+        # Arm the request and repaint. The prompt text itself is rendered by
+        # the layout's input_prompt_widget on the main thread (see
+        # _get_input_prompt_fragments). We deliberately do NOT print it from
+        # this background agent thread: in a non-full-screen app that would go
+        # through run_in_terminal (CPR + full redraw) and race the spinner's
+        # invalidate(), desyncing the input cursor so the box stops echoing
+        # keystrokes while the agent waits for an answer.
+        #
+        # Whatever the user had half-typed in the input buffer stays exactly
+        # where it was — the user can Ctrl+U / backspace it out if they want a
+        # clean answer field. Deciding that for them would silently change the
+        # meaning of their keystrokes.
         state_ref.input_request = req
-        _show_prompt()
-        try:
-            app_ref.invalidate()
-        except Exception:
-            pass
+        app_ref.invalidate()
 
-        # Block the agent thread until the user submits a line.
+        # Block the agent thread until the user submits a line, or Ctrl+C
+        # puts the CANCELLED sentinel on the queue to release us.
         answer = req.result.get()
+        if answer is _InputRequest.CANCELLED:
+            # Propagate as AgentCancelledError so the agent runtime unwinds
+            # cleanly. Any layer between us and the agent that catches Exception
+            # will still respect this because AgentCancelledError subclasses
+            # Exception but is explicitly re-raised by the tool infra.
+            raise AgentCancelledError("user_input aborted by user (Ctrl+C)")
 
         # If the user typed an option number, map it back to the option text.
         if options and answer:
@@ -1766,7 +1859,6 @@ def run_interactive(
     # so the user_input tool reads via the TUI instead of a blocking input().
     _ui_holder["state"] = state
     _ui_holder["app"] = app
-    _ui_holder["con"] = chat_console
 
     # ── Background thread: process input queue and run agent ──
     def process_loop():
@@ -1941,6 +2033,16 @@ def run_interactive(
             )
             state.agent_running = False
             tui_state["spinner_text"] = ""
+            # Belt-and-braces: if an ask-user-question request is still armed
+            # when the agent turn returns (e.g. an unusual error path in a
+            # tool), unblock it so the callback thread can exit and clear the
+            # slot before the next turn.
+            if state.input_request is not None:
+                try:
+                    state.input_request.cancel()
+                except Exception:
+                    pass
+                state.input_request = None
 
             # Standing-goal hook: decide whether to enqueue a continuation
             # for the next turn. Honors user-priority and cancel semantics.
@@ -1960,19 +2062,29 @@ def run_interactive(
 
     def spinner_loop():
         while not state.should_exit:
-            if state.agent_running and app.is_running:
-                phase = tui_state.get("_phase", "thinking")
-                base = tui_state.get("_spinner_base", "")
-                start = tui_state.get("_phase_start") or time.monotonic()
-                elapsed = time.monotonic() - start
-                tui_state["spinner_text"] = _render_spinner_text(
-                    _frame_idx[0], phase, base, elapsed
-                )
-                _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
-                app.invalidate()
-                time.sleep(0.12)
-            else:
+            if not (state.agent_running and app.is_running):
                 time.sleep(0.3)
+                continue
+            # Agent parked on a user_input/confirm tool: stop churning
+            # invalidate() (it fights the input renderer and desyncs the
+            # cursor) and replace the stale "🔧 tool (Ns)" phase with a
+            # steady "waiting" line so the user knows it's their turn.
+            if state.input_request is not None:
+                if tui_state.get("spinner_text") != _WAITING_FOR_INPUT_TEXT:
+                    tui_state["spinner_text"] = _WAITING_FOR_INPUT_TEXT
+                    app.invalidate()
+                time.sleep(0.2)
+                continue
+            phase = tui_state.get("_phase", "thinking")
+            base = tui_state.get("_spinner_base", "")
+            start = tui_state.get("_phase_start") or time.monotonic()
+            elapsed = time.monotonic() - start
+            tui_state["spinner_text"] = _render_spinner_text(
+                _frame_idx[0], phase, base, elapsed
+            )
+            _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
+            app.invalidate()
+            time.sleep(0.12)
 
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()

@@ -45,10 +45,20 @@ from agentica.utils.string import truncate_if_too_long
 # grep self-imposed timeout (seconds). Covers both the rg subprocess and the
 # pure-Python fallback so a missing rg can't walk huge trees for the outer
 # 120s executor timeout. grep is marked manages_own_timeout=True. The default
-# 10s bounds the common case; the LLM may override it via the `timeout` arg
-# (no upper cap — the caller decides). A timeout must always be set: on a bad
-# disk / network mount, or with a backtracking regex (e.g. nested .*.*) over a
-# large file, grep can hang or go exponential and 10s is already generous.
+# 10s bounds the common case; the LLM may override it via the `timeout` arg.
+#
+# Default timeout for the built-in ``glob`` tool, in seconds. Same rationale
+# as ``_GREP_TIMEOUT``: caller can override without upper cap, but we must
+# always be bounded — a bare ``**/pattern`` walk over ``$HOME`` or a stuck
+# network mount will otherwise hang for the full outer harness limit (120s).
+_GLOB_TIMEOUT = 10
+
+# Default timeout (in seconds) for the built-in ``grep`` tool. Callers may
+# override this per-invocation by passing ``timeout``, and the override is
+# used as-is (no upper cap — the caller decides). A timeout must always be
+# set: on a bad disk / network mount, or with a backtracking regex (e.g.
+# nested .*.*) over a large file, grep can hang or go exponential and 10s
+# is already generous.
 _GREP_TIMEOUT = 10
 
 
@@ -279,12 +289,65 @@ class BuiltinFileTool(Tool):
         self.register(self.multi_edit_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
-        # grep enforces its own timeout on both the rg and pure-Python
-        # fallback paths (default 10s, LLM-tunable with no upper cap), so skip
-        # the outer 120s executor wrapper — a missing rg used to let the
-        # fallback walk huge trees for the full 120s.
+        # glob and grep enforce their own timeouts on both fast (rg / native
+        # pathlib.glob) and fallback paths (default 10s, LLM-tunable with no
+        # upper cap), so skip the outer 120s executor wrapper — otherwise a
+        # bare ``**/*.log`` walk from ``$HOME`` or a stuck network mount used
+        # to hang for the full 120s.
+        self.functions["glob"].manages_own_timeout = True
         self.functions["grep"].manages_own_timeout = True
         self.register(self.undo_edit, is_destructive=True)
+
+        # Explicit, structured schema for multi_edit_file. The auto-generated
+        # schema from `edits: List[Dict[str, Any]]` collapses each item to a
+        # bare {"type": "object"} with no properties, so the LLM gets zero
+        # structural guidance for an edit and frequently serialises the whole
+        # `edits` array into a JSON string — which then fails validation with
+        # "edits: Input should be a valid list". Spelling out item properties
+        # here makes models emit a real array of objects.
+        self.functions["multi_edit_file"].parameters = {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the file to edit.",
+                },
+                "edits": {
+                    "type": "array",
+                    "description": (
+                        "Edit operations applied sequentially to the file. "
+                        "MUST be a JSON array of objects, NOT a stringified array."
+                    ),
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old_string": {
+                                "type": "string",
+                                "description": "Exact existing text to find and replace.",
+                            },
+                            "new_string": {
+                                "type": "string",
+                                "description": "Replacement text.",
+                            },
+                            "replace_all": {
+                                "type": "boolean",
+                                "description": "Replace all occurrences instead of requiring a unique match. Default false.",
+                            },
+                        },
+                        "required": ["old_string", "new_string"],
+                    },
+                },
+                "continue_on_error": {
+                    "type": "boolean",
+                    "description": (
+                        "When true (default), apply the edits that succeed and report "
+                        "failures per-item so you can retry only the failing ones. "
+                        "Set false for all-or-nothing atomic edits."
+                    ),
+                },
+            },
+            "required": ["file_path", "edits"],
+        }
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path, supporting absolute, relative, and ~ paths.
@@ -1071,7 +1134,7 @@ class BuiltinFileTool(Tool):
             "error": None,
         }
 
-    async def glob(self, pattern: str, path: str = ".") -> str:
+    async def glob(self, pattern: str, path: str = ".", timeout: Optional[int] = None) -> str:
         """Find files matching a glob pattern (supports recursive search with `**`).
 
         Usage:
@@ -1093,6 +1156,11 @@ class BuiltinFileTool(Tool):
         Args:
             pattern: Valid glob search pattern, e.g., "*.py", "**/*.md", "src/?*.js"
             path: Starting search directory (relative or absolute), defaults to current working directory (".").
+            timeout: Search timeout in seconds (default 10, no upper cap). glob must
+                always be bounded: a bare ``**/pattern`` walk from ``$HOME`` or over a
+                stuck network mount can otherwise hang for the full outer executor
+                limit (120s). Raise this only when you know a legitimately huge tree
+                needs more time.
 
         Returns:
             JSON formatted string of sorted absolute file paths (filtered to exclude ignored directories).
@@ -1103,6 +1171,8 @@ class BuiltinFileTool(Tool):
         if not base_path.exists():
             raise FileNotFoundError(f"Directory not found: {path}")
 
+        effective_timeout = timeout if timeout is not None else _GLOB_TIMEOUT
+
         # Run glob in executor to avoid blocking on large directory trees
         def _glob_sync():
             matches = list(base_path.glob(pattern))
@@ -1112,7 +1182,17 @@ class BuiltinFileTool(Tool):
                 if not set(m.parts).intersection(ignore_dirs)
             )
 
-        filtered = await asyncio.get_event_loop().run_in_executor(None, _glob_sync)
+        loop = asyncio.get_event_loop()
+        try:
+            filtered = await asyncio.wait_for(
+                loop.run_in_executor(None, _glob_sync),
+                timeout=effective_timeout,
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"glob timed out after {effective_timeout} seconds "
+                f"(pattern={pattern!r}, path={path!r})"
+            )
 
         logger.debug(f"Glob found {len(filtered)} files matching pattern '{pattern}' in directory '{path}'")
         # Convert to formatted JSON string
@@ -1480,22 +1560,22 @@ class BuiltinExecuteTool(Tool):
     Exposed as execute function for consistent naming in Agent.
     """
 
-    def __init__(self, work_dir: Optional[str] = None, timeout: int = 120, max_timeout: int = 600,
+    def __init__(self, work_dir: Optional[str] = None, timeout: int = 120,
                  max_output_length: int = 20000, sandbox_config=None):
         """
         Initialize BuiltinExecuteTool.
 
         Args:
             work_dir: Work directory for command execution
-            timeout: Default command execution timeout in seconds
-            max_timeout: Maximum allowed timeout in seconds
+            timeout: Default command execution timeout in seconds. Callers may
+                override per-invocation via ``execute(timeout=...)``; overrides
+                are applied as-is with no upper cap — the caller decides.
             max_output_length: Maximum length of output to return
             sandbox_config: SandboxConfig instance for command restriction enforcement
         """
         super().__init__(name="builtin_execute_tool")
         self._work_dir: Optional[Path] = Path(work_dir) if work_dir else None
         self._timeout = timeout
-        self._max_timeout = max_timeout
         self._max_output_length = max_output_length
         self._sandbox_config = sandbox_config
         # Override timeout from sandbox config if set
@@ -1534,7 +1614,8 @@ class BuiltinExecuteTool(Tool):
 
         Usage notes:
         - Commands timeout after 120 seconds by default
-        - You may specify a custom timeout up to 600 seconds (10 min) for long-running commands
+        - You may specify a custom ``timeout`` (in seconds) for long-running
+          commands; there is no upper cap — the caller decides.
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
         - For Python code, the tool auto-converts `python3 -c "..."` to heredoc format
@@ -1561,15 +1642,14 @@ class BuiltinExecuteTool(Tool):
 
         Args:
             command: shell command to execute
-            timeout: optional timeout in seconds (default 120, max 600)
+            timeout: optional timeout in seconds (default 120, no upper cap)
 
         Returns:
             str: The output of the command (stdout + stderr) with exit code
         """
-        # Apply timeout: use provided value, clamped to max
-        effective_timeout = self._timeout
-        if timeout is not None:
-            effective_timeout = min(max(1, timeout), self._max_timeout)
+        # Apply timeout: use per-call override if provided, else the tool default.
+        # No upper cap — the caller decides.
+        effective_timeout = self._timeout if timeout is None else max(1, timeout)
 
         # Use ShellTool's syntax fixers (python -c → heredoc conversion, null/true/false fix)
         command = self._shell._convert_python_c_to_heredoc(command)

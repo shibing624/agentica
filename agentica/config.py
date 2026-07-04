@@ -5,7 +5,6 @@
 """
 
 import os
-from datetime import datetime
 from dotenv import load_dotenv  # noqa
 
 AGENTICA_HOME = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
@@ -40,19 +39,14 @@ AGENTICA_WORKSPACE_DIR = os.getenv("AGENTICA_WORKSPACE_DIR", f"{AGENTICA_HOME}/w
 AGENTICA_PROJECTS_DIR = os.getenv("AGENTICA_PROJECTS_DIR", f"{AGENTICA_HOME}/projects")
 AGENTICA_LOG_LEVEL = os.getenv("AGENTICA_LOG_LEVEL", "INFO").upper()
 AGENTICA_MAX_MEMORY_CHARACTER_COUNT = int(os.getenv("AGENTICA_MAX_MEMORY_CHARACTER_COUNT", "40000"))
-user_log_file = os.getenv("AGENTICA_LOG_FILE")
 
-if user_log_file:
-    # User specified a log file
-    AGENTICA_LOG_FILE = os.path.expanduser(user_log_file)
-elif AGENTICA_LOG_LEVEL == "DEBUG":
-    # Use default log file if log level is DEBUG
-    formatted_date = datetime.now().strftime("%Y%m%d")
-    default_log_file = f"{AGENTICA_HOME}/logs/{formatted_date}.log"
-    os.makedirs(os.path.dirname(default_log_file), exist_ok=True)
-    AGENTICA_LOG_FILE = default_log_file
-else:
-    AGENTICA_LOG_FILE = ""
+# SDK default: no log file, logs only go to stdio. The CLI opts in by setting
+# ``AGENTICA_LOG_FILE`` to a daily path in ``agentica.cli.main`` — SDK users
+# who ``import agentica`` from library code should not have side-effect files
+# created under ``~/.agentica/logs/``. Setting the env var (including to an
+# empty string) is always respected as-is.
+user_log_file = os.getenv("AGENTICA_LOG_FILE")
+AGENTICA_LOG_FILE = os.path.expanduser(user_log_file) if user_log_file else ""
 
 # Langfuse configuration
 LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")

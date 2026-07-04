@@ -528,20 +528,20 @@ class CompressionManager:
         # Stage 1a: Truncate oldest tool results
         truncated = self._truncate_oldest_tool_results(messages, user_id=user_id)
         if truncated:
-            logger.debug(f"Stage 1a: Truncated {truncated} old tool results")
+            logger.info(f"Stage 1a: Truncated {truncated} old tool results")
 
         # Check if still over limit
         if self._still_over_limit(messages, tools, model, response_format):
             # Stage 1b: Drop old messages
             dropped = await self._drop_old_messages(messages)
             if dropped:
-                logger.debug(f"Stage 1b: Dropped {dropped} old messages")
+                logger.info(f"Stage 1b: Dropped {dropped} old messages")
 
         # Stage 2: LLM compression (optional)
         if self.use_llm_compression and self._still_over_limit(messages, tools, model, response_format):
             llm_count = await self._llm_compress_old_tool_results(messages)
             if llm_count:
-                logger.debug(f"Stage 2: LLM compressed {llm_count} tool results")
+                logger.info(f"Stage 2: LLM compressed {llm_count} tool results")
 
         # Sanitize orphaned tool_call/result pairs after compression
         sanitized = self._sanitize_tool_pairs(list(messages))
@@ -766,7 +766,10 @@ class CompressionManager:
         if not force and not self._should_auto_compact(messages, model):
             return False
 
-        logger.debug("Auto-compact triggered: summarising conversation")
+        # INFO: auto-compact is a once-per-many-rounds transition that
+        # changes how every later turn looks (different message stack, often
+        # slower first reply). Operators need it visible without DEBUG noise.
+        logger.info("Auto-compact triggered: summarising conversation")
 
 
         # SM-compact optimization: reuse existing WorkingMemory session summary
@@ -800,7 +803,7 @@ class CompressionManager:
 
         self._consecutive_auto_compact_failures = 0
         self.stats["auto_compact_count"] = self.stats.get("auto_compact_count", 0) + 1
-        logger.debug(f"Auto-compact complete, messages reduced to {len(messages)}")
+        logger.info(f"Auto-compact complete, messages reduced to {len(messages)}")
 
         # Write compact boundary to JSONL session log (if configured)
         try:
