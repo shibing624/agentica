@@ -6,6 +6,7 @@
 
 import json
 import os
+import asyncio
 import queue
 import re
 import shutil
@@ -95,14 +96,36 @@ class _InputRequest:
     prompt: str
     options: Optional[List[str]] = None
     result: "queue.Queue" = field(default_factory=lambda: queue.Queue(maxsize=1))
+    resolved: bool = False
 
-    def cancel(self) -> None:
+    def submit(self, answer: str) -> bool:
+        """Deliver the user's answer exactly once.
+
+        Returns ``True`` only when this call won the race to resolve the
+        request. Late submissions after cancel/submit are ignored.
+        """
+        if self.resolved:
+            return False
+        try:
+            self.result.put_nowait(answer)
+            self.resolved = True
+            return True
+        except queue.Full:
+            self.resolved = True
+            return False
+
+    def cancel(self) -> bool:
         """Wake up the blocked agent thread and tell it the user aborted."""
+        if self.resolved:
+            return False
         try:
             self.result.put_nowait(_InputRequest.CANCELLED)
+            self.resolved = True
+            return True
         except queue.Full:
             # Someone already answered — nothing to unblock.
-            pass
+            self.resolved = True
+            return False
 
 
 @dataclass
@@ -1029,33 +1052,76 @@ def _process_stream_response(
 
 
 class _CleanResizeApplication(Application):
-    """Application that does a full screen clear on terminal resize.
+    """Application that collapses its bottom frame during terminal resize.
 
     In non-full-screen mode prompt_toolkit erases its bottom frame (spinner /
     hint / queue / rule / input box / status bar) using a *relative* cursor
     offset (``renderer._cursor_pos``). On resize the terminal reflows the whole
     visible area (including the scrollback transcript printed via patch_stdout)
     at the new width, so that recorded offset becomes stale: the default
-    ``_on_resize`` moves the cursor up by the old row count and erases the wrong
-    region, leaving ghost copies of the frame stacked on screen.
+    ``_on_resize`` moves the cursor up by the old row count and erases the
+    wrong region, leaving ghost copies of the frame stacked in the scrollback.
+    A full ``erase_screen`` does not help here because ESC[2J only clears the
+    visible viewport, while ghost rows have already been reflowed *into* the
+    scrollback where no escape sequence can reach them.
 
-    An unconditional full clear (``erase_screen`` + ``cursor_goto(0, 0)``) does
-    not depend on the stale offset, so the frame is redrawn cleanly with no
-    ghosts. ``renderer.erase`` already resets ``_cursor_pos`` and
-    ``_last_screen`` (forcing a fresh, non-diff redraw); we only insert the full
-    clear between erase and redraw. The transcript stays in the terminal's
-    native scrollback (ESC[2J does not clear scrollback), so scrolling up still
-    shows prior output.
+    Strategy: during a resize burst we hide the tall parts of the bottom frame
+    (spinner + rule) via ``tui_state["_resize_collapsed"]`` so that at most one
+    row (the input line) can be reflowed into scrollback per SIGWINCH. A short
+    debounce timer restores the full frame once the user stops resizing.
+
+    The transcript stays in the terminal's native scrollback, so scrolling up
+    still shows prior output.
     """
 
+    #: How long to keep the frame collapsed after the last SIGWINCH. Tuned so
+    #: that continuous drag-resize keeps everything collapsed, while a single
+    #: resize restores the spinner/rule within a quarter second.
+    _RESIZE_DEBOUNCE_SEC: float = 0.25
+
     def _on_resize(self) -> None:
+        tui_state = getattr(self, "tui_state", None)
+        if tui_state is not None:
+            tui_state["_resize_collapsed"] = True
+            # Cancel any pending restore timer and re-arm it. Repeated SIGWINCH
+            # events (e.g. while the user is dragging the terminal edge) keep
+            # bumping the deadline forward, so we only restore once the burst
+            # has clearly ended.
+            prev_handle = tui_state.pop("_resize_restore_handle", None)
+            if prev_handle is not None:
+                try:
+                    prev_handle.cancel()
+                except Exception:
+                    pass
+            try:
+                loop = asyncio.get_event_loop()
+                tui_state["_resize_restore_handle"] = loop.call_later(
+                    self._RESIZE_DEBOUNCE_SEC,
+                    self._restore_after_resize,
+                )
+            except Exception:
+                # No running loop yet — restore immediately so we don't leave
+                # the frame permanently collapsed.
+                tui_state["_resize_collapsed"] = False
+
+        # Still do the normal erase+redraw so the (now 1-row) frame lands in
+        # a sane place. renderer.erase resets _cursor_pos and _last_screen,
+        # forcing a fresh non-diff redraw at the new dimensions.
         renderer = self.renderer
         renderer.erase(leave_alternate_screen=False)
-        renderer.output.erase_screen()
-        renderer.output.cursor_goto(0, 0)
-        renderer.output.flush()
         self._request_absolute_cursor_position()
         self._redraw()
+
+    def _restore_after_resize(self) -> None:
+        tui_state = getattr(self, "tui_state", None)
+        if tui_state is None:
+            return
+        tui_state["_resize_collapsed"] = False
+        tui_state.pop("_resize_restore_handle", None)
+        try:
+            self.invalidate()
+        except Exception:
+            pass
 
 
 def _setup_tui(
@@ -1140,8 +1206,12 @@ def _setup_tui(
             # AgentCancelledError, which the agent runtime unwinds cleanly.
             pending_req = state.input_request
             if pending_req is not None:
-                pending_req.cancel()
-                state.input_request = None
+                cancelled = pending_req.cancel()
+                if state.input_request is pending_req:
+                    state.input_request = None
+                tui_state["spinner_text"] = (
+                    "Cancelled pending answer" if cancelled else "Answer prompt already closed"
+                )
                 # Clear whatever the user was typing into the answer field so
                 # the next prompt starts fresh.
                 try:
@@ -1175,7 +1245,8 @@ def _setup_tui(
 
     @kb.add("enter")
     def _handle_enter(event):
-        text = event.app.current_buffer.text.strip()
+        raw_text = event.app.current_buffer.text
+        text = raw_text.strip()
         has_images = bool(state.attached_images)
 
         # If the agent is waiting on a user_input tool request, route this line
@@ -1184,11 +1255,13 @@ def _setup_tui(
         # the user can accept a default/blank answer.
         if state.input_request is not None:
             req = state.input_request
-            state.input_request = None
-            try:
-                req.result.put(text)
-            except Exception:
-                pass
+            submitted = req.submit(raw_text)
+            if state.input_request is req:
+                state.input_request = None
+            if submitted:
+                tui_state["spinner_text"] = "Submitted answer"
+            else:
+                tui_state["spinner_text"] = "Answer prompt already closed"
             event.app.current_buffer.reset(append_to_history=True)
             event.app.invalidate()
             return
@@ -1373,6 +1446,11 @@ def _setup_tui(
 
     def _get_status_bar():
         tw = shutil.get_terminal_size().columns
+        spinner = tui_state.get("spinner_text", "")
+        # spinner_text is set exclusively while the agent is producing output
+        # (streaming, tool execution, thinking). Use its presence as the
+        # ground-truth signal for "agent is working right now" — avoids a
+        # separate flag we'd have to keep in sync.
         return build_status_bar_fragments(
             model_name=tui_state.get("model_name", ""),
             model_provider=tui_state.get("model_provider", ""),
@@ -1382,8 +1460,9 @@ def _setup_tui(
             cost_usd=tui_state.get("cost_usd", 0.0),
             active_seconds=tui_state.get("active_seconds", 0.0),
             last_turn_seconds=tui_state.get("last_turn_seconds", 0.0),
-            spinner_text=tui_state.get("spinner_text", ""),
+            spinner_text=spinner,
             terminal_width=tw,
+            agent_running=bool(spinner),
         )
 
     history_dir = os.path.dirname(history_file)
@@ -1412,8 +1491,19 @@ def _setup_tui(
             # (empty line still occupies 1 row).
             total_rows += max(1, -(-len(line) // usable_width))
         total_rows = max(1, total_rows)
-        preferred = min(_MAX_INPUT_ROWS, total_rows)
-        return Dimension(min=1, max=_MAX_INPUT_ROWS, preferred=preferred)
+        needed = min(_MAX_INPUT_ROWS, total_rows)
+        # IMPORTANT: use `min=needed`, not `min=1`. prompt_toolkit's HSplit
+        # dimension solver treats `min` as an inviolable floor and only uses
+        # `preferred` when there is spare space. If we set min=1 the solver is
+        # free to shrink the input box back down to a single row whenever the
+        # sibling widgets (status bar, queue bar, streaming output, etc.) ask
+        # for more space — which produced the reported bug: on line 2 the box
+        # collapsed to 1 row and hid line 1; on line 3 there was suddenly
+        # enough slack for the box to expand to 3 rows and line 1 reappeared.
+        # By pinning min == needed we guarantee everything the user has
+        # already typed stays visible (up to _MAX_INPUT_ROWS; beyond that the
+        # TextArea itself scrolls, still keeping the cursor line visible).
+        return Dimension(min=needed, max=_MAX_INPUT_ROWS, preferred=needed)
 
     input_area = TextArea(
         height=_get_input_height,
@@ -1440,11 +1530,6 @@ def _setup_tui(
         if not text:
             return []
         return [("class:spinner", f"  {text}")]
-
-    spinner_widget = ConditionalContainer(
-        Window(content=FormattedTextControl(_get_spinner_fragments), height=1, wrap_lines=False),
-        filter=Condition(lambda: bool(tui_state.get("spinner_text", ""))),
-    )
 
     # ── user_input prompt widget ──
     # When the agent parks on a user_input/confirm tool it sets
@@ -1517,9 +1602,14 @@ def _setup_tui(
         filter=Condition(lambda: not pending_queue.empty()),
     )
 
-    input_rule = Window(char="─", height=1, style="class:input-rule")
-
-    body = HSplit([spinner_widget, input_prompt_widget, queue_bar, input_rule, input_area, status_bar])
+    # NOTE: no ``input_rule`` and no standalone ``spinner_widget`` here.
+    # The gutter design (assistant ``▏`` bar + closing ``Rule`` in the
+    # transcript) already provides a hard boundary between the assistant
+    # turn and the input line, so an extra horizontal rule above the input
+    # would just stack redundant separators. The spinner text is folded into
+    # the leftmost segment of ``status_bar`` (see ``build_status_bar_fragments``)
+    # so we never occupy a full extra row for it.
+    body = HSplit([input_prompt_widget, queue_bar, input_area, status_bar])
     layout = Layout(
         FloatContainer(
             content=body,
@@ -1531,11 +1621,10 @@ def _setup_tui(
         {
             "input-area": "#FFF8DC",
             "placeholder": "#555555 italic",
-            "prompt": "ansicyan bold",
+            "prompt": "#FFD700 bold",
             "prompt-working": "#888888 italic",
             "shell-prompt": "ansigreen bold",
             "hint": "#555555 italic",
-            "input-rule": "#CD7F32",
             "queue-label": "#FFD700 bold",
             "queue-dim": "#8B8682 italic",
             "queue-time": "#8FBC8F",
@@ -1549,6 +1638,19 @@ def _setup_tui(
             "sb-bad": "bg:#1a1a2e #FF8C00 bold",
             "sb-critical": "bg:#1a1a2e #FF6B6B bold",
             "sb-spin": "bg:#1a1a2e #FFD700 italic",
+            # Agent-running variants: same foreground palette, one shade
+            # darker background (#0f0f1a instead of #1a1a2e) so the bar
+            # visually "cools down" while work is in progress. Numeric fields
+            # keep updating — this is intentional, users often watch tokens
+            # and cost tick during long turns.
+            "sb-active": "bg:#0f0f1a #C0C0C0",
+            "sb-strong-active": "bg:#0f0f1a #FFD700 bold",
+            "sb-dim-active": "bg:#0f0f1a #8B8682",
+            "sb-good-active": "bg:#0f0f1a #8FBC8F bold",
+            "sb-warn-active": "bg:#0f0f1a #FFD700 bold",
+            "sb-bad-active": "bg:#0f0f1a #FF8C00 bold",
+            "sb-critical-active": "bg:#0f0f1a #FF6B6B bold",
+            "sb-spin-active": "bg:#0f0f1a #FFD700 italic",
             "completion-menu": "bg:#1a1a2e #FFF8DC",
             "completion-menu.completion": "bg:#1a1a2e #FFF8DC",
             "completion-menu.completion.current": "bg:#333355 #FFD700",
@@ -1562,6 +1664,9 @@ def _setup_tui(
         full_screen=False,
         mouse_support=False,
     )
+    # Attached so _on_resize can flip the collapse flag and schedule the
+    # debounce timer without needing to override __init__.
+    app.tui_state = tui_state
 
     return app
 

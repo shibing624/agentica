@@ -175,6 +175,15 @@ class TestGlobalConfig(unittest.TestCase):
         txt = open(gc.global_config_path()).read()
         self.assertIn("Hand-edit freely", txt)
 
+    def test_set_and_get_setting_round_trip(self):
+        gc.save_global_config({"profiles": {}})
+
+        gc.set_setting("cli_markdown", "on")
+
+        data = gc.load_global_config()
+        self.assertEqual(data["settings"]["cli_markdown"], "on")
+        self.assertEqual(gc.get_setting("cli_markdown"), "on")
+
 
 if __name__ == "__main__":
     unittest.main()

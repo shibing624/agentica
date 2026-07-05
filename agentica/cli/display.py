@@ -13,10 +13,12 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from rich.markdown import Markdown
+from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
 
 from agentica.cli.config import get_console, TOOL_ICONS, BUILTIN_TOOLS
+from agentica.global_config import get_setting
 
 
 # Rich console color scheme (unified - no separate ANSI codes)
@@ -159,6 +161,175 @@ def clear_truncated_blocks() -> None:
     _truncated_blocks.clear()
 
 
+class _GutteredConsole:
+    """Console proxy that prepends every printed line with a gutter marker.
+
+    Wraps an existing console-like object (either a raw ``rich.console.Console``
+    or the CLI's ``ChatConsole`` adapter defined in ``interactive.py``) and
+    rewrites ``.print()`` output so every visible line is prefixed with a
+    colored gutter character (e.g. ``▏ `` for the assistant turn). All other
+    attributes are forwarded to the underlying console.
+
+    Rendering strategy — picked per-call in this order:
+
+    1. If the underlying console exposes ``render_ansi(*args, **kwargs)``
+       (that's the CLI's ``ChatConsole``), use it — it already gives us a
+       fully-rendered ANSI string without touching stdout.
+    2. Otherwise, if it exposes rich's ``.capture()`` context manager, use
+       that — same idea, one indirection more.
+    3. Otherwise, fall back to a plain pass-through ``.print(*args, **kwargs)``
+       without any gutter. This lets bare mocks and non-rich consoles still
+       work (they just lose the gutter decoration) rather than blowing up.
+
+    Emission: the assembled gutter-prefixed ANSI text is handed back to
+    the underlying console via ``_emit_ansi``, which prefers ``ChatConsole``'s
+    line-oriented ``_cprint`` (integrates with prompt_toolkit's patch_stdout)
+    and otherwise writes directly to ``console.file``.
+    """
+
+    def __init__(self, console, gutter_char: str = "▏", style: str = "#CD7F32"):
+        self._console = console
+        self._gutter_char = gutter_char
+        self._style = style
+
+    # ------------------------------------------------------------------ helpers
+
+    def _render_ansi(self, *args, **kwargs) -> Tuple[Optional[str], bool]:
+        """Render args to ANSI text.
+
+        Returns ``(text, already_printed)``:
+        - ``(str, False)`` — got real ANSI, caller should apply gutter and emit
+        - ``(None, True)`` — no ANSI available, but a side-effect ``.print()``
+          call already happened during the capture attempt (bare MagicMock);
+          caller must NOT print again to avoid double output
+        - ``(None, False)`` — neither ANSI nor side-effect print occurred;
+          caller should degrade to a plain pass-through ``.print()``
+
+        Prefers ``ChatConsole.render_ansi`` (side-effect free). Falls back to
+        ``rich.Console.capture()`` (side-effect free on real consoles; on
+        MagicMock the ``.capture()`` context still records ``.print()`` calls
+        as its underlying implementation, which we treat as ``already_printed``).
+        """
+        render = getattr(self._console, "render_ansi", None)
+        if callable(render):
+            try:
+                result = render(*args, **kwargs)
+            except Exception:
+                result = None
+            if isinstance(result, str):
+                return result, False
+        capture = getattr(self._console, "capture", None)
+        if callable(capture):
+            try:
+                with capture() as cap:
+                    self._console.print(*args, **kwargs)
+                got = cap.get()
+            except Exception:
+                # capture blew up but ``self._console.print`` may or may not
+                # have fired; be conservative and assume it did to avoid
+                # duplicating output.
+                return None, True
+            if isinstance(got, str):
+                return got, False
+            # capture succeeded structurally but returned non-str (MagicMock).
+            # The inner ``self._console.print`` call HAS already been recorded,
+            # so the payload effectively landed. Signal already_printed.
+            return None, True
+        return None, False
+
+    def _emit_ansi(self, ansi_text: str) -> None:
+        """Send fully-assembled ANSI text back to the underlying console.
+
+        Prefers ``ChatConsole._cprint`` (line-oriented, integrates with
+        prompt_toolkit's patch_stdout); falls back to raw file writes.
+        """
+        if not ansi_text:
+            return
+        # ChatConsole exposes ``print`` that expects Rich markup, not raw ANSI.
+        # We can't reuse it — it would double-render. Instead we go straight
+        # to the module-level ``_cprint`` which is line-oriented and writes
+        # ANSI verbatim (that's what ChatConsole itself uses internally).
+        try:
+            from agentica.cli.interactive import _cprint  # local import to avoid cycles
+        except Exception:  # pragma: no cover — during shutdown / partial import
+            _cprint = None
+
+        if _cprint is not None and hasattr(self._console, "render_ansi"):
+            # Line-mode: strip a single trailing newline so we don't emit an
+            # extra empty line, then feed each line through _cprint.
+            text = ansi_text[:-1] if ansi_text.endswith("\n") else ansi_text
+            for line in text.split("\n"):
+                _cprint(line)
+            return
+
+        # Rich Console path: write directly to its file.
+        file = getattr(self._console, "file", None)
+        if file is not None:
+            file.write(ansi_text)
+            try:
+                file.flush()
+            except Exception:
+                pass
+            return
+
+        # Last resort: pass-through print (no gutter).
+        self._console.print(ansi_text, end="", markup=False, highlight=False)
+
+    # ------------------------------------------------------------------ public
+
+    @property
+    def gutter_prefix_ansi(self) -> str:
+        """The ``▏ `` prefix pre-rendered as ANSI, cached per instance.
+
+        Uses whichever ANSI-rendering path the underlying console supports.
+        If no path yields ANSI (bare mock, exotic console), returns a plain
+        uncolored ``▏ `` — the gutter still exists structurally, just untinted.
+        """
+        cached = getattr(self, "_prefix_cache", None)
+        if cached is not None:
+            return cached
+        text, _ = self._render_ansi(
+            f"[{self._style}]{self._gutter_char}[/{self._style}] ",
+            end="",
+        )
+        rendered = text if text is not None else f"{self._gutter_char} "
+        self._prefix_cache = rendered
+        return rendered
+
+    def print(self, *args, **kwargs):
+        text, already_printed = self._render_ansi(*args, **kwargs)
+        if text is None:
+            if not already_printed:
+                # Neither ANSI nor a side-effect print — pass through so at
+                # least the payload lands somewhere.
+                self._console.print(*args, **kwargs)
+            # If already_printed, the underlying console already saw a
+            # (gutter-less) ``.print`` call during our capture attempt.
+            # We can't retroactively add the gutter, so we accept the
+            # ungutter'd output rather than duplicating it.
+            return
+        if not text:
+            return
+        # Rich normally ends with a newline; strip trailing newline once so we
+        # don't emit an empty gutter line at the very bottom.
+        trailing_newline = text.endswith("\n")
+        if trailing_newline:
+            text = text[:-1]
+        prefix = self.gutter_prefix_ansi
+        lines = text.split("\n")
+        # Prepend the gutter to every physical line. Empty lines still get a
+        # gutter so the visual bar stays continuous even in blank spacing.
+        rebuilt = "\n".join(prefix + ln for ln in lines)
+        if trailing_newline:
+            rebuilt += "\n"
+        self._emit_ansi(rebuilt)
+
+    def __getattr__(self, name):
+        # Forward width, size, is_terminal, options, capture, rule, status,
+        # etc. — anything StreamDisplayManager might touch.
+        return getattr(self._console, name)
+
+
 def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int = 0) -> None:
     """Display user message with file mentions colored.
 
@@ -205,7 +376,7 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
             style="dim",
         )
 
-    get_console().print(rich_text)
+    _GutteredConsole(get_console(), "▎", "cyan").print(rich_text)
 
 
 def get_file_completions(document_text: str) -> List[str]:
@@ -494,23 +665,19 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     # Note: in this repo "task" is the dedicated subagent-spawn tool, so we
     # avoid using "tasks" as the label here to prevent confusion.
     if tool_name == "write_todos" and "\n" in display_str:
-        console_instance.print(f"  {icon} [bold magenta]{tool_name}[/bold magenta]:")
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
         console_instance.print(f"    {display_str}", style="dim")
     elif display_str:
-        console_instance.print(f"  {icon} [bold magenta]{tool_name}[/bold magenta] [dim]{display_str}[/dim]")
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta] [dim]{display_str}[/dim]")
     else:
-        console_instance.print(f"  {icon} [bold magenta]{tool_name}[/bold magenta]")
-
-
-_BOX_COLOR = "bright_yellow"
-_BOX_DIM_COLOR = "dim"
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
 
 
 class StreamDisplayManager:
     """Manages CLI output display state for streaming responses.
 
-    LLM response text is wrapped in a ``╭─ Response ─╮ … ╰───╯`` box.
-    Reasoning/thinking gets a separate ``╭─ Thinking ─╮`` box.
+    Assistant output uses a left gutter (▏) instead of a box.
+    Thinking/reasoning uses a left gutter (▎) in magenta.
     """
 
     # Subagent rendering verbosity. Three explicit modes (see PR notes):
@@ -524,10 +691,25 @@ class StreamDisplayManager:
 
     def __init__(self, console_instance, subagent_verbosity: str = "all"):
         self.console = console_instance
+        self._raw_console = console_instance
+        # Post-redesign: assistant/thinking output is emitted as plain text
+        # (no left-side gutter bar). Only the user query keeps a ``▎`` prefix,
+        # which acts as the sole visual delimiter between the human question
+        # and the AI response body. The ``_assistant_console`` alias remains
+        # so the rest of ``StreamDisplayManager`` doesn't have to branch, but
+        # it now points at the raw console — the ``_GutteredConsole`` proxy
+        # is only constructed on-the-fly inside ``display_user_message``.
+        self._assistant_console = console_instance
         self._term_width = min(console_instance.width or 80, 120)
         if subagent_verbosity not in self.SUBAGENT_VERBOSITIES:
             subagent_verbosity = "all"
         self._subagent_verbosity = subagent_verbosity
+        self._cli_markdown_mode = str(get_setting("cli_markdown", "auto") or "auto").lower()
+        if self._cli_markdown_mode not in {"off", "auto", "on"}:
+            self._cli_markdown_mode = "auto"
+        self._turn_started_at = None
+        self._thinking_buffer = ""
+        self._thinking_console = None
         self.reset()
 
     def reset(self):
@@ -539,9 +721,10 @@ class StreamDisplayManager:
         self.response_started = False
         self.has_content_output = False
         self._response_buffer = []
-        self._box_opened = False
-        self._thinking_box_opened = False
         self._line_buffer = ""  # accumulates tokens until newline for line-buffered output
+        self._turn_started_at = None
+        self._thinking_buffer = ""
+        self._thinking_console = None
         # Set of "task" tool_call_ids (or just a counter) for which we have
         # already streamed live subagent steps; the after-completion summary
         # in display_tool_result() should be suppressed in that case.
@@ -565,66 +748,51 @@ class StreamDisplayManager:
         # the manager is created), which used to make Ctrl+o show only tool
         # results and never the folded query.
 
-    def _open_box(self, label: str = "Response"):
-        w = self._term_width
-        fill = max(0, w - len(label) - 5)
-        self.console.print(f"[{_BOX_COLOR}]╭─ {label} {'─' * fill}╮[/{_BOX_COLOR}]")
-
-    def _close_box(self, right_label: Optional[str] = None):
-        """Close a box. If ``right_label`` is given, embed it on the right
-        side of the closing rule, e.g. ``╰─────────── (15:32:08) ─╯``.
-        """
-        w = self._term_width
-        if not right_label:
-            self.console.print(f"[{_BOX_COLOR}]╰{'─' * (w - 2)}╯[/{_BOX_COLOR}]")
-            return
-        # Layout: ╰─...─ <right_label> ─╯  (one space padding around label)
-        # Total width is ``w``; left rule + 1 space + label + 1 space + ─╯
-        label_len = len(right_label)
-        fill = max(2, w - label_len - 5)
-        self.console.print(
-            f"[{_BOX_COLOR}]╰{'─' * fill} [/{_BOX_COLOR}]"
-            f"[{_BOX_DIM_COLOR}]{right_label}[/{_BOX_DIM_COLOR}]"
-            f"[{_BOX_COLOR}] ─╯[/{_BOX_COLOR}]"
-        )
+    # No more box methods; gutter is used instead.
 
     def _flush_line_buffer(self):
         """Flush any accumulated partial line to output."""
         if self._line_buffer:
-            self.console.print(self._line_buffer, highlight=False, markup=False)
+            self._assistant_console.print(self._line_buffer, highlight=False, markup=False)
             self._line_buffer = ""
 
     def _stream_text(self, content: str):
         """Buffer tokens and output complete lines.
 
-        Accumulate tokens and flush on each newline through the same
-        console path used by box drawing, ensuring correct ordering.
+        Accumulate tokens and flush on each newline through the assistant
+        gutter console, ensuring correct ordering.
         """
         self._line_buffer += content
         while "\n" in self._line_buffer:
             line, self._line_buffer = self._line_buffer.split("\n", 1)
-            self.console.print(line, highlight=False, markup=False)
+            self._assistant_console.print(line, highlight=False, markup=False)
 
     def start_thinking(self):
-        """Start thinking section with a box."""
+        """Start thinking section.
+
+        Post-redesign: no left-side gutter — the thinking segment is just
+        raw text on the raw console, distinguished from the assistant's
+        answer by an ``italic dim magenta`` style applied at print time.
+        """
         if not self.thinking_shown:
-            self.console.print()
-            self._open_box("Thinking")
-            self._thinking_box_opened = True
+            self._raw_console.print()
             self.thinking_shown = True
             self.in_thinking = True
 
     def stream_thinking(self, content: str):
         """Stream thinking content with line-buffered output."""
-        self._stream_text(content)
+        self._thinking_buffer += content
+        while "\n" in self._thinking_buffer:
+            line, self._thinking_buffer = self._thinking_buffer.split("\n", 1)
+            self._raw_console.print(line, style="italic dim magenta", highlight=False, markup=False)
 
     def end_thinking(self):
-        """End thinking section and close its box."""
+        """End thinking section."""
         if self.in_thinking:
-            self._flush_line_buffer()
-            if self._thinking_box_opened:
-                self._close_box()
-                self._thinking_box_opened = False
+            # Flush thinking buffer
+            if self._thinking_buffer:
+                self._raw_console.print(self._thinking_buffer, style="italic dim magenta", highlight=False, markup=False)
+                self._thinking_buffer = ""
             self.in_thinking = False
             self.response_started = False
 
@@ -642,14 +810,13 @@ class StreamDisplayManager:
         if not self.in_tool_section:
             if self.in_thinking:
                 self.end_thinking()
-            if not self._box_opened:
+            if not self.response_started:
                 self.console.print()
-                self._open_box("Response")
-                self._box_opened = True
+                if self._turn_started_at is None:
+                    self._turn_started_at = time.monotonic()
                 self.response_started = True
-            elif self.has_content_output and not self.response_started:
+            elif self.has_content_output:
                 self.console.print()
-            self.console.print()
             self.in_tool_section = True
 
     def display_tool(self, tool_name: str, tool_args: dict):
@@ -671,7 +838,7 @@ class StreamDisplayManager:
             return
         self.start_tool_section()
         self.tool_count += 1
-        _display_tool_impl(self.console, tool_name, tool_args, self.tool_count)
+        _display_tool_impl(self._assistant_console, tool_name, tool_args, self.tool_count)
 
     def _stash_write_file_old(self, tool_args: dict) -> None:
         """Best-effort read of a write_file target's current content (pre-write).
@@ -760,7 +927,7 @@ class StreamDisplayManager:
                 line += f" [dim]- {summary}{elapsed_str}[/dim]"
             else:
                 line += f" [dim]{elapsed_str}[/dim]"
-        self.console.print(line)
+        self._assistant_console.print(line)
 
     # Max diff lines shown inline beneath an edit_file/multi_edit_file summary.
     _EDIT_DIFF_MAX_LINES = 8
@@ -798,7 +965,7 @@ class StreamDisplayManager:
         else:
             unit = "edit" if n_edits == 1 else "edits"
             line += f" [dim]- ✓ {n_edits} {unit}{elapsed_str}[/dim]"
-        self.console.print(line)
+        self._assistant_console.print(line)
 
         # Render a truncated unified diff from the edit args (skip on error).
         if is_error:
@@ -808,11 +975,11 @@ class StreamDisplayManager:
             return
         diff_lines = diff_text.splitlines()
         show = diff_lines[: self._EDIT_DIFF_MAX_LINES]
-        self.console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
+        self._assistant_console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
                                   line_numbers=False))
         remaining = len(diff_lines) - self._EDIT_DIFF_MAX_LINES
         if remaining > 0:
-            self.console.print(
+            self._assistant_console.print(
                 f"      [dim italic]... ({remaining} more diff lines · Ctrl+o 展开)[/dim italic]"
             )
             remember_truncated(f"Edit diff · {filename}", diff_text)
@@ -890,7 +1057,7 @@ class StreamDisplayManager:
             verb = "created" if created else "updated"
             unit = "line" if n_lines == 1 else "lines"
             line += f" [dim]- ✓ {verb} {n_lines} {unit}{elapsed_str}[/dim]"
-        self.console.print(line)
+        self._assistant_console.print(line)
 
         if is_error:
             return
@@ -918,10 +1085,10 @@ class StreamDisplayManager:
         else:
             show = diff_lines[:head] + diff_lines[-tail:]
             hidden = n - head - tail
-        self.console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
+        self._assistant_console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
                                   line_numbers=False))
         if hidden > 0:
-            self.console.print(
+            self._assistant_console.print(
                 f"      [dim italic]... ({hidden} hidden diff lines · Ctrl+o 展开)[/dim italic]"
             )
             remember_truncated(f"Write diff · {filename}", diff_text)
@@ -986,7 +1153,7 @@ class StreamDisplayManager:
             return
 
         if not result_content:
-            self.console.print(f"    [dim]⎿ done{elapsed_str}[/dim]")
+            self._assistant_console.print(f"    [dim]⎿ done{elapsed_str}[/dim]")
             return
 
         if tool_name == "task":
@@ -1029,16 +1196,16 @@ class StreamDisplayManager:
             if len(line) > max_line_width:
                 line = line[:max_line_width - 3] + "..."
             p = prefix if i == 0 else cont_prefix
-            self.console.print(f"{p}{line}", style=style)
+            self._assistant_console.print(f"{p}{line}", style=style)
 
         remaining = len(lines) - max_lines
         if remaining > 0:
-            self.console.print(
+            self._assistant_console.print(
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+o 展开)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
         if elapsed_str:
-            self.console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
+            self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 
     def _display_head_tail(self, lines: List[str], head: int, tail: int,
                            *, prefix: str, cont_prefix: str, style: str,
@@ -1066,16 +1233,16 @@ class StreamDisplayManager:
             if len(line) > max_line_width:
                 line = line[:max_line_width - 3] + "..."
             p = first_prefix if i == 0 else cont_prefix
-            self.console.print(f"{p}{line}", style=style)
+            self._assistant_console.print(f"{p}{line}", style=style)
 
         if hidden > 0:
-            self.console.print(
+            self._assistant_console.print(
                 f"{cont_prefix}... ({hidden} hidden lines · Ctrl+o 展开)",
                 style="dim italic",
             )
             remember_truncated(truncated_title, full_content)
         if elapsed_str:
-            self.console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
+            self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
     
     def _display_task_result(self, result_content: str, is_error: bool = False):
         """Display subagent task result.
@@ -1087,7 +1254,7 @@ class StreamDisplayManager:
         try:
             data = json.loads(result_content)
         except (ValueError, TypeError):
-            self.console.print(f"    ⎿ {str(result_content)[:120]}", style="dim")
+            self._assistant_console.print(f"    ⎿ {str(result_content)[:120]}", style="dim")
             return
 
         success = data.get("success", False)
@@ -1097,7 +1264,7 @@ class StreamDisplayManager:
 
         if not success:
             error_msg = data.get("error", "Unknown error")
-            self.console.print(f"    ⎿ ⚠ {error_msg[:120]}", style="dim red")
+            self._assistant_console.print(f"    ⎿ ⚠ {error_msg[:120]}", style="dim red")
             if self._subagent_live_shown > 0:
                 self._subagent_live_shown -= 1
             return
@@ -1112,7 +1279,7 @@ class StreamDisplayManager:
             if exec_time is not None:
                 summary_parts.append(f"{exec_time:.1f}s")
             if summary_parts:
-                self.console.print(
+                self._assistant_console.print(
                     f"    [dim italic]⎿ task done ({', '.join(summary_parts)})[/dim italic]"
                 )
             return
@@ -1125,18 +1292,18 @@ class StreamDisplayManager:
             if len(info) > 90:
                 info = info[:87] + "..."
             if i == 0:
-                self.console.print(f"    ⎿ ", end="", style="dim")
+                self._assistant_console.print(f"    ⎿ ", end="", style="dim")
             else:
-                self.console.print(f"      ", end="")
-            self.console.print(f"{name}", end="", style="dim bold")
+                self._assistant_console.print(f"      ", end="")
+            self._assistant_console.print(f"{name}", end="", style="dim bold")
             if info:
-                self.console.print(f" {info}", style="dim")
+                self._assistant_console.print(f" {info}", style="dim")
             else:
-                self.console.print(style="dim")
+                self._assistant_console.print(style="dim")
 
         if len(tool_summary) > max_shown:
             remaining = len(tool_summary) - max_shown
-            self.console.print(f"      ... and {remaining} more tool calls", style="dim italic")
+            self._assistant_console.print(f"      ... and {remaining} more tool calls", style="dim italic")
 
         summary_parts = []
         if tool_count > 0:
@@ -1145,7 +1312,7 @@ class StreamDisplayManager:
             summary_parts.append(f"cost: {exec_time:.1f}s")
         if summary_parts:
             summary_str = ", ".join(summary_parts)
-            self.console.print(f"    [dim italic]Execution Summary: {summary_str}[/dim italic]")
+            self._assistant_console.print(f"    [dim italic]Execution Summary: {summary_str}[/dim italic]")
 
     # ------------------------------------------------------------------
     # Live event rendering (subagent progress + compaction)
@@ -1199,7 +1366,7 @@ class StreamDisplayManager:
             preview = task.replace("\n", " ").strip()
             if len(preview) > 100:
                 preview = preview[:97] + "..."
-            self.console.print(
+            self._assistant_console.print(
                 f"{self._SUB_INDENT}{self._subagent_prefix(run_id)}"
                 f"[dim cyan]⮕ {agent_name}[/dim cyan] "
                 f"[dim italic]{preview}[/dim italic]"
@@ -1228,7 +1395,7 @@ class StreamDisplayManager:
             )
             if info:
                 line += f" [dim]{info}[/dim]"
-            self.console.print(line)
+            self._assistant_console.print(line)
 
         elif et == "subagent.tool_completed":
             # Default ``all`` mode is tool-first: completion is hidden because
@@ -1247,7 +1414,7 @@ class StreamDisplayManager:
             elapsed_str = self._fmt_elapsed(event.get("elapsed"))
             prefix = self._subagent_prefix(run_id)
             if is_error:
-                self.console.print(
+                self._assistant_console.print(
                     f"{self._SUB_INDENT}{prefix}"
                     f"[dim red]⚠ {tool_name}[/dim red] [dim]{info}[/dim]"
                 )
@@ -1260,7 +1427,7 @@ class StreamDisplayManager:
                 line += f" [dim]{info}[/dim]"
             if elapsed_str:
                 line += f"[dim]{elapsed_str}[/dim]"
-            self.console.print(line)
+            self._assistant_console.print(line)
 
         elif et == "subagent.end":
             # Reclaim the slot before rendering so the prefix on the final
@@ -1276,7 +1443,7 @@ class StreamDisplayManager:
                     preview = preview[:197] + "..."
                 # Final response is shown in every mode (including ``off``):
                 # it's the actual answer the parent agent will consume.
-                self.console.print(
+                self._assistant_console.print(
                     f"{self._SUB_INDENT}[dim cyan]⤷[/dim cyan] "
                     f"[dim italic]{preview}[/dim italic]"
                 )
@@ -1296,7 +1463,7 @@ class StreamDisplayManager:
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)
-            self.console.print(
+            self._assistant_console.print(
                 f"{prefix}[dim yellow]🗜 compact [/dim yellow] "
                 f"[dim]{before} → {after} msgs ({elapsed:.2f}s)[/dim]"
             )
@@ -1304,7 +1471,7 @@ class StreamDisplayManager:
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)
-            self.console.print(
+            self._assistant_console.print(
                 f"{prefix}[dim yellow]🗜 compact (auto / LLM-summarised)[/dim yellow] "
                 f"[dim]{before} → {after} msgs ({elapsed:.1f}s)[/dim]"
             )
@@ -1312,7 +1479,7 @@ class StreamDisplayManager:
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)
-            self.console.print(
+            self._assistant_console.print(
                 f"{prefix}[dim yellow]🗜 compact (reactive · prompt_too_long)[/dim yellow] "
                 f"[dim]{before} → {after} msgs ({elapsed:.1f}s)[/dim]"
             )
@@ -1324,45 +1491,116 @@ class StreamDisplayManager:
             self.response_started = False
     
     def start_response(self):
-        """Start response section with a box."""
+        """Start the assistant response section.
+
+        With the gutter design there is no visible ``open`` — the visual
+        signal is the left-side ``▏`` bar that appears on each printed line
+        via ``self._assistant_console``. This method only manages state:
+        prints a blank spacer line and records the turn start timestamp so
+        ``finalize()`` can report elapsed time.
+        """
         if not self.response_started:
             if self.in_thinking:
                 self.end_thinking()
             if self.in_tool_section:
                 self.end_tool_section()
             self.console.print()
-            self._open_box("Response")
-            self._box_opened = True
+            if self._turn_started_at is None:
+                self._turn_started_at = time.monotonic()
             self.response_started = True
 
     def stream_response(self, content: str):
-        """Stream response content with line-buffered output."""
+        """Stream response content.
+
+        In Markdown-rendered modes, keep the stream buffered and render only the
+        final assistant reply once in ``finalize()`` to avoid duplicate output.
+        """
         self.start_response()
         self._response_buffer.append(content)
-        self._stream_text(content)
         self.has_content_output = True
+        if self._cli_markdown_mode == "off":
+            self._stream_text(content)
+
+    def _should_render_markdown(self, text: str) -> bool:
+        if self._cli_markdown_mode == "on":
+            return True
+        if self._cli_markdown_mode == "off":
+            return False
+        return _has_markdown(text)
+
+    def _build_turn_summary(self) -> str:
+        """Compose the compact right-aligned summary shown in the closing rule.
+
+        Format: `` HH:MM:SS · N tools · Xs `` (leading/trailing spaces so the
+        rule characters don't hug the text). ``N tools`` is omitted when
+        ``tool_count == 0``. Elapsed is omitted when we never recorded a
+        turn start (e.g. a purely synthetic finalize with no content).
+        """
+        parts = [time.strftime("%H:%M:%S", time.localtime())]
+        if self.tool_count > 0:
+            parts.append(f"{self.tool_count} tool{'s' if self.tool_count != 1 else ''}")
+        if self._turn_started_at is not None:
+            elapsed = time.monotonic() - self._turn_started_at
+            parts.append(f"{elapsed:.1f}s")
+        return " " + " · ".join(parts) + " "
 
     def finalize(self):
-        """Finalize output: flush buffered text and close open boxes.
+        """Finalize the assistant turn: flush buffers and draw the closing rule.
 
-        The Response box gets a small completion timestamp embedded in its
-        bottom-right corner, e.g. ``╰─...─ (15:32:08) ─╯``. Useful when a
-        long session is reviewed later — you can see when each answer landed.
+        With the gutter design there is no visible box to close. Instead we
+        render a right-aligned dim ``rich.rule.Rule`` at the bottom, whose
+        title carries a compact summary:
+
+            ─────────────── 15:32:08 · 3 tools · 4.2s ────────
+
+        The rule is drawn on the *raw* console (no gutter), so it acts as
+        a hard separator between this turn and the next user query.
         """
         if self.in_thinking:
             self.end_thinking()
         if self.in_tool_section:
             self.end_tool_section()
-        ts = time.strftime("%H:%M:%S", time.localtime())
-        right_label = f"({ts})"
+
         if self.has_content_output:
-            self._flush_line_buffer()
-            if self._box_opened:
-                self._close_box(right_label=right_label)
-                self._box_opened = False
-        elif self._box_opened:
-            self._close_box(right_label=right_label)
-            self._box_opened = False
+            full_text = "".join(self._response_buffer)
+            if self._should_render_markdown(full_text):
+                # Discard any partial-line buffered from ``off`` mode transitions;
+                # the Markdown renderer works from ``full_text`` end-to-end.
+                self._line_buffer = ""
+                # Constrain markdown width to ``console.width - 4`` so code
+                # blocks and headings don't hug the terminal edge — leaves a
+                # small right-side gutter of breathing room. Rich normally
+                # pads renderables out to full console width; without this
+                # cap, code fences and heading underlines stretch to the
+                # far right and look loud.
+                md_width = max(20, (self._raw_console.width or 80) - 4)
+                self._assistant_console.print(Markdown(full_text), width=md_width)
+            else:
+                # Plain-text mode: ``_stream_text`` already emitted complete lines
+                # through the assistant gutter as they arrived; only a partial
+                # trailing line may remain. If ``_stream_text`` was skipped
+                # entirely (auto-mode decided against markdown after the fact),
+                # ``_line_buffer`` is empty and we fall back to printing the
+                # full buffered response so nothing is lost.
+                if self._line_buffer:
+                    self._flush_line_buffer()
+                elif full_text:
+                    self._assistant_console.print(full_text, highlight=False, markup=False)
+
+        # Draw the closing separator only if this turn actually produced
+        # output (tool calls, streamed text, or thinking). A no-op turn
+        # shouldn't leave a stray separator floating on the screen.
+        #
+        # The separator is a fixed-width string ``──── SUMMARY ────`` rather
+        # than a ``rich.rule.Rule`` because Rule spans the full console width
+        # at render time. If the user resizes the terminal afterwards, old
+        # Rules already in scrollback keep their original width and look off.
+        # A fixed short separator is width-agnostic — it looks the same at
+        # 80 cols and at 200 cols, before and after resize.
+        if self.has_content_output or self.tool_count > 0:
+            summary = self._build_turn_summary().strip()
+            edge = "─" * 4
+            self.console.print(f"[dim]{edge} {summary} {edge}[/dim]")
 
 
 def display_tool_call(tool_name: str, tool_args: dict) -> None:
@@ -1372,8 +1610,19 @@ def display_tool_call(tool_name: str, tool_args: dict) -> None:
 
 def _has_markdown(text: str) -> bool:
     """Detect if text contains Markdown formatting worth rendering."""
-    markers = ["```", "## ", "### ", "* ", "- [ ]", "| ", "**", "1. "]
-    return any(m in text for m in markers)
+    if not text:
+        return False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            return True
+        if stripped.startswith(("- ", "* ", "+ ", "> ")):
+            return True
+        if any(stripped.startswith(f"{i}. ") for i in range(1, 10)):
+            return True
+        if "```" in line or "**" in line or "`" in line:
+            return True
+    return "\n|" in text and "\n|-" in text
 
 
 def render_markdown_response(console_instance, text: str) -> None:
@@ -1534,6 +1783,7 @@ def build_status_bar_fragments(
     last_turn_seconds: float = 0.0,
     spinner_text: str = "",
     terminal_width: int = 80,
+    agent_running: bool = False,
 ):
     """Build prompt_toolkit formatted-text fragments for the persistent status bar.
 
@@ -1549,6 +1799,17 @@ def build_status_bar_fragments(
     The model label is rendered as ``provider/model`` when a provider is
     supplied (e.g. ``openai/gpt-4o``); a non-default profile name is shown
     as a ``profile:`` prefix on wider terminals.
+
+    When ``agent_running`` is ``True``:
+      - ``spinner_text`` (typically a single spinner glyph like ``⠋``) is
+        prepended as the leftmost fragment, giving users a heartbeat
+        signal that the agent is working.
+      - Every ``class:sb*`` class name is swapped for its ``-active``
+        variant, which the CLI style sheet paints with a slightly darker
+        ``bg:#0f0f1a`` background. This visual downshift makes it clear
+        the bar is in "working" state without hiding any of the (still
+        updating) numeric fields — users often want to watch tokens and
+        cost tick during long turns.
     """
     base = model_name.split("/")[-1] if "/" in model_name else model_name
     if model_provider:
@@ -1619,4 +1880,26 @@ def build_status_bar_fragments(
         frags.insert(1, ("class:sb-dim", profile_prefix))
 
     frags.append(("class:sb", " "))
+
+    # ── Agent-running visual downshift ─────────────────────────────────
+    # Two things happen when the agent is actively producing output:
+    #   1. Prepend spinner_text as the leftmost fragment (heartbeat).
+    #   2. Rewrite every ``class:sb*`` fragment to ``class:sb*-active`` so
+    #      the CLI style sheet paints them on ``bg:#0f0f1a`` (one shade
+    #      darker than the idle ``#1a1a2e``). This is intentionally subtle
+    #      — the bar stays legible and the numeric fields keep updating.
+    if agent_running:
+        if spinner_text:
+            # Use the base class name; the rewrite pass below tacks on ``-active``.
+            frags.insert(0, ("class:sb-spin", f" {spinner_text} "))
+        frags = [
+            (
+                cls + "-active"
+                if cls.startswith("class:sb") and not cls.endswith("-active")
+                else cls,
+                text,
+            )
+            for (cls, text) in frags
+        ]
+
     return frags

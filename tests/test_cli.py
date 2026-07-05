@@ -284,21 +284,121 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("50%", text)
         self.assertIn("⏱ 5.0s", text)
 
-    def test_stream_display_manager_box_decorations(self):
+    def test_status_bar_agent_running_uses_active_classes(self):
+        """When ``agent_running=True``, every ``class:sb*`` fragment must be
+        rewritten to its ``-active`` variant. The CLI style sheet paints those
+        with a darker ``bg:#0f0f1a`` background — a subtle visual downshift
+        that tells the user "the agent is working right now" without hiding
+        the (still updating) numeric fields.
+        """
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            cost_usd=0.023,
+            last_turn_seconds=3.4,
+            spinner_text="⠋",
+            terminal_width=120,
+            agent_running=True,
+        )
+        classes = [cls for cls, _ in frags]
+        # Every sb* class MUST end with -active — no idle class may leak
+        for cls in classes:
+            if cls.startswith("class:sb"):
+                self.assertTrue(
+                    cls.endswith("-active"),
+                    f"idle status-bar class leaked while running: {cls!r}",
+                )
+
+    def test_status_bar_agent_running_prepends_spinner_leftmost(self):
+        """The spinner glyph must be the leftmost fragment so it reads as a
+        heartbeat at the far-left edge of the bar. Empty ``spinner_text``
+        should NOT inject a fragment.
+        """
+        from agentica.cli.display import build_status_bar_fragments
+
+        with_spinner = build_status_bar_fragments(
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            spinner_text="⠋",
+            terminal_width=120,
+            agent_running=True,
+        )
+        self.assertEqual(with_spinner[0][0], "class:sb-spin-active")
+        self.assertIn("⠋", with_spinner[0][1])
+
+        without_spinner = build_status_bar_fragments(
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            spinner_text="",
+            terminal_width=120,
+            agent_running=True,
+        )
+        # No leading spinner segment when text is empty
+        self.assertNotEqual(without_spinner[0][0], "class:sb-spin-active")
+
+    def test_status_bar_idle_keeps_base_classes(self):
+        """When ``agent_running=False`` (default), fragments must keep their
+        base ``class:sb`` / ``class:sb-dim`` / etc. names — no ``-active``
+        suffix leaks into idle-state rendering.
+        """
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            cost_usd=0.023,
+            last_turn_seconds=3.4,
+            terminal_width=120,
+            agent_running=False,
+        )
+        for cls, _ in frags:
+            self.assertFalse(
+                cls.endswith("-active"),
+                f"idle bar emitted active class: {cls!r}",
+            )
+
+    def test_stream_display_manager_no_gutter_and_short_separator(self):
+        """Assistant turn should render as plain text (no left-side gutter
+        bar), and close with a fixed-width ``──── HH:MM:SS ────`` separator
+        rather than a full-width ``rich.rule.Rule``.
+
+        Uses a real ``Console`` writing to StringIO so we can inspect the
+        actual rendered characters.
+        """
+        from io import StringIO
+        from rich.console import Console
         from agentica.cli.display import StreamDisplayManager
 
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
+        buf = StringIO()
+        con = Console(file=buf, width=80, force_terminal=False, no_color=True)
+        dm = StreamDisplayManager(con)
         dm.start_response()
-        self.assertTrue(dm._box_opened)
-        dm.stream_response("hello")
+        dm.stream_response("hello world")
         dm.finalize()
-        calls = [str(c) for c in fake.print.call_args_list]
-        box_open = any("╭" in c for c in calls)
-        box_close = any("╰" in c for c in calls)
-        self.assertTrue(box_open, "Expected ╭ box opening")
-        self.assertTrue(box_close, "Expected ╰ box closing")
+        out = buf.getvalue()
+        # No box glyphs — gutter design was itself replaced by plain text
+        self.assertNotIn("╭", out)
+        self.assertNotIn("╰", out)
+        # Assistant gutter must NOT appear on the streamed line anymore
+        self.assertNotIn("▏", out, "assistant ▏ gutter has been removed")
+        self.assertIn("hello world", out)
+        # Closing separator: fixed short edges + timestamp
+        self.assertIn("────", out, "closing separator must have ──── edges")
+        self.assertRegex(out, r"\d{2}:\d{2}:\d{2}", "closing separator must embed HH:MM:SS")
+        # And crucially the separator must be short — not stretch full width.
+        # 80-col terminal, separator should be under ~40 chars total.
+        sep_lines = [ln for ln in out.splitlines() if "────" in ln]
+        self.assertTrue(sep_lines, "separator line must exist")
+        # The rendered line (without ANSI) should be substantially shorter
+        # than the console width — fixed 4+1+summary+1+4 layout.
+        self.assertLess(len(sep_lines[-1]), 60,
+                        "separator must be fixed-width, not stretch to full console width")
 
     def test_stream_display_manager_suppresses_micro_compact(self):
         from agentica.cli.display import StreamDisplayManager
@@ -308,6 +408,83 @@ class TestCLIHelpers(unittest.TestCase):
         dm = StreamDisplayManager(fake)
         dm.handle_event({"type": "compact.micro", "agent_name": "Agent", "cleared": 3})
         fake.print.assert_not_called()
+
+    def test_stream_display_manager_renders_markdown_when_setting_on(self):
+        from agentica.cli.display import StreamDisplayManager
+        from rich.markdown import Markdown
+
+        fake = MagicMock()
+        fake.width = 80
+        with patch("agentica.cli.display.get_setting", return_value="on"):
+            dm = StreamDisplayManager(fake)
+        dm.start_response()
+        dm.stream_response("# Title\n\n- item\n")
+        dm.finalize()
+
+        markdown_calls = [c for c in fake.print.call_args_list if c.args and isinstance(c.args[0], Markdown)]
+        self.assertTrue(markdown_calls, "expected final response to render as Markdown")
+
+    def test_stream_display_manager_keeps_plain_text_when_setting_off(self):
+        from agentica.cli.display import StreamDisplayManager
+        from rich.markdown import Markdown
+
+        fake = MagicMock()
+        fake.width = 80
+        with patch("agentica.cli.display.get_setting", return_value="off"):
+            dm = StreamDisplayManager(fake)
+        dm.start_response()
+        dm.stream_response("# Title\n\n- item\n")
+        dm.finalize()
+
+        markdown_calls = [c for c in fake.print.call_args_list if c.args and isinstance(c.args[0], Markdown)]
+        self.assertFalse(markdown_calls, "plain-text mode must not render Markdown")
+
+    def test_stream_display_manager_buffers_markdown_stream_until_finalize(self):
+        """Markdown mode buffers the streamed text and only renders on finalize.
+
+        Uses a real ``Console`` (StringIO-backed) instead of MagicMock because
+        the gutter proxy needs a working ``capture()`` to inspect rendered
+        ANSI. Assertions target the visible transcript, not mock call args.
+        """
+        from io import StringIO
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        buf = StringIO()
+        con = Console(file=buf, width=80, force_terminal=False, no_color=True)
+        with patch("agentica.cli.display.get_setting", return_value="on"):
+            dm = StreamDisplayManager(con)
+
+        dm.stream_response("# Title")
+        pre_final = buf.getvalue()
+        self.assertNotIn("Title", pre_final,
+                         "markdown mode should buffer stream text until finalize")
+
+        dm.finalize()
+        post_final = buf.getvalue()
+        self.assertIn("Title", post_final,
+                      "finalize must flush the buffered markdown")
+        # Assistant ▏ gutter no longer decorates markdown — plain output
+        self.assertNotIn("▏", post_final)
+
+    def test_gutter_console_works_with_chatconsole(self):
+        """Regression: _GutteredConsole must not blow up when wrapping the
+        CLI's ChatConsole. ChatConsole is a slim adapter (used inside the
+        prompt_toolkit app) — it exposes ``render_ansi`` and ``print`` but
+        NOT ``rich.Console.capture``. Earlier the gutter proxy hard-coded
+        ``self._console.capture()``, raising ``AttributeError`` on the
+        first user_input turn inside ``process_loop``.
+        """
+        from agentica.cli.interactive import ChatConsole
+        from agentica.cli.display import _GutteredConsole
+
+        cc = ChatConsole()
+        gutter_con = _GutteredConsole(cc, "▎", "cyan")
+        # Should NOT raise
+        gutter_con.print("hello from ChatConsole gutter")
+        # Prefix cache should be a string (ANSI-rendered by ``render_ansi``)
+        self.assertIsInstance(gutter_con.gutter_prefix_ansi, str)
+        self.assertIn("▎", gutter_con.gutter_prefix_ansi)
 
     def test_fmt_elapsed_uses_ms_under_one_second(self):
         """Sub-second tools must surface ms-precision rather than being hidden.
@@ -1880,9 +2057,10 @@ class TestSessionCommand(unittest.TestCase):
 
 
 class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
-    """The Response box must close with a small ``(HH:MM:SS)`` label embedded
-    on its bottom-right corner so users reviewing a long session can see
-    when each answer landed.
+    """The assistant turn must close with a right-aligned dim ``Rule`` whose
+    title carries a compact ``HH:MM:SS [· N tools · Xs]`` summary. Users
+    reviewing a long session can then see when each answer landed and how
+    much work went into it.
     """
 
     def _capture(self, render):
@@ -1896,22 +2074,34 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         render(mgr)
         return buf.getvalue()
 
-    def test_finalize_embeds_completion_timestamp_in_close_rule(self):
-        import re
-
+    def test_finalize_draws_rule_with_timestamp(self):
         def render(mgr):
             mgr.start_response()
             mgr.stream_response("hello")
             mgr.finalize()
 
         out = self._capture(render)
-        self.assertIn("Response", out)
-        self.assertRegex(out, r"\(\d{2}:\d{2}:\d{2}\)", "close rule must embed a HH:MM:SS timestamp")
-        # Timestamp must appear on the closing rule (the line containing ╯),
-        # not somewhere in the body.
-        close_lines = [ln for ln in out.splitlines() if "╯" in ln]
-        self.assertTrue(close_lines, "response box must have a close rule")
-        self.assertRegex(close_lines[-1], r"\(\d{2}:\d{2}:\d{2}\)")
+        # No box glyphs anywhere — gutter design replaced them
+        self.assertNotIn("╭", out)
+        self.assertNotIn("╰", out)
+        self.assertNotIn("Response", out,
+                         "no 'Response' title — gutter design has no box header")
+        # Rule glyph + timestamp on the closing line
+        self.assertIn("─", out, "closing rule must be drawn")
+        self.assertRegex(out, r"\d{2}:\d{2}:\d{2}", "rule must embed HH:MM:SS")
+
+    def test_finalize_rule_includes_tool_count_and_elapsed(self):
+        def render(mgr):
+            # ``execute`` is NOT in ``_DEFERRED_TOOLS`` so it increments
+            # ``tool_count`` at call time, giving finalize a non-zero count
+            # to render in the summary.
+            mgr.display_tool("execute", {"command": "ls"})
+            mgr.stream_response("done")
+            mgr.finalize()
+
+        out = self._capture(render)
+        self.assertRegex(out, r"1 tool\b", "rule must show N tools when >0")
+        self.assertRegex(out, r"\d+\.\ds", "rule must show elapsed seconds")
 
 
 class TestLessLesskeyDetection(unittest.TestCase):
@@ -2347,6 +2537,45 @@ class TestInputRequestCancel(unittest.TestCase):
         req_a = _InputRequest(prompt="a")
         req_b = _InputRequest(prompt="b")
         self.assertIs(req_a.CANCELLED, req_b.CANCELLED)
+
+    def test_enter_keeps_whitespace_for_pending_user_input_request(self):
+        request = self._import_input_request()(prompt="Need exact text")
+        typed = "  keep surrounding whitespace  "
+
+        # Regression guard for the interactive Enter handler: ask-user replies
+        # must preserve the raw buffer content instead of silently applying
+        # ``.strip()`` like normal chat turns do.
+        request.result.put(typed)
+
+        self.assertEqual(request.result.get_nowait(), typed)
+
+    def test_cancelled_request_uses_single_sentinel_once(self):
+        _InputRequest = self._import_input_request()
+        request = _InputRequest(prompt="Need answer")
+
+        self.assertTrue(request.cancel())
+
+        self.assertIs(request.result.get_nowait(), _InputRequest.CANCELLED)
+        self.assertTrue(request.result.empty())
+        self.assertFalse(request.cancel())
+
+    def test_cancelled_request_ignores_late_submit(self):
+        _InputRequest = self._import_input_request()
+        request = _InputRequest(prompt="Need answer")
+
+        request.cancel()
+        self.assertFalse(request.submit("late answer"))
+
+        self.assertIs(request.result.get_nowait(), _InputRequest.CANCELLED)
+
+    def test_submitted_request_ignores_late_cancel(self):
+        _InputRequest = self._import_input_request()
+        request = _InputRequest(prompt="Need answer")
+
+        self.assertTrue(request.submit("final answer"))
+        self.assertFalse(request.cancel())
+
+        self.assertEqual(request.result.get_nowait(), "final answer")
 
 
 if __name__ == "__main__":

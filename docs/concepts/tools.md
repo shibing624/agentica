@@ -388,7 +388,7 @@ agent = Agent(
     model=ZhipuAI(),
     tools=[AskUserQuestionTool(input_callback=my_input_handler)],
 )
-# Agent 需要确认时会调用 user_input 工具：
+# Agent 需要确认时会调用 ask_user_question 工具：
 # "确定要删除 production 数据库吗？(yes/no)"
 ```
 

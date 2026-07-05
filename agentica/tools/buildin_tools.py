@@ -286,7 +286,63 @@ class BuiltinFileTool(Tool):
         self.register(self.read_file, concurrency_safe=True, is_read_only=True)
         self.register(self.write_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.edit_file, sanitize_arguments=False, is_destructive=True)
-        self.register(self.multi_edit_file, sanitize_arguments=False, is_destructive=True)
+        # multi_edit_file: the auto-derived schema from `edits: List[Dict[str, Any]]`
+        # collapses each item to a bare {"type": "object"} with no properties,
+        # leaving the LLM zero structural guidance. Models then frequently
+        # stringify the whole `edits` array, which fails validation with
+        # "edits: Input should be a valid list". We pin the LLM-facing schema
+        # here so every code path (CLI + SDK) exposes the same rich shape.
+        self.register(
+            self.multi_edit_file,
+            sanitize_arguments=False,
+            is_destructive=True,
+            parameters_override={
+                "type": "object",
+                "properties": {
+                    "file_path": {
+                        "type": "string",
+                        "description": "Path to the file to edit.",
+                    },
+                    "edits": {
+                        "type": "array",
+                        "description": (
+                            "Edit operations applied sequentially to the file. "
+                            "MUST be a JSON array of objects, NOT a stringified array."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "old_string": {
+                                    "type": "string",
+                                    "description": "Exact existing text to find and replace.",
+                                },
+                                "new_string": {
+                                    "type": "string",
+                                    "description": "Replacement text.",
+                                },
+                                "replace_all": {
+                                    "type": "boolean",
+                                    "description": (
+                                        "Replace all occurrences instead of requiring a "
+                                        "unique match. Default false."
+                                    ),
+                                },
+                            },
+                            "required": ["old_string", "new_string"],
+                        },
+                    },
+                    "continue_on_error": {
+                        "type": "boolean",
+                        "description": (
+                            "When true (default), apply the edits that succeed and report "
+                            "failures per-item so you can retry only the failing ones. "
+                            "Set false for all-or-nothing atomic edits."
+                        ),
+                    },
+                },
+                "required": ["file_path", "edits"],
+            },
+        )
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
         # glob and grep enforce their own timeouts on both fast (rg / native
@@ -297,57 +353,6 @@ class BuiltinFileTool(Tool):
         self.functions["glob"].manages_own_timeout = True
         self.functions["grep"].manages_own_timeout = True
         self.register(self.undo_edit, is_destructive=True)
-
-        # Explicit, structured schema for multi_edit_file. The auto-generated
-        # schema from `edits: List[Dict[str, Any]]` collapses each item to a
-        # bare {"type": "object"} with no properties, so the LLM gets zero
-        # structural guidance for an edit and frequently serialises the whole
-        # `edits` array into a JSON string — which then fails validation with
-        # "edits: Input should be a valid list". Spelling out item properties
-        # here makes models emit a real array of objects.
-        self.functions["multi_edit_file"].parameters = {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "Path to the file to edit.",
-                },
-                "edits": {
-                    "type": "array",
-                    "description": (
-                        "Edit operations applied sequentially to the file. "
-                        "MUST be a JSON array of objects, NOT a stringified array."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "old_string": {
-                                "type": "string",
-                                "description": "Exact existing text to find and replace.",
-                            },
-                            "new_string": {
-                                "type": "string",
-                                "description": "Replacement text.",
-                            },
-                            "replace_all": {
-                                "type": "boolean",
-                                "description": "Replace all occurrences instead of requiring a unique match. Default false.",
-                            },
-                        },
-                        "required": ["old_string", "new_string"],
-                    },
-                },
-                "continue_on_error": {
-                    "type": "boolean",
-                    "description": (
-                        "When true (default), apply the edits that succeed and report "
-                        "failures per-item so you can retry only the failing ones. "
-                        "Set false for all-or-nothing atomic edits."
-                    ),
-                },
-            },
-            "required": ["file_path", "edits"],
-        }
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve path, supporting absolute, relative, and ~ paths.

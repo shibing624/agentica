@@ -259,8 +259,8 @@ def upsert_profile(name: str, profile: Dict[str, Any], make_active: bool = True)
 def get_setting(key: str, default: Any = None, config: Optional[Dict[str, Any]] = None) -> Any:
     """Read a value from the top-level ``settings`` block of config.yaml.
 
-    The ``settings`` block holds CLI behaviour toggles (e.g. cron) that are not
-    tied to a model profile. Returns ``default`` when missing.
+    The ``settings`` block holds CLI behaviour toggles (e.g. cron / markdown)
+    that are not tied to a model profile. Returns ``default`` when missing.
     """
     data = load_global_config() if config is None else config
     settings = data.get("settings")
@@ -401,4 +401,8 @@ profiles:
 # Free-form env block: arbitrary keys injected into os.environ.
 # Shell / .env values still win over these (setdefault semantics).
 env: {}
+
+# CLI-only presentation toggles.
+settings:
+#  cli_markdown: auto   # off|auto|on — render only the final assistant reply
 """

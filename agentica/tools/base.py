@@ -167,6 +167,14 @@ class Function(BaseModel):
         default_factory=lambda: {"type": "object", "properties": {}},
         description="JSON Schema object describing function parameters",
     )
+    # If set, `process_entrypoint` will NOT overwrite `parameters` with the
+    # schema auto-derived from the entrypoint signature. Use this when the
+    # function signature cannot carry rich structural information (e.g.
+    # `edits: List[Dict[str, Any]]` collapses each item to a bare
+    # `{"type": "object"}` with no properties, leaving the LLM no structural
+    # guidance and often triggering "stringified array" tool-call failures).
+    # The overriding dict IS the final schema exposed to the LLM.
+    parameters_override: Optional[Dict[str, Any]] = None
     strict: Optional[bool] = None
 
     # The function to be called.
@@ -353,7 +361,13 @@ class Function(BaseModel):
             return
 
         try:
-            self.parameters = self._parse_parameters(self.entrypoint, strict=strict)
+            if self.parameters_override is not None:
+                # Caller supplied a hand-written schema (typically because the
+                # signature type `List[Dict[str, Any]]` erases item structure).
+                # Use it verbatim — do NOT let the auto-derived one clobber it.
+                self.parameters = self.parameters_override
+            else:
+                self.parameters = self._parse_parameters(self.entrypoint, strict=strict)
         except Exception as e:
             logger.warning(f"Could not parse args for {self.name}: {e}", exc_info=True)
 
@@ -827,7 +841,8 @@ class Tool:
     def register(self, function: Callable[..., Any], sanitize_arguments: bool = True,
                  concurrency_safe: bool = False, is_read_only: bool = False,
                  is_destructive: bool = False,
-                 available_when: Optional[Callable[[], bool]] = None):
+                 available_when: Optional[Callable[[], bool]] = None,
+                 parameters_override: Optional[Dict[str, Any]] = None):
         """Register a function with the toolkit.
 
         Args:
@@ -840,10 +855,37 @@ class Tool:
             is_destructive:     If True, the function performs irreversible operations.
             available_when:     Optional callback that returns True when the tool
                                 should be exposed to the LLM.
+            parameters_override: If given, use this dict verbatim as the LLM-facing
+                                JSON schema instead of the one auto-derived from the
+                                function signature. Necessary when the signature type
+                                erases structure (e.g. `List[Dict[str, Any]]` items
+                                collapse to `{"type": "object"}` with no properties,
+                                which is a common source of tool-call failures).
 
         Returns:
             The registered function
         """
+        if parameters_override is not None:
+            if not isinstance(parameters_override, dict):
+                raise TypeError(
+                    f"parameters_override for {function.__name__} must be a dict, "
+                    f"got {type(parameters_override).__name__}"
+                )
+            # JSON Schema object keys we actually consume downstream. Anything
+            # outside this set is almost certainly a typo (e.g. `propertys`,
+            # `require`) that would silently reach the LLM as a broken schema.
+            allowed_schema_keys = {
+                "type", "properties", "required", "additionalProperties",
+                "description", "title", "$defs", "definitions", "enum",
+                "items", "oneOf", "anyOf", "allOf", "not",
+            }
+            unknown = set(parameters_override.keys()) - allowed_schema_keys
+            if unknown:
+                raise ValueError(
+                    f"parameters_override for {function.__name__} contains "
+                    f"unknown JSON-schema keys: {sorted(unknown)}. "
+                    f"Allowed: {sorted(allowed_schema_keys)}"
+                )
         try:
             origin_type = "builtin" if (self.name and self.name.startswith("builtin_")) else "function"
             f = Function(
@@ -855,6 +897,7 @@ class Tool:
                 is_read_only=is_read_only,
                 is_destructive=is_destructive,
                 available_when=available_when,
+                parameters_override=parameters_override,
                 origin=ToolOrigin(type=origin_type, source_tool_name=function.__name__),
             )
             self.functions[f.name] = f

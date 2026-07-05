@@ -392,6 +392,7 @@ class SubagentRegistry:
         child: "Agent",
         task: str,
         run_id: Optional[str] = None,
+        output_sink: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Drive the subagent through ``run_stream`` and bubble events to parent CLI.
 
@@ -399,6 +400,13 @@ class SubagentRegistry:
         ``BuiltinTaskTool`` and any external caller share the same execution
         loop. ``run_id`` is propagated into every emitted event so the CLI can
         correlate concurrent subagents (e.g. for ``[1] [2]`` batch prefixes).
+
+        If ``output_sink`` is provided, ``content`` and ``tool_calls_summary``
+        are mirrored to it live on every chunk. This lets ``spawn()`` recover
+        partial output when the coroutine is cancelled by ``asyncio.wait_for``
+        (timeout) or by the user (Ctrl+C). Without this, all work done before
+        the interrupt is silently discarded.
+
         Returns ``{content, tool_calls_summary}``.
         """
         from agentica.run_config import RunConfig
@@ -425,6 +433,19 @@ class SubagentRegistry:
         log_index_by_id: Dict[str, int] = {}
         final_content = ""
 
+        def _mirror_to_sink() -> None:
+            """Copy current progress into the caller-provided sink so partial
+            output survives cancellation / timeout."""
+            if output_sink is None:
+                return
+            output_sink["content"] = final_content
+            output_sink["tool_calls_summary"] = [
+                {"name": tc["name"], "info": tc.get("info", "")}
+                for tc in tool_calls_log
+            ]
+
+        _mirror_to_sink()
+
         async for chunk in child.run_stream(task, config=RunConfig(stream_intermediate_steps=True)):
             if chunk is None:
                 continue
@@ -444,6 +465,7 @@ class SubagentRegistry:
                             seen_started.add(call_id)
                             log_index_by_id[call_id] = len(tool_calls_log)
                         tool_calls_log.append({"name": tool_name, "info": brief})
+                        _mirror_to_sink()
                         if cb is not None:
                             cb({
                                 "type": "subagent.tool_started",
@@ -465,6 +487,7 @@ class SubagentRegistry:
                             idx = log_index_by_id.get(call_id)
                             if idx is not None:
                                 tool_calls_log[idx]["info"] = brief
+                                _mirror_to_sink()
                         if cb is not None:
                             elapsed_t = (tool_info.get("metrics") or {}).get("time")
                             cb({
@@ -478,6 +501,7 @@ class SubagentRegistry:
                             })
             if chunk.event == "RunResponse" and chunk.content:
                 final_content += str(chunk.content)
+                _mirror_to_sink()
 
         if cb is not None:
             cb({
@@ -656,42 +680,131 @@ class SubagentRegistry:
             child._parent_run_id = parent_agent.run_id
 
         start_time = time.time()
+        # Shared mutable sink so we can recover partial output when the child
+        # run is aborted by timeout / user cancel / unexpected exception.
+        # Without this, ``final_content`` lives only inside ``_run_child_streaming``
+        # and is silently discarded on interrupt — which is exactly why users
+        # were seeing "task failed with no content" for long-running subagents.
+        partial_sink: Dict[str, Any] = {"content": "", "tool_calls_summary": []}
         try:
-            run_coro = self._run_child_streaming(parent_agent, child, task, run_id=run_id)
+            run_coro = self._run_child_streaming(
+                parent_agent, child, task, run_id=run_id, output_sink=partial_sink
+            )
             if config.timeout > 0:
                 stream_result = await asyncio.wait_for(run_coro, timeout=config.timeout)
             else:
                 stream_result = await run_coro
         except asyncio.TimeoutError:
-            logger.warning("Subagent timed out after %ss", config.timeout)
-            self.update_status(run_id=run_id, status="error", error="timeout")
+            elapsed = round(time.time() - start_time, 3)
+            partial_content = partial_sink.get("content") or ""
+            partial_tools = partial_sink.get("tool_calls_summary") or []
+            logger.warning(
+                "Subagent timed out after %ss (partial: %d chars, %d tool calls)",
+                config.timeout, len(partial_content), len(partial_tools),
+            )
+            timeout_note = (
+                f"[Subagent timed out after {config.timeout}s. "
+                f"Partial output below reflects {len(partial_tools)} completed tool call(s).]"
+            )
+            content_out = (
+                f"{timeout_note}\n\n{partial_content}" if partial_content else timeout_note
+            )
+            self.update_status(run_id=run_id, status="timeout", result=content_out)
             return {
-                "status": "error",
+                "status": "timeout",
                 "error": f"Subagent timed out after {config.timeout} seconds",
                 "agent_type": config.type.value,
+                "subagent_name": config.name,
                 "run_id": run_id,
-                "content": "",
+                "content": content_out,
+                "tool_calls_summary": partial_tools,
+                "tool_count": len(partial_tools),
+                "elapsed_seconds": elapsed,
+                "partial": True,
             }
         except (asyncio.CancelledError, AgentCancelledError):
-            self.update_status(run_id=run_id, status="cancelled", error="cancelled by user")
+            # Cancellation must propagate so the parent run terminates cleanly,
+            # but we still persist partial output to the registry so the user
+            # can inspect what the subagent produced before the interrupt.
+            partial_content = partial_sink.get("content") or ""
+            partial_tools = partial_sink.get("tool_calls_summary") or []
+            cancel_note = (
+                f"[Subagent cancelled after {round(time.time() - start_time, 3)}s. "
+                f"Partial output reflects {len(partial_tools)} completed tool call(s).]"
+            )
+            content_out = (
+                f"{cancel_note}\n\n{partial_content}" if partial_content else cancel_note
+            )
+            self.update_status(
+                run_id=run_id, status="cancelled", result=content_out, error="cancelled by user"
+            )
             raise
         except Exception as e:
+            elapsed = round(time.time() - start_time, 3)
+            partial_content = partial_sink.get("content") or ""
+            partial_tools = partial_sink.get("tool_calls_summary") or []
             logger.error(f"Subagent execution failed: {e}")
             self.update_status(run_id=run_id, status="error", error=str(e))
             return {
                 "status": "error",
                 "error": str(e),
                 "agent_type": config.type.value,
+                "subagent_name": config.name,
                 "run_id": run_id,
-                "content": "",
+                "content": partial_content,
+                "tool_calls_summary": partial_tools,
+                "tool_count": len(partial_tools),
+                "elapsed_seconds": elapsed,
+                "partial": bool(partial_content or partial_tools),
             }
 
         elapsed = round(time.time() - start_time, 3)
-        final_content = stream_result["content"] or "Subagent completed but returned no content."
+        raw_content = stream_result["content"]
+        tool_calls_summary = stream_result["tool_calls_summary"]
+
+        # Detect ``Runner`` graceful break (max_turns / tool_call_limit). When
+        # this happens the run returns normally but ``break_reason`` is set on
+        # the last RunResponse. Surface it as a first-class status so callers
+        # know the answer was truncated by budget rather than by the model
+        # declaring itself done.
+        break_reason = None
+        run_response = getattr(child, "run_response", None)
+        if run_response is not None:
+            break_reason = getattr(run_response, "break_reason", None)
 
         if parent_agent.model is not None and child.model is not None:
             parent_agent.model.usage.merge(child.model.usage)
 
+        if break_reason:
+            # ``break_reason`` from runner.py is a plain string like
+            # "MAX_TURNS" / "TOOL_CALL_LIMIT". Normalise to lowercase status.
+            reason_str = str(break_reason).lower()
+            if "turn" in reason_str:
+                status_out = "max_turns"
+            elif "tool" in reason_str:
+                status_out = "tool_call_limit"
+            else:
+                status_out = "truncated"
+            note = (
+                f"[Subagent stopped at {reason_str} limit after {len(tool_calls_summary)} "
+                f"tool call(s). Output below is what was produced before the limit.]"
+            )
+            final_content = f"{note}\n\n{raw_content}" if raw_content else note
+            self.update_status(run_id=run_id, status=status_out, result=final_content)
+            return {
+                "status": status_out,
+                "error": f"stopped at {reason_str} limit",
+                "content": final_content,
+                "agent_type": config.type.value,
+                "subagent_name": config.name,
+                "run_id": run_id,
+                "tool_calls_summary": tool_calls_summary,
+                "tool_count": len(tool_calls_summary),
+                "elapsed_seconds": elapsed,
+                "partial": True,
+            }
+
+        final_content = raw_content or "Subagent completed but returned no content."
         self.update_status(run_id=run_id, status="completed", result=final_content)
 
         logger.chat(

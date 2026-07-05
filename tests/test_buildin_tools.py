@@ -300,6 +300,81 @@ class TestBuiltinFileToolEditFile:
         assert Path(fp).read_text() == "aaa bbb"
 
 
+class TestMultiEditFileSchema:
+    """Guard the LLM-facing tool schema for multi_edit_file.
+
+    Regression: the auto-derived schema from `edits: List[Dict[str, Any]]`
+    collapses each item to a bare `{"type": "object"}` with no properties,
+    which caused frequent tool-call failures (LLM stringified the whole array).
+    We now pin a rich schema via `register(..., parameters_override=...)` and
+    that override must survive `Function.process_entrypoint()`.
+    """
+
+    def _mefn(self):
+        """Return the multi_edit_file Function after process_entrypoint,
+        matching what model.add_tool ultimately exposes to the LLM."""
+        tk = BuiltinFileTool()
+        fn = tk.functions["multi_edit_file"]
+        fn.process_entrypoint(strict=False)
+        return fn
+
+    def test_override_is_set_at_construction(self):
+        tk = BuiltinFileTool()
+        fn = tk.functions["multi_edit_file"]
+        assert fn.parameters_override is not None, (
+            "BuiltinFileTool must register multi_edit_file with a schema override"
+        )
+
+    def test_process_entrypoint_preserves_override(self):
+        """The core regression: process_entrypoint MUST NOT clobber the override."""
+        fn = self._mefn()
+        items = fn.parameters["properties"]["edits"]["items"]
+        assert items.get("type") == "object"
+        assert "properties" in items, (
+            "items schema was clobbered back to a bare object — override lost"
+        )
+        assert set(items["properties"].keys()) == {"old_string", "new_string", "replace_all"}
+        assert items["required"] == ["old_string", "new_string"]
+
+    def test_wire_schema_has_continue_on_error(self):
+        fn = self._mefn()
+        assert "continue_on_error" in fn.parameters["properties"]
+        assert fn.parameters["properties"]["continue_on_error"]["type"] == "boolean"
+
+    def test_wire_schema_required_fields(self):
+        fn = self._mefn()
+        assert fn.parameters["required"] == ["file_path", "edits"]
+
+    def test_edits_description_warns_against_stringifying(self):
+        """The most common LLM failure mode is emitting `edits` as a JSON
+        string. Description must call this out explicitly."""
+        fn = self._mefn()
+        desc = fn.parameters["properties"]["edits"].get("description", "")
+        assert "stringified" in desc.lower(), (
+            f"edits description missing anti-stringify hint: {desc!r}"
+        )
+
+    def test_to_dict_wire_format_is_rich(self):
+        """Final wire format sent to the LLM (via Function.to_dict) must
+        carry the rich items schema — not the bare {'type': 'object'} stub."""
+        fn = self._mefn()
+        wire = fn.to_dict()
+        items = wire["parameters"]["properties"]["edits"]["items"]
+        assert "properties" in items and items["properties"], (
+            "wire schema still shows bare object items — LLM will guess wrong"
+        )
+
+    def test_other_tools_still_use_auto_schema(self):
+        """Sanity: parameters_override is opt-in. Tools that don't set it
+        must still get their schema auto-derived from the signature."""
+        tk = BuiltinFileTool()
+        fn = tk.functions["read_file"]
+        assert fn.parameters_override is None
+        fn.process_entrypoint(strict=False)
+        # auto-derived schema should have file_path as a string property
+        assert fn.parameters["properties"]["file_path"]["type"] == "string"
+
+
 class TestBuiltinFileToolGlob:
     def test_glob_py_files(self, file_tool, tmp_dir):
         Path(tmp_dir, "a.py").write_text("")
