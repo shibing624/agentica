@@ -3,6 +3,7 @@ site_description: A lightweight, powerful Python framework for building autonomo
 site_url: https://shibing624.github.io/agentica
 repo_url: https://github.com/shibing624/agentica
 repo_name: shibing624/agentica
+edit_uri: blob/main/docs/
 
 theme:
   name: readthedocs
