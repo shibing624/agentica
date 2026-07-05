@@ -769,7 +769,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertNotIn("line 7", text2)
 
     def test_truncated_blocks_are_remembered_for_expand(self):
-        """Long user input and long tool output are stashed for Ctrl+o expansion."""
+        """Long user input and long tool output are stashed for Ctrl+O expansion."""
         from agentica.cli import display as disp
         from agentica.cli.display import StreamDisplayManager
 
@@ -793,8 +793,8 @@ class TestCLIHelpers(unittest.TestCase):
 
         # The long query survives StreamDisplayManager construction — the
         # per-turn clear lives in display_user_message now, not __init__, so
-        # Ctrl+o expands BOTH the query and the tool result (regression guard:
-        # previously __init__'s clear wiped the query, so Ctrl+o showed only
+        # Ctrl+O expands BOTH the query and the tool result (regression guard:
+        # previously __init__'s clear wiped the query, so Ctrl+O showed only
         # tool results).
         blocks = disp.get_truncated_blocks()
         self.assertEqual(len(blocks), 2)
@@ -807,7 +807,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertEqual(disp.get_last_truncated()["content"], "")
 
     def test_truncated_blocks_list_supports_expand_all(self):
-        """Multiple folded blocks accumulate so Ctrl+o can expand ALL of them."""
+        """Multiple folded blocks accumulate so Ctrl+O can expand ALL of them."""
         from agentica.cli import display as disp
         from agentica.cli.display import StreamDisplayManager
 
@@ -2057,10 +2057,15 @@ class TestSessionCommand(unittest.TestCase):
 
 
 class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
-    """The assistant turn must close with a right-aligned dim ``Rule`` whose
-    title carries a compact ``HH:MM:SS [· N tools · Xs]`` summary. Users
-    reviewing a long session can then see when each answer landed and how
-    much work went into it.
+    """The assistant turn must close with a dim rule whose body carries a
+    compact per-turn summary in Plan A format:
+
+        #N · HH:MM:SS · Xs · +Tk · +$C · N tools
+
+    Users reviewing a long session can then see, for each turn, when it
+    landed, how long it took (net), how much context it ate, how much it
+    cost, and how many tools it fired. The status bar carries session
+    totals; this rule carries per-turn deltas — zero overlap.
     """
 
     def _capture(self, render):
@@ -2103,9 +2108,118 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         self.assertRegex(out, r"1 tool\b", "rule must show N tools when >0")
         self.assertRegex(out, r"\d+\.\ds", "rule must show elapsed seconds")
 
+    def test_finalize_rule_shows_turn_number_and_deltas_when_provided(self):
+        """Plan A: the closing separator carries per-turn deltas.
+
+        When the interactive loop hands ``finalize`` a turn number, token
+        delta and cost delta, they must appear as ``#N``, ``+Tk`` and
+        ``+$C`` respectively so a user scrolling back can locate turn #7
+        and see it cost 3.2K tokens / $0.08.
+        """
+        def render(mgr):
+            mgr.stream_response("ok")
+            mgr.finalize(turn_no=7, delta_tokens=3200, delta_cost_usd=0.08)
+
+        out = self._capture(render)
+        self.assertIn("#7", out, "turn number must appear as #N")
+        self.assertIn("+3.2K", out, "delta tokens >=1000 shown with K suffix")
+        self.assertIn("+$0.08", out, "delta cost shown with 2-decimal $ prefix")
+
+    def test_finalize_rule_uses_raw_count_for_small_token_deltas(self):
+        """<1000 tokens: no K suffix — show the raw number.
+
+        Guards the K-suffix boundary so a 42-token turn doesn't render as
+        the misleading ``+0.0K``.
+        """
+        def render(mgr):
+            mgr.stream_response("tiny")
+            mgr.finalize(turn_no=1, delta_tokens=42, delta_cost_usd=0.0)
+
+        out = self._capture(render)
+        self.assertIn("+42", out)
+        self.assertNotIn("+0.0K", out)
+        # Zero cost must be suppressed to avoid a noisy "+$0.00" on
+        # free/local models.
+        self.assertNotIn("+$0.00", out)
+
+    def test_finalize_rule_omits_optional_fields_when_none(self):
+        """Backward-compat: callers that pass no delta info get the old
+        skeleton (timestamp + elapsed [+ tool count]) — no phantom ``#None``
+        or stray ``+`` markers.
+        """
+        def render(mgr):
+            mgr.stream_response("plain")
+            mgr.finalize()  # no kwargs at all
+
+        out = self._capture(render)
+        self.assertNotIn("#", out, "no turn number when caller omits it")
+        self.assertNotIn("+", out, "no delta markers when caller omits them")
+        self.assertRegex(out, r"\d{2}:\d{2}:\d{2}", "timestamp still present")
+
+
+class TestStreamDisplayManagerSegmentOrdering(unittest.TestCase):
+    """Preamble text must land in the LLM's NATIVE emission order.
+
+    ``stream_response`` buffers text silently; the buffer is flushed as plain
+    text at the next boundary that produces its own live output — thinking
+    start OR tool start. Whatever remains at ``finalize`` is the final answer
+    (rendered as Markdown). Regression guard for the ``text -> thinking ->
+    tool`` inversion where the buffered preamble used to surface AFTER the
+    thinking block (it was only flushed on a tool call, never on thinking).
+    """
+
+    def _mgr_and_buf(self):
+        from io import StringIO
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        buf = StringIO()
+        con = Console(file=buf, width=80, force_terminal=False, no_color=True)
+        return StreamDisplayManager(con), buf
+
+    def test_text_before_thinking_is_flushed_before_thinking(self):
+        mgr, buf = self._mgr_and_buf()
+        mgr.stream_response("PREAMBLETEXT")
+        mgr.start_thinking()
+        mgr.stream_thinking("THINKINGLINE\n")
+        mgr.end_thinking()
+        mgr.finalize()
+        out = buf.getvalue()
+        self.assertIn("PREAMBLETEXT", out)
+        self.assertIn("THINKINGLINE", out)
+        self.assertLess(
+            out.index("PREAMBLETEXT"), out.index("THINKINGLINE"),
+            "preamble text must appear BEFORE the thinking it preceded",
+        )
+
+    def test_preamble_before_tool_is_flushed_before_tool(self):
+        mgr, buf = self._mgr_and_buf()
+        mgr.stream_response("PREAMBLETEXT")
+        mgr.display_tool("execute", {"command": "ls"})
+        mgr.finalize()
+        out = buf.getvalue()
+        self.assertIn("PREAMBLETEXT", out)
+        self.assertIn("execute", out)
+        self.assertLess(
+            out.index("PREAMBLETEXT"), out.index("execute"),
+            "preamble text must appear BEFORE the tool call it preceded",
+        )
+
+    def test_final_segment_stays_buffered_until_finalize(self):
+        """The final answer is silent while streaming; it only lands when
+        ``finalize`` renders it in one shot (spinner covers the wait)."""
+        mgr, buf = self._mgr_and_buf()
+        mgr.stream_response("FINALANSWER")
+        self.assertNotIn(
+            "FINALANSWER", buf.getvalue(),
+            "final answer must not be printed token-by-token during streaming",
+        )
+        mgr.finalize()
+        self.assertIn("FINALANSWER", buf.getvalue())
+
 
 class TestLessLesskeyDetection(unittest.TestCase):
-    """Ctrl+o expand pager: detect --lesskey-content support (less's help
+    """Ctrl+O expand pager: detect --lesskey-content support (less's help
     misprints the option as --lesskey-context, so detection must probe the real
     option, not parse help text)."""
 
@@ -2128,7 +2242,7 @@ class TestLessLesskeyDetection(unittest.TestCase):
 
 
 class TestCompileLesskey(unittest.TestCase):
-    """Old-less fallback: compile a lesskey file to bind Ctrl+o to quit when
+    """Old-less fallback: compile a lesskey file to bind Ctrl+O to quit when
     --lesskey-content is unavailable. Esc is not bound (escape-sequence
     prefix would break arrow keys)."""
 

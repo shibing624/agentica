@@ -1802,30 +1802,43 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 return
             chosen = matching[0]
 
-        if resume_at_uuid is None:
-            log = SessionLog(chosen["session_id"])
-            user_msgs = log.list_user_messages(limit=10)
-            if user_msgs:
-                con.print(f"\n[bold]Session: {chosen['session_id']}[/bold]")
-                con.print("[dim]Recent queries (resume from any point):[/dim]\n")
-                for i, m in enumerate(user_msgs, 1):
-                    ts = m.get("timestamp", "")[:19].replace("T", " ") if m.get("timestamp") else ""
-                    con.print(f"  {i}. [dim]{ts}[/dim] {m['content']}")
-                con.print(f"\n[dim]Usage: /resume {chosen['session_id']} at <uuid>[/dim]")
-
         agent_config = dict(ctx.agent_config)
         agent_config["session_id"] = chosen["session_id"]
         agent_config["_resume_at_uuid"] = resume_at_uuid
         current_agent = create_agent(agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
 
-        if resume_at_uuid and current_agent._session_log:
+        # Eagerly load history into working_memory so /status, /context etc.
+        # reflect the resumed state immediately (do not wait for the next _run
+        # to lazily replay). Applies to both plain resume and `resume ... at <uuid>`.
+        loaded_count = 0
+        runs_built = 0
+        if current_agent._session_log and current_agent._session_log.exists():
             current_agent.working_memory.clear()
-            for rm in current_agent._session_log.load(resume_at=resume_at_uuid):
-                current_agent.working_memory.add_message(Message(role=rm["role"], content=rm.get("content", "")))
+            resumed = current_agent._session_log.load(resume_at=resume_at_uuid)
+            if resumed:
+                runs_built = current_agent.working_memory.hydrate_runs_from_history(resumed)
+                loaded_count = len(resumed)
+
+        # Show a preview of recent user queries so the human confirms the right
+        # session was picked (also useful for finding an `at <uuid>` cut point).
+        if resume_at_uuid is None:
+            log = SessionLog(chosen["session_id"])
+            user_msgs = log.list_user_messages(limit=10)
+            if user_msgs:
+                con.print(f"\n[bold]Session: {chosen['session_id']}[/bold]")
+                con.print("[dim]Recent user queries in this session:[/dim]\n")
+                for i, m in enumerate(user_msgs, 1):
+                    ts = m.get("timestamp", "")[:19].replace("T", " ") if m.get("timestamp") else ""
+                    con.print(f"  {i}. [dim]{ts}[/dim] {m['content']}")
+                con.print(
+                    f"\n[dim]Tip: fork from an earlier point with "
+                    f"`/resume {chosen['session_id']} at <uuid>`[/dim]"
+                )
 
         con.print(
             f"[green]Resumed session: {chosen['session_id']}"
-            f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}[/green]"
+            f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}"
+            f" — loaded {loaded_count} messages ({runs_built} runs) into context[/green]"
         )
 
         # If the resumed session had an active goal, demote to paused for
@@ -3300,7 +3313,8 @@ COMMAND_REGISTRY = {
     # Permissions
     "/permissions": (_cmd_permissions, "View or set permission mode"),
     "/yolo": (_cmd_yolo, "Toggle YOLO mode (auto-approve all)"),
-    # Media
+    # Media (hidden aliases; prefer Ctrl+V for clipboard paste and
+    # @path completion / drag-and-drop for local files. Not shown in /help.)
     "/paste": (_cmd_paste, "Paste image from clipboard"),
     "/image": (_cmd_image, "Attach a local image file"),
     # Other

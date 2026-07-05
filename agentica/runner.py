@@ -1469,19 +1469,27 @@ class Runner:
                 )
 
                 # --- Session resume (CC-style JSONL) ---
-                # On first run, if a session log exists, replay messages from
-                # the last compact boundary into working_memory.
+                # On first run, if a session log exists AND working_memory has
+                # not already been hydrated (e.g. by `/resume` in the CLI, which
+                # eagerly loads history), replay messages from the last compact
+                # boundary into working_memory as reconstructed AgentRuns so the
+                # prompt builder (get_messages_from_last_n_runs) actually sees
+                # them. Just appending to working_memory.messages is not enough
+                # — that field is for archive/trim, not prompt assembly.
                 if (
                     agent._session_log is not None
                     and agent._session_log.exists()
                     and len(agent.working_memory.runs) == 0
+                    and len(agent.working_memory.messages) == 0
                 ):
                     resumed_messages = agent._session_log.load()
                     if resumed_messages:
-                        for rm in resumed_messages:
-                            agent.working_memory.add_message(Message(**rm))
+                        runs_built = agent.working_memory.hydrate_runs_from_history(
+                            resumed_messages
+                        )
                         logger.debug(
-                            f"Session resumed from JSONL: {len(resumed_messages)} messages"
+                            f"Session resumed from JSONL: {len(resumed_messages)} messages, "
+                            f"{runs_built} runs reconstructed"
                         )
 
                 # --- Initialise CostTracker for this run ---

@@ -180,7 +180,7 @@ def _cprint(text: str):
 
 
 def _less_supports_lesskey(pager: str) -> bool:
-    """True if this ``less`` accepts ``--lesskey-content`` (needed to bind Ctrl+o
+    """True if this ``less`` accepts ``--lesskey-content`` (needed to bind Ctrl+O
     to quit). Cached per-process. Probed by invoking the real option rather than
     parsing ``--help`` text — less's own help misprints the option as
     ``--lesskey-context``, so a substring check on help would always be False.
@@ -234,15 +234,15 @@ def _compile_lesskey(bindings: str):
 
 def _open_in_pager(title: str, content: str) -> None:
     """Open ``content`` in a pager so the user can view the full truncated
-    block(s), then press ``Ctrl+o`` or ``Esc`` to return — the terminal is
+    block(s), then press ``Ctrl+O`` or ``Esc`` to return — the terminal is
     restored, giving CC-style expand/hide semantics without flooding the
     inline transcript.
 
     Key binding strategy (in order of preference):
-    1. ``less --lesskey-content``: bind ``Ctrl+o`` to quit and the up/down
+    1. ``less --lesskey-content``: bind ``Ctrl+O`` to quit and the up/down
        arrow sequences to ``back-line``/``forw-line``. Esc is NOT bound (a lone
        ``^[`` leaf would shadow the arrow keys, which also start with ESC —
-       see the comment above ``lesskey_src``), so quitting is Ctrl+o or the
+       see the comment above ``lesskey_src``), so quitting is Ctrl+O or the
        built-in ``q``. The bottom prompt line (``-P``) shows a one-line cheat
        sheet (scroll / search / jump / return) so the user knows how to drive
        less without leaving the CLI.
@@ -253,7 +253,7 @@ def _open_in_pager(title: str, content: str) -> None:
     import tempfile
 
     pager = shutil.which("less") or shutil.which("more")
-    # lesskey source binding Ctrl+o (^O) to quit, plus the up/down arrow
+    # lesskey source binding Ctrl+O (^O) to quit, plus the up/down arrow
     # sequences to back-line/forw-line so they scroll line-by-line.
     #
     # We deliberately do NOT bind `^[ quit` (Esc to quit): in lesskey, the
@@ -263,7 +263,7 @@ def _open_in_pager(title: str, content: str) -> None:
     # Down quits every time — the `^[[B forw-line` binding is shadowed and
     # never reached. Esc-to-quit and arrow-scrolling are mutually exclusive,
     # so we keep the arrows (the user's intuitive expectation) and rely on
-    # Ctrl+o / q to quit. Both cursor-key modes are covered (^[ [ X normal
+    # Ctrl+O / q to quit. Both cursor-key modes are covered (^[ [ X normal
     # mode, ^[ O X application mode).
     lesskey_src = (
         "\n#command\n"
@@ -276,11 +276,11 @@ def _open_in_pager(title: str, content: str) -> None:
     lesskey_ok = pager is not None and _less_supports_lesskey(pager) and "less" in (pager or "")
 
     if lesskey_ok:
-        return_hint = "Ctrl+o/q to return"
-        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+o/q 返回"
+        return_hint = "Ctrl+O/q to return"
+        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+O/q 返回"
     elif pager is not None and "less" in pager and _compile_lesskey(lesskey_src):
-        return_hint = "Ctrl+o/q to return"
-        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+o/q 返回"
+        return_hint = "Ctrl+O/q to return"
+        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+O/q 返回"
     else:
         return_hint = "q to return"
         prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · q 返回"
@@ -991,7 +991,31 @@ def _process_stream_response(
                 _set_phase("answering")
                 display.stream_response(chunk.content)
 
-        display.finalize()
+        # Compute per-turn cost/token deltas BEFORE closing the turn, so we
+        # can hand them to ``display.finalize`` for the closing separator.
+        #
+        # Note: ``agent.run_response.cost_tracker`` is scoped to a single
+        # ``agent.run()`` invocation, so its ``total_*`` fields ARE the
+        # per-turn deltas we want — no snapshot/subtract dance needed.
+        cost_tracker = current_agent.run_response.cost_tracker
+        delta_tokens: int | None = None
+        delta_cost_usd: float | None = None
+        if cost_tracker and cost_tracker.turns > 0:
+            delta_tokens = (cost_tracker.total_input_tokens or 0) + (
+                cost_tracker.total_output_tokens or 0
+            )
+            delta_cost_usd = cost_tracker.total_cost_usd
+
+        # 1-based session-scoped turn counter. Increment BEFORE finalize so
+        # the separator shows the turn that just completed.
+        tui_state["turn_no"] = tui_state.get("turn_no", 0) + 1
+        turn_no = tui_state["turn_no"]
+
+        display.finalize(
+            turn_no=turn_no,
+            delta_tokens=delta_tokens,
+            delta_cost_usd=delta_cost_usd,
+        )
         _set_phase("idle")
 
         # Surface loop-break reasons (death spiral / max turns / cost budget).
@@ -1008,7 +1032,6 @@ def _process_stream_response(
         tui_state["last_turn_seconds"] = elapsed
         tui_state["active_seconds"] = tui_state.get("active_seconds", 0.0) + elapsed
 
-        cost_tracker = current_agent.run_response.cost_tracker
         if cost_tracker and cost_tracker.turns > 0:
             context_tokens = cost_tracker.last_input_tokens
             context_window = current_agent.model.context_window if current_agent.model else 128000
@@ -1397,7 +1420,7 @@ def _setup_tui(
 
         Opens EVERY block folded during the current run (user input, tool
         output, edit/write diffs) in one pager so the user can scroll through
-        all of it — not just the most recent one. Press ``Ctrl+o`` or ``Esc``
+        all of it — not just the most recent one. Press ``Ctrl+O`` or ``Esc``
         to return; the terminal is restored, giving expand/hide semantics
         without flooding the inline transcript.
         """

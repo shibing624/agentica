@@ -147,8 +147,6 @@ def _profile_name_for(provider: str, base_url: Optional[str] = None) -> str:
     if provider == "openai" and base_url:
         canonical = PROVIDER_PRESETS["openai"]["base_url"].rstrip("/")
         if base_url.rstrip("/") != canonical:
-            from urllib.parse import urlparse
-
             host = urlparse(base_url).netloc or base_url.rstrip("/")
             return f"openai@{host}"
     return provider
@@ -267,6 +265,18 @@ def _pick_keys(d: Optional[dict], keys) -> Dict:
     if not d:
         return {}
     return {k: d[k] for k in keys if d.get(k) is not None}
+
+
+def _label(base: str, cur, blank_hint: str = "blank to skip") -> str:
+    """Build a prompt label that shows the current value when present.
+
+    ``"  X [cur]: "`` when ``cur is not None``, else ``"  X (blank_hint): "``.
+    Centralises the "have existing value vs. first-time" label pattern used
+    all over the advanced/cache/auxiliary prompts.
+    """
+    if cur is not None:
+        return f"  {base} [{cur}]: "
+    return f"  {base} ({blank_hint}): "
 
 
 # ── Input validation ─────────────────────────────────────────────────────────
@@ -418,11 +428,7 @@ def _prompt_advanced_params(console, provider: str, current: Optional[dict] = No
 
     # Thinking depth / reasoning effort.
     cur_effort = existing.get("reasoning_effort")
-    eff_label = (
-        f"  Reasoning effort {list(_REASONING_EFFORT_CHOICES)} [{cur_effort}]: "
-        if cur_effort
-        else f"  Reasoning effort {list(_REASONING_EFFORT_CHOICES)} (blank to skip): "
-    )
+    eff_label = _label(f"Reasoning effort {list(_REASONING_EFFORT_CHOICES)}", cur_effort)
     while True:
         effort = pt_prompt(eff_label).strip().lower()
         if not effort:
@@ -434,23 +440,23 @@ def _prompt_advanced_params(console, provider: str, current: Optional[dict] = No
 
     # Output limit.
     cur_mt = existing.get("max_tokens")
-    mt = _prompt_int(f"  Max output tokens (output limit [{cur_mt}]): " if cur_mt else "  Max output tokens (output limit, blank to skip): ")
+    mt = _prompt_int(_label("Max output tokens (output limit)", cur_mt))
     if mt is not None:
         params["max_tokens"] = mt
 
     # Context limit (overrides the catalog auto-detected value).
     cur_cw = existing.get("context_window")
-    cw = _prompt_int(f"  Context window (context limit [{cur_cw}]): " if cur_cw else "  Context window (context limit, blank to skip): ")
+    cw = _prompt_int(_label("Context window (context limit)", cur_cw))
     if cw is not None:
         params["context_window"] = cw
 
     # Sampling.
     cur_temp = existing.get("temperature")
-    temp = _prompt_float_range(console, f"  Temperature [0.0-2.0, {cur_temp}]: " if cur_temp is not None else "  Temperature [0.0-2.0, blank to skip]: ", 0.0, 2.0)
+    temp = _prompt_float_range(console, _label("Temperature [0.0-2.0]", cur_temp), 0.0, 2.0)
     if temp is not None:
         params["temperature"] = temp
     cur_top_p = existing.get("top_p")
-    top_p = _prompt_float_range(console, f"  Top-p [0.0-1.0, {cur_top_p}]: " if cur_top_p is not None else "  Top-p [0.0-1.0, blank to skip]: ", 0.0, 1.0)
+    top_p = _prompt_float_range(console, _label("Top-p [0.0-1.0]", cur_top_p), 0.0, 1.0)
     if top_p is not None:
         params["top_p"] = top_p
 
@@ -483,13 +489,13 @@ def _prompt_cache_control(console, provider: str, current: Optional[dict] = None
 
     params: Dict = {"enable_cache_control": True}
     cur_msgs = existing.get("cache_control_messages")
-    msgs = _prompt_int(f"  Cache breakpoints on recent messages [{cur_msgs}]: " if cur_msgs else "  Cache breakpoints on recent messages (blank for 3): ")
+    msgs = _prompt_int(_label("Cache breakpoints on recent messages", cur_msgs, "blank for 3"))
     if msgs is not None:
         params["cache_control_messages"] = msgs
     elif cur_msgs is not None:
         params["cache_control_messages"] = cur_msgs
     cur_header = existing.get("cache_control_session_header")
-    header = pt_prompt(f"  Sticky routing header (e.g. Venus-Session-Id) [{cur_header}]: " if cur_header else "  Sticky routing header (e.g. Venus-Session-Id, blank to skip): ").strip()
+    header = pt_prompt(_label("Sticky routing header (e.g. Venus-Session-Id)", cur_header)).strip()
     if header:
         params["cache_control_session_header"] = header
     elif cur_header:

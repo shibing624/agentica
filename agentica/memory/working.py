@@ -281,6 +281,67 @@ class WorkingMemory(BaseModel):
         """Adds an AgentRun to the runs list."""
         self.runs.append(agent_run)
 
+    def hydrate_runs_from_history(self, history_messages: List[Dict[str, Any]]) -> int:
+        """Rebuild `runs` from a flat list of persisted messages (session resume).
+
+        The prompt builder assembles LLM context via
+        `get_messages_from_last_n_runs()`, which reads `prev_run.response.messages`
+        — NOT `working_memory.messages`. So on resume we must reconstruct
+        AgentRun entries, not just append raw messages, or the LLM will see
+        an empty history.
+
+        Pairs consecutive (user, assistant) messages into runs. Tool messages
+        following an assistant are bundled into the same run's response.
+        System messages are added via `add_system_message` instead.
+
+        Args:
+            history_messages: Ordered list of message dicts (each with at least
+                'role' and 'content'), typically from `SessionLog.load()`.
+
+        Returns:
+            Number of runs reconstructed.
+        """
+        if not history_messages:
+            return 0
+
+        runs_built = 0
+        i = 0
+        n = len(history_messages)
+        while i < n:
+            rm = history_messages[i]
+            role = rm.get("role")
+            if role == "system":
+                self.add_system_message(Message(**rm))
+                i += 1
+                continue
+            if role != "user":
+                # Orphan assistant/tool message with no preceding user turn;
+                # attach as a synthetic run so it still shows up in history.
+                run_msgs = [Message(**rm)]
+                i += 1
+                while i < n and history_messages[i].get("role") in ("assistant", "tool"):
+                    run_msgs.append(Message(**history_messages[i]))
+                    i += 1
+                self.runs.append(AgentRun(response=RunResponse(messages=run_msgs)))
+                runs_built += 1
+                continue
+
+            # role == "user": start of a new run
+            user_msg = Message(**rm)
+            run_msgs: List[Message] = [user_msg]
+            i += 1
+            # Collect subsequent assistant / tool messages until the next user turn
+            while i < n and history_messages[i].get("role") in ("assistant", "tool", "function"):
+                run_msgs.append(Message(**history_messages[i]))
+                i += 1
+            self.runs.append(
+                AgentRun(message=user_msg, response=RunResponse(messages=run_msgs))
+            )
+            runs_built += 1
+
+        logger.debug(f"WorkingMemory: hydrated {runs_built} runs from {n} history messages")
+        return runs_built
+
     def add_system_message(self, message: Message, system_message_role: str = "system") -> None:
         """Add the system messages to the messages list"""
         if len(self.messages) == 0:

@@ -74,13 +74,11 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+J[/bright_green]      Insert newline (Alt+Enter also works)")
     get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
-    get_console().print("  [bright_green]Alt+V[/bright_green]       Paste image from clipboard")
-    get_console().print("  [bright_green]Ctrl+o[/bright_green]      Expand all truncated inputs/tool outputs in pager (Ctrl+o or Esc to return)")
+    get_console().print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
+    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand all truncated inputs/tool outputs in pager (Ctrl+O or Esc to return)")
     get_console().print()
     # Input features
-    get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files and inject content")
-    get_console().print("  [bright_green]/paste[/bright_green]      Paste image from clipboard")
-    get_console().print("  [bright_green]/image[/bright_green]      Attach local image: /image <path>")
+    get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files (images auto-attach)")
     get_console().print("  [bright_green]/command[/bright_green]    Type / to see available commands (try /help)")
     get_console().print()
 
@@ -131,14 +129,14 @@ _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 
 
 # All blocks (user input or tool output) truncated in the CLI display during
-# the current run. Remembered so the user can expand them on demand: Ctrl+o
+# the current run. Remembered so the user can expand them on demand: Ctrl+O
 # opens EVERY folded block in one pager (CC-style "expand all"), instead of
 # only the most recent one. Cleared at the start of each run.
 _truncated_blocks: List[Dict[str, str]] = []
 
 
 def remember_truncated(title: str, content: str) -> None:
-    """Stash a truncated block for on-demand expansion (Ctrl+o opens all)."""
+    """Stash a truncated block for on-demand expansion (Ctrl+O opens all)."""
     if not content:
         return
     _truncated_blocks.append({"title": title, "content": content})
@@ -336,11 +334,11 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
     For long pasted content, shows a trimmed preview with line count.
     """
     # A new user turn starts here: drop the previous turn's folded blocks so
-    # Ctrl+o expands the CURRENT turn (this query + its tool results), not
+    # Ctrl+O expands the CURRENT turn (this query + its tool results), not
     # stale history. The clear is done here rather than in
     # StreamDisplayManager.__init__ because display_user_message runs BEFORE
     # the manager is created — clearing in __init__ would wipe the
-    # just-remembered user input, which is exactly why Ctrl+o used to show
+    # just-remembered user input, which is exactly why Ctrl+O used to show
     # only tool results and never the long query.
     clear_truncated_blocks()
     cleaned = _PASTE_PATH_RE.sub("", text).strip()
@@ -348,7 +346,7 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
         cleaned = f"[Pasted text: {pasted_lines} lines]"
 
     # Show the message nearly in full; only fold when it exceeds 12 lines so
-    # typical multi-line questions and pastes stay visible without Ctrl+o.
+    # typical multi-line questions and pastes stay visible without Ctrl+O.
     lines = cleaned.split('\n')
     if len(lines) > 12:
         # Show first 10 lines + summary
@@ -357,7 +355,7 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
         remaining = len(lines) - 10
         rich_text = Text()
         rich_text.append(preview, style=COLORS["user"])
-        rich_text.append(f"\n... (+{remaining} more lines · Ctrl+o 展开)", style="dim")
+        rich_text.append(f"\n... (+{remaining} more lines · Ctrl+O 展开)", style="dim")
         remember_truncated("User input", cleaned)
     else:
         pattern = r"(@[\w./-]+)"
@@ -454,10 +452,6 @@ def show_help(skills_registry=None):
             "/permissions":     "View or set mode (allow-all/auto/strict)",
             "/yolo":            "Toggle YOLO mode (auto-approve all)",
         },
-        "Media": {
-            "/paste":           "Paste image from clipboard",
-            "/image <path>":    "Attach a local image file",
-        },
         "Other": {
             "/help":            "Show this help message",
             "/exit, /quit":     "Exit the CLI",
@@ -493,8 +487,8 @@ def show_help(skills_registry=None):
         "Ctrl+D":            "Exit",
         "Ctrl+C":            "Interrupt current operation",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
-        "Alt+V":             "Paste image from clipboard",
-        "Ctrl+o":            "Expand all truncated inputs/tool outputs in pager",
+        "Ctrl+V":            "Paste image from clipboard",
+        "Ctrl+O":            "Expand all truncated inputs/tool outputs in pager",
     }
     for key, desc in shortcuts.items():
         get_console().print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
@@ -708,6 +702,14 @@ class StreamDisplayManager:
         if self._cli_markdown_mode not in {"off", "auto", "on"}:
             self._cli_markdown_mode = "auto"
         self._turn_started_at = None
+        # Populated by ``finalize()`` from its kwargs, then read back by
+        # ``_build_turn_summary()``. Kept as instance state (rather than
+        # threaded as params through the render helper) because the summary
+        # is built inside ``finalize`` after the last render step and it's
+        # cleaner than yet another positional-args tuple.
+        self._summary_turn_no: int | None = None
+        self._summary_delta_tokens: int | None = None
+        self._summary_delta_cost_usd: float | None = None
         self._thinking_buffer = ""
         self._thinking_console = None
         self.reset()
@@ -721,8 +723,21 @@ class StreamDisplayManager:
         self.response_started = False
         self.has_content_output = False
         self._response_buffer = []
-        self._line_buffer = ""  # accumulates tokens until newline for line-buffered output
+        # Buffer for the CURRENT response segment — the run of assistant text
+        # since the last boundary (tool call / thinking start) or turn start.
+        # Flushed as plain text by ``_flush_segment_as_plain_text`` at the next
+        # boundary (so it lands in the LLM's native order), or rendered as
+        # Markdown by ``finalize`` when it turns out to be the final answer.
+        self._segment_text = ""
         self._turn_started_at = None
+        # Populated by ``finalize()`` from its kwargs, then read back by
+        # ``_build_turn_summary()``. Kept as instance state (rather than
+        # threaded as params through the render helper) because the summary
+        # is built inside ``finalize`` after the last render step and it's
+        # cleaner than yet another positional-args tuple.
+        self._summary_turn_no: int | None = None
+        self._summary_delta_tokens: int | None = None
+        self._summary_delta_cost_usd: float | None = None
         self._thinking_buffer = ""
         self._thinking_console = None
         # Set of "task" tool_call_ids (or just a counter) for which we have
@@ -745,27 +760,30 @@ class StreamDisplayManager:
         # Truncated blocks are cleared at the start of each user turn in
         # display_user_message(), NOT here. Clearing here would wipe the
         # user's just-remembered long query (display_user_message runs before
-        # the manager is created), which used to make Ctrl+o show only tool
+        # the manager is created), which used to make Ctrl+O show only tool
         # results and never the folded query.
 
     # No more box methods; gutter is used instead.
 
-    def _flush_line_buffer(self):
-        """Flush any accumulated partial line to output."""
-        if self._line_buffer:
-            self._assistant_console.print(self._line_buffer, highlight=False, markup=False)
-            self._line_buffer = ""
+    def _flush_segment_as_plain_text(self):
+        """Emit the current buffered segment as plain text and reset it.
 
-    def _stream_text(self, content: str):
-        """Buffer tokens and output complete lines.
-
-        Accumulate tokens and flush on each newline through the assistant
-        gutter console, ensuring correct ordering.
+        Called at every boundary that produces its own live output —
+        ``start_thinking`` and ``start_tool_section``. Reaching such a
+        boundary proves the preceding assistant text was a *mid-turn
+        preamble* (not the final answer), so we print it now, right before
+        the thinking / tool output, preserving the LLM's native emission
+        order. The final segment, in contrast, stays buffered until
+        ``finalize`` where it is rendered as Markdown in one shot.
         """
-        self._line_buffer += content
-        while "\n" in self._line_buffer:
-            line, self._line_buffer = self._line_buffer.split("\n", 1)
+        if not self._segment_text:
+            return
+        # Split on newlines and print through the gutter console so lines
+        # line up with the rest of the assistant output. Trailing partial
+        # line (no ``\n``) still gets printed as its own line.
+        for line in self._segment_text.split("\n"):
             self._assistant_console.print(line, highlight=False, markup=False)
+        self._segment_text = ""
 
     def start_thinking(self):
         """Start thinking section.
@@ -775,6 +793,12 @@ class StreamDisplayManager:
         answer by an ``italic dim magenta`` style applied at print time.
         """
         if not self.thinking_shown:
+            # Any assistant text buffered before this thinking block is a
+            # mid-turn preamble (the model spoke, then thought). Flush it as
+            # plain text FIRST so it appears above the thinking, matching the
+            # LLM's native ``text → thinking`` emission order instead of being
+            # held back until the next tool call.
+            self._flush_segment_as_plain_text()
             self._raw_console.print()
             self.thinking_shown = True
             self.in_thinking = True
@@ -810,6 +834,11 @@ class StreamDisplayManager:
         if not self.in_tool_section:
             if self.in_thinking:
                 self.end_thinking()
+            # Any assistant text buffered so far is now known to be a
+            # mid-turn preamble (the model paused to call a tool). Flush
+            # it to the screen as plain text so the user can read what the
+            # model said before the tool call runs.
+            self._flush_segment_as_plain_text()
             if not self.response_started:
                 self.console.print()
                 if self._turn_started_at is None:
@@ -940,7 +969,7 @@ class StreamDisplayManager:
         ``  ✎ edit_file config.py - ✓ 1 edit (120ms)`` followed by a short
         CC/opencode-style diff so the user sees the actual code change. Errors
         surface a truncated message instead. The full diff is remembered for
-        Ctrl+o expansion when truncated.
+        Ctrl+O expansion when truncated.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         filename = _extract_filename(tool_args.get("file_path", ""))
@@ -980,7 +1009,7 @@ class StreamDisplayManager:
         remaining = len(diff_lines) - self._EDIT_DIFF_MAX_LINES
         if remaining > 0:
             self._assistant_console.print(
-                f"      [dim italic]... ({remaining} more diff lines · Ctrl+o 展开)[/dim italic]"
+                f"      [dim italic]... ({remaining} more diff lines · Ctrl+O 展开)[/dim italic]"
             )
             remember_truncated(f"Edit diff · {filename}", diff_text)
 
@@ -1035,7 +1064,7 @@ class StreamDisplayManager:
         a head/tail unified diff (old content was stashed at call-start; for a
         brand-new file the "old" side is empty so the diff is all additions).
         Errors surface a truncated message instead. The full diff is remembered
-        for Ctrl+o expansion when truncated.
+        for Ctrl+O expansion when truncated.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         filename = _extract_filename(tool_args.get("file_path", ""))
@@ -1089,7 +1118,7 @@ class StreamDisplayManager:
                                   line_numbers=False))
         if hidden > 0:
             self._assistant_console.print(
-                f"      [dim italic]... ({hidden} hidden diff lines · Ctrl+o 展开)[/dim italic]"
+                f"      [dim italic]... ({hidden} hidden diff lines · Ctrl+O 展开)[/dim italic]"
             )
             remember_truncated(f"Write diff · {filename}", diff_text)
 
@@ -1201,7 +1230,7 @@ class StreamDisplayManager:
         remaining = len(lines) - max_lines
         if remaining > 0:
             self._assistant_console.print(
-                f"{cont_prefix}... ({remaining} more lines · Ctrl+o 展开)", style="dim italic"
+                f"{cont_prefix}... ({remaining} more lines · Ctrl+O 展开)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
         if elapsed_str:
@@ -1216,8 +1245,8 @@ class StreamDisplayManager:
         """Render a head/tail window with the middle hidden.
 
         Shows the first ``head`` lines and the last ``tail`` lines; anything in
-        between is collapsed into a ``... (N hidden lines · Ctrl+o 展开)``
-        separator. The full content is remembered for Ctrl+o expansion. Used
+        between is collapsed into a ``... (N hidden lines · Ctrl+O 展开)``
+        separator. The full content is remembered for Ctrl+O expansion. Used
         for execute output and write_file diffs where the tail matters.
         """
         first_prefix = error_prefix or prefix
@@ -1237,7 +1266,7 @@ class StreamDisplayManager:
 
         if hidden > 0:
             self._assistant_console.print(
-                f"{cont_prefix}... ({hidden} hidden lines · Ctrl+o 展开)",
+                f"{cont_prefix}... ({hidden} hidden lines · Ctrl+O 展开)",
                 style="dim italic",
             )
             remember_truncated(truncated_title, full_content)
@@ -1510,16 +1539,30 @@ class StreamDisplayManager:
             self.response_started = True
 
     def stream_response(self, content: str):
-        """Stream response content.
+        """Buffer response content silently; render lazily on segment boundary.
 
-        In Markdown-rendered modes, keep the stream buffered and render only the
-        final assistant reply once in ``finalize()`` to avoid duplicate output.
+        Assistant text is NOT printed token-by-token as it streams. Instead
+        each chunk accumulates into ``_segment_text`` and is flushed at one of
+        two well-defined moments:
+
+        * On the next boundary that produces its own live output —
+          ``start_thinking`` or ``start_tool_section``. Reaching such a
+          boundary proves the segment was a *mid-turn preamble*, so it is
+          printed as plain text right before the thinking / tool output. This
+          keeps the LLM's native emission order (e.g. ``text → thinking →
+          tool``) intact, whichever way it interleaves.
+        * On ``finalize`` — no further boundary arrived, so the segment is the
+          final answer. It is rendered as Markdown in one shot.
+
+        The spinner ("⠋ answering… 3s") stays on the status bar the whole
+        time, so the user still gets a heartbeat that the model is producing
+        tokens. The tradeoff: the final answer isn't a live typewriter, but it
+        also never flash-erases-and-redraws — and preambles land in order.
         """
         self.start_response()
         self._response_buffer.append(content)
+        self._segment_text += content
         self.has_content_output = True
-        if self._cli_markdown_mode == "off":
-            self._stream_text(content)
 
     def _should_render_markdown(self, text: str) -> bool:
         if self._cli_markdown_mode == "on":
@@ -1529,63 +1572,120 @@ class StreamDisplayManager:
         return _has_markdown(text)
 
     def _build_turn_summary(self) -> str:
-        """Compose the compact right-aligned summary shown in the closing rule.
+        """Compose the compact summary shown in the closing separator.
 
-        Format: `` HH:MM:SS · N tools · Xs `` (leading/trailing spaces so the
-        rule characters don't hug the text). ``N tools`` is omitted when
-        ``tool_count == 0``. Elapsed is omitted when we never recorded a
-        turn start (e.g. a purely synthetic finalize with no content).
+        Format (Plan A):
+
+            #N · HH:MM:SS · Xs · +Tk · +$C · N tools
+
+        Field order and meaning:
+
+        * ``#N``       — 1-based turn number within the session. Only shown
+                         when caller supplied ``turn_no`` to :meth:`finalize`;
+                         acts as a scrollback anchor ("see turn #7").
+        * ``HH:MM:SS`` — Wall-clock time the turn ended. Always shown.
+        * ``Xs``       — Net execution time (LLM + tools), NOT the wall-clock
+                         seen in the status bar's ``⏱``. The two differ by CLI
+                         overhead (render / disk / callbacks) — that gap is
+                         real and intentional; see docs.
+        * ``+Tk``      — Delta tokens produced by this turn (input+output).
+                         ``K`` suffix when ≥ 1_000, else raw. Omitted when
+                         caller didn't pass ``delta_tokens``.
+        * ``+$C``      — Delta USD cost for this turn. Omitted when caller
+                         didn't pass ``delta_cost_usd`` or the cost is 0
+                         (avoid noise for free/local models).
+        * ``N tools``  — Tool calls executed this turn. Omitted when 0.
+
+        The design principle: the closing separator carries **per-turn
+        deltas** (immutable historical records that live in scrollback),
+        while the status bar carries **session totals** (live, current-only).
+        Zero overlap between the two.
         """
-        parts = [time.strftime("%H:%M:%S", time.localtime())]
-        if self.tool_count > 0:
-            parts.append(f"{self.tool_count} tool{'s' if self.tool_count != 1 else ''}")
+        parts: list[str] = []
+        if self._summary_turn_no is not None:
+            parts.append(f"#{self._summary_turn_no}")
+        parts.append(time.strftime("%H:%M:%S", time.localtime()))
         if self._turn_started_at is not None:
             elapsed = time.monotonic() - self._turn_started_at
             parts.append(f"{elapsed:.1f}s")
+        if self._summary_delta_tokens is not None and self._summary_delta_tokens > 0:
+            dt = self._summary_delta_tokens
+            if dt >= 1000:
+                parts.append(f"+{dt / 1000:.1f}K")
+            else:
+                parts.append(f"+{dt}")
+        if self._summary_delta_cost_usd is not None and self._summary_delta_cost_usd > 0:
+            parts.append(f"+${self._summary_delta_cost_usd:.2f}")
+        if self.tool_count > 0:
+            parts.append(f"{self.tool_count} tool{'s' if self.tool_count != 1 else ''}")
         return " " + " · ".join(parts) + " "
 
-    def finalize(self):
+    def finalize(
+        self,
+        turn_no: int | None = None,
+        delta_tokens: int | None = None,
+        delta_cost_usd: float | None = None,
+    ):
         """Finalize the assistant turn: flush buffers and draw the closing rule.
 
         With the gutter design there is no visible box to close. Instead we
-        render a right-aligned dim ``rich.rule.Rule`` at the bottom, whose
-        title carries a compact summary:
+        render a compact dim separator at the bottom whose body carries a
+        summary of *what this turn cost* (Plan A layout):
 
-            ─────────────── 15:32:08 · 3 tools · 4.2s ────────
+            ──── #7 · 20:29:29 · 6.4s · +3.2K · +$0.08 · 4 tools ────
 
-        The rule is drawn on the *raw* console (no gutter), so it acts as
-        a hard separator between this turn and the next user query.
+        The separator is drawn on the *raw* console (no gutter), so it acts
+        as a hard boundary between this turn and the next user query.
+
+        Args:
+            turn_no: 1-based turn number within the session. Rendered as
+                ``#N`` at the head of the summary. When ``None`` the field
+                is omitted — useful for tests or synthetic turns that have
+                no meaningful ordinal.
+            delta_tokens: Tokens consumed by this turn (input + output).
+                Rendered as ``+Tk`` (``+3.2K`` when ≥ 1000, ``+42`` else).
+                Omitted when ``None`` or ``<= 0``.
+            delta_cost_usd: USD cost incurred by this turn. Rendered as
+                ``+$C``. Omitted when ``None`` or ``<= 0`` so free/local
+                models don't show a noisy ``+$0.00``.
+
+        The caller (interactive loop) is expected to source ``delta_*``
+        from the per-run ``cost_tracker`` (which is itself per-``run()``
+        scoped in agentica, so its totals ARE the per-turn deltas — no
+        snapshotting needed here).
         """
+        self._summary_turn_no = turn_no
+        self._summary_delta_tokens = delta_tokens
+        self._summary_delta_cost_usd = delta_cost_usd
+
         if self.in_thinking:
             self.end_thinking()
         if self.in_tool_section:
             self.end_tool_section()
 
         if self.has_content_output:
+            # ``full_text`` (whole turn) drives the render-mode decision so
+            # a code fence anywhere in the turn still upgrades the tail to
+            # Markdown. The actual render target is the final segment —
+            # earlier segments were already emitted as plain text at their
+            # trailing thinking/tool boundary.
             full_text = "".join(self._response_buffer)
-            if self._should_render_markdown(full_text):
-                # Discard any partial-line buffered from ``off`` mode transitions;
-                # the Markdown renderer works from ``full_text`` end-to-end.
-                self._line_buffer = ""
-                # Constrain markdown width to ``console.width - 4`` so code
-                # blocks and headings don't hug the terminal edge — leaves a
-                # small right-side gutter of breathing room. Rich normally
-                # pads renderables out to full console width; without this
-                # cap, code fences and heading underlines stretch to the
-                # far right and look loud.
-                md_width = max(20, (self._raw_console.width or 80) - 4)
-                self._assistant_console.print(Markdown(full_text), width=md_width)
-            else:
-                # Plain-text mode: ``_stream_text`` already emitted complete lines
-                # through the assistant gutter as they arrived; only a partial
-                # trailing line may remain. If ``_stream_text`` was skipped
-                # entirely (auto-mode decided against markdown after the fact),
-                # ``_line_buffer`` is empty and we fall back to printing the
-                # full buffered response so nothing is lost.
-                if self._line_buffer:
-                    self._flush_line_buffer()
-                elif full_text:
-                    self._assistant_console.print(full_text, highlight=False, markup=False)
+            tail_text = self._segment_text
+            if tail_text:
+                if self._should_render_markdown(full_text):
+                    # Constrain markdown width to ``console.width - 4`` so
+                    # code blocks and headings don't hug the terminal edge
+                    # — leaves a small right-side gutter of breathing
+                    # room. Without this cap, code fences and heading
+                    # underlines stretch to the far right and look loud.
+                    md_width = max(20, (self._raw_console.width or 80) - 4)
+                    self._assistant_console.print(Markdown(tail_text), width=md_width)
+                else:
+                    # No markdown features detected — print as plain text,
+                    # preserving line breaks exactly as the model sent them.
+                    for line in tail_text.split("\n"):
+                        self._assistant_console.print(line, highlight=False, markup=False)
+                self._segment_text = ""
 
         # Draw the closing separator only if this turn actually produced
         # output (tool calls, streamed text, or thinking). A no-op turn

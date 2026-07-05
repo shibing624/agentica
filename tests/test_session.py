@@ -82,6 +82,41 @@ class TestSessionPersistence:
         assert "q2" in contents
         assert "q0" not in contents
 
+    def test_hydrate_runs_from_history_pairs_user_and_assistant(self):
+        """hydrate_runs_from_history reconstructs runs so the prompt builder sees history on resume."""
+        memory = WorkingMemory()
+        history = [
+            {"role": "user", "content": "q1"},
+            {"role": "assistant", "content": "a1"},
+            {"role": "user", "content": "q2"},
+            {"role": "assistant", "content": "a2"},
+            {"role": "tool", "content": "tool_out"},
+            {"role": "user", "content": "q3"},
+            {"role": "assistant", "content": "a3"},
+        ]
+        n = memory.hydrate_runs_from_history(history)
+        assert n == 3, "Should build one run per user turn"
+        assert len(memory.runs) == 3
+        # First run: just (user, assistant)
+        assert memory.runs[0].message.content == "q1"
+        assert [m.content for m in memory.runs[0].response.messages] == ["q1", "a1"]
+        # Second run bundles tool message after assistant
+        assert memory.runs[1].message.content == "q2"
+        assert [m.content for m in memory.runs[1].response.messages] == ["q2", "a2", "tool_out"]
+        assert memory.runs[2].message.content == "q3"
+
+        # Critical: get_messages_from_last_n_runs must actually see them
+        msgs = memory.get_messages_from_last_n_runs(last_n=None)
+        contents = [m.content for m in msgs]
+        assert "q1" in contents and "a1" in contents
+        assert "q2" in contents and "a2" in contents
+        assert "q3" in contents and "a3" in contents
+
+    def test_hydrate_runs_from_history_empty_is_noop(self):
+        memory = WorkingMemory()
+        assert memory.hydrate_runs_from_history([]) == 0
+        assert len(memory.runs) == 0
+
     def test_get_messages_from_all_runs(self):
         """get_messages_from_last_n_runs(last_n=None) returns all history."""
         memory = WorkingMemory()
