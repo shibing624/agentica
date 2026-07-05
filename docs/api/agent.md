@@ -295,7 +295,7 @@ from agentica import DeepAgent
 | 任务 | `task` | 委派子任务给子 Agent |
 | TODO | `write_todos` | 任务列表管理（写入即读取，单工具设计） |
 | 记忆 | `save_memory`, `search_memory` | 持久化记忆读写（需配合 Workspace） |
-| 用户输入 | `user_input` | Human-in-the-loop 请求用户确认或输入 |
+| 用户输入 | `ask_user_question` | Human-in-the-loop 请求用户确认或输入 |
 
 !!! note "`read_todos` 已移除"
     历史版本有 `read_todos` 工具，当前版本只有 `write_todos`。`write_todos` 采用"写即读"设计：

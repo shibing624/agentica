@@ -12,7 +12,7 @@ It supports various interaction modes:
 Example:
     ```python
     from agentica import Agent
-    from agentica.tools.user_input_tool import AskUserQuestionTool
+    from agentica.tools.ask_user_question_tool import AskUserQuestionTool
     
     agent = Agent(
         tools=[AskUserQuestionTool()],
@@ -61,9 +61,9 @@ class AskUserQuestionTool(Tool):
     """
     
     # System prompt for user input tool usage guidance
-    USER_INPUT_SYSTEM_PROMPT = """## `user_input` (Human-in-the-loop)
+    ASK_USER_QUESTION_SYSTEM_PROMPT = """## `ask_user_question` (Human-in-the-loop)
 
-You have access to the `user_input` tool to request input or confirmation from the user during execution.
+You have access to the `ask_user_question` tool to request input or confirmation from the user during execution.
 
 ### When to use:
 1. **Critical Operations**: Before performing irreversible actions (delete files, send emails, make purchases)
@@ -105,18 +105,18 @@ You have access to the `user_input` tool to request input or confirmation from t
         self.timeout = timeout
         self.default_on_timeout = default_on_timeout
         
-        # Register the user_input function
-        self.register(self.user_input)
+        # Register the ask_user_question function
+        self.register(self.ask_user_question)
         self.register(self.confirm)
         # Human-in-the-loop: wait indefinitely for the user (like CC/Cursor),
         # don't let the outer ~120s tool-executor timeout auto-pass the prompt
         # and silently continue without an answer.
-        self.functions["user_input"].manages_own_timeout = True
+        self.functions["ask_user_question"].manages_own_timeout = True
         self.functions["confirm"].manages_own_timeout = True
     
     def get_system_prompt(self) -> Optional[str]:
         """Get the system prompt for user input tool usage guidance."""
-        return self.USER_INPUT_SYSTEM_PROMPT
+        return self.ASK_USER_QUESTION_SYSTEM_PROMPT
     
     def _get_input(self, prompt: str, options: Optional[List[str]] = None) -> str:
         """
@@ -170,7 +170,7 @@ You have access to the `user_input` tool to request input or confirmation from t
                 return self.default_on_timeout
             return ""
     
-    def user_input(
+    def ask_user_question(
         self,
         prompt: str,
         mode: Literal["confirm", "text", "select"] = "text",
@@ -201,19 +201,19 @@ You have access to the `user_input` tool to request input or confirmation from t
         
         Examples:
             # Confirmation
-            response = user_input(
+            response = ask_user_question(
                 prompt="Delete all temporary files? This action cannot be undone.",
                 mode="confirm"
             )
             
             # Text input
-            response = user_input(
+            response = ask_user_question(
                 prompt="Please provide the API endpoint URL:",
                 mode="text"
             )
             
             # Selection
-            response = user_input(
+            response = ask_user_question(
                 prompt="Choose the output format:",
                 mode="select",
                 options=["JSON", "CSV", "XML", "Plain Text"]
@@ -276,7 +276,7 @@ You have access to the `user_input` tool to request input or confirmation from t
     
     def confirm(self, prompt: str) -> str:
         """
-        Quick confirmation method - shorthand for user_input with mode="confirm".
+        Quick confirmation method - shorthand for ask_user_question with mode="confirm".
         
         Use this for simple yes/no questions before critical operations.
         
@@ -291,7 +291,7 @@ You have access to the `user_input` tool to request input or confirmation from t
             result = confirm("Proceed with deploying to production?")
             # Returns: {"mode": "confirm", "prompt": "...", "response": "yes"}
         """
-        return self.user_input(prompt=prompt, mode="confirm")
+        return self.ask_user_question(prompt=prompt, mode="confirm")
 
 
 class AskUserQuestionRequired(StopAgentRun):
@@ -344,7 +344,7 @@ if __name__ == "__main__":
     
     # Test text input
     print("\n--- Test 2: Text Input ---")
-    result = tool.user_input(
+    result = tool.ask_user_question(
         prompt="Please enter your name:",
         mode="text"
     )
@@ -352,7 +352,7 @@ if __name__ == "__main__":
     
     # Test selection
     print("\n--- Test 3: Selection ---")
-    result = tool.user_input(
+    result = tool.ask_user_question(
         prompt="Choose your preferred programming language:",
         mode="select",
         options=["Python", "JavaScript", "Go", "Rust"]

@@ -155,8 +155,8 @@ LAZY_IMPORTS = {
     "ACPSession": "agentica.acp",
     "SessionStatus": "agentica.acp",
     # human-in-the-loop tool
-    "AskUserQuestionTool": "agentica.tools.user_input_tool",
-    "AskUserQuestionRequired": "agentica.tools.user_input_tool",
+    "AskUserQuestionTool": "agentica.tools.ask_user_question_tool",
+    "AskUserQuestionRequired": "agentica.tools.ask_user_question_tool",
     # mcp
     "MCPConfig": "agentica.mcp.config",
     "McpTool": "agentica.tools.mcp_tool",

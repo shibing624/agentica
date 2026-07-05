@@ -390,7 +390,7 @@ result = await agent.run("""
 """)
 ```
 
-**DeepAgent 内置工具**（`ls`, `read_file`, `write_file`, `edit_file`, `multi_edit_file`, `glob`, `grep`, `execute`, `web_search`, `fetch_url`, `write_todos`, `task`, `user_input`, `save_memory`, `search_memory`）
+**DeepAgent 内置工具**（`ls`, `read_file`, `write_file`, `edit_file`, `multi_edit_file`, `glob`, `grep`, `execute`, `web_search`, `fetch_url`, `write_todos`, `task`, `ask_user_question`, `save_memory`, `search_memory`）
 
 **DeepAgent 默认开启**：
 - `enable_agentic_prompt=True`（Soul + Tools Guide + Heartbeat + Self Verification）

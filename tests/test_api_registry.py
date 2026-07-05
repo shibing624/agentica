@@ -10,8 +10,8 @@ from agentica.api_registry import (
 
 def test_api_registry_contains_core_lazy_exports():
     assert LAZY_IMPORTS["SqliteDb"] == "agentica.db.sqlite"
-    assert LAZY_IMPORTS["AskUserQuestionTool"] == "agentica.tools.user_input_tool"
-    assert LAZY_IMPORTS["AskUserQuestionRequired"] == "agentica.tools.user_input_tool"
+    assert LAZY_IMPORTS["AskUserQuestionTool"] == "agentica.tools.ask_user_question_tool"
+    assert LAZY_IMPORTS["AskUserQuestionRequired"] == "agentica.tools.ask_user_question_tool"
     assert "UserInputTool" not in LAZY_IMPORTS
     assert "UserInputRequired" not in LAZY_IMPORTS
     # OpenAIChat + builtin tools are eager (openai is a hard dep, builtin tools have no extra deps)
@@ -60,7 +60,7 @@ def test_agentica_public_api_uses_registry_names():
 
 def test_ask_user_question_tool_lazy_import():
     import agentica
-    from agentica.tools.user_input_tool import AskUserQuestionRequired, AskUserQuestionTool
+    from agentica.tools.ask_user_question_tool import AskUserQuestionRequired, AskUserQuestionTool
 
     assert agentica.AskUserQuestionTool is AskUserQuestionTool
     assert agentica.AskUserQuestionRequired is AskUserQuestionRequired

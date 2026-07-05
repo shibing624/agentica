@@ -377,7 +377,7 @@ agent = Agent(tools=[DalleTool(), ImageAnalysisTool()])
 让 Agent 在执行过程中向用户提问：
 
 ```python
-from agentica.tools.user_input_tool import AskUserQuestionTool
+from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
 def my_input_handler(prompt: str, options=None) -> str:
     """自定义输入处理（如 Web UI 弹窗）"""
