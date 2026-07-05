@@ -17,11 +17,33 @@ Provides:
 import asyncio
 import threading
 import time
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from agentica.utils.log import logger
 
 from agentica.cron.scheduler import tick
+
+
+def _noninteractive_input_callback(prompt: str, options: Optional[List[str]] = None) -> str:
+    """Answer ``ask_user_question`` for an UNATTENDED cron run.
+
+    A scheduled job runs on a background scheduler thread (in-CLI daemon) or a
+    headless ``agentica cron daemon`` process — there is no human watching to
+    type an answer. The tool's default is a bare ``input()`` that blocks
+    forever there (it also deadlocks against prompt_toolkit's stdin ownership
+    when the daemon thread lives inside the interactive CLI). That is exactly
+    the reported hang.
+
+    Instead of blocking we return a short notice so the agent stops asking and
+    proceeds with its best judgment. For ``confirm`` prompts the tool
+    normalises any non-yes answer to "no", which is the safe default for an
+    unattended run (never take an unapproved irreversible action).
+    """
+    return (
+        "[non-interactive scheduled run: no user is available to answer. "
+        "Do not ask further questions — pick a reasonable default and complete "
+        "the task, noting any assumptions in your final result.]"
+    )
 
 
 class CliAgentRunner:
@@ -71,6 +93,8 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
             extra_tools=extra_tools or [],
             workspace=workspace if workspace is not None else workspace_default,
             skills_registry=skills_registry,
+            # Unattended run: never block on stdin for a human answer.
+            user_input_callback=_noninteractive_input_callback,
         )
 
     return _factory

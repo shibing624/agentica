@@ -75,6 +75,10 @@ class TestCronCommand(unittest.TestCase):
             extra_tools = []
             workspace = None
             skills_registry = None
+            # No interactive channel / agent in tests -> /cron add skips the
+            # LLM refine + confirm flow and creates the job with the raw prompt.
+            current_agent = None
+            user_input_callback = None
 
         self.ctx = Ctx()
         self.ctx.tui_state = {
@@ -99,6 +103,103 @@ class TestCronCommand(unittest.TestCase):
     def test_registered(self):
         from agentica.cli import commands
         self.assertIn("/cron", commands.COMMAND_REGISTRY)
+
+    def test_edit_prompt_and_schedule(self):
+        from agentica.cli import commands
+        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        jid = self.cronjobs.list_jobs()[0].id
+
+        commands._cmd_cron(self.ctx, f'edit {jid} prompt "a much better thing"')
+        job = self.cronjobs.get_job(jid)
+        self.assertEqual(job.prompt, "a much better thing")
+        self.assertEqual(job.name, "a much better thing")
+
+        commands._cmd_cron(self.ctx, f"edit {jid} schedule every 5m")
+        job = self.cronjobs.get_job(jid)
+        from agentica.cron.types import EverySchedule
+        self.assertIsInstance(job.schedule, EverySchedule)
+        self.assertEqual(job.schedule.interval_ms, 5 * 60 * 1000)
+
+    def test_edit_bad_usage_does_not_raise(self):
+        from agentica.cli import commands
+        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        jid = self.cronjobs.list_jobs()[0].id
+        # Missing field/value, and unknown job id — must print, not raise.
+        commands._cmd_cron(self.ctx, f"edit {jid}")
+        commands._cmd_cron(self.ctx, "edit nope prompt hi")
+
+    def test_remove_uses_tui_confirm_not_pt_prompt(self):
+        """Regression: /cron remove must confirm via the user_input_callback
+        (TUI-safe), never a nested pt_prompt that deadlocks the bg thread."""
+        from agentica.cli import commands
+        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        jid = self.cronjobs.list_jobs()[0].id
+
+        # 'no' keeps the job.
+        self.ctx.user_input_callback = lambda prompt, options=None: "no"
+        commands._cmd_cron(self.ctx, f"remove {jid}")
+        self.assertEqual(len(self.cronjobs.list_jobs()), 1)
+
+        # 'yes' removes it.
+        self.ctx.user_input_callback = lambda prompt, options=None: "yes"
+        commands._cmd_cron(self.ctx, f"remove {jid}")
+        self.assertEqual(len(self.cronjobs.list_jobs()), 0)
+
+    def test_confirm_via_tui_safe_default_without_callback(self):
+        from agentica.cli import commands
+        self.ctx.user_input_callback = None
+        self.assertFalse(commands._confirm_via_tui(self.ctx, "Delete?"))
+
+    def test_add_refines_prompt_and_stores_recommended(self):
+        """Add-time flow: refine the rough prompt with the model and, when the
+        user picks the recommended option, store the refined prompt while
+        keeping their original words as the display name."""
+        from agentica.cli import commands
+
+        class _FakeResp:
+            content = "Touch tmp/<ISO-timestamp>.txt in one run."
+
+        class _FakeModel:
+            async def response(self, messages):
+                return _FakeResp()
+
+        class _FakeAgent:
+            def resolve_auxiliary_model(self, task="default"):
+                return _FakeModel()
+
+        self.ctx.current_agent = _FakeAgent()
+        # Callback picks the first (recommended = refined) option.
+        self.ctx.user_input_callback = lambda prompt, options=None: (
+            options[0] if options else "")
+
+        commands._cmd_cron(self.ctx, 'add "每分钟在tmp下touch时间戳txt" "every 1m"')
+        jobs = self.cronjobs.list_jobs()
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].prompt, "Touch tmp/<ISO-timestamp>.txt in one run.")
+        self.assertEqual(jobs[0].name, "每分钟在tmp下touch时间戳txt")
+
+    def test_add_keeps_original_when_user_declines_refine(self):
+        from agentica.cli import commands
+
+        class _FakeResp:
+            content = "some refined text"
+
+        class _FakeModel:
+            async def response(self, messages):
+                return _FakeResp()
+
+        class _FakeAgent:
+            def resolve_auxiliary_model(self, task="default"):
+                return _FakeModel()
+
+        self.ctx.current_agent = _FakeAgent()
+        # Pick the "Keep the original prompt" option (2nd).
+        self.ctx.user_input_callback = lambda prompt, options=None: (
+            options[1] if options and len(options) > 1 else "")
+
+        commands._cmd_cron(self.ctx, 'add "raw words" "every 1m"')
+        jobs = self.cronjobs.list_jobs()
+        self.assertEqual(jobs[0].prompt, "raw words")
 
     def test_execute_job_signature(self):
         """Regression: _execute_job requires positional `verbose`; ensure calling
@@ -148,6 +249,33 @@ class TestCronInCliTools(unittest.TestCase):
         names = [type(t).__name__ for t in agent.tools]
         self.assertIn("CronTool", names)
         self.assertIn("SelfManageTool", names)
+
+    def test_cron_agent_ask_tool_is_noninteractive(self):
+        """Regression: a cron job runs unattended on a background scheduler
+        thread, so its ``ask_user_question`` tool must NOT fall back to a bare
+        ``input()`` (which blocks forever / deadlocks prompt_toolkit). The cron
+        factory wires a non-interactive callback that returns immediately."""
+        import sys
+        sys.argv = ["agentica"]
+        from agentica.cli.config import parse_args
+        from agentica.cron.cli_runner import build_cli_agent_factory
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        cfg = vars(parse_args())
+        cfg.update({"model_provider": "openai", "model_name": "gpt-4o",
+                    "api_key": "sk-test", "base_url": None})
+        factory = build_cli_agent_factory(
+            cfg, extra_tools=[], workspace=None, skills_registry=None)
+        agent = factory()
+
+        ask_tools = [t for t in agent.tools if isinstance(t, AskUserQuestionTool)]
+        self.assertTrue(ask_tools, "cron agent must include the ask_user_question tool")
+        cb = ask_tools[0].input_callback
+        self.assertIsNotNone(
+            cb, "cron agent's ask tool must have a non-interactive callback, not bare input()")
+        # The callback must return immediately (never block on stdin).
+        result = cb("choose an implementation approach", ["A", "B", "C"])
+        self.assertIn("non-interactive", result.lower())
 
 
 if __name__ == "__main__":

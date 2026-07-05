@@ -448,6 +448,9 @@ def show_help(skills_registry=None):
             "/tools":           "Manage tools: add | remove | info | search",
             "/skills":          "Manage skills: search | browse | install | remove | inspect | tap",
         },
+        "Automation": {
+            "/cron":            "Scheduled jobs: list | add \"<prompt>\" <schedule> | edit | pause | resume | remove | runs | run | daemon on/off",
+        },
         "Permissions": {
             "/permissions":     "View or set mode (allow-all/auto/strict)",
             "/yolo":            "Toggle YOLO mode (auto-approve all)",
