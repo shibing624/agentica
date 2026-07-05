@@ -401,11 +401,12 @@ def _prompt_int(label: str) -> Optional[int]:
             return None
         try:
             value = int(raw)
-            if value > 0:
-                return value
         except ValueError:
-            pass
-        # Re-prompt on invalid input; the label already says "blank to skip".
+            print(f"  Invalid integer: {raw}")
+            continue
+        if value > 0:
+            return value
+        print(f"  Value must be positive, got {value}")
 
 
 def _prompt_advanced_params(console, provider: str, current: Optional[dict] = None) -> Dict:
