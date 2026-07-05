@@ -141,7 +141,16 @@ class BuiltinTaskTool(Tool):
             )
         return new
 
-    async def task(self, description: str, subagent_type: str = "code") -> str:
+    async def task(
+        self,
+        description: str,
+        subagent_type: str = "code",
+        timeout: Optional[int] = None,
+        max_turns: Optional[int] = None,
+        tool_call_limit: Optional[int] = None,
+        system_prompt_override: Optional[str] = None,
+        resume_from_run_id: Optional[str] = None,
+    ) -> str:
         """Launch a subagent to handle a complex task.
 
         Args:
@@ -153,6 +162,23 @@ class BuiltinTaskTool(Tool):
                 - ``code``     — code generation and execution (default)
                 Any custom type registered via ``register_custom_subagent`` is
                 also accepted.
+            timeout: Optional per-call override for the subagent's timeout in
+                seconds. Use this to retry a task that hit ``status=timeout`` on
+                the previous call — e.g. ``timeout=3600`` for a long research
+                task. Default (``None``) keeps the subagent config's own value.
+            max_turns: Optional per-call override for the ReAct turn budget.
+                Use this to retry a task that hit ``status=max_turns``.
+            tool_call_limit: Optional per-call override for the tool call
+                budget. Use this to retry a task that hit ``status=tool_call_limit``.
+            system_prompt_override: Optional replacement system prompt for
+                this one call. Use this when the default subagent prompt is
+                pulling the model off-task and you want tighter instructions.
+            resume_from_run_id: Optional ``run_id`` from a previous call that
+                returned ``partial=true``. When provided, the previous partial
+                output is stitched into the continuation prompt so the
+                subagent picks up where it left off instead of restarting.
+                The failed call's ``next_action`` field tells you which
+                ``run_id`` to pass here.
 
         Returns:
             JSON string with the subagent's final result and execution summary.
@@ -170,9 +196,23 @@ class BuiltinTaskTool(Tool):
             task=description,
             agent_type=subagent_type,
             model_override=self._model_override,
+            timeout_override=timeout,
+            max_turns_override=max_turns,
+            tool_call_limit_override=tool_call_limit,
+            system_prompt_override=system_prompt_override,
+            resume_from_run_id=resume_from_run_id,
         )
 
-        if result["status"] == "completed":
+        status = result.get("status", "error")
+        # ``completed`` = clean success. ``timeout`` / ``max_turns`` /
+        # ``tool_call_limit`` / ``truncated`` = the subagent got interrupted
+        # by a budget limit but still produced partial output that the caller
+        # should see. We surface those as ``success=false`` (so the parent
+        # model knows the task did not finish cleanly) but include ``result``,
+        # ``tool_calls_summary`` and ``partial=true`` so the parent can still
+        # use whatever work was done. Only genuine ``error`` / ``cancelled``
+        # states drop into the bare error payload.
+        if status == "completed":
             payload: Dict[str, Any] = {
                 "success": True,
                 "subagent_type": result["agent_type"],
@@ -184,12 +224,42 @@ class BuiltinTaskTool(Tool):
             }
             return json.dumps(payload, ensure_ascii=False, indent=2)
 
-        return json.dumps({
+        if status in ("timeout", "max_turns", "tool_call_limit", "truncated"):
+            return json.dumps({
+                "success": False,
+                "status": status,
+                "partial": True,
+                "error": result.get("error", f"Subagent stopped due to {status}."),
+                "subagent_type": result.get("agent_type", subagent_type),
+                "subagent_name": result.get("subagent_name", subagent_type),
+                "result": result.get("content", ""),
+                "tool_calls_summary": result.get("tool_calls_summary", []),
+                "tool_count": result.get("tool_count", 0),
+                "elapsed_seconds": result.get("elapsed_seconds", 0.0),
+                # ``run_id`` + ``next_action`` are how the parent Agent's ReAct
+                # loop learns it can resume this task instead of restarting.
+                "run_id": result.get("run_id"),
+                "next_action": result.get("next_action"),
+                "description": description[:300],
+            }, ensure_ascii=False, indent=2)
+
+        # Genuine failure: still surface partial content if any was recovered
+        # (e.g. exception mid-stream), otherwise fall back to bare error.
+        payload = {
             "success": False,
+            "status": status,
             "error": result.get("error", "Subagent failed without an error message."),
             "subagent_type": result.get("agent_type", subagent_type),
+            "run_id": result.get("run_id"),
+            "next_action": result.get("next_action"),
             "description": description[:300],
-        }, ensure_ascii=False)
+        }
+        partial_content = result.get("content") or ""
+        if partial_content:
+            payload["result"] = partial_content
+            payload["partial"] = True
+            payload["tool_calls_summary"] = result.get("tool_calls_summary", [])
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
     @staticmethod
     def _format_tool_brief(tool_name: str, tool_args, content=None) -> str:

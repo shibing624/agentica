@@ -17,6 +17,7 @@ import json
 import time
 import uuid
 
+import dataclasses
 from dataclasses import dataclass
 from enum import Enum
 from collections import OrderedDict
@@ -96,8 +97,11 @@ class SubagentConfig:
     inherit_knowledge: bool = False
     # Whether the parent agent's current context summary is prepended to the task
     inherit_context: bool = False
-    # Timeout for subagent execution in seconds (0 = no timeout)
-    timeout: int = 300
+    # Timeout for subagent execution in seconds (0 = no timeout).
+    # Real-world code / research subagents routinely need 5–15 min. The
+    # previous default of 300s was the single biggest cause of "task tool
+    # keeps failing" reports — raise it to 30 min and let long tasks finish.
+    timeout: int = 1800
 
 
 @dataclass
@@ -123,7 +127,10 @@ class SubagentRun:
     started_at: datetime
     
     # Current status
-    status: Literal["pending", "running", "completed", "error", "cancelled"] = "pending"
+    status: Literal[
+        "pending", "running", "completed", "error", "cancelled",
+        "timeout", "max_turns", "tool_call_limit", "truncated",
+    ] = "pending"
     
     # Timestamp when ended (if finished)
     ended_at: Optional[datetime] = None
@@ -195,7 +202,10 @@ class SubagentRegistry:
     def update_status(
         self,
         run_id: str,
-        status: Literal["running", "completed", "error", "cancelled"],
+        status: Literal[
+            "running", "completed", "error", "cancelled",
+            "timeout", "max_turns", "tool_call_limit", "truncated",
+        ],
         result: Optional[str] = None,
         error: Optional[str] = None,
         token_usage: Optional[Dict[str, int]] = None,
@@ -528,6 +538,11 @@ class SubagentRegistry:
         context: str = "",
         depth: int = 1,
         model_override: Optional["Model"] = None,
+        timeout_override: Optional[int] = None,
+        max_turns_override: Optional[int] = None,
+        tool_call_limit_override: Optional[int] = None,
+        system_prompt_override: Optional[str] = None,
+        resume_from_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Spawn an isolated subagent and run it to completion.
 
@@ -594,6 +609,54 @@ class SubagentRegistry:
                 "agent_type": str(agent_type),
                 "content": "",
             }
+
+        # Apply per-call overrides so the parent Agent's ReAct loop can retry
+        # a failed / truncated task with a larger budget or a tweaked prompt
+        # without having to register a whole new subagent type. We copy the
+        # config to avoid mutating the shared registry entry.
+        if any(v is not None for v in (
+            timeout_override, max_turns_override,
+            tool_call_limit_override, system_prompt_override,
+        )):
+            config = dataclasses.replace(
+                config,
+                timeout=timeout_override if timeout_override is not None else config.timeout,
+                max_turns=max_turns_override if max_turns_override is not None else config.max_turns,
+                tool_call_limit=(
+                    tool_call_limit_override if tool_call_limit_override is not None
+                    else config.tool_call_limit
+                ),
+                system_prompt=(
+                    system_prompt_override if system_prompt_override is not None
+                    else config.system_prompt
+                ),
+            )
+
+        # Resume support: pull the previous run's partial output and stitch it
+        # into the new task so the subagent continues from where it left off.
+        # This is the missing piece that lets the parent Agent iterate on a
+        # timed-out / truncated task instead of having to restart from zero.
+        if resume_from_run_id:
+            prev = self.get(resume_from_run_id)
+            if prev is None:
+                return {
+                    "status": "error",
+                    "error": f"resume_from_run_id={resume_from_run_id!r} not found in registry",
+                    "agent_type": config.type.value,
+                    "content": "",
+                }
+            prev_partial = (prev.result or "").strip()
+            prev_status = prev.status
+            resume_prefix = (
+                f"[RESUME] You are continuing a previous {config.type.value} subagent run "
+                f"(run_id={resume_from_run_id}, previous status={prev_status}). "
+                f"Below is the partial output from that run — read it, then finish the task. "
+                f"Do NOT redo work already done; pick up where it stopped.\n\n"
+                f"--- PREVIOUS PARTIAL OUTPUT ---\n{prev_partial or '(empty)'}\n"
+                f"--- END OF PREVIOUS OUTPUT ---\n\n"
+                f"[CONTINUATION TASK]\n"
+            )
+            task = resume_prefix + task
 
         source_model = model_override or parent_agent.model
         if source_model is None:
@@ -721,15 +784,66 @@ class SubagentRegistry:
                 "tool_count": len(partial_tools),
                 "elapsed_seconds": elapsed,
                 "partial": True,
+                "next_action": (
+                    "To finish this task, call the ``task`` tool again with the SAME "
+                    f"description, subagent_type={config.type.value!r}, "
+                    f"resume_from_run_id={run_id!r}, and a larger "
+                    f"timeout (e.g. timeout={config.timeout * 2}). The previous partial "
+                    "output will be stitched into the continuation prompt automatically."
+                ),
             }
         except (asyncio.CancelledError, AgentCancelledError):
-            # Cancellation must propagate so the parent run terminates cleanly,
-            # but we still persist partial output to the registry so the user
-            # can inspect what the subagent produced before the interrupt.
+            # Distinguish two paths that both surface as CancelledError:
+            #
+            # 1. ``asyncio.wait_for`` fires its own cancel on timeout, and if
+            #    the inner ``run_stream`` catches ``CancelledError`` and
+            #    re-raises as ``AgentCancelledError`` (which it does), the
+            #    ``TimeoutError`` branch above never sees it. We reroute to
+            #    the timeout payload by checking elapsed time.
+            #
+            # 2. Real user Ctrl+C: propagate so the whole parent run tears
+            #    down cleanly (but still persist partial output to registry).
+            elapsed = round(time.time() - start_time, 3)
             partial_content = partial_sink.get("content") or ""
             partial_tools = partial_sink.get("tool_calls_summary") or []
+
+            if config.timeout > 0 and elapsed >= config.timeout - 0.5:
+                logger.warning(
+                    "Subagent timed out after %ss via cancel path "
+                    "(partial: %d chars, %d tool calls)",
+                    config.timeout, len(partial_content), len(partial_tools),
+                )
+                timeout_note = (
+                    f"[Subagent timed out after {config.timeout}s. "
+                    f"Partial output below reflects {len(partial_tools)} completed tool call(s).]"
+                )
+                content_out = (
+                    f"{timeout_note}\n\n{partial_content}" if partial_content else timeout_note
+                )
+                self.update_status(run_id=run_id, status="timeout", result=content_out)
+                return {
+                    "status": "timeout",
+                    "error": f"Subagent timed out after {config.timeout} seconds",
+                    "agent_type": config.type.value,
+                    "subagent_name": config.name,
+                    "run_id": run_id,
+                    "content": content_out,
+                    "tool_calls_summary": partial_tools,
+                    "tool_count": len(partial_tools),
+                    "elapsed_seconds": elapsed,
+                    "partial": True,
+                    "next_action": (
+                        "To finish this task, call the ``task`` tool again with the SAME "
+                        f"description, subagent_type={config.type.value!r}, "
+                        f"resume_from_run_id={run_id!r}, and a larger "
+                        f"timeout (e.g. timeout={config.timeout * 2}). The previous partial "
+                        "output will be stitched into the continuation prompt automatically."
+                    ),
+                }
+
+            # Genuine cancel: persist partial + propagate.
             cancel_note = (
-                f"[Subagent cancelled after {round(time.time() - start_time, 3)}s. "
+                f"[Subagent cancelled after {elapsed}s. "
                 f"Partial output reflects {len(partial_tools)} completed tool call(s).]"
             )
             content_out = (
@@ -756,6 +870,19 @@ class SubagentRegistry:
                 "tool_count": len(partial_tools),
                 "elapsed_seconds": elapsed,
                 "partial": bool(partial_content or partial_tools),
+                "next_action": (
+                    (
+                        "To recover this task, call the ``task`` tool again with the SAME "
+                        f"description, subagent_type={config.type.value!r}, "
+                        f"resume_from_run_id={run_id!r}. The previous partial output will "
+                        "be stitched in so the subagent doesn't redo finished work."
+                    )
+                    if partial_content or partial_tools else
+                    (
+                        "The subagent failed before producing any output. Consider retrying "
+                        "with a simpler description or a different subagent_type."
+                    )
+                ),
             }
 
         elapsed = round(time.time() - start_time, 3)
@@ -802,6 +929,14 @@ class SubagentRegistry:
                 "tool_count": len(tool_calls_summary),
                 "elapsed_seconds": elapsed,
                 "partial": True,
+                "next_action": (
+                    "To finish this task, call the ``task`` tool again with the SAME "
+                    f"description, subagent_type={config.type.value!r}, "
+                    f"resume_from_run_id={run_id!r}, and a larger budget "
+                    f"(e.g. max_turns={(config.max_turns or 100) * 2}, "
+                    f"tool_call_limit={(config.tool_call_limit or 100) * 2}). "
+                    "The previous partial output will be stitched into the continuation prompt."
+                ),
             }
 
         final_content = raw_content or "Subagent completed but returned no content."
@@ -906,7 +1041,9 @@ Guidelines:
 Complete the user's search request efficiently and report your findings clearly.""",
     allowed_tools=["ls", "read_file", "glob", "grep"],  # Read-only tools
     denied_tools=["write_file", "edit_file", "execute", "task"],  # No write/execute/spawn
-    tool_call_limit=100,
+    tool_call_limit=150,
+    max_turns=150,
+    timeout=1800,
     can_spawn_subagents=False,
 )
 
@@ -932,7 +1069,9 @@ Guidelines:
 Complete your research task and provide a comprehensive summary of your findings.""",
     allowed_tools=["web_search", "fetch_url", "read_file", "ls", "glob", "grep"],
     denied_tools=["write_file", "edit_file", "execute", "task"],
-    tool_call_limit=100,
+    tool_call_limit=150,
+    max_turns=150,
+    timeout=1800,
     can_spawn_subagents=False,
 )
 
@@ -958,7 +1097,9 @@ Guidelines:
 Complete your coding task and provide a summary of the results.""",
     allowed_tools=["read_file", "write_file", "edit_file", "execute", "ls", "glob", "grep"],
     denied_tools=["task"],  # Cannot spawn nested subagents
-    tool_call_limit=100,
+    tool_call_limit=200,
+    max_turns=200,
+    timeout=1800,
     can_spawn_subagents=False,
     inherit_context=True,  # Code tasks benefit from parent context
 )
