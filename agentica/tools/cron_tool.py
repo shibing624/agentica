@@ -9,8 +9,9 @@ Agents call cronjob(action="create|list|update|pause|resume|remove|run", ...).
 Security: cron prompts are scanned for injection patterns before storage.
 """
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
+from agentica.tools.base import Tool
 from agentica.tools.decorators import tool
 from agentica.tools.helpers import tool_result
 from agentica.cron.jobs import (
@@ -18,6 +19,7 @@ from agentica.cron.jobs import (
     create_job,
     get_job,
     list_jobs,
+    list_task_runs,
     update_job,
     remove_job,
     pause_job,
@@ -89,24 +91,28 @@ def _format_job(job: CronJob) -> dict:
     }
 
 
-@tool(
-    name="cronjob",
-    description="""Manage scheduled cron jobs with a single tool.
+_CRONJOB_DESCRIPTION = """Manage the user's scheduled (cron) jobs with a single tool. Prefer this over editing cron files by hand.
 
-Use action='create' to schedule a new job from a prompt.
-Use action='list' to inspect jobs.
-Use action='update', 'pause', 'resume', 'remove', or 'run' to manage an existing job.
+Actions:
+- action='create'  -> schedule a new job. Requires prompt + schedule. Optional name/deliver/timeout_seconds/max_retries.
+- action='list'    -> list all jobs with their id, schedule, status and next run time.
+- action='runs'    -> show recent execution history (optionally for one job_id) to see the effect of past runs.
+- action='update'  -> change an existing job's prompt/schedule/name/etc. Requires job_id.
+- action='pause' / 'resume' -> disable/enable an existing job. Requires job_id.
+- action='remove'  -> delete a job. Requires job_id.
+- action='run'     -> execute a job ONCE right now and return its result (a trial run to verify it works). Requires job_id.
 
-Jobs run in a fresh session with no current-chat context, so prompts must be self-contained.
-Cron jobs run autonomously with no user present.
+Jobs run in a fresh session with no current-chat context, so the prompt must be fully self-contained.
+Scheduled jobs run autonomously with no user present; write prompts that need no clarification.
 
 Schedule formats:
 - Cron expression: "30 7 * * *" (daily 7:30), "0 9 * * 1-5" (weekdays 9:00)
 - Interval: "30m", "every 2h", "5s", "1d"
 - One-shot ISO: "2024-01-15T09:30:00"
-""",
-)
-def cronjob(
+"""
+
+
+def _do_cronjob(
     action: str,
     job_id: Optional[str] = None,
     prompt: Optional[str] = None,
@@ -120,24 +126,12 @@ def cronjob(
     retry_delay_ms: Optional[int] = None,
     permissions: Optional[dict[str, Any]] = None,
 ) -> str:
-    """Unified cron job management tool.
+    """Pure business implementation of the cronjob tool (no immediate-run path).
 
-    Args:
-        action: One of: create, list, update, pause, resume, remove, run.
-        job_id: Required for update/pause/resume/remove/run.
-        prompt: For create/update: the self-contained prompt for the agent.
-        schedule: For create/update: schedule string (cron, interval, or ISO).
-        name: Optional human-friendly name.
-        deliver: Delivery target: local, origin, telegram, discord, etc.
-        user_id: User ID for filtering (defaults to 'default').
-        timezone: Timezone for cron expressions (defaults to Asia/Shanghai).
-        timeout_seconds: Optional per-run timeout. 0 or None disables timeout.
-        max_retries: Optional immediate retry count after failure or timeout.
-        retry_delay_ms: Delay between retry attempts.
-        permissions: Product-layer permission profile, e.g. {"execute": false}.
-
-    Returns:
-        JSON string with operation result.
+    Single source of truth for every non-immediate-run action. Both the
+    module-level ``@tool``-decorated ``cronjob`` and ``CronTool.cronjob``
+    delegate here, so neither depends on the decorator's ``__call__``
+    transparency (which was a fragile implicit contract).
     """
     try:
         normalized = (action or "").strip().lower()
@@ -157,6 +151,8 @@ def cronjob(
             )
         if normalized == "list":
             return _action_list(user_id)
+        if normalized == "runs":
+            return _action_runs(job_id)
         if not job_id:
             return _to_json({"success": False, "error": f"job_id is required for action '{normalized}'"})
 
@@ -189,6 +185,38 @@ def cronjob(
 
     except Exception as e:
         return _to_json({"success": False, "error": str(e)})
+
+
+@tool(name="cronjob", description=_CRONJOB_DESCRIPTION, is_destructive=True)
+def cronjob(
+    action: str,
+    job_id: Optional[str] = None,
+    prompt: Optional[str] = None,
+    schedule: Optional[str] = None,
+    name: Optional[str] = None,
+    deliver: Optional[str] = None,
+    user_id: Optional[str] = None,
+    timezone: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
+    max_retries: Optional[int] = None,
+    retry_delay_ms: Optional[int] = None,
+    permissions: Optional[dict[str, Any]] = None,
+) -> str:
+    """Unified cron job management tool. See decorator description for actions."""
+    return _do_cronjob(
+        action=action,
+        job_id=job_id,
+        prompt=prompt,
+        schedule=schedule,
+        name=name,
+        deliver=deliver,
+        user_id=user_id,
+        timezone=timezone,
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+        retry_delay_ms=retry_delay_ms,
+        permissions=permissions,
+    )
 
 
 def _action_create(
@@ -238,6 +266,26 @@ def _action_list(user_id: Optional[str]) -> str:
         "success": True,
         "count": len(jobs),
         "jobs": [_format_job(j) for j in jobs],
+    })
+
+
+def _action_runs(job_id: Optional[str]) -> str:
+    """Recent execution history, newest first. Optional job_id filter."""
+    runs = list_task_runs(job_id=job_id, limit=20)
+    return _to_json({
+        "success": True,
+        "count": len(runs),
+        "runs": [
+            {
+                "job_id": r.task_id,
+                "status": r.status.value if hasattr(r.status, "value") else str(r.status),
+                "started_at_ms": r.started_at_ms,
+                "ended_at_ms": r.ended_at_ms,
+                "result_preview": (r.result[:200] if r.result else None),
+                "error": r.error,
+            }
+            for r in runs
+        ],
     })
 
 
@@ -323,15 +371,97 @@ def _action_update(
 
 # ============== Tool class wrapper for Agent(tools=[CronTool()]) ==============
 
-class CronTool:
+_CRON_SYSTEM_PROMPT = """You can manage the user's scheduled (cron) jobs directly with the `cronjob` tool: \
+create, list, runs (history), update, pause, resume, remove, and run (execute once now). \
+Translate natural-language requests ("remind me every morning", "stop the hourly job", "try it now", \
+"change it to run daily") into the matching cronjob action instead of editing cron files by hand. \
+Schedules accept cron expressions ("30 7 * * *"), intervals ("every 2h", "30m"), or one-shot ISO timestamps. \
+A scheduled job runs unattended in a fresh session, so its prompt must be fully self-contained. \
+Use action='run' to execute a job once immediately and show the result. \
+Note: jobs only fire on their schedule while the cron scheduler daemon is enabled \
+(the user can enable it with `/cron daemon on`)."""
+
+
+class CronTool(Tool):
     """Cron job management tool for Agent integration.
 
     Usage:
         agent = Agent(tools=[CronTool()])
+
+    Args:
+        job_runner: optional ``(CronJob) -> dict`` callback that executes a job
+            once synchronously and returns the ``_execute_job`` result dict. When
+            provided (the interactive CLI wires this), ``action='run'`` performs a
+            real immediate trial run and returns its output. When omitted (SDK /
+            unattended usage), ``action='run'`` falls back to marking the job due
+            on the next scheduler tick.
     """
 
-    def __init__(self):
-        self.functions = [cronjob]
+    def __init__(self, job_runner: Optional[Callable[[CronJob], dict]] = None):
+        super().__init__(name="cronjob", description=_CRONJOB_DESCRIPTION)
+        self._job_runner = job_runner
+        self.register(self.cronjob, is_destructive=True)
+
+    # No docstring on the method: Tool.register() falls back to self.description
+    # (= _CRONJOB_DESCRIPTION, set in __init__) when function.__doc__ is None,
+    # so the LLM-facing schema stays in perfect sync with the free-function
+    # @tool decorator without duplicating the description text.
+    def cronjob(
+        self,
+        action: str,
+        job_id: Optional[str] = None,
+        prompt: Optional[str] = None,
+        schedule: Optional[str] = None,
+        name: Optional[str] = None,
+        deliver: Optional[str] = None,
+        user_id: Optional[str] = None,
+        timezone: Optional[str] = None,
+        timeout_seconds: Optional[float] = None,
+        max_retries: Optional[int] = None,
+        retry_delay_ms: Optional[int] = None,
+        permissions: Optional[dict[str, Any]] = None,
+    ) -> str:
+        normalized = (action or "").strip().lower()
+        # Immediate trial run: only when an executor is wired (interactive CLI).
+        if normalized in {"run", "run_now", "trigger"} and self._job_runner is not None:
+            if not job_id:
+                return _to_json({"success": False, "error": "job_id is required for action 'run'"})
+            job = get_job(job_id)
+            if not job:
+                return _to_json({"success": False, "error": f"Job '{job_id}' not found. Use action='list' to see jobs."})
+            return self._run_now(job_id, job)
+        # Everything else (and run without an executor) uses the pure impl.
+        return _do_cronjob(
+            action=action,
+            job_id=job_id,
+            prompt=prompt,
+            schedule=schedule,
+            name=name,
+            deliver=deliver,
+            user_id=user_id,
+            timezone=timezone,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+            retry_delay_ms=retry_delay_ms,
+            permissions=permissions,
+        )
+
+    def _run_now(self, job_id: str, job: CronJob) -> str:
+        """Execute a job once, synchronously, and return its result."""
+        try:
+            result = self._job_runner(job) or {}
+        except Exception as e:  # surface as tool error, do not crash the turn
+            return _to_json({"success": False, "error": f"Immediate run failed: {e}"})
+        status = result.get("status")
+        return _to_json({
+            "success": status == "ok",
+            "job_id": job_id,
+            "run": result,
+            "message": f"Executed job '{job.name}' once now (status={status}).",
+        })
+
+    def get_system_prompt(self) -> Optional[str]:
+        return _CRON_SYSTEM_PROMPT
 
     def __repr__(self) -> str:
         return "CronTool()"

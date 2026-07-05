@@ -614,10 +614,31 @@ class TestCronToolClass:
 
     def test_cron_tool_has_functions(self):
         from agentica.tools.cron_tool import CronTool
+        from agentica.tools.base import Tool
         tool = CronTool()
-        assert len(tool.functions) == 1
-        assert tool.functions[0].__name__ == "cronjob"
+        # CronTool must be a real Tool so model.add_tool registers `cronjob`.
+        assert isinstance(tool, Tool)
+        assert list(tool.functions.keys()) == ["cronjob"]
 
     def test_cron_tool_repr(self):
         from agentica.tools.cron_tool import CronTool
         assert repr(CronTool()) == "CronTool()"
+
+    def test_cron_tool_immediate_run_uses_job_runner(self, tmp_cron_dir):
+        """When a job_runner is wired, action='run' executes it and returns output."""
+        import json
+        from agentica.tools.cron_tool import CronTool
+        from agentica.cron.jobs import create_job
+
+        job = create_job(prompt="say hi", schedule="1h", name="Trial")
+        captured = {}
+
+        def fake_runner(j):
+            captured["job_id"] = j.id
+            return {"job_id": j.id, "status": "ok", "result": "did it"}
+
+        tool = CronTool(job_runner=fake_runner)
+        out = json.loads(tool.cronjob(action="run", job_id=job.id))
+        assert out["success"] is True
+        assert captured["job_id"] == job.id
+        assert out["run"]["result"] == "did it"

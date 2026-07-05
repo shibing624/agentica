@@ -653,7 +653,7 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
 
 def create_agent(
     agent_config: dict, extra_tools: Optional[List] = None, workspace: Optional[Workspace] = None, skills_registry=None,
-    user_input_callback=None,
+    user_input_callback=None, enable_cron_immediate_run: bool = True,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
@@ -662,6 +662,10 @@ def create_agent(
         callback so the tool reads via the TUI input box instead of a bare
         ``input()`` (which deadlocks against prompt_toolkit's stdin ownership in
         the background agent thread).
+    enable_cron_immediate_run: when True (interactive CLI) the ``cronjob`` tool's
+        ``action='run'`` executes a job once immediately and returns its output.
+        Set False for cron-spawned agents so a scheduled job cannot recursively
+        trigger further immediate runs.
     """
     model = get_model(
         model_provider=agent_config["model_provider"],
@@ -698,11 +702,24 @@ def create_agent(
     from agentica.tools.self_manage_tool import SelfManageTool
     from agentica.tools.cron_tool import CronTool
 
+    # Immediate-run executor for the cronjob tool: builds a fresh CLI agent per
+    # run (mirrors the `/cron run` command) so `action='run'` is a real trial run
+    # returning output, not just a "mark due" that silently needs the daemon.
+    cron_job_runner = None
+    if enable_cron_immediate_run:
+        def cron_job_runner(job):
+            import asyncio
+            from agentica.cron.scheduler import _execute_job
+            from agentica.cron.cli_runner import CliAgentRunner, build_cli_agent_factory
+            factory = build_cli_agent_factory(agent_config, extra_tools, workspace, skills_registry)
+            runner = CliAgentRunner(factory)
+            return asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
+
     # Always give the CLI agent the self-management + cron tools so it can
     # inspect/optimize its own config (config.yaml / .env), self-upgrade, and
-    # schedule its own recurring tasks. Prepended so a user-supplied extra tool
-    # with the same name could still override.
-    cli_tools = [SelfManageTool(), CronTool()] + list(extra_tools or [])
+    # schedule/manage its own recurring tasks by natural language. Prepended so a
+    # user-supplied extra tool with the same name could still override.
+    cli_tools = [SelfManageTool(), CronTool(job_runner=cron_job_runner)] + list(extra_tools or [])
 
     new_agent = DeepAgent(
         model=model,

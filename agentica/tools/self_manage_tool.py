@@ -14,14 +14,13 @@ preserve other lines and take effect in-process immediately.
 """
 from typing import Optional
 
+from agentica.tools.base import Tool
 from agentica.tools.decorators import tool
 from agentica.tools.helpers import tool_result, tool_error
 from agentica.cli import self_manage as sm
 
 
-@tool(
-    name="self_manage",
-    description="""Inspect and modify agentica's own runtime configuration, or upgrade itself.
+_SELF_MANAGE_DESCRIPTION = """Inspect and modify agentica's own runtime configuration, or upgrade itself.
 
 Actions:
 - action='show'                 -> return current config.yaml profiles + .env vars (secrets masked)
@@ -37,16 +36,23 @@ Actions:
                                    Optional force=confirm-style via confirm=True to overwrite existing.
 
 Use this to optimize your own setup, e.g. raise max_tokens, switch model, or add an API key.
-Config file edits persist; model changes take effect on next agent rebuild/restart.""",
-)
-def self_manage(
+Config file edits persist; model changes take effect on next agent rebuild/restart."""
+
+
+def _do_self_manage(
     action: str,
     key: Optional[str] = None,
     value: Optional[str] = None,
     profile: Optional[str] = None,
     confirm: bool = False,
 ) -> str:
-    """Self-management tool handler. See decorator description for actions."""
+    """Pure business implementation of the self_manage tool.
+
+    This is the single source of truth for every action. Both the module-level
+    ``@tool``-decorated entry point and ``SelfManageTool.self_manage`` delegate
+    here, so neither of them depends on the decorator's ``__call__`` transparency
+    (which was a fragile implicit contract).
+    """
     action = (action or "").strip().lower()
 
     if action == "show":
@@ -145,7 +151,19 @@ def self_manage(
     )
 
 
-class SelfManageTool:
+@tool(name="self_manage", description=_SELF_MANAGE_DESCRIPTION, is_destructive=True)
+def self_manage(
+    action: str,
+    key: Optional[str] = None,
+    value: Optional[str] = None,
+    profile: Optional[str] = None,
+    confirm: bool = False,
+) -> str:
+    """Self-management tool handler. See decorator description for actions."""
+    return _do_self_manage(action, key, value, profile, confirm)
+
+
+class SelfManageTool(Tool):
     """Self-management tool for Agent integration.
 
     Usage:
@@ -153,7 +171,22 @@ class SelfManageTool:
     """
 
     def __init__(self):
-        self.functions = [self_manage]
+        super().__init__(name="self_manage", description=_SELF_MANAGE_DESCRIPTION)
+        self.register(self.self_manage, is_destructive=True)
+
+    # No docstring on the method: Tool.register() falls back to self.description
+    # (= _SELF_MANAGE_DESCRIPTION, set in __init__) when function.__doc__ is None,
+    # so the LLM-facing schema stays in perfect sync with the free-function
+    # @tool decorator without duplicating the description text.
+    def self_manage(
+        self,
+        action: str,
+        key: Optional[str] = None,
+        value: Optional[str] = None,
+        profile: Optional[str] = None,
+        confirm: bool = False,
+    ) -> str:
+        return _do_self_manage(action, key, value, profile, confirm)
 
     def __repr__(self) -> str:
         return "SelfManageTool()"

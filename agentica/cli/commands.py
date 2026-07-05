@@ -1859,8 +1859,23 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         ts = ctx.tui_state or {}
         is_running = ts.get("cron_is_running", lambda: False)()
         if action == "status":
-            con.print(f"  cron scheduler: [{'green' if is_running else 'dim'}]"
+            from agentica.global_config import get_setting
+            enabled = bool(get_setting("cron.enabled", False))
+            interval = int(get_setting("cron.interval", 60) or 60)
+            con.print(f"  this session:   [{'green' if is_running else 'dim'}]"
                       f"{'RUNNING' if is_running else 'STOPPED'}[/]")
+            con.print(f"  config (persisted): cron.enabled="
+                      f"[{'green' if enabled else 'red'}]{enabled}[/]  interval={interval}s")
+            # The live thread only reflects THIS process. Explain a mismatch so
+            # "status can't be seen" never looks like a silent failure.
+            if enabled and not is_running:
+                con.print("  [yellow]Enabled in config but no scheduler thread in this "
+                          "session[/yellow] — a separate `agentica cron daemon` process may be "
+                          "running it (the file lock prevents double execution), or the thread "
+                          "failed to start. Run [cyan]/cron daemon on[/cyan] to start it here.")
+            elif not enabled and is_running:
+                con.print("  [yellow]Running in this session but disabled in config[/yellow] — "
+                          "it will not auto-start next launch. Run [cyan]/cron daemon on[/cyan] to persist.")
             return
         if action == "on":
             from agentica.global_config import set_setting

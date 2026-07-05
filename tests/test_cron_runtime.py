@@ -104,6 +104,31 @@ class TestCronCommand(unittest.TestCase):
         from agentica.cli import commands
         self.assertIn("/cron", commands.COMMAND_REGISTRY)
 
+    def test_daemon_status_reports_persisted_config(self):
+        """`/cron daemon status` must surface the persisted cron.enabled config,
+        not only the current session's thread — otherwise a daemon enabled in
+        config (or run by a separate process) looks like it has no status."""
+        import io
+        from unittest.mock import patch
+        from rich.console import Console
+        from agentica.cli import commands
+        from agentica.global_config import set_setting
+
+        set_setting("cron.enabled", True)
+        set_setting("cron.interval", 45)
+        self._running = False  # no live thread in this session
+
+        buf = io.StringIO()
+        with patch.object(commands, "get_console", return_value=Console(file=buf, width=200)):
+            commands._cmd_cron(self.ctx, "daemon status")
+        out = buf.getvalue()
+        self.assertIn("config", out)
+        self.assertIn("cron.enabled=", out)
+        self.assertIn("45s", out)
+        # Enabled in config but no live thread -> must explain (proves the
+        # persisted True was read), not stay silent.
+        self.assertIn("Enabled in config but no scheduler thread", out)
+
     def test_edit_prompt_and_schedule(self):
         from agentica.cli import commands
         commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
@@ -249,6 +274,23 @@ class TestCronInCliTools(unittest.TestCase):
         names = [type(t).__name__ for t in agent.tools]
         self.assertIn("CronTool", names)
         self.assertIn("SelfManageTool", names)
+
+    def test_cli_agent_exposes_cron_functions_to_model(self):
+        """Regression: CronTool/SelfManageTool must be real Tool subclasses so
+        ``model.add_tool`` registers their functions. Previously they were plain
+        objects with a ``functions`` list, so ``cronjob``/``self_manage`` were
+        silently dropped and the agent could not manage cron via natural language."""
+        import sys
+        sys.argv = ["agentica"]
+        from agentica.cli.config import create_agent, parse_args
+        cfg = vars(parse_args())
+        cfg.update({"model_provider": "openai", "model_name": "gpt-4o",
+                    "api_key": "sk-test", "base_url": None})
+        agent = create_agent(cfg, extra_tools=[], workspace=None, skills_registry=None)
+        agent.update_model()
+        fns = agent.model.functions or {}
+        self.assertIn("cronjob", fns)
+        self.assertIn("self_manage", fns)
 
     def test_cron_agent_ask_tool_is_noninteractive(self):
         """Regression: a cron job runs unattended on a background scheduler

@@ -114,8 +114,11 @@ class TestSelfManageTool(unittest.TestCase):
             os.environ["AGENTICA_DOTENV_PATH"] = self._orig_dotenv
 
     def test_tool_object_exposes_function(self):
+        from agentica.tools.base import Tool
         tool = self.SelfManageTool()
-        self.assertEqual([f.__name__ for f in tool.functions], ["self_manage"])
+        # Must be a real Tool so model.add_tool registers `self_manage`.
+        self.assertIsInstance(tool, Tool)
+        self.assertEqual(list(tool.functions.keys()), ["self_manage"])
 
     def test_show(self):
         out = json.loads(self.self_manage(action="show"))
