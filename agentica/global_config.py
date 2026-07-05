@@ -372,39 +372,31 @@ _CONFIG_TEMPLATE = """\
 
 active_profile: default
 
+# Named model profiles — add one per provider/endpoint you use. Example:
+#   default:
+#     # --- main model (user-facing turns) ---
+#     model_provider: deepseek
+#     model_name: deepseek-v4-flash
+#     base_url: https://api.deepseek.com
+#     api_key: sk-...
+#     # optional tuning (omit to use model/factory defaults):
+#     #   reasoning_effort: max      # low|medium|high|max (OpenAI/DeepSeek)
+#     #   max_tokens: 8192           # output token limit
+#     #   context_window: 1000000    # context limit; overrides catalog value
+#     #   temperature: 0.7
+#     #   top_p: 0.95
+#     # optional prompt caching for OpenAI-compatible proxies fronting Claude
+#     # (e.g. Venus): enable_cache_control, cache_control_messages,
+#     #   cache_control_session_header (sticky-routing header for cache hits).
+#     # --- optional auxiliary model (background calls + `task` subagent tool) ---
+#     # A cheaper/faster model here saves cost on memory extraction, context
+#     # compression, and delegated subtasks. Omit to reuse the main model.
+#     # auxiliary_model:
+#     #   model_provider: zhipuai
+#     #   model_name: glm-4.7-flash
+#     #   base_url: https://open.bigmodel.cn/api/paas/v4
+#     #   api_key: sk-...
 profiles:
-  default:
-    # --- main model (user-facing turns) ---
-    model_provider: deepseek
-    model_name: deepseek-v4-flash
-    base_url: https://api.deepseek.com
-    api_key: REPLACE_ME
-
-    # optional model tuning (omit to use model/factory defaults)
-    # reasoning_effort: max      # low|medium|high|max (OpenAI/DeepSeek)
-    # max_tokens: 8192           # output token limit
-    # context_window: 1000000    # context limit; overrides catalog value
-    # temperature: 0.7
-    # top_p: 0.95
-
-    # optional prompt caching for OpenAI-compatible proxies fronting Claude
-    # (e.g. Venus). Set enable_cache_control: true to turn on Anthropic-style
-    # cache_control blocks (system + recent messages + tools); omit (or false)
-    # to keep it off. cache_control_messages: trailing-msg breakpoints
-    # (Anthropic caps total at 4). cache_control_session_header: sticky-routing
-    # header name for cache hits (e.g. Venus-Session-Id).
-    # enable_cache_control: true
-    # cache_control_messages: 3
-    # cache_control_session_header: Venus-Session-Id
-
-    # --- optional auxiliary model (background calls + `task` subagent tool) ---
-    # A cheaper/faster model here saves cost on memory extraction, context
-    # compression, and delegated subtasks. Omit to reuse the main model.
-    # auxiliary_model:
-    #   model_provider: zhipuai
-    #   model_name: glm-4.7-flash
-    #   base_url: https://open.bigmodel.cn/api/paas/v4
-    #   api_key: sk-...
 
 # Free-form env block: arbitrary keys injected into os.environ.
 # Shell / .env values still win over these (setdefault semantics).

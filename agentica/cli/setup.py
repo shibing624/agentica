@@ -36,7 +36,6 @@ from agentica.global_config import (
     upsert_profile,
     set_active_profile,
     find_profile_for_provider,
-    global_config_path,
     write_commented_template,
 )
 
@@ -849,10 +848,13 @@ def _configure_one_profile(
     # Optional auxiliary model — pre-filled; declining keeps the existing auxiliary block.
     auxiliary_block = _prompt_auxiliary_model(console, provider, existing_auxiliary=existing_auxiliary if same_provider else None)
 
-    # Persist to config.yaml as a named profile. On first run (no file yet)
+    # Persist to config.yaml as a named profile. On first run (no profiles yet)
     # write a fully-commented template first so the user gets a readable base;
-    # upsert then round-trips the file, preserving those comments.
-    if not os.path.exists(global_config_path()):
+    # upsert then round-trips the file, preserving those comments. Use
+    # get_profiles() (not os.path.exists on the raw path) so the "first run?"
+    # check honours the same config path the upsert writes to — otherwise a
+    # missing real-path file re-templates every pass and clobbers prior profiles.
+    if not get_profiles():
         write_commented_template()
 
     # Ask the user to NAME this profile. The legacy behaviour used the
