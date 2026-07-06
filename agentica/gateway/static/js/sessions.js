@@ -5,7 +5,7 @@ import { uid } from './utils.js';
 import { fetchSessions, deleteSessionApi, archiveSessionApi, unarchiveSessionApi, renameSessionApi } from './api.js';
 import { showToast, showConfirm, openDirModalForNewSession, updateDirDisplayForSession } from './modals.js';
 import { renderSidebar } from './sidebar.js';
-import { renderChat } from './chat.js';
+import { renderChat, drainQueue } from './chat.js';
 
 export async function loadSessions() {
   // Server SessionLog is the single source of truth for session list/name.
@@ -44,9 +44,43 @@ export async function loadSessions() {
 
 export function save() { localStorage.setItem('ag_s', JSON.stringify(state.sessions)) }
 
+// "+ New Chat" (sidebar-level) — reuse the currently viewed session's (or
+// pending draft's) project directory by default, so it doesn't interrupt the
+// user with a dir prompt every time. Only when there's no current project
+// (no session yet, or the active session is Unfiled) do we fall back to
+// asking for a directory. Nothing is persisted here — see startNewChatDraft.
 export function newSession() {
-  if (state.streaming) return;
+  const cur = state.curSess ? state.sessions[state.curSess] : null;
+  const dir = (cur && cur.dir) || state.pendingNewChatDir || '';
+  if (dir) { startNewChatDraft(dir); return; }
   openDirModalForNewSession();
+}
+
+// Switch to the "composing a new chat" view without creating/persisting a
+// session yet. The session is only actually created (and shown in the
+// sidebar) once the user sends the first message — see sendMessage() in
+// chat.js — so opening "+ New Chat" and not typing anything leaves no trace.
+export function startNewChatDraft(dir) {
+  state.curSess = null;
+  localStorage.removeItem('ag_a');
+  state.pendingNewChatDir = dir || '';
+  state.inputText = '';
+  state.pendingFiles = [];
+  renderSidebar(); renderChat();
+  const ta = document.getElementById('inputTa');
+  if (ta) { ta.style.height = 'auto'; ta.focus() }
+}
+
+// Best-effort default working directory for a brand-new session started
+// from the empty/welcome screen: reuse whatever directory was used most
+// recently, falling back to the server's base directory.
+export function defaultDirForNewSession() {
+  const ids = Object.keys(state.sessions).sort((a, b) => (state.sessions[b].ts || 0) - (state.sessions[a].ts || 0));
+  for (const id of ids) {
+    const d = state.sessions[id].dir;
+    if (d) return d;
+  }
+  return state.serverDir || '';
 }
 
 export function createSessionWithDir(dir) {
@@ -58,22 +92,38 @@ export function createSessionWithDir(dir) {
   document.getElementById('inputTa').focus();
 }
 
+// "New chat" from inside an existing project (the per-project "+" button) —
+// reuse that project's working dir directly instead of asking again, since
+// every session in the project already shares it. Only the project-less
+// "Unfiled" bucket (no dir) still needs to prompt.
+export function createSessionInProject(projectId) {
+  const meta = loadProjectMeta();
+  const project = meta.projects[projectId];
+  const dir = project && project.dir ? project.dir : '';
+  if (!dir) { openDirModalForNewSession(); return; }
+  startNewChatDraft(dir);
+}
+
 export function switchTo(id) {
   state.curSess = id;
   localStorage.setItem('ag_a', id);
   const s = state.sessions[id];
+  if (s) s.unread = false;
   updateDirDisplayForSession(s);
   renderSidebar(); renderChat();
+  // If a message was queued for this session while the user was elsewhere
+  // and the agent is free, send it now instead of waiting for another event.
+  drainQueue();
 }
 
 export function delSession(id) {
-  const title = state.sessions[id]?.title || '该会话';
-  showConfirm(`删除会话「${title}」？`, () => {
+  const title = state.sessions[id]?.title || 'this session';
+  showConfirm(`Delete session "${title}"?`, () => {
     const ids = Object.keys(state.sessions).sort((a, b) => state.sessions[b].ts - state.sessions[a].ts);
     const idx = ids.indexOf(id);
     const nextId = ids[idx + 1] || ids[idx - 1] || null;
     delete state.sessions[id]; save();
-    deleteSessionApi(id).then(({ ok }) => { if (!ok) throw 0 }).catch(() => showToast('服务端删除同步失败', 2000));
+    deleteSessionApi(id).then(({ ok }) => { if (!ok) throw 0 }).catch(() => showToast('Failed to sync deletion to server', 2000));
     if (state.curSess === id && nextId && state.sessions[nextId]) switchTo(nextId);
     else if (state.curSess === id) { state.curSess = null; localStorage.removeItem('ag_a'); renderChat() }
     renderSidebar();
@@ -86,14 +136,14 @@ export function archiveSession(id) {
   save();
   archiveSessionApi(id)
     .then(({ ok }) => { if (!ok) throw 0 })
-    .catch(() => showToast('归档已本地保存，服务端同步失败', 2200));
+    .catch(() => showToast('Archived locally, failed to sync to server', 2200));
   if (state.curSess === id) {
     const ids = Object.keys(state.sessions).filter(sid => sid !== id && !state.sessions[sid].archived).sort((a, b) => state.sessions[b].ts - state.sessions[a].ts);
     if (ids.length) switchTo(ids[0]);
     else { state.curSess = null; localStorage.removeItem('ag_a'); renderChat(); }
   }
   renderSidebar();
-  showToast('已归档', 1200);
+  showToast('Archived', 1200);
 }
 
 export function unarchiveSession(id) {
@@ -101,9 +151,9 @@ export function unarchiveSession(id) {
   persistSessionMeta(id, { archived: false });
   unarchiveSessionApi(id)
     .then(({ ok }) => { if (!ok) throw 0 })
-    .catch(() => showToast('恢复已本地保存，服务端同步失败', 2200));
+    .catch(() => showToast('Restored locally, failed to sync to server', 2200));
   save(); renderSidebar();
-  showToast('已恢复', 1200);
+  showToast('Restored', 1200);
 }
 
 export function forkSession(sessionId, fromMsgIdx) {
@@ -117,7 +167,7 @@ export function forkSession(sessionId, fromMsgIdx) {
   meta.sessionMeta[id] = { ...(meta.sessionMeta[id] || {}), parentSessionId: sessionId, forkedFromMsgIdx: fromMsgIdx, archived: false };
   saveProjectMeta(meta);
   save(); switchTo(id); renderSidebar();
-  showToast('已创建分叉会话', 1200);
+  showToast('Fork created', 1200);
   return id;
 }
 
@@ -139,12 +189,12 @@ export async function commitSessionRename(id, value) {
   const s = state.sessions[id]; if (!s) return;
   const t = (value || '').trim();
   state.renamingSessionId = null;
-  if (!t) { showToast('会话名不能为空', 1500); return; }
+  if (!t) { showToast('Session name cannot be empty', 1500); return; }
   if (t === s.title) return;
   s.title = t; save();
   const { ok } = await renameSessionApi(id, t);
-  if (!ok) { showToast('重命名同步到服务端失败', 2000); return; }
-  showToast('已重命名', 1200);
+  if (!ok) { showToast('Failed to sync rename to server', 2000); return; }
+  showToast('Renamed', 1200);
 }
 
 export function renameKey(ev, id) {

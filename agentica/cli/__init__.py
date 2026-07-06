@@ -30,7 +30,6 @@ from agentica.cli.display import (
     show_help,
     print_header,
 )
-from agentica.cli.permissions import PermissionManager
 from agentica.cli.interactive import run_interactive
 from agentica.cli.setup import (
     resolve_model_config,
@@ -60,7 +59,6 @@ __all__ = [
     "render_markdown_response",
     "show_help",
     "print_header",
-    "PermissionManager",
     "run_interactive",
     "resolve_model_config",
     "run_onboarding",

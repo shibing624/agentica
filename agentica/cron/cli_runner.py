@@ -94,7 +94,7 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
             workspace=workspace if workspace is not None else workspace_default,
             skills_registry=skills_registry,
             # Unattended run: never block on stdin for a human answer.
-            user_input_callback=_noninteractive_input_callback,
+            ask_user_question_callback=_noninteractive_input_callback,
             # A scheduled job must not recursively kick off further immediate runs.
             enable_cron_immediate_run=False,
         )

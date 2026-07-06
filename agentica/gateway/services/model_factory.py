@@ -7,6 +7,7 @@ Model factory: instantiates configured LLM models and loads cron tools.
 Extracted from AgentService to keep model creation logic independently testable
 and to reduce AgentService's responsibility count.
 """
+import asyncio
 from typing import Any, List, Optional
 
 from agentica.utils.log import logger
@@ -115,17 +116,40 @@ def create_model(
     return model
 
 
-def get_cron_tools() -> List[Any]:
-    """Load cron tools from the SDK cron module.
+def _gateway_cron_job_runner(job: Any) -> dict:
+    """Execute a cron job immediately and return its ``_execute_job`` result.
 
-    Returns:
-        A list containing the cronjob tool function, or an empty list
-        if the cron module is not available.
+    Called from ``CronTool``'s sync tool entrypoint, which itself runs in a
+    worker thread (see ``Tool.execute``). Bridges back to the gateway's own
+    asyncio event loop with ``run_coroutine_threadsafe`` instead of spinning
+    up a second loop (``asyncio.run``), so the run shares the same
+    AgentService session locks/state as every other request — no cross-loop
+    hazard.
+    """
+    from .. import deps
+    from agentica.cron.scheduler import _execute_job
+
+    if deps.cron_runner is None or deps.main_loop is None:
+        return {"job_id": job.id, "status": "failed", "error": "Cron runner not ready"}
+    future = asyncio.run_coroutine_threadsafe(
+        _execute_job(job, agent_runner=deps.cron_runner, verbose=False),
+        deps.main_loop,
+    )
+    return future.result()
+
+
+def get_cron_tools() -> List[Any]:
+    """Load the cron tool, wired for real immediate execution.
+
+    Returns a ``CronTool`` (not the bare ``cronjob`` function) with a
+    ``job_runner`` so ``cronjob(action="run", ...)`` actually executes the
+    job now and returns its result — same as the CLI — instead of just
+    marking it due for the next scheduler tick.
     """
     try:
-        from agentica.tools.cron_tool import cronjob
+        from agentica.tools.cron_tool import CronTool
         logger.debug("Loaded cron tool")
-        return [cronjob]
+        return [CronTool(job_runner=_gateway_cron_job_runner)]
     except Exception as e:
         logger.warning(f"Failed to load cron tools: {e}")
         return []
@@ -146,4 +170,53 @@ You can help users create and manage scheduled tasks. Use the `cronjob` tool:
 - `cronjob(action="run", job_id="...")` — Trigger a job immediately
 
 Schedule formats: cron expression ("30 7 * * *"), interval ("30m", "every 2h"), or ISO datetime.
+"""
+
+
+def get_self_manage_tools() -> List[Any]:
+    """Load the self-management tool (same one the CLI gives its agent).
+
+    Lets the web agent inspect its own config.yaml/.env, know its own
+    version, and adjust its own model/tuning — the "self-awareness"
+    capability the CLI has always had. Gated by the same permission_mode
+    tiers as write_file/edit_file (hidden in "ask" mode, available in
+    "auto"/"allow-all") since it's registered as destructive.
+    """
+    try:
+        from agentica.tools.self_manage_tool import SelfManageTool
+        logger.debug("Loaded self_manage tool")
+        return [SelfManageTool()]
+    except Exception as e:
+        logger.warning(f"Failed to load self_manage tool: {e}")
+        return []
+
+
+def get_self_manage_instructions() -> str:
+    """Return the system prompt instructions describing the agent's own identity."""
+    return """
+# Self-Awareness
+
+You are Agentica, running as a web/API agent inside the Agentica Gateway — this
+may be the browser chat UI or one of its bot channels (Feishu/WeCom/WeChat/
+Telegram/Discord/DingTalk/QQ). You have a `self_manage` tool to inspect and
+adjust your own runtime configuration:
+
+- `self_manage(action="show")` — view your own config.yaml profiles, settings
+  (including whether the cron scheduler daemon is enabled, its tick interval,
+  etc.) and .env vars (secrets masked)
+- `self_manage(action="set_config", key="...", value="...")` — edit a config.yaml profile field
+- `self_manage(action="set_env", key="...", value="...")` — set/delete a .env variable
+- `self_manage(action="check_upgrade")` — check for a newer Agentica release on PyPI
+- `self_manage(action="install_skill", value="<git url or path>")` — install a skill
+
+Use this when the user asks what model/version you're running, or wants you to
+tune your own settings (e.g. "switch yourself to gpt-4", "raise your max_tokens").
+Model/profile edits take effect on the next agent rebuild, not mid-conversation.
+
+Important: there is no terminal here. Never tell the user to run a CLI-only
+slash command (e.g. `/cron daemon on`, `/model`, `/upgrade`, `/config`) — this
+surface has no command line and the user cannot type them. If something needs
+deployment-level access you don't have (enabling the cron daemon, restarting
+the server process after an upgrade), say so plainly and tell the user to
+contact whoever manages this deployment instead of handing them a command.
 """

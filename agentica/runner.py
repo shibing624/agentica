@@ -920,6 +920,48 @@ class Runner:
         return False
 
     @staticmethod
+    def _strip_tool_artifacts(msgs: List[Message], *, drop_system: bool = False) -> List[Message]:
+        """Drop 'tool' role messages and 'tool_calls' from assistant messages.
+
+        Keeps only the assistant's text content (if any) and every other
+        message untouched. Used to recover from cross-provider tool-call
+        format mismatches — see _sanitize_tool_history_after_error.
+        """
+        cleaned: List[Message] = []
+        for m in msgs:
+            if m.role == "tool":
+                continue
+            if m.role == "assistant" and m.tool_calls:
+                text = m.content if isinstance(m.content, str) else ""
+                if text:
+                    cleaned.append(Message(role="assistant", content=text))
+                continue
+            if drop_system and m.role == "system":
+                continue
+            cleaned.append(m)
+        return cleaned
+
+    @staticmethod
+    def _sanitize_tool_history_after_error(agent: "Agent", messages: List[Message]) -> None:
+        """Strip tool-call artifacts from history after a tool-history API error.
+
+        Recovery path for resuming a session whose history was recorded under
+        a different model provider (e.g. Claude) on a provider that rejects
+        the resulting 'tool' role messages (e.g. "Messages with role 'tool'
+        must be a response to a preceding message with 'tool_calls'"). Only
+        user/assistant text is needed going forward, so tool_calls/tool
+        results are dropped entirely — both from working-memory-backed
+        history (so future turns stay clean) and the in-flight ``messages``
+        list (so the immediate retry succeeds).
+        """
+        for run in agent.working_memory.runs:
+            if run.response and run.response.messages:
+                run.response.messages = Runner._strip_tool_artifacts(
+                    run.response.messages, drop_system=True
+                )
+        messages[:] = Runner._strip_tool_artifacts(messages)
+
+    @staticmethod
     async def _call_with_retry(
         model: "Model",
         messages: List[Message],
@@ -1059,6 +1101,47 @@ class Runner:
                     del messages[message_checkpoint:]
                     last_exc = exc
                     err = str(exc).lower()
+
+                    # One-shot recovery: cross-provider tool-call/tool-result
+                    # format mismatch (e.g. resuming a session recorded under
+                    # a different model provider). Strip tool artifacts and
+                    # retry immediately — independent of max_api_retry /
+                    # fallback-candidate bookkeeping, since this is a
+                    # guaranteed-safe structural fix, not a flaky transient.
+                    is_tool_history_error = any(h in err for h in state.TOOL_HISTORY_HINTS)
+                    if is_tool_history_error and not state.tool_history_sanitized_done:
+                        state.tool_history_sanitized_done = True
+                        logger.warning(
+                            f"[tool_history] {current.id} rejected tool-call "
+                            f"history (likely cross-model resume); stripping "
+                            f"tool messages and retrying once: {exc}"
+                        )
+                        Runner._sanitize_tool_history_after_error(agent, messages)
+                        try:
+                            if stream:
+                                state.last_used_model_id = current.id
+                                state.last_used_model_idx = model_idx
+                                if is_fallback:
+                                    _emit_fallback_recovery(current.id, model_idx)
+                                return ModelCallResult(
+                                    response=current.response_stream(messages=messages),
+                                    used_model=current,
+                                    used_fallback=is_fallback,
+                                )
+                            resp = await current.response(messages=messages)
+                            state.last_used_model_id = current.id
+                            state.last_used_model_idx = model_idx
+                            if is_fallback:
+                                _emit_fallback_recovery(current.id, model_idx)
+                            return ModelCallResult(
+                                response=resp, used_model=current, used_fallback=is_fallback
+                            )
+                        except Exception as exc2:
+                            del messages[message_checkpoint:]
+                            last_exc = exc2
+                            err = str(exc2).lower()
+                            # Fall through to the normal classification below
+                            # with the post-sanitize exception.
 
                     # Reactive compact: prompt_too_long -> emergency compress.
                     # Only attempted on the primary model; fallbacks inherit the

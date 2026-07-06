@@ -1,20 +1,46 @@
-// ============ SETTINGS / PROFILES ============
-// Web UI only supports adding new profiles + deleting them. Editing an
-// existing profile's model/tuning must be done by hand in config.yaml (the
-// file remains the single source of truth for profile definitions).
+// ============ SETTINGS / PROFILES / SCHEDULED JOBS / ARCHIVED SESSIONS ============
+// One modal, four tabs — Settings, Profiles, Scheduled Jobs and Archived
+// Sessions all live here so switching between them is just a tab click
+// instead of opening a separate modal. Web UI only supports adding new
+// profiles + deleting them; editing an existing profile's model/tuning must
+// be done by hand in config.yaml (the file remains the single source of
+// truth for profile definitions).
 import { state } from './state.js';
 import { showToast, showConfirm } from './modals.js';
 import { loadProfiles } from './model-panel.js';
-import { fetchProfiles, createProfileApi, deleteProfileApi } from './api.js';
+import { loadCronJobs, cancelCronForm } from './cron-panel.js';
+import { fetchProfiles, createProfileApi, deleteProfileApi, openPathApi } from './api.js';
 
-export async function openSettingsModal() {
+export async function openSettingsModal(tab) {
   state.settingsModal.open = true;
+  state.settingsTab = tab || 'settings';
   cancelProfileForm();
+  cancelCronForm();
   await loadSettingsProfiles();
+  if (state.settingsTab === 'cron') await loadCronJobs();
 }
 
 export function closeSettingsModal() {
   state.settingsModal.open = false;
+}
+
+export async function switchSettingsTab(tab) {
+  state.settingsTab = tab;
+  if (tab === 'cron') await loadCronJobs();
+}
+
+export function copyConfigPath() {
+  const p = state.serverConfigPath;
+  if (!p) return;
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(p).then(() => showToast('Copied: ' + p));
+  }
+}
+
+export function openConfigFile() {
+  const p = state.serverConfigPath;
+  if (!p) return;
+  openPathApi(p, 'finder').catch(() => {});
 }
 
 async function loadSettingsProfiles() {

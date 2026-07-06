@@ -473,7 +473,7 @@ class TestCLIHelpers(unittest.TestCase):
         prompt_toolkit app) — it exposes ``render_ansi`` and ``print`` but
         NOT ``rich.Console.capture``. Earlier the gutter proxy hard-coded
         ``self._console.capture()``, raising ``AttributeError`` on the
-        first user_input turn inside ``process_loop``.
+        first ask_user_question turn inside ``process_loop``.
         """
         from agentica.cli.interactive import ChatConsole
         from agentica.cli.display import _GutteredConsole
@@ -2669,7 +2669,7 @@ class TestCLIAwareness(unittest.TestCase):
 class TestInputRequestCancel(unittest.TestCase):
     """Regression tests for the Ctrl+C escape path through an ask-user prompt.
 
-    Motivating bug: when the agent called a user_input / confirm tool, the CLI
+    Motivating bug: when the agent called a ask_user_question / confirm tool, the CLI
     armed an ``_InputRequest`` and the tool thread blocked on
     ``req.result.get()``. Pressing Ctrl+C only reached ``asyncio.Task.cancel()``,
     which cannot interrupt a synchronous blocking ``queue.Queue.get()`` running
@@ -2724,7 +2724,7 @@ class TestInputRequestCancel(unittest.TestCase):
         req_b = _InputRequest(prompt="b")
         self.assertIs(req_a.CANCELLED, req_b.CANCELLED)
 
-    def test_enter_keeps_whitespace_for_pending_user_input_request(self):
+    def test_enter_keeps_whitespace_for_pending_ask_user_question_request(self):
         request = self._import_input_request()(prompt="Need exact text")
         typed = "  keep surrounding whitespace  "
 
@@ -2762,6 +2762,55 @@ class TestInputRequestCancel(unittest.TestCase):
         self.assertFalse(request.cancel())
 
         self.assertEqual(request.result.get_nowait(), "final answer")
+
+
+class TestCmdPermissions(unittest.TestCase):
+    """`/permissions` reads/writes the Agent's own permission_mode directly —
+    no separate PermissionManager object anymore."""
+
+    def _make_ctx(self, agent):
+        return cli_commands.CommandContext(
+            agent_config={"work_dir": None},
+            current_agent=agent,
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
+        )
+
+    def test_set_valid_mode_calls_agent_set_permission_mode(self):
+        from agentica.agent import Agent
+
+        agent = Agent()
+        ctx = self._make_ctx(agent)
+        with patch.object(cli_commands, "get_console", return_value=MagicMock()):
+            cli_commands._cmd_permissions(ctx, "ask")
+
+        self.assertEqual(agent.tool_config.permission_mode, "ask")
+
+    def test_set_invalid_mode_does_not_mutate_agent(self):
+        from agentica.agent import Agent
+
+        agent = Agent()
+        ctx = self._make_ctx(agent)
+        with patch.object(cli_commands, "get_console", return_value=MagicMock()):
+            cli_commands._cmd_permissions(ctx, "strict")
+
+        self.assertEqual(agent.tool_config.permission_mode, "allow-all")
+
+    def test_no_args_prints_current_mode_without_error(self):
+        from agentica.agent import Agent
+        from agentica.agent.config import ToolConfig
+
+        agent = Agent(tool_config=ToolConfig(permission_mode="auto"))
+        ctx = self._make_ctx(agent)
+        console = MagicMock()
+        with patch.object(cli_commands, "get_console", return_value=console):
+            cli_commands._cmd_permissions(ctx, "")
+
+        self.assertTrue(console.print.called)
+
+    def test_yolo_command_removed_from_registry(self):
+        self.assertNotIn("/yolo", cli_commands.COMMAND_REGISTRY)
 
 
 if __name__ == "__main__":

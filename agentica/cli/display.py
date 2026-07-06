@@ -452,8 +452,7 @@ def show_help(skills_registry=None):
             "/cron":            "Scheduled jobs: list | add \"<prompt>\" <schedule> | edit | pause | resume | remove | runs | run | daemon on/off",
         },
         "Permissions": {
-            "/permissions":     "View or set mode (allow-all/auto/strict)",
-            "/yolo":            "Toggle YOLO mode (auto-approve all)",
+            "/permissions":     "View or set mode (ask/auto/allow-all)",
         },
         "Other": {
             "/help":            "Show this help message",

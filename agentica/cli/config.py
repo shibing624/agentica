@@ -399,8 +399,9 @@ def parse_args():
         "--permissions",
         type=str,
         default="auto",
-        choices=["allow-all", "auto", "strict"],
-        help="Permission mode: allow-all (no prompts), auto (prompt for writes), strict (prompt for all)",
+        choices=["ask", "auto", "allow-all"],
+        help="Permission mode: ask (read-only tools only), auto (writes restricted to work_dir), "
+        "allow-all (no restriction)",
     )
     parser.add_argument(
         "command", nargs="?", choices=["acp"], help="Run in ACP mode for IDE integration (agentica acp)"
@@ -653,12 +654,13 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
 
 def create_agent(
     agent_config: dict, extra_tools: Optional[List] = None, workspace: Optional[Workspace] = None, skills_registry=None,
-    user_input_callback=None, enable_cron_immediate_run: bool = True,
+    ask_user_question_callback=None, enable_cron_immediate_run: bool = True,
+    permission_mode: Optional[str] = None,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
-    user_input_callback: optional ``(prompt, options) -> str`` used by the
-        user_input/confirm tools. The interactive CLI passes a prompt_toolkit-aware
+    ask_user_question_callback: optional ``(prompt, options) -> str`` used by the
+        ask_user_question/confirm tools. The interactive CLI passes a prompt_toolkit-aware
         callback so the tool reads via the TUI input box instead of a bare
         ``input()`` (which deadlocks against prompt_toolkit's stdin ownership in
         the background agent thread).
@@ -666,7 +668,12 @@ def create_agent(
         ``action='run'`` executes a job once immediately and returns its output.
         Set False for cron-spawned agents so a scheduled job cannot recursively
         trigger further immediate runs.
+    permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
+        see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
+        then "allow-all".
     """
+    if permission_mode is None:
+        permission_mode = agent_config.get("permissions", "allow-all")
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -699,8 +706,8 @@ def create_agent(
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
-    from agentica.tools.self_manage_tool import SelfManageTool
-    from agentica.tools.cron_tool import CronTool
+    from agentica.tools.self_manage_tool import SelfManageTool, CLI_RESTART_HINT
+    from agentica.tools.cron_tool import CronTool, CLI_DAEMON_HINT
 
     # Immediate-run executor for the cronjob tool: builds a fresh CLI agent per
     # run (mirrors the `/cron run` command) so `action='run'` is a real trial run
@@ -719,7 +726,10 @@ def create_agent(
     # inspect/optimize its own config (config.yaml / .env), self-upgrade, and
     # schedule/manage its own recurring tasks by natural language. Prepended so a
     # user-supplied extra tool with the same name could still override.
-    cli_tools = [SelfManageTool(), CronTool(job_runner=cron_job_runner)] + list(extra_tools or [])
+    cli_tools = [
+        SelfManageTool(restart_hint=CLI_RESTART_HINT),
+        CronTool(job_runner=cron_job_runner, daemon_hint=CLI_DAEMON_HINT),
+    ] + list(extra_tools or [])
 
     new_agent = DeepAgent(
         model=model,
@@ -733,10 +743,11 @@ def create_agent(
         enable_experience_capture=agent_config.get("enable_experience_capture", True),
         experience_config=experience_config,
         long_term_memory_config=long_term_memory_config,
-        include_user_input=True,  # CLI is interactive, always enable human-in-the-loop
-        user_input_callback=user_input_callback,
+        include_ask_user_question=True,  # CLI is interactive, always enable human-in-the-loop
+        ask_user_question_callback=ask_user_question_callback,
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
         diagnostics_servers=agent_config.get("diagnostics_servers"),
+        permission_mode=permission_mode,
     )
 
     if skills_registry and len(skills_registry) > 0:

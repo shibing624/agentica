@@ -71,6 +71,11 @@ from agentica.agent.config import (
     AgentSafetyConfig,
 )
 from agentica.agent.history_filter import HistoryFilter
+from agentica.agent.permissions import (
+    read_only_whitelist,
+    sandbox_should_be_enabled,
+    validate_permission_mode,
+)
 from agentica.hooks import (
     AgentHooks,
     RunHooks,
@@ -503,7 +508,20 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.tool_config = tool_config or ToolConfig()
         self.long_term_memory_config = long_term_memory_config or WorkspaceMemoryConfig()
         self.experience_config = experience_config or ExperienceConfig()
-        self.sandbox_config = sandbox_config
+        # Always hold a concrete SandboxConfig instance (never None) so
+        # set_permission_mode() can flip .enabled in place later and have
+        # already-constructed tool instances (which captured this exact
+        # object reference at build time) observe the change immediately —
+        # no Agent/tool rebuild required. Explicit sandbox_config always wins
+        # as-is (advanced override); permission_mode only supplies the default.
+        # writable_dirs must be seeded with work_dir: SandboxConfig only
+        # enforces work_dir as a fallback when writable_dirs is non-empty
+        # (see BuiltinFileTool._validate_write_path) — an empty list is a
+        # silent no-op even with enabled=True.
+        self.sandbox_config = sandbox_config or SandboxConfig(
+            enabled=sandbox_should_be_enabled(self.tool_config.permission_mode),
+            writable_dirs=[self.work_dir or os.getcwd()],
+        )
         self.history_config = history_config or HistoryConfig()
         self.history_filter = history_filter
         self.tool_input_guardrails = tool_input_guardrails or []
@@ -1039,7 +1057,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     def _is_tool_enabled(self, func_name: str) -> bool:
         """Check if a tool function is enabled.
 
-        Priority: query-level (enabled_tools) > agent-level (runtime_configs) > default (True).
+        Priority: query-level (enabled_tools) > agent-level (runtime_configs)
+        > permission_mode whitelist (e.g. "ask" hides write tools) > default (True).
         """
         # Query-level whitelist: if set, only listed tools are allowed
         if self._enabled_tools is not None:
@@ -1048,7 +1067,24 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         cfg = self._tool_runtime_configs.get(func_name)
         if cfg is not None:
             return cfg.enabled
+        mode_whitelist = read_only_whitelist(self.tool_config.permission_mode)
+        if mode_whitelist is not None:
+            return func_name in mode_whitelist
         return True
+
+    def set_permission_mode(self, mode: str) -> None:
+        """Switch the tool permission tier at runtime — no Agent rebuild needed.
+
+        Mutates ``tool_config.permission_mode`` and the shared
+        ``sandbox_config.enabled`` flag in place. Already-constructed tool
+        instances (write_file/edit_file/execute) hold a reference to this
+        same ``sandbox_config`` object, so they observe the new mode on
+        their very next call. See ``agentica.agent.permissions`` for the
+        exact semantics of "ask" / "auto" / "allow-all".
+        """
+        validate_permission_mode(mode)
+        self.tool_config.permission_mode = mode
+        self.sandbox_config.enabled = sandbox_should_be_enabled(mode)
 
     def _is_skill_enabled(self, skill_name: str) -> bool:
         """Check if a skill is enabled.
@@ -1496,7 +1532,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             return
 
         # If no filtering configured, skip
-        if self._enabled_tools is None and not self._tool_runtime_configs:
+        if (
+            self._enabled_tools is None
+            and not self._tool_runtime_configs
+            and self.tool_config.permission_mode == "allow-all"
+        ):
             return
 
         disabled_funcs = []
@@ -1668,6 +1708,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         attach_goal_tool: bool = True,
         event_callback: Optional[Callable[..., None]] = None,
         verifier: Optional[Callable[..., Any]] = None,
+        seed_messages: Optional[Sequence[Union[Message, Dict[str, Any]]]] = None,
     ) -> "GoalRunResult":
         """Drive the standing-goal loop until completion / pause / budget.
 
@@ -1712,6 +1753,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 as ``None`` — a buggy verifier must not crash the loop.
                 Priority: budget > tool short-circuit > tool-stuck >
                 verifier > judge.
+            seed_messages: Prior conversation to seed into the (cloned) goal
+                agent's working memory before the first turn, so the loop
+                starts from real context. Used by the Web UI so ``/goal`` sees
+                the chat history the user built up — the CLI drives ``/goal`` on
+                the live agent and keeps history naturally. Accepts a sequence
+                of ``Message`` objects or plain ``{role, content}`` dicts.
 
         Returns:
             ``agentica.goals.GoalRunResult`` with final status / reason /
@@ -1722,6 +1769,21 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         # Clone the agent so concurrent run_goal() calls on the same instance
         # are safe.  Swarm._clone_agent_for_task() uses the same pattern.
         agent = self.clone()
+
+        # Seed the cloned agent's working memory with the prior conversation so
+        # the goal loop begins from real context. The CLI drives /goal on the
+        # live agent and keeps history naturally; this makes the Web path
+        # symmetric. hydrate_runs_from_history() rebuilds AgentRun entries that
+        # the prompt builder (get_messages_from_last_n_runs) actually reads —
+        # appending to working_memory.messages alone is NOT enough (that field
+        # is archive/trim only, not prompt assembly).
+        if seed_messages:
+            seed_dicts = [
+                m.model_dump(exclude_none=True) if isinstance(m, Message) else m
+                for m in seed_messages
+            ]
+            agent.working_memory.hydrate_runs_from_history(seed_dicts)
+
         mgr = agent.get_goal_manager(event_callback=event_callback, verifier=verifier)
         state = mgr.set(
             objective,

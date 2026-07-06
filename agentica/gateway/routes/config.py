@@ -444,6 +444,28 @@ async def _add_dir_history(path: str) -> None:
     await _save_dir_history(history[:_DIR_HISTORY_MAX])
 
 
+# ============== Filesystem browsing (folder picker) ==============
+
+@router.get("/api/fs/browse")
+async def browse_fs(path: Optional[str] = None):
+    """List subdirectories of a path for the web UI's folder picker
+    (read-only). Falls back to settings.base_dir when path is omitted."""
+    base = Path(path).expanduser().resolve() if path else settings.base_dir
+    if not base.exists() or not base.is_dir():
+        raise HTTPException(status_code=400, detail=f"Not a directory: {base}")
+    try:
+        entries = sorted(base.iterdir(), key=lambda p: p.name.lower())
+    except PermissionError:
+        entries = []
+    dirs = [
+        {"name": entry.name, "path": str(entry)}
+        for entry in entries
+        if entry.is_dir() and not entry.name.startswith(".")
+    ]
+    parent = str(base.parent) if base.parent != base else None
+    return {"path": str(base), "parent": parent, "dirs": dirs}
+
+
 # ============== Open in Finder / Terminal ==============
 
 @router.post("/api/open")

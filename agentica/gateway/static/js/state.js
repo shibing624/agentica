@@ -9,8 +9,14 @@ import { reactive } from './vendor/petite-vue.js';
 export const state = reactive({
   curSess: null,
   sessions: {},
-  streaming: false,
-  abortCtrl: null,
+  // Per-session in-flight streams: { [sessionId]: { abortCtrl, aiMsg } }.
+  // Multiple sessions can stream concurrently (the backend already runs one
+  // lock per session_id) — switching the viewed session must never abort or
+  // freeze another session's response. `streaming` reflects only the
+  // *currently viewed* session so every existing template/guard that reads
+  // state.streaming keeps working unmodified.
+  streams: {},
+  get streaming() { return !!this.streams[this.curSess] },
   pendingFiles: [],
   serverModel: '-',
   serverDir: '',
@@ -21,7 +27,7 @@ export const state = reactive({
   serverReasoningEffort: '',
   modelsData: null,
   userScrolledUp: false,
-  _scrollLock: false, // 用户主动上翻后锁定，不再因内容增长而意外滚动
+  _scrollLock: false, // locked once the user scrolls up manually, so new content won't force-scroll
   serverContextWindow: 128000,
   serverProfile: '',
   profilesData: { active: '', profiles: [] },
@@ -36,15 +42,27 @@ export const state = reactive({
 
   // ---- input box (petite-vue driven) ----
   inputText: '',
+  // Messages submitted while the agent is streaming are queued here (like the
+  // CLI's PendingQueue) instead of being sent immediately, and are drained
+  // FIFO once the current turn finishes.
+  messageQueue: [],
   modelDDOpen: false,
   quickMenuOpen: false,
   approvalMenuOpen: false,
   ctxTipOpen: false,
   switchingLabel: null,
-  selectedApprovalMode: 'ask',
-  goalInput: '',
-  skillInput: '',
-  toolInput: '',
+  selectedApprovalMode: 'auto',
+  sidebarCollapsed: false,
+  theme: 'auto',
+  quickMenuSearch: '',
+
+  // ---- slash command palette (type "/" in the input to invoke skills / /goal) ----
+  slashOpen: false,
+  slashIndex: 0,
+  // After the user commits a selection the leading "/" stays in the input
+  // (e.g. "/data-analysis "); suppress reopening the palette until that
+  // leading "/" is removed, so typing a normal message doesn't pop it again.
+  slashCommitted: false,
 
   // ---- toast / confirm ----
   toast: { show: false, msg: '' },
@@ -53,22 +71,35 @@ export const state = reactive({
   // ---- dir modal ----
   dirModal: { open: false, forNewSession: false, value: '', historyOpen: false, historyList: [] },
 
+  // Directory chosen for a new chat that hasn't been created yet (curSess is
+  // null) — a session is only actually created once the first message is
+  // sent (see sendMessage() in chat.js), so "+ New Chat" never leaves behind
+  // an empty placeholder in the sidebar if the user doesn't type anything.
+  pendingNewChatDir: '',
+
   // ---- account / plugins panels ----
   accountPanelOpen: false,
   pluginsPanelOpen: false,
 
-  // ---- GATEWAY_TOKEN auth (see api.js) ----
-  authRequired: false,
-  gatewayTokenInput: '',
-
-  // ---- cron modal ----
+  // ---- cron jobs (rendered inside the Settings modal's "Scheduled Jobs" tab) ----
   cronModal: {
-    open: false, jobs: [], formOpen: false, editingId: null,
+    jobs: [], formOpen: false, editingId: null,
     name: '', prompt: '', schedule: '', timeout: '', retries: '',
-    openRuns: {}, runsData: {}, runsLoading: {},
+    validateRun: true, polishing: false,
+    openRuns: {}, runsData: {}, runsLoading: {}, triggering: {},
+  },
+
+  // ---- plugins panel (built-in tools read-only, mcp servers + skills CRUD) ----
+  pluginsTab: 'skills',
+  pluginsSearch: '',
+  pluginsData: { tools: [], skills: [], mcpServers: [] },
+  skillForm: { open: false, editingName: null, name: '', description: '', trigger: '', content: '' },
+  mcpForm: {
+    open: false, name: '', kind: 'stdio', command: '', args: '', url: '', envRows: [],
   },
 
   // ---- settings/profiles modal ----
+  settingsTab: 'settings',
   settingsModal: {
     open: false, formOpen: false,
     form: {
@@ -125,9 +156,28 @@ export function projectNameForDir(dir) {
   return parts[parts.length - 1] || d;
 }
 
+// A project hidden via "Remove project" (`removed: true`) must STAY hidden —
+// it's a deliberate delete, not a "collapse", and it never touches the
+// underlying sessions/files. Starting a brand-new chat in that same
+// directory is a fresh start, not a request to resurrect old history, so it
+// gets its own new project entry for that dir (`dir:<enc>#2`, `#3`, ...)
+// instead of un-hiding the removed one. Existing sessions that already
+// recorded a projectId in sessionMeta are untouched by this — it only
+// applies to the dir-based fallback used for genuinely new sessions.
+export function activeProjectIdForDir(meta, dir) {
+  const canonicalId = projectIdForDir(dir);
+  let id = canonicalId;
+  let n = 1;
+  while (meta.projects[id] && meta.projects[id].removed) {
+    n++;
+    id = `${canonicalId}#${n}`;
+  }
+  return id;
+}
+
 export function ensureProjectForSession(sessionId, session, meta) {
   const sessionMeta = meta.sessionMeta[sessionId] || {};
-  const projectId = sessionMeta.projectId || session.projectId || projectIdForDir(session.dir || '');
+  const projectId = sessionMeta.projectId || session.projectId || activeProjectIdForDir(meta, session.dir || '');
   if (!meta.projects[projectId]) {
     meta.projects[projectId] = {
       id: projectId,

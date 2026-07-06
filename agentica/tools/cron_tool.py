@@ -371,15 +371,23 @@ def _action_update(
 
 # ============== Tool class wrapper for Agent(tools=[CronTool()]) ==============
 
-_CRON_SYSTEM_PROMPT = """You can manage the user's scheduled (cron) jobs directly with the `cronjob` tool: \
-create, list, runs (history), update, pause, resume, remove, and run (execute once now). \
-Translate natural-language requests ("remind me every morning", "stop the hourly job", "try it now", \
-"change it to run daily") into the matching cronjob action instead of editing cron files by hand. \
-Schedules accept cron expressions ("30 7 * * *"), intervals ("every 2h", "30m"), or one-shot ISO timestamps. \
-A scheduled job runs unattended in a fresh session, so its prompt must be fully self-contained. \
-Use action='run' to execute a job once immediately and show the result. \
-Note: jobs only fire on their schedule while the cron scheduler daemon is enabled \
-(the user can enable it with `/cron daemon on`)."""
+# Whether/how the user can control the cron scheduler daemon depends entirely
+# on the product surface the agent is running in. The terminal CLI has a
+# `/cron daemon on` slash command the user can type themselves; the gateway
+# (web chat + Feishu/WeCom/WeChat/Telegram/Discord/DingTalk/QQ bot channels)
+# has no terminal and no such command — telling a web/bot user to run one is
+# a dead end. Default to the surface-agnostic phrasing; the CLI opts into the
+# more specific one via `CronTool(daemon_hint=CLI_DAEMON_HINT)`.
+DEFAULT_DAEMON_HINT = (
+    "jobs only fire on their schedule while the cron scheduler daemon is enabled. "
+    "This is a deployment-level setting (`cron.enabled` in config.yaml) — you cannot "
+    "toggle it yourself from this conversation. If it's off, tell the user to ask "
+    "whoever manages this deployment to enable it."
+)
+CLI_DAEMON_HINT = (
+    "jobs only fire on their schedule while the cron scheduler daemon is enabled "
+    "(the user can enable it with `/cron daemon on`)."
+)
 
 
 class CronTool(Tool):
@@ -395,11 +403,20 @@ class CronTool(Tool):
             real immediate trial run and returns its output. When omitted (SDK /
             unattended usage), ``action='run'`` falls back to marking the job due
             on the next scheduler tick.
+        daemon_hint: surface-specific phrasing for how the user can enable the
+            cron scheduler daemon, appended to the tool's system prompt. Defaults
+            to ``DEFAULT_DAEMON_HINT`` (safe for any non-CLI surface); the CLI
+            passes ``CLI_DAEMON_HINT`` since it alone has the `/cron` command.
     """
 
-    def __init__(self, job_runner: Optional[Callable[[CronJob], dict]] = None):
+    def __init__(
+        self,
+        job_runner: Optional[Callable[[CronJob], dict]] = None,
+        daemon_hint: Optional[str] = None,
+    ):
         super().__init__(name="cronjob", description=_CRONJOB_DESCRIPTION)
         self._job_runner = job_runner
+        self._daemon_hint = daemon_hint or DEFAULT_DAEMON_HINT
         self.register(self.cronjob, is_destructive=True)
         # The immediate-run path spawns a sub-agent in a worker thread via its
         # own asyncio.run() loop, which the outer asyncio.wait_for() cannot
@@ -477,7 +494,16 @@ class CronTool(Tool):
         })
 
     def get_system_prompt(self) -> Optional[str]:
-        return _CRON_SYSTEM_PROMPT
+        return (
+            "You can manage the user's scheduled (cron) jobs directly with the `cronjob` tool: "
+            "create, list, runs (history), update, pause, resume, remove, and run (execute once now). "
+            "Translate natural-language requests (\"remind me every morning\", \"stop the hourly job\", "
+            "\"try it now\", \"change it to run daily\") into the matching cronjob action instead of "
+            "editing cron files by hand. Schedules accept cron expressions (\"30 7 * * *\"), intervals "
+            "(\"every 2h\", \"30m\"), or one-shot ISO timestamps. A scheduled job runs unattended in a "
+            "fresh session, so its prompt must be fully self-contained. Use action='run' to execute a "
+            f"job once immediately and show the result. Note: {self._daemon_hint}"
+        )
 
     def __repr__(self) -> str:
         return "CronTool()"

@@ -279,12 +279,42 @@ class TestSchedulerEndpoints:
             assert client.post("/api/scheduler/jobs/j1/resume").status_code == 200
 
     def test_trigger(self, mock_app):
+        """Trigger runs the job for real (via _execute_job), not just marks it due."""
         client, _ = mock_app
+        fake_run = {"job_id": "j1", "status": "ok", "result": "done"}
         with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
-             patch("agentica.gateway.routes.scheduler.cronjob",
-                   return_value='{"success":true,"job":{"id":"j1"}}'):
+             patch("agentica.gateway.routes.scheduler._execute_job", new=AsyncMock(return_value=fake_run)) as m:
             resp = client.post("/api/scheduler/jobs/j1/trigger")
         assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["run"] == fake_run
+        m.assert_awaited_once()
+
+    def test_trigger_failed_run(self, mock_app):
+        client, _ = mock_app
+        fake_run = {"job_id": "j1", "status": "failed", "error": "boom"}
+        with patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica.gateway.routes.scheduler._execute_job", new=AsyncMock(return_value=fake_run)):
+            resp = client.post("/api/scheduler/jobs/j1/trigger")
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
+
+    def test_create_job_with_validate_run(self, mock_app):
+        """validate_run=True runs the freshly created job immediately."""
+        client, _ = mock_app
+        fake_run = {"job_id": "j1", "status": "ok", "result": "done"}
+        with patch("agentica.gateway.routes.scheduler.cronjob",
+                   return_value='{"success":true,"job":{"job_id":"j1"}}'), \
+             patch("agentica.gateway.routes.scheduler.get_job", return_value=self._fake_job()), \
+             patch("agentica.gateway.routes.scheduler._execute_job", new=AsyncMock(return_value=fake_run)) as m:
+            resp = client.post("/api/scheduler/jobs", json={
+                "prompt": "daily report", "schedule": "30 7 * * *", "validate_run": True,
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["validation_run"] == fake_run
+        m.assert_awaited_once()
 
     def test_list_runs(self, mock_app):
         client, _ = mock_app
@@ -295,6 +325,14 @@ class TestSchedulerEndpoints:
         assert data["total"] == 1
         assert data["runs"][0]["job_id"] == "j1"
         assert data["runs"][0]["result_preview"] == "done"
+        assert data["runs"][0]["result_full"] == "done"
+
+    def test_list_runs_result_full_uses_error_when_no_result(self, mock_app):
+        client, _ = mock_app
+        run = self._fake_run(result=None, error="boom")
+        with patch("agentica.gateway.routes.scheduler.list_task_runs", return_value=[run]):
+            resp = client.get("/api/scheduler/runs")
+        assert resp.json()["runs"][0]["result_full"] == "boom"
 
     def test_list_job_runs(self, mock_app):
         client, _ = mock_app

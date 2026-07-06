@@ -99,6 +99,16 @@ class ToolConfig:
     # 0.0 = disabled. Recommended: 0.8 (warn at 80%, hard-truncate at 90%).
     context_overflow_threshold: float = 0.0
 
+    # Unified 3-tier tool permission mode shared by the SDK, CLI, and Gateway.
+    # See agentica.agent.permissions for the exact semantics of each tier.
+    # "ask" | "auto" | "allow-all". Defaults to "allow-all" (today's SDK
+    # behavior: no restriction) so existing Agent() callers see no change.
+    permission_mode: str = "allow-all"
+
+    def __post_init__(self) -> None:
+        from agentica.agent.permissions import validate_permission_mode
+        validate_permission_mode(self.permission_mode)
+
 
 @dataclass
 class WorkspaceMemoryConfig:

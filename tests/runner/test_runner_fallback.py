@@ -799,5 +799,116 @@ class TestFallbackRecoveryEvent(unittest.TestCase):
         )
 
 
+class TestToolHistorySanitizeRecovery(unittest.TestCase):
+    """Cross-provider tool-call/tool-result mismatch (e.g. resuming a session
+    recorded under Claude with a non-Claude model) -> strip tool artifacts
+    from history and retry once on the same model, no fallback needed."""
+
+    def _model_that_fails_once_on_tool_history(self, model_id="primary"):
+        calls = {"n": 0}
+
+        async def _resp(messages):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError(
+                    "Error code: 400 - {'error': {'message': \"Messages with "
+                    "role 'tool' must be a response to a preceding message "
+                    "with 'tool_calls'\"}}"
+                )
+            return ModelResponse(content="recovered", finish_reason="stop")
+
+        m = MagicMock()
+        m.id = model_id
+        m.response = _resp
+        m.get_retryable_substrings = lambda defaults: tuple(defaults)
+        m.extra_retryable_substrings = None
+        return m, calls
+
+    def test_strips_tool_messages_and_retries_same_model(self):
+        primary, calls = self._model_that_fails_once_on_tool_history()
+        messages = [
+            Message(role="user", content="do X"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+            ),
+            Message(role="tool", content="tool result", tool_call_id="call_1"),
+            Message(role="user", content="continue"),
+        ]
+        agent = _make_agent()
+
+        state = LoopState()
+        result = asyncio.run(
+            Runner._call_with_retry(primary, messages, state, agent, stream=False)
+        )
+
+        self.assertEqual(result.content, "recovered")
+        self.assertEqual(calls["n"], 2)
+        # In-flight messages sent to the model are cleaned of tool artifacts.
+        self.assertNotIn("tool", [m.role for m in messages])
+        self.assertTrue(all(not m.tool_calls for m in messages if m.role == "assistant"))
+        self.assertEqual(state.tool_history_sanitized_done, True)
+
+    def test_also_sanitizes_working_memory_runs(self):
+        from agentica.run_response import RunResponse
+        from agentica.memory.models import AgentRun
+
+        primary, _ = self._model_that_fails_once_on_tool_history()
+        agent = _make_agent()
+        stale_run = AgentRun(
+            response=RunResponse(
+                content="old",
+                messages=[
+                    Message(role="user", content="past question"),
+                    Message(
+                        role="assistant",
+                        content="",
+                        tool_calls=[{"id": "call_9", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+                    ),
+                    Message(role="tool", content="past tool result", tool_call_id="call_9"),
+                ],
+            )
+        )
+        agent.working_memory.runs.append(stale_run)
+
+        state = LoopState()
+        asyncio.run(
+            Runner._call_with_retry(primary, [Message(role="user", content="hi")], state, agent, stream=False)
+        )
+
+        cleaned_roles = [m.role for m in stale_run.response.messages]
+        self.assertNotIn("tool", cleaned_roles)
+        self.assertTrue(all(not m.tool_calls for m in stale_run.response.messages if m.role == "assistant"))
+
+    def test_only_sanitizes_once_per_loop(self):
+        """A second, unrelated tool-history-shaped error is not retried again
+        (state.tool_history_sanitized_done guards against infinite loops)."""
+        calls = {"n": 0}
+
+        async def _resp(messages):
+            calls["n"] += 1
+            raise RuntimeError(
+                "role 'tool' must be a response to a preceding message with 'tool_calls'"
+            )
+
+        primary = MagicMock()
+        primary.id = "primary"
+        primary.response = _resp
+        primary.get_retryable_substrings = lambda defaults: tuple(defaults)
+        primary.extra_retryable_substrings = None
+
+        agent = _make_agent()
+        state = LoopState()
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(
+                Runner._call_with_retry(primary, [Message(role="user", content="hi")], state, agent, stream=False)
+            )
+
+        # Sanitize retried exactly once, not in an infinite loop.
+        self.assertEqual(calls["n"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

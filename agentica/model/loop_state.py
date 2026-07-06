@@ -41,6 +41,9 @@ class LoopState:
     # Reactive compact (one-shot per loop invocation)
     reactive_compact_done: bool = False
 
+    # Tool-history sanitize (one-shot per loop invocation)
+    tool_history_sanitized_done: bool = False
+
     # Cross-provider fallback bookkeeping for the most recent successful LLM call.
     # Set by Runner._call_with_retry; consumed by Runner._run_impl to keep
     # RunResponse.model truthful when a fallback (not the primary) actually
@@ -96,6 +99,20 @@ class LoopState:
         default=(
             "content_filter", "content filter", "content-filter",
             "content_policy", "content policy", "responsibleaipolicyviolation",
+        ),
+        repr=False,
+    )
+    # Cross-provider tool-call/tool-result format mismatch, typically hit when
+    # a session's history was recorded under a different model provider (e.g.
+    # Claude) and is then resumed on an OpenAI-compatible provider (e.g.
+    # DeepSeek) that rejects the resulting 'tool' role messages. Recovered by
+    # stripping tool_calls/tool messages from history and retrying once (see
+    # Runner._sanitize_tool_history_after_error).
+    TOOL_HISTORY_HINTS: tuple = field(
+        default=(
+            "must be a response to a preceding message",
+            "tool_call_ids found in tool_calls",
+            "unexpected tool_use_id",
         ),
         repr=False,
     )

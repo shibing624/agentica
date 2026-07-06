@@ -1,7 +1,10 @@
 // ============ THEME ============
+import { state } from './state.js';
+
 export function getTheme() { return localStorage.getItem('ag_theme') || 'auto' }
 
 export function applyTheme(t) {
+  state.theme = t;
   const d = document.documentElement;
   if (t === 'dark') d.setAttribute('data-theme', 'dark');
   else if (t === 'light') d.removeAttribute('data-theme');
@@ -17,9 +20,6 @@ export function applyTheme(t) {
   }
 }
 
-export function toggleTheme() {
-  const c = getTheme(); let n;
-  if (c === 'auto') n = matchMedia('(prefers-color-scheme:dark)').matches ? 'light' : 'dark';
-  else n = c === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('ag_theme', n); applyTheme(n);
+export function setTheme(t) {
+  localStorage.setItem('ag_theme', t); applyTheme(t);
 }

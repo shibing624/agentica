@@ -669,3 +669,18 @@ class TestCronToolClass:
         from agentica.tools.cron_tool import CronTool
         tool = CronTool(job_runner=lambda j: {"status": "ok", "result": ""})
         assert tool.functions["cronjob"].manages_own_timeout is True
+
+    def test_cron_tool_default_daemon_hint_has_no_slash_command(self):
+        """Non-CLI surfaces (gateway, bot channels) have no terminal, so the
+        default system prompt must not tell the user to run `/cron daemon on`."""
+        from agentica.tools.cron_tool import CronTool
+        tool = CronTool()
+        prompt = tool.get_system_prompt()
+        assert "/cron" not in prompt
+        assert "deployment" in prompt
+
+    def test_cron_tool_cli_daemon_hint_mentions_slash_command(self):
+        """The CLI opts into the slash-command hint since the user can type it."""
+        from agentica.tools.cron_tool import CronTool, CLI_DAEMON_HINT
+        tool = CronTool(daemon_hint=CLI_DAEMON_HINT)
+        assert "/cron daemon on" in tool.get_system_prompt()

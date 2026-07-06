@@ -1,7 +1,7 @@
 // ============ CHAT RENDER + SEND/STREAM ============
 import { state, persistSessionMeta } from './state.js';
 import { nextTick } from './vendor/petite-vue.js';
-import { esc, fmtTime, highlightCode } from './utils.js';
+import { esc, fmtDurationCompact, highlightCode, shortenPath } from './utils.js';
 import { md } from './markdown.js';
 import {
   toolIcon, toolDisplay, toolSecClass, isRichTool, fmtToolArgsHtml, fmtToolArgs,
@@ -9,24 +9,56 @@ import {
 } from './tools-render.js';
 import { showToast, showConfirm, openDirModalForNewSession } from './modals.js';
 import { renderSidebar } from './sidebar.js';
-import { save, forkSession } from './sessions.js';
+import { save, forkSession, createSessionWithDir, defaultDirForNewSession } from './sessions.js';
 import { uploadFiles } from './files.js';
-import { streamChat } from './api.js';
+import { streamChat, runGoalApi } from './api.js';
+import { renderChatNav, scheduleRenderChatNav } from './chat-nav.js';
+import { slashItems, selectSlash, updateSlash } from './model-panel.js';
 
 // ============ CHAT RENDER ============
 export function renderChat() {
   const c = document.getElementById('messages');
   if (!state.curSess || !state.sessions[state.curSess] || !state.sessions[state.curSess].msgs.length) {
+    renderChatNav();
     if (!state.curSess || !state.sessions[state.curSess]) {
-      // 没有 session — 显示引导选择目录
-      c.innerHTML = `<div class="welcome"><img class="w-icon-img" src="${document.querySelector('.brand-logo').src}" alt="logo"><h2>Agentica</h2><p>选择一个项目目录开始工作</p><button class="open-folder-btn" onclick="newSession()">Open Folder</button></div>`;
+      // no session yet — center the greeting like a fresh Codex chat, with the
+      // directory that will be used shown as an editable chip below it. Typing
+      // and sending directly from here works (sendMessage() lazily creates the
+      // session with this directory); the chip is only for changing it upfront.
+      const dir = state.pendingNewChatDir || defaultDirForNewSession();
+      c.innerHTML = `<div class="welcome welcome-new">
+        <img class="w-icon-img" src="${document.querySelector('.brand-logo').src}" alt="logo">
+        <h2>Agentica</h2>
+        <p>What should we build today?</p>
+        <button class="welcome-dir-chip" onclick="openDirModalForNewSession()" title="Change working directory">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.75 3.5h4l1.2 1.5h7.3a.75.75 0 01.75.75v7a.75.75 0 01-.75.75H1.75a.75.75 0 01-.75-.75v-8.5a.75.75 0 01.75-.75z" stroke-linejoin="round"/></svg>
+          <span>${esc(dir ? shortenPath(dir) : 'Choose a directory')}</span>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
+        </button>
+      </div>`;
     } else {
       c.innerHTML = `<div class="welcome"><img class="w-icon-img" src="${document.querySelector('.brand-logo').src}" alt="logo"><h2>Agentica</h2><p>AI Agent — send a message to get started.</p></div>`;
     }
     return;
   }
-  c.innerHTML = state.sessions[state.curSess].msgs.map((m, i) => renderMsg(m, i)).join('');
+  const msgs = state.sessions[state.curSess].msgs;
+  // If the session being (re-)rendered still has an in-flight response —
+  // e.g. the user navigated away mid-stream and just switched back — the
+  // last message is the live aiMsg. Render everything before it statically,
+  // then hand the last message over to the live scaffold (appendLive) so
+  // subsequent chunks keep updating it instead of freezing at whatever
+  // content had accumulated at render time.
+  const stream = state.streams[state.curSess];
+  const isLive = stream && msgs.length && msgs[msgs.length - 1] === stream.aiMsg;
+  const staticCount = isLive ? msgs.length - 1 : msgs.length;
+  c.innerHTML = msgs.slice(0, staticCount).map((m, i) => renderMsg(m, i)).join('');
   highlightCode(c);
+  if (isLive) {
+    appendLive();
+    updateLiveContent(stream.aiMsg);
+    updateLiveSteps(stream.aiMsg);
+  }
+  renderChatNav();
   scrollEnd();
 }
 
@@ -36,21 +68,23 @@ function renderMsg(m, idx) {
 }
 
 function renderUserMsg(m, idx) {
-  let h = `<div class="m m-u"><div class="msg-stack"><div class="bub">${esc(m.content)}`;
+  let h = `<div class="m m-u" id="msg-${idx}"><div class="msg-stack"><div class="bub">${esc(m.content)}`;
   if (m.files && m.files.length) h += m.files.map(f => `<br><span class="m-file">📎 ${esc(f)}</span>`).join('');
   h += `</div>${renderMsgMeta(m)}${renderMsgActions(idx, 'user')}</div></div>`;
   return h;
 }
 
 function renderAssistantMsg(m, idx) {
-  let h = '<div class="m m-a"><div class="msg-stack">';
+  let h = `<div class="m m-a" id="msg-${idx}"><div class="msg-stack">`;
   h += renderStepSections(m.steps || [], m.durationSec || 0, false);
   h += `<div class="bub">${md(m.content)}</div>${renderMsgMeta(m)}${renderMsgActions(idx, 'assistant', m)}</div></div>`;
   return h;
 }
 
-// Pre-existing helper (kept for parity with the original monolith); not
-// currently invoked by any render path, but harmless to retain.
+// Group consecutive same-type steps together while preserving the original
+// chronological order the agent emitted them in (thinking -> tool -> tool ->
+// thinking -> tool -> ...), matching the CLI's native emission order instead
+// of bucketing all thinking text before all tool calls.
 function groupSteps(steps) {
   const sections = [];
   for (const st of steps) {
@@ -67,25 +101,28 @@ function groupSteps(steps) {
   return sections;
 }
 
+// Thinking text and tool calls are both just parts of the same execution
+// process, so they're rendered together under one collapsible "Worked for"
+// row instead of two separate blocks — but in the order they actually happened.
 function renderStepSections(steps, durationSec, isStreaming) {
-  const thinkingItems = steps.filter(st => st.type === 'thinking');
-  const toolItems = steps.filter(st => st.type === 'tool');
-  let h = '';
-  if (thinkingItems.length) h += renderThinkingBlock(thinkingItems, durationSec, isStreaming);
-  if (toolItems.length) h += renderToolSection(toolItems);
-  return h;
-}
-
-function renderThinkingBlock(items, durationSec, isStreaming) {
-  const text = items.map(s => s.text).join('\n');
-  const label = isStreaming ? '正在思考...' : `已处理 ${Math.max(0, Math.round(durationSec || 0))}s`;
+  const sections = groupSteps(steps);
+  if (!sections.length) return '';
+  const label = isStreaming ? 'Thinking...' : `Worked for ${fmtDurationCompact(durationSec)}`;
   const open = isStreaming ? ' open' : '';
-  const arrowOpen = isStreaming ? ' open' : '';
+  let bodyH = '';
+  for (const sec of sections) {
+    if (sec.type === 'thinking') {
+      const text = sec.items.map(s => s.text).join('\n');
+      if (text) bodyH += `<div class="think-text">${esc(text)}</div>`;
+    } else {
+      bodyH += renderToolSection(sec.items);
+    }
+  }
   return `<div class="think-row has-body" onclick="toggleThinkBody(this)">
-    <span class="tg-arrow${arrowOpen}">&#x25B8;</span>
+    <span class="tg-arrow${open}">&#x25B8;</span>
     <span class="think-icon">💭</span>
     <span class="think-lbl">${esc(label)}</span>
-  </div><div class="think-body${open}">${esc(text)}</div>`;
+  </div><div class="think-body${open}">${bodyH}</div>`;
 }
 
 function renderToolSection(items) {
@@ -136,11 +173,11 @@ function renderToolSection(items) {
 }
 
 function renderMsgMeta(m) {
-  const parts = [];
-  if (m.ts) parts.push(new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-  if (m.durationSec) parts.push(fmtTime(m.durationSec));
-  if (!parts.length) return '';
-  return `<div class="m-meta">${parts.map(esc).join(' · ')}</div>`;
+  // Duration already shown in the "Worked for" step-section label above, so
+  // the trailing timestamp here only needs the time-of-day, not a duplicate.
+  if (!m.ts) return '';
+  const time = new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `<div class="m-meta">${esc(time)}</div>`;
 }
 
 // Icon set follows the Feather-icons visual language (clean, thin outline,
@@ -153,13 +190,13 @@ const ICON_FORK = '<svg viewBox="0 0 16 16" aria-hidden="true"><line x1="4" y1="
 const ICON_RETRY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8A5.5 5.5 0 104.9 12.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function renderMsgActions(idx, role, msg) {
-  const copy = `<button class="msg-act" onclick="copyMsg(${idx})" title="复制消息" aria-label="Copy message">${ICON_COPY}</button>`;
+  const copy = `<button class="msg-act" onclick="copyMsg(${idx})" title="Copy message" aria-label="Copy message">${ICON_COPY}</button>`;
   if (role === 'user') {
-    return `<div class="m-actions">${copy}<button class="msg-act" onclick="editUserMsg(${idx})" title="编辑并从这里继续" aria-label="Edit message">${ICON_EDIT}</button></div>`;
+    return `<div class="m-actions">${copy}<button class="msg-act" onclick="editUserMsg(${idx})" title="Edit and continue from here" aria-label="Edit message">${ICON_EDIT}</button></div>`;
   }
   return `<div class="m-actions">${copy}
     <button class="msg-act" onclick="forkFromMsg(${idx})" title="Fork from here" aria-label="Fork from here">${ICON_FORK}</button>
-    <button class="msg-act" onclick="retryMsg(${idx})" title="重新生成这条回答" aria-label="Retry response">${ICON_RETRY}</button>
+    <button class="msg-act" onclick="retryMsg(${idx})" title="Regenerate this response" aria-label="Retry response">${ICON_RETRY}</button>
   </div>`;
 }
 
@@ -169,14 +206,14 @@ export async function copyMsg(idx) {
   const text = m.content || '';
   try {
     await navigator.clipboard.writeText(text);
-    showToast('已复制', 1200);
+    showToast('Copied', 1200);
   } catch {
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.select();
     document.execCommand('copy');
     ta.remove();
-    showToast('已复制', 1200);
+    showToast('Copied', 1200);
   }
 }
 
@@ -194,7 +231,7 @@ export function editUserMsg(idx) {
   nextTick(() => autoResize(ta));
   state.pendingFiles = [];
   ta.focus();
-  showToast('已载入编辑内容，发送后从这里继续', 1800);
+  showToast('Loaded into editor — send to continue from here', 1800);
 }
 
 export function setMsgFeedback(idx, value) {
@@ -225,9 +262,9 @@ export function deleteMsg(idx) {
       s.msgs.splice(idx, 1);
     }
     s.ts = Date.now(); save(); renderChat(); renderSidebar();
-    showToast('已删除', 1200);
+    showToast('Deleted', 1200);
   };
-  if (msg.role === 'user') showConfirm('删除这轮用户消息及其后的回答？', remove);
+  if (msg.role === 'user') showConfirm('Delete this user message and the responses after it?', remove);
   else remove();
 }
 
@@ -304,7 +341,7 @@ function isNearBottom() {
 
 // Auto-scroll only if user hasn't deliberately scrolled up
 export function autoScroll() {
-  // 一旦锁定（用户上翻），完全停止自动滚动，只更新按钮
+  // once locked (user scrolled up), fully stop auto-scroll and just update the button
   if (state._scrollLock || state.userScrolledUp) { updateScrollBtn(); return; }
   if (isNearBottom()) {
     scrollEnd();
@@ -318,8 +355,8 @@ export function updateScrollBtn() {
   if (!btn) return;
   const a = document.getElementById('chatArea');
   const dist = a.scrollHeight - a.scrollTop - a.clientHeight;
-  // 流式输出时：只要用户上翻（_scrollLock）或不在底部，就显示下箭头
-  // 非流式时：滚动超过半屏才显示
+  // while streaming: show the down-arrow if the user scrolled up (_scrollLock) or isn't at the bottom
+  // otherwise: only show once scrolled past half a screen
   const show = state.streaming ? (dist > 30) : (dist > a.clientHeight * 0.5);
   btn.classList.toggle('visible', show);
 }
@@ -328,31 +365,166 @@ export function updateScrollBtn() {
 export { isNearBottom };
 
 // ============ SEND / STREAM ============
-export function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!state.streaming) sendMessage() } }
+export function handleKey(e) {
+  // Slash palette navigation: ArrowUp/Down move the highlight, Enter commits
+  // the selected directive/skill (replacing the "/query" text), Esc closes.
+  if (state.slashOpen) {
+    const items = slashItems();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (items.length) state.slashIndex = (state.slashIndex + 1) % items.length;
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (items.length) state.slashIndex = (state.slashIndex - 1 + items.length) % items.length;
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      state.slashOpen = false;
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (items[state.slashIndex]) selectSlash(items[state.slashIndex]);
+      return;
+    }
+    // Any other key falls through so the character is typed and @input refreshes
+    // the filtered list on the next input event.
+  }
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  // IME composition (Chinese/Japanese/Korean input, or a browser predictive-text
+  // candidate popup) also fires a keydown with key === 'Enter' when the user is
+  // just confirming a candidate, not submitting — sending here would cut the
+  // message off mid-composition. e.keyCode 229 is the legacy fallback some
+  // browsers use instead of (or alongside) isComposing.
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  if (!state.streaming) { sendMessage(); return }
+  // Streaming + empty input: Enter does nothing — interrupting must be an
+  // explicit click on the stop button, not an accidental empty Enter press.
+  if (state.inputText.trim() || state.pendingFiles.length) queueMessage();
+}
 export function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 200) + 'px' }
 
-export function onAction() {
-  if (state.streaming) { stopGen(); return }
-  sendMessage();
+export function onInput(e) {
+  autoResize(e.target);
+  updateSlash();
 }
 
-export async function sendMessage() {
-  const originalText = state.inputText.trim();
-  let text = originalText;
+export function onAction() {
+  if (!state.streaming) { sendMessage(); return }
+  if (state.inputText.trim() || state.pendingFiles.length) queueMessage();
+  else stopGen();
+}
+
+// ============ MESSAGE QUEUE (queue while streaming, like the CLI) ============
+// Queued items are tagged with the session they were composed for. That way
+// switching sessions while one is still streaming can't cause a message
+// meant for session A to be silently fired into session B once the agent
+// frees up — drainQueue() only ever sends items belonging to the active
+// session.
+export function queueMessage() {
+  const text = state.inputText.trim();
   if (!text && !state.pendingFiles.length) return;
+  state.messageQueue.push({
+    id: 'q_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+    sessionId: state.curSess,
+    text,
+    files: state.pendingFiles.slice(),
+    ts: Date.now(),
+  });
+  state.inputText = '';
+  state.pendingFiles = [];
+  const ta = document.getElementById('inputTa');
+  if (ta) { ta.style.height = 'auto'; ta.focus() }
+}
+
+// Queue items belong to whichever session they were composed for (see
+// queueMessage below) — the input box only ever shows/edits the queue for
+// the session currently being viewed, since other sessions may be running
+// concurrently in the background with their own separate queues.
+export function sessionQueue() {
+  return state.messageQueue.filter(q => q.sessionId === state.curSess);
+}
+
+export function removeQueueItem(id) {
+  const idx = state.messageQueue.findIndex(q => q.id === id);
+  if (idx >= 0) state.messageQueue.splice(idx, 1);
+}
+
+export function editQueueItem(id) {
+  const idx = state.messageQueue.findIndex(q => q.id === id);
+  if (idx < 0) return;
+  const [item] = state.messageQueue.splice(idx, 1);
+  state.inputText = item.text;
+  state.pendingFiles = item.files || [];
+  const ta = document.getElementById('inputTa');
+  if (ta) { nextTick(() => autoResize(ta)); ta.focus() }
+}
+
+// Jump this queued item to the front and interrupt the current answer so it
+// runs next, instead of waiting for the current turn to finish naturally.
+export function sendQueueItemNow(id) {
+  const idx = state.messageQueue.findIndex(q => q.id === id);
+  if (idx < 0) return;
+  const [item] = state.messageQueue.splice(idx, 1);
+  state.messageQueue.unshift(item);
+  if (state.streaming) stopGen();
+  else drainQueue();
+}
+
+// Pull the next queued message for the *currently active* session and send
+// it, once the agent is free again. Items queued for a session the user has
+// since navigated away from are left alone until that session is reopened
+// (switchTo() calls drainQueue() again on entry).
+export function drainQueue() {
+  if (state.streaming || !state.curSess) return;
+  const idx = state.messageQueue.findIndex(q => q.sessionId === state.curSess);
+  if (idx < 0) return;
+  const [item] = state.messageQueue.splice(idx, 1);
+  // Pass the queued text/files explicitly instead of routing them through
+  // state.inputText/pendingFiles — the user may already be composing an
+  // unrelated draft for this session, and clobbering it here was the bug.
+  sendMessage(item.text, item.files || []);
+}
+
+export async function sendMessage(overrideText, overrideFiles) {
+  const usingOverride = overrideText !== undefined;
+  const originalText = (usingOverride ? overrideText : state.inputText).trim();
+  let text = originalText;
+  const files = usingOverride ? overrideFiles : state.pendingFiles;
+  if (!text && !files.length) return;
   if (state.streaming) return;
 
   if (!state.curSess) {
-    openDirModalForNewSession();
+    // The session for a new chat is only created here, on the first actual
+    // message — not when "+ New Chat" is clicked — so an unused draft never
+    // leaves an empty placeholder behind in the sidebar/history.
+    const dir = state.pendingNewChatDir || defaultDirForNewSession();
+    if (!dir) { openDirModalForNewSession(); return; }
+    state.pendingNewChatDir = '';
+    createSessionWithDir(dir);
+  }
+  const sessId = state.curSess;
+  const s = state.sessions[sessId];
+  if (!s) { openDirModalForNewSession(); return; }
+
+  // "/goal <objective>" — dispatch to the bounded Agent.run_goal() loop
+  // instead of a normal streamed turn, mirroring the CLI's /goal command.
+  const goalMatch = /^\/goal\s+(.+)/is.exec(text);
+  if (goalMatch) {
+    if (!usingOverride) { state.inputText = ''; document.getElementById('inputTa').style.height = 'auto' }
+    await runGoalFlow(s, originalText, goalMatch[1].trim(), sessId);
     return;
   }
-  const s = state.sessions[state.curSess];
 
   // upload files first
   let uploadedPaths = [];
-  if (state.pendingFiles.length) {
+  if (files.length) {
     const targetDir = s.dir || state.serverDir || '';
-    uploadedPaths = await uploadFiles(targetDir);
+    uploadedPaths = await uploadFiles(targetDir, files);
     if (!text) text = 'I uploaded files: ' + uploadedPaths.join(', ');
     else text += '\n\n[Attached files: ' + uploadedPaths.join(', ') + ']';
   }
@@ -365,21 +537,24 @@ export async function sendMessage() {
     s.title = userMsg.content.slice(0, 50);
   }
   s.ts = Date.now();
-  save(); renderChat(); renderSidebar();
+  save();
+  if (sessId === state.curSess) renderChat();
+  renderSidebar();
 
-  // clear
-  state.inputText = '';
-  const ta = document.getElementById('inputTa');
-  ta.style.height = 'auto';
+  // clear — only the real input box, never the caller's explicit override
+  if (!usingOverride) {
+    state.inputText = '';
+    state.pendingFiles = [];
+    document.getElementById('inputTa').style.height = 'auto';
+  }
 
   // stream
-  state.streaming = true;
-  state.abortCtrl = new AbortController();
-
+  const abortCtrl = new AbortController();
   const aiStart = performance.now();
   const aiMsg = { role: 'assistant', content: '', steps: [], ts: Date.now(), durationSec: 0 };
+  state.streams[sessId] = { abortCtrl, aiMsg };
   s.msgs.push(aiMsg);
-  appendLive();
+  if (sessId === state.curSess) appendLive();
 
   // current thinking accumulator
   let curThinking = '';
@@ -387,22 +562,13 @@ export async function sendMessage() {
   approxIn = Math.ceil(text.length / 3.5);
 
   try {
-    const composedText = [
-      state.goalInput ? `[Goal]\n${state.goalInput}` : '',
-      state.skillInput ? `[Skill]\n${state.skillInput}` : '',
-      state.toolInput ? `[Tool]\n${state.toolInput}` : '',
-      text,
-    ].filter(Boolean).join('\n\n');
     const resp = await streamChat({
-      message: composedText,
-      session_id: state.curSess,
+      message: text,
+      session_id: sessId,
       user_id: 'default',
       work_dir: s.dir || state.serverDir || '',
-      goal: state.goalInput,
-      skill: state.skillInput,
-      tool: state.toolInput,
       approval_mode: state.selectedApprovalMode,
-    }, state.abortCtrl.signal);
+    }, abortCtrl.signal);
     const reader = resp.body.getReader();
     const dec = new TextDecoder();
     let buf = '';
@@ -472,14 +638,14 @@ export async function sendMessage() {
                 s.tokOut = (s.tokOut || 0) + approxOut;
                 s.tokTotal = (s.tokTotal || 0) + approxIn + approxOut;
               }
-              // 保存最后一次请求的 input_tokens（代表当前上下文实际占用）
+              // save the last request's input_tokens (reflects actual current context usage)
               if (entries.length > 0) {
                 const lastEntry = entries[entries.length - 1];
                 s.lastInputTokens = lastEntry.input_tokens || gotIn || 0;
               } else if (gotIn > 0) {
                 s.lastInputTokens = gotIn;
               } else {
-                // fallback: 用近似值
+                // fallback: use the approximation
                 s.lastInputTokens = approxIn;
               }
               s.requests = (s.requests || 0) + (gotReqs || 1);
@@ -508,14 +674,63 @@ export async function sendMessage() {
   }
 
   if (!aiMsg.durationSec) aiMsg.durationSec = (performance.now() - aiStart) / 1000;
-  state.streaming = false; state.abortCtrl = null; state.userScrolledUp = false; state._scrollLock = false;
-  state.goalInput = '';
-  state.skillInput = '';
-  state.toolInput = '';
-  updateScrollBtn();
+  delete state.streams[sessId];
   s.ts = Date.now(); save();
-  renderChat(); renderSidebar();
-  document.getElementById('inputTa').focus();
+  markSessionActivity(sessId);
+  renderSidebar();
+  if (sessId === state.curSess) {
+    state.userScrolledUp = false; state._scrollLock = false;
+    updateScrollBtn();
+    renderChat();
+    document.getElementById('inputTa').focus();
+  }
+  drainQueue();
+}
+
+// A response that finished while the user had already switched to a
+// different session shouldn't silently vanish — flag it unread (small green
+// dot in the sidebar) instead. Sessions the user is still looking at never
+// get flagged.
+function markSessionActivity(sessId) {
+  const s = state.sessions[sessId];
+  if (s) s.unread = sessId !== state.curSess;
+}
+
+async function runGoalFlow(s, displayText, objective, sessId) {
+  const userMsg = { role: 'user', content: displayText, ts: Date.now() };
+  s.msgs.push(userMsg);
+  if (s.msgs.filter(m => m.role === 'user').length === 1) s.title = displayText.slice(0, 50);
+  s.ts = Date.now();
+  save();
+  if (sessId === state.curSess) renderChat();
+  renderSidebar();
+
+  const aiMsg = { role: 'assistant', content: '_Running standing-goal loop…_', steps: [], ts: Date.now(), durationSec: 0 };
+  // No AbortController — run_goal is a single bounded, non-streamed request
+  // (see AgentService.run_goal docstring), so it can't be interrupted mid-flight yet.
+  state.streams[sessId] = { abortCtrl: null, aiMsg };
+  s.msgs.push(aiMsg);
+  if (sessId === state.curSess) appendLive();
+  const t0 = performance.now();
+
+  const { ok, data } = await runGoalApi(objective, sessId);
+  aiMsg.durationSec = (performance.now() - t0) / 1000;
+  if (!ok) {
+    aiMsg.content = '**Error:** ' + (data?.detail || 'goal run failed');
+  } else {
+    const statusLabel = { complete: '✅ complete', paused: '⏸ paused', budget_limited: '⏱ budget limited' }[data.status] || data.status;
+    aiMsg.content = (data.content || '_(no content)_') + `\n\n---\n*goal ${statusLabel} · ${data.turns_used} turn(s) · ${data.reason || ''}*`;
+  }
+  delete state.streams[sessId];
+  s.ts = Date.now(); save();
+  markSessionActivity(sessId);
+  renderSidebar();
+  if (sessId === state.curSess) {
+    state.userScrolledUp = false; state._scrollLock = false;
+    renderChat();
+    document.getElementById('inputTa').focus();
+  }
+  drainQueue();
 }
 
 function findLastTool(steps) {
@@ -525,7 +740,10 @@ function findLastTool(steps) {
   return null;
 }
 
-export function stopGen() { if (state.abortCtrl) state.abortCtrl.abort() }
+export function stopGen() {
+  const stream = state.streams[state.curSess];
+  if (stream && stream.abortCtrl) stream.abortCtrl.abort();
+}
 
 // ============ LIVE DOM ============
 function appendLive() {
@@ -540,7 +758,7 @@ function appendLive() {
 
 function updateLiveContent(msg) {
   const el = document.getElementById('live-bub');
-  if (el) { el.innerHTML = md(msg.content); highlightCode(el); autoScroll() }
+  if (el) { el.innerHTML = md(msg.content); highlightCode(el); autoScroll(); scheduleRenderChatNav() }
 }
 
 function updateLiveSteps(msg) {
@@ -550,5 +768,6 @@ function updateLiveSteps(msg) {
   const bodies = el.querySelectorAll('.think-body.open');
   if (bodies.length) { const last = bodies[bodies.length - 1]; last.scrollTop = last.scrollHeight };
   autoScroll();
+  scheduleRenderChatNav();
 }
 

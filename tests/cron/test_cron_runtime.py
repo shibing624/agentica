@@ -78,7 +78,7 @@ class TestCronCommand(unittest.TestCase):
             # No interactive channel / agent in tests -> /cron add skips the
             # LLM refine + confirm flow and creates the job with the raw prompt.
             current_agent = None
-            user_input_callback = None
+            ask_user_question_callback = None
 
         self.ctx = Ctx()
         self.ctx.tui_state = {
@@ -154,25 +154,25 @@ class TestCronCommand(unittest.TestCase):
         commands._cmd_cron(self.ctx, "edit nope prompt hi")
 
     def test_remove_uses_tui_confirm_not_pt_prompt(self):
-        """Regression: /cron remove must confirm via the user_input_callback
+        """Regression: /cron remove must confirm via the ask_user_question_callback
         (TUI-safe), never a nested pt_prompt that deadlocks the bg thread."""
         from agentica.cli import commands
         commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
         jid = self.cronjobs.list_jobs()[0].id
 
         # 'no' keeps the job.
-        self.ctx.user_input_callback = lambda prompt, options=None: "no"
+        self.ctx.ask_user_question_callback = lambda prompt, options=None: "no"
         commands._cmd_cron(self.ctx, f"remove {jid}")
         self.assertEqual(len(self.cronjobs.list_jobs()), 1)
 
         # 'yes' removes it.
-        self.ctx.user_input_callback = lambda prompt, options=None: "yes"
+        self.ctx.ask_user_question_callback = lambda prompt, options=None: "yes"
         commands._cmd_cron(self.ctx, f"remove {jid}")
         self.assertEqual(len(self.cronjobs.list_jobs()), 0)
 
     def test_confirm_via_tui_safe_default_without_callback(self):
         from agentica.cli import commands
-        self.ctx.user_input_callback = None
+        self.ctx.ask_user_question_callback = None
         self.assertFalse(commands._confirm_via_tui(self.ctx, "Delete?"))
 
     def test_add_refines_prompt_and_stores_recommended(self):
@@ -194,7 +194,7 @@ class TestCronCommand(unittest.TestCase):
 
         self.ctx.current_agent = _FakeAgent()
         # Callback picks the first (recommended = refined) option.
-        self.ctx.user_input_callback = lambda prompt, options=None: (
+        self.ctx.ask_user_question_callback = lambda prompt, options=None: (
             options[0] if options else "")
 
         commands._cmd_cron(self.ctx, 'add "每分钟在tmp下touch时间戳txt" "every 1m"')
@@ -219,7 +219,7 @@ class TestCronCommand(unittest.TestCase):
 
         self.ctx.current_agent = _FakeAgent()
         # Pick the "Keep the original prompt" option (2nd).
-        self.ctx.user_input_callback = lambda prompt, options=None: (
+        self.ctx.ask_user_question_callback = lambda prompt, options=None: (
             options[1] if options and len(options) > 1 else "")
 
         commands._cmd_cron(self.ctx, 'add "raw words" "every 1m"')

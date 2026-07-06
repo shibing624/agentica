@@ -1817,10 +1817,10 @@ def get_builtin_tools(
         include_todos: bool = True,
         include_task: bool = True,
         include_skills: bool = False,
-        include_user_input: bool = False,
+        include_ask_user_question: bool = False,
         task_model: Optional["Model"] = None,
         custom_skill_dirs: Optional[List[str]] = None,
-        user_input_callback=None,
+        ask_user_question_callback=None,
         sandbox_config=None,
         enable_diagnostics: bool = False,
         diagnostics_servers: Optional[List[str]] = None,
@@ -1838,11 +1838,11 @@ def get_builtin_tools(
         include_todos: Whether to include task management tools
         include_task: Whether to include subagent task tool
         include_skills: Whether to include skill tool for executing skills (default: False)
-        include_user_input: Whether to include user input tool for human-in-the-loop (default: False)
+        include_ask_user_question: Whether to include ask_user_question tool for human-in-the-loop (default: False)
         task_model: Optional model override for subagents spawned by the
             ``task`` tool. When ``None`` the parent agent's model is cloned.
         custom_skill_dirs: Custom skill directories to load (optional)
-        user_input_callback: Custom callback for user input tool (optional)
+        ask_user_question_callback: Custom callback for ask_user_question tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
         enable_diagnostics: When True, start an LSP diagnostics checker and attach
             it to the file tool so write/edit results report newly-introduced
@@ -1893,9 +1893,9 @@ def get_builtin_tools(
         from agentica.tools.skill_tool import SkillTool
         tools.append(SkillTool(custom_skill_dirs=custom_skill_dirs, auto_load=True))
 
-    if include_user_input:
+    if include_ask_user_question:
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
-        tools.append(AskUserQuestionTool(input_callback=user_input_callback))
+        tools.append(AskUserQuestionTool(input_callback=ask_user_question_callback))
 
     return tools
 

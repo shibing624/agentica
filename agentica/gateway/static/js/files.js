@@ -1,6 +1,9 @@
 // ============ DRAG & DROP / FILE HANDLING ============
 import { state } from './state.js';
 import { uploadFileApi } from './api.js';
+import { showToast } from './modals.js';
+
+const MAX_PENDING_FILES = 100;
 
 export function setupDragDrop() {
   const box = document.getElementById('inputBox');
@@ -17,19 +20,24 @@ export function onFilePick(e) {
   e.target.value = '';
 }
 export function addFiles(fileList) {
-  for (const f of fileList) state.pendingFiles.push(f);
+  for (const f of fileList) {
+    if (state.pendingFiles.length >= MAX_PENDING_FILES) {
+      showToast(`Up to ${MAX_PENDING_FILES} files per message`, 1500);
+      break;
+    }
+    state.pendingFiles.push(f);
+  }
 }
 export function removeFile(i) {
   state.pendingFiles.splice(i, 1);
 }
 
-export async function uploadFiles(targetDir) {
+export async function uploadFiles(targetDir, files) {
   const uploaded = [];
-  for (const f of state.pendingFiles) {
+  for (const f of files) {
     const { ok, data } = await uploadFileApi(f, targetDir);
     if (ok && data) uploaded.push(data.path);
     else uploaded.push(`[upload failed: ${f.name}]`);
   }
-  state.pendingFiles = [];
   return uploaded;
 }

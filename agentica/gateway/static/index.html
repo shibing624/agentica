@@ -9,34 +9,39 @@
 <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <link id="hljs-theme" rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/atom-one-light.min.css">
 <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
-<link rel="stylesheet" href="/static/style.css?v=23">
+<link rel="stylesheet" href="/static/style.css?v=49">
 </head>
 <body>
 
 <!-- SIDEBAR -->
 <aside class="sidebar" id="sidebar">
-  <div class="side-head">
+  <div class="side-head" v-scope>
     <div class="brand">
       <img class="brand-logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%234A90D9'/%3E%3Cstop offset='100%25' stop-color='%23A8D8EA'/%3E%3C/linearGradient%3E%3ClinearGradient id='body' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%23E8F4FD'/%3E%3Cstop offset='100%25' stop-color='%23d0e8f8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='50' cy='50' r='48' fill='url(%23bg)'/%3E%3Cpath d='M28 38 L22 18 L38 30 Z' fill='%23E8F4FD'/%3E%3Cpath d='M72 38 L78 18 L62 30 Z' fill='%23E8F4FD'/%3E%3Cpath d='M28 38 L22 18 L38 30' fill='none' stroke='%23d0e8f8' stroke-width='1'/%3E%3Cpath d='M72 38 L78 18 L62 30' fill='none' stroke='%23d0e8f8' stroke-width='1'/%3E%3Cellipse cx='50' cy='52' rx='28' ry='28' fill='url(%23body)'/%3E%3Ccircle cx='39' cy='46' r='4.5' fill='%232C3E50'/%3E%3Ccircle cx='61' cy='46' r='4.5' fill='%232C3E50'/%3E%3Ccircle cx='40.2' cy='44.8' r='1.5' fill='white'/%3E%3Ccircle cx='62.2' cy='44.8' r='1.5' fill='white'/%3E%3Cellipse cx='50' cy='55' rx='3.5' ry='2' fill='%23F4A0B0'/%3E%3Cpath d='M46.5 55 Q50 59 53.5 55' stroke='%232C3E50' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3Cline x1='28' y1='52' x2='16' y2='48' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='28' y1='55' x2='16' y2='55' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='72' y1='52' x2='84' y2='48' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3Cline x1='72' y1='55' x2='84' y2='55' stroke='%23ccc' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E" alt="logo">
       <span>Agentica</span>
-      <span class="brand-ver" id="verLabel">v0.1.1</span>
     </div>
+    <button class="ib" @click="toggleSidebar()" title="Collapse sidebar">
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><line x1="5.5" y1="2.5" x2="5.5" y2="13.5"/></svg>
+    </button>
   </div>
   <nav class="side-nav" aria-label="Primary">
     <button class="side-nav-item" id="navNewChat" onclick="newSession()" title="New Chat">
       <span class="nav-icon"><svg viewBox="0 0 16 16"><path d="M8 2.75v10.5M2.75 8h10.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
       <span class="nav-label">New Chat</span>
     </button>
-    <label class="side-nav-item side-search-item" title="Search" v-scope>
+    <label class="side-nav-item side-search-item" title="Search" v-scope onclick="focusSidebarSearch()">
       <span class="nav-icon"><svg viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.25" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.2 10.2l3.05 3.05" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
       <input type="text" placeholder="Search" v-model="state.sidebarSearch">
+      <button class="search-clear" v-if="state.sidebarSearch" @click.stop.prevent="state.sidebarSearch=''" title="Clear">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
     </label>
-    <button class="side-nav-item" id="navScheduled" onclick="openCronModal()" title="Scheduled">
-      <span class="nav-icon"><svg viewBox="0 0 16 16"><rect x="2.25" y="3" width="11.5" height="10.75" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5 1.75v2.5M11 1.75v2.5M2.75 6.25h10.5M8 8.25v2.4l1.8 1" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+    <button class="side-nav-item" id="navScheduled" onclick="openSettingsModal('cron')" title="Scheduled">
+      <span class="nav-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9" r="5.5"/><path d="M8 6.2V9l2 1.2"/><path d="M2.7 3.2l1.9 1.7M13.3 3.2l-1.9 1.7M6.2 1.5h3.6"/></svg></span>
       <span class="nav-label">Scheduled</span>
     </button>
     <button class="side-nav-item" id="navPlugins" onclick="openPluginsPanel()" title="Plugins">
-      <span class="nav-icon"><svg viewBox="0 0 16 16"><path d="M6.25 2.25h3.5v3h3v3.5h-3v3h-3.5v-3h-3v-3.5h3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg></span>
+      <span class="nav-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 14.7v-3.3"/><path d="M6 5.3V1.3M10 5.3V1.3"/><path d="M12 5.3v3.3a2.7 2.7 0 01-2.7 2.7h-2.6a2.7 2.7 0 01-2.7-2.7V5.3z"/></svg></span>
       <span class="nav-label">Plugins</span>
     </button>
   </nav>
@@ -61,6 +66,7 @@
             <div class="p-dir" :title="project.dir || ''">{{ project.dirShort }}</div>
           </div>
           <div class="p-actions" v-if="state.renamingProjectId!==project.id">
+            <button class="db" @click.stop="createSessionInProject(project.id)" title="New chat in this project"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 3v10M3 8h10"/></svg></button>
             <button class="db" @click.stop="renameProject(project.id)" title="Rename project"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.55 1.45a1.55 1.55 0 012.2 2.2l-8.2 8.2-3.3.9.9-3.3z" stroke-linejoin="round"/><path d="M10.5 2.5l3 3"/></svg></button>
             <button class="db danger" @click.stop="removeProject(project.id)" title="Remove project"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
           </div>
@@ -70,7 +76,7 @@
           <div class="s-main">
             <input class="s-rename-input" v-if="state.renamingSessionId===s.id" :id="'rename_' + s.id" :value="s.title"
                    @click.stop @keydown="renameKey($event, s.id)" @blur="commitSessionRename(s.id, $event.target.value)">
-            <div class="ti" v-else @dblclick.stop="renameSession(s.id)" title="双击重命名">{{ s.title }}</div>
+            <div class="ti" v-else @dblclick.stop="renameSession(s.id)" title="Double-click to rename"><span class="unread-dot" v-if="s.unread" title="New reply"></span>{{ s.title }}</div>
             <div class="mt">{{ s.n }} msg · {{ s.agoStr }}<template v-if="s.dirShort"> · <span class="s-dir" :title="s.dir">{{ s.dirShort }}</span></template><template v-if="s.isFork"> · fork</template></div>
           </div>
           <div class="s-actions">
@@ -82,20 +88,52 @@
       </div>
     </template>
   </div>
-  <button class="account-entry" id="accountBtn" onclick="openAccountPanel()" title="Account">
-    <span class="account-avatar">A</span>
-    <span class="account-meta">
-      <span class="account-name">Agentica</span>
-      <span class="account-sub">Usage, archives, settings</span>
-    </span>
-  </button>
+  <div class="account-wrap" v-scope>
+    <div class="account-pop" :class="{open: state.accountPanelOpen}" @click.stop>
+      <div class="account-pop-usage">
+        <div class="ctx-tip-header">Token Usage <span class="account-usage-scope">All sessions</span></div>
+        <div class="ctx-tip-row"><span>Sessions</span><span>{{ accountUsage.sessionCount }}</span></div>
+        <div class="ctx-tip-row"><span>Total In</span><span>{{ fmtN(accountUsage.tokIn) }}</span></div>
+        <div class="ctx-tip-row"><span>Total Out</span><span>{{ fmtN(accountUsage.tokOut) }}</span></div>
+        <div class="ctx-tip-row ctx-tip-total"><span>Total</span><span>{{ fmtN(accountUsage.tokTotal) }}</span></div>
+        <div class="ctx-tip-row" v-if="accountUsage.requests>0"><span>Requests</span><span>{{ accountUsage.requests }}</span></div>
+        <div class="ctx-tip-row" v-if="accountUsage.totalTime>0"><span>Time</span><span>{{ fmtTime(accountUsage.totalTime) }}</span></div>
+      </div>
+      <button class="account-action" @click="closeAccountPanel();openSettingsModal('settings')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"><path d="M6.6 1.75h2.8l.45 1.85c.5.16.96.4 1.38.68l1.8-.62 1.4 2.42-1.4 1.28c.05.26.07.53.07.8s-.02.54-.07.8l1.4 1.28-1.4 2.42-1.8-.62c-.42.28-.88.52-1.38.68l-.45 1.85H6.6l-.45-1.85a5.6 5.6 0 01-1.38-.68l-1.8.62-1.4-2.42 1.4-1.28A5.3 5.3 0 012.9 8c0-.27.02-.54.07-.8L1.57 5.92l1.4-2.42 1.8.62c.42-.28.88-.52 1.38-.68z"/><circle cx="8" cy="8" r="2.15"/></svg>
+        <span>Settings</span>
+      </button>
+      <button class="account-action" @click="closeAccountPanel();openSettingsModal('profiles')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="2" y="2.5" width="12" height="11" rx="1.5"/><path d="M5 6h6M5 8.5h6M5 11h3.5" stroke-linecap="round"/></svg>
+        <span>Profiles</span>
+      </button>
+      <button class="account-action" @click="closeAccountPanel();openSettingsModal('cron')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8.5" r="5.75"/><path d="M8 5.5v3l2 1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 1.5h4" stroke-linecap="round"/></svg>
+        <span>Scheduled Jobs</span>
+      </button>
+      <button class="account-action" @click="closeAccountPanel();openSettingsModal('archived')">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="13" height="3" rx="0.8"/><path d="M2.5 5.7V13a1 1 0 001 1h9a1 1 0 001-1V5.7" stroke-linecap="round"/><line x1="6.5" y1="8.3" x2="9.5" y2="8.3" stroke-linecap="round"/></svg>
+        <span>Archived Sessions</span>
+      </button>
+    </div>
+    <button class="account-entry" id="accountBtn" @click.stop="state.accountPanelOpen ? closeAccountPanel() : openAccountPanel()" title="Account">
+      <span class="account-avatar"><svg viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="5.2" r="2.9"/><path d="M2.4 14c.5-3.2 3-5 5.6-5s5.1 1.8 5.6 5z"/></svg></span>
+      <span class="account-meta">
+        <span class="account-name">User</span>
+        <span class="account-sub">Usage, archives, settings</span>
+      </span>
+    </button>
+  </div>
 </aside>
+
+<!-- Account popover backdrop (click outside to close) -->
+<div class="account-pop-backdrop" v-scope :class="{open: state.accountPanelOpen}" @click="closeAccountPanel()"></div>
 
 <!-- MAIN -->
 <div class="main">
   <div class="topbar">
     <div class="tb-l">
-      <button class="ib" onclick="toggleSidebar()" title="Toggle sidebar">
+      <button class="ib sidebar-expand-btn" id="sidebarExpandBtn" onclick="toggleSidebar()" title="Expand sidebar">
         <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><line x1="5.5" y1="2.5" x2="5.5" y2="13.5"/></svg>
       </button>
     </div>
@@ -115,10 +153,31 @@
     <button class="scroll-bottom-btn" id="scrollBottomBtn" onclick="scrollEnd()" title="Scroll to bottom">
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10m0 0l-4-4m4 4l4-4"/></svg>
     </button>
+    <!-- chat navigator: one tick per user turn, packed densely on the left
+         edge (right edge is the native scrollbar); hover previews the turn,
+         click jumps there (see chat-nav.js) -->
+    <div class="chat-nav" id="chatNav"></div>
   </div>
 
   <div class="input-area" v-scope>
     <div class="input-box" id="inputBox">
+      <div class="queue-list" v-if="sessionQueue.length">
+        <div class="queue-item" v-for="(q, qi) in sessionQueue" :key="q.id">
+          <span class="queue-idx">{{ qi + 1 }}</span>
+          <span class="queue-text">{{ q.text || ('📎 ' + (q.files||[]).length + ' file(s)') }}</span>
+          <div class="queue-actions">
+            <button class="queue-act" @click="sendQueueItemNow(q.id)" title="Send now (interrupts current response)">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M8.8 1.5L3 9.2h3.6L6.2 14.5 12.5 6.3H8.8z"/></svg>
+            </button>
+            <button class="queue-act" @click="editQueueItem(q.id)" title="Edit">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"><path d="M11.55 1.45a1.55 1.55 0 012.2 2.2l-8.2 8.2-3.3.9.9-3.3z"/><path d="M10.5 2.5l3 3"/></svg>
+            </button>
+            <button class="queue-act" @click="removeQueueItem(q.id)" title="Remove">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
       <div class="file-list" v-if="state.pendingFiles.length">
         <div class="file-chip" v-for="(f, i) in state.pendingFiles" :key="i">
           <span>{{ f.name }}</span><span style="color:var(--fg3)">({{ fmtFileSize(f.size) }})</span>
@@ -126,56 +185,76 @@
         </div>
       </div>
       <textarea class="input-ta" id="inputTa" placeholder="Send a message..." rows="1"
-        v-model="state.inputText" @keydown="handleKey($event)" @input="autoResize($event.target)"></textarea>
+        v-model="state.inputText" @keydown="handleKey($event)" @input="onInput($event)"></textarea>
+      <div class="quick-dd slash-dd" :class="{open: state.slashOpen}" @click.stop>
+        <div class="quick-list">
+          <button class="quick-item" v-for="(it, i) in slashItems" :key="it.label"
+                  :class="{active: i === state.slashIndex}"
+                  @click="selectSlash(it)" @mousemove="state.slashIndex = i">
+            <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"><path d="M3 3.5A1.5 1.5 0 014.5 2h7A1.5 1.5 0 0113 3.5v9A1.5 1.5 0 0111.5 14h-7A1.5 1.5 0 013 12.5z"/><path d="M5.25 6h5.5M5.25 8.5h5.5M5.25 11h3.5"/></svg></span>
+            <span class="quick-item-text">{{ it.label }}<span class="quick-item-desc">{{ it.description }}</span></span>
+          </button>
+          <div class="quick-empty" v-if="!slashItems.length">No matches</div>
+        </div>
+      </div>
       <div class="input-foot">
         <div class="input-foot-l">
           <div class="input-plus-wrap">
-            <button class="foot-btn plus-btn" @click.stop="toggleQuickMenu()" title="添加文件、goal、skill、tool">
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M8 3.25v9.5M3.25 8h9.5"/></svg>
+            <button class="foot-btn plus-btn" @click.stop="toggleQuickMenu()" title="Add files, goal or skill">
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
             </button>
             <div class="quick-dd" :class="{open: state.quickMenuOpen}">
               <button class="quick-item" @click="triggerFilePicker()">
                 <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5h3l1.2 1.5H13a1 1 0 011 1v4.5a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 012 11.5v-6A1 1 0 013 4.5z"/></svg></span>
-                <span>添加文件</span>
+                <span>Add files</span>
               </button>
-              <button class="quick-item" @click="triggerFolderPicker()">
-                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h11v6A1.5 1.5 0 0112 13H4A1.5 1.5 0 012.5 11.5z"/><path d="M2.5 5.5V4.7A1.2 1.2 0 013.7 3.5h2.1l1.1 1.2H12a1.5 1.5 0 011.5 1.5v.3"/></svg></span>
-                <span>添加文件夹</span>
+              <button class="quick-item" @click="insertGoalPrefix()">
+                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="5.75"/><circle cx="8" cy="8" r="3.25"/><circle cx="8" cy="8" r="0.75" fill="currentColor" stroke="none"/></svg></span>
+                <span>Goal: set a multi-turn objective</span>
               </button>
-              <label class="quick-item quick-input-item">
-                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.75l4.5 2.3v5.9L8 13.25l-4.5-2.3v-5.9z"/><path d="M8 2.75v10.5"/></svg></span>
-                <span>添加 goal</span>
-                <input type="text" class="quick-inline-input" v-model="state.goalInput" placeholder="例如：修复登录失败">
-              </label>
-              <label class="quick-item quick-input-item">
-                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5A1.5 1.5 0 014.5 3h7A1.5 1.5 0 0113 4.5v7A1.5 1.5 0 0111.5 13h-7A1.5 1.5 0 013 11.5z"/><path d="M5.25 6h5.5M5.25 8.5h5.5M5.25 11h3.5"/></svg></span>
-                <span>应用 skill</span>
-                <input type="text" class="quick-inline-input" v-model="state.skillInput" placeholder="例如：browse">
-              </label>
-              <label class="quick-item quick-input-item">
-                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5h8v7H4z"/><path d="M6 2.75v3.5M10 2.75v3.5M6 9.25h4"/></svg></span>
-                <span>指定 tool</span>
-                <input type="text" class="quick-inline-input" v-model="state.toolInput" placeholder="例如：Bash / Edit">
-              </label>
+              <div class="quick-divider"></div>
+              <input type="text" class="quick-search" placeholder="Search skills…" v-model="state.quickMenuSearch" @click.stop>
+              <div class="quick-list">
+                <button class="quick-item quick-item-ref" v-for="s in quickSkills" :key="'qsk_'+s.name" @click="insertSkillRef(s)">
+                  <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"><path d="M3 3.5A1.5 1.5 0 014.5 2h7A1.5 1.5 0 0113 3.5v9A1.5 1.5 0 0111.5 14h-7A1.5 1.5 0 013 12.5z"/><path d="M5.25 6h5.5M5.25 8.5h5.5M5.25 11h3.5"/></svg></span>
+                  <span class="quick-item-text">{{ s.name }}<span class="quick-item-desc">{{ s.description }}</span></span>
+                </button>
+                <div class="quick-empty" v-if="!quickSkills.length">No matches</div>
+              </div>
             </div>
           </div>
           <div class="approval-wrap">
             <button class="foot-btn approval-btn" @click.stop="toggleApprovalMenu()" :title="state.selectedApprovalMode">
-              <span class="approval-label">{{ state.selectedApprovalMode === 'ask' ? '请求批准' : (state.selectedApprovalMode === 'auto' ? '替我审批' : '完全访问') }}</span>
+              <span class="quick-icon" v-if="state.selectedApprovalMode==='ask'"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.25"/><path d="M6.2 6.1a1.9 1.9 0 013.6.9c0 1.3-1.8 1.5-1.8 2.9" stroke-linecap="round"/><circle cx="8" cy="11.7" r="0.2" fill="currentColor" stroke="none"/></svg></span>
+              <span class="quick-icon" v-if="state.selectedApprovalMode==='auto'"><svg viewBox="0 0 16 16" fill="currentColor" stroke="none"><path d="M8.6 1.5L3 9.2h3.6L6.2 14.5 12.5 6.3H8.8z"/></svg></span>
+              <span class="quick-icon" v-if="state.selectedApprovalMode==='allow-all'"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7.3V5.1a3.5 3.5 0 016.7-1.35"/><rect x="3" y="7.3" width="10" height="6.5" rx="1.3"/></svg></span>
+              <span class="approval-label">{{ state.selectedApprovalMode }}</span>
               <span class="arr">&#x25BE;</span>
             </button>
             <div class="approval-dd" :class="{open: state.approvalMenuOpen}">
-              <button class="quick-item" :class="{active: state.selectedApprovalMode==='ask'}" @click="setApprovalMode('ask')">请求批准</button>
-              <button class="quick-item" :class="{active: state.selectedApprovalMode==='auto'}" @click="setApprovalMode('auto')">替我审批</button>
-              <button class="quick-item" :class="{active: state.selectedApprovalMode==='full'}" @click="setApprovalMode('full')">完全访问</button>
+              <button class="quick-item" :class="{active: state.selectedApprovalMode==='ask'}" @click="setApprovalMode('ask')">
+                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.25"/><path d="M6.2 6.1a1.9 1.9 0 013.6.9c0 1.3-1.8 1.5-1.8 2.9" stroke-linecap="round"/><circle cx="8" cy="11.7" r="0.2" fill="currentColor" stroke="none"/></svg></span>
+                <span>ask</span>
+              </button>
+              <button class="quick-item" :class="{active: state.selectedApprovalMode==='auto'}" @click="setApprovalMode('auto')">
+                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="currentColor" stroke="none"><path d="M8.6 1.5L3 9.2h3.6L6.2 14.5 12.5 6.3H8.8z"/></svg></span>
+                <span>auto</span>
+              </button>
+              <button class="quick-item" :class="{active: state.selectedApprovalMode==='allow-all'}" @click="setApprovalMode('allow-all')">
+                <span class="quick-icon"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 7.3V5.1a3.5 3.5 0 016.7-1.35"/><rect x="3" y="7.3" width="10" height="6.5" rx="1.3"/></svg></span>
+                <span>allow-all</span>
+              </button>
             </div>
           </div>
           <input type="file" id="fileInput" multiple style="display:none" @change="onFilePick($event)">
-          <input type="file" id="folderInput" webkitdirectory directory multiple style="display:none" @change="onFilePick($event)">
         </div>
         <div class="input-foot-r">
           <span class="ctx-wrap input-ctx" id="ctxWrap" @click.stop="toggleCtxTip()" title="Token usage">
-            <span class="ctx-main" :class="{'ctx-warn': usage.pct>=80 && usage.pct<95, 'ctx-danger': usage.pct>=95}">{{ usage.pct }}% context</span>
+            <svg class="ctx-ring" :class="{'ctx-warn': usage.pct>=80 && usage.pct<95, 'ctx-danger': usage.pct>=95}" viewBox="0 0 16 16" width="14" height="14">
+              <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6" opacity="0.18"/>
+              <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+                      :stroke-dasharray="(usage.pct/100*37.7) + ' 37.7'" transform="rotate(-90 8 8)"/>
+            </svg>
             <div class="ctx-tip" :class="{open: state.ctxTipOpen}">
               <div class="ctx-tip-header">Token Usage</div>
               <div class="ctx-tip-row"><span>Last Input</span><span>{{ fmtN(usage.lastIn) }}</span></div>
@@ -184,14 +263,6 @@
               <div class="ctx-tip-row ctx-tip-total"><span>Context Window</span><span>{{ fmtN(usage.ctxWin) }}</span></div>
               <div class="ctx-tip-row" v-if="usage.requests>0"><span>Requests</span><span>{{ usage.requests }}</span></div>
               <div class="ctx-tip-row" v-if="usage.totalTime>0"><span>Time</span><span>{{ fmtTime(usage.totalTime) }}</span></div>
-              <div v-if="usage.entries.length">
-                <div class="ctx-tip-divider"></div>
-                <div class="ctx-tip-sub">Recent Requests</div>
-                <div class="ctx-tip-entry" v-for="e in usage.entries.slice(-5).reverse()" :key="e.request_index">
-                  <span>#{{ e.request_index }}</span><span>{{ fmtN(e.input_tokens) }} in / {{ fmtN(e.output_tokens) }} out<template v-if="e.response_time"> · {{ fmtTime(e.response_time) }}</template></span>
-                </div>
-                <div class="ctx-tip-more" v-if="usage.entries.length>5">… and {{ usage.entries.length-5 }} more</div>
-              </div>
             </div>
           </span>
           <div class="input-model-wrap" id="modelWrap">
@@ -206,7 +277,7 @@
                 <div class="dd-config-row"><span>Model</span><strong>{{ state.serverModelName || '-' }}</strong></div>
                 <div class="dd-config-row"><span>Thinking</span><strong>{{ state.serverReasoningEffort || 'off' }}</strong></div>
               </div>
-              <div class="dd-section">切换 Profile</div>
+              <div class="dd-section">Switch Profile</div>
               <div class="dd-empty" v-if="!state.profilesData.profiles.length">No profiles. Edit <code>{{ state.serverConfigPath || '~/.agentica/config.yaml' }}</code></div>
               <button class="dd-profile" v-for="p in state.profilesData.profiles" :key="p.name"
                       :class="{active: p.name===state.profilesData.active}" @click="switchProfile(p.name)">
@@ -214,87 +285,22 @@
                 <div class="dd-p-model">{{ p.model_provider||'?' }}/{{ p.model_name||'?' }}</div>
                 <div class="dd-p-tuning" v-if="p.tuning && p.tuning.length">{{ p.tuning.join(' · ') }}</div>
               </button>
-              <div class="dd-note">新增/编辑模型请修改 <code>{{ state.serverConfigPath || '~/.agentica/config.yaml' }}</code></div>
+              <div class="dd-note">To add/edit models, edit <code>{{ state.serverConfigPath || '~/.agentica/config.yaml' }}</code></div>
             </div>
           </div>
-          <button class="act-btn" :class="state.streaming ? 'stop' : 'send'" @click="onAction()" :title="state.streaming ? 'Stop generation' : 'Send (Enter)'">
-            <svg v-if="!state.streaming" viewBox="0 0 16 16" width="16" height="16"><path d="M12 3v5a2 2 0 01-2 2H4m0 0l3-3M4 10l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            <svg v-else viewBox="0 0 16 16" width="16" height="16"><rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/></svg>
+          <button class="act-btn" :class="!state.streaming ? 'send' : (state.inputText.trim() || state.pendingFiles.length ? 'queue' : 'stop')" @click="onAction()"
+            :title="!state.streaming ? 'Send (Enter)' : (state.inputText.trim() || state.pendingFiles.length ? 'Add to queue (sends after current response finishes)' : 'Stop generation')">
+            <svg v-if="!state.streaming" viewBox="0 0 16 16" width="16" height="16"><path d="M8 13V4M8 4L4.3 7.7M8 4l3.7 3.7" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg v-else-if="state.inputText.trim() || state.pendingFiles.length" viewBox="0 0 16 16" width="16" height="16"><path d="M2 4h7M2 8h7M2 12h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/><circle cx="12.5" cy="11" r="2.7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M12.5 9.8v1.2h1.1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" fill="none"/></svg>
+            <svg v-else viewBox="0 0 16 16" width="16" height="16"><rect x="4.5" y="4.5" width="7" height="7" rx="1.8" fill="currentColor"/></svg>
           </button>
         </div>
       </div>
     </div>
-    <div class="bottom-info">AI 可能会犯错，请核实重要信息。</div>
   </div>
 </div>
 
-<!-- Account Panel -->
-<div class="account-overlay" v-scope :class="{open: state.accountPanelOpen}" @click="closeAccountPanel()">
-  <div class="account-panel" @click.stop>
-    <div class="account-head">
-      <div class="account-avatar big">A</div>
-      <div>
-        <h3>Agentica Account</h3>
-        <p>Local gateway workspace</p>
-      </div>
-      <button class="ib" @click="closeAccountPanel()" title="Close">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-      </button>
-    </div>
-    <div class="account-body">
-      <section class="account-section">
-        <div class="account-section-title">Token Usage</div>
-        <div class="account-usage">
-          <div class="usage-ring">{{ accountUsage.pct }}%</div>
-          <div class="usage-grid">
-            <div><span>Context</span><b>{{ fmtN(accountUsage.input) }} / {{ fmtN(accountUsage.ctxWin) }}</b></div>
-            <div><span>Total In</span><b>{{ fmtN(accountUsage.tokIn) }}</b></div>
-            <div><span>Total Out</span><b>{{ fmtN(accountUsage.tokOut) }}</b></div>
-            <div><span>Requests</span><b>{{ fmtN(accountUsage.requests) }}</b></div>
-          </div>
-        </div>
-      </section>
-      <section class="account-section">
-        <div class="account-section-title">Access Token</div>
-        <p class="account-hint">
-          <template v-if="state.authRequired">Server requires GATEWAY_TOKEN — enter it below.</template>
-          <template v-else>Not required (GATEWAY_TOKEN is unset on the server).</template>
-        </p>
-        <div class="account-token-row">
-          <input type="password" v-model="state.gatewayTokenInput" placeholder="GATEWAY_TOKEN" @keydown.enter="saveGatewayToken()">
-          <button class="account-action" @click="saveGatewayToken()">Save</button>
-        </div>
-      </section>
-      <section class="account-section">
-        <div class="account-section-title">Actions</div>
-        <button class="account-action" @click="closeAccountPanel();openSettingsModal()">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="2.1"/><path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6L3.5 3.5" stroke-linecap="round"/></svg><span>Settings / Profiles</span>
-        </button>
-        <button class="account-action" @click="closeAccountPanel();openCronModal()">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8.5" r="5.75"/><path d="M8 5.5v3l2 1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M6 1.5h4" stroke-linecap="round"/></svg><span>Scheduled Jobs</span>
-        </button>
-        <button class="account-action" @click="toggleTheme()">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13.5 9.5A6 6 0 016.5 2.5a6 6 0 106.98 7z" stroke-linejoin="round"/></svg><span>Toggle Theme</span>
-        </button>
-      </section>
-      <section class="account-section">
-        <div class="account-section-title">Archived Sessions</div>
-        <div class="account-archives">
-          <div class="account-empty" v-if="!archivedList.length">No archived sessions</div>
-          <div class="archive-row" v-for="a in archivedList" :key="a.id">
-            <div class="archive-main" @click="switchTo(a.id);closeAccountPanel()">
-              <div class="archive-title">{{ a.title }}</div>
-              <div class="archive-meta">{{ a.msgCount }} msg<template v-if="a.dir"> · {{ a.dir }}</template> · {{ a.agoStr }}</div>
-            </div>
-            <button class="archive-restore" @click="unarchiveSession(a.id)" title="Restore"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8.5A5 5 0 108 13.5"/><path d="M13 5v3.5h-3.5"/></svg></button>
-          </div>
-        </div>
-      </section>
-    </div>
-  </div>
-</div>
-
-<!-- Plugins Modal -->
+<!-- Plugins Modal: manage built-in tools (read-only) + skills (CRUD) -->
 <div class="plugins-overlay" v-scope :class="{open: state.pluginsPanelOpen}" @click="closePluginsPanel()">
   <div class="plugins-modal" @click.stop>
     <div class="plugins-head">
@@ -303,19 +309,85 @@
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
       </button>
     </div>
+    <div class="plugins-tabs">
+      <button class="plugins-tab" :class="{active: state.pluginsTab==='skills'}" @click="state.pluginsTab='skills'">Skills ({{ state.pluginsData.skills.length }})</button>
+      <button class="plugins-tab" :class="{active: state.pluginsTab==='tools'}" @click="state.pluginsTab='tools'">Tools ({{ state.pluginsData.tools.length }})</button>
+      <input type="text" class="plugins-search" placeholder="Search…" v-model="state.pluginsSearch">
+      <button class="cron-new-btn" v-if="state.pluginsTab==='skills'" @click="showSkillForm()">+ New Skill</button>
+      <button class="cron-new-btn" v-if="state.pluginsTab==='tools'" @click="showMcpForm()">+ Add MCP Tool</button>
+    </div>
     <div class="plugins-body">
-      <div class="plugin-card">
-        <div class="plugin-icon"><svg viewBox="0 0 16 16"><path d="M2.5 5.5h11M5.5 2.5v11M10.5 2.5v11" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></div>
-        <div>
-          <div class="plugin-title">Tools</div>
-          <div class="plugin-desc">Built-in tools are shown inline during runs. Manage availability from agent configuration.</div>
+      <div class="skill-form" v-if="state.pluginsTab==='skills' && state.skillForm.open">
+        <h4>{{ state.skillForm.editingName ? 'Edit Skill' : 'New Skill' }}</h4>
+        <input type="text" class="pf-input" placeholder="Name" v-model="state.skillForm.name" :disabled="!!state.skillForm.editingName">
+        <input type="text" class="pf-input" placeholder="Description" v-model="state.skillForm.description">
+        <input type="text" class="pf-input" placeholder="Trigger (optional, e.g. /commit)" v-model="state.skillForm.trigger">
+        <textarea class="pf-input" placeholder="SKILL.md body (instructions the agent follows when it loads this skill)" rows="6" v-model="state.skillForm.content"></textarea>
+        <div class="pf-actions">
+          <button class="dp-btn" @click="cancelSkillForm()">Cancel</button>
+          <button class="dp-btn primary" @click="saveSkillForm()">{{ state.skillForm.editingName ? 'Save' : 'Create' }}</button>
         </div>
       </div>
-      <div class="plugin-card">
-        <div class="plugin-icon"><svg viewBox="0 0 16 16"><path d="M3 3.5A1.5 1.5 0 014.5 2h7A1.5 1.5 0 0113 3.5v9A1.5 1.5 0 0111.5 14h-7A1.5 1.5 0 013 12.5zM5.25 5.25h5.5M5.25 8h5.5M5.25 10.75h3.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"/></svg></div>
-        <div>
-          <div class="plugin-title">Skills</div>
-          <div class="plugin-desc">Markdown skills are loaded by the backend runtime. This panel is a lightweight gateway entry point.</div>
+      <div class="plugin-list" v-if="state.pluginsTab==='skills'">
+        <div class="account-empty" v-if="!filteredSkills.length">No skills found.</div>
+        <div class="plugin-row" v-for="s in filteredSkills" :key="s.name">
+          <div class="plugin-row-main">
+            <div class="plugin-row-title">{{ s.name }} <span class="plugin-badge" v-if="s.trigger">{{ s.trigger }}</span> <span class="plugin-badge loc">{{ s.location }}</span></div>
+            <div class="plugin-row-desc">{{ s.description }}</div>
+          </div>
+          <div class="plugin-row-actions" v-if="s.editable">
+            <button class="cron-act" @click="editSkill(s.name)" title="Edit"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.55 1.45a1.55 1.55 0 012.2 2.2l-8.2 8.2-3.3.9.9-3.3z" stroke-linejoin="round"/><path d="M10.5 2.5l3 3"/></svg></button>
+            <button class="cron-act danger" @click="deleteSkill(s.name)" title="Delete"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="skill-form" v-if="state.pluginsTab==='tools' && state.mcpForm.open">
+        <h4>Add MCP Tool</h4>
+        <p class="dm-desc">Registers a new MCP server for the web agent — takes effect on its next turn (no restart needed).</p>
+        <input type="text" class="pf-input" placeholder="Server name (e.g. calc)" v-model="state.mcpForm.name">
+        <div class="mcp-kind-row">
+          <button class="theme-opt" :class="{active: state.mcpForm.kind==='stdio'}" @click="state.mcpForm.kind='stdio'">Command (stdio)</button>
+          <button class="theme-opt" :class="{active: state.mcpForm.kind==='sse'}" @click="state.mcpForm.kind='sse'">URL (SSE / HTTP)</button>
+        </div>
+        <template v-if="state.mcpForm.kind==='stdio'">
+          <input type="text" class="pf-input" placeholder="Command (e.g. python)" v-model="state.mcpForm.command">
+          <input type="text" class="pf-input" placeholder="Args (space-separated, e.g. server.py --port 8080)" v-model="state.mcpForm.args">
+        </template>
+        <template v-else>
+          <input type="text" class="pf-input" placeholder="URL (e.g. http://localhost:8080/sse)" v-model="state.mcpForm.url">
+        </template>
+        <div class="pf-section">Env Vars (optional)</div>
+        <div class="pf-env">
+          <div class="pf-env-row" v-for="(row, i) in state.mcpForm.envRows" :key="i">
+            <input type="text" class="pf-input pf-env-k" placeholder="KEY" v-model="row.key">
+            <input type="text" class="pf-input pf-env-v" placeholder="value" v-model="row.value">
+            <button class="pf-env-del" @click="removeMcpEnvRow(i)" title="Remove"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+          </div>
+        </div>
+        <button class="pf-add-env" @click="addMcpEnvRow()">+ Add env var</button>
+        <div class="pf-actions">
+          <button class="dp-btn" @click="cancelMcpForm()">Cancel</button>
+          <button class="dp-btn primary" @click="saveMcpForm()">Add</button>
+        </div>
+      </div>
+      <div class="plugin-list" v-if="state.pluginsTab==='tools'">
+        <div class="plugins-subhead" v-if="state.pluginsData.mcpServers.length">MCP Servers</div>
+        <div class="plugin-row" v-for="m in state.pluginsData.mcpServers" :key="'mcp_'+m.name">
+          <div class="plugin-row-main">
+            <div class="plugin-row-title">{{ m.name }} <span class="plugin-badge">mcp/{{ m.type }}</span></div>
+            <div class="plugin-row-desc">{{ m.type==='sse' ? m.url : (m.command + ' ' + (m.args||[]).join(' ')) }}</div>
+          </div>
+          <div class="plugin-row-actions">
+            <button class="cron-act danger" @click="deleteMcpServer(m.name)" title="Delete"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+          </div>
+        </div>
+        <div class="plugins-subhead" v-if="filteredTools.length">Built-in Tools</div>
+        <div class="account-empty" v-if="!filteredTools.length && !state.pluginsData.mcpServers.length">No tools found.</div>
+        <div class="plugin-row" v-for="t in filteredTools" :key="t.name">
+          <div class="plugin-row-main">
+            <div class="plugin-row-title">{{ t.name }} <span class="plugin-badge">{{ t.tool_group }}</span></div>
+            <div class="plugin-row-desc">{{ t.description }}</div>
+          </div>
         </div>
       </div>
     </div>
@@ -334,11 +406,11 @@
       <div class="dir-input-wrap">
         <input type="text" id="dirEditInput" placeholder="/path/to/project" v-model="state.dirModal.value"
                @keydown="if($event.key==='Enter')saveDir()">
-        <button class="dir-toggle-btn" :class="{open: state.dirModal.historyOpen}" @click="toggleDirHistory()" title="历史路径">
+        <button class="dir-toggle-btn" :class="{open: state.dirModal.historyOpen}" @click="toggleDirHistory()" title="Recent paths">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg>
         </button>
         <div class="dir-history-dropdown" :class="{open: state.dirModal.historyOpen}">
-          <div class="dir-history-empty" v-if="!dirHistoryFiltered.length">无历史记录</div>
+          <div class="dir-history-empty" v-if="!dirHistoryFiltered.length">No history yet</div>
           <div class="dir-history-item" v-for="p in dirHistoryFiltered" :key="p" @click="selectDirHistory(p)">
             <div class="dh-short">{{ shortenPath(p) }}</div>
             <div class="dh-full">{{ p }}</div>
@@ -374,70 +446,8 @@
   <div class="confirm-box" @click.stop>
     <div class="cm-msg">{{ state.confirm.msg }}</div>
     <div class="cm-actions">
-      <button class="dp-btn" @click="confirmCancel()">取消</button>
-      <button class="dp-btn danger" @click="confirmOk()">删除</button>
-    </div>
-  </div>
-</div>
-
-<!-- Cron Modal -->
-<div class="cron-overlay" v-scope :class="{open: state.cronModal.open}" @click="closeCronModal()">
-  <div class="cron-modal" @click.stop>
-    <div class="cron-head">
-      <h3>Cron Jobs</h3>
-      <button class="cron-new-btn" @click="showCronForm()">+ New</button>
-    </div>
-    <div class="cron-body">
-      <div class="cron-list">
-        <div class="cron-empty" v-if="!state.cronModal.jobs.length">No cron jobs. Click "+ New" to create one.</div>
-        <div class="cron-item" v-for="j in state.cronModal.jobs" :key="j.id">
-          <div class="cron-item-head">
-            <span class="cron-name">{{ j.name }}</span>
-            <span class="cron-status" :class="j.status==='active' ? 'cron-st-active' : j.status==='paused' ? 'cron-st-paused' : 'cron-st-other'">{{ j.status }}</span>
-            <div class="cron-item-actions">
-              <button class="cron-act" v-if="j.status==='paused'" @click="resumeCronJob(j.id)" title="Resume"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg></button>
-              <button class="cron-act" v-else @click="pauseCronJob(j.id)" title="Pause"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="3" width="3" height="10" rx="0.6"/><rect x="9" y="3" width="3" height="10" rx="0.6"/></svg></button>
-              <button class="cron-act" @click="editCronJob(j.id)" title="Edit"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.55 1.45a1.55 1.55 0 012.2 2.2l-8.2 8.2-3.3.9.9-3.3z" stroke-linejoin="round"/><path d="M10.5 2.5l3 3"/></svg></button>
-              <button class="cron-act" @click="triggerCronJob(j.id)" title="Run now"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-              <button class="cron-act danger" @click="deleteCronJob(j.id)" title="Delete"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
-            </div>
-          </div>
-          <div class="cron-item-meta">
-            <span title="Schedule">{{ j.schedule }}</span>
-            <span title="Next run">next: {{ fmtCronTime(j.next_run_at_ms) }}</span>
-            <span title="Last run">last: {{ fmtCronTime(j.last_run_at_ms) }}</span>
-            <span title="Run count">{{ j.run_count || 0 }} runs</span>
-          </div>
-          <div class="cron-prompt" title="Prompt">{{ j.prompt }}</div>
-          <div class="cron-runs-toggle" @click="toggleCronRuns(j.id)">{{ state.cronModal.openRuns[j.id] ? '▾' : '▸' }} runs</div>
-          <div class="cron-runs" v-if="state.cronModal.openRuns[j.id]">
-            <div class="cron-runs-loading" v-if="state.cronModal.runsLoading[j.id]">loading...</div>
-            <div class="cron-runs-empty" v-if="!state.cronModal.runsLoading[j.id] && !state.cronModal.runsData[j.id]">Failed to load</div>
-            <div class="cron-runs-empty" v-if="!state.cronModal.runsLoading[j.id] && state.cronModal.runsData[j.id] && !state.cronModal.runsData[j.id].length">No runs yet</div>
-            <div v-if="!state.cronModal.runsLoading[j.id] && state.cronModal.runsData[j.id]">
-              <div class="cron-run" v-for="r in state.cronModal.runsData[j.id]" :key="r.started_at_ms">
-                <span class="cron-run-status" :class="r.status==='ok' ? 'cron-run-ok' : 'cron-run-err'">{{ r.status }}</span>
-                <span class="cron-run-time">{{ fmtCronTime(r.started_at_ms) }}</span>
-                <span class="cron-run-preview">{{ r.result_preview || r.error || '' }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="cron-form" v-if="state.cronModal.formOpen">
-        <h4>{{ state.cronModal.editingId ? 'Edit Job' : 'New Job' }}</h4>
-        <input type="text" id="cronName" class="cron-input" placeholder="Name (optional)" v-model="state.cronModal.name">
-        <textarea class="cron-input" placeholder="Prompt (self-contained — runs unattended in a fresh session)" rows="3" v-model="state.cronModal.prompt"></textarea>
-        <input type="text" class="cron-input" placeholder="Schedule: 30 7 * * * | every 2h | 2024-01-15T09:30:00" v-model="state.cronModal.schedule">
-        <div class="cron-form-adv">
-          <input type="number" class="cron-input" placeholder="timeout (s)" min="0" v-model="state.cronModal.timeout">
-          <input type="number" class="cron-input" placeholder="max retries" min="0" v-model="state.cronModal.retries">
-        </div>
-        <div class="cron-form-actions">
-          <button class="dp-btn" @click="cancelCronForm()">Cancel</button>
-          <button class="dp-btn primary" @click="saveCronForm()">{{ state.cronModal.editingId ? 'Save' : 'Create' }}</button>
-        </div>
-      </div>
+      <button class="dp-btn" @click="confirmCancel()">Cancel</button>
+      <button class="dp-btn danger" @click="confirmOk()">Delete</button>
     </div>
   </div>
 </div>
@@ -446,10 +456,41 @@
 <div class="settings-overlay" v-scope :class="{open: state.settingsModal.open}" @click="closeSettingsModal()">
   <div class="settings-modal" @click.stop>
     <div class="settings-head">
-      <h3>Profiles</h3>
-      <button class="settings-new-btn" @click="showProfileForm()">+ New</button>
+      <h3>Settings <span class="settings-ver" v-if="state.serverVersion">Agentica v{{ state.serverVersion }}</span></h3>
+      <div class="settings-head-actions">
+        <button class="settings-new-btn" v-if="state.settingsTab==='profiles'" @click="showProfileForm()">+ New</button>
+        <button class="settings-new-btn" v-if="state.settingsTab==='cron'" @click="showCronForm()">+ New</button>
+        <button class="ib" @click="closeSettingsModal()" title="Close">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
     </div>
-    <div class="settings-body">
+    <div class="plugins-tabs">
+      <button class="plugins-tab" :class="{active: state.settingsTab==='settings'}" @click="switchSettingsTab('settings')">Settings</button>
+      <button class="plugins-tab" :class="{active: state.settingsTab==='profiles'}" @click="switchSettingsTab('profiles')">Profiles</button>
+      <button class="plugins-tab" :class="{active: state.settingsTab==='cron'}" @click="switchSettingsTab('cron')">Scheduled Jobs</button>
+      <button class="plugins-tab" :class="{active: state.settingsTab==='archived'}" @click="switchSettingsTab('archived')">Archived</button>
+    </div>
+
+    <div class="settings-body" v-if="state.settingsTab==='settings'">
+      <div class="pf-section">Appearance</div>
+      <div class="theme-picker">
+        <button class="theme-opt" :class="{active: state.theme==='light'}" @click="setTheme('light')">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="3.5"/><path d="M8 1.5v1.5M8 13v1.5M14.5 8H13M3 8H1.5M12.4 3.6l-1 1M4.6 11.4l-1 1M12.4 12.4l-1-1M4.6 4.6l-1-1" stroke-linecap="round"/></svg>
+          <span>Light</span>
+        </button>
+        <button class="theme-opt" :class="{active: state.theme==='dark'}" @click="setTheme('dark')">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13.5 9.5A6 6 0 016.5 2.5a6 6 0 106.98 7z" stroke-linejoin="round"/></svg>
+          <span>Dark</span>
+        </button>
+        <button class="theme-opt" :class="{active: state.theme==='auto'}" @click="setTheme('auto')">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14" stroke-linecap="round"/></svg>
+          <span>Auto</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="settings-body" v-if="state.settingsTab==='profiles'">
       <div class="settings-list">
         <div class="settings-empty" v-if="!state.profilesData.profiles.length">No profiles. Click "+ New" to create one.</div>
         <div class="settings-item" v-for="p in state.profilesData.profiles" :key="p.name" :class="{active: p.name===state.profilesData.active}">
@@ -504,10 +545,93 @@
           <button class="dp-btn primary" @click="saveProfileForm()">Create</button>
         </div>
       </div>
+      <div class="pf-section">Config File</div>
+      <div class="config-path-row">
+        <code class="config-path-val">{{ state.serverConfigPath || '~/.agentica/config.yaml' }}</code>
+        <button class="cron-act" @click="copyConfigPath()" title="Copy path"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="6" y="6" width="8.7" height="8.7" rx="1.3"/><path d="M3.3 10H2.7a1.3 1.3 0 01-1.3-1.3V2.7a1.3 1.3 0 011.3-1.3h6a1.3 1.3 0 011.3 1.3v1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="cron-act" @click="openConfigFile()" title="Open"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h11v6A1.5 1.5 0 0112 13H4A1.5 1.5 0 012.5 11.5z"/><path d="M2.5 5.5V4.7A1.2 1.2 0 013.7 3.5h2.1l1.1 1.2H12a1.5 1.5 0 011.5 1.5v.3"/></svg></button>
+      </div>
+    </div>
+
+    <div class="settings-body" v-if="state.settingsTab==='cron'">
+      <div class="cron-list">
+        <div class="cron-empty" v-if="!state.cronModal.jobs.length">No cron jobs. Click "+ New" to create one.</div>
+        <div class="cron-item" v-for="j in state.cronModal.jobs" :key="j.id">
+          <div class="cron-item-head">
+            <span class="cron-name">{{ j.name }}</span>
+            <span class="cron-status" :class="j.status==='active' ? 'cron-st-active' : j.status==='paused' ? 'cron-st-paused' : 'cron-st-other'">{{ j.status }}</span>
+            <div class="cron-item-actions">
+              <button class="cron-act" v-if="j.status==='paused'" @click="resumeCronJob(j.id)" title="Resume"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5v11l9-5.5z"/></svg></button>
+              <button class="cron-act" v-else @click="pauseCronJob(j.id)" title="Pause"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="3" width="3" height="10" rx="0.6"/><rect x="9" y="3" width="3" height="10" rx="0.6"/></svg></button>
+              <button class="cron-act" @click="editCronJob(j.id)" title="Edit"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M11.55 1.45a1.55 1.55 0 012.2 2.2l-8.2 8.2-3.3.9.9-3.3z" stroke-linejoin="round"/><path d="M10.5 2.5l3 3"/></svg></button>
+              <button class="cron-act" :class="{spinning: state.cronModal.triggering[j.id]}" :disabled="state.cronModal.triggering[j.id]" @click="triggerCronJob(j.id)" title="Run now"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6"/><path d="M6.7 5.4v5.2l4.1-2.6z" fill="currentColor" stroke="none"/></svg></button>
+              <button class="cron-act danger" @click="deleteCronJob(j.id)" title="Delete"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+            </div>
+          </div>
+          <div class="cron-item-meta">
+            <span title="Schedule">{{ j.schedule }}</span>
+            <span title="Next run">next: {{ fmtCronTime(j.next_run_at_ms) }}</span>
+            <span title="Last run">last: {{ fmtCronTime(j.last_run_at_ms) }}</span>
+            <span title="Run count">{{ j.run_count || 0 }} runs</span>
+          </div>
+          <div class="cron-prompt" title="Prompt">{{ j.prompt }}</div>
+          <div class="cron-runs-toggle" @click="toggleCronRuns(j.id)">{{ state.cronModal.openRuns[j.id] ? '▾' : '▸' }} runs</div>
+          <div class="cron-runs" v-if="state.cronModal.openRuns[j.id]">
+            <div class="cron-runs-loading" v-if="state.cronModal.runsLoading[j.id]">loading...</div>
+            <div class="cron-runs-empty" v-if="!state.cronModal.runsLoading[j.id] && !state.cronModal.runsData[j.id]">Failed to load</div>
+            <div class="cron-runs-empty" v-if="!state.cronModal.runsLoading[j.id] && state.cronModal.runsData[j.id] && !state.cronModal.runsData[j.id].length">No runs yet</div>
+            <div v-if="!state.cronModal.runsLoading[j.id] && state.cronModal.runsData[j.id]">
+              <div class="cron-run" v-for="r in state.cronModal.runsData[j.id]" :key="r.started_at_ms">
+                <span class="cron-run-status" :class="r.status==='ok' ? 'cron-run-ok' : 'cron-run-err'">{{ r.status }}</span>
+                <span class="cron-run-time">{{ fmtCronTime(r.started_at_ms) }}</span>
+                <span class="cron-run-preview" :title="r.result_full || r.result_preview || r.error || ''">{{ r.result_preview || r.error || '' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cron-form" v-if="state.cronModal.formOpen">
+        <h4>{{ state.cronModal.editingId ? 'Edit Job' : 'New Job' }}</h4>
+        <p class="dm-desc">Scheduled jobs run as their own independent agent in a dedicated session — they do not see or inherit context from any of your chat conversations. Write the prompt to be fully self-contained.</p>
+        <input type="text" id="cronName" class="cron-input" placeholder="Name (optional)" v-model="state.cronModal.name">
+        <div class="cron-prompt-wrap">
+          <textarea class="cron-input" placeholder="Prompt — write a rough idea, then click 'AI Polish' to turn it into a precise, self-contained unattended prompt." rows="3" v-model="state.cronModal.prompt"></textarea>
+          <button class="cron-polish-btn" :class="{spinning: state.cronModal.polishing}" :disabled="state.cronModal.polishing || !state.cronModal.prompt.trim()" @click="polishCronPrompt()" title="AI Polish">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 008.5 14.063l-6.135-1.582a.5.5 0 010-.962L8.5 9.936A2 2 0 009.937 8.5l1.582-6.135a.5.5 0 01.963 0L14.063 8.5A2 2 0 0015.5 9.937l6.135 1.582a.5.5 0 010 .962L15.5 14.063a2 2 0 00-1.437 1.437l-1.582 6.135a.5.5 0 01-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
+          </button>
+        </div>
+        <input type="text" class="cron-input" placeholder="Schedule: 30 7 * * * | every 2h | 2024-01-15T09:30:00" v-model="state.cronModal.schedule">
+        <div class="cron-form-adv">
+          <input type="number" class="cron-input" placeholder="timeout (s)" min="0" v-model="state.cronModal.timeout">
+          <input type="number" class="cron-input" placeholder="max retries" min="0" v-model="state.cronModal.retries">
+        </div>
+        <label class="cron-validate-row" v-if="!state.cronModal.editingId">
+          <input type="checkbox" v-model="state.cronModal.validateRun">
+          <span>Run once immediately after creation to validate</span>
+        </label>
+        <div class="cron-form-actions">
+          <button class="dp-btn" @click="cancelCronForm()">Cancel</button>
+          <button class="dp-btn primary" @click="saveCronForm()">{{ state.cronModal.editingId ? 'Save' : 'Create' }}</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-body" v-if="state.settingsTab==='archived'">
+      <div class="account-empty" v-if="!archivedList.length">No archived sessions</div>
+      <div class="archive-row" v-for="a in archivedList" :key="a.id">
+        <div class="archive-main" @click="switchTo(a.id);closeSettingsModal()">
+          <div class="archive-title">{{ a.title }}</div>
+          <div class="archive-meta">{{ a.msgCount }} msg<template v-if="a.dir"> · {{ a.dir }}</template> · {{ a.agoStr }}</div>
+        </div>
+        <div class="archive-row-actions">
+          <button class="archive-restore" @click="unarchiveSession(a.id)" title="Unarchive (restore)"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="3" rx="0.8"/><path d="M2.5 5.7V13a1 1 0 001 1h9a1 1 0 001-1V5.7"/><path d="M8 12V7.3M8 7.3L5.8 9.5M8 7.3l2.2 2.2"/></svg></button>
+          <button class="archive-restore danger" @click="deleteArchivedSession(a.id)" title="Delete permanently"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
 
-<script type="module" src="/static/js/main.js?v=23"></script>
+<script type="module" src="/static/js/main.js?v=49"></script>
 </body>
 </html>

@@ -3,20 +3,13 @@ import { state } from './state.js';
 import { showToast, showConfirm } from './modals.js';
 import {
   fetchCronJobs, createCronJobApi, updateCronJobApi, deleteCronJobApi,
-  pauseCronJobApi, resumeCronJobApi, triggerCronJobApi, fetchCronRuns,
+  pauseCronJobApi, resumeCronJobApi, triggerCronJobApi, fetchCronRuns, polishPromptApi,
 } from './api.js';
 
-export async function openCronModal() {
-  state.cronModal.open = true;
-  cancelCronForm();
-  await loadCronJobs();
-}
-
-export function closeCronModal() {
-  state.cronModal.open = false;
-}
-
-async function loadCronJobs() {
+// Cron jobs are rendered inside the Settings modal's "Scheduled Jobs" tab
+// (see settings-panel.js's openSettingsModal/switchSettingsTab, which own
+// loading this data when that tab becomes active).
+export async function loadCronJobs() {
   const { ok, data } = await fetchCronJobs();
   if (!ok) return;
   state.cronModal.jobs = data.jobs || [];
@@ -36,6 +29,7 @@ export function showCronForm(job) {
   m.schedule = job ? job.schedule : '';
   m.timeout = job && job.timeout_seconds ? job.timeout_seconds : '';
   m.retries = job && job.max_retries ? job.max_retries : '';
+  m.validateRun = true;
   setTimeout(() => document.getElementById('cronName')?.focus(), 0);
 }
 
@@ -64,6 +58,7 @@ export async function saveCronForm() {
     timeout_seconds: parseInt(m.timeout) || 0,
     max_retries: parseInt(m.retries) || 0,
   };
+  if (!m.editingId) body.validate_run = m.validateRun;
   const { ok, data: d } = m.editingId
     ? await updateCronJobApi(m.editingId, body)
     : await createCronJobApi(body);
@@ -71,7 +66,20 @@ export async function saveCronForm() {
   const wasEditing = !!m.editingId;
   cancelCronForm();
   await loadCronJobs();
-  showToast(wasEditing ? 'Job updated' : 'Job created', 1500);
+  if (!wasEditing && body.validate_run) showToast('Job created, will validate with one run on the next schedule cycle', 2500);
+  else showToast(wasEditing ? 'Job updated' : 'Job created', 1500);
+}
+
+export async function polishCronPrompt() {
+  const m = state.cronModal;
+  const draft = m.prompt.trim();
+  if (!draft) return;
+  m.polishing = true;
+  const { ok, data } = await polishPromptApi(draft);
+  m.polishing = false;
+  if (!ok) { showToast(data?.detail || 'AI polish failed', 2500); return; }
+  m.prompt = data.prompt;
+  showToast('Prompt polished', 1200);
 }
 
 export async function deleteCronJob(id) {
@@ -92,11 +100,20 @@ export async function resumeCronJob(id) {
 }
 
 export async function triggerCronJob(id) {
-  showToast('Triggering job...', 1500);
+  if (state.cronModal.triggering[id]) return;
+  state.cronModal.triggering[id] = true;
+  showToast('Running now…', 4000);
   const { ok, data: d } = await triggerCronJobApi(id);
-  if (!ok) { showToast(d?.detail || 'Trigger failed', 2500); return; }
-  showToast('Job will run on next tick', 2000);
+  state.cronModal.triggering[id] = false;
+  if (!ok) { showToast(d?.detail || 'Run failed', 2500); return; }
+  const run = d.run || {};
+  if (run.status === 'ok') showToast('✅ Run succeeded', 2000);
+  else showToast('❌ Run failed: ' + (run.error || 'Unknown error'), 3500);
   await loadCronJobs();
+  // Surface the fresh result immediately in the run history, instead of
+  // making the user manually reopen it to see what just happened.
+  state.cronModal.openRuns[id] = false;
+  await toggleCronRuns(id);
 }
 
 export async function toggleCronRuns(id) {

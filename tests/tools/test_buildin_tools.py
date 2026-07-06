@@ -1161,8 +1161,8 @@ class TestFileToolRegistrationGuard:
 # ===========================================================================
 
 class TestAskUserQuestionTool:
-    def test_user_input_manages_own_timeout(self):
-        """user_input/confirm must wait indefinitely for the user (CC/Cursor
+    def test_ask_user_question_manages_own_timeout(self):
+        """ask_user_question/confirm must wait indefinitely for the user (CC/Cursor
         semantics), not be auto-passed by the outer ~120s tool-executor timeout."""
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
@@ -1170,7 +1170,7 @@ class TestAskUserQuestionTool:
         assert tool.functions["ask_user_question"].manages_own_timeout is True
         assert tool.functions["confirm"].manages_own_timeout is True
 
-    def test_user_input_uses_callback(self):
+    def test_ask_user_question_uses_callback(self):
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         captured = {}

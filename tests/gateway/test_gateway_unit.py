@@ -13,6 +13,46 @@ import pytest
 pytest.importorskip("fastapi", reason="Gateway tests require agentica[gateway] extras")
 
 
+class TestAgentServiceApprovalMode:
+    """set_session_approval_mode uses the unified ask/auto/allow-all vocabulary
+    and mutates an already-cached Agent's permission mode in place."""
+
+    def test_unknown_mode_falls_back_to_default(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.set_session_approval_mode("s1", "full")
+        assert svc.get_session_approval_mode("s1") == svc._DEFAULT_APPROVAL_MODE
+
+    def test_valid_modes_are_persisted(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        for mode in ("ask", "auto", "allow-all"):
+            svc.set_session_approval_mode("s1", mode)
+            assert svc.get_session_approval_mode("s1") == mode
+
+    def test_switches_cached_agent_permission_mode_in_place(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        agent = MagicMock()
+        svc._cache.put("s1", agent)
+
+        svc.set_session_approval_mode("s1", "ask")
+
+        agent.set_permission_mode.assert_called_once_with("ask")
+
+    def test_run_config_no_longer_carries_enabled_tools(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.run_context import RunSource
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc.set_session_approval_mode("s1", "ask")
+        run_config = svc._run_config_for_session("s1", RunSource.gateway)
+        assert run_config.enabled_tools is None
+
+
 class TestAgentServiceRunSource:
     """AgentService passes gateway/cron run source into RunConfig."""
 
@@ -47,6 +87,106 @@ class TestAgentServiceRunSource:
 
         config = agent.run.call_args.kwargs["config"]
         assert config.source == RunSource.cron
+
+
+class TestAgentServiceCronUsesAuxiliaryModel:
+    """Scheduled (cron) sessions default to the cheaper auxiliary model as
+    their main model when one is configured; interactive chat sessions and
+    cron sessions without an auxiliary model configured are unaffected."""
+
+    def test_cron_session_uses_auxiliary_model_when_configured(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.config import settings
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._workspace = None
+        with patch.object(settings, "auxiliary_model_provider", "zhipuai"), \
+             patch.object(settings, "auxiliary_model_name", "glm-4.7-flash"), \
+             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+            mock_create.return_value = MagicMock()
+            svc._build_agent("scheduled_job1")
+
+        mock_create.assert_called_once()
+        assert mock_create.call_args.args == ("zhipuai", "glm-4.7-flash")
+
+    def test_cron_session_falls_back_to_main_model_without_auxiliary(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.config import settings
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._workspace = None
+        with patch.object(settings, "auxiliary_model_name", ""), \
+             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+            mock_create.return_value = MagicMock()
+            svc._build_agent("scheduled_job1")
+
+        assert mock_create.call_args.args == (svc.model_provider, svc.model_name)
+
+    def test_interactive_session_ignores_auxiliary_model_shortcut(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.config import settings
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._workspace = None
+        with patch.object(settings, "auxiliary_model_provider", "zhipuai"), \
+             patch.object(settings, "auxiliary_model_name", "glm-4.7-flash"), \
+             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+            mock_create.return_value = MagicMock()
+            svc._build_agent("chat123")
+
+        assert mock_create.call_args_list[0].args == (svc.model_provider, svc.model_name)
+
+
+class TestAgentServiceRunCron:
+    """run_cron() builds an independent, uncached Agent per job execution and
+    is excluded from the chat sidebar (list_sessions())."""
+
+    def test_run_cron_never_touches_the_interactive_agent_cache(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.run_context import RunSource
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=MagicMock(content="done", tools=[]))
+        svc._build_agent = MagicMock(return_value=agent)
+
+        result = asyncio.run(svc.run_cron("do the thing", job_id="job1", user_id="u1"))
+
+        assert result.content == "done"
+        assert result.session_id == "scheduled_job1"
+        config = agent.run.call_args.kwargs["config"]
+        assert config.source == RunSource.cron
+        # Never cached: a second run must build a fresh Agent again.
+        assert svc._cache.get("scheduled_job1") is None
+        asyncio.run(svc.run_cron("do it again", job_id="job1", user_id="u1"))
+        assert svc._build_agent.call_count == 2
+
+    def test_run_cron_rejects_concurrent_runs_of_the_same_job(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        busy_lock = MagicMock()
+        busy_lock.locked.return_value = True
+        svc._get_session_lock = MagicMock(return_value=busy_lock)
+
+        with pytest.raises(RuntimeError, match="already has an active run"):
+            asyncio.run(svc.run_cron("x", job_id="job1"))
+
+    def test_list_sessions_excludes_scheduled_job_sessions(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.memory.session_log import SessionLog
+
+        with patch.object(SessionLog, "list_sessions", return_value=[
+            {"session_id": "scheduled_job1", "path": "x", "last_timestamp": 1},
+            {"session_id": "chat123", "path": "y", "last_timestamp": 2},
+        ]), patch.object(SessionLog, "session_preview", return_value={"first_user": "hi", "user_count": 1}):
+            svc = AgentService(workspace_path=str(tmp_path))
+            sessions = svc.list_sessions()
+
+        assert [s["session_id"] for s in sessions] == ["chat123"]
 
 
 # ============== TestSettings ==============
@@ -539,6 +679,17 @@ class TestModelFactory:
         from agentica.gateway.services.model_factory import get_cron_instructions
         instructions = get_cron_instructions()
         assert "cronjob" in instructions
+
+    def test_self_manage_tools_returns_list(self):
+        from agentica.gateway.services.model_factory import get_self_manage_tools
+        tools = get_self_manage_tools()
+        assert isinstance(tools, list)
+        assert len(tools) == 1
+
+    def test_self_manage_instructions_non_empty(self):
+        from agentica.gateway.services.model_factory import get_self_manage_instructions
+        instructions = get_self_manage_instructions()
+        assert "self_manage" in instructions
 
 
 # ============== TestChannelBase ==============

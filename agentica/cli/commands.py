@@ -89,7 +89,6 @@ class CommandContext:
     extra_tool_names: Optional[List[str]] = None
     workspace: Any = None  # Optional[Workspace]
     skills_registry: Any = None
-    permission_manager: Any = None
     shell_mode: bool = False
     tui_state: Optional[dict] = None
     pending_queue: Any = None  # PendingQueue
@@ -103,10 +102,10 @@ class CommandContext:
     # between the post-turn hook and /goal handlers, guarded by goal_lock.
     goal_manager: Any = None  # Optional[GoalManager]
     goal_lock: Any = None  # Optional[threading.Lock]
-    # Callback the user_input/confirm tools use to read via the TUI input box
+    # Callback the ask_user_question/confirm tools use to read via the TUI input box
     # instead of a blocking input(). Must be preserved across agent rebuilds
     # (/model, /newchat, /reload, …) or those paths reintroduce the deadlock.
-    user_input_callback: Any = None
+    ask_user_question_callback: Any = None
 
 
 # ==================== PendingQueue ====================
@@ -279,7 +278,7 @@ def _refresh_skills_session(ctx: CommandContext):
     load_skills()
     new_registry = get_skill_registry()
     new_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, new_registry,
-                             user_input_callback=ctx.user_input_callback)
+                             ask_user_question_callback=ctx.ask_user_question_callback)
     return {
         "skills_registry": new_registry,
         "current_agent": new_agent,
@@ -550,7 +549,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     custom_subagents = len(get_custom_subagent_configs())
     subagent_total = 3 + custom_subagents
 
-    perm_mode = ctx.permission_manager.mode if ctx.permission_manager else None
+    perm_mode = agent.tool_config.permission_mode if agent else None
 
     # Context usage and session cost are best-effort from the TUI state.
     ts = ctx.tui_state or {}
@@ -1361,8 +1360,8 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     con.print("  [bold]-- Terminal --[/bold]")
     con.print(f"  Working Dir: {os.getcwd()}")
     con.print(f"  Mode:        {'Shell' if ctx.shell_mode else 'Agent'}")
-    if ctx.permission_manager:
-        con.print(f"  Permissions: {ctx.permission_manager.mode}")
+    if ctx.current_agent:
+        con.print(f"  Permissions: {ctx.current_agent.tool_config.permission_mode}")
 
     con.print()
     con.print("  [bold]-- Agent --[/bold]")
@@ -1589,14 +1588,14 @@ def _confirm_via_tui(ctx: CommandContext, question: str) -> bool:
     prompt_toolkit owns the main thread. A nested ``pt_prompt`` there spins up
     a second Application that fights the live one — it deadlocks and leaks CPR
     escapes (``^[[..R``) into the input line, so the user can never answer.
-    Instead route through the SAME ``user_input_callback`` the agent's
+    Instead route through the SAME ``ask_user_question_callback`` the agent's
     ``ask_user_question`` uses: it arms ``state.input_request`` and the main
     thread renders the inline prompt + feeds the typed answer back.
 
     Returns False when there is no interactive channel (non-TUI / tests) — the
     safe default for a destructive confirmation.
     """
-    cb = ctx.user_input_callback
+    cb = ctx.ask_user_question_callback
     if cb is None:
         return False
     try:
@@ -1612,10 +1611,10 @@ def _ask_text_via_tui(ctx: CommandContext, prompt: str, default: str = "") -> st
 
     Same rationale as :func:`_confirm_via_tui`: a nested ``pt_prompt`` on the
     background thread deadlocks the live prompt_toolkit app. Route through the
-    ``user_input_callback`` instead. Returns ``default`` when there is no
+    ``ask_user_question_callback`` instead. Returns ``default`` when there is no
     interactive channel (non-TUI / tests) or when the user cancels (Ctrl+C).
     """
-    cb = ctx.user_input_callback
+    cb = ctx.ask_user_question_callback
     if cb is None:
         return default
     try:
@@ -1718,7 +1717,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         # and the TUI input channel); non-TUI / tests fall straight through.
         final_prompt = prompt
         agent = ctx.current_agent
-        if agent is not None and ctx.user_input_callback is not None:
+        if agent is not None and ctx.ask_user_question_callback is not None:
             con.print("[dim]Refining the task prompt with the model…[/dim]")
             refined = ""
             try:
@@ -1733,7 +1732,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                 opt_original = "Keep the original prompt"
                 opt_manual = "Write it myself"
                 try:
-                    choice = str(ctx.user_input_callback(
+                    choice = str(ctx.ask_user_question_callback(
                         "Which prompt should this scheduled job run?",
                         [opt_refined, opt_original, opt_manual],
                     )).strip()
@@ -1744,7 +1743,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                     final_prompt = prompt
                 elif choice == opt_manual:
                     try:
-                        typed = ctx.user_input_callback("Enter the execution prompt:", None)
+                        typed = ctx.ask_user_question_callback("Enter the execution prompt:", None)
                     except AgentCancelledError:
                         con.print("[dim]cancelled — job not created[/dim]")
                         return
@@ -1904,7 +1903,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 user_input_callback=ctx.user_input_callback)
+                                 ask_user_question_callback=ctx.ask_user_question_callback)
     con.print("[green]New chat session created.[/green]")
     con.print("[dim]Conversation history cleared.[/dim]")
     # Drop any goal manager — the new session has a new SessionLog.
@@ -2196,7 +2195,7 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     os.system("clear" if os.name != "nt" else "cls")
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 user_input_callback=ctx.user_input_callback)
+                                 ask_user_question_callback=ctx.ask_user_question_callback)
     print_header(
         ctx.agent_config["model_provider"],
         ctx.agent_config["model_name"],
@@ -2318,7 +2317,7 @@ def _apply_profile(ctx: CommandContext, name: str):
         con.print(f"[dim]Auxiliary model: {auxiliary_str}[/dim]")
         return {"model_switched": True}
     current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 user_input_callback=ctx.user_input_callback)
+                                 ask_user_question_callback=ctx.ask_user_question_callback)
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
     return {"current_agent": current_agent}
 
@@ -2628,40 +2627,26 @@ def _cmd_export(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
+    from agentica.agent.permissions import PERMISSION_MODES
+
     if cmd_args.strip():
         new_mode = cmd_args.strip().lower()
-        if new_mode not in ("allow-all", "auto", "strict"):
-            con.print(f"[red]Invalid mode: {new_mode}. Use: allow-all, auto, strict[/red]")
+        if new_mode not in PERMISSION_MODES:
+            con.print(f"[red]Invalid mode: {new_mode}. Use: {', '.join(PERMISSION_MODES)}[/red]")
             return
-        if ctx.permission_manager:
-            ctx.permission_manager.mode = new_mode
-            ctx.permission_manager.session_allowed.clear()
+        if ctx.current_agent:
+            ctx.current_agent.set_permission_mode(new_mode)
             con.print(f"[green]Permission mode set to: {new_mode}[/green]")
         return
 
-    if ctx.permission_manager:
-        con.print(f"[bold cyan]Permission Mode: {ctx.permission_manager.mode}[/bold cyan]")
-        if ctx.permission_manager.session_allowed:
-            con.print(f"  Session-allowed tools: {', '.join(sorted(ctx.permission_manager.session_allowed))}")
+    if ctx.current_agent:
+        con.print(f"[bold cyan]Permission Mode: {ctx.current_agent.tool_config.permission_mode}[/bold cyan]")
         con.print()
-        con.print("  [dim]allow-all[/dim]  - auto-approve everything")
-        con.print("  [dim]auto[/dim]      - prompt for write/execute, auto-approve reads")
-        con.print("  [dim]strict[/dim]    - prompt for every tool call")
+        con.print("  [dim]ask[/dim]        - only read-only tools are exposed")
+        con.print("  [dim]auto[/dim]       - all tools exposed; writes restricted to work_dir")
+        con.print("  [dim]allow-all[/dim]  - all tools exposed, no restriction")
         con.print()
         con.print("Usage: /permissions <mode>", style="dim")
-
-
-def _cmd_yolo(ctx: CommandContext, cmd_args: str = ""):
-    con = get_console()
-    if not ctx.permission_manager:
-        return
-    if ctx.permission_manager.mode == "allow-all":
-        ctx.permission_manager.mode = "auto"
-        ctx.permission_manager.session_allowed.clear()
-        con.print("[cyan]YOLO OFF[/cyan] -- back to auto-approve mode")
-    else:
-        ctx.permission_manager.mode = "allow-all"
-        con.print("[bold yellow]YOLO ON[/bold yellow] -- all tool calls auto-approved")
 
 
 def _cmd_paste(ctx: CommandContext, cmd_args: str = ""):
@@ -3474,8 +3459,7 @@ COMMAND_REGISTRY = {
     ),
     "/agent": (_cmd_agents, "Manage subagents (alias for /agents)"),
     # Permissions
-    "/permissions": (_cmd_permissions, "View or set permission mode"),
-    "/yolo": (_cmd_yolo, "Toggle YOLO mode (auto-approve all)"),
+    "/permissions": (_cmd_permissions, "View or set permission mode (ask/auto/allow-all)"),
     # Media (hidden aliases; prefer Ctrl+V for clipboard paste and
     # @path completion / drag-and-drop for local files. Not shown in /help.)
     "/paste": (_cmd_paste, "Paste image from clipboard"),

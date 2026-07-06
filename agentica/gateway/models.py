@@ -4,7 +4,7 @@
 @description: 
 Pydantic request/response models shared across routes.
 """
-from typing import Optional
+from typing import List, Optional
 from pydantic import BaseModel
 
 
@@ -52,6 +52,43 @@ class CronJobCreateRequest(BaseModel):
     max_retries: int = 0
     retry_delay_ms: int = 60000
     permissions: Optional[dict] = None
+    # When True, the job is triggered once immediately after creation so the
+    # user can verify the prompt/schedule actually work before waiting for
+    # the first scheduled tick.
+    validate_run: bool = False
+
+
+class PolishPromptRequest(BaseModel):
+    draft: str
+
+
+class GoalRequest(BaseModel):
+    objective: str
+    session_id: str = "default"
+    user_id: str = "default"
+
+
+class SkillCreateRequest(BaseModel):
+    name: str
+    description: str
+    content: str = ""
+    trigger: Optional[str] = None
+
+
+class SkillUpdateRequest(BaseModel):
+    description: Optional[str] = None
+    content: Optional[str] = None
+    trigger: Optional[str] = None
+
+
+class McpServerRequest(BaseModel):
+    name: str
+    command: Optional[str] = None
+    args: Optional[List[str]] = None
+    url: Optional[str] = None
+    env: Optional[dict] = None
+    headers: Optional[dict] = None
+    timeout: Optional[float] = None
 
 
 class CronJobUpdateRequest(BaseModel):

@@ -21,7 +21,7 @@ from agentica.utils.file_parser import (
     read_excel_file,
 )
 
-pwd_path = Path(__file__).parent
+pwd_path = Path(__file__).parent.parent
 
 
 class TestFileParser(unittest.TestCase):

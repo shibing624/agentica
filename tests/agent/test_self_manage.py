@@ -154,6 +154,31 @@ class TestSelfManageTool(unittest.TestCase):
         self.assertIn("/upgrade", commands.COMMAND_REGISTRY)
         self.assertIn("/config", commands.COMMAND_REGISTRY)
 
+    def test_show_includes_settings_block(self):
+        from agentica import global_config as gc
+        config_path = os.path.join(self._tmp, "config.yaml")
+        with patch("agentica.global_config.global_config_path", return_value=config_path):
+            gc.upsert_profile("default", {
+                "model_provider": "openai", "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1", "api_key": "sk-x",
+            }, make_active=True)
+            gc.set_setting("cron.enabled", True)
+            gc.set_setting("cron.interval", 30)
+            out = json.loads(self.self_manage(action="show"))
+        self.assertEqual(out["config"]["settings"]["cron.enabled"], True)
+        self.assertEqual(out["config"]["settings"]["cron.interval"], 30)
+
+    def test_default_restart_hint_defers_to_deployment_owner(self):
+        """The gateway default must not tell a chat user to restart a CLI they don't have."""
+        from agentica.tools.self_manage_tool import DEFAULT_RESTART_HINT
+        self.assertIn("deployment", DEFAULT_RESTART_HINT)
+        self.assertNotIn("CLI", DEFAULT_RESTART_HINT)
+
+    def test_self_manage_tool_uses_custom_restart_hint(self):
+        from agentica.tools.self_manage_tool import CLI_RESTART_HINT
+        tool = self.SelfManageTool(restart_hint=CLI_RESTART_HINT)
+        self.assertIn(CLI_RESTART_HINT, tool.description)
+
 
 if __name__ == "__main__":
     unittest.main()

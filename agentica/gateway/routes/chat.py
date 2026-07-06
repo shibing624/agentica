@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from .. import deps
 from ..config import settings
-from ..models import ChatRequest, ChatResponse, MemoryRequest, RenameRequest
+from ..models import ChatRequest, ChatResponse, MemoryRequest, RenameRequest, GoalRequest
 from ..services.agent_service import AgentService
 
 try:
@@ -48,6 +48,23 @@ async def chat(
         user_id=result.user_id,
         tool_calls=result.tool_calls,
     )
+
+
+# ============== Standing goal ("/goal <objective>") ==============
+
+@router.post("/api/goal")
+async def run_goal(
+    request: GoalRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    """Drive a bounded standing-goal loop (Agent.run_goal) for the web UI's
+    "/goal <objective>" command. Non-streaming — the loop runs several turns
+    internally and returns only the final result."""
+    try:
+        result = await svc.run_goal(request.objective, request.session_id, request.user_id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return result
 
 
 # ============== SSE streaming chat ==============

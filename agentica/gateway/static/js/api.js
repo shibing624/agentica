@@ -52,6 +52,7 @@ export const setThinkingApi = (enabled) => postJson('/api/config/thinking', { en
 export const fetchDirHistory = () => request('/api/config/dir_history');
 export const saveBaseDirApi = (base_dir) => postJson('/api/config/base_dir', { base_dir });
 export const openPathApi = (path, app) => postJson('/api/open', { path, app });
+export const fetchFsBrowse = (path) => request(`/api/fs/browse${path ? '?path=' + encodeURIComponent(path) : ''}`);
 
 // ---- sessions ----
 export const fetchSessions = () => request('/api/sessions');
@@ -77,6 +78,21 @@ export const pauseCronJobApi = (id) => request(`/api/scheduler/jobs/${id}/pause`
 export const resumeCronJobApi = (id) => request(`/api/scheduler/jobs/${id}/resume`, { method: 'POST' });
 export const triggerCronJobApi = (id) => request(`/api/scheduler/jobs/${id}/trigger`, { method: 'POST' });
 export const fetchCronRuns = (id) => request(`/api/scheduler/jobs/${id}/runs`);
+export const polishPromptApi = (draft) => postJson('/api/scheduler/polish_prompt', { draft });
+
+// ---- plugins: tools (read-only) + mcp servers (CRUD) + skills (CRUD) ----
+export const fetchTools = () => request('/api/tools');
+export const fetchMcpServers = () => request('/api/mcp/servers');
+export const createMcpServerApi = (body) => postJson('/api/mcp/servers', body);
+export const deleteMcpServerApi = (name) => request(`/api/mcp/servers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+export const fetchSkills = () => request('/api/skills');
+export const fetchSkillDetail = (name) => request(`/api/skills/${encodeURIComponent(name)}`);
+export const createSkillApi = (body) => postJson('/api/skills', body);
+export const updateSkillApi = (name, body) => putJson(`/api/skills/${encodeURIComponent(name)}`, body);
+export const deleteSkillApi = (name) => request(`/api/skills/${encodeURIComponent(name)}`, { method: 'DELETE' });
+
+// ---- standing goal ----
+export const runGoalApi = (objective, session_id) => postJson('/api/goal', { objective, session_id });
 
 // ---- profiles (settings; web UI only creates + deletes, edits go in config.yaml) ----
 export const createProfileApi = (body) => postJson('/api/profile', body);

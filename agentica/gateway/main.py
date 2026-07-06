@@ -21,7 +21,6 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from agentica.run_context import RunSource
 from agentica.utils.log import logger
 from . import deps
 from agentica.version import __version__
@@ -29,7 +28,7 @@ from .config import settings
 from .services.agent_service import AgentService
 from .services.channel_manager import ChannelManager
 from .services.router import MessageRouter
-from .routes import chat, config as config_routes, scheduler as scheduler_routes, channels, ws
+from .routes import chat, config as config_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes
 
 # ContextVar holding the current request ID — async-safe, no threading issues
 _request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -70,21 +69,33 @@ async def lifespan(app: FastAPI):
     deps.channel_manager = ChannelManager()
     deps.message_router = MessageRouter(default_agent="main")
 
-    # Cron scheduler — tick every 60s using the new SDK cron module
+    # Cron scheduler — uses the same SDK cron module (agentica.cron.*) and
+    # jobs.json store as the CLI, never the OS crontab. Gated by the same
+    # `cron.enabled` config.yaml setting the CLI's `/cron daemon on` toggles,
+    # so both surfaces share one on/off switch.
     from agentica.cron.scheduler import tick as cron_tick
+    from agentica.global_config import get_setting
 
     cron_runner = _GatewayAgentRunner(agent_svc)
+    deps.cron_runner = cron_runner
+    deps.main_loop = asyncio.get_running_loop()
 
-    async def _cron_ticker():
-        while True:
-            await asyncio.sleep(60)
-            try:
-                await cron_tick(agent_runner=cron_runner)
-            except Exception as e:
-                logger.error(f"Cron tick error: {e}")
+    cron_task = None
+    if get_setting("cron.enabled", False):
+        interval = int(get_setting("cron.interval", 60) or 60)
 
-    cron_task = asyncio.create_task(_cron_ticker())
-    logger.info("Cron scheduler started (60s tick)")
+        async def _cron_ticker():
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    await cron_tick(agent_runner=cron_runner)
+                except Exception as e:
+                    logger.error(f"Cron tick error: {e}")
+
+        cron_task = asyncio.create_task(_cron_ticker())
+        logger.info(f"Cron scheduler started ({interval}s tick)")
+    else:
+        logger.info("Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to enable)")
 
     # Channels
     await _setup_channels()
@@ -95,11 +106,12 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("Shutting down...")
-    cron_task.cancel()
-    try:
-        await cron_task
-    except (asyncio.CancelledError, Exception):
-        pass
+    if cron_task is not None:
+        cron_task.cancel()
+        try:
+            await cron_task
+        except (asyncio.CancelledError, Exception):
+            pass
     if deps.channel_manager:
         await deps.channel_manager.disconnect_all()
     logger.info("Goodbye!")
@@ -204,6 +216,7 @@ async def web_chat():
 app.include_router(config_routes.router)
 app.include_router(chat.router)
 app.include_router(scheduler_routes.router)
+app.include_router(plugins_routes.router)
 app.include_router(channels.router)
 app.include_router(ws.router)
 
@@ -355,7 +368,13 @@ async def _handle_channel_message(message) -> None:
 # ============== Scheduler agent runner ==============
 
 class _GatewayAgentRunner:
-    """Adapts AgentService to the AgentRunner protocol expected by JobExecutor."""
+    """Adapts AgentService to the AgentRunner protocol expected by JobExecutor.
+
+    Runs each job on its own independent Agent (see
+    AgentService.run_cron()) — never the shared interactive-chat cache — so
+    scheduled jobs neither leak context between runs nor show up in the chat
+    sidebar.
+    """
 
     def __init__(self, agent_svc: AgentService):
         self._svc = agent_svc
@@ -364,14 +383,8 @@ class _GatewayAgentRunner:
         ctx = context or {}
         job_id = ctx.get("job_id", str(uuid4()))
         user_id = ctx.get("user_id", settings.default_user_id)
-        session_id = f"scheduled_{job_id}"
 
-        result = await self._svc.chat(
-            message=prompt,
-            session_id=session_id,
-            user_id=user_id,
-            source=RunSource.cron,
-        )
+        result = await self._svc.run_cron(message=prompt, job_id=job_id, user_id=user_id)
         return result.content
 
 

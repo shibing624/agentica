@@ -20,9 +20,12 @@ from agentica.cron.jobs import (
     list_task_runs,
     schedule_to_human,
 )
+from agentica.cron.scheduler import _execute_job
 from agentica.tools.cron_tool import cronjob
 
-from ..models import CronJobCreateRequest, CronJobUpdateRequest
+from .. import deps
+from ..config import settings
+from ..models import CronJobCreateRequest, CronJobUpdateRequest, PolishPromptRequest
 
 router = APIRouter(prefix="/api/scheduler")
 
@@ -51,13 +54,21 @@ def _job_dict(j) -> dict:
 
 
 def _run_dict(r) -> dict:
-    """Compact run record for history responses (matches cron_tool _action_runs)."""
+    """Run record for history responses.
+
+    ``result_preview`` mirrors cron_tool._action_runs (200 chars — that one
+    is LLM-facing and must stay context-cheap). ``result_full`` is this
+    endpoint's own addition for the web UI's hover tooltip: this route is
+    browser-only, so it can afford a much larger (but still capped) payload.
+    """
+    full = r.result or r.error or ""
     return {
         "job_id": r.task_id,
         "status": r.status.value if hasattr(r.status, "value") else str(r.status),
         "started_at_ms": r.started_at_ms,
         "ended_at_ms": r.ended_at_ms,
         "result_preview": (r.result[:200] if r.result else None),
+        "result_full": full[:20000],
         "error": r.error,
     }
 
@@ -99,10 +110,19 @@ async def api_get_job(job_id: str):
 
 @router.post("/jobs")
 async def api_create_job(body: CronJobCreateRequest):
-    result = _parse_tool_result(cronjob(action="create", **body.model_dump()))
+    fields = body.model_dump(exclude={"validate_run"})
+    result = _parse_tool_result(cronjob(action="create", **fields))
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Failed to create job"))
-    return _job_response(result)
+    result = _job_response(result)
+    if body.validate_run:
+        job = result.get("job") or {}
+        job_id = job.get("id")
+        job_obj = get_job(job_id) if job_id else None
+        if job_obj:
+            result["validation_run"] = await _execute_job(job_obj, agent_runner=deps.cron_runner, verbose=False)
+            result["job"] = _job_dict(get_job(job_id))
+    return result
 
 
 @router.put("/jobs/{job_id}")
@@ -150,12 +170,61 @@ async def api_resume_job(job_id: str):
 
 @router.post("/jobs/{job_id}/trigger")
 async def api_trigger_job(job_id: str):
-    if not get_job(job_id):
+    """Run this job once, right now, synchronously — same execution path
+    (`_execute_job` + the gateway's AgentRunner) the background ticker uses,
+    not just marking it due for the next tick.
+    """
+    job = get_job(job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    result = _parse_tool_result(cronjob(action="run", job_id=job_id))
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Trigger failed"))
-    return _job_response(result)
+    run_result = await _execute_job(job, agent_runner=deps.cron_runner, verbose=False)
+    updated = get_job(job_id)
+    return {
+        "success": run_result.get("status") == "ok",
+        "job": _job_dict(updated) if updated else None,
+        "run": run_result,
+    }
+
+
+# ============== Prompt polishing (LLM-assisted authoring) ==============
+
+_POLISH_SYSTEM_PROMPT = """You rewrite a rough cron-job idea into a clear, \
+self-contained prompt for an unattended AI agent. The agent that receives \
+this prompt runs in a fresh session with no chat history and no user present \
+to answer follow-up questions, so the prompt must:
+- State the exact task and the expected deliverable/output format.
+- Include any concrete details the user gave (paths, names, thresholds, etc).
+- Avoid vague language like "check things" — be specific and actionable.
+Reply with ONLY the rewritten prompt text, no preamble, no quotes, no markdown fences."""
+
+
+@router.post("/polish_prompt")
+async def polish_prompt(body: PolishPromptRequest):
+    draft = body.draft.strip()
+    if not draft:
+        raise HTTPException(status_code=400, detail="draft must not be empty")
+
+    from agentica.model.message import Message
+    from ..services.model_factory import create_model
+
+    model = create_model(
+        settings.model_provider,
+        settings.model_name,
+        base_url=settings.model_base_url or None,
+        api_key=settings.model_api_key or None,
+    )
+    messages = [
+        Message(role="system", content=_POLISH_SYSTEM_PROMPT),
+        Message(role="user", content=draft),
+    ]
+    try:
+        response = await model.response(messages)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {e}")
+    polished = (response.content or "").strip() if response else ""
+    if not polished:
+        raise HTTPException(status_code=502, detail="LLM returned an empty response")
+    return {"prompt": polished}
 
 
 # ============== Run history ==============

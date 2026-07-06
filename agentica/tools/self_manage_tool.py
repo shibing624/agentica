@@ -20,10 +20,29 @@ from agentica.tools.helpers import tool_result, tool_error
 from agentica.cli import self_manage as sm
 
 
-_SELF_MANAGE_DESCRIPTION = """Inspect and modify agentica's own runtime configuration, or upgrade itself.
+# Whether the agent can literally restart itself to load a new version
+# depends on the product surface. The terminal CLI is a foreground process
+# the user is driving, so exiting and rerunning it is something *they* can
+# do themselves. The gateway (web chat + Feishu/WeCom/WeChat/Telegram/
+# Discord/DingTalk/QQ bot channels) is a long-running server process — the
+# chat user has no way to restart it, only whoever manages the deployment
+# does. Default to the surface-agnostic phrasing; the CLI opts into the more
+# specific one via `SelfManageTool(restart_hint=CLI_RESTART_HINT)`.
+DEFAULT_RESTART_HINT = (
+    "Restarting is required to load a new version. This must be done by "
+    "whoever manages this deployment (restarting the server process) — you "
+    "cannot do this yourself from the conversation, and neither can the user "
+    "if they're just chatting with you."
+)
+CLI_RESTART_HINT = "Restart the CLI to load the new version (exit and rerun `agentica`)."
+
+
+def _build_description(restart_hint: str) -> str:
+    return f"""Inspect and modify agentica's own runtime configuration, or upgrade itself.
 
 Actions:
-- action='show'                 -> return current config.yaml profiles + .env vars (secrets masked)
+- action='show'                 -> return current config.yaml profiles + settings (cron scheduler
+                                   enabled/interval, etc.) + .env vars (secrets masked)
 - action='set_config'           -> edit a config.yaml profile field.
                                    Requires key + value. Optional profile (defaults to active).
                                    Editable keys: model_provider, model_name, base_url, api_key,
@@ -31,12 +50,15 @@ Actions:
 - action='set_env'              -> set a .env variable. Requires key + value.
                                    Pass value='-' to delete the variable.
 - action='check_upgrade'        -> report current vs latest PyPI version (no install).
-- action='upgrade'              -> pip install -U agentica (requires confirm=True). Restart needed after.
+- action='upgrade'              -> pip install -U agentica (requires confirm=True). {restart_hint}
 - action='install_skill'        -> install a skill from a git URL or local path. Requires value=<source>.
                                    Optional force=confirm-style via confirm=True to overwrite existing.
 
 Use this to optimize your own setup, e.g. raise max_tokens, switch model, or add an API key.
 Config file edits persist; model changes take effect on next agent rebuild/restart."""
+
+
+_SELF_MANAGE_DESCRIPTION = _build_description(DEFAULT_RESTART_HINT)
 
 
 def _do_self_manage(
@@ -45,6 +67,7 @@ def _do_self_manage(
     value: Optional[str] = None,
     profile: Optional[str] = None,
     confirm: bool = False,
+    restart_hint: str = DEFAULT_RESTART_HINT,
 ) -> str:
     """Pure business implementation of the self_manage tool.
 
@@ -141,8 +164,7 @@ def _do_self_manage(
             success=(code == 0),
             exit_code=code,
             output=output.strip()[-2000:],  # surface real pip signal, capped
-            note="Restart the CLI to load the new version." if code == 0
-            else "pip failed; see output.",
+            note=restart_hint if code == 0 else "pip failed; see output.",
         )
 
     return tool_error(
@@ -168,16 +190,24 @@ class SelfManageTool(Tool):
 
     Usage:
         agent = Agent(tools=[SelfManageTool()])
+
+    Args:
+        restart_hint: surface-specific phrasing for how a new version is
+            loaded after ``action='upgrade'``, baked into both the tool
+            description and the upgrade result's ``note``. Defaults to
+            ``DEFAULT_RESTART_HINT`` (safe for any non-CLI surface); the CLI
+            passes ``CLI_RESTART_HINT`` since the user can restart it themselves.
     """
 
-    def __init__(self):
-        super().__init__(name="self_manage", description=_SELF_MANAGE_DESCRIPTION)
+    def __init__(self, restart_hint: Optional[str] = None):
+        self._restart_hint = restart_hint or DEFAULT_RESTART_HINT
+        super().__init__(name="self_manage", description=_build_description(self._restart_hint))
         self.register(self.self_manage, is_destructive=True)
 
     # No docstring on the method: Tool.register() falls back to self.description
-    # (= _SELF_MANAGE_DESCRIPTION, set in __init__) when function.__doc__ is None,
-    # so the LLM-facing schema stays in perfect sync with the free-function
-    # @tool decorator without duplicating the description text.
+    # (set in __init__ from _build_description()) when function.__doc__ is None,
+    # so the LLM-facing schema stays in sync with the surface-specific restart_hint
+    # without duplicating the description text.
     def self_manage(
         self,
         action: str,
@@ -186,7 +216,7 @@ class SelfManageTool(Tool):
         profile: Optional[str] = None,
         confirm: bool = False,
     ) -> str:
-        return _do_self_manage(action, key, value, profile, confirm)
+        return _do_self_manage(action, key, value, profile, confirm, restart_hint=self._restart_hint)
 
     def __repr__(self) -> str:
         return "SelfManageTool()"

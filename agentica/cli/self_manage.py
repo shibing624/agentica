@@ -108,6 +108,10 @@ def read_config_summary(reveal_secrets: bool = False) -> Dict[str, Any]:
     """Return a masked snapshot of the global config for display.
 
     Secrets in profiles and the env block are masked unless ``reveal_secrets``.
+    Includes the top-level ``settings`` block (cron.enabled/cron.interval,
+    cli_markdown, etc. — see ``global_config.get_setting``/``set_setting``) so
+    callers (the `self_manage` tool's ``action='show'``) can answer questions
+    like "is the cron scheduler daemon on?" without a separate lookup.
     """
     config = load_global_config()
     if not config:
@@ -129,6 +133,9 @@ def read_config_summary(reveal_secrets: bool = False) -> Dict[str, Any]:
             k: (v if reveal_secrets else mask_secret(k, v))
             for k, v in env_block.items()
         }
+    settings_block = config.get("settings")
+    if isinstance(settings_block, dict):
+        snapshot["settings"] = dict(settings_block)
     return snapshot
 
 

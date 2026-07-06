@@ -419,7 +419,30 @@ profiles:
 
 # Free-form env block: arbitrary keys injected into os.environ.
 # Shell / .env values still win over these (setdefault semantics).
+# Common keys you may want here (uncomment / fill in what you need; the
+# equivalent .env.example keys still work too, this is just the recommended
+# home for them going forward):
 env: {}
+#   # --- search / web tools ---
+#   JINA_API_KEY:               # read_url_content(reader) via Jina
+#   SERPER_API_KEY:             # Google search via serper.dev
+#   EXA_API_KEY:                # Exa search
+#   BOCHA_API_KEY:              # Bocha search
+#   # --- shell tool safety (execute/run_shell_command) ---
+#   SHELL_COMMAND_CONTROL: denylist   # allowlist|denylist (default: denylist)
+#   SHELL_DENYLIST: "sudo,su"         # used when SHELL_COMMAND_CONTROL=denylist
+#   SHELL_ALLOWLIST: ""               # used when SHELL_COMMAND_CONTROL=allowlist
+#   # --- huggingface (IMAGE_PROVIDER=huggingface) ---
+#   HUGGINGFACE_IMAGE_MODEL: CompVis/stable-diffusion-v1-4
+#   HUGGINGFACE_API_TOKEN:
+#   # --- logging ---
+#   AGENTICA_LOG_LEVEL: INFO
+#   AGENTICA_LOG_FILE: ""
+#   # --- Langfuse tracing (https://langfuse.com/docs) ---
+#   LANGFUSE_SECRET_KEY:
+#   LANGFUSE_PUBLIC_KEY:
+#   LANGFUSE_BASE_URL: "https://cloud.langfuse.com"
+#   LANGFUSE_TIMEOUT: 300
 
 # CLI-only presentation toggles.
 settings:

@@ -283,7 +283,7 @@ from agentica import DeepAgent
 | `include_todos` | `bool` | `True` | 启用 TODO 管理 |
 | `include_task` | `bool` | `True` | 启用子任务委派 |
 | `include_skills` | `bool` | `True` | 启用 Skill 查询工具 |
-| `include_user_input` | `bool` | `False` | 启用 Human-in-the-loop 工具 |
+| `include_ask_user_question` | `bool` | `False` | 启用 Human-in-the-loop 工具 |
 
 ### 内置工具
 

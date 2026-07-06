@@ -251,7 +251,7 @@ class TestVisionWithLocalImage(unittest.TestCase):
     def setUpClass(cls):
         """Load test image."""
         cls.test_image_path = os.path.join(
-            os.path.dirname(__file__), 'data', 'chinese.jpg'
+            os.path.dirname(os.path.dirname(__file__)), 'data', 'chinese.jpg'
         )
         if os.path.exists(cls.test_image_path):
             with open(cls.test_image_path, 'rb') as f:
@@ -373,7 +373,7 @@ class TestAgentWithVisionHistory(unittest.TestCase):
     def setUpClass(cls):
         """Load test image."""
         cls.test_image_path = os.path.join(
-            os.path.dirname(__file__), 'data', 'chinese.jpg'
+            os.path.dirname(os.path.dirname(__file__)), 'data', 'chinese.jpg'
         )
         if os.path.exists(cls.test_image_path):
             with open(cls.test_image_path, 'rb') as f:

@@ -41,6 +41,7 @@ export function sidebarTree() {
           dirShort: s.dir ? shortenPath(s.dir) : '',
           dir: s.dir || '',
           isFork: !!s.parentSessionId,
+          unread: !!s.unread,
           visible: !q || sessionSearch.includes(q),
         };
       }),
@@ -83,7 +84,7 @@ export function removeProject(projectId) {
   const project = meta.projects[projectId]; if (!project) return;
   project.removed = true;
   saveProjectMeta(meta);
-  showToast('已隐藏项目分组', 1200);
+  showToast('Project group hidden', 1200);
 }
 
 // The sidebar template re-renders reactively off `state.sessions` and

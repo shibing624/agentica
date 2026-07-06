@@ -57,7 +57,6 @@ from agentica.cli.display import (
     get_file_completions,
     get_truncated_blocks,
 )
-from agentica.cli.permissions import PermissionManager
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import logger, suppress_console_logging
@@ -83,9 +82,9 @@ from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 
 @dataclass
 class _InputRequest:
-    """A pending user_input tool request awaiting a typed reply.
+    """A pending ask_user_question tool request awaiting a typed reply.
 
-    Created by the user_input_callback on the background agent thread; the main
+    Created by the ask_user_question_callback on the background agent thread; the main
     prompt_toolkit thread fulfils it by putting the user's line on ``result``.
     Putting the ``CANCELLED`` sentinel unblocks the agent thread so it can raise
     :class:`AgentCancelledError` — this is how Ctrl+C escapes a pending prompt.
@@ -156,8 +155,8 @@ class SessionState:
     # We snapshot cumulative CostTracker totals BEFORE each turn and diff
     # AFTER so the goal loop sees the delta, not the whole run.
     goal_tokens_baseline: int = 0
-    # Active user_input tool request. When the agent (running in the background
-    # process_loop thread) calls the user_input tool, it parks on a result queue
+    # Active ask_user_question tool request. When the agent (running in the background
+    # process_loop thread) calls the ask_user_question tool, it parks on a result queue
     # and sets this field so the main prompt_toolkit thread routes the next typed
     # line into the queue instead of pending_queue. None when no request pending.
     input_request: Optional["_InputRequest"] = None
@@ -351,7 +350,7 @@ class ChatConsole:
         """Render Rich markup to an ANSI string without emitting it.
 
         Lets callers batch multiple lines into a single ``run_in_terminal``
-        cycle (see ``_cli_user_input_callback._show_prompt``).
+        cycle (see ``_cli_ask_user_question_callback._show_prompt``).
         """
         self._buffer.seek(0)
         self._buffer.truncate()
@@ -517,7 +516,7 @@ def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> No
 # (spinner frozen) at a glance.
 _BRAILLE_SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-# Shown in the spinner line while the agent is parked on a user_input/confirm
+# Shown in the spinner line while the agent is parked on a ask_user_question/confirm
 # tool. Steady (no animation) so the spinner thread can stop invalidate() churn
 # that would otherwise fight the input renderer.
 _WAITING_FOR_INPUT_TEXT = "⏸  waiting for your answer…"
@@ -797,7 +796,6 @@ def _process_stream_response(
     tui_state: dict,
     *,
     images: Optional[list] = None,
-    permission_manager: Optional[PermissionManager] = None,
 ) -> None:
     """Process the agent's streaming response and display it."""
     con = get_console()
@@ -837,11 +835,11 @@ def _process_stream_response(
 
         run_config = RunConfig(stream_intermediate_steps=True, source=RunSource.cli)
 
-        # Permission integration: restrict tools based on permission mode
-        if permission_manager and permission_manager.mode == "strict":
-            from agentica.cli.permissions import READ_ONLY_TOOLS
-
-            run_config.enabled_tools = list(READ_ONLY_TOOLS)
+        # Permission enforcement lives on the Agent itself now (tool_config.
+        # permission_mode + sandbox_config, see agentica.agent.permissions) —
+        # set once at build time by create_agent() and switchable at runtime
+        # via current_agent.set_permission_mode() (/permissions command).
+        # No per-run RunConfig override needed here.
 
         run_kwargs = {"config": run_config}
 
@@ -1221,7 +1219,7 @@ def _setup_tui(
                 return
             state.last_ctrl_c = now
             _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit)")
-            # If the agent is currently blocked in a user_input tool call, the
+            # If the agent is currently blocked in a ask_user_question tool call, the
             # asyncio task.cancel() route alone won't help: the tool runs on a
             # worker thread waiting on a queue.Queue.get(), and Python threads
             # can't be interrupted from asyncio. We must wake that thread by
@@ -1272,7 +1270,7 @@ def _setup_tui(
         text = raw_text.strip()
         has_images = bool(state.attached_images)
 
-        # If the agent is waiting on a user_input tool request, route this line
+        # If the agent is waiting on a ask_user_question tool request, route this line
         # straight to the request's result queue (unblocking the agent thread)
         # instead of treating it as a new turn. Empty input is allowed here so
         # the user can accept a default/blank answer.
@@ -1554,8 +1552,8 @@ def _setup_tui(
             return []
         return [("class:spinner", f"  {text}")]
 
-    # ── user_input prompt widget ──
-    # When the agent parks on a user_input/confirm tool it sets
+    # ── ask_user_question prompt widget ──
+    # When the agent parks on a ask_user_question/confirm tool it sets
     # state.input_request. We render the question here, as part of the layout
     # on the main prompt_toolkit thread, instead of having the background
     # agent thread call print_formatted_text(). In a non-full-screen app that
@@ -1750,11 +1748,10 @@ def run_interactive(
         suppress_console_logging()
 
     perm_mode = agent_config.get("permissions", "auto")
-    permission_manager = PermissionManager(mode=perm_mode)
 
     extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
 
-    # Holder lets the user_input_callback (built now, needed by create_agent)
+    # Holder lets the ask_user_question_callback (built now, needed by create_agent)
     # reach `state` / `app`, which are created further below. The agent calls
     # the callback on the background process_loop thread; it parks on a queue
     # while the main prompt_toolkit thread feeds the typed line back via
@@ -1762,7 +1759,7 @@ def run_interactive(
     # deadlocks against prompt_toolkit's stdin ownership.
     _ui_holder: dict = {}
 
-    def _cli_user_input_callback(prompt: str, options: Optional[List[str]] = None) -> str:
+    def _cli_ask_user_question_callback(prompt: str, options: Optional[List[str]] = None) -> str:
         state_ref = _ui_holder.get("state")
         app_ref = _ui_holder.get("app")
         # Fallback to bare input if the TUI isn't up yet (shouldn't happen in
@@ -1795,7 +1792,7 @@ def run_interactive(
             # cleanly. Any layer between us and the agent that catches Exception
             # will still respect this because AgentCancelledError subclasses
             # Exception but is explicitly re-raised by the tool infra.
-            raise AgentCancelledError("user_input aborted by user (Ctrl+C)")
+            raise AgentCancelledError("ask_user_question aborted by user (Ctrl+C)")
 
         # If the user typed an option number, map it back to the option text.
         if options and answer:
@@ -1809,7 +1806,8 @@ def run_interactive(
 
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
-        user_input_callback=_cli_user_input_callback,
+        ask_user_question_callback=_cli_ask_user_question_callback,
+        permission_mode=perm_mode,
     )
 
     # Load custom subagent definitions (.agentica/agents/*.md) before the TUI
@@ -1908,7 +1906,6 @@ def run_interactive(
             extra_tool_names=extra_tool_names,
             workspace=workspace,
             skills_registry=skills_registry,
-            permission_manager=permission_manager,
             shell_mode=state.shell_mode,
             tui_state=tui_state,
             pending_queue=pending_queue,
@@ -1919,7 +1916,7 @@ def run_interactive(
             bg_task_counter=state.bg_task_counter,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
-            user_input_callback=_cli_user_input_callback,
+            ask_user_question_callback=_cli_ask_user_question_callback,
         )
 
     def _dispatch_concurrent_cmd(cmd: str, cmd_args: str):
@@ -1983,8 +1980,8 @@ def run_interactive(
     chat_console = ChatConsole()
     set_active_console(chat_console)
 
-    # Wire the user_input callback holder now that state/app/console all exist,
-    # so the user_input tool reads via the TUI instead of a blocking input().
+    # Wire the ask_user_question callback holder now that state/app/console all exist,
+    # so the ask_user_question tool reads via the TUI instead of a blocking input().
     _ui_holder["state"] = state
     _ui_holder["app"] = app
 
@@ -2157,7 +2154,6 @@ def run_interactive(
                 session_tokens,
                 tui_state,
                 images=turn_images,
-                permission_manager=permission_manager,
             )
             state.agent_running = False
             tui_state["spinner_text"] = ""
@@ -2193,7 +2189,7 @@ def run_interactive(
             if not (state.agent_running and app.is_running):
                 time.sleep(0.3)
                 continue
-            # Agent parked on a user_input/confirm tool: stop churning
+            # Agent parked on a ask_user_question/confirm tool: stop churning
             # invalidate() (it fights the input renderer and desyncs the
             # cursor) and replace the stale "🔧 tool (Ns)" phase with a
             # steady "waiting" line so the user knows it's their turn.

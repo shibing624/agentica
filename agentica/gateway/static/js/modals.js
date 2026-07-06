@@ -1,9 +1,9 @@
 // ============ TOAST / CONFIRM / DIR MODAL / ACCOUNT / PLUGINS ============
 import { state } from './state.js';
 import { fmtN, ago, shortenPath } from './utils.js';
-import { fetchDirHistory, saveBaseDirApi, openPathApi, getToken, setToken } from './api.js';
-import { loadProjectMeta, saveProjectMeta, ensureProjectForSession, projectIdForDir } from './state.js';
-import { createSessionWithDir, save } from './sessions.js';
+import { fetchDirHistory, saveBaseDirApi, openPathApi } from './api.js';
+import { loadProjectMeta, saveProjectMeta, ensureProjectForSession, activeProjectIdForDir } from './state.js';
+import { startNewChatDraft, save, delSession } from './sessions.js';
 import { renderSidebar } from './sidebar.js';
 
 // ---- Toast ----
@@ -65,7 +65,7 @@ export function openDirModal() {
   state.dirModal.open = true;
   state.dirModal.historyOpen = false;
   if (state.dirModal.forNewSession) {
-    state.dirModal.value = state.serverDir || '';
+    state.dirModal.value = state.pendingNewChatDir || state.serverDir || '';
   } else {
     state.dirModal.value = currentDir() || '';
   }
@@ -104,25 +104,27 @@ export async function saveDir() {
   if (!val) return;
   const { ok, data } = await saveBaseDirApi(val);
   if (!ok) {
-    showToast(data?.detail || '设置工作目录失败，请检查路径是否正确');
+    showToast(data?.detail || 'Failed to set working directory, please check the path');
     return;
   }
   if (data.status === 'ok') {
     state.serverDir = data.base_dir;
     loadDirHistory();
-    if (data.created) showToast('已自动创建文件夹: ' + data.base_dir);
+    if (data.created) showToast('Folder created automatically: ' + data.base_dir);
 
     if (state.dirModal.forNewSession) {
       state.dirModal.forNewSession = false;
       state.dirModal.open = false;
-      createSessionWithDir(data.base_dir);
+      // Only remember the chosen dir — the session itself isn't created
+      // until the user actually sends a first message (startNewChatDraft).
+      startNewChatDraft(data.base_dir);
       return;
     }
 
     if (state.curSess && state.sessions[state.curSess]) {
       state.sessions[state.curSess].dir = data.base_dir;
       const meta = loadProjectMeta();
-      const projectId = projectIdForDir(data.base_dir);
+      const projectId = activeProjectIdForDir(meta, data.base_dir);
       meta.sessionMeta[state.curSess] = { ...(meta.sessionMeta[state.curSess] || {}), projectId, archived: !!state.sessions[state.curSess].archived };
       ensureProjectForSession(state.curSess, state.sessions[state.curSess], meta);
       saveProjectMeta(meta);
@@ -138,13 +140,13 @@ export function copyDir() {
   const text = val || currentDir();
   if (!text) return;
   if (navigator.clipboard && window.isSecureContext) {
-    navigator.clipboard.writeText(text).then(() => showToast('已复制: ' + text));
+    navigator.clipboard.writeText(text).then(() => showToast('Copied: ' + text));
   } else {
     const ta = document.createElement('textarea');
     ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px';
     document.body.appendChild(ta); ta.select();
-    try { document.execCommand('copy'); showToast('已复制: ' + text); }
-    catch (e) { showToast('复制失败'); }
+    try { document.execCommand('copy'); showToast('Copied: ' + text); }
+    catch (e) { showToast('Copy failed'); }
     document.body.removeChild(ta);
   }
 }
@@ -161,32 +163,37 @@ export function openInTerminal() {
   openPathApi(dir, 'terminal').catch(() => { });
 }
 
-// ---- Account panel ----
+// ---- Account panel (small popover anchored above the account button) ----
 export function openAccountPanel() {
   state.accountPanelOpen = true;
-  state.gatewayTokenInput = getToken();
 }
 
 export function closeAccountPanel() {
   state.accountPanelOpen = false;
 }
 
-export function saveGatewayToken() {
-  setToken((state.gatewayTokenInput || '').trim());
-  showToast('Access token saved');
+// ---- Archived sessions (rendered inside the Settings modal's "Archived"
+// tab — see settings-panel.js) ----
+export function deleteArchivedSession(id) {
+  delSession(id);
 }
 
+// Account panel usage is user-wide, not tied to whichever session happens to
+// be open — it sums every local session's counters (the per-session tally in
+// the input box's ctx-tip is the one scoped to state.curSess).
 export function currentUsage() {
-  const s = state.curSess && state.sessions[state.curSess] ? state.sessions[state.curSess] : null;
-  const ctxWin = state.serverContextWindow || 128000;
-  const input = s ? (s.lastInputTokens || s.tokIn || 0) : 0;
-  const pct = ctxWin && input ? Math.min(Math.round((input / ctxWin) * 100), 100) : 0;
-  const entries = s && s.usageEntries ? s.usageEntries : [];
+  const sessions = Object.values(state.sessions);
+  let tokIn = 0, tokOut = 0, requests = 0, totalTime = 0;
+  for (const s of sessions) {
+    tokIn += s.tokIn || 0;
+    tokOut += s.tokOut || 0;
+    requests += s.requests || 0;
+    totalTime += s.totalTime || 0;
+  }
   return {
-    s, ctxWin, input, pct,
-    tokIn: s ? s.tokIn || 0 : 0, tokOut: s ? s.tokOut || 0 : 0,
-    requests: s ? s.requests || 0 : 0, totalTime: s ? s.totalTime || 0 : 0,
-    entries,
+    sessionCount: sessions.length,
+    tokIn, tokOut, tokTotal: tokIn + tokOut,
+    requests, totalTime,
   };
 }
 
@@ -206,12 +213,3 @@ export function archivedSessions() {
 }
 
 export { fmtN };
-
-// ---- Plugins panel ----
-export function openPluginsPanel() {
-  state.pluginsPanelOpen = true;
-}
-
-export function closePluginsPanel() {
-  state.pluginsPanelOpen = false;
-}

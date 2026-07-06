@@ -32,7 +32,7 @@ Usage:
     agent = DeepAgent(enable_long_term_memory=False)  # explicitly disable long-term memory
 
     # Enable human-in-the-loop
-    agent = DeepAgent(include_user_input=True)
+    agent = DeepAgent(include_ask_user_question=True)
 
     # Disable web search (file-only agent)
     agent = DeepAgent(include_web_search=False, include_fetch_url=False)
@@ -46,7 +46,13 @@ Usage:
     response = await agent.run("Analyze X", config=RunConfig(max_cost_usd=1.0))
     print(response.cost_tracker.total_cost_usd)
 
-    # With sandbox isolation
+    # Unified 3-tier tool permission (see agentica.agent.permissions):
+    # "ask" (read-only tools only), "auto" (writes restricted to work_dir),
+    # "allow-all" (no restriction — default, matches historical behavior).
+    agent = DeepAgent(permission_mode="auto")
+    agent.set_permission_mode("allow-all")  # switch at runtime, no rebuild
+
+    # Custom sandbox override (advanced — bypasses permission_mode's default)
     from agentica import SandboxConfig
     agent = DeepAgent(sandbox_config=SandboxConfig(enabled=True, writable_dirs=["./output"]))
 
@@ -120,6 +126,7 @@ class DeepAgent(Agent):
         long_term_memory_config: Optional[WorkspaceMemoryConfig] = None,
         experience_config: Optional[ExperienceConfig] = None,
         sandbox_config: Optional[SandboxConfig] = None,
+        permission_mode: str = "allow-all",
         # Builtin tool toggles — mirror get_builtin_tools() params
         include_file_tools: bool = True,
         include_execute: bool = True,
@@ -128,14 +135,14 @@ class DeepAgent(Agent):
         include_todos: bool = True,
         include_task: bool = True,
         include_skills: bool = True,
-        include_user_input: bool = False,
+        include_ask_user_question: bool = False,
         enable_long_term_memory: bool = True,
         enable_diagnostics: bool = False,
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
-        user_input_callback: Optional[Callable] = None,
+        ask_user_question_callback: Optional[Callable] = None,
         **kwargs,
     ):
         if model is None:
@@ -157,6 +164,25 @@ class DeepAgent(Agent):
         if work_dir is None:
             work_dir = os.getcwd()
 
+        # Unified 3-tier tool permission (see agentica.agent.permissions).
+        # Resolve a single concrete SandboxConfig instance up front — this
+        # exact object is shared by every builtin tool AND self.sandbox_config
+        # (set below via super().__init__()), so a later
+        # ``agent.set_permission_mode(...)`` mutation (flips .enabled in
+        # place) is immediately observed by already-constructed tools without
+        # rebuilding the Agent. An explicit sandbox_config always wins as-is
+        # (advanced override); permission_mode only supplies the default.
+        from agentica.agent.permissions import validate_permission_mode, sandbox_should_be_enabled
+        validate_permission_mode(permission_mode)
+        if sandbox_config is None:
+            # writable_dirs must be seeded with work_dir: SandboxConfig only
+            # enforces work_dir as a fallback when writable_dirs is non-empty
+            # (see BuiltinFileTool._validate_write_path) — an empty list is a
+            # silent no-op even with enabled=True.
+            sandbox_config = SandboxConfig(
+                enabled=sandbox_should_be_enabled(permission_mode), writable_dirs=[work_dir]
+            )
+
         # Builtin tools + user-provided tools
         from agentica.tools.buildin_tools import get_builtin_tools
         all_tools: List[Union[ModelTool, Tool, Callable, Dict, Function]] = list(
@@ -169,10 +195,10 @@ class DeepAgent(Agent):
                 include_todos=include_todos,
                 include_task=include_task,
                 include_skills=include_skills,
-                include_user_input=include_user_input,
+                include_ask_user_question=include_ask_user_question,
                 task_model=task_model,
                 custom_skill_dirs=custom_skill_dirs,
-                user_input_callback=user_input_callback,
+                ask_user_question_callback=ask_user_question_callback,
                 sandbox_config=sandbox_config,
                 enable_diagnostics=enable_diagnostics,
                 diagnostics_servers=diagnostics_servers,
@@ -196,7 +222,13 @@ class DeepAgent(Agent):
                 auto_load_mcp=True,
                 compress_tool_results=True,
                 context_overflow_threshold=0.8,
+                permission_mode=permission_mode,
             )
+        else:
+            # permission_mode kwarg always wins, even over a caller-supplied
+            # tool_config, so it never silently diverges from the
+            # sandbox_config resolved above (both must agree on the mode).
+            tool_config.permission_mode = permission_mode
 
         if long_term_memory_config is None:
             long_term_memory_config = WorkspaceMemoryConfig(

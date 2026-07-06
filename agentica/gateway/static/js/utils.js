@@ -1,7 +1,24 @@
 // ============ SHARED UTILS ============
+import { state } from './state.js';
+
 export function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML }
 export function ago(ts) { const d = Date.now() - ts; const m = Math.floor(d / 60000); if (m < 1) return 'now'; if (m < 60) return m + 'm'; const h = Math.floor(m / 60); if (h < 24) return h + 'h'; return Math.floor(h / 24) + 'd' }
 export function fmtTime(sec) { if (!sec) return '0s'; if (sec < 60) return sec.toFixed(1) + 's'; const m = Math.floor(sec / 60); const s = sec % 60; return m + 'm' + s.toFixed(0) + 's' }
+
+// Compact duration for the "Worked for" step label, mirroring the CLI's
+// format_duration_compact: escalates the unit tiers (s -> m/s -> h/m -> d/h)
+// so multi-hour/day agent runs still read as a short duration, not a huge
+// raw second count.
+export function fmtDurationCompact(sec) {
+  sec = Math.max(0, Math.round(sec || 0));
+  if (sec < 60) return sec + 's';
+  let m = Math.floor(sec / 60), s = sec % 60;
+  if (m < 60) return `${m}m${String(s).padStart(2, '0')}s`;
+  let h = Math.floor(m / 60); m %= 60;
+  if (h < 24) return `${h}h${String(m).padStart(2, '0')}m`;
+  const d = Math.floor(h / 24); h %= 24;
+  return `${d}d${String(h).padStart(2, '0')}h`;
+}
 export function fmtN(n) { if (!n) return '0'; if (n >= 1000) return (n / 1000).toFixed(1) + 'K'; return String(n) }
 export function fmtFileSize(sz) { return sz > 1024 ? (sz / 1024).toFixed(1) + 'K' : sz + 'B' }
 
@@ -31,7 +48,19 @@ export function shortenPath(p) {
   return p;
 }
 
-export function toggleSidebar() { document.getElementById('sidebar').classList.toggle('collapsed') }
+export function toggleSidebar() {
+  state.sidebarCollapsed = !state.sidebarCollapsed;
+  document.getElementById('sidebar').classList.toggle('collapsed', state.sidebarCollapsed);
+  document.getElementById('sidebarExpandBtn').classList.toggle('show', state.sidebarCollapsed);
+}
+
+// Collapsed sidebar hides the search <input> (display:none), so a plain
+// label-click can't focus it. Expand the sidebar first (if needed), then
+// focus — used on the search nav item's click handler.
+export function focusSidebarSearch() {
+  if (state.sidebarCollapsed) toggleSidebar();
+  document.querySelector('.side-search-item input')?.focus();
+}
 
 export function highlightCode(root) {
   if (typeof hljs === 'undefined') return;

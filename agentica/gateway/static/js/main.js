@@ -8,19 +8,19 @@
 // areas weren't part of this pass.
 import { createApp } from './vendor/petite-vue.js';
 import { state } from './state.js';
-import { getTheme, applyTheme, toggleTheme } from './theme.js';
+import { getTheme, applyTheme, setTheme } from './theme.js';
 import { setupDragDrop, onFilePick, removeFile } from './files.js';
-import { fmtN, fmtTime, fmtFileSize, shortenPath, toggleSidebar } from './utils.js';
+import { fmtN, fmtTime, fmtFileSize, shortenPath, toggleSidebar, focusSidebarSearch } from './utils.js';
 import {
   confirmOk, confirmCancel,
   openDirModal, closeDirModal, toggleDirHistory, selectDirHistory,
   saveDir, copyDir, openInFinder, openInTerminal,
   openAccountPanel, closeAccountPanel, currentUsage, archivedSessions, dirHistoryFiltered,
-  openPluginsPanel, closePluginsPanel, saveGatewayToken,
+  deleteArchivedSession, openDirModalForNewSession,
 } from './modals.js';
 import {
   loadSessions, newSession, switchTo, archiveSession, unarchiveSession,
-  forkSession, renameSession, commitSessionRename, renameKey,
+  forkSession, renameSession, commitSessionRename, renameKey, createSessionInProject,
 } from './sessions.js';
 import {
   sidebarTree, toggleProjectCollapsed,
@@ -30,22 +30,33 @@ import {
   renderChat, copyMsg, editUserMsg, setMsgFeedback, forkFromMsg, retryMsg,
   toggleSec, toggleToolResult, toggleThinkBody, toggleToolGroup,
   scrollEnd, updateScrollBtn, isNearBottom,
-  handleKey, autoResize, onAction,
+  handleKey, autoResize, onAction, onInput,
+  removeQueueItem, editQueueItem, sendQueueItemNow, sessionQueue,
 } from './chat.js';
+import { jumpToChatMsg, updateChatNavActive, renderChatNav } from './chat-nav.js';
 import {
-  loadHealth, loadStatus, loadModels, loadProfiles, loadProviders,
+  loadStatus, loadModels, loadProfiles, loadProviders,
   toggleModelDD, switchProfile, toggleCtxTip, tokenUsage,
   toggleQuickMenu, toggleApprovalMenu, setApprovalMode, triggerFilePicker,
-  triggerFolderPicker, closeInputMenus,
+  closeInputMenus, quickSkills,
+  insertSkillRef, insertGoalPrefix,
+  slashItems, selectSlash, updateSlash,
 } from './model-panel.js';
 import {
-  openCronModal, closeCronModal, cancelCronForm, showCronForm, editCronJob,
+  cancelCronForm, showCronForm, editCronJob,
   saveCronForm, deleteCronJob, pauseCronJob, resumeCronJob, triggerCronJob, toggleCronRuns, fmtCronTime,
+  polishCronPrompt,
 } from './cron-panel.js';
 import {
   openSettingsModal, closeSettingsModal, cancelProfileForm, showProfileForm,
   addEnvRow, removeEnvRow, saveProfileForm, deleteProfile,
+  switchSettingsTab, copyConfigPath, openConfigFile,
 } from './settings-panel.js';
+import {
+  openPluginsPanel, closePluginsPanel, filteredTools, filteredSkills,
+  showSkillForm, cancelSkillForm, saveSkillForm, editSkill, deleteSkill,
+  showMcpForm, cancelMcpForm, saveMcpForm, deleteMcpServer, addMcpEnvRow, removeMcpEnvRow,
+} from './plugins-panel.js';
 
 // ---- petite-vue app: shared `state` + getters/methods for every v-scope
 // block in index.html (input box, modals, sidebar) ----
@@ -53,35 +64,45 @@ createApp({
   state,
   get modelLabel() {
     if (state.switchingLabel) return state.switchingLabel;
-    return state.serverProfile ? state.serverProfile + ' · ' + state.serverModelName : (state.serverModelName || state.serverModel);
+    return state.serverModelName || state.serverModel;
   },
   get usage() { return tokenUsage() },
   get accountUsage() { return currentUsage() },
   get archivedList() { return archivedSessions() },
   get dirHistoryFiltered() { return dirHistoryFiltered() },
   get sidebarTree() { return sidebarTree() },
+  get filteredTools() { return filteredTools() },
+  get filteredSkills() { return filteredSkills() },
+  get quickSkills() { return quickSkills() },
+  get slashItems() { return slashItems() },
+  get sessionQueue() { return sessionQueue() },
 
   fmtN, fmtTime, fmtFileSize, fmtCronTime, shortenPath,
 
+  toggleSidebar,
   onFilePick, removeFile,
   handleKey, autoResize, onAction,
+  removeQueueItem, editQueueItem, sendQueueItemNow,
   toggleCtxTip, toggleModelDD, switchProfile,
   toggleQuickMenu, toggleApprovalMenu, setApprovalMode, triggerFilePicker,
-  triggerFolderPicker,
+  insertSkillRef, insertGoalPrefix,
+  selectSlash, updateSlash, onInput,
 
   confirmOk, confirmCancel,
   closeDirModal, saveDir, copyDir, openInFinder, openInTerminal, toggleDirHistory, selectDirHistory,
-  closeAccountPanel, openSettingsModal, openCronModal, toggleTheme, switchTo, unarchiveSession,
-  closePluginsPanel, saveGatewayToken,
+  closeAccountPanel, openSettingsModal, switchTo, unarchiveSession,
+  closePluginsPanel, showSkillForm, cancelSkillForm, saveSkillForm, editSkill, deleteSkill,
+  showMcpForm, cancelMcpForm, saveMcpForm, deleteMcpServer, addMcpEnvRow, removeMcpEnvRow,
+  deleteArchivedSession,
 
-  closeCronModal, showCronForm, editCronJob, pauseCronJob, resumeCronJob, triggerCronJob,
-  deleteCronJob, toggleCronRuns, cancelCronForm, saveCronForm,
+  showCronForm, editCronJob, pauseCronJob, resumeCronJob, triggerCronJob,
+  deleteCronJob, toggleCronRuns, cancelCronForm, saveCronForm, polishCronPrompt,
 
   closeSettingsModal, showProfileForm, deleteProfile, cancelProfileForm, saveProfileForm,
-  addEnvRow, removeEnvRow,
+  addEnvRow, removeEnvRow, switchSettingsTab, copyConfigPath, openConfigFile, setTheme,
 
   toggleProjectCollapsed, renameProject, commitProjectRename, projectRenameKey, removeProject,
-  renameSession, commitSessionRename, renameKey, forkSession, archiveSession,
+  renameSession, commitSessionRename, renameKey, forkSession, archiveSession, createSessionInProject,
 }).mount();
 
 // ---- expose functions still referenced from inline onclick/onkeydown
@@ -90,15 +111,15 @@ createApp({
 // HTML) — template strings built at runtime can't "see" module-scoped
 // bindings, only globals ----
 Object.assign(window, {
-  newSession, openCronModal, openPluginsPanel, openAccountPanel, toggleSidebar, openDirModal, scrollEnd,
+  newSession, openSettingsModal, openPluginsPanel, openAccountPanel, toggleSidebar, focusSidebarSearch, openDirModal, openDirModalForNewSession, scrollEnd,
   copyMsg, editUserMsg, setMsgFeedback, forkFromMsg, retryMsg,
   toggleSec, toggleToolResult, toggleThinkBody, toggleToolGroup,
+  jumpToChatMsg,
 });
 
 // ============ INIT ============
 document.addEventListener('DOMContentLoaded', () => {
   applyTheme(getTheme());
-  loadHealth();
   loadSessions();
   loadStatus();
   loadProfiles();
@@ -123,10 +144,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatArea = document.getElementById('chatArea');
   chatArea.addEventListener('scroll', () => {
     updateScrollBtn();
-    // 用户滚动到接近底部时，解除锁定
+    updateChatNavActive();
+    // unlock once the user scrolls back near the bottom
     if (isNearBottom()) { state.userScrolledUp = false; state._scrollLock = false; }
     else if (state.streaming && !state._scrollLock) {
-      // 流式期间，只要不是在底部就算上翻
+      // during streaming, anything not at the bottom counts as scrolled up
       state.userScrolledUp = true;
     }
   });
@@ -134,12 +156,12 @@ document.addEventListener('DOMContentLoaded', () => {
   chatArea.addEventListener('wheel', (e) => {
     if (!state.streaming) return;
     if (e.deltaY < 0 && isNearBottom()) {
-      // 在底部附近上翻 → 立即锁定
+      // scrolled up near the bottom → lock immediately
       state._scrollLock = true;
       state.userScrolledUp = true;
       updateScrollBtn();
     } else if (e.deltaY > 0 && !isNearBottom()) {
-      // 非底部区域下滚 → 不解锁（用户还在浏览中间内容）
+      // scrolling down away from the bottom → don't unlock (user still browsing mid-content)
       updateScrollBtn();
     } else if (e.deltaY > 0 && isNearBottom()) {
       state.userScrolledUp = false; state._scrollLock = false; updateScrollBtn();
@@ -151,4 +173,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateScrollBtn();
   }, { passive: true });
+  // window resize reflows message heights, which the nav's tick positions
+  // (computed from offsetTop) depend on — debounce so a drag-resize doesn't
+  // thrash the DOM every frame.
+  let navResizeTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(navResizeTimer);
+    navResizeTimer = setTimeout(renderChatNav, 150);
+  });
 });
