@@ -293,7 +293,7 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], 
         print("=" * 80)
 
         # Display reasoning content if available
-        if hasattr(run_response, 'reasoning_content') and run_response.reasoning_content:
+        if run_response.reasoning_content:
             print("THINKING")
             print("-" * 40)
             print(run_response.reasoning_content)
@@ -336,7 +336,7 @@ def pprint_run_response(run_response: Union[RunResponse, Iterable[RunResponse], 
         for resp in run_response:
             if isinstance(resp, RunResponse):
                 # Handle reasoning content
-                if (hasattr(resp, 'reasoning_content') and resp.reasoning_content
+                if (resp.reasoning_content
                         and resp.reasoning_content != reasoning_content):
 
                     if not reasoning_displayed:

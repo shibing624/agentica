@@ -22,10 +22,18 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from uuid import uuid4
 
 from agentica.utils.log import logger
+
+
+@runtime_checkable
+class _ToDict(Protocol):
+    """Object exposing a ``to_dict()`` method (e.g. GoalState)."""
+
+    def to_dict(self) -> Dict[str, Any]:  # pragma: no cover - protocol marker
+        ...
 
 # Large file optimization threshold (5MB, same as CC's SKIP_PRECOMPACT_THRESHOLD)
 _LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
@@ -161,13 +169,12 @@ class SessionLog:
         """Append a goal state snapshot. Returns entry uuid.
 
         ``goal_state`` may be a ``GoalState`` dataclass or any object with a
-        ``to_dict()`` method. We keep the import lazy to avoid a hard cycle
-        between memory and goals modules.
+        ``to_dict()`` method.
         """
-        if hasattr(goal_state, "to_dict"):
-            payload = goal_state.to_dict()
-        elif isinstance(goal_state, dict):
+        if isinstance(goal_state, dict):
             payload = dict(goal_state)
+        elif isinstance(goal_state, _ToDict):
+            payload = goal_state.to_dict()
         else:
             raise TypeError(
                 f"append_goal expected GoalState or dict, got {type(goal_state).__name__}"

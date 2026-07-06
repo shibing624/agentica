@@ -110,7 +110,7 @@ class InMemoryVectorDb(VectorDb):
 
     def exists(self) -> bool:
         """Check if the in-memory storage is initialized."""
-        return hasattr(self, 'documents')
+        return self.documents is not None
 
     def optimize(self) -> None:
         """No optimization needed for in-memory storage."""

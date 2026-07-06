@@ -702,7 +702,7 @@ class LspTool(Tool):
 
     def __del__(self):
         """Cleanup LSP servers on deletion."""
-        if hasattr(self, 'manager'):
+        if self.manager is not None:
             self.manager.shutdown_all()
 
 

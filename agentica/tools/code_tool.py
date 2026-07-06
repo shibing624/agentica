@@ -187,7 +187,7 @@ class CodeTool(Tool):
                     if isinstance(base, ast.Name):
                         bases.append(base.id)
                     elif isinstance(base, ast.Attribute):
-                        bases.append(f"{base.value.id}.{base.attr}" if hasattr(base.value, 'id') else "complex_base")
+                        bases.append(f"{base.value.id}.{base.attr}" if isinstance(base.value, ast.Name) else "complex_base")
 
                 docstring = ast.get_docstring(node) or ''
                 analysis['classes'].append({
@@ -203,7 +203,7 @@ class CodeTool(Tool):
             if isinstance(node, ast.Assign) and all(isinstance(target, ast.Name) for target in node.targets):
                 value = "complex_value"
                 if isinstance(node.value, ast.Constant):
-                    value = node.value.value if hasattr(node.value, 'value') else "complex_value"
+                    value = node.value.value
 
                 for target in node.targets:
                     if isinstance(target, ast.Name):

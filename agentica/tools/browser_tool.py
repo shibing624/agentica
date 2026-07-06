@@ -690,7 +690,7 @@ class BaseBrowser:
             return "User cancelled the video analysis."
 
         model = None
-        if hasattr(self, 'web_agent_model') and self.web_agent_model is not None:
+        if self.web_agent_model is not None:
             model = self.web_agent_model
 
         video_analyzer = VideoAnalysisTool(model=model)
