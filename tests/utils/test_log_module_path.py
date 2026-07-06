@@ -26,7 +26,7 @@ class TestDottedModuleFromPath(unittest.TestCase):
     def setUp(self):
         # All resolution is path-based and must not depend on cwd.
         self.repo_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..")
+            os.path.join(os.path.dirname(__file__), "..", "..")
         )
 
     def test_resolves_top_level_package_module(self):
@@ -92,7 +92,7 @@ class TestLoguruStyleFormatter(unittest.TestCase):
 
     def setUp(self):
         self.repo_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..")
+            os.path.join(os.path.dirname(__file__), "..", "..")
         )
         self.formatter = LoguruStyleFormatter()
 
@@ -120,7 +120,7 @@ class TestPlainLoguruStyleFormatter(unittest.TestCase):
 
     def setUp(self):
         self.repo_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..")
+            os.path.join(os.path.dirname(__file__), "..", "..")
         )
         self.formatter = _PlainLoguruStyleFormatter()
 

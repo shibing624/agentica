@@ -118,7 +118,7 @@ class TestSwarmExampleContracts(unittest.TestCase):
     """Keep public Swarm examples aligned with the real API surface."""
 
     def test_swarm_docs_do_not_pass_mode_to_run(self):
-        docs_path = Path(__file__).resolve().parents[1] / "docs" / "multi-agent" / "swarm.md"
+        docs_path = Path(__file__).resolve().parents[2] / "docs" / "multi-agent" / "swarm.md"
         content = docs_path.read_text(encoding="utf-8")
 
         self.assertNotRegex(
@@ -129,7 +129,7 @@ class TestSwarmExampleContracts(unittest.TestCase):
 
     def test_swarm_demo_uses_constructor_mode_not_run_mode(self):
         demo_path = (
-            Path(__file__).resolve().parents[1]
+            Path(__file__).resolve().parents[2]
             / "examples"
             / "agent_patterns"
             / "08_swarm.py"
