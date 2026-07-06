@@ -56,11 +56,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
 
     # Agent service
-    agent_svc = AgentService(
-        workspace_path=str(settings.workspace_path),
-        model_name=settings.model_name,
-        model_provider=settings.model_provider,
-    )
+    agent_svc = AgentService(workspace_path=str(settings.workspace_path))
     # Eagerly initialize so startup errors surface immediately (fail fast)
     try:
         await agent_svc._ensure_initialized()

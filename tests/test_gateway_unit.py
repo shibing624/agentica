@@ -58,7 +58,8 @@ class TestSettings:
         """Settings.from_env() with no env vars uses sensible defaults."""
         from agentica.gateway.config import Settings
         with patch.dict(os.environ, {}, clear=True):
-            s = Settings.from_env()
+            with patch("agentica.gateway.config.apply_global_config", return_value={}):
+                s = Settings.from_env()
         assert s.host == "0.0.0.0"
         assert s.port == 8789
         assert s.debug is False
@@ -69,7 +70,7 @@ class TestSettings:
         assert s.model_reasoning_effort == ""
 
     def test_from_env_custom(self):
-        """Settings.from_env() reads custom env vars."""
+        """Settings.from_env() reads custom env vars (profile mocked empty)."""
         from agentica.gateway.config import Settings
         env = {
             "HOST": "127.0.0.1",
@@ -82,7 +83,8 @@ class TestSettings:
             "AGENTICA_REASONING_EFFORT": "max",
         }
         with patch.dict(os.environ, env, clear=True):
-            s = Settings.from_env()
+            with patch("agentica.gateway.config.apply_global_config", return_value={}):
+                s = Settings.from_env()
         assert s.host == "127.0.0.1"
         assert s.port == 9000
         assert s.debug is True
@@ -488,18 +490,12 @@ class TestModelFactory:
 
     def test_openai_provider(self):
         from agentica.gateway.services.model_factory import create_model
-        with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
-            mock_settings.model_thinking = ""
-            mock_settings.model_reasoning_effort = ""
-            model = create_model("openai", "gpt-4o-mini")
+        model = create_model("openai", "gpt-4o-mini")
         assert model.__class__.__name__ == "OpenAIChat"
 
     def test_kimi_provider(self):
         from agentica.gateway.services.model_factory import create_model
-        with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
-            mock_settings.model_thinking = ""
-            mock_settings.model_reasoning_effort = ""
-            model = create_model("kimi", "moonshot-v1")
+        model = create_model("kimi", "moonshot-v1")
         assert model.__class__.__name__ == "KimiChat"
 
     def test_openai_compat_provider(self):
@@ -507,25 +503,18 @@ class TestModelFactory:
         from agentica.gateway.services.model_factory import create_model
         from agentica import PROVIDER_FACTORIES
         provider_name = next(iter(PROVIDER_FACTORIES))
-        with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
-            mock_settings.model_thinking = ""
-            mock_settings.model_reasoning_effort = ""
-            model = create_model(provider_name, "test-model")
+        model = create_model(provider_name, "test-model")
         assert model is not None
 
     def test_deepseek_provider_uses_v4_flash_thinking_defaults(self):
-        """Gateway DeepSeek models should NOT inject thinking defaults when not requested.
+        """No thinking/reasoning args -> plain model with no reasoning_effort / extra_body.
 
-        Thinking is opt-in only via gateway settings (model_thinking / model_reasoning_effort).
-        Empty settings -> plain model with no reasoning_effort / extra_body, so user-side
-        `extra_body={"thinking": {"type": "disabled"}}` won't conflict with baked-in defaults.
+        Thinking is opt-in only via the ``thinking`` / ``reasoning_effort`` args.
+        Empty args -> plain model so user-side ``extra_body`` won't conflict.
         """
         from agentica.gateway.services.model_factory import create_model
 
-        with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
-            mock_settings.model_thinking = ""
-            mock_settings.model_reasoning_effort = ""
-            model = create_model("deepseek", "deepseek-v4-flash")
+        model = create_model("deepseek", "deepseek-v4-flash")
 
         assert model.id == "deepseek-v4-flash"
         assert model.base_url == "https://api.deepseek.com"
@@ -534,13 +523,10 @@ class TestModelFactory:
         assert model.extra_body is None
 
     def test_deepseek_provider_respects_gateway_reasoning_effort(self):
-        """Gateway env reasoning effort should override DeepSeek provider defaults."""
+        """reasoning_effort arg should override DeepSeek provider defaults."""
         from agentica.gateway.services.model_factory import create_model
 
-        with patch("agentica.gateway.services.model_factory.settings") as mock_settings:
-            mock_settings.model_thinking = ""
-            mock_settings.model_reasoning_effort = "max"
-            model = create_model("deepseek", "deepseek-v4-flash")
+        model = create_model("deepseek", "deepseek-v4-flash", reasoning_effort="max")
 
         assert model.reasoning_effort == "max"
 

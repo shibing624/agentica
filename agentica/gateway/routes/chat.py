@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from .. import deps
 from ..config import settings
-from ..models import ChatRequest, ChatResponse, MemoryRequest
+from ..models import ChatRequest, ChatResponse, MemoryRequest, RenameRequest
 from ..services.agent_service import AgentService
 
 try:
@@ -35,6 +35,7 @@ async def chat(
     """Send a message to the agent (non-streaming)."""
     if request.work_dir:
         await _apply_session_work_dir(svc, request.session_id, request.work_dir)
+    svc.set_session_approval_mode(request.session_id, request.approval_mode)
 
     result = await svc.chat(
         message=request.message,
@@ -59,6 +60,7 @@ async def chat_stream(
     """Send a message and stream the response via Server-Sent Events."""
     if request.work_dir:
         await _apply_session_work_dir(svc, request.session_id, request.work_dir)
+    svc.set_session_approval_mode(request.session_id, request.approval_mode)
 
     session_id = request.session_id
 
@@ -196,6 +198,37 @@ async def delete_session(
     if not success:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "deleted"}
+
+
+@router.post("/api/sessions/{session_id}/rename")
+async def rename_session(
+    session_id: str,
+    request: RenameRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    name = request.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name must not be empty")
+    svc.rename_session(session_id, name)
+    return {"status": "renamed", "session_id": session_id, "name": name}
+
+
+@router.post("/api/sessions/{session_id}/archive")
+async def archive_session(
+    session_id: str,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    svc.archive_session(session_id, archived=True)
+    return {"status": "archived", "session_id": session_id}
+
+
+@router.post("/api/sessions/{session_id}/unarchive")
+async def unarchive_session(
+    session_id: str,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    svc.archive_session(session_id, archived=False)
+    return {"status": "unarchived", "session_id": session_id}
 
 
 # ============== Memory ==============

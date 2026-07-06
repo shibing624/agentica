@@ -4,7 +4,7 @@
 @description: 
 Pydantic request/response models shared across routes.
 """
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel
 
 
@@ -15,6 +15,10 @@ class ChatRequest(BaseModel):
     user_id: str = "default"
     agent_id: str = "main"
     work_dir: Optional[str] = None
+    goal: str = ""
+    skill: str = ""
+    tool: str = ""
+    approval_mode: str = "ask"
 
 
 class ChatResponse(BaseModel):
@@ -37,35 +41,56 @@ class SendRequest(BaseModel):
     message: str
 
 
-class JobCreateRequest(BaseModel):
-    name: str
+class CronJobCreateRequest(BaseModel):
     prompt: str
-    user_id: str
-    cron_expression: Optional[str] = None
-    interval_seconds: Optional[int] = None
-    run_at_iso: Optional[str] = None
-    timezone: str = "Asia/Shanghai"
-
-
-class JobResponse(BaseModel):
-    id: str
-    name: str
     schedule: str
-    status: str
-    next_run_at_ms: Optional[int] = None
+    name: Optional[str] = None
+    user_id: str = "default"
+    timezone: str = "Asia/Shanghai"
+    deliver: str = "local"
+    timeout_seconds: float = 0.0
+    max_retries: int = 0
+    retry_delay_ms: int = 60000
+    permissions: Optional[dict] = None
 
 
-class BatchJobsRequest(BaseModel):
-    job_ids: List[str]
-
-
-class CloneJobRequest(BaseModel):
-    new_name: Optional[str] = None
+class CronJobUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    prompt: Optional[str] = None
+    schedule: Optional[str] = None
+    deliver: Optional[str] = None
+    timeout_seconds: Optional[float] = None
+    max_retries: Optional[int] = None
+    retry_delay_ms: Optional[int] = None
+    permissions: Optional[dict] = None
 
 
 class ModelSwitchRequest(BaseModel):
     model_provider: str
     model_name: str
+
+
+class ProfileSwitchRequest(BaseModel):
+    name: str
+
+
+class ProfileUpsertRequest(BaseModel):
+    name: str
+    model_provider: str
+    model_name: str
+    base_url: str = ""
+    api_key: Optional[str] = None
+    reasoning_effort: Optional[str] = None
+    max_tokens: Optional[int] = None
+    context_window: Optional[int] = None
+    temperature: Optional[float] = None
+    top_p: Optional[float] = None
+    auxiliary_model: Optional[dict] = None
+    env: Optional[dict] = None
+
+
+class RenameRequest(BaseModel):
+    name: str
 
 
 class ThinkingToggleRequest(BaseModel):

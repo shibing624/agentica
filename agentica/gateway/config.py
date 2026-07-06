@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agentica.config import AGENTICA_WORKSPACE_DIR
+from agentica.global_config import apply_global_config, get_profile
 
 
 @dataclass
@@ -81,24 +82,28 @@ class Settings:
     wechat_token_file: Optional[str] = None
     wechat_allowed_users: List[str] = field(default_factory=list)
 
-    # Model / path settings — mutable fields with env-var defaults.
-    # Routes update these at runtime (e.g. model switch, base_dir change).
+    # Model / path settings — loaded from the active config.yaml profile at
+    # startup (see Settings.from_env), with env vars as fallback. Routes
+    # update these at runtime (profile switch, base_dir change).
     model_provider: str = ""
     model_name: str = ""
+    model_base_url: str = ""
+    model_api_key: str = ""
     model_thinking: str = ""
     model_reasoning_effort: str = ""
+    max_tokens: int = 0
+    temperature: float = 0.0
+    top_p: float = 0.0
+    context_window: int = 0
 
-    # Optional sibling models for DeepAgent. None / empty means reuse the
-    # main model (same provider, base_url, api_key).
+    # Auxiliary model — the cheap/fast model for all background LLM work
+    # (memory extraction, context compression, goal judging, skill upgrade)
+    # AND the `task` subagent tool. Empty model_name = reuse the main model.
+    # This replaces the old separate task_model_* block (CLI unified them).
     auxiliary_model_provider: str = ""
     auxiliary_model_name: str = ""
     auxiliary_base_url: str = ""
     auxiliary_api_key: str = ""
-
-    task_model_provider: str = ""
-    task_model_name: str = ""
-    task_base_url: str = ""
-    task_api_key: str = ""
 
     _base_dir: str = ""
 
@@ -129,6 +134,15 @@ class Settings:
         """Load configuration from environment variables."""
         allowed_users = os.getenv("FEISHU_ALLOWED_USERS", "")
         allowed_groups = os.getenv("FEISHU_ALLOWED_GROUPS", "")
+
+        # Load the active config.yaml profile — single source of truth for the
+        # main model + auxiliary model. apply_global_config() also projects the
+        # profile's api_key and the free-form env block into os.environ (with
+        # setdefault semantics, so shell env still wins).
+        profile = apply_global_config() or {}
+        aux_profile = profile.get("auxiliary_model") or {}
+        if not isinstance(aux_profile, dict):
+            aux_profile = {}
 
         return cls(
             # Server
@@ -206,23 +220,38 @@ class Settings:
                 u.strip() for u in os.getenv("WECHAT_ALLOWED_USERS", "").split(",") if u.strip()
             ],
 
-            # Model / path
-            model_provider=os.getenv("AGENTICA_MODEL_PROVIDER", "deepseek"),
-            model_name=os.getenv("AGENTICA_MODEL_NAME", "deepseek-v4-flash"),
+            # Model / path — profile first, env fallback, built-in default last.
+            # When a config.yaml profile is present it wins (gateway is a
+            # profile-driven service); env vars keep env-only setups working.
+            model_provider=(profile.get("model_provider")
+                or os.getenv("AGENTICA_MODEL_PROVIDER", "deepseek")),
+            model_name=(profile.get("model_name")
+                or os.getenv("AGENTICA_MODEL_NAME", "deepseek-v4-flash")),
+            model_base_url=(profile.get("base_url")
+                or os.getenv("AGENTICA_BASE_URL", "")),
+            model_api_key=(profile.get("api_key")
+                or os.getenv("AGENTICA_API_KEY", "")),
             model_thinking=os.getenv("AGENTICA_MODEL_THINKING", ""),
-            model_reasoning_effort=os.getenv("AGENTICA_REASONING_EFFORT", ""),
+            model_reasoning_effort=(profile.get("reasoning_effort")
+                or os.getenv("AGENTICA_REASONING_EFFORT", "")),
+            max_tokens=int(profile.get("max_tokens")
+                or os.getenv("AGENTICA_MAX_TOKENS", "0") or 0),
+            temperature=float(profile.get("temperature")
+                or os.getenv("AGENTICA_TEMPERATURE", "0") or 0),
+            top_p=float(profile.get("top_p")
+                or os.getenv("AGENTICA_TOP_P", "0") or 0),
+            context_window=int(profile.get("context_window")
+                or os.getenv("AGENTICA_CONTEXT_WINDOW", "0") or 0),
 
             # Auxiliary model (leave empty to reuse main model)
-            auxiliary_model_provider=os.getenv("AGENTICA_AUXILIARY_MODEL_PROVIDER", ""),
-            auxiliary_model_name=os.getenv("AGENTICA_AUXILIARY_MODEL_NAME", ""),
-            auxiliary_base_url=os.getenv("AGENTICA_AUXILIARY_BASE_URL", ""),
-            auxiliary_api_key=os.getenv("AGENTICA_AUXILIARY_API_KEY", ""),
-
-            # Task-subagent model (leave empty to reuse main model)
-            task_model_provider=os.getenv("AGENTICA_TASK_MODEL_PROVIDER", ""),
-            task_model_name=os.getenv("AGENTICA_TASK_MODEL_NAME", ""),
-            task_base_url=os.getenv("AGENTICA_TASK_BASE_URL", ""),
-            task_api_key=os.getenv("AGENTICA_TASK_API_KEY", ""),
+            auxiliary_model_provider=(aux_profile.get("model_provider")
+                or os.getenv("AGENTICA_AUXILIARY_MODEL_PROVIDER", "")),
+            auxiliary_model_name=(aux_profile.get("model_name")
+                or os.getenv("AGENTICA_AUXILIARY_MODEL_NAME", "")),
+            auxiliary_base_url=(aux_profile.get("base_url")
+                or os.getenv("AGENTICA_AUXILIARY_BASE_URL", "")),
+            auxiliary_api_key=(aux_profile.get("api_key")
+                or os.getenv("AGENTICA_AUXILIARY_API_KEY", "")),
         )
 
 

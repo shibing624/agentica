@@ -101,6 +101,22 @@ class TestSessionLogBasic:
         assert messages[0]["model"] == "m1"
         assert messages[0]["usage"] == {"input_tokens": 10, "output_tokens": 2}
 
+    def test_sidecar_name_and_archived_coexist(self, tmp_dir):
+        log = SessionLog("meta", base_dir=tmp_dir)
+        log.append("user", "hello")
+
+        SessionLog.rename_session("meta", "Important Chat", base_dir=tmp_dir)
+        SessionLog.archive_session("meta", True, base_dir=tmp_dir)
+
+        sessions = SessionLog.list_sessions(base_dir=tmp_dir)
+        assert sessions[0]["name"] == "Important Chat"
+        assert sessions[0]["archived"] is True
+
+        SessionLog.archive_session("meta", False, base_dir=tmp_dir)
+        sessions = SessionLog.list_sessions(base_dir=tmp_dir)
+        assert sessions[0]["name"] == "Important Chat"
+        assert sessions[0]["archived"] is False
+
 
 class TestUUIDChain:
     """Verify UUID + parent_uuid chain (CC's core design)."""

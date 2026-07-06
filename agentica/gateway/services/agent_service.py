@@ -14,6 +14,7 @@ Key design decisions:
 - Per-session stream lock prevents concurrent streams on the same session
 """
 import asyncio
+import os
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,6 +27,13 @@ from agentica.run_response import AgentCancelledError
 from agentica.run_config import RunConfig
 from agentica.run_context import RunSource
 from agentica.workspace import Workspace
+from agentica.global_config import (
+    apply_global_config,
+    set_active_profile,
+    provider_api_key_env,
+)
+from agentica.memory.session_log import SessionLog
+from agentica.cli.permissions import READ_ONLY_TOOLS
 
 from ..config import settings
 from .model_factory import create_model, get_cron_tools, get_cron_instructions
@@ -101,43 +109,17 @@ class AgentService:
     def __init__(
         self,
         workspace_path: Optional[str] = None,
-        model_name: Optional[str] = None,
-        model_provider: Optional[str] = None,
         extra_tools: Optional[List[Any]] = None,
         extra_instructions: Optional[List[str]] = None,
-        # Optional sibling overrides. Each can differ in any of
-        # provider/model/base_url/api_key; unspecified fields fall back to the
-        # main-model values so users can override just what differs. When
-        # `{prefix}_model_name` is empty, the sibling is not built and DeepAgent
-        # reuses the main model.
-        auxiliary_model_provider: Optional[str] = None,
-        auxiliary_model_name: Optional[str] = None,
-        auxiliary_base_url: Optional[str] = None,
-        auxiliary_api_key: Optional[str] = None,
-        task_model_provider: Optional[str] = None,
-        task_model_name: Optional[str] = None,
-        task_base_url: Optional[str] = None,
-        task_api_key: Optional[str] = None,
     ):
         self.workspace_path = Path(workspace_path or settings.workspace_path).expanduser()
-        self.model_name = model_name or settings.model_name
-        self.model_provider = model_provider or settings.model_provider
         self.extra_tools = extra_tools or []
         self.extra_instructions = extra_instructions or []
-
-        # Sibling model configs — empty string treated as "not set".
-        self.auxiliary_model_provider = auxiliary_model_provider or settings.auxiliary_model_provider
-        self.auxiliary_model_name = auxiliary_model_name or settings.auxiliary_model_name
-        self.auxiliary_base_url = auxiliary_base_url or settings.auxiliary_base_url
-        self.auxiliary_api_key = auxiliary_api_key or settings.auxiliary_api_key
-        self.task_model_provider = task_model_provider or settings.task_model_provider
-        self.task_model_name = task_model_name or settings.task_model_name
-        self.task_base_url = task_base_url or settings.task_base_url
-        self.task_api_key = task_api_key or settings.task_api_key
 
         self._cache = LRUAgentCache(max_size=settings.agent_max_sessions)
         # Per-session work_dir overrides; falls back to settings.base_dir
         self._session_work_dirs: Dict[str, str] = {}
+        self._session_approval_modes: Dict[str, str] = {}
         # Per-session run locks: prevents concurrent runs (chat or stream) on the same session.
         # The underlying Agent instance is NOT thread-safe for concurrent reuse.
         self._session_locks: Dict[str, asyncio.Lock] = {}
@@ -145,14 +127,78 @@ class AgentService:
         self._initialized = False
         self._init_lock = asyncio.Lock()
 
-    def _build_sibling_model(self, prefix: str) -> Optional[Any]:
-        """Build a sibling (auxiliary/task) model if a model name is configured.
+    # ============== Model config (single source of truth: `settings`) ==============
+    # These proxy directly to the gateway's global `settings` singleton instead
+    # of keeping a duplicate copy, so routes only ever need to write to one
+    # place (settings.xxx) and every reader (here, routes/config.py, etc.)
+    # sees the same value with no risk of drift.
 
-        Fields fall through to main-model values so callers can override
-        only what differs (e.g. a different model_name on the same provider,
-        or a different base_url+api_key on the same provider/model).
+    @property
+    def model_provider(self) -> str:
+        return settings.model_provider
+
+    @model_provider.setter
+    def model_provider(self, value: str) -> None:
+        settings.model_provider = value
+
+    @property
+    def model_name(self) -> str:
+        return settings.model_name
+
+    @model_name.setter
+    def model_name(self, value: str) -> None:
+        settings.model_name = value
+
+    @property
+    def model_base_url(self) -> str:
+        return settings.model_base_url
+
+    @property
+    def model_api_key(self) -> str:
+        return settings.model_api_key
+
+    @property
+    def model_reasoning_effort(self) -> str:
+        return settings.model_reasoning_effort
+
+    @property
+    def max_tokens(self) -> int:
+        return settings.max_tokens
+
+    @property
+    def temperature(self) -> float:
+        return settings.temperature
+
+    @property
+    def top_p(self) -> float:
+        return settings.top_p
+
+    @property
+    def context_window(self) -> int:
+        return settings.context_window
+
+    @property
+    def auxiliary_model_provider(self) -> str:
+        return settings.auxiliary_model_provider
+
+    @property
+    def auxiliary_model_name(self) -> str:
+        return settings.auxiliary_model_name
+
+    @property
+    def auxiliary_base_url(self) -> str:
+        return settings.auxiliary_base_url
+
+    @property
+    def auxiliary_api_key(self) -> str:
+        return settings.auxiliary_api_key
+
+    def _build_sibling_model(self, prefix: str) -> Optional[Any]:
+        """Build a sibling (auxiliary) model if a model name is configured.
+
         Returns None when no sibling name is set — DeepAgent will reuse
-        the main model.
+        the main model. The auxiliary model also serves as the task subagent
+        model (CLI unified them).
         """
         sibling_name = getattr(self, f"{prefix}_model_name")
         if not sibling_name:
@@ -160,7 +206,13 @@ class AgentService:
         provider = getattr(self, f"{prefix}_model_provider") or self.model_provider
         base_url = getattr(self, f"{prefix}_base_url") or None
         api_key = getattr(self, f"{prefix}_api_key") or None
-        return create_model(provider, sibling_name, base_url=base_url, api_key=api_key)
+        return create_model(
+            provider,
+            sibling_name,
+            base_url=base_url,
+            api_key=api_key,
+            thinking=settings.model_thinking,
+        )
 
     # ============== Initialization ==============
 
@@ -197,7 +249,7 @@ class AgentService:
             )
             raise RuntimeError(f"AgentService init failed: {e}") from e
 
-    def _build_agent(self) -> DeepAgent:
+    def _build_agent(self, session_id: str) -> DeepAgent:
         """Build a new DeepAgent instance (sync, runs in thread).
 
         DeepAgent auto-includes: builtin tools, skills, agentic prompt,
@@ -211,9 +263,22 @@ class AgentService:
         AgentService with the matching kwargs) to route them to a
         different provider / model / base_url / api_key.
         """
-        model = create_model(self.model_provider, self.model_name)
+        model = create_model(
+            self.model_provider,
+            self.model_name,
+            base_url=self.model_base_url or None,
+            api_key=self.model_api_key or None,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            context_window=self.context_window,
+            reasoning_effort=self.model_reasoning_effort,
+            thinking=settings.model_thinking,
+        )
         auxiliary_model = self._build_sibling_model("auxiliary")
-        task_model = self._build_sibling_model("task")
+        # The auxiliary model also serves as the task subagent model (CLI
+        # unified them — no separate task_model config anymore).
+        task_model = auxiliary_model
         work_dir = str(settings.base_dir)
 
         # Extra tools: user-provided + cron
@@ -228,6 +293,7 @@ class AgentService:
             instructions.append(get_cron_instructions())
 
         agent = DeepAgent(
+            session_id=session_id,
             model=model,
             auxiliary_model=auxiliary_model,
             task_model=task_model,
@@ -258,7 +324,7 @@ class AgentService:
 
         try:
             agent = await asyncio.wait_for(
-                asyncio.to_thread(self._build_agent),
+                asyncio.to_thread(self._build_agent, session_id),
                 timeout=_AGENT_BUILD_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -281,17 +347,51 @@ class AgentService:
             self._session_locks[session_id] = asyncio.Lock()
         return self._session_locks[session_id]
 
+    def set_session_approval_mode(self, session_id: str, mode: str) -> None:
+        """Persist the selected approval mode for a session.
+
+        Gateway currently enforces this as a product-layer tool whitelist:
+        - ``ask``: read-only tool subset only (Q&A only, no code edits)
+        - ``auto`` / ``full``: full toolset allowed
+        """
+        normalized = (mode or "ask").strip().lower()
+        if normalized not in {"ask", "auto", "full"}:
+            normalized = "ask"
+        self._session_approval_modes[session_id] = normalized
+
+    def get_session_approval_mode(self, session_id: str) -> str:
+        return self._session_approval_modes.get(session_id, "ask")
+
+    def _run_config_for_session(
+        self,
+        session_id: str,
+        source: RunSource,
+        *,
+        stream_intermediate_steps: bool = False,
+    ) -> RunConfig:
+        mode = self.get_session_approval_mode(session_id)
+        run_config = RunConfig(stream_intermediate_steps=stream_intermediate_steps, source=source)
+        if mode == "ask":
+            run_config.enabled_tools = list(READ_ONLY_TOOLS)
+        return run_config
+
     # ============== Public API ==============
 
-    def get_context_window(self, session_id: str) -> int:
+    def get_context_window(self, session_id: Optional[str] = None) -> int:
         """Return the context window size for the model used by a session.
 
-        Falls back to 128000 if the session has no cached agent or
-        the model doesn't expose a context_window attribute.
+        When ``session_id`` is omitted, returns the context window of an
+        arbitrary cached agent (useful for a general status check before any
+        specific session is known). Falls back to 128000 if no matching
+        agent is cached yet (``context_window`` is a declared field on every
+        Model, defaulting to 128000, so no per-call fallback is needed once
+        an agent exists).
         """
-        agent = self._cache.get(session_id)
+        if session_id is None:
+            session_id = next(iter(self._cache.keys()), None)
+        agent = self._cache.get(session_id) if session_id else None
         if agent and agent.model:
-            return getattr(agent.model, "context_window", 128000)
+            return agent.model.context_window
         return 128000
 
     async def chat(
@@ -333,7 +433,10 @@ class AgentService:
                 if self._workspace:
                     await asyncio.to_thread(self._workspace.set_user, user_id)
 
-                response = await agent.run(message, config=RunConfig(source=source))
+                response = await agent.run(
+                    message,
+                    config=self._run_config_for_session(session_id, source),
+                )
 
                 content = (response.content or "").strip()
                 tools_used: List[str] = []
@@ -435,7 +538,11 @@ class AgentService:
 
             async for chunk in agent.run_stream(
                 message,
-                config=RunConfig(stream_intermediate_steps=True, source=source),
+                config=self._run_config_for_session(
+                    session_id,
+                    source,
+                    stream_intermediate_steps=True,
+                ),
             ):
                 if chunk is None:
                     continue
@@ -504,21 +611,68 @@ class AgentService:
 
     # ============== Session management ==============
 
-    def list_sessions(self) -> List[str]:
-        """List all active session IDs."""
-        return self._cache.keys()
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """List sessions from the persistent SessionLog (single source of truth).
+
+        Returns rich metadata (name/preview/timestamps) so the UI can show
+        sessions across restarts, not just the in-memory LRU cache.
+        """
+        out: List[Dict[str, Any]] = []
+        for s in SessionLog.list_sessions():
+            sid = s["session_id"]
+            preview = SessionLog.session_preview(s["path"])
+            first_user = (preview or {}).get("first_user", "")
+            name = s.get("name") or (first_user[:40] if first_user else "Chat")
+            out.append({
+                "session_id": sid,
+                "name": name,
+                "preview": first_user,
+                "user_count": (preview or {}).get("user_count", 0),
+                "last_timestamp": s.get("last_timestamp"),
+                "size_bytes": s.get("size_bytes", 0),
+                "archived": bool(s.get("archived")),
+            })
+        return out
+
+    def has_active_runs(self) -> bool:
+        """Return True if any session currently has an in-flight run.
+
+        Used by profile switch to reject switching mid-run (the agent cache
+        clear would evict an agent whose run is still streaming).
+        """
+        return any(lock.locked() for lock in self._session_locks.values())
 
     def delete_session(self, session_id: str) -> bool:
-        """Delete a session and its cached Agent instance.
+        """Delete a session: cached Agent + persistent SessionLog JSONL + meta.
 
-        Returns True if the session existed, False otherwise.
+        Removes the on-disk JSONL and sidecar meta so the session does not
+        reappear after restart (SessionLog is the single source of truth).
+        Returns True if either the cache or the on-disk log existed.
         """
         removed = self._cache.delete(session_id)
         self._session_work_dirs.pop(session_id, None)
         self._session_locks.pop(session_id, None)
-        if removed:
-            logger.debug(f"Session deleted: {session_id}")
-        return removed
+        log_existed = False
+        try:
+            log = SessionLog(session_id=session_id)
+            if log.path.exists():
+                log.path.unlink()
+                log_existed = True
+            meta = log.base_dir / f"{session_id}.meta.json"
+            if meta.exists():
+                meta.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to remove SessionLog for {session_id}: {e}")
+        logger.debug(f"Session deleted: {session_id}")
+        return removed or log_existed
+
+    def rename_session(self, session_id: str, name: str) -> None:
+        """Rename a session by writing the sidecar .meta.json (SessionLog)."""
+        SessionLog.rename_session(session_id, name)
+
+    def archive_session(self, session_id: str, archived: bool = True) -> None:
+        """Archive/unarchive a session by writing SessionLog sidecar metadata."""
+        SessionLog.archive_session(session_id, archived=archived)
 
     def clear_session(self, session_id: str) -> bool:
         """Alias for delete_session (for compatibility)."""
@@ -617,14 +771,68 @@ class AgentService:
 
     # ============== Hot reload ==============
 
-    async def reload_model(self, model_provider: str, model_name: str) -> None:
-        """Switch model at runtime; clears all cached agents."""
+    async def reload_profile(self, profile_name: Optional[str] = None) -> None:
+        """Switch to a different config.yaml profile at runtime.
+
+        Reloads main + auxiliary model config from the active profile (or
+        ``profile_name`` if given), projects the profile's api_key/env into
+        os.environ, then clears the agent cache so agents rebuild on next
+        request with the new model.
+        """
+        if profile_name:
+            set_active_profile(profile_name)
+        profile = apply_global_config() or {}
+        aux_profile = profile.get("auxiliary_model") or {}
+        if not isinstance(aux_profile, dict):
+            aux_profile = {}
+
+        # apply_global_config uses setdefault semantics, so switching between
+        # two profiles on the SAME provider would leave the old api_key in
+        # place. Force-overwrite the provider env vars so the new profile's
+        # key actually takes effect for SDK code paths that read the env.
+        new_provider = profile.get("model_provider")
+        new_api_key = profile.get("api_key")
+        if new_provider and new_api_key:
+            os.environ[provider_api_key_env(new_provider)] = new_api_key
+        if aux_profile:
+            aux_provider = aux_profile.get("model_provider")
+            aux_key = aux_profile.get("api_key")
+            if aux_provider and aux_key:
+                os.environ[provider_api_key_env(aux_provider)] = aux_key
+
         async with self._init_lock:
-            self.model_provider = model_provider
-            self.model_name = model_name
+            if profile.get("model_provider"):
+                settings.model_provider = profile["model_provider"]
+            if profile.get("model_name"):
+                settings.model_name = profile["model_name"]
+            settings.model_base_url = profile.get("base_url") or settings.model_base_url
+            settings.model_api_key = profile.get("api_key") or settings.model_api_key
+            settings.model_reasoning_effort = profile.get("reasoning_effort") or settings.model_reasoning_effort
+            settings.max_tokens = int(profile.get("max_tokens") or 0)
+            settings.temperature = float(profile.get("temperature") or 0)
+            settings.top_p = float(profile.get("top_p") or 0)
+            settings.context_window = int(profile.get("context_window") or 0)
+            settings.auxiliary_model_provider = aux_profile.get("model_provider") or ""
+            settings.auxiliary_model_name = aux_profile.get("model_name") or ""
+            settings.auxiliary_base_url = aux_profile.get("base_url") or ""
+            settings.auxiliary_api_key = aux_profile.get("api_key") or ""
             self._initialized = False
             self._cache.clear()
-            logger.info(f"Model reloaded: {model_provider}/{model_name}")
+            logger.info(
+                f"Profile reloaded: {profile_name or 'active'} -> "
+                f"{self.model_provider}/{self.model_name}"
+            )
+
+    async def _invalidate_cache(self) -> None:
+        """Clear the agent cache so agents rebuild on next request.
+
+        Used when a runtime-only setting changes (e.g. thinking toggle) that
+        does not require re-reading the profile.
+        """
+        async with self._init_lock:
+            self._initialized = False
+            self._cache.clear()
+            logger.info("Agent cache invalidated (will rebuild on next request)")
 
     async def add_tool(self, tool: Any) -> None:
         """Dynamically add a tool; clears agent cache to force rebuild."""

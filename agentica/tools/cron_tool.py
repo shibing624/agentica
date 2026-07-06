@@ -401,6 +401,13 @@ class CronTool(Tool):
         super().__init__(name="cronjob", description=_CRONJOB_DESCRIPTION)
         self._job_runner = job_runner
         self.register(self.cronjob, is_destructive=True)
+        # The immediate-run path spawns a sub-agent in a worker thread via its
+        # own asyncio.run() loop, which the outer asyncio.wait_for() cannot
+        # cancel — a 120s outer timeout would orphan that thread (still burning
+        # tokens) while reporting a timeout to the LLM. _execute_job already
+        # enforces the job's own timeout_seconds internally, so let the tool
+        # manage its own timeout instead of wrapping it.
+        self.functions["cronjob"].manages_own_timeout = True
 
     # No docstring on the method: Tool.register() falls back to self.description
     # (= _CRONJOB_DESCRIPTION, set in __init__) when function.__doc__ is None,
@@ -453,6 +460,15 @@ class CronTool(Tool):
         except Exception as e:  # surface as tool error, do not crash the turn
             return _to_json({"success": False, "error": f"Immediate run failed: {e}"})
         status = result.get("status")
+        # The sub-agent's full response text can be large; returning it verbatim
+        # stuffs the parent turn's context. Keep a bounded preview plus length /
+        # truncated flags so the LLM knows the run happened and how big it was,
+        # without the token bloat.
+        text = result.get("result")
+        if isinstance(text, str):
+            full_len = len(text)
+            result = {**result, "result": text[:2000],
+                      "result_truncated": full_len > 2000, "result_full_length": full_len}
         return _to_json({
             "success": status == "ok",
             "job_id": job_id,

@@ -642,3 +642,30 @@ class TestCronToolClass:
         assert out["success"] is True
         assert captured["job_id"] == job.id
         assert out["run"]["result"] == "did it"
+
+    def test_cron_tool_immediate_run_truncates_long_result(self, tmp_cron_dir):
+        """A long sub-agent response is bounded so it doesn't stuff the parent turn."""
+        import json
+        from agentica.tools.cron_tool import CronTool
+        from agentica.cron.jobs import create_job
+
+        job = create_job(prompt="say hi", schedule="1h", name="Trial")
+        long_text = "x" * 5000
+
+        def fake_runner(j):
+            return {"job_id": j.id, "status": "ok", "result": long_text}
+
+        tool = CronTool(job_runner=fake_runner)
+        out = json.loads(tool.cronjob(action="run", job_id=job.id))
+        run = out["run"]
+        assert len(run["result"]) == 2000
+        assert run["result_truncated"] is True
+        assert run["result_full_length"] == 5000
+
+    def test_cron_tool_immediate_run_manages_own_timeout(self):
+        """The immediate-run path spawns an uncancellable worker thread, so the
+        cronjob Function must opt out of the outer asyncio.wait_for wrapper
+        (_execute_job enforces the job's timeout_seconds internally)."""
+        from agentica.tools.cron_tool import CronTool
+        tool = CronTool(job_runner=lambda j: {"status": "ok", "result": ""})
+        assert tool.functions["cronjob"].manages_own_timeout is True

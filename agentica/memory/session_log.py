@@ -413,12 +413,14 @@ class SessionLog:
             except Exception:
                 pass
 
+            meta_path = base / f"{session_id}.meta.json"
             sessions.append({
                 "session_id": session_id,
                 "path": str(f),
                 "size_bytes": stat.st_size,
                 "last_timestamp": last_timestamp,
-                "name": cls._read_meta_name(base / f"{session_id}.meta.json"),
+                "name": cls._read_meta_name(meta_path),
+                "archived": cls._read_meta_archived(meta_path),
             })
 
         return sessions
@@ -470,21 +472,56 @@ class SessionLog:
     # ``fix_at_library_layer_for_downstream`` mandates.
 
     @staticmethod
+    def _read_meta(meta_path: Path) -> Dict[str, Any]:
+        """Return sidecar metadata, or an empty dict if missing/malformed."""
+        try:
+            if not meta_path.exists():
+                return {}
+            with open(meta_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
     def _read_meta_name(meta_path: Path) -> Optional[str]:
         """Return the ``name`` field from a sidecar file, or ``None`` if the
         file is missing / malformed / empty. Never raises — callers treat
         a missing name as "no name set" and fall back to a preview."""
         try:
-            if not meta_path.exists():
-                return None
-            with open(meta_path, "r", encoding="utf-8") as fh:
-                data = json.load(fh)
+            data = SessionLog._read_meta(meta_path)
             name = data.get("name")
             if isinstance(name, str) and name.strip():
                 return name.strip()
             return None
         except Exception:
             return None
+
+    @staticmethod
+    def _read_meta_archived(meta_path: Path) -> bool:
+        """Return whether a session has been archived in sidecar metadata."""
+        return bool(SessionLog._read_meta(meta_path).get("archived"))
+
+    def _write_meta(self, updates: Dict[str, Any]) -> None:
+        """Merge sidecar metadata updates and persist atomically."""
+        from datetime import datetime, timezone
+
+        self.meta_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = self._read_meta(self.meta_path)
+        payload.update(updates)
+        payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        tmp = self.meta_path.with_suffix(self.meta_path.suffix + ".tmp")
+        try:
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.meta_path)
+        except Exception:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+            raise
 
     def get_name(self) -> Optional[str]:
         """Return the human-friendly name for THIS session, or ``None``
@@ -502,27 +539,11 @@ class SessionLog:
         if not isinstance(name, str) or not name.strip():
             raise ValueError("session name must be a non-empty string")
         name = name.strip()
-        self.meta_path.parent.mkdir(parents=True, exist_ok=True)
-        from datetime import datetime, timezone
-        payload = {
-            "name": name,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        tmp = self.meta_path.with_suffix(self.meta_path.suffix + ".tmp")
-        try:
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, ensure_ascii=False, indent=2)
-            os.replace(tmp, self.meta_path)
-        except Exception:
-            # Abandoned .tmp fragments would otherwise pile up on repeated
-            # write failures; the real sidecar is safe (os.replace only runs
-            # on success), but clean up the orphaned temp either way.
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-            raise
+        self._write_meta({"name": name})
+
+    def set_archived(self, archived: bool = True) -> None:
+        """Set the archived flag in sidecar metadata."""
+        self._write_meta({"archived": bool(archived)})
 
     def clear_name(self) -> bool:
         """Delete the sidecar file. Returns ``True`` if a file was removed,
@@ -531,7 +552,20 @@ class SessionLog:
         the caller's POV."""
         try:
             if self.meta_path.exists():
-                self.meta_path.unlink()
+                payload = self._read_meta(self.meta_path)
+                if "name" not in payload:
+                    return False
+                payload.pop("name", None)
+                if payload:
+                    from datetime import datetime, timezone
+
+                    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+                    tmp = self.meta_path.with_suffix(self.meta_path.suffix + ".tmp")
+                    with open(tmp, "w", encoding="utf-8") as fh:
+                        json.dump(payload, fh, ensure_ascii=False, indent=2)
+                    os.replace(tmp, self.meta_path)
+                else:
+                    self.meta_path.unlink()
                 return True
         except Exception:
             pass
@@ -553,6 +587,19 @@ class SessionLog:
         base = Path(base_dir) if base_dir else Path(_get_default_base_dir())
         log = cls(session_id=session_id, base_dir=str(base))
         log.set_name(name)
+        return True
+
+    @classmethod
+    def archive_session(
+        cls,
+        session_id: str,
+        archived: bool = True,
+        base_dir: Optional[str] = None,
+    ) -> bool:
+        """Archive or unarchive a session by id using sidecar metadata."""
+        base = Path(base_dir) if base_dir else Path(_get_default_base_dir())
+        log = cls(session_id=session_id, base_dir=str(base))
+        log.set_archived(archived)
         return True
 
     # ------------------------------------------------------------------

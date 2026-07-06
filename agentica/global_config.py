@@ -256,6 +256,25 @@ def upsert_profile(name: str, profile: Dict[str, Any], make_active: bool = True)
     _save_commented(data)
 
 
+def delete_profile(name: str) -> bool:
+    """Delete a named profile. Returns False if it does not exist.
+
+    If the active profile is deleted, fall back to the first remaining profile
+    (or the default profile name if none remain). Round-trips YAML so user
+    comments are preserved.
+    """
+    data = _load_commented()
+    profiles = data.get("profiles")
+    if not isinstance(profiles, CommentedMap) or name not in profiles:
+        return False
+    profiles.pop(name)
+    if data.get("active_profile") == name:
+        remaining = list(profiles.keys())
+        data["active_profile"] = remaining[0] if remaining else DEFAULT_PROFILE_NAME
+    _save_commented(data)
+    return True
+
+
 def get_setting(key: str, default: Any = None, config: Optional[Dict[str, Any]] = None) -> Any:
     """Read a value from the top-level ``settings`` block of config.yaml.
 

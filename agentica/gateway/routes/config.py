@@ -8,7 +8,9 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass, fields
 from pathlib import Path
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -16,12 +18,52 @@ from fastapi.responses import HTMLResponse
 from .. import deps
 from ..config import settings
 from agentica.version import __version__
-from ..models import ModelSwitchRequest, ThinkingToggleRequest, BaseDirRequest, OpenRequest
+from agentica.provider_registry import list_providers, get_provider_factory
+from agentica.global_config import (
+    get_profiles,
+    get_active_profile_name,
+    get_profile,
+    upsert_profile,
+    delete_profile,
+)
+from agentica.cli import self_manage
+from ..models import (
+    ModelSwitchRequest,
+    ProfileSwitchRequest,
+    ProfileUpsertRequest,
+    ThinkingToggleRequest,
+    BaseDirRequest,
+    OpenRequest,
+)
 from ..services.agent_service import AgentService
 
 router = APIRouter()
 
 _DIR_HISTORY_MAX = 20
+
+
+@dataclass
+class ProfileFields:
+    """Single definition of the config.yaml profile schema (see the profile
+    shape documented in agentica/global_config.py). Profiles themselves stay
+    plain dicts end-to-end (loaded/saved via ruamel.yaml), but the field list
+    is declared once here and reused by _profile_summary/get_profile_detail/
+    _profile_body_to_dict instead of being hand-written 3 times."""
+    model_provider: str = ""
+    model_name: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    reasoning_effort: str = ""
+    max_tokens: int = 0
+    context_window: int = 0
+    temperature: float = 0.0
+    top_p: float = 0.0
+    auxiliary_model: Optional[dict] = None
+    env: Optional[dict] = None
+
+
+PROFILE_FIELD_NAMES = tuple(f.name for f in fields(ProfileFields))
+TUNING_FIELD_NAMES = ("reasoning_effort", "max_tokens", "temperature", "top_p", "context_window")
 
 
 # ============== Root + Status ==============
@@ -41,6 +83,10 @@ async def health():
         "version": __version__,
         "channels": deps.channel_manager.get_status() if deps.channel_manager else {},
         "scheduler": {"active_jobs": active_jobs},
+        # This endpoint is auth-exempt (see main.py's _AUTH_EXEMPT), so the
+        # frontend can call it to learn whether GATEWAY_TOKEN is configured
+        # before any other /api/* call 401s.
+        "auth_required": bool(settings.gateway_token),
     }
 
 
@@ -50,15 +96,11 @@ async def status():
     active_jobs = len(list_jobs(include_disabled=False))
     scheduler_status = {"active_jobs": active_jobs}
 
-    context_window = 128000
     svc = deps.agent_service
-    if svc:
-        first_session = next(iter(svc._cache.keys()), None)
-        if first_session:
-            agent = svc._cache.get(first_session)
-            if agent and agent.model:
-                context_window = getattr(agent.model, "context_window", 128000)
+    context_window = svc.get_context_window() if svc else 128000
 
+    active_profile = get_active_profile_name()
+    config_path = self_manage.config_file_path()
     return {
         "workspace": str(settings.workspace_path),
         "base_dir": str(settings.base_dir),
@@ -70,6 +112,14 @@ async def status():
         "version": __version__,
         "channels": deps.channel_manager.get_status() if deps.channel_manager else {},
         "scheduler": scheduler_status,
+        "active_profile": active_profile,
+        "config_path": str(config_path),
+        "tuning": {
+            "max_tokens": svc.max_tokens if svc else settings.max_tokens,
+            "temperature": svc.temperature if svc else settings.temperature,
+            "top_p": svc.top_p if svc else settings.top_p,
+            "reasoning_effort": svc.model_reasoning_effort if svc else settings.model_reasoning_effort,
+        },
     }
 
 
@@ -94,9 +144,28 @@ async def switch_model(
     request: ModelSwitchRequest,
     svc: AgentService = Depends(deps.get_agent_service),
 ):
-    await svc.reload_model(request.model_provider, request.model_name)
+    # Validate provider against the SDK registry so an unknown slug (e.g.
+    # "doubao" instead of "ark") fails here with a helpful list, not lazily
+    # on the next agent build. For full profile-based switches use
+    # POST /api/profile/switch.
+    if get_provider_factory(request.model_provider) is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown model_provider '{request.model_provider}'. "
+                f"Supported: {list_providers()}"
+            ),
+        )
+    if svc.has_active_runs():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot switch model while a run is active. Wait for it to finish or cancel it first.",
+        )
+    # AgentService.model_provider/model_name proxy directly to settings, so a
+    # single write here is enough — no separate svc.xxx write needed.
     settings.model_provider = request.model_provider
     settings.model_name = request.model_name
+    await svc._invalidate_cache()
     return {"status": "ok", "model": f"{request.model_provider}/{request.model_name}"}
 
 
@@ -108,13 +177,198 @@ async def toggle_thinking(request: ThinkingToggleRequest):
     settings.model_thinking = new_val
     svc = deps.agent_service
     if svc:
-        await svc.reload_model(settings.model_provider, settings.model_name)
+        await svc._invalidate_cache()
     return {"status": "ok", "thinking": new_val}
 
 
 @router.get("/api/config/thinking")
 async def get_thinking():
     return {"thinking": settings.model_thinking or ""}
+
+
+# ============== Providers + Profiles ==============
+
+@router.get("/api/providers")
+async def list_providers_api():
+    """Return all SDK-supported provider slugs (single source of truth)."""
+    return {"providers": list_providers()}
+
+
+def _mask_key(key: str) -> str:
+    """Mask an API key for display: show first 4 + last 4 chars."""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return key[:4] + "****" + key[-4:]
+
+
+def _profile_summary(name: str, profile: dict) -> dict:
+    """Build a UI-friendly profile summary (api_key masked)."""
+    aux = profile.get("auxiliary_model") or {}
+    if not isinstance(aux, dict):
+        aux = {}
+    tuning = []
+    for field_name in TUNING_FIELD_NAMES:
+        value = profile.get(field_name)
+        if value:
+            label = "effort" if field_name == "reasoning_effort" else field_name
+            tuning.append(f"{label}={value}")
+    return {
+        "name": name,
+        "model_provider": profile.get("model_provider", ""),
+        "model_name": profile.get("model_name", ""),
+        "base_url": profile.get("base_url", ""),
+        "api_key_masked": _mask_key(profile.get("api_key", "")),
+        "has_api_key": bool(profile.get("api_key")),
+        "tuning": tuning,
+        "auxiliary": (
+            {
+                "model_provider": aux.get("model_provider", ""),
+                "model_name": aux.get("model_name", ""),
+                "base_url": aux.get("base_url", ""),
+                "has_api_key": bool(aux.get("api_key")),
+                "api_key_masked": _mask_key(aux.get("api_key", "")),
+            }
+            if aux
+            else None
+        ),
+    }
+
+
+@router.get("/api/profiles")
+async def list_profiles():
+    """List all config.yaml profiles with the active one marked."""
+    profiles = get_profiles()
+    active = get_active_profile_name()
+    return {
+        "active": active,
+        "profiles": [_profile_summary(name, p) for name, p in profiles.items()],
+    }
+
+
+@router.post("/api/profile/switch")
+async def switch_profile(
+    request: ProfileSwitchRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    name = request.name.strip()
+    profiles = get_profiles()
+    if name not in profiles:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Profile '{name}' not found. Available: {list(profiles.keys())}",
+        )
+    if svc.has_active_runs():
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot switch profile while a run is active. Wait for it to finish or cancel it first.",
+        )
+    # reload_profile() writes the full tuning set (model_provider/model_name/
+    # reasoning_effort/max_tokens/temperature/top_p/context_window/...)
+    # directly to `settings`, so no manual patch-up is needed here.
+    await svc.reload_profile(name)
+    return {
+        "status": "ok",
+        "active_profile": name,
+        "model": f"{svc.model_provider}/{svc.model_name}",
+    }
+
+
+# ============== Profile CRUD ==============
+
+@router.get("/api/profile/{name}")
+async def get_profile_detail(name: str):
+    p = get_profile(name)
+    if not p:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    aux = p.get("auxiliary_model") or {}
+    if not isinstance(aux, dict):
+        aux = {}
+    return {
+        "name": name,
+        "model_provider": p.get("model_provider", ""),
+        "model_name": p.get("model_name", ""),
+        "base_url": p.get("base_url", ""),
+        "api_key_masked": _mask_key(p.get("api_key", "")),
+        "has_api_key": bool(p.get("api_key")),
+        **{field_name: p.get(field_name) for field_name in TUNING_FIELD_NAMES},
+        "auxiliary_model": (
+            {
+                "model_provider": aux.get("model_provider", ""),
+                "model_name": aux.get("model_name", ""),
+                "base_url": aux.get("base_url", ""),
+                "has_api_key": bool(aux.get("api_key")),
+                "api_key_masked": _mask_key(aux.get("api_key", "")),
+            }
+            if aux
+            else None
+        ),
+        "env": p.get("env") or {},
+    }
+
+
+def _profile_body_to_dict(body: ProfileUpsertRequest) -> dict:
+    """Convert a ProfileUpsertRequest to a profile dict, dropping empty/None
+    fields. api_key is only included when non-empty (empty means "keep existing"
+    on update)."""
+    d: dict = {}
+    for k in PROFILE_FIELD_NAMES:
+        if k == "api_key":
+            continue
+        v = getattr(body, k)
+        if v is not None and v != "":
+            d[k] = v
+    if body.api_key:
+        d["api_key"] = body.api_key
+    return d
+
+
+@router.post("/api/profile")
+async def create_profile(
+    body: ProfileUpsertRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Profile name must not be empty")
+    if svc.has_active_runs():
+        raise HTTPException(status_code=409, detail="Cannot change config while a run is active.")
+    upsert_profile(name, _profile_body_to_dict(body), make_active=False)
+    return {"status": "ok", "name": name}
+
+
+@router.put("/api/profile/{name}")
+async def update_profile(
+    name: str,
+    body: ProfileUpsertRequest,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    existing = get_profile(name)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    if svc.has_active_runs():
+        raise HTTPException(status_code=409, detail="Cannot change config while a run is active.")
+    # Merge: keep existing fields the user left empty (esp. api_key).
+    merged = dict(existing)
+    for k, v in _profile_body_to_dict(body).items():
+        merged[k] = v
+    upsert_profile(name, merged, make_active=False)
+    return {"status": "ok", "name": name}
+
+
+@router.delete("/api/profile/{name}")
+async def remove_profile(
+    name: str,
+    svc: AgentService = Depends(deps.get_agent_service),
+):
+    if not get_profile(name):
+        raise HTTPException(status_code=404, detail=f"Profile '{name}' not found")
+    if svc.has_active_runs():
+        raise HTTPException(status_code=409, detail="Cannot change config while a run is active.")
+    if not delete_profile(name):
+        raise HTTPException(status_code=400, detail="Delete failed")
+    return {"status": "deleted", "name": name}
 
 
 # ============== Working directory ==============

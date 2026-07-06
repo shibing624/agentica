@@ -1922,6 +1922,12 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         con.print("[yellow]No sessions found to resume.[/yellow]")
         return
 
+    # Archived sessions are hidden from the picker (same "I don't want to see
+    # this anymore" semantic as the Web UI sidebar), but an explicit id/prefix
+    # match below still searches the full unfiltered `sessions` list so an
+    # archived session remains directly resumable by id.
+    visible_sessions = [s for s in sessions if not s.get("archived")]
+
     args_str = (cmd_args or "").strip()
     resume_at_uuid = None
     if " at " in args_str:
@@ -1932,8 +1938,8 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
     if args_str:
         try:
             idx = int(args_str) - 1
-            if 0 <= idx < len(sessions):
-                chosen = sessions[idx]
+            if 0 <= idx < len(visible_sessions):
+                chosen = visible_sessions[idx]
             else:
                 con.print("[red]Invalid number.[/red]")
                 return
@@ -2013,8 +2019,11 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 
         return {"current_agent": current_agent, "goal_manager": resumed_goal_manager}
     else:
+        if not visible_sessions:
+            con.print("[yellow]No sessions found to resume (all sessions are archived).[/yellow]")
+            return
         con.print("\n[bold]Available sessions:[/bold]\n")
-        for i, s in enumerate(sessions[:10], 1):
+        for i, s in enumerate(visible_sessions[:10], 1):
             ts_str = s.get("last_timestamp", "") or ""
             if ts_str:
                 ts_str = ts_str[:16].replace("T", " ")
@@ -2053,7 +2062,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                     con.print(f"     [dim]> {subline}[/dim]")
             else:
                 con.print(f"     [dim]> {summary}[/dim]")
-        con.print(f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {sessions[0]['session_id'][:8]})[/dim]")
+        con.print(f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {visible_sessions[0]['session_id'][:8]})[/dim]")
         return
 
 

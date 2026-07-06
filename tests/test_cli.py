@@ -2056,6 +2056,78 @@ class TestSessionCommand(unittest.TestCase):
         self.assertIn("/session", COMMAND_REGISTRY)
 
 
+class TestResumeArchivedFilter(unittest.TestCase):
+    """``/resume`` must respect the ``archived`` sidecar flag: the picker
+    (bare ``/resume`` or ``/resume <number>``) hides archived sessions, but
+    an explicit id/prefix still resumes them directly — same cross-surface
+    semantics the Web UI sidebar already enforces.
+    """
+
+    def _sessions(self):
+        return [
+            {"session_id": "sess-active-1111", "path": "/tmp/sess-active-1111.jsonl", "size_bytes": 100, "last_timestamp": "2026-01-01T00:00:00", "archived": False},
+            {"session_id": "sess-archived-2222", "path": "/tmp/sess-archived-2222.jsonl", "size_bytes": 100, "last_timestamp": "2026-01-02T00:00:00", "archived": True},
+            {"session_id": "sess-active-3333", "path": "/tmp/sess-active-3333.jsonl", "size_bytes": 100, "last_timestamp": "2026-01-03T00:00:00", "archived": False},
+        ]
+
+    def test_picker_listing_excludes_archived(self):
+        from agentica.cli.commands import _cmd_resume, CommandContext
+
+        ctx = CommandContext(agent_config={}, current_agent=None)
+        with patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()), \
+                patch("agentica.memory.session_log.SessionLog.session_preview", return_value={"user_count": 0, "first_user": None}):
+            with patch("agentica.cli.commands.get_console") as mock_console:
+                console = MagicMock()
+                mock_console.return_value = console
+                _cmd_resume(ctx, "")
+
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+        self.assertGreaterEqual(printed.count("sess-act"), 2)  # both active sessions listed
+        self.assertNotIn("sess-arc", printed)
+
+    def test_picker_by_number_skips_archived_indices(self):
+        """Numeric selection indexes into the *visible* (unarchived) list,
+        matching what was actually printed to the user."""
+        from agentica.cli.commands import _cmd_resume, CommandContext
+
+        ctx = CommandContext(agent_config={"model_provider": "zhipuai", "model_name": "glm-5"}, current_agent=None)
+        with patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()), \
+                patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]), \
+                patch("agentica.memory.session_log.SessionLog.exists", return_value=False), \
+                patch("agentica.cli.commands.create_agent") as mock_create_agent, \
+                patch("agentica.cli.commands.GoalManager") as mock_goal_manager:
+            agent = MagicMock()
+            agent._session_log = None
+            mock_create_agent.return_value = agent
+            mock_goal_manager.return_value.load.return_value = None
+
+            result = _cmd_resume(ctx, "2")
+
+        # "2" selects the 2nd *visible* session (sess-active-3333), not the
+        # raw sessions[1] which would be the archived one.
+        self.assertEqual(mock_create_agent.call_args[0][0]["session_id"], "sess-active-3333")
+        self.assertIsNotNone(result)
+
+    def test_explicit_id_prefix_still_resumes_archived(self):
+        from agentica.cli.commands import _cmd_resume, CommandContext
+
+        ctx = CommandContext(agent_config={"model_provider": "zhipuai", "model_name": "glm-5"}, current_agent=None)
+        with patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()), \
+                patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]), \
+                patch("agentica.memory.session_log.SessionLog.exists", return_value=False), \
+                patch("agentica.cli.commands.create_agent") as mock_create_agent, \
+                patch("agentica.cli.commands.GoalManager") as mock_goal_manager:
+            agent = MagicMock()
+            agent._session_log = None
+            mock_create_agent.return_value = agent
+            mock_goal_manager.return_value.load.return_value = None
+
+            result = _cmd_resume(ctx, "sess-archived")
+
+        self.assertEqual(mock_create_agent.call_args[0][0]["session_id"], "sess-archived-2222")
+        self.assertIsNotNone(result)
+
+
 class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
     """The assistant turn must close with a dim rule whose body carries a
     compact per-turn summary in Plan A format:
