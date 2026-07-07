@@ -183,6 +183,46 @@ class TestConfigEndpoints:
         assert "current" in data
 
 
+class TestBaseDirEndpoint:
+    """POST /api/config/base_dir — a directory must already exist; the
+    server never creates one on the user's behalf. Setting a new dir is also
+    how the frontend creates a new project (each dir maps 1:1 to a project)."""
+
+    def test_existing_directory_succeeds(self, mock_app, tmp_path):
+        client, mock_svc = mock_app
+        mock_svc.update_work_dir = MagicMock()
+        resp = client.post("/api/config/base_dir", json={"base_dir": str(tmp_path)})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["base_dir"] == str(tmp_path)
+        assert "created" not in data
+
+    def test_nonexistent_directory_is_rejected_not_created(self, mock_app, tmp_path):
+        client, mock_svc = mock_app
+        mock_svc.update_work_dir = MagicMock()
+        missing = tmp_path / "does_not_exist_yet"
+        resp = client.post("/api/config/base_dir", json={"base_dir": str(missing)})
+        assert resp.status_code == 400
+        assert "does not exist" in resp.json()["detail"].lower()
+        assert not missing.exists()
+
+    def test_path_that_is_a_file_is_rejected(self, mock_app, tmp_path):
+        client, mock_svc = mock_app
+        mock_svc.update_work_dir = MagicMock()
+        f = tmp_path / "some_file.txt"
+        f.write_text("x")
+        resp = client.post("/api/config/base_dir", json={"base_dir": str(f)})
+        assert resp.status_code == 400
+        assert "not a directory" in resp.json()["detail"].lower()
+
+    def test_empty_path_is_rejected(self, mock_app):
+        client, mock_svc = mock_app
+        mock_svc.update_work_dir = MagicMock()
+        resp = client.post("/api/config/base_dir", json={"base_dir": "   "})
+        assert resp.status_code == 400
+
+
 class TestSchedulerEndpoints:
     """Test /api/scheduler/* — cron job CRUD + actions + run history.
 

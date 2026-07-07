@@ -102,16 +102,19 @@ export function openDirModalForNewSession() {
 export async function saveDir() {
   const val = (state.dirModal.value || '').trim();
   if (!val) return;
+  // The server only validates that the dir already exists (it never creates
+  // one on the user's behalf) — a clear, actionable error surfaces here.
   const { ok, data } = await saveBaseDirApi(val);
   if (!ok) {
-    showToast(data?.detail || 'Failed to set working directory, please check the path');
+    showToast(data?.detail || 'Directory does not exist. Create it first, then try again.', 3500);
     return;
   }
   if (data.status === 'ok') {
     state.serverDir = data.base_dir;
     loadDirHistory();
-    if (data.created) showToast('Folder created automatically: ' + data.base_dir);
 
+    // A new/different dir from the current project's is how a new project
+    // gets created — ensureProjectForSession keys projects 1:1 by dir.
     if (state.dirModal.forNewSession) {
       state.dirModal.forNewSession = false;
       state.dirModal.open = false;

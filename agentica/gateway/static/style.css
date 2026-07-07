@@ -27,7 +27,11 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 ::-webkit-scrollbar-track{background:transparent}
 
 /* ===== SIDEBAR ===== */
-.sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);height:100vh;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;transition:width var(--t),min-width var(--t),background .2s}
+.sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);height:100vh;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;position:relative;transition:width var(--t),min-width var(--t),background .2s}
+.sidebar-resize-handle{position:absolute;top:0;right:-3px;width:6px;height:100%;cursor:col-resize;z-index:5;background:transparent}
+.sidebar-resize-handle:hover,.sidebar-resize-handle.dragging{background:var(--accent-soft)}
+.sidebar.collapsed .sidebar-resize-handle{display:none}
+.sidebar.resizing{transition:none}
 .sidebar.collapsed{width:48px;min-width:48px}
 .sidebar.collapsed .s-list,
 .sidebar.collapsed .account-entry,
@@ -62,8 +66,11 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .p-caret{width:18px;height:18px;border:none;background:transparent;color:var(--fg3);cursor:pointer;font-size:11px;border-radius:5px;flex-shrink:0}
 .p-caret:hover{background:var(--accent-soft);color:var(--fg)}
 .p-main{min-width:0;flex:1;cursor:pointer}
-.p-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fg2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.p-count{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;margin-left:4px;border-radius:999px;background:var(--accent-soft);font-size:10px;color:var(--fg3);font-family:var(--mono)}
+.p-title{display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fg2)}
+.p-icon{flex-shrink:0;width:13px;height:13px;display:flex;align-items:center;justify-content:center;color:var(--fg3)}
+.p-icon svg{width:13px;height:13px}
+.p-title-text{min-width:0;flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p-count{flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 5px;border-radius:999px;background:var(--accent-soft);font-size:10px;color:var(--fg3);font-family:var(--mono)}
 .p-dir{font-size:10px;color:var(--fg3);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
 .p-actions{display:flex;align-items:center;gap:2px;opacity:0;transition:opacity var(--t)}
 .p-head:hover .p-actions{opacity:1}
@@ -77,9 +84,13 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .s-item.active{background:var(--accent-soft);box-shadow:inset 2px 0 0 var(--fg)}
 .s-item.archived{opacity:.62}
 .s-main{min-width:0;flex:1}
-.s-item .ti{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.s-item .ti{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500}
 .unread-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#22c55e;margin-right:6px;flex-shrink:0;vertical-align:middle}
-.s-item .mt{font-size:11px;color:var(--fg3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Sits absolutely over the (invisible-until-hover) .s-actions slot, so the
+   title gets the full row width instead of sharing it with the meta text. */
+.s-item .mt{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:11px;color:var(--fg3);white-space:nowrap;background:var(--bg2);pointer-events:none}
+.s-item:hover .mt{display:none}
+.s-item.active .mt{background:var(--accent-soft)}
 .s-actions{display:flex;align-items:center;gap:2px;opacity:0;transform:translateX(3px);transition:opacity var(--t),transform var(--t);flex-shrink:0}
 .s-item:hover .s-actions{opacity:1;transform:none}
 .s-item .db{width:22px;height:22px;border:none;background:transparent;color:var(--fg3);border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:12px;transition:all var(--t)}
@@ -553,10 +564,6 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .welcome-dir-chip:hover{background:var(--bg3);color:var(--fg)}
 .welcome-dir-chip svg{flex-shrink:0;width:14px;height:14px}
 .welcome-dir-chip span{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-/* session dir badge */
-.s-dir{font-family:var(--mono);font-size:10px;color:var(--fg3);opacity:.7}
-
 /* ===== RESPONSIVE ===== */
 @media(max-width:768px){
   .sidebar{position:fixed;z-index:100;height:100vh;box-shadow:2px 0 8px rgba(0,0,0,.1)}

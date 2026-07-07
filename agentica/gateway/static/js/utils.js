@@ -62,6 +62,47 @@ export function focusSidebarSearch() {
   document.querySelector('.side-search-item input')?.focus();
 }
 
+// ---- Sidebar width resize (drag handle on the right edge) ----
+const SIDEBAR_W_KEY = 'ag_sidebar_w';
+const SIDEBAR_MIN_W = 200;
+const SIDEBAR_MAX_W = 420;
+
+export function initSidebarResize() {
+  const saved = parseInt(localStorage.getItem(SIDEBAR_W_KEY), 10);
+  if (saved && saved >= SIDEBAR_MIN_W && saved <= SIDEBAR_MAX_W) {
+    document.documentElement.style.setProperty('--sidebar-w', saved + 'px');
+  }
+  const handle = document.getElementById('sidebarResizeHandle');
+  const sidebar = document.getElementById('sidebar');
+  if (!handle || !sidebar) return;
+
+  let startX = 0, startW = 0;
+  const onMove = (e) => {
+    const w = Math.min(SIDEBAR_MAX_W, Math.max(SIDEBAR_MIN_W, startW + (e.clientX - startX)));
+    document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+  };
+  const onUp = () => {
+    document.removeEventListener('mousemove', onMove);
+    document.removeEventListener('mouseup', onUp);
+    handle.classList.remove('dragging');
+    sidebar.classList.remove('resizing');
+    document.body.style.userSelect = '';
+    const w = sidebar.getBoundingClientRect().width;
+    localStorage.setItem(SIDEBAR_W_KEY, String(Math.round(w)));
+  };
+  handle.addEventListener('mousedown', (e) => {
+    if (state.sidebarCollapsed) return;
+    e.preventDefault();
+    startX = e.clientX;
+    startW = sidebar.getBoundingClientRect().width;
+    handle.classList.add('dragging');
+    sidebar.classList.add('resizing');
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 export function highlightCode(root) {
   if (typeof hljs === 'undefined') return;
   (root || document).querySelectorAll('pre code').forEach(el => {

@@ -375,18 +375,23 @@ async def remove_profile(
 
 @router.post("/api/config/base_dir")
 async def set_base_dir(request: BaseDirRequest):
+    """Set the working directory for the current/new session.
+
+    The directory must already exist — we never create it on the user's
+    behalf. Setting a directory that isn't the current project's dir is also
+    how a new project gets created (see ensureProjectForSession on the
+    frontend): each distinct dir maps 1:1 to a project.
+    """
     raw = request.base_dir.strip()
     if not raw:
         raise HTTPException(status_code=400, detail="Path must not be empty")
     p = Path(raw).expanduser().resolve()
-    created = False
     if not p.exists():
-        if p.parent.exists():
-            p.mkdir(parents=False, exist_ok=True)
-            created = True
-        else:
-            raise HTTPException(status_code=400, detail=f"Path does not exist and cannot be auto-created: {p}")
-    elif not p.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Directory does not exist: {p}. Create it first, then try again.",
+        )
+    if not p.is_dir():
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {p}")
 
     settings.base_dir = p
@@ -394,7 +399,7 @@ async def set_base_dir(request: BaseDirRequest):
     if svc:
         svc.update_work_dir(str(p))
     await _add_dir_history(str(p))
-    return {"status": "ok", "base_dir": str(p), "created": created}
+    return {"status": "ok", "base_dir": str(p)}
 
 
 @router.get("/api/config/dir_history")

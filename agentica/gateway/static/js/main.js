@@ -10,7 +10,7 @@ import { createApp } from './vendor/petite-vue.js';
 import { state } from './state.js';
 import { getTheme, applyTheme, setTheme } from './theme.js';
 import { setupDragDrop, onFilePick, removeFile } from './files.js';
-import { fmtN, fmtTime, fmtFileSize, shortenPath, toggleSidebar, focusSidebarSearch } from './utils.js';
+import { fmtN, fmtTime, fmtFileSize, shortenPath, toggleSidebar, focusSidebarSearch, initSidebarResize } from './utils.js';
 import {
   confirmOk, confirmCancel,
   openDirModal, closeDirModal, toggleDirHistory, selectDirHistory,
@@ -129,6 +129,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadProviders();
   loadModels();
   setupDragDrop();
+  initSidebarResize();
   document.getElementById('inputTa').focus();
   matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => { if (getTheme() === 'auto') applyTheme('auto') });
   renderChat();

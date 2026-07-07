@@ -38,7 +38,6 @@ export function sidebarTree() {
           title: s.title,
           n: s.msgs && s.msgs.length ? s.msgs.filter(m => m.role === 'user').length : (s.user_count || 0),
           agoStr: ago(s.ts),
-          dirShort: s.dir ? shortenPath(s.dir) : '',
           dir: s.dir || '',
           isFork: !!s.parentSessionId,
           unread: !!s.unread,
