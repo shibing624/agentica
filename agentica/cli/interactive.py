@@ -1945,6 +1945,8 @@ def run_interactive(
         if "current_agent" in result:
             state.current_agent = result["current_agent"]
             tui_state["model_name"] = agent_config.get("model_name", "")
+            tui_state["model_provider"] = agent_config.get("model_provider", "")
+            tui_state["profile_name"] = get_active_profile_name()
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
@@ -1952,7 +1954,14 @@ def run_interactive(
             tui_state["context_tokens"] = 0
             tui_state["cost_usd"] = 0.0
         if result.get("model_switched"):
+            # `/model profile <name>` (or `/model provider/name`) changed the
+            # active profile and model — sync every status-bar field that
+            # derives from them, not just model_name. Without this the bar's
+            # ``profile:`` prefix and ``provider/model`` label kept showing the
+            # pre-switch values for the rest of the session.
             tui_state["model_name"] = agent_config.get("model_name", "")
+            tui_state["model_provider"] = agent_config.get("model_provider", "")
+            tui_state["profile_name"] = get_active_profile_name()
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )

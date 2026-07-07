@@ -853,11 +853,21 @@ class StreamDisplayManager:
     def display_tool(self, tool_name: str, tool_args: dict):
         """Display a single tool call.
 
+        Every tool call counts toward the per-turn total reported in the closing
+        separator (``… · N tools``), INCLUDING read-only / write-diff tools whose
+        call line is deferred to completion. Otherwise a turn that only ran
+        ``read_file`` / ``grep`` / ``edit_file`` etc. would show "0 tools" and
+        confuse the user — the visible tool calls and the reported count must
+        agree.
+
         Read-only tools (``_DEFERRED_TOOLS``) skip the start-time call line and
         collapse into a single completion line that folds in elapsed time, e.g.
         ``  🔎 grep 'pat' in path - 5 lines (13ms)``. The live spinner still
         announces the running tool, so deferring the print costs no feedback.
         """
+        # Count every tool call up front, before any deferred-print early
+        # return, so the turn summary's "N tools" matches what the user saw.
+        self.tool_count += 1
         if tool_name in self._DEFERRED_TOOLS:
             return
         if tool_name in self._WRITE_DIFF_TOOLS:
@@ -868,7 +878,6 @@ class StreamDisplayManager:
                 self._stash_write_file_old(tool_args)
             return
         self.start_tool_section()
-        self.tool_count += 1
         _display_tool_impl(self._assistant_console, tool_name, tool_args, self.tool_count)
 
     def _stash_write_file_old(self, tool_args: dict) -> None:

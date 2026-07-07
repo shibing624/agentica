@@ -363,6 +363,26 @@ class TestCLIHelpers(unittest.TestCase):
                 f"idle bar emitted active class: {cls!r}",
             )
 
+    def test_build_status_bar_fragments_shows_profile_prefix(self):
+        """After `/model profile <name>` the status bar must show the new
+        profile prefix and provider/model label — driven entirely by the
+        ``profile_name`` / ``model_provider`` / ``model_name`` args the
+        interactive loop syncs via ``_apply_command_result``."""
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="deepseek-v4-flash",
+            model_provider="deepseek",
+            profile_name="work",
+            context_tokens=1000,
+            context_window=128000,
+            last_turn_seconds=1.0,
+            terminal_width=120,
+        )
+        text = "".join(v for _, v in frags)
+        self.assertIn("profile:work", text)
+        self.assertIn("deepseek/deepseek-v4-flash", text)
+
     def test_stream_display_manager_no_gutter_and_short_separator(self):
         """Assistant turn should render as plain text (no left-side gutter
         bar), and close with a fixed-width ``──── HH:MM:SS ────`` separator
@@ -2179,6 +2199,23 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         out = self._capture(render)
         self.assertRegex(out, r"1 tool\b", "rule must show N tools when >0")
         self.assertRegex(out, r"\d+\.\ds", "rule must show elapsed seconds")
+
+    def test_finalize_rule_counts_deferred_and_write_tools(self):
+        """Regression: ``read_file`` / ``grep`` (deferred) and ``edit_file`` /
+        ``write_file`` (write-diff) used to be EXCLUDED from ``tool_count``
+        because ``display_tool`` returned before incrementing. A turn that only
+        read/edited files would then show "0 tools", contradicting the visible
+        tool calls. Every tool call must count."""
+        def render(mgr):
+            mgr.display_tool("read_file", {"file_path": "a.py"})
+            mgr.display_tool("grep", {"pattern": "x"})
+            mgr.display_tool("edit_file", {"file_path": "a.py"})
+            mgr.display_tool("write_file", {"file_path": "b.py", "content": "x"})
+            mgr.stream_response("done")
+            mgr.finalize()
+
+        out = self._capture(render)
+        self.assertRegex(out, r"4 tools\b", "all 4 deferred/write tools must count")
 
     def test_finalize_rule_shows_turn_number_and_deltas_when_provided(self):
         """Plan A: the closing separator carries per-turn deltas.
