@@ -3,10 +3,6 @@
 @author: XuMing(xuming624@qq.com)
 @description: Agentica - Build AI Agents with ease.
 
-═══════════════════════════════════════════════════════════════
-v1.3.6+ Recommended Import Style (clearer; aligns with v2.0 plan)
-═══════════════════════════════════════════════════════════════
-
 Core (always default-installed, eager top-level imports)::
 
     from agentica import Agent, DeepAgent, tool, Workspace    # core SDK

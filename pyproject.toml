@@ -1,6 +1,6 @@
 [project]
 name = "agentica"
-version = "1.4.7"
+version = "1.4.8"
 description = "Agentica: A lightweight Python SDK for building AI agents with persistent memory and self-evolution"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -45,7 +45,6 @@ dependencies = [
     "prompt-toolkit>=3.0",        # cli: 交互式终端
     "rich>=13.0",                 # cli: 终端渲染（workspace 也用）
     # ── DeepAgent 默认内置工具的依赖（CLI 开箱即用）──
-    # 没有这些 `agentica --query "..."` 会立即 crash
     "beautifulsoup4>=4.12",       # BaiduSearchTool / UrlCrawlerTool 解析 HTML
     "lxml>=4.9",                  # bs4 高性能后端
     "markdownify>=0.11",          # MarkdownConverter: HTML → Markdown
