@@ -19,6 +19,8 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-07-07
+
 ### Fixed
 - **TaskAnchor no longer leaks `agent.run(message)`'s first message into the system prompt every turn.** `TaskAnchor` gains a `source: Literal["message", "goal"] = "message"` field that gates `to_prompt_block()`. Only explicit goal entry points — `Agent.run_goal()`, CLI `/goal`, and an active session-log goal — produce `source="goal"` anchors that render as `## Original Task`. Ordinary `agent.run(message)` produces `source="message"` anchors that are still used as the retrieval query but stay out of the system prompt. This restores pre-1.4.0 prompt behavior for plain `agent.run()` callers (e.g. private chat seed, workflow handoff, session resume) where the "first message" is a transcript / replay / dump and pinning it system-wide was a bug. Callers that need long-task drift defense should use `Agent.run_goal()` or set `agent.task_anchor = TaskAnchor(..., source="goal")` explicitly.
 
