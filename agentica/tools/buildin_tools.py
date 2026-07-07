@@ -242,6 +242,7 @@ class BuiltinFileTool(Tool):
             max_line_length: int = 2000,
             sandbox_config=None,
             diagnostics_checker=None,
+            consent_callback=None,
     ):
         """
         Initialize BuiltinFileTool.
@@ -253,6 +254,12 @@ class BuiltinFileTool(Tool):
             sandbox_config: SandboxConfig instance for path restriction enforcement
             diagnostics_checker: Optional LspDiagnosticsChecker. When set, file
                 edits append newly-introduced LSP diagnostics to the tool result.
+            consent_callback: Optional ``(prompt, options) -> str`` callback used by
+                ``request_path_access`` to ask the user for permission to read or
+                write a path that is otherwise blocked (outside the sandboxed
+                ``writable_dirs``, or a sensitive system/credentials path). Same
+                callback the CLI wires into ``ask_user_question``. When None,
+                ``request_path_access`` fails closed (no human to ask).
         """
         super().__init__(name="builtin_file_tool")
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
@@ -261,6 +268,11 @@ class BuiltinFileTool(Tool):
         self._file_locks: Dict[str, asyncio.Lock] = {}
         self._sandbox_config = sandbox_config
         self.diagnostics_checker = diagnostics_checker
+        self._consent_callback = consent_callback
+        # Paths the user has explicitly approved via request_path_access,
+        # overriding sandbox writable_dirs / blocked_paths / sensitive-path
+        # guards for the rest of this session. Not persisted across restarts.
+        self._escalated_paths: List[str] = []
 
         # mtime cache: detect external modifications before edit/write.
         # Key: resolved absolute path (str), Value: {"mtime": float}
@@ -277,6 +289,7 @@ class BuiltinFileTool(Tool):
         self.register(self.read_file, concurrency_safe=True, is_read_only=True)
         self.register(self.write_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.edit_file, sanitize_arguments=False, is_destructive=True)
+        self.register(self.request_path_access, is_destructive=False)
         # multi_edit_file: the auto-derived schema from `edits: List[Dict[str, Any]]`
         # collapses each item to a bare {"type": "object"} with no properties,
         # leaving the LLM zero structural guidance. Models then frequently
@@ -399,7 +412,7 @@ class BuiltinFileTool(Tool):
         path = self._resolve_path(file_path)
 
         # Sensitive path guard (e.g. /etc/passwd, ~/.ssh)
-        sensitive_err = _check_sensitive_write_path(str(path))
+        sensitive_err = self._sensitive_write_guard(str(path))
         if sensitive_err:
             raise PermissionError(sensitive_err)
 
@@ -426,14 +439,31 @@ class BuiltinFileTool(Tool):
         return None
 
 
+    def _is_escalated(self, resolved: str) -> bool:
+        """Whether `resolved` was previously approved via request_path_access."""
+        return any(resolved.startswith(d) for d in self._escalated_paths)
+
+    def _component_blocked(self, resolved: str) -> bool:
+        """Whether `resolved` has a path component matching sandbox_config.blocked_paths
+        (e.g. `.ssh`, `.env`) and hasn't already been approved via request_path_access."""
+        if self._sandbox_config is None or not self._sandbox_config.enabled:
+            return False
+        if self._is_escalated(resolved):
+            return False
+        resolved_parts = set(Path(resolved).parts)
+        return any(blocked in resolved_parts for blocked in self._sandbox_config.blocked_paths)
+
     def _validate_path(self, path: str) -> str:
         """Validate path against sandbox restrictions and blocked device files.
 
         Always checks:
-        - Path must not resolve to a known device file (/dev/zero, etc.)
+        - Path must not resolve to a known device file (/dev/zero, etc.) — this
+          is a crash/hang guard, not a permission decision, so it is NOT
+          escalatable via request_path_access.
 
         When sandbox is enabled, also checks:
-        - Path components do not match any blocked_paths entries
+        - Path components do not match any blocked_paths entries, unless the
+          path was already approved via request_path_access.
         - Uses path component matching (not substring) to avoid false positives
         - For write operations, caller should use _validate_write_path instead
 
@@ -452,11 +482,48 @@ class BuiltinFileTool(Tool):
 
         if self._sandbox_config is None or not self._sandbox_config.enabled:
             return path
-        resolved_parts = set(resolved.parts)
-        for blocked in self._sandbox_config.blocked_paths:
-            if blocked in resolved_parts:
-                raise PermissionError(f"Sandbox: access to path containing '{blocked}' is blocked")
+        if self._component_blocked(str(resolved)):
+            matched = next(
+                b for b in self._sandbox_config.blocked_paths if b in set(resolved.parts)
+            )
+            raise PermissionError(
+                f"Sandbox: access to path containing '{matched}' is blocked. "
+                f"Call request_path_access(path=<the path>, reason=<why>) to ask the "
+                f"user for permission, then retry."
+            )
         return path
+
+    def _is_write_allowed(self, resolved: str) -> bool:
+        """Whether `resolved` (an absolute path string) is inside a writable_dir,
+        work_dir, or a previously-escalated path."""
+        if self._is_escalated(resolved):
+            return True
+        for wd in self._sandbox_config.writable_dirs:
+            wd_resolved = str(Path(wd).expanduser().resolve())
+            if resolved.startswith(wd_resolved):
+                return True
+        return resolved.startswith(str(self.work_dir.resolve()))
+
+    def _sensitive_write_guard(self, filepath: str) -> Optional[str]:
+        """Return an error message if `filepath` targets a sensitive system/credentials
+        location and hasn't already been approved via request_path_access.
+
+        Wraps the stateless `_check_sensitive_write_path()` with per-instance
+        escalation so a user-approved path bypasses the guard.
+        """
+        try:
+            resolved = str(Path(filepath).expanduser().resolve())
+        except (OSError, ValueError):
+            resolved = filepath
+        if self._is_escalated(resolved):
+            return None
+        err = _check_sensitive_write_path(filepath)
+        if err is None:
+            return None
+        return err + (
+            f"\nCall request_path_access(path={filepath!r}, reason=<why>) to ask "
+            f"the user for permission, then retry."
+        )
 
     def _validate_write_path(self, path: str) -> str:
         """Validate that a write operation is allowed under sandbox restrictions.
@@ -471,22 +538,77 @@ class BuiltinFileTool(Tool):
             return path
         resolved = str(self._resolve_path(path).resolve())
         # If writable_dirs is configured, enforce whitelist
-        if self._sandbox_config.writable_dirs:
-            allowed = False
-            for wd in self._sandbox_config.writable_dirs:
-                wd_resolved = str(Path(wd).expanduser().resolve())
-                if resolved.startswith(wd_resolved):
-                    allowed = True
-                    break
-            if not allowed:
-                # Also allow work_dir
-                work_dir_str = str(self.work_dir.resolve())
-                if not resolved.startswith(work_dir_str):
-                    raise PermissionError(
-                        f"Sandbox: write to '{path}' is not allowed. "
-                        f"Writable dirs: {self._sandbox_config.writable_dirs}"
-                    )
+        if self._sandbox_config.writable_dirs and not self._is_write_allowed(resolved):
+            raise PermissionError(
+                f"Sandbox: write to '{path}' is not allowed in the current permission mode. "
+                f"Writable dirs: {self._sandbox_config.writable_dirs}. "
+                f"Call request_path_access(path=<the directory>, reason=<why>) to ask the "
+                f"user for permission, then retry the write."
+            )
         return path
+
+    def request_path_access(self, path: str, reason: str) -> str:
+        """Ask the user for permission to read or write a path that is otherwise blocked.
+
+        Two independent restrictions can block a path, and both are escalatable
+        with this tool:
+        1. Sandbox scoping (the "auto"/"ask" permission tiers): writes are
+           restricted to work_dir, reads to `.ssh`/`.env`/etc. within any path
+           are blocked.
+        2. Sensitive system/credentials paths (`/etc/`, `~/.ssh/`, `~/.aws/credentials`,
+           etc.): writes there are refused by default in ANY permission mode,
+           including "allow-all", since the model should not silently touch
+           credentials or system files.
+
+        Use this tool whenever a task legitimately requires touching such a
+        path. It asks the user for a one-time yes/no confirmation; on approval,
+        the path is whitelisted for the rest of this session so the original
+        read/write can be retried immediately afterward.
+
+        Args:
+            path: The file or directory path you need access to.
+            reason: A short, clear explanation of why this access is needed.
+
+        Returns:
+            JSON string with "granted": true/false and a "message" explaining
+            the outcome. When granted, retry the original read/write immediately.
+        """
+        resolved = str(self._resolve_path(path).resolve())
+        is_blocked = (
+            self._component_blocked(resolved)
+            or self._sensitive_write_guard(path) is not None
+            or (
+                self._sandbox_config is not None
+                and self._sandbox_config.enabled
+                and not self._is_write_allowed(resolved)
+            )
+        )
+        if not is_blocked:
+            return json.dumps({"granted": True, "message": f"'{path}' is already accessible."})
+        if self._consent_callback is None:
+            return json.dumps({
+                "granted": False,
+                "message": (
+                    "No interactive user is available to grant this request in the current "
+                    "session. Access to this path stays blocked."
+                ),
+            })
+        prompt = (
+            f"The agent wants access to a restricted path:\n"
+            f"  Path: {resolved}\n"
+            f"  Reason: {reason}\n\n"
+            f"Allow access to this path for the rest of the session?"
+        )
+        try:
+            answer = self._consent_callback(prompt, ["yes", "no"])
+        except Exception as e:
+            return json.dumps({"granted": False, "message": f"Failed to get user consent: {e}"})
+        granted = str(answer).strip().lower() in ("yes", "y")
+        if granted:
+            grant_dir = resolved if Path(resolved).is_dir() else str(Path(resolved).parent)
+            self._escalated_paths.append(grant_dir)
+            return json.dumps({"granted": True, "message": f"User approved. '{grant_dir}' is now accessible for this session."})
+        return json.dumps({"granted": False, "message": "User denied access to this path."})
 
     async def ls(self, directory: str = ".") -> str:
         """List the immediate entries (files AND subdirectories) of a directory, NON-recursive.
@@ -669,7 +791,7 @@ class BuiltinFileTool(Tool):
         path = self._resolve_path(file_path)
 
         # ── Sensitive path guard ──────────────────────────────────
-        sensitive_err = _check_sensitive_write_path(str(path))
+        sensitive_err = self._sensitive_write_guard(str(path))
         if sensitive_err:
             raise PermissionError(sensitive_err)
 
@@ -1473,7 +1595,7 @@ class BuiltinFileTool(Tool):
         path = self._resolve_path(file_path)
 
         # ── Reuse safety guards from write_file ───────────────────
-        sensitive_err = _check_sensitive_write_path(str(path))
+        sensitive_err = self._sensitive_write_guard(str(path))
         if sensitive_err:
             raise PermissionError(sensitive_err)
 
@@ -1828,6 +1950,7 @@ def get_builtin_tools(
             work_dir=work_dir,
             sandbox_config=sandbox_config,
             diagnostics_checker=diagnostics_checker,
+            consent_callback=ask_user_question_callback,
         ))
 
     if include_execute:

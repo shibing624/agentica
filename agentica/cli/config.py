@@ -398,10 +398,10 @@ def parse_args():
     parser.add_argument(
         "--permissions",
         type=str,
-        default="auto",
+        default="allow-all",
         choices=["ask", "auto", "allow-all"],
         help="Permission mode: ask (read-only tools only), auto (writes restricted to work_dir), "
-        "allow-all (no restriction)",
+        "allow-all (no restriction; default — the CLI is a single-user tool)",
     )
     parser.add_argument(
         "command", nargs="?", choices=["acp"], help="Run in ACP mode for IDE integration (agentica acp)"
@@ -674,7 +674,7 @@ def create_agent(
         trigger further immediate runs.
     permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
         see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
-        then "allow-all".
+        then "allow-all" (the CLI's actual --permissions default; see parse_args()).
     """
     if permission_mode is None:
         permission_mode = agent_config.get("permissions", "allow-all")

@@ -62,7 +62,7 @@ from agentica.run_response import AgentCancelledError
 from agentica.utils.log import logger, suppress_console_logging
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
-from agentica.global_config import get_active_profile_name
+from agentica.global_config import resolve_active_profile_name
 
 from agentica.cli.commands import (
     CommandContext,
@@ -1747,7 +1747,7 @@ def run_interactive(
     if not agent_config.get("debug"):
         suppress_console_logging()
 
-    perm_mode = agent_config.get("permissions", "auto")
+    perm_mode = agent_config.get("permissions", "allow-all")
 
     extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
 
@@ -1846,7 +1846,7 @@ def run_interactive(
         if skill_cmds:
             cmds_str = ", ".join(skill_cmds.keys())
             con.print(f"  Skills: [cyan]{len(skills_registry)} loaded[/cyan] (commands: {cmds_str})")
-    if perm_mode != "auto":
+    if perm_mode != "allow-all":
         con.print(f"  Permissions: [yellow]{perm_mode}[/yellow]")
     con.print()
 
@@ -1856,7 +1856,7 @@ def run_interactive(
     tui_state = {
         "model_name": agent_config.get("model_name", ""),
         "model_provider": agent_config.get("model_provider", ""),
-        "profile_name": get_active_profile_name(),
+        "profile_name": resolve_active_profile_name(work_dir=agent_config.get("work_dir"))[0],
         "context_tokens": 0,
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
@@ -1946,7 +1946,9 @@ def run_interactive(
             state.current_agent = result["current_agent"]
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
-            tui_state["profile_name"] = get_active_profile_name()
+            tui_state["profile_name"] = resolve_active_profile_name(
+                work_dir=agent_config.get("work_dir")
+            )[0]
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
@@ -1961,7 +1963,9 @@ def run_interactive(
             # pre-switch values for the rest of the session.
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
-            tui_state["profile_name"] = get_active_profile_name()
+            tui_state["profile_name"] = resolve_active_profile_name(
+                work_dir=agent_config.get("work_dir")
+            )[0]
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )

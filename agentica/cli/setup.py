@@ -33,6 +33,7 @@ from agentica.global_config import (
     get_profile,
     get_profiles,
     get_active_profile_name,
+    resolve_active_profile_name,
     upsert_profile,
     set_active_profile,
     find_profile_for_provider,
@@ -1013,8 +1014,13 @@ def resolve_model_config(args, console=None) -> Dict:
     profile ``auxiliary_model`` block; a different provider never reuses the main
     model's api_key or base_url.
     """
-    # Active profile in config.yaml is the single source of truth.
-    active_profile = get_profile()
+    # Resolve effective profile: project override > global default > builtin.
+    # work_dir may be None on some callers (e.g. `agentica setup` before a
+    # workspace exists) — fall back to cwd so we still respect any project
+    # override at the launch directory.
+    work_dir = getattr(args, "work_dir", None) or os.getcwd()
+    profile_name, _profile_source = resolve_active_profile_name(work_dir=work_dir)
+    active_profile = get_profile(profile_name)
     profile_provider = active_profile.get("model_provider")
 
     provider = args.model_provider or profile_provider or DEFAULT_PROVIDER
@@ -1040,7 +1046,8 @@ def resolve_model_config(args, console=None) -> Dict:
         base_url = args.base_url or result["base_url"]
         resolved_key = result.get("api_key")
         # Onboarding may have written/activated a new profile.
-        active_profile = get_profile()
+        profile_name, _profile_source = resolve_active_profile_name(work_dir=work_dir)
+        active_profile = get_profile(profile_name)
         use_profile = provider == active_profile.get("model_provider")
 
     # API key resolution: active profile -> any profile matching provider/base_url.

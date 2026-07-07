@@ -10,13 +10,26 @@ surfaces expose the exact same vocabulary and behavior:
                   edit_file, execute are hidden from the tool schema).
   - "auto"      : every tool is exposed. Writes (write_file/edit_file) are
                   restricted to the agent's work_dir via SandboxConfig; reads
-                  are unrestricted. ``execute`` (shell) has NO path
-                  restriction here — a shell command can `cd`/redirect
-                  anywhere, so true path scoping would require OS-level
-                  sandboxing (Docker/seccomp), which is out of scope. Only
-                  the existing SandboxConfig.blocked_commands safety net
+                  outside work_dir are also blocked for sensitive path
+                  components (.ssh, .env, etc. — see SandboxConfig.blocked_paths).
+                  Neither is a dead end: the model can call
+                  ``request_path_access(path, reason)`` to ask the user for a
+                  one-time yes/no approval, which then whitelists that path for
+                  the rest of the session (see
+                  ``BuiltinFileTool.request_path_access``). ``execute`` (shell)
+                  has NO path restriction here — a shell command can `cd`/
+                  redirect anywhere, so true path scoping would require
+                  OS-level sandboxing (Docker/seccomp), which is out of scope.
+                  Only the existing SandboxConfig.blocked_commands safety net
                   (best-effort dangerous-command blocklist) applies.
-  - "allow-all" : every tool is exposed, no path restriction at all.
+  - "allow-all" : every tool is exposed, no sandbox path restriction. The CLI's
+                  actual default (see agentica.cli.config.parse_args). Note
+                  that a small set of always-sensitive write targets (/etc,
+                  ~/.ssh, ~/.aws/credentials, etc.) are still refused by
+                  default even in this mode — the model should never silently
+                  touch credentials or system files. This too is escalatable
+                  via ``request_path_access``, so the user always has the
+                  final say instead of the tool being a hard dead end.
 
 Callers should not construct their own mode strings — always compare against
 ``PERMISSION_MODES`` / use ``validate_permission_mode`` so a typo fails loud

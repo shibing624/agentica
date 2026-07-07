@@ -23,6 +23,7 @@ from agentica.global_config import (
     load_global_config,
     get_profile,
     get_active_profile_name,
+    resolve_active_profile_name,
     upsert_profile,
     global_config_path,
 )
@@ -177,7 +178,14 @@ def set_profile_field(
             f"Field '{field}' is not editable. Allowed: "
             f"{', '.join(sorted(_EDITABLE_PROFILE_FIELDS))}"
         )
-    name = profile_name or get_active_profile_name()
+    # When the caller doesn't pin a profile, target the one actually in effect
+    # for the current work_dir (respecting any project-scoped override), NOT
+    # the global default. Otherwise the agent tool would happily edit some
+    # other profile while the user sees no change in their session.
+    if profile_name:
+        name = profile_name
+    else:
+        name = resolve_active_profile_name(work_dir=os.getcwd())[0]
     profile = dict(get_profile(name))
     coerced = _coerce_profile_value(field, value)
     if coerced is None:

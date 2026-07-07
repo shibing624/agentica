@@ -46,7 +46,11 @@ from agentica.global_config import (
     get_profile,
     get_profiles,
     get_active_profile_name,
+    resolve_active_profile_name,
     set_active_profile,
+    set_project_profile,
+    clear_project_profile,
+    get_project_profile,
     upsert_profile,
 )
 from agentica.goals import GoalManager
@@ -538,7 +542,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     provider = ac.get("model_provider")
     model_name = ac.get("model_name")
     base_url = ac.get("base_url")
-    profile = get_active_profile_name()
+    profile, profile_source = resolve_active_profile_name(work_dir=ac.get("work_dir"))
 
     auxiliary_provider = ac.get("auxiliary_model_provider")
     auxiliary_model_name = ac.get("auxiliary_model_name")
@@ -574,7 +578,10 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     ctx_str = f"{ctx_pct:.0f}% ({int(ctx_tokens):,}/{int(ctx_window):,})" if ctx_pct is not None else "n/a"
     cost_str = f"${session_cost:.4f}" if isinstance(session_cost, (int, float)) else "n/a"
 
-    con.print(f"  [bold]Agentica[/bold] [dim]v{__version__}[/dim]  profile: [cyan]{profile or '(none)'}[/cyan]")
+    profile_label = profile or '(none)'
+    if profile and profile_source in ("project", "global", "default"):
+        profile_label = f"{profile} ({profile_source})"
+    con.print(f"  [bold]Agentica[/bold] [dim]v{__version__}[/dim]  profile: [cyan]{profile_label}[/cyan]")
     con.print(f"  Model:     [bold]{model_str}[/bold]")
     if base_url:
         con.print(f"  Endpoint:  [dim]{base_url}[/dim]")
@@ -1416,9 +1423,15 @@ def _cmd_config_show_files(ctx: CommandContext):
     summary = self_manage.read_config_summary()
     if summary:
         con.print(f"[bold]config.yaml[/bold] [dim]({self_manage.config_file_path()})[/dim]")
-        con.print(f"  active profile: [cyan]{summary.get('active_profile')}[/cyan]")
+        active_name, active_source = resolve_active_profile_name(
+            work_dir=ctx.agent_config.get("work_dir")
+        )
+        source_label = f" [dim]({active_source})[/dim]" if active_source else ""
+        con.print(f"  active profile: [cyan]{active_name}[/cyan]{source_label}")
+        if active_source == "project":
+            con.print(f"  [dim](global default: {summary.get('active_profile')})[/dim]")
         for pname, profile in (summary.get("profiles") or {}).items():
-            marker = "*" if pname == summary.get("active_profile") else " "
+            marker = "*" if pname == active_name else " "
             con.print(f"  {marker} [yellow]{pname}[/yellow]")
             for k, v in profile.items():
                 con.print(f"      {k} = [green]{v}[/green]")
@@ -1479,16 +1492,24 @@ def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
             value = " ".join(parts[1:])
     else:
         value = parts[1]
+    # Resolve target profile up front: respect project-scoped override so
+    # `/config set` in a project with an override edits the profile the user
+    # is actually *using*, not the global default. Passing an explicit
+    # profile_name into set_profile_field also avoids self_manage having to
+    # know about work_dir.
+    effective_active, _src = resolve_active_profile_name(
+        work_dir=ctx.agent_config.get("work_dir")
+    )
+    target = profile_name or effective_active
     try:
-        updated = self_manage.set_profile_field(field, value, profile_name)
+        updated = self_manage.set_profile_field(field, value, target)
     except ValueError as e:
         con.print(f"[red]{e}[/red]")
         return
-    target = profile_name or get_active_profile_name()
     con.print(f"[green]Updated profile '{target}': {field} = "
               f"{self_manage.mask_secret(field, value)}[/green]")
     # If editing the active profile, sync ctx + rebuild the live model.
-    if target == get_active_profile_name():
+    if target == effective_active:
         coerced = self_manage._coerce_profile_value(field, value)
         ctx.agent_config[field] = coerced
         try:
@@ -2274,12 +2295,17 @@ def _apply_profile(ctx: CommandContext, name: str):
         new_auxiliary_model = None
     ctx.agent_config["auxiliary_model"] = new_auxiliary_model
 
-    # Persist the switch: only the top-level `active:` pointer is rewritten.
+    # Persist the switch as a *project-scoped* override under
+    # ~/.agentica/projects/<key>/profile. config.yaml's global
+    # `active_profile:` pointer is untouched — that stays the machine-wide
+    # default, and other projects keep whatever they had.
+    #
     # Profile bodies (model_*, auxiliary_*, tuning) are write-only-by-setup
     # — never touched here. That separation is what fixed the original
     # "config.yaml 乱掉" bug, where the old free-form `/model provider/name`
     # path rewrote fields of the active profile in place.
-    set_active_profile(name)
+    work_dir = ctx.agent_config.get("work_dir") or os.getcwd()
+    set_project_profile(work_dir, name)
 
     model_kwargs = {
         "model_provider": new_provider,
@@ -2322,18 +2348,46 @@ def _apply_profile(ctx: CommandContext, name: str):
     return {"current_agent": current_agent}
 
 
-def _list_profiles():
-    """Print all configured config.yaml profiles with main/auxiliary full names."""
+def _clear_project_profile_override(ctx: CommandContext) -> None:
+    """Handle `/model --clear`: drop the project override and re-apply global default."""
+    con = get_console()
+    work_dir = ctx.agent_config.get("work_dir") or os.getcwd()
+    override = get_project_profile(work_dir)
+    if not override:
+        con.print("[yellow]No project-scoped profile override to clear.[/yellow]")
+        default_name, source = resolve_active_profile_name(work_dir=work_dir)
+        con.print(f"[dim]Current profile: {default_name} ({source})[/dim]")
+        return
+    clear_project_profile(work_dir)
+    default_name, source = resolve_active_profile_name(work_dir=work_dir)
+    con.print(f"[green]Cleared project profile override.[/green]")
+    con.print(f"[dim]Falling back to {default_name} ({source}).[/dim]")
+    # Actually apply the fallback profile to the live session so the state
+    # matches the message the user just saw.
+    return _apply_profile(ctx, default_name)
+
+
+def _list_profiles(active_name: Optional[str] = None, active_source: Optional[str] = None):
+    """Print all configured config.yaml profiles with main/auxiliary full names.
+
+    If ``active_name`` is provided, it labels that profile as ``[active]`` and
+    annotates the source (project/global/default). Otherwise falls back to the
+    global default from config.yaml.
+    """
     con = get_console()
     profiles = get_profiles()
-    active = get_active_profile_name()
+    active = active_name if active_name is not None else get_active_profile_name()
     if not profiles:
         con.print("[yellow]No profiles configured in ~/.agentica/config.yaml[/yellow]")
         con.print("Create one with: agentica setup", style="dim")
         return
     con.print("Configured profiles:", style="cyan")
     for name, p in profiles.items():
-        marker = " [bold green][active][/bold green]" if name == active else ""
+        if name == active:
+            source_label = f" [dim]({active_source})[/dim]" if active_source else ""
+            marker = f" [bold green][active][/bold green]{source_label}"
+        else:
+            marker = ""
         provider = p.get("model_provider", "?")
         model = p.get("model_name", "?")
         has_key = "key set" if p.get("api_key") else "no key"
@@ -2382,13 +2436,22 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
     if not stripped:
         return _model_list_overview(ctx)
 
+    # /model --clear (or --reset) drops the project-scoped override and
+    # re-applies the global default. Deliberately no `--global` flag: writing
+    # global defaults is `agentica setup` / `/config` territory.
+    if stripped in ("--clear", "--reset", "clear", "reset"):
+        return _clear_project_profile_override(ctx)
+
     # Tolerate (and gently redirect) the legacy `profile <name>` form so users
     # with muscle memory still get a working switch.
     parts = stripped.split(None, 1)
     if parts[0].lower() in ("profile", "profiles"):
         if len(parts) == 1:
             return _model_list_overview(ctx)
-        return _apply_profile(ctx, parts[1].strip())
+        rest = parts[1].strip()
+        if rest in ("--clear", "--reset", "clear", "reset"):
+            return _clear_project_profile_override(ctx)
+        return _apply_profile(ctx, rest)
 
     # Anything containing "/" is the old "<provider>/<model>" free-form path.
     # Reject it with an actionable pointer rather than silently mutating config.
@@ -2414,10 +2477,14 @@ def _model_list_overview(ctx: CommandContext) -> None:
         f"Current model: [bold cyan]{ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}[/bold cyan]"
     )
     con.print()
-    _list_profiles()
+    active_name, active_source = resolve_active_profile_name(
+        work_dir=ctx.agent_config.get("work_dir")
+    )
+    _list_profiles(active_name=active_name, active_source=active_source)
     con.print("Usage:", style="cyan")
     con.print("  /model                  list saved profiles (this view)", style="dim")
-    con.print("  /model <profile_name>   switch to a saved profile (session only, config.yaml untouched)", style="dim")
+    con.print("  /model <profile_name>   switch to a saved profile (project-scoped; config.yaml untouched)", style="dim")
+    con.print("  /model --clear          drop project override, fall back to global default", style="dim")
     con.print("To add or edit a profile, run [bold]agentica setup[/bold] outside the session.", style="dim")
 
 
@@ -2642,9 +2709,18 @@ def _cmd_permissions(ctx: CommandContext, cmd_args: str = ""):
     if ctx.current_agent:
         con.print(f"[bold cyan]Permission Mode: {ctx.current_agent.tool_config.permission_mode}[/bold cyan]")
         con.print()
-        con.print("  [dim]ask[/dim]        - only read-only tools are exposed")
+        con.print("  [dim]ask[/dim]        - only read-only tools are exposed; no writes at all")
         con.print("  [dim]auto[/dim]       - all tools exposed; writes restricted to work_dir")
-        con.print("  [dim]allow-all[/dim]  - all tools exposed, no restriction")
+        con.print("  [dim]allow-all[/dim]  - all tools exposed, no restriction (default)")
+        con.print()
+        con.print(
+            "None of these are hard dead ends: if a write/read is blocked (outside work_dir "
+            "in auto mode, or a sensitive path like ~/.ssh, ~/.aws/credentials, /etc — blocked "
+            "in ANY mode including allow-all), the agent can call request_path_access(path, "
+            "reason) to ask you for a one-time yes/no approval, which then whitelists that "
+            "path for the rest of the session.",
+            style="dim",
+        )
         con.print()
         con.print("Usage: /permissions <mode>", style="dim")
 

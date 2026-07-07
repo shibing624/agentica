@@ -77,11 +77,15 @@ Schema (``~/.agentica/config.yaml``)::
 The file is written with ``chmod 0o600`` because profiles hold secrets.
 """
 
+import hashlib
+import logging
 import os
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple
 
 from ruamel.yaml import YAML
 from ruamel.yaml.comments import CommentedMap
+
+logger = logging.getLogger(__name__)
 
 # Map a provider slug to the environment variable its model factory reads for
 # the API key. Kept in sync with the provider factories in agentica/__init__.py
@@ -235,6 +239,105 @@ def set_active_profile(name: str) -> bool:
     data["active_profile"] = name
     _save_commented(data)
     return True
+
+
+# ---------- Project-scoped profile override ----------
+#
+# Active profile has two layers:
+#   1. Project override: ~/.agentica/projects/<key>/profile (this section)
+#   2. Global default:   config.yaml -> active_profile
+#
+# Project key = sha1(realpath(work_dir))[:16]. Deliberately using work_dir
+# (not git toplevel) so it aligns with Workspace / AGENTICA_HOME and works for
+# non-git directories (~/notes, /tmp/scratch) with zero fallback logic.
+
+def _projects_dir() -> str:
+    home = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
+    return os.path.join(home, "projects")
+
+
+def _project_key(work_dir: str) -> str:
+    real = os.path.realpath(os.path.expanduser(work_dir))
+    return hashlib.sha1(real.encode("utf-8")).hexdigest()[:16]
+
+
+def _project_profile_path(work_dir: str) -> str:
+    return os.path.join(_projects_dir(), _project_key(work_dir), "profile")
+
+
+def get_project_profile(work_dir: Optional[str]) -> Optional[str]:
+    """Return the project-scoped active profile name, or None if not set."""
+    if not work_dir:
+        return None
+    path = _project_profile_path(work_dir)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            name = f.read().strip()
+        return name or None
+    except OSError:
+        return None
+
+
+def set_project_profile(work_dir: str, name: str) -> None:
+    """Persist the project-scoped active profile. Does NOT touch config.yaml."""
+    path = _project_profile_path(work_dir)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(name.strip() + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def clear_project_profile(work_dir: str) -> bool:
+    """Remove project-scoped override. Returns True if a file was deleted."""
+    if not work_dir:
+        return False
+    path = _project_profile_path(work_dir)
+    if os.path.exists(path):
+        try:
+            os.remove(path)
+            return True
+        except OSError:
+            return False
+    return False
+
+
+def resolve_active_profile_name(
+    work_dir: Optional[str] = None,
+    config: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """Resolve the effective profile name and its source.
+
+    Precedence:
+      1. project override (returns source="project")
+      2. config.yaml active_profile (returns source="global")
+      3. DEFAULT_PROFILE_NAME (returns source="default")
+
+    If a project override points to a non-existent profile, it is ignored
+    with a warning and we fall back to the global default.
+    """
+    data = load_global_config() if config is None else config
+    profiles = get_profiles(data)
+
+    project_name = get_project_profile(work_dir)
+    if project_name:
+        if not profiles or project_name in profiles:
+            return project_name, "project"
+        logger.warning(
+            "Project profile override '%s' does not exist in config.yaml, "
+            "falling back to global default.",
+            project_name,
+        )
+
+    global_name = data.get("active_profile")
+    if global_name and (not profiles or global_name in profiles):
+        return global_name, "global"
+
+    return DEFAULT_PROFILE_NAME, "default"
 
 
 def upsert_profile(name: str, profile: Dict[str, Any], make_active: bool = True) -> None:
