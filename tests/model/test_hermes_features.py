@@ -5,7 +5,7 @@
   - coerce_tool_args (schema-aware type coercion)
   - output truncation 40/60 strategy
   - exit code semantic interpretation
-  - file safety guards (device paths, consecutive reads, sensitive paths, staleness)
+  - file safety guards (device paths, sensitive paths, staleness)
   - API error context limit learning
   - tool_pair sanitization in compression
   - prompt caching system_and_3
@@ -227,33 +227,6 @@ class TestFileReadSafety:
         assert _is_blocked_device("/tmp/test.txt") is False
         assert _is_blocked_device("/home/user/file.py") is False
         assert _is_blocked_device("/dev/sda1") is False  # not in block list
-
-    def test_consecutive_read_tracker(self):
-        """Consecutive reads of same file should be tracked per-key."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
-        tool = BuiltinFileTool(work_dir="/tmp")
-
-        read_key = ("test.txt", 0, 500)
-
-        # Simulate consecutive reads via per-key dict
-        tool._read_consecutive_counts[read_key] = 3
-        assert tool._read_consecutive_counts[read_key] == 3  # warning threshold
-
-        tool._read_consecutive_counts[read_key] = 4
-        assert tool._read_consecutive_counts[read_key] >= 4  # block threshold
-
-    def test_read_tracker_resets_on_different_file(self):
-        """Reading a different file should have independent counter."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
-        tool = BuiltinFileTool(work_dir="/tmp")
-        tool._read_consecutive_counts[("file_a.txt", 0, 500)] = 3
-
-        # Different file starts at its own count
-        new_key = ("file_b.txt", 0, 500)
-        tool._read_consecutive_counts[new_key] = tool._read_consecutive_counts.get(new_key, 0) + 1
-        assert tool._read_consecutive_counts[new_key] == 1
-        # file_a count is unaffected
-        assert tool._read_consecutive_counts[("file_a.txt", 0, 500)] == 3
 
 
 # ============== TestFileWriteSafety ==============

@@ -10,6 +10,8 @@ Provides layered configuration:
 """
 
 from dataclasses import dataclass, field
+
+from agentica.config import AGENTICA_NUM_HISTORY_TURNS
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -383,7 +385,7 @@ class AgentExecutionConfig:
     """Execution behavior for an Agent."""
 
     add_history_to_context: bool = False
-    num_history_turns: int = 3
+    num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS
     use_structured_outputs: bool = False
     debug: bool = False
     enable_tracing: bool = False

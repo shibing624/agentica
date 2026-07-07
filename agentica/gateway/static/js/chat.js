@@ -187,7 +187,7 @@ const ICON_EDIT = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M11.55 1
 const ICON_LIKE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.75 14h5.1a1.5 1.5 0 001.45-1.12l1.15-4.3A1.5 1.5 0 0012 6.7H9.2l.45-2.55A1.8 1.8 0 007.88 2h-.2L4.5 6.25V14zM2 7h2.5v7H2z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>';
 const ICON_DISLIKE = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10.25 2h-5.1A1.5 1.5 0 003.7 3.12l-1.15 4.3A1.5 1.5 0 004 9.3h2.8l-.45 2.55A1.8 1.8 0 008.12 14h.2l3.18-4.25V2zM14 9h-2.5V2H14z" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round"/></svg>';
 const ICON_FORK = '<svg viewBox="0 0 16 16" aria-hidden="true"><line x1="4" y1="2" x2="4" y2="10" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="12" cy="4" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M12 6a6 6 0 01-6 6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>';
-const ICON_RETRY = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8A5.5 5.5 0 104.9 12.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><path d="M13.5 4v4h-4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const ICON_RETRY = '<svg viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><polyline points="15.33 2.67 15.33 6.67 11.33 6.67"/><polyline points="0.67 13.33 0.67 9.33 4.67 9.33"/><path d="M2.34 6a6 6 0 019.9-2.24L15.33 6.67M0.67 9.33l3.1 2.91A6 6 0 0013.66 10"/></svg>';
 
 function renderMsgActions(idx, role, msg) {
   const copy = `<button class="msg-act" onclick="copyMsg(${idx})" title="Copy message" aria-label="Copy message">${ICON_COPY}</button>`;
@@ -679,7 +679,7 @@ export async function sendMessage(overrideText, overrideFiles) {
   markSessionActivity(sessId);
   renderSidebar();
   if (sessId === state.curSess) {
-    state.userScrolledUp = false; state._scrollLock = false;
+    state.userScrolledUp = false; state._scrollLock = false; state._thinkScrollLock = false;
     updateScrollBtn();
     renderChat();
     document.getElementById('inputTa').focus();
@@ -726,7 +726,7 @@ async function runGoalFlow(s, displayText, objective, sessId) {
   markSessionActivity(sessId);
   renderSidebar();
   if (sessId === state.curSess) {
-    state.userScrolledUp = false; state._scrollLock = false;
+    state.userScrolledUp = false; state._scrollLock = false; state._thinkScrollLock = false;
     renderChat();
     document.getElementById('inputTa').focus();
   }
@@ -754,6 +754,7 @@ function appendLive() {
   div.innerHTML = `<div class="msg-stack"><div id="live-sections"></div>
     <div class="bub" id="live-bub"></div></div>`;
   c.appendChild(div); scrollEnd();
+  state._thinkScrollLock = false;
 }
 
 function updateLiveContent(msg) {
@@ -764,9 +765,20 @@ function updateLiveContent(msg) {
 function updateLiveSteps(msg) {
   const el = document.getElementById('live-sections');
   if (!el) return;
+  // Preserve the open thinking/tool card's scroll position across the innerHTML
+  // rewrite below — otherwise every streamed chunk wipes it and re-pins to the
+  // bottom, undoing the user's attempt to scroll up and read earlier content.
+  const prevBodies = el.querySelectorAll('.think-body.open');
+  const prevLast = prevBodies.length ? prevBodies[prevBodies.length - 1] : null;
+  const prevScrollTop = prevLast ? prevLast.scrollTop : 0;
+
   el.innerHTML = renderStepSections(msg.steps || [], msg.durationSec || 0, true);
+
   const bodies = el.querySelectorAll('.think-body.open');
-  if (bodies.length) { const last = bodies[bodies.length - 1]; last.scrollTop = last.scrollHeight };
+  if (bodies.length) {
+    const last = bodies[bodies.length - 1];
+    last.scrollTop = state._thinkScrollLock ? prevScrollTop : last.scrollHeight;
+  }
   autoScroll();
   scheduleRenderChatNav();
 }

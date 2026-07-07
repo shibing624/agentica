@@ -653,8 +653,12 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
 
 
 def create_agent(
-    agent_config: dict, extra_tools: Optional[List] = None, workspace: Optional[Workspace] = None, skills_registry=None,
-    ask_user_question_callback=None, enable_cron_immediate_run: bool = True,
+    agent_config: dict, 
+    extra_tools: Optional[List] = None, 
+    workspace: Optional[Workspace] = None, 
+    skills_registry=None,
+    ask_user_question_callback=None, 
+    enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.

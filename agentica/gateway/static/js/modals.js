@@ -135,9 +135,7 @@ export async function saveDir() {
   state.dirModal.open = false;
 }
 
-export function copyDir() {
-  const val = (state.dirModal.value || '').trim();
-  const text = val || currentDir();
+function copyText(text) {
   if (!text) return;
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(text).then(() => showToast('Copied: ' + text));
@@ -149,6 +147,17 @@ export function copyDir() {
     catch (e) { showToast('Copy failed'); }
     document.body.removeChild(ta);
   }
+}
+
+export function copyDir() {
+  const val = (state.dirModal.value || '').trim();
+  copyText(val || currentDir());
+}
+
+// Topbar "copy path" button — always copies the *actual* current session's
+// working directory, ignoring any in-progress (unsaved) dir-modal edit.
+export function copyCurrentDir() {
+  copyText(currentDir());
 }
 
 export function openInFinder() {

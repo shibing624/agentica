@@ -444,7 +444,10 @@ env: {}
 #   LANGFUSE_BASE_URL: "https://cloud.langfuse.com"
 #   LANGFUSE_TIMEOUT: 300
 
-# CLI-only presentation toggles.
+# SDK-wide behavior defaults (not tied to a model profile) — the CLI, the
+# gateway (web), and any SDK-created Agent/DeepAgent inherit these unless a
+# caller passes the equivalent constructor argument explicitly.
 settings:
-#  cli_markdown: auto   # off|auto|on — render only the final assistant reply
+#  cli_markdown: auto        # off|auto|on — render only the final assistant reply
+#  num_history_turns: 20     # conversation turns kept in the prompt window
 """

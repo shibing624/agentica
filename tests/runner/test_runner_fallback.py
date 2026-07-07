@@ -909,6 +909,56 @@ class TestToolHistorySanitizeRecovery(unittest.TestCase):
         # Sanitize retried exactly once, not in an infinite loop.
         self.assertEqual(calls["n"], 2)
 
+    def test_streaming_sanitizes_and_retries_through_real_consumption_path(self):
+        """Regression test: _call_with_retry's own try/except never fires for
+        stream=True — Model.response_stream() is a lazy async generator, so
+        creating it raises nothing; the HTTP call (and this 400) only happens
+        once the caller starts iterating it via ``async for``, which is
+        *outside* _call_with_retry (in Runner._run_impl's streaming loop).
+        This exercises that real consumption path end-to-end instead of unit
+        -testing _call_with_retry directly, which would miss the bug."""
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+        from agentica.model.response import ModelResponseEvent
+
+        primary = OpenAIChat(id="primary", api_key="fake_openai_key")
+        calls = {"n": 0}
+
+        async def _stream(messages):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError(
+                    "Error code: 400 - {'error': {'message': \"Messages with "
+                    "role 'tool' must be a response to a preceding message "
+                    "with 'tool_calls'\"}}"
+                )
+            messages.append(Message(role="assistant", content="recovered"))
+            yield ModelResponse(
+                event=ModelResponseEvent.assistant_response.value,
+                content="recovered",
+            )
+
+        primary.response_stream = _stream
+        agent = Agent(name="tool-history-stream-agent", model=primary)
+
+        stale_messages = [
+            Message(role="user", content="do X"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[{"id": "call_1", "type": "function", "function": {"name": "f", "arguments": "{}"}}],
+            ),
+            Message(role="tool", content="tool result", tool_call_id="call_1"),
+            Message(role="user", content="continue"),
+        ]
+
+        for _ in agent.run_stream_sync(messages=stale_messages):
+            pass
+
+        response = agent.run_response
+        self.assertEqual(response.content, "recovered")
+        self.assertEqual(calls["n"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

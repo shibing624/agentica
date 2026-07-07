@@ -23,6 +23,29 @@ export function toolSecClass(name) {
 // How many tool rows to show before collapsing (for history)
 export const TOOL_VISIBLE_LIMIT = 3;
 
+// Read-only tools whose result is a big blob of raw text/listing rather than
+// a diff — mirrors the CLI's deferred-tool set. The CLI hides their result
+// entirely (only a "N lines/items" summary), but the web UI already keeps
+// every tool result collapsed-by-default behind a click, so hiding it here
+// too would just remove useful detail with no noise benefit. Instead we keep
+// results expandable but give them the same "N lines/items" summary in the
+// collapsed row, and a head/tail-truncated body instead of a raw text dump.
+const READ_SUMMARY_TOOLS = new Set(['grep', 'glob', 'ls', 'web_search', 'read_file', 'fetch_url']);
+
+// Compact "N lines/items/files" suffix shown next to the args in the
+// collapsed row — same wording the CLI uses for its deferred tools.
+export function resultSummary(name, result) {
+  if (!READ_SUMMARY_TOOLS.has(name)) return '';
+  if (!result) return name === 'grep' ? 'no matches' : '';
+  const n = String(result).split('\n').length;
+  if (!n) return name === 'grep' ? 'no matches' : '';
+  if (name === 'grep') return `${n} lines`;
+  if (name === 'ls') return `${n} items`;
+  if (name === 'glob') return `${n} files`;
+  if (name === 'web_search') return `${n} results`;
+  return `${n} lines`;
+}
+
 // Tools that need HTML-rendered args (not just plain text escape)
 const RICH_TOOLS = new Set(['task', 'write_todos', 'read_todos', 'read_file', 'write_file', 'edit_file', 'multi_edit_file']);
 export function isRichTool(name) { return RICH_TOOLS.has(name) }
@@ -38,9 +61,12 @@ export function renderToolRow(st) {
   const todoBody = isTodo ? fmtTodoBodyHtml(st.rawArgs) : '';
   const taskBody = isTaskTool ? fmtTaskBodyHtml(st.result) : '';
   const hasExtra = hasResult || todoBody || taskBody;
+  const summary = hasResult ? resultSummary(st.name, st.result) : '';
   let h = `<div class="tg-row${hasExtra ? ' has-result' : ''}"${hasExtra ? ` onclick="toggleToolResult(this)"` : ''}>`
   if (hasExtra) h += `<span class="tg-arrow">&#x25B8;</span>`;
-  h += `<span class="tg-icon">${icon}</span><span class="tg-name">${esc(dname)}</span><span class="tg-args">${argsHtml}</span></div>`;
+  h += `<span class="tg-icon">${icon}</span><span class="tg-name">${esc(dname)}</span><span class="tg-args">${argsHtml}</span>`;
+  if (summary) h += `<span class="tg-count">· ${esc(summary)}</span>`;
+  h += `</div>`;
   if (hasExtra) {
     let body = '';
     if (todoBody) body += todoBody;
@@ -246,6 +272,12 @@ export function fmtToolResultHtml(name, rawArgs, result) {
   }
   if (name === 'execute' || name === 'shell') {
     return buildHeadTailHtml(result || '', 8, 8);
+  }
+  if (name === 'read_file') {
+    return buildWritePreviewHtml(result || '', 40);
+  }
+  if (name === 'ls' || name === 'glob' || name === 'grep' || name === 'web_search' || name === 'fetch_url') {
+    return buildHeadTailHtml(result || '', 10, 6);
   }
   return esc(result || '');
 }

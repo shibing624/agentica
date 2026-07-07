@@ -14,13 +14,15 @@ import { fmtN, fmtTime, fmtFileSize, shortenPath, toggleSidebar, focusSidebarSea
 import {
   confirmOk, confirmCancel,
   openDirModal, closeDirModal, toggleDirHistory, selectDirHistory,
-  saveDir, copyDir, openInFinder, openInTerminal,
+  saveDir, copyDir, copyCurrentDir, openInFinder, openInTerminal,
   openAccountPanel, closeAccountPanel, currentUsage, archivedSessions, dirHistoryFiltered,
   deleteArchivedSession, openDirModalForNewSession,
 } from './modals.js';
 import {
   loadSessions, newSession, switchTo, archiveSession, unarchiveSession,
   forkSession, renameSession, commitSessionRename, renameKey, createSessionInProject,
+  toggleChatMenu, closeChatMenu, renameCurrentSession, forkCurrentSession, archiveCurrentSession,
+  exportCurrentSessionMarkdown,
 } from './sessions.js';
 import {
   sidebarTree, toggleProjectCollapsed,
@@ -89,7 +91,8 @@ createApp({
   selectSlash, updateSlash, onInput,
 
   confirmOk, confirmCancel,
-  closeDirModal, saveDir, copyDir, openInFinder, openInTerminal, toggleDirHistory, selectDirHistory,
+  closeDirModal, saveDir, copyDir, copyCurrentDir, openInFinder, openInTerminal, toggleDirHistory, selectDirHistory,
+  toggleChatMenu, renameCurrentSession, forkCurrentSession, archiveCurrentSession, exportCurrentSessionMarkdown,
   closeAccountPanel, openSettingsModal, switchTo, unarchiveSession,
   closePluginsPanel, showSkillForm, cancelSkillForm, saveSkillForm, editSkill, deleteSkill,
   showMcpForm, cancelMcpForm, saveMcpForm, deleteMcpServer, addMcpEnvRow, removeMcpEnvRow,
@@ -136,6 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!document.getElementById('ctxWrap').contains(e.target)) {
       state.ctxTipOpen = false;
     }
+    if (!document.getElementById('chatMenuWrap')?.contains(e.target)) {
+      closeChatMenu();
+    }
     if (!document.getElementById('inputBox').contains(e.target)) {
       closeInputMenus();
     }
@@ -172,6 +178,22 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!state._scrollLock) { state.userScrolledUp = true; state._scrollLock = true; }
     }
     updateScrollBtn();
+  }, { passive: true });
+  // Thinking/tool-call card ("已处理") has its own inner scroll while streaming.
+  // Any upward scroll inside it should stop the auto-follow-to-bottom immediately —
+  // no threshold, so the user can read older content without fighting new chunks.
+  chatArea.addEventListener('wheel', (e) => {
+    const body = e.target.closest && e.target.closest('.think-body');
+    if (!body) return;
+    if (e.deltaY < 0) {
+      state._thinkScrollLock = true;
+    } else if (e.deltaY > 0 && (body.scrollHeight - body.scrollTop - body.clientHeight) < 24) {
+      state._thinkScrollLock = false;
+    }
+  }, { passive: true });
+  chatArea.addEventListener('touchmove', (e) => {
+    const body = e.target.closest && e.target.closest('.think-body');
+    if (body) state._thinkScrollLock = true;
   }, { passive: true });
   // window resize reflows message heights, which the nav's tick positions
   // (computed from offsetTop) depend on — debounce so a drag-resize doesn't

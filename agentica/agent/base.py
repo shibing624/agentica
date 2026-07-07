@@ -55,7 +55,7 @@ from agentica.run_context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
 from agentica.memory.session_log import SessionLog
 from agentica.compression import CompressionManager
-from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY
+from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, AGENTICA_NUM_HISTORY_TURNS
 from agentica.agent.config import (
     PromptConfig,
     ToolConfig,
@@ -172,7 +172,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     # Layer 2: Common config
     # ============================
     add_history_to_context: bool = False
-    num_history_turns: int = 3
+    num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS
     use_structured_outputs: bool = False
     debug: bool = False
     enable_tracing: bool = False
@@ -307,7 +307,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         response_model: Optional[Type[Any]] = None,
         # ---- Common config ----
         add_history_to_context: bool = False,
-        num_history_turns: int = 8,
+        num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS,
         use_structured_outputs: bool = False,
         debug: bool = False,
         enable_tracing: bool = False,

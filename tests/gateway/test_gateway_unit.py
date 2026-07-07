@@ -137,6 +137,50 @@ class TestAgentServiceCronUsesAuxiliaryModel:
         assert mock_create.call_args_list[0].args == (svc.model_provider, svc.model_name)
 
 
+class TestAgentServiceNumHistoryTurns:
+    """_build_agent must read num_history_turns from settings — the same
+    single source of truth for both the interactive agent and any agent
+    rebuilt after a model/profile switch invalidates the cache — never a
+    separate hardcoded literal."""
+
+    def test_build_agent_uses_settings_num_history_turns(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.config import settings
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._workspace = None
+        with patch.object(settings, "num_history_turns", 9), \
+             patch("agentica.gateway.services.agent_service.create_model"), \
+             patch("agentica.gateway.services.agent_service.DeepAgent") as mock_agent_cls:
+            mock_agent_cls.return_value = MagicMock(tools=[])
+            svc._build_agent("chat123")
+
+        assert mock_agent_cls.call_args.kwargs["num_history_turns"] == 9
+
+    def test_rebuild_after_model_switch_stays_aligned_with_settings(self, tmp_path):
+        """Simulates a model switch (settings.num_history_turns changed at
+        runtime) followed by an agent rebuild — the rebuilt agent must pick
+        up the new value, not a stale hardcoded one."""
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.config import settings
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._workspace = None
+        with patch.object(settings, "num_history_turns", 3), \
+             patch("agentica.gateway.services.agent_service.create_model"), \
+             patch("agentica.gateway.services.agent_service.DeepAgent") as mock_agent_cls:
+            mock_agent_cls.return_value = MagicMock(tools=[])
+            svc._build_agent("chat123")
+        assert mock_agent_cls.call_args.kwargs["num_history_turns"] == 3
+
+        with patch.object(settings, "num_history_turns", 12), \
+             patch("agentica.gateway.services.agent_service.create_model"), \
+             patch("agentica.gateway.services.agent_service.DeepAgent") as mock_agent_cls:
+            mock_agent_cls.return_value = MagicMock(tools=[])
+            svc._build_agent("chat123")
+        assert mock_agent_cls.call_args.kwargs["num_history_turns"] == 12
+
+
 class TestAgentServiceRunCron:
     """run_cron() builds an independent, uncached Agent per job execution and
     is excluded from the chat sidebar (list_sessions())."""

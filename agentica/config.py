@@ -22,9 +22,9 @@ load_dotenv(AGENTICA_DOTENV_PATH)
 #     shell env  >  .env  >  config.yaml
 # Injection uses setdefault semantics, so an already-set variable is never
 # overwritten. The SDK keeps reading plain env vars; nothing else has to change.
-try:
-    from agentica.global_config import apply_global_config
+from agentica.global_config import apply_global_config, get_setting
 
+try:
     apply_global_config()
 except Exception:
     # Never let a malformed config.yaml break import of the SDK.
@@ -39,6 +39,14 @@ AGENTICA_WORKSPACE_DIR = os.getenv("AGENTICA_WORKSPACE_DIR", f"{AGENTICA_HOME}/w
 AGENTICA_PROJECTS_DIR = os.getenv("AGENTICA_PROJECTS_DIR", f"{AGENTICA_HOME}/projects")
 AGENTICA_LOG_LEVEL = os.getenv("AGENTICA_LOG_LEVEL", "INFO").upper()
 AGENTICA_MAX_MEMORY_CHARACTER_COUNT = int(os.getenv("AGENTICA_MAX_MEMORY_CHARACTER_COUNT", "40000"))
+
+# Default conversation history window (in turns/runs) for Agent/DeepAgent —
+# the single SDK-wide default that the CLI and gateway (web) inherit unless a
+# caller passes num_history_turns=... explicitly. Precedence (highest first):
+# shell env > .env > config.yaml `settings.num_history_turns` > built-in 20.
+AGENTICA_NUM_HISTORY_TURNS = int(
+    os.getenv("AGENTICA_NUM_HISTORY_TURNS") or get_setting("num_history_turns", 20)
+)
 
 # SDK default: no log file, logs only go to stdio. The CLI opts in by setting
 # ``AGENTICA_LOG_FILE`` to a daily path in ``agentica.cli.main`` — SDK users

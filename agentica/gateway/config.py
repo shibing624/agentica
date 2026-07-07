@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from agentica.config import AGENTICA_WORKSPACE_DIR
+from agentica.config import AGENTICA_WORKSPACE_DIR, AGENTICA_NUM_HISTORY_TURNS
 from agentica.global_config import apply_global_config, get_profile
 
 
@@ -47,6 +47,14 @@ class Settings:
 
     # Run history retention (days); runs older than this are pruned on startup
     job_runs_retention_days: int = 30
+
+    # Conversation history window (in turns/runs) fed into the prompt on every
+    # request — the single source of truth for _build_agent(), so a rebuilt
+    # agent (e.g. after a model/profile switch invalidates the cache) uses the
+    # exact same window as the interactive agent it replaced. Defaults to the
+    # SDK-wide AGENTICA_NUM_HISTORY_TURNS (same default the CLI/SDK use), so
+    # web/CLI/SDK stay aligned unless a user overrides it explicitly.
+    num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS
 
     # Feishu
     feishu_app_id: Optional[str] = None
@@ -167,6 +175,11 @@ class Settings:
 
             # Run history retention
             job_runs_retention_days=int(os.getenv("JOB_RUNS_RETENTION_DAYS", "30")),
+
+            # Conversation history window — inherits the SDK-wide default
+            # (env var / config.yaml `settings.num_history_turns`); see
+            # agentica.config.AGENTICA_NUM_HISTORY_TURNS.
+            num_history_turns=AGENTICA_NUM_HISTORY_TURNS,
 
             # Feishu
             feishu_app_id=os.getenv("FEISHU_APP_ID"),

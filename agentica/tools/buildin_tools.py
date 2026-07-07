@@ -193,9 +193,6 @@ _BLOCKED_DEVICE_PATHS = frozenset({
 # Sensitive system paths that file tools should refuse to write to
 _SENSITIVE_PATH_PREFIXES = ("/etc/", "/boot/", "/usr/lib/systemd/", "/private/etc/", "/private/var/run/")
 
-# Maximum consecutive identical reads before hard-blocking
-_MAX_CONSECUTIVE_READS = 4
-
 
 def _is_blocked_device(filepath: str) -> bool:
     """Return True if the path would hang the process."""
@@ -268,12 +265,6 @@ class BuiltinFileTool(Tool):
         # mtime cache: detect external modifications before edit/write.
         # Key: resolved absolute path (str), Value: {"mtime": float}
         self._file_read_state: Dict[str, Dict[str, Any]] = {}
-
-        # Consecutive-read tracker: prevents LLM read-loop death spirals.
-        # Dict mapping (path, offset, limit) -> consecutive count.
-        # Per-key tracking is safe under concurrent reads (no cross-key interference).
-        self._read_consecutive_counts: Dict[tuple, int] = {}
-        self._read_last_key: Optional[tuple] = None
 
         # File snapshots for workspace rollback: {abs_path: [content_before_1, ...]}
         # Stores previous file content before each write/edit, supporting undo.
@@ -599,10 +590,6 @@ class BuiltinFileTool(Tool):
             )
 
         if not path.exists():
-            # Reset consecutive tracker for this path
-            for k in [k for k in self._read_consecutive_counts if k[0] == file_path]:
-                del self._read_consecutive_counts[k]
-            self._read_last_key = None
             raise FileNotFoundError(f"File not found: {file_path}")
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
@@ -654,28 +641,6 @@ class BuiltinFileTool(Tool):
         except OSError:
             pass
 
-        # ── Consecutive-read loop detection ───────────────────────
-        read_key = (file_path, offset, limit)
-        self._read_consecutive_counts[read_key] = self._read_consecutive_counts.get(read_key, 0) + 1
-        count = self._read_consecutive_counts[read_key]
-        self._read_last_key = read_key
-
-        if count >= _MAX_CONSECUTIVE_READS:
-            # Soft signal (not an error): tell the agent to stop re-reading.
-            # Not a FileNotFoundError or the like -- the file exists and the
-            # read succeeded; we simply refuse to return the content again.
-            return (
-                f"BLOCKED: You have read this exact file region {count} times in a row. "
-                "The content has NOT changed. You already have this information. "
-                "STOP re-reading and proceed with your task."
-            )
-        if count >= 3:
-            result += (
-                f"\n\n[Warning: You have read this exact file region {count} times "
-                "consecutively. The content has not changed. Use the information "
-                "you already have.]"
-            )
-
         logger.debug(f"Read file {file_path}: lines {offset + 1}-{actual_end}, total {total_lines} lines")
         return result
 
@@ -723,10 +688,6 @@ class BuiltinFileTool(Tool):
                         )
                 except OSError:
                     pass
-
-        # Reset consecutive-read tracker (write breaks the loop)
-        self._read_last_key = None
-        self._read_consecutive_counts.clear()
 
         # Ensure directory exists
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -826,10 +787,6 @@ class BuiltinFileTool(Tool):
 
         abs_path = str(path.resolve())
 
-        # Reset consecutive-read tracker (edit breaks the loop)
-        self._read_last_key = None
-        self._read_consecutive_counts.clear()
-
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
         if not path.is_file():
@@ -882,6 +839,9 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Apply multiple edits to a single file.
 
+        You MUST use read_file at least once before editing a file.
+        This tool will error if the file has been modified externally since your last read.
+
         Edits are applied sequentially on the same in-memory content, then
         the result is written back atomically once.
 
@@ -922,10 +882,6 @@ class BuiltinFileTool(Tool):
             return preflight_warning
 
         abs_path = str(path.resolve())
-
-        # Reset consecutive-read tracker (multi-edit breaks the loop)
-        self._read_last_key = None
-        self._read_consecutive_counts.clear()
 
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")

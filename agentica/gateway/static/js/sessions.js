@@ -201,3 +201,64 @@ export function renameKey(ev, id) {
   if (ev.key === 'Enter') commitSessionRename(id, ev.target.value);
   else if (ev.key === 'Escape') cancelSessionRename();
 }
+
+// ---- Topbar "..." chat menu (rename/fork/archive the current session) ----
+export function toggleChatMenu() {
+  state.chatMenuOpen = !state.chatMenuOpen;
+}
+
+export function closeChatMenu() {
+  state.chatMenuOpen = false;
+}
+
+export async function renameCurrentSession() {
+  if (!state.curSess) return;
+  state.chatMenuOpen = false;
+  state.renamingSessionId = state.curSess;
+  nextTick(() => {
+    const inp = document.getElementById('renameTbInput');
+    if (inp) { inp.focus(); inp.select(); }
+  });
+}
+
+export function forkCurrentSession() {
+  state.chatMenuOpen = false;
+  if (!state.curSess || !state.sessions[state.curSess]) return;
+  forkSession(state.curSess, (state.sessions[state.curSess].msgs || []).length - 1);
+}
+
+export function archiveCurrentSession() {
+  state.chatMenuOpen = false;
+  if (!state.curSess) return;
+  archiveSession(state.curSess);
+}
+
+// Download the current session as a Markdown file (client-side only — no
+// server round-trip needed since messages already live in state.sessions).
+export function exportCurrentSessionMarkdown() {
+  state.chatMenuOpen = false;
+  const id = state.curSess;
+  const s = id && state.sessions[id];
+  if (!s) return;
+  const msgs = (s.msgs || []).filter(m => m.role === 'user' || m.role === 'assistant');
+  if (!msgs.length) { showToast('No messages to export', 1500); return; }
+
+  const lines = [`# ${s.title || 'Chat'}`, '', `_Exported: ${new Date().toISOString()}_`, '', '---'];
+  for (const m of msgs) {
+    lines.push('', `## ${m.role === 'user' ? 'User' : 'Assistant'}`, '');
+    lines.push((m.content || '').trim());
+    const toolCalls = (m.steps || []).filter(st => st.type === 'tool').length;
+    if (toolCalls) lines.push('', `_(${toolCalls} tool call${toolCalls > 1 ? 's' : ''})_`);
+  }
+  const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const safeName = (s.title || 'chat').trim().replace(/[^\w\-]+/g, '_').slice(0, 60) || 'chat';
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${safeName}_${new Date().toISOString().slice(0, 10)}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast('Exported to Markdown', 1200);
+}

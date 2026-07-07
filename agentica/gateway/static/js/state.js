@@ -28,6 +28,7 @@ export const state = reactive({
   modelsData: null,
   userScrolledUp: false,
   _scrollLock: false, // locked once the user scrolls up manually, so new content won't force-scroll
+  _thinkScrollLock: false, // locked once the user scrolls up inside a live thinking/tool-call card
   serverContextWindow: 128000,
   serverProfile: '',
   profilesData: { active: '', profiles: [] },
@@ -49,6 +50,7 @@ export const state = reactive({
   modelDDOpen: false,
   quickMenuOpen: false,
   approvalMenuOpen: false,
+  chatMenuOpen: false,
   ctxTipOpen: false,
   switchingLabel: null,
   selectedApprovalMode: 'auto',

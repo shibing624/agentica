@@ -127,6 +127,18 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
    in-rail toggle button with it. */
 .sidebar-expand-btn{display:none}
 
+/* current session info — chat icon + title + "..." menu (rename/fork/archive) */
+.tb-chat-info{display:flex;align-items:center;gap:6px;min-width:0}
+.tb-chat-icon{width:16px;height:16px;display:flex;align-items:center;justify-content:center;color:var(--fg3);flex-shrink:0}
+.tb-chat-icon svg{width:16px;height:16px}
+.tb-chat-menu-btn svg{width:16px;height:16px}
+.tb-chat-title{font-size:13px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:32vw;cursor:default}
+.tb-chat-rename-input{width:min(240px,28vw);height:24px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg);font-size:13px;font-weight:600;padding:2px 6px;outline:none}
+.tb-chat-rename-input:focus{border-color:var(--fg3);box-shadow:0 0 0 2px var(--accent-soft)}
+.tb-chat-menu-wrap{position:relative;flex-shrink:0}
+.tb-chat-menu-dd{position:absolute;top:calc(100% + 6px);left:0;min-width:160px;background:var(--bg);border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 32px rgba(0,0,0,.16);padding:6px;display:none;flex-direction:column;gap:2px;z-index:220}
+.tb-chat-menu-dd.open{display:flex}
+
 /* model selector — in input footer */
 .input-model-wrap{position:relative}
 .model-sel{display:flex;align-items:center;gap:3px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:transparent;color:var(--fg2);font-size:11px;font-weight:500;cursor:pointer;transition:all var(--t);font-family:var(--mono);white-space:nowrap;height:26px}
@@ -153,9 +165,11 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .dd-custom-btn:hover{background:var(--fg);color:var(--bg)}
 
 .tb-r{display:flex;align-items:center;gap:8px;flex-shrink:0;min-width:0;overflow:visible}
-.tb-info{font-size:10px;color:var(--fg3);font-family:var(--mono);display:flex;align-items:center;gap:10px;white-space:nowrap;line-height:1.3;text-decoration:none}
+.tb-info{font-size:10px;color:var(--fg3);font-family:var(--mono);display:flex;align-items:center;gap:6px;white-space:nowrap;line-height:1.3;text-decoration:none}
 .tb-info b{text-decoration:none}
 .tb-info .sep{color:var(--border);font-size:8px}
+.tb-dir-act{width:22px;height:22px;margin-left:2px}
+.tb-dir-act svg{fill:currentColor}
 /* context usage display */
 .ctx-wrap{position:relative;cursor:pointer;text-decoration:none!important;border:none!important;box-shadow:none!important;display:flex;align-items:center;gap:6px}
 .ctx-wrap,.ctx-wrap *{text-decoration:none!important;border-bottom:none!important}
@@ -329,8 +343,10 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .sec-body{display:none;padding:0;max-height:500px;overflow-y:auto;margin:0 2px 2px;border-radius:0 0 6px 6px}
 .sec-body.open{display:block}
 
-/* thinking — flat row style, same as tool calls */
-.think-row{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;font-size:11px;line-height:1.5;color:var(--fg3);font-family:var(--mono);border:1px solid var(--border);border-radius:999px;margin:0 0 5px 0;transition:all .15s;background:var(--bg2)}
+/* thinking — full-width card, aligned with the main answer's bubble width
+   (both are direct children of .msg-stack, which is capped/sized the same
+   as .bub) instead of a small floating pill */
+.think-row{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;padding:6px 10px;font-size:11px;line-height:1.5;color:var(--fg3);font-family:var(--mono);border:1px solid var(--border);border-radius:var(--radius-sm);margin:0 0 5px 0;transition:all .15s;background:var(--bg2)}
 .think-row:hover{color:var(--fg2);background:var(--bg3)}
 .think-row.has-body{cursor:pointer}
 .think-row .tg-arrow{font-size:8px;opacity:.4;transition:transform .15s;flex-shrink:0}
@@ -338,10 +354,13 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .think-row .think-icon{font-size:11px;flex-shrink:0}
 .think-row .think-lbl{font-weight:500;color:var(--fg3);white-space:nowrap;font-size:11px}
 .think-row .think-preview{opacity:.6;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:500px}
+/* When expanded, the header and body visually merge into one card (flat
+   shared edge, no double border/gap) */
+.think-row:has(+ .think-body.open){border-radius:var(--radius-sm) var(--radius-sm) 0 0;border-bottom-color:transparent;margin-bottom:0}
 /* thinking body — hidden by default; holds both the thinking text and the
    tool calls made while processing, since both are part of the same
    execution step */
-.think-body{display:none;padding:8px 12px;font-size:11px;color:var(--fg3);max-height:340px;overflow-y:auto;margin:0 0 6px 0;border:1px solid var(--border);border-radius:var(--radius-sm);line-height:1.45;background:var(--bg2)}
+.think-body{display:none;width:100%;box-sizing:border-box;padding:8px 12px;font-size:11px;color:var(--fg3);max-height:340px;overflow-y:auto;margin:0 0 6px 0;border:1px solid var(--border);border-radius:0 0 var(--radius-sm) var(--radius-sm);line-height:1.45;background:var(--bg2)}
 .think-body.open{display:block}
 .think-text{font-family:var(--mono);font-style:italic;white-space:pre-wrap;word-break:break-word;opacity:.8}
 .think-text + .tool-group,.think-text + .sec-block{margin-top:6px}
@@ -358,6 +377,7 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .tg-row .tg-icon{font-size:11px;flex-shrink:0}
 .tg-row .tg-name{font-weight:500;color:var(--fg3);white-space:nowrap;font-size:11px}
 .tg-row .tg-args{opacity:.7;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:500px}
+.tg-row .tg-count{opacity:.5;font-size:10px;flex-shrink:0;white-space:nowrap}
 .tg-row .tg-args .file-path{font-size:10px}
 .tg-row .tg-args .diff-add,.tg-row .tg-args .diff-del{font-size:10px}
 .tg-row .tg-args .line-range{font-size:9px}
@@ -420,7 +440,10 @@ body{font-family:var(--sans);font-size:14px;line-height:1.6;color:var(--fg);back
 .file-path{color:var(--fg2);font-family:var(--mono);font-size:11px}
 .line-range{color:var(--fg3);font-family:var(--mono);font-size:10px}
 
-.m-a .bub{padding:2px 0;max-width:100%;font-size:13px;line-height:1.6;color:var(--fg);word-break:break-word}
+/* width:100% (not just max-width) so short answers still occupy the full
+   column — otherwise the bubble shrink-wraps to its text and no longer
+   lines up with the full-width thinking card above it */
+.m-a .bub{padding:2px 0;width:100%;max-width:100%;box-sizing:border-box;font-size:13px;line-height:1.6;color:var(--fg);word-break:break-word}
 /* streaming indicator — ChatGPT-style pulsing dot */
 .streaming .bub::after{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--fg2);margin-left:3px;vertical-align:middle;animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1)}}

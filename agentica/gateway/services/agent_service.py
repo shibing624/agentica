@@ -351,7 +351,7 @@ class AgentService:
             tools=extra if extra else None,
             workspace=self._workspace,
             work_dir=work_dir,
-            num_history_turns=6,
+            num_history_turns=settings.num_history_turns,
             instructions=instructions,
             debug=settings.debug,
             # memory, skills, user input, experience capture, workspace memory
