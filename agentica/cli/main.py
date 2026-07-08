@@ -132,6 +132,11 @@ def main():
         "reasoning_effort": args.reasoning_effort or resolved.get("reasoning_effort"),
         "top_p": args.top_p if args.top_p is not None else resolved.get("top_p"),
         "context_window": args.context_window if args.context_window is not None else resolved.get("context_window"),
+        # Raw passthrough dicts (profile-only, no CLI flag — see cli/setup.py's
+        # _RAW_PASSTHROUGH_KEYS) for endpoints whose tuning knobs don't map to
+        # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
+        "extra_body": resolved.get("extra_body"),
+        "extra_headers": resolved.get("extra_headers"),
         # Prompt caching (OpenAI-compatible proxies fronting Claude, e.g. Venus).
         # CLI flag wins; otherwise the active profile's value; else None (auto:
         # on for known proxy base_urls, off otherwise).
@@ -146,6 +151,8 @@ def main():
         "auxiliary_model_name": resolved.get("auxiliary_model_name"),
         "auxiliary_base_url": resolved.get("auxiliary_base_url"),
         "auxiliary_api_key": resolved.get("auxiliary_api_key"),
+        "auxiliary_extra_body": resolved.get("auxiliary_extra_body"),
+        "auxiliary_extra_headers": resolved.get("auxiliary_extra_headers"),
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
         "enable_experience_capture": not args.no_experience,

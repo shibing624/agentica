@@ -56,6 +56,15 @@ Schema (``~/.agentica/config.yaml``)::
         # context_window: 1000000    # context limit; overrides catalog value
         # temperature: 0.7
         # top_p: 0.95
+        # extra_body / extra_headers: raw passthrough dicts, hand-edit only
+        # (no setup wizard prompt) for endpoints whose tuning knobs don't map
+        # to a standard OpenAI param, e.g. Hunyuan's taiji gateway wants
+        # reasoning_effort inside extra_body.chat_template_kwargs:
+        # extra_body:
+        #   chat_template_kwargs:
+        #     reasoning_effort: high
+        # extra_headers:
+        #   X-Custom-Header: value
 
         # --- optional auxiliary model (background calls + `task` subagent tool) ---
         # Omit the whole block to reuse the main model for auxiliary work. When auxiliary
@@ -68,6 +77,8 @@ Schema (``~/.agentica/config.yaml``)::
         #   model_name: glm-4.7-flash
         #   base_url: https://open.bigmodel.cn/api/paas/v4
         #   api_key: sk-...
+        #   # extra_body / extra_headers work the same as the main model's,
+        #   # but are NEVER inherited from it (different endpoint/deployment).
 
     # Free-form env block: arbitrary keys injected into os.environ (tool API
     # keys, tracing, etc.). Shell/env-file values still win over these.
@@ -517,6 +528,9 @@ active_profile: default
 #     #   context_window: 1000000    # context limit; overrides catalog value
 #     #   temperature: 0.7
 #     #   top_p: 0.95
+#     #   extra_body / extra_headers: raw passthrough dicts, hand-edit only,
+#     #     for endpoints whose tuning knobs don't map to a standard OpenAI
+#     #     param (e.g. extra_body: {chat_template_kwargs: {reasoning_effort: high}})
 #     # optional prompt caching for OpenAI-compatible proxies fronting Claude
 #     # (e.g. Venus): enable_cache_control, cache_control_messages,
 #     #   cache_control_session_header (sticky-routing header for cache hits).

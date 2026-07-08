@@ -243,6 +243,28 @@ class TestResolveModelConfig(_CliSetupTestBase):
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["api_key"], "sk-from-profile")
 
+    def test_resolves_extra_body_and_extra_headers(self):
+        self._write_profile({
+            "model_provider": "openai", "model_name": "hy3",
+            "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
+            "extra_body": {"chat_template_kwargs": {"reasoning_effort": "high"}},
+            "extra_headers": {"X-Custom": "value"},
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(
+            resolved["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}}
+        )
+        self.assertEqual(resolved["extra_headers"], {"X-Custom": "value"})
+
+    def test_extra_body_none_when_not_set(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-x",
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertIsNone(resolved["extra_body"])
+        self.assertIsNone(resolved["extra_headers"])
+
 
 class TestResolveAuxModel(_CliSetupTestBase):
     """Optional auxiliary model resolution: CLI flag > profile auxiliary_model block >
@@ -324,6 +346,33 @@ class TestResolveAuxModel(_CliSetupTestBase):
         self.assertEqual(resolved["auxiliary_model_provider"], "deepseek")
         self.assertEqual(resolved["auxiliary_base_url"], "https://api.deepseek.com")
         self.assertEqual(resolved["auxiliary_api_key"], "sk-main")
+
+    def test_auxiliary_extra_body_never_inherits_from_main(self):
+        self._write_profile({
+            "model_provider": "openai", "model_name": "hy3",
+            "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-main",
+            "extra_body": {"chat_template_kwargs": {"reasoning_effort": "high"}},
+            "auxiliary_model": {"model_name": "hy3-lite"},  # same provider, no own extra_body
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertIsNone(resolved["auxiliary_extra_body"])
+
+    def test_auxiliary_extra_body_resolved_from_its_own_block(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-main",
+            "auxiliary_model": {
+                "model_name": "hy3", "model_provider": "openai",
+                "base_url": "http://api.taiji.woa.com/openapi/v2",
+                "extra_body": {"chat_template_kwargs": {"reasoning_effort": "low"}},
+                "extra_headers": {"X-Aux": "1"},
+            },
+        })
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(
+            resolved["auxiliary_extra_body"], {"chat_template_kwargs": {"reasoning_effort": "low"}}
+        )
+        self.assertEqual(resolved["auxiliary_extra_headers"], {"X-Aux": "1"})
 
 
 class TestShouldOnboard(_CliSetupTestBase):
@@ -505,11 +554,14 @@ class TestRunOnboarding(_CliSetupTestBase):
                 "max_tokens": 4096,
                 "enable_cache_control": True,
                 "cache_control_messages": 3,
+                "extra_body": {"chat_template_kwargs": {"reasoning_effort": "high"}},
+                "extra_headers": {"X-Custom": "value"},
                 "auxiliary_model": {
                     "model_provider": "zhipuai",
                     "model_name": "glm-4.7-flash",
                     "base_url": cli_setup.default_base_url("zhipuai"),
                     "api_key": "sk-keep-auxiliary",
+                    "extra_body": {"aux": True},
                 },
             },
             make_active=True,
@@ -534,12 +586,20 @@ class TestRunOnboarding(_CliSetupTestBase):
         # Cache kept.
         self.assertTrue(profile.get("enable_cache_control"))
         self.assertEqual(profile.get("cache_control_messages"), 3)
+        # extra_body/extra_headers kept, even though there's no interactive
+        # prompt for them (see _RAW_PASSTHROUGH_KEYS) — the wizard must not
+        # silently wipe a hand-edited passthrough dict on re-run.
+        self.assertEqual(
+            profile.get("extra_body"), {"chat_template_kwargs": {"reasoning_effort": "high"}}
+        )
+        self.assertEqual(profile.get("extra_headers"), {"X-Custom": "value"})
         # Auxiliary block kept verbatim (not dropped by the decline).
         self.assertIn("auxiliary_model", profile)
         am = profile["auxiliary_model"]
         self.assertEqual(am["model_provider"], "zhipuai")
         self.assertEqual(am["model_name"], "glm-4.7-flash")
         self.assertEqual(am["api_key"], "sk-keep-auxiliary")
+        self.assertEqual(am["extra_body"], {"aux": True})
 
     def test_rerun_shows_api_key_in_full(self):
         """The api key prompt must NOT be masked (is_password=False) in setup."""
@@ -715,6 +775,37 @@ class TestProfileValidation(_CliSetupTestBase):
             "cache_control_session_header", "auxiliary_model",
         ):
             self.assertIn(needle, joined)
+
+    def test_validate_profile_rejects_non_dict_extra_body(self):
+        errors = cli_setup._validate_profile({
+            "model_provider": "openai", "model_name": "hy3",
+            "base_url": "http://api.taiji.woa.com/openapi/v2",
+            "extra_body": "not-a-dict",
+        })
+        joined = " | ".join(errors)
+        self.assertIn("extra_body", joined)
+
+    def test_validate_profile_accepts_dict_extra_body_and_headers(self):
+        errors = cli_setup._validate_profile({
+            "model_provider": "openai", "model_name": "hy3",
+            "base_url": "http://api.taiji.woa.com/openapi/v2",
+            "extra_body": {"chat_template_kwargs": {"reasoning_effort": "high"}},
+            "extra_headers": {"X-Custom": "value"},
+        })
+        self.assertEqual(errors, [])
+
+    def test_validate_profile_rejects_non_dict_auxiliary_extra_body(self):
+        errors = cli_setup._validate_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com",
+            "auxiliary_model": {
+                "model_provider": "openai", "model_name": "hy3",
+                "base_url": "http://api.taiji.woa.com/openapi/v2",
+                "extra_body": "not-a-dict",
+            },
+        })
+        joined = " | ".join(errors)
+        self.assertIn("auxiliary_model.extra_body", joined)
 
     # ── per-field re-prompt loops ────────────────────────────────────────────
     def test_prompt_base_url_reprompts_until_valid(self):

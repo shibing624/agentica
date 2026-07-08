@@ -259,6 +259,14 @@ _REASONING_EFFORT_CHOICES = ("low", "medium", "high", "max")
 # values through a re-run of `agentica setup` when the user declines to edit.
 _TUNING_KEYS = ("reasoning_effort", "max_tokens", "context_window", "temperature", "top_p")
 _CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header")
+# extra_body / extra_headers are raw passthrough dicts for endpoints whose
+# tuning knobs don't map to a standard OpenAI param (e.g. Hunyuan's taiji
+# gateway wants reasoning_effort inside extra_body.chat_template_kwargs, not
+# as a top-level field). No interactive prompt for these — a nested dict is
+# awkward to type at a `pt_prompt()` line — they are hand-edited in
+# config.yaml and only carried through re-runs of `agentica setup` so the
+# wizard never silently drops them.
+_RAW_PASSTHROUGH_KEYS = ("extra_body", "extra_headers")
 
 
 def _pick_keys(d: Optional[dict], keys) -> Dict:
@@ -368,6 +376,11 @@ def _validate_profile(data: dict) -> List[str]:
     if top_p is not None and not (0.0 <= float(top_p) <= 1.0):
         errors.append("top_p must be between 0.0 and 1.0.")
 
+    for raw_key in _RAW_PASSTHROUGH_KEYS:
+        raw_val = data.get(raw_key)
+        if raw_val is not None and not isinstance(raw_val, dict):
+            errors.append(f"{raw_key} must be a mapping (dict), got {type(raw_val).__name__}.")
+
     if data.get("enable_cache_control") is not None and not isinstance(data.get("enable_cache_control"), bool):
         errors.append("enable_cache_control must be true or false.")
     cm = data.get("cache_control_messages")
@@ -391,6 +404,12 @@ def _validate_profile(data: dict) -> List[str]:
             aerr = _validate_base_url(auxiliary.get("base_url") or "")
             if aerr:
                 errors.append(f"auxiliary_model.base_url: {aerr}")
+            for raw_key in _RAW_PASSTHROUGH_KEYS:
+                raw_val = auxiliary.get(raw_key)
+                if raw_val is not None and not isinstance(raw_val, dict):
+                    errors.append(
+                        f"auxiliary_model.{raw_key} must be a mapping (dict), got {type(raw_val).__name__}."
+                    )
     return errors
 
 
@@ -585,6 +604,11 @@ def _prompt_auxiliary_model(console, main_provider: str, existing_auxiliary: Opt
     }
     if key:
         block["api_key"] = key
+    # Carry through hand-edited extra_body/extra_headers (no interactive
+    # prompt for these — see _RAW_PASSTHROUGH_KEYS) so reconfiguring the
+    # auxiliary model doesn't silently drop them.
+    same_provider = provider == (existing_auxiliary.get("model_provider") if existing_auxiliary else None)
+    block.update(_pick_keys(existing_auxiliary if same_provider else None, _RAW_PASSTHROUGH_KEYS))
     if provider == main_provider:
         console.print("  [dim]Same provider as main model — you could also just set model_name.[/dim]")
     return block
@@ -888,6 +912,10 @@ def _configure_one_profile(
     }
     profile_data.update(advanced)  # None values are dropped by upsert_profile
     profile_data.update(cache_block)
+    # No interactive prompt for extra_body/extra_headers (hand-edit-only, see
+    # _RAW_PASSTHROUGH_KEYS) — carry them through so a re-run of `agentica
+    # setup` doesn't silently wipe a hand-edited passthrough dict.
+    profile_data.update(_pick_keys(existing if same_provider else None, _RAW_PASSTHROUGH_KEYS))
     if auxiliary_block:
         profile_data["auxiliary_model"] = auxiliary_block
 
@@ -1073,6 +1101,13 @@ def resolve_model_config(args, console=None) -> Dict:
     auxiliary_name = args.auxiliary_model_name or auxiliary_block.get("model_name")
     auxiliary_base = args.auxiliary_base_url or auxiliary_block.get("base_url")
     auxiliary_key = args.auxiliary_api_key or auxiliary_block.get("api_key")
+    # extra_body/extra_headers are raw passthrough dicts, not tied to the
+    # main model's endpoint the way base_url/api_key are — the auxiliary
+    # model never inherits the main model's passthrough dict even when same
+    # provider, since it's a different endpoint/deployment that may not want
+    # the same raw params.
+    auxiliary_extra_body = auxiliary_block.get("extra_body")
+    auxiliary_extra_headers = auxiliary_block.get("extra_headers")
     if auxiliary_name:
         if not auxiliary_base:
             # Same provider as main -> reuse main endpoint; otherwise use the
@@ -1089,6 +1124,7 @@ def resolve_model_config(args, console=None) -> Dict:
                 auxiliary_key = get_profile_api_key(auxiliary_provider, auxiliary_base)
     else:
         auxiliary_provider = auxiliary_base = auxiliary_key = None
+        auxiliary_extra_body = auxiliary_extra_headers = None
 
     return {
         "model_provider": provider,
@@ -1100,10 +1136,16 @@ def resolve_model_config(args, console=None) -> Dict:
         "reasoning_effort": profile_params.get("reasoning_effort"),
         "top_p": profile_params.get("top_p"),
         "context_window": profile_params.get("context_window"),
+        # Raw passthrough dicts for endpoints whose tuning knobs don't map to
+        # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
+        "extra_body": profile_params.get("extra_body"),
+        "extra_headers": profile_params.get("extra_headers"),
         "auxiliary_model_provider": auxiliary_provider,
         "auxiliary_model_name": auxiliary_name,
         "auxiliary_base_url": auxiliary_base,
         "auxiliary_api_key": auxiliary_key,
+        "auxiliary_extra_body": auxiliary_extra_body,
+        "auxiliary_extra_headers": auxiliary_extra_headers,
         # Prompt caching knobs (profile top-level; CLI flags override in main.py).
         "enable_cache_control": profile_params.get("enable_cache_control"),
         "cache_control_messages": profile_params.get("cache_control_messages"),

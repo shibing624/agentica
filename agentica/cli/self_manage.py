@@ -145,11 +145,16 @@ def read_config_summary(reveal_secrets: bool = False) -> Dict[str, Any]:
 _EDITABLE_PROFILE_FIELDS = {
     "model_provider", "model_name", "base_url", "api_key",
     "max_tokens", "temperature", "reasoning_effort", "top_p", "context_window",
+    "extra_body", "extra_headers",
 }
 
 # Values that are numeric on the model side; coerced from string input.
 _NUMERIC_FIELDS = {"max_tokens", "context_window"}
 _FLOAT_FIELDS = {"temperature", "top_p"}
+# Raw passthrough dicts for endpoints whose tuning knobs don't map to a
+# standard OpenAI param (e.g. Hunyuan's taiji gateway wants reasoning_effort
+# inside extra_body.chat_template_kwargs). Set via a JSON object string.
+_JSON_FIELDS = {"extra_body", "extra_headers"}
 
 
 def _coerce_profile_value(field: str, value: str) -> Any:
@@ -160,6 +165,14 @@ def _coerce_profile_value(field: str, value: str) -> Any:
         return int(value)
     if field in _FLOAT_FIELDS:
         return float(value)
+    if field in _JSON_FIELDS:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{field} must be a JSON object, e.g. '{{\"key\": \"value\"}}': {e}")
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{field} must be a JSON object (dict), got {type(parsed).__name__}.")
+        return parsed
     return value
 
 

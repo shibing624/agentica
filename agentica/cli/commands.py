@@ -1462,6 +1462,8 @@ def _rebuild_live_model(ctx: CommandContext):
         "reasoning_effort": ctx.agent_config.get("reasoning_effort"),
         "top_p": ctx.agent_config.get("top_p"),
         "context_window": ctx.agent_config.get("context_window"),
+        "extra_body": ctx.agent_config.get("extra_body"),
+        "extra_headers": ctx.agent_config.get("extra_headers"),
     }
     ctx.current_agent.model = get_model(**model_kwargs)
     ctx.current_agent.environment_context = _build_environment_context(
@@ -2252,6 +2254,8 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_reasoning_effort = profile.get("reasoning_effort")
     new_top_p = profile.get("top_p")
     new_context_window = profile.get("context_window")
+    new_extra_body = profile.get("extra_body")
+    new_extra_headers = profile.get("extra_headers")
 
     ctx.agent_config["model_provider"] = new_provider
     ctx.agent_config["model_name"] = new_model
@@ -2262,6 +2266,8 @@ def _apply_profile(ctx: CommandContext, name: str):
     ctx.agent_config["reasoning_effort"] = new_reasoning_effort
     ctx.agent_config["top_p"] = new_top_p
     ctx.agent_config["context_window"] = new_context_window
+    ctx.agent_config["extra_body"] = new_extra_body
+    ctx.agent_config["extra_headers"] = new_extra_headers
 
     # Auxiliary model: a profile switch fully replaces the auxiliary model too. An
     # auxiliary_model block rebuilds the sibling (background calls + task subagent);
@@ -2276,6 +2282,8 @@ def _apply_profile(ctx: CommandContext, name: str):
         ctx.agent_config["auxiliary_model_name"] = auxiliary_block.get("model_name")
         ctx.agent_config["auxiliary_base_url"] = auxiliary_block.get("base_url")
         ctx.agent_config["auxiliary_api_key"] = auxiliary_block.get("api_key")
+        ctx.agent_config["auxiliary_extra_body"] = auxiliary_block.get("extra_body")
+        ctx.agent_config["auxiliary_extra_headers"] = auxiliary_block.get("extra_headers")
         try:
             new_auxiliary_model = _build_sibling_model(ctx.agent_config, "auxiliary")
         except Exception as exc:
@@ -2286,12 +2294,16 @@ def _apply_profile(ctx: CommandContext, name: str):
             ctx.agent_config["auxiliary_model_name"] = None
             ctx.agent_config["auxiliary_base_url"] = None
             ctx.agent_config["auxiliary_api_key"] = None
+            ctx.agent_config["auxiliary_extra_body"] = None
+            ctx.agent_config["auxiliary_extra_headers"] = None
             new_auxiliary_model = None
     else:
         ctx.agent_config["auxiliary_model_provider"] = None
         ctx.agent_config["auxiliary_model_name"] = None
         ctx.agent_config["auxiliary_base_url"] = None
         ctx.agent_config["auxiliary_api_key"] = None
+        ctx.agent_config["auxiliary_extra_body"] = None
+        ctx.agent_config["auxiliary_extra_headers"] = None
         new_auxiliary_model = None
     ctx.agent_config["auxiliary_model"] = new_auxiliary_model
 
@@ -2317,6 +2329,8 @@ def _apply_profile(ctx: CommandContext, name: str):
         "reasoning_effort": new_reasoning_effort,
         "top_p": new_top_p,
         "context_window": new_context_window,
+        "extra_body": new_extra_body,
+        "extra_headers": new_extra_headers,
     }
     new_model_obj = get_model(**model_kwargs)
     if ctx.current_agent is not None:
@@ -2412,6 +2426,10 @@ def _list_profiles(active_name: Optional[str] = None, active_source: Optional[st
             tuning.append(f"temp={p['temperature']}")
         if p.get("top_p") is not None:
             tuning.append(f"top_p={p['top_p']}")
+        if p.get("extra_body"):
+            tuning.append("extra_body=set")
+        if p.get("extra_headers"):
+            tuning.append("extra_headers=set")
         if tuning:
             con.print(f"      [dim]tuning: {', '.join(tuning)}[/dim]")
     con.print()

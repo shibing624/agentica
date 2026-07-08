@@ -1125,6 +1125,31 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.context_window, 300000)
         self.assertFalse(hasattr(model, "reasoning_effort"))
 
+    def test_get_model_passes_extra_body_and_extra_headers(self):
+        from agentica.cli.config import get_model
+
+        model = get_model(
+            "openai",
+            "hy3",
+            api_key="k",
+            base_url="http://api.taiji.woa.com/openapi/v2",
+            extra_body={"chat_template_kwargs": {"reasoning_effort": "high"}},
+            extra_headers={"X-Custom": "value"},
+        )
+        self.assertEqual(model.extra_body, {"chat_template_kwargs": {"reasoning_effort": "high"}})
+        self.assertEqual(model.extra_headers, {"X-Custom": "value"})
+
+    def test_get_model_skips_extra_body_for_anthropic(self):
+        from agentica.cli.config import get_model
+
+        model = get_model(
+            "anthropic",
+            "claude-opus-4-8",
+            api_key="k",
+            extra_body={"some": "thing"},
+        )
+        self.assertFalse(hasattr(model, "extra_body") and model.extra_body)
+
     def test_reasoning_effort_accepts_low_medium(self):
         import sys
         from agentica.cli.config import parse_args
@@ -2518,6 +2543,20 @@ class TestBuildSiblingModel(unittest.TestCase):
         self.assertIsNone(kw["base_url"])  # must NOT fall back to deepseek base_url
         self.assertEqual(kw["api_key"], "sk-zhipu")
 
+    def test_auxiliary_extra_body_passed_and_never_inherits_main(self):
+        from agentica.cli.config import _build_sibling_model
+        cfg = self._cfg(
+            auxiliary_model_name="deepseek-chat",  # same provider as main
+            extra_body={"main": True},  # main model's own extra_body
+            auxiliary_extra_body={"chat_template_kwargs": {"reasoning_effort": "low"}},
+            auxiliary_extra_headers={"X-Aux": "1"},
+        )
+        with patch("agentica.cli.config.get_model") as gm:
+            _build_sibling_model(cfg, "auxiliary")
+        _args, kw = gm.call_args
+        self.assertEqual(kw["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "low"}})
+        self.assertEqual(kw["extra_headers"], {"X-Aux": "1"})
+
 
 class TestCLIAwareness(unittest.TestCase):
     """CLI self-awareness and capability management (Phase 3).
@@ -2702,6 +2741,51 @@ class TestCLIAwareness(unittest.TestCase):
             "Auxiliary model: deepseek/deepseek-chat",
             ctx.current_agent.environment_context,
         )
+
+    def test_apply_profile_switches_extra_body(self):
+        """Switching to a profile with extra_body wires it into agent_config +
+        the rebuilt model, main and auxiliary independently."""
+        from agentica import global_config as gc
+
+        ctx = self._make_apply_profile_ctx()
+        self.assertIsNone(ctx.agent_config.get("extra_body"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, "config.yaml")
+            with (
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model") as mock_get_model,
+                patch.object(cli_commands, "_build_sibling_model", return_value=MagicMock()),
+                patch.object(cli_commands, "set_project_profile"),
+            ):
+                gc.upsert_profile(
+                    "hy3",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "hy3",
+                        "base_url": "http://api.taiji.woa.com/openapi/v2",
+                        "api_key": "sk-main",
+                        "extra_body": {"chat_template_kwargs": {"reasoning_effort": "high"}},
+                        "auxiliary_model": {
+                            "model_provider": "deepseek",
+                            "model_name": "deepseek-chat",
+                            "base_url": "https://api.deepseek.com",
+                            "api_key": "sk-auxiliary",
+                            "extra_body": {"aux": True},
+                        },
+                    },
+                    make_active=True,
+                )
+                cli_commands._apply_profile(ctx, "hy3")
+
+        self.assertEqual(
+            ctx.agent_config["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}}
+        )
+        self.assertEqual(ctx.agent_config["auxiliary_extra_body"], {"aux": True})
+        # get_model (main model rebuild) received the profile's extra_body.
+        _args, kw = mock_get_model.call_args
+        self.assertEqual(kw["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}})
 
     def test_apply_profile_without_auxiliary_clears(self):
         """Switching to a profile without an auxiliary_model block clears the auxiliary fields."""

@@ -453,6 +453,8 @@ def get_model(
     enable_cache_control=None,
     cache_control_messages=None,
     cache_control_session_header=None,
+    extra_body=None,
+    extra_headers=None,
 ):
     """Create a model instance based on the provider name.
 
@@ -481,6 +483,13 @@ def get_model(
             params["reasoning_effort"] = reasoning_effort or "max"
         elif reasoning_effort is not None:
             params["reasoning_effort"] = reasoning_effort
+        # Raw passthrough dicts for endpoints whose tuning knobs don't map to
+        # a standard OpenAI param (e.g. Hunyuan's taiji gateway wants
+        # reasoning_effort inside extra_body.chat_template_kwargs).
+        if extra_body is not None:
+            params["extra_body"] = extra_body
+        if extra_headers is not None:
+            params["extra_headers"] = extra_headers
 
     model_class = MODEL_REGISTRY.get(model_provider)
     if model_class is None:
@@ -538,6 +547,11 @@ def _build_sibling_model(agent_config: dict, prefix: str):
         enable_cache_control=agent_config.get("enable_cache_control"),
         cache_control_messages=agent_config.get("cache_control_messages"),
         cache_control_session_header=agent_config.get("cache_control_session_header"),
+        # Auxiliary passthrough dicts are their own field (auxiliary_extra_*),
+        # never inherited from the main model even when same provider — a
+        # different deployment/endpoint may not want the same raw params.
+        extra_body=agent_config.get(f"{prefix}_extra_body"),
+        extra_headers=agent_config.get(f"{prefix}_extra_headers"),
     )
 
 
@@ -694,6 +708,8 @@ def create_agent(
         enable_cache_control=agent_config.get("enable_cache_control"),
         cache_control_messages=agent_config.get("cache_control_messages"),
         cache_control_session_header=agent_config.get("cache_control_session_header"),
+        extra_body=agent_config.get("extra_body"),
+        extra_headers=agent_config.get("extra_headers"),
     )
 
     # Auxiliary model: the cheap/fast model for all background LLM work (memory

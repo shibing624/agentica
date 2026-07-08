@@ -92,6 +92,57 @@ class TestSelfManagePrimitives(unittest.TestCase):
             self.sm.set_profile_field("temperature", "0.5")
             self.assertEqual(gc.get_profile()["temperature"], 0.5)
 
+    def test_set_profile_field_extra_body_accepts_json_object(self):
+        from agentica import global_config as gc
+        tmp = tempfile.mkdtemp()
+        import shutil
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        path = os.path.join(tmp, "config.yaml")
+        with patch("agentica.global_config.global_config_path", return_value=path):
+            gc.upsert_profile("default", {
+                "model_provider": "openai", "model_name": "hy3",
+                "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
+            }, make_active=True)
+            self.sm.set_profile_field(
+                "extra_body", '{"chat_template_kwargs": {"reasoning_effort": "high"}}'
+            )
+            self.assertEqual(
+                gc.get_profile()["extra_body"],
+                {"chat_template_kwargs": {"reasoning_effort": "high"}},
+            )
+
+    def test_set_profile_field_extra_body_rejects_non_json(self):
+        from agentica import global_config as gc
+        tmp = tempfile.mkdtemp()
+        import shutil
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        path = os.path.join(tmp, "config.yaml")
+        with patch("agentica.global_config.global_config_path", return_value=path):
+            gc.upsert_profile("default", {
+                "model_provider": "openai", "model_name": "hy3",
+                "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
+            }, make_active=True)
+            with self.assertRaises(ValueError):
+                self.sm.set_profile_field("extra_body", "not json")
+            with self.assertRaises(ValueError):
+                self.sm.set_profile_field("extra_body", "[1, 2, 3]")  # valid JSON, not an object
+            self.assertNotIn("extra_body", gc.get_profile())
+
+    def test_set_profile_field_extra_body_none_clears(self):
+        from agentica import global_config as gc
+        tmp = tempfile.mkdtemp()
+        import shutil
+        self.addCleanup(lambda: shutil.rmtree(tmp, ignore_errors=True))
+        path = os.path.join(tmp, "config.yaml")
+        with patch("agentica.global_config.global_config_path", return_value=path):
+            gc.upsert_profile("default", {
+                "model_provider": "openai", "model_name": "hy3",
+                "base_url": "http://api.taiji.woa.com/openapi/v2", "api_key": "sk-x",
+                "extra_body": {"a": 1},
+            }, make_active=True)
+            self.sm.set_profile_field("extra_body", "none")
+            self.assertNotIn("extra_body", gc.get_profile())
+
 
 class TestSelfManageTool(unittest.TestCase):
     def setUp(self):
