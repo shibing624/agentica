@@ -5,7 +5,7 @@
 
 Unlike the in-memory per-file ``undo_edit`` on ``BuiltinFileTool`` (single
 process, lost on restart), ``CheckpointManager`` persists pre-edit file content
-to disk under ``~/.agentica/checkpoints/<session_id>/<checkpoint_id>/`` so a run
+to disk under ``~/.agentica/cache/checkpoints/<session_id>/<checkpoint_id>/`` so a run
 can be rolled back across multiple files and even across process restarts.
 
 Design (kept deliberately small):
@@ -34,10 +34,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from agentica.config import AGENTICA_HOME
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
 
-DEFAULT_CHECKPOINT_ROOT = os.path.join(AGENTICA_HOME, "checkpoints")
+DEFAULT_CHECKPOINT_ROOT = os.path.join(AGENTICA_CACHE_DIR, "checkpoints")
 
 
 @dataclass

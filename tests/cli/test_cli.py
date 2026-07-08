@@ -1428,6 +1428,10 @@ class TestCLIConfiguration(unittest.TestCase):
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
                 patch.object(cli_commands, "get_model", return_value=MagicMock()) as mock_get_model,
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
+                # /model <profile> -> _apply_profile -> set_project_profile(work_dir, name);
+                # work_dir=None falls back to os.getcwd(), which would otherwise leak a
+                # real ~/.agentica/projects/<repo>/profile file on every test run.
+                patch.object(cli_commands, "set_project_profile"),
             ):
                 gc.upsert_profile("deepseek", {
                     "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
@@ -1448,6 +1452,59 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(ctx.agent_config["model_provider"], "anthropic")
         self.assertEqual(ctx.agent_config["model_name"], "claude-opus-4")
         self.assertEqual(mock_get_model.call_args.kwargs["model_provider"], "anthropic")
+
+    def test_model_command_switch_updates_status_bar_profile_resolution(self):
+        """Regression: after `/model <profile>`, the status bar must see the switch.
+
+        `_apply_profile` persists the project override keyed by
+        ``agent_config.get("work_dir") or os.getcwd()``. The status-bar sync in
+        interactive.py's ``_apply_command_result`` must resolve with the exact
+        same fallback — resolving with a bare (possibly-None) ``work_dir`` looks
+        up the wrong key and silently falls back to the stale global default.
+        """
+        from agentica import global_config as gc
+        ctx = cli_commands.CommandContext(
+            agent_config={
+                "model_provider": "openai", "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1", "api_key": "sk-a",
+                "debug": False, "work_dir": None,
+            },
+            current_agent=None, extra_tools=[], workspace=None, skills_registry=None,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            home = os.path.join(tmp, "agentica_home")
+            os.makedirs(home, exist_ok=True)
+            cfg_path = os.path.join(home, "config.yaml")
+            with (
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch.dict(os.environ, {"AGENTICA_HOME": home}),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model", return_value=MagicMock()),
+                patch.object(cli_commands, "create_agent", return_value=MagicMock()),
+            ):
+                gc.upsert_profile("venus", {
+                    "model_provider": "openai", "model_name": "gpt-4o",
+                    "base_url": "https://api.openai.com/v1", "api_key": "sk-a",
+                }, make_active=True)
+                gc.upsert_profile("ark", {
+                    "model_provider": "openai", "model_name": "gpt-5",
+                    "base_url": "https://api.openai.com/v1", "api_key": "sk-b",
+                }, make_active=False)
+
+                cli_commands._cmd_model(ctx, "ark")
+
+                # Mirrors interactive.py's _apply_command_result exactly.
+                fixed_name, fixed_source = gc.resolve_active_profile_name(
+                    work_dir=ctx.agent_config.get("work_dir") or os.getcwd()
+                )
+                # Sanity: the pre-fix call (no os.getcwd() fallback) misses the
+                # override and silently shows the stale global default instead.
+                stale_name, stale_source = gc.resolve_active_profile_name(
+                    work_dir=ctx.agent_config.get("work_dir")
+                )
+
+        self.assertEqual((fixed_name, fixed_source), ("ark", "project"))
+        self.assertEqual((stale_name, stale_source), ("venus", "global"))
 
     def test_parse_goal_budget_flags(self):
         from agentica.cli.commands import _parse_goal_set_args
@@ -2613,6 +2670,11 @@ class TestCLIAwareness(unittest.TestCase):
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
                 patch.object(cli_commands, "get_model", return_value=MagicMock()),
                 patch.object(cli_commands, "_build_sibling_model", return_value=MagicMock()) as mock_auxiliary,
+                # _apply_profile persists a project-scoped override via
+                # set_project_profile(work_dir, name); work_dir=None here falls
+                # back to os.getcwd(), which would otherwise leak a real
+                # ~/.agentica/projects/<repo>/profile file on every test run.
+                patch.object(cli_commands, "set_project_profile"),
             ):
                 gc.upsert_profile(
                     "withaux",
@@ -2655,6 +2717,9 @@ class TestCLIAwareness(unittest.TestCase):
                 patch.object(cli_commands, "get_console", return_value=MagicMock()),
                 patch.object(cli_commands, "get_model", return_value=MagicMock()),
                 patch.object(cli_commands, "_build_sibling_model") as mock_sibling,
+                # See test_apply_profile_switches_auxiliary_model above: avoid
+                # leaking a real project-profile file to ~/.agentica/projects/.
+                patch.object(cli_commands, "set_project_profile"),
             ):
                 gc.upsert_profile(
                     "noaux",

@@ -468,9 +468,9 @@ def _detect_file_drop(user_input: str) -> Optional[dict]:
 def _try_attach_clipboard_image(attached_images: list, image_counter: list) -> bool:
     """Check clipboard for an image and attach it if found."""
     from agentica.cli.clipboard import save_clipboard_image
-    from agentica.config import AGENTICA_HOME
+    from agentica.cli.config import CACHE_DIR
 
-    img_dir = Path(AGENTICA_HOME) / "images"
+    img_dir = Path(CACHE_DIR) / "images"
     image_counter[0] += 1
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     img_path = img_dir / f"clip_{ts}_{image_counter[0]}.png"
@@ -1379,9 +1379,9 @@ def _setup_tui(
             line_count = pasted.count("\n")
             buf = event.current_buffer
             if line_count >= 5 and not buf.text.strip().startswith("/"):
-                from agentica.config import AGENTICA_HOME
+                from agentica.cli.config import CACHE_DIR
 
-                paste_dir = Path(AGENTICA_HOME) / "pastes"
+                paste_dir = Path(CACHE_DIR) / "pastes"
                 paste_dir.mkdir(parents=True, exist_ok=True)
                 state.paste_counter += 1
                 ts = datetime.now().strftime("%H%M%S")
@@ -1856,7 +1856,7 @@ def run_interactive(
     tui_state = {
         "model_name": agent_config.get("model_name", ""),
         "model_provider": agent_config.get("model_provider", ""),
-        "profile_name": resolve_active_profile_name(work_dir=agent_config.get("work_dir"))[0],
+        "profile_name": resolve_active_profile_name(work_dir=agent_config.get("work_dir") or os.getcwd())[0],
         "context_tokens": 0,
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
@@ -1947,7 +1947,7 @@ def run_interactive(
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
             tui_state["profile_name"] = resolve_active_profile_name(
-                work_dir=agent_config.get("work_dir")
+                work_dir=agent_config.get("work_dir") or os.getcwd()
             )[0]
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
@@ -1964,7 +1964,7 @@ def run_interactive(
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
             tui_state["profile_name"] = resolve_active_profile_name(
-                work_dir=agent_config.get("work_dir")
+                work_dir=agent_config.get("work_dir") or os.getcwd()
             )[0]
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000

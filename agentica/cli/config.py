@@ -20,7 +20,7 @@ from agentica.agent.config import (
     SkillUpgradeConfig,
     WorkspaceMemoryConfig,
 )
-from agentica.config import AGENTICA_HOME
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.tools.base import Tool
 from agentica.workspace import Workspace
 
@@ -49,7 +49,10 @@ def set_active_console(console_instance):
 # now get the plain console. All runtime output should use get_console().
 console = _plain_console
 
-history_file = os.path.join(AGENTICA_HOME, "cli_history.txt")
+# Re-exported so agentica.cli.interactive can share one cache-root constant.
+CACHE_DIR = AGENTICA_CACHE_DIR
+
+history_file = os.path.join(CACHE_DIR, "cli_history.txt")
 
 
 def _generate_session_id() -> str:

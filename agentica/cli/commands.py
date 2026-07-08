@@ -542,7 +542,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     provider = ac.get("model_provider")
     model_name = ac.get("model_name")
     base_url = ac.get("base_url")
-    profile, profile_source = resolve_active_profile_name(work_dir=ac.get("work_dir"))
+    profile, profile_source = resolve_active_profile_name(work_dir=ac.get("work_dir") or os.getcwd())
 
     auxiliary_provider = ac.get("auxiliary_model_provider")
     auxiliary_model_name = ac.get("auxiliary_model_name")
@@ -1424,7 +1424,7 @@ def _cmd_config_show_files(ctx: CommandContext):
     if summary:
         con.print(f"[bold]config.yaml[/bold] [dim]({self_manage.config_file_path()})[/dim]")
         active_name, active_source = resolve_active_profile_name(
-            work_dir=ctx.agent_config.get("work_dir")
+            work_dir=ctx.agent_config.get("work_dir") or os.getcwd()
         )
         source_label = f" [dim]({active_source})[/dim]" if active_source else ""
         con.print(f"  active profile: [cyan]{active_name}[/cyan]{source_label}")
@@ -1498,7 +1498,7 @@ def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
     # profile_name into set_profile_field also avoids self_manage having to
     # know about work_dir.
     effective_active, _src = resolve_active_profile_name(
-        work_dir=ctx.agent_config.get("work_dir")
+        work_dir=ctx.agent_config.get("work_dir") or os.getcwd()
     )
     target = profile_name or effective_active
     try:
@@ -2478,7 +2478,7 @@ def _model_list_overview(ctx: CommandContext) -> None:
     )
     con.print()
     active_name, active_source = resolve_active_profile_name(
-        work_dir=ctx.agent_config.get("work_dir")
+        work_dir=ctx.agent_config.get("work_dir") or os.getcwd()
     )
     _list_profiles(active_name=active_name, active_source=active_source)
     con.print("Usage:", style="cyan")

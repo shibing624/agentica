@@ -61,6 +61,7 @@ from agentica.config import (
     AGENTICA_WORKSPACE_DIR,
     AGENTICA_PROJECTS_DIR,
     AGENTICA_CRON_DIR,
+    AGENTICA_CACHE_DIR,
 )
 
 # ── Unified config (config.yaml) shared by SDK + CLI ──

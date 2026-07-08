@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
-from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH
+from agentica.config import AGENTICA_HOME, AGENTICA_DOTENV_PATH, AGENTICA_CACHE_DIR
 
 OK = "ok"
 WARN = "warn"
@@ -99,7 +99,7 @@ def _check_dirs(report: DoctorReport) -> None:
     else:
         report.add("Home dir writable", FAIL, f"cannot write to {AGENTICA_HOME}")
 
-    ckpt_root = os.path.join(AGENTICA_HOME, "checkpoints")
+    ckpt_root = os.path.join(AGENTICA_CACHE_DIR, "checkpoints")
     if _dir_writable(ckpt_root):
         report.add("Checkpoint dir writable", OK, ckpt_root)
     else:

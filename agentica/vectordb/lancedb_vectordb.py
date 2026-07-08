@@ -16,6 +16,7 @@ try:
 except ImportError:
     raise ImportError("`lancedb` not installed, please install it via `pip install lancedb`.")
 
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.document import Document
 from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance, SearchType
@@ -76,7 +77,7 @@ class LanceDb(VectorDb):
 
         # Setup storage path for local disk storage
         if on_disk and uri is None and connection is None:
-            uri = os.path.join(os.path.expanduser("~"), ".agentica", "lancedb")
+            uri = os.path.join(AGENTICA_CACHE_DIR, "lancedb")
         if uri:
             uri = os.path.expanduser(uri)
             os.makedirs(uri, exist_ok=True)

@@ -5,6 +5,7 @@ from typing import List, Optional, Dict, Any
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.document import Document
 from agentica.embedding.base import Embedding
 from agentica.embedding.openai import OpenAIEmbedding
@@ -80,7 +81,7 @@ class QdrantDb(VectorDb):
 
         # Setup storage path for local disk storage
         if on_disk and path is None and url is None and location is None:
-            path = os.path.join(os.path.expanduser("~"), ".agentica", "qdrant_db")
+            path = os.path.join(AGENTICA_CACHE_DIR, "qdrant_db")
         if path:
             path = os.path.expanduser(path)
         self.path: Optional[str] = path

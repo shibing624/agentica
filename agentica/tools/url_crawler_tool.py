@@ -18,7 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from agentica.tools.base import Tool
-from agentica.config import AGENTICA_HOME
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
 
 
@@ -41,7 +41,7 @@ def clean_text(text: str) -> str:
 
 class UrlCrawlerTool(Tool):
     # Default cache directory for crawled web pages
-    DEFAULT_CACHE_DIR = os.path.join(AGENTICA_HOME, "web_cache")
+    DEFAULT_CACHE_DIR = os.path.join(AGENTICA_CACHE_DIR, "web_cache")
     # Hard cap on the bytes persisted to the on-disk cache. Without this a
     # single large page (e.g. a framework doc dump) can write a multi-MB file
     # that a model is then tempted to read_file in full, blowing the context

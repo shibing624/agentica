@@ -77,7 +77,6 @@ Schema (``~/.agentica/config.yaml``)::
 The file is written with ``chmod 0o600`` because profiles hold secrets.
 """
 
-import hashlib
 import logging
 import os
 from typing import Dict, Optional, Any, List, Tuple
@@ -244,25 +243,36 @@ def set_active_profile(name: str) -> bool:
 # ---------- Project-scoped profile override ----------
 #
 # Active profile has two layers:
-#   1. Project override: ~/.agentica/projects/<key>/profile (this section)
+#   1. Project override: ~/.agentica/projects/default/<key>/profile (this section)
 #   2. Global default:   config.yaml -> active_profile
 #
-# Project key = sha1(realpath(work_dir))[:16]. Deliberately using work_dir
-# (not git toplevel) so it aligns with Workspace / AGENTICA_HOME and works for
-# non-git directories (~/notes, /tmp/scratch) with zero fallback logic.
-
-def _projects_dir() -> str:
-    home = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
-    return os.path.join(home, "projects")
-
-
-def _project_key(work_dir: str) -> str:
-    real = os.path.realpath(os.path.expanduser(work_dir))
-    return hashlib.sha1(real.encode("utf-8")).hexdigest()[:16]
-
+# Reuses tool_result_storage.get_project_dir(), which already lays out
+# ~/.agentica/projects/<user>/<sanitized-cwd>/... for session logs and
+# tool-result spill files (<user> defaults to "default" for the single-user
+# CLI). One scheme for one directory tree — readable with `ls` instead of an
+# opaque hash, and no risk of two conventions drifting apart.
+# Deliberately using work_dir (not git toplevel) so it aligns with Workspace /
+# AGENTICA_HOME and works for non-git directories (~/notes, /tmp/scratch)
+# with zero fallback logic.
 
 def _project_profile_path(work_dir: str) -> str:
-    return os.path.join(_projects_dir(), _project_key(work_dir), "profile")
+    # Lazy import: agentica.config imports global_config at module level, so
+    # global_config can't import tool_result_storage (-> agentica.config) at
+    # module level without a cycle.
+    #
+    # Deliberately NOT calling tool_result_storage.get_project_dir() here: it
+    # bakes AGENTICA_PROJECTS_DIR in as a module-level constant at first
+    # import, so it can't pick up a test's later `os.environ["AGENTICA_HOME"]
+    # = tmp` override — that mismatch previously leaked test directories into
+    # the real ~/.agentica/projects/. Re-reading the env var on every call
+    # keeps this override live-testable while still mirroring the exact same
+    # <projects_dir>/<user>/<sanitized-cwd>/ layout (user segment "default"
+    # for the single-user CLI, same as tool_result_storage's default).
+    from agentica.compression.tool_result_storage import _safe_user_segment, _sanitize_path
+    home = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
+    projects_dir = os.getenv("AGENTICA_PROJECTS_DIR", os.path.join(home, "projects"))
+    real = os.path.realpath(os.path.expanduser(work_dir))
+    return os.path.join(projects_dir, _safe_user_segment(None), _sanitize_path(real), "profile")
 
 
 def get_project_profile(work_dir: Optional[str]) -> Optional[str]:

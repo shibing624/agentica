@@ -133,8 +133,8 @@ _MODEL_CATALOG: Optional[Dict[str, ModelEntry]] = None
 
 
 def _get_cache_path() -> str:
-    from agentica.config import AGENTICA_HOME
-    return os.path.join(AGENTICA_HOME, "model_pricing_cache.json")
+    from agentica.config import AGENTICA_CACHE_DIR
+    return os.path.join(AGENTICA_CACHE_DIR, "model_pricing_cache.json")
 
 
 def _is_official(provider_id: str, model_id: str) -> bool:

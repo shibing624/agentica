@@ -419,8 +419,8 @@ async def clear_dir_history():
 
 
 def _dir_history_file() -> Path:
-    from agentica.config import AGENTICA_HOME
-    return Path(AGENTICA_HOME).expanduser() / "dir_history.json"
+    from agentica.config import AGENTICA_CACHE_DIR
+    return Path(AGENTICA_CACHE_DIR).expanduser() / "dir_history.json"
 
 
 async def _load_dir_history() -> list[str]:

@@ -37,6 +37,10 @@ AGENTICA_EXTRA_SKILL_PATHS = [
 AGENTICA_CRON_DIR = os.getenv("AGENTICA_CRON_DIR", f"{AGENTICA_HOME}/cron")
 AGENTICA_WORKSPACE_DIR = os.getenv("AGENTICA_WORKSPACE_DIR", f"{AGENTICA_HOME}/workspace")
 AGENTICA_PROJECTS_DIR = os.getenv("AGENTICA_PROJECTS_DIR", f"{AGENTICA_HOME}/projects")
+# Shared cache root for regenerable, safe-to-delete scratch data: checkpoints,
+# web/browser caches, vector-db local storage, pricing cache, CLI history,
+# clipboard images/pastes, dir_history, etc.
+AGENTICA_CACHE_DIR = os.getenv("AGENTICA_CACHE_DIR", f"{AGENTICA_HOME}/cache")
 AGENTICA_LOG_LEVEL = os.getenv("AGENTICA_LOG_LEVEL", "INFO").upper()
 AGENTICA_MAX_MEMORY_CHARACTER_COUNT = int(os.getenv("AGENTICA_MAX_MEMORY_CHARACTER_COUNT", "40000"))
 

@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -62,35 +63,41 @@ class TestStorageIntegration(unittest.TestCase):
         big_image = "data:image/png;base64," + base64.b64encode(b"x" * 8000).decode()
         self.assertGreater(len(big_image), PREVIEW_CHARS)
         with tempfile.TemporaryDirectory() as tmp:
-            result = maybe_persist_result(
-                tool_name="screenshot",
-                tool_use_id="call_1",
-                content=big_image,
-                session_id="s1",
-                cwd=tmp,
-                max_result_size_chars=50_000,  # image is UNDER this
-            )
+            # cwd=tmp only sandboxes the leaf directory name (_sanitize_path(cwd));
+            # AGENTICA_PROJECTS_DIR is the actual storage root and must also be
+            # patched, or this persists for real under ~/.agentica/projects/.
+            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmp):
+                result = maybe_persist_result(
+                    tool_name="screenshot",
+                    tool_use_id="call_1",
+                    content=big_image,
+                    session_id="s1",
+                    cwd=tmp,
+                    max_result_size_chars=50_000,  # image is UNDER this
+                )
         self.assertIn("<media", result)
         self.assertIn("image", result)
         self.assertNotIn(big_image[:200], result)  # raw base64 must be gone
 
     def test_normal_small_text_passes_through(self):
         with tempfile.TemporaryDirectory() as tmp:
-            result = maybe_persist_result(
-                tool_name="read_file", tool_use_id="c2",
-                content="short normal output", session_id="s1", cwd=tmp,
-                max_result_size_chars=50_000,
-            )
+            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmp):
+                result = maybe_persist_result(
+                    tool_name="read_file", tool_use_id="c2",
+                    content="short normal output", session_id="s1", cwd=tmp,
+                    max_result_size_chars=50_000,
+                )
         self.assertEqual(result, "short normal output")
 
     def test_large_text_still_persists(self):
         big_text = "line\n" * 20000
         with tempfile.TemporaryDirectory() as tmp:
-            result = maybe_persist_result(
-                tool_name="execute", tool_use_id="c3",
-                content=big_text, session_id="s1", cwd=tmp,
-                max_result_size_chars=1000,
-            )
+            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmp):
+                result = maybe_persist_result(
+                    tool_name="execute", tool_use_id="c3",
+                    content=big_text, session_id="s1", cwd=tmp,
+                    max_result_size_chars=1000,
+                )
         self.assertIn("persisted-output", result)
 
 

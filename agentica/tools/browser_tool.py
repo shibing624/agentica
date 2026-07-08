@@ -44,7 +44,7 @@ from agentica.agent import Agent
 from agentica.agent.config import PromptConfig
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
-from agentica.config import AGENTICA_HOME
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.filename import sanitize_filename
 
 # Constants
@@ -1051,7 +1051,7 @@ class BaseBrowser:
         import sys
         from pathlib import Path
 
-        path = os.path.join(AGENTICA_HOME, "browser")
+        path = os.path.join(AGENTICA_CACHE_DIR, "browser")
         install_dir = Path(path)
         install_dir.mkdir(parents=True, exist_ok=True)
         cache_file = install_dir / f"{self.channel}_installed"

@@ -18,6 +18,7 @@ try:
 except ImportError:
     raise ImportError("The `chromadb` package is not installed. Please install it via `pip install chromadb`.")
 
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.document import Document
 from agentica.embedding.base import Embedding
 from agentica.vectordb.base import VectorDb, Distance
@@ -74,7 +75,7 @@ class ChromaDb(VectorDb):
 
         # Setup storage path for local disk storage
         if on_disk and path is None:
-            path = os.path.join(os.path.expanduser("~"), ".agentica", "chromadb")
+            path = os.path.join(AGENTICA_CACHE_DIR, "chromadb")
         if path:
             path = os.path.expanduser(path)
             os.makedirs(path, exist_ok=True)

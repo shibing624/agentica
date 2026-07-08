@@ -57,13 +57,16 @@ _MAX_SANITIZED_LENGTH = 200
 
 
 def _sanitize_path(raw: str) -> str:
-    """Convert a filesystem path into a readable, safe directory name (mirrors CC's sanitizePath).
+    """Convert a filesystem path into a readable, safe, collision-free directory name.
 
-    Long paths (>200 chars): truncate + md5 hash suffix for uniqueness.
+    Non-alphanumeric characters become ``-``, which is lossy: structurally
+    different paths can slugify to the same string (e.g. ``/a/b`` and
+    ``/a-b`` both become ``-a-b``). An md5 hash suffix is therefore ALWAYS
+    appended (not just when truncating long paths) so two different inputs
+    can never collide on the same directory. Long paths (>200 chars) are
+    truncated before the suffix so the final name stays filesystem-safe.
     """
     sanitized = re.sub(r'[^a-zA-Z0-9]', '-', raw)
-    if len(sanitized) <= _MAX_SANITIZED_LENGTH:
-        return sanitized
     hash_suffix = hashlib.md5(raw.encode()).hexdigest()[:8]
     return f"{sanitized[:_MAX_SANITIZED_LENGTH]}-{hash_suffix}"
 

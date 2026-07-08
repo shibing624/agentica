@@ -171,7 +171,7 @@ EAGER_PUBLIC_EXPORTS = [
     "__version__",
     "AGENTICA_HOME", "AGENTICA_DOTENV_PATH", "AGENTICA_LOG_LEVEL",
     "AGENTICA_LOG_FILE", "AGENTICA_WORKSPACE_DIR", "AGENTICA_PROJECTS_DIR",
-    "AGENTICA_CRON_DIR",
+    "AGENTICA_CRON_DIR", "AGENTICA_CACHE_DIR",
     "set_log_level_to_debug", "set_log_level_to_info", "logger",
     "write_audio_to_file",
     "Message", "MessageReferences", "UserMessage", "AssistantMessage",
