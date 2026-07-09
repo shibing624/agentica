@@ -152,8 +152,9 @@ class SessionState:
     goal_manager: Optional[GoalManager] = None
     goal_lock: threading.Lock = field(default_factory=threading.Lock)
     # Token + wall-clock baselines for per-turn budget accounting (S2).
-    # We snapshot cumulative CostTracker totals BEFORE each turn and diff
-    # AFTER so the goal loop sees the delta, not the whole run.
+    # A fresh CostTracker is created per Agent.run(), so each turn's
+    # cost_tracker holds THIS turn's tokens only. extract_turn_signals
+    # takes that as the delta and accumulates it onto this running baseline.
     goal_tokens_baseline: int = 0
     # Active ask_user_question tool request. When the agent (running in the background
     # process_loop thread) calls the ask_user_question tool, it parks on a result queue
@@ -168,6 +169,19 @@ class SessionState:
 # ==================== Output bridge for patch_stdout ====================
 
 
+# Serializes the background streaming thread's terminal writes against a
+# foreground pager (Ctrl+O). ``run_in_terminal`` only suspends prompt_toolkit's
+# own renderer, not the agent thread's ``print_formatted_text`` calls, so while
+# ``less`` owns the TTY those writes would interleave with the pager screen
+# (blank gaps / spliced-in diff text / cursor desync). Holding this lock for the
+# whole pager session parks the streaming thread's writes until the pager
+# closes; the agent's LLM stream keeps draining into its unbounded queue
+# meanwhile, so nothing is lost or timed out — buffered chunks render in order
+# afterwards. RLock (not Lock) because the no-pager fallback in
+# ``_open_in_pager`` re-enters ``_cprint`` on the same thread that holds it.
+_tty_write_lock = threading.RLock()
+
+
 def _cprint(text: str):
     """Print ANSI text through prompt_toolkit's renderer.
 
@@ -175,7 +189,8 @@ def _cprint(text: str):
     swallowed.  Routing through ``print_formatted_text(ANSI(...))`` lets
     prompt_toolkit parse the escapes and render colors correctly.
     """
-    print_formatted_text(ANSI(text))
+    with _tty_write_lock:
+        print_formatted_text(ANSI(text))
 
 
 def _less_supports_lesskey(pager: str) -> bool:
@@ -737,28 +752,21 @@ def _maybe_continue_goal(
             continue
         return  # real user message waiting — let it run first
 
-    final_text = ""
-    if agent.run_response is not None:
-        final_text = agent.run_response.content or ""
+    # Extract per-turn signals (final text, token delta, tool pairs) via the
+    # SAME shared helper the SDK ``run_goal_step()`` uses, so the CLI /goal
+    # loop and ``Agent.run_goal()`` never drift on how a turn is measured.
+    # The CLI keeps its own outer shell (user-input preemption above, Ctrl+C
+    # pause, continuation queueing below) — only the per-turn evaluation is
+    # shared. ``goal_tokens_baseline`` persists the accumulated total across
+    # turns of this /goal session (each turn's per-run delta added on).
+    final_text, token_delta, new_baseline, tool_pairs = mgr.extract_turn_signals(
+        agent.run_response, state.goal_tokens_baseline
+    )
     if not final_text.strip():
         return
-
-    # Compute per-turn token delta from the CostTracker (cumulative).
-    token_delta = 0
-    if agent.run_response is not None and agent.run_response.cost_tracker is not None:
-        ct = agent.run_response.cost_tracker
-        total_now = ct.total_input_tokens + ct.total_output_tokens
-        token_delta = max(0, total_now - state.goal_tokens_baseline)
-        state.goal_tokens_baseline = total_now
+    state.goal_tokens_baseline = new_baseline
 
     elapsed_sec = float(tui_state.get("last_turn_seconds", 0.0) or 0.0)
-
-    # Tool-call summary for the judge + the tool-stuck counter.
-    tool_pairs: List[Tuple[str, bool]] = []
-    if agent.run_response is not None:
-        for tc in agent.run_response.tool_calls:
-            if tc.tool_name:
-                tool_pairs.append((tc.tool_name, bool(tc.is_error)))
 
     with state.goal_lock:
         try:
@@ -787,6 +795,42 @@ def _maybe_continue_goal(
 
 
 # ==================== Stream response ====================
+
+
+def _refresh_live_status(
+    tui_state: dict,
+    agent,
+    request_start: float,
+    cost_baseline: float,
+    active_baseline: float,
+    calls_baseline: int,
+) -> None:
+    """Write the live status-bar fields (tokens / cost / time) from the
+    current run's cost_tracker.
+
+    Idempotent — uses ``baseline + current-run-delta`` math instead of ``+=``,
+    so calling it repeatedly mid-turn (from the spinner loop, ~8x/sec) and
+    once more at turn end never double-counts. The cost_tracker is populated
+    live by the model layer on every LLM API call (``model/base.py`` calls
+    ``cost_tracker.record(...)`` as each call returns), so reading it at any
+    point gives the running totals for the in-flight turn.
+
+    Time fields are always updated (they don't need the cost_tracker). Token
+    / cost fields are only written once at least one API call has landed
+    (``ct.turns > 0``), so the bar doesn't flash 0 before the first response.
+    """
+    elapsed = perf_counter() - request_start
+    tui_state["last_turn_seconds"] = elapsed
+    tui_state["active_seconds"] = active_baseline + elapsed
+    run_response = agent.run_response if agent is not None else None
+    ct = run_response.cost_tracker if run_response is not None else None
+    if ct is not None and ct.turns > 0:
+        model = agent.model if agent is not None else None
+        ctx_win = (model.context_window if model is not None else None) or 128000
+        tui_state["context_tokens"] = ct.last_input_tokens
+        tui_state["context_window"] = ctx_win
+        tui_state["cost_usd"] = cost_baseline + ct.total_cost_usd
+        tui_state["total_api_calls"] = calls_baseline + ct.turns
 
 
 def _process_stream_response(
@@ -828,6 +872,18 @@ def _process_stream_response(
     _set_phase("thinking")
     tui_state["spinner_text"] = "⠋ thinking…"
     request_start = perf_counter()
+    # Snapshot pre-turn baselines so live status refreshes (spinner loop +
+    # turn-end reconcile) can express the running total as
+    # ``baseline + current-run-delta`` — idempotent, no double-counting.
+    # Stashed into tui_state because the spinner thread has no other way to
+    # reach these locals.
+    _cost_baseline = tui_state.get("cost_usd", 0.0)
+    _active_baseline = tui_state.get("active_seconds", 0.0)
+    _calls_baseline = tui_state.get("total_api_calls", 0)
+    tui_state["_turn_request_start"] = request_start
+    tui_state["_turn_cost_baseline"] = _cost_baseline
+    tui_state["_turn_active_baseline"] = _active_baseline
+    tui_state["_turn_calls_baseline"] = _calls_baseline
 
     try:
         from agentica.run_config import RunConfig
@@ -1026,17 +1082,21 @@ def _process_stream_response(
                 f"{current_agent.run_response.break_message}[/yellow]"
             )
 
-        elapsed = perf_counter() - request_start
-        tui_state["last_turn_seconds"] = elapsed
-        tui_state["active_seconds"] = tui_state.get("active_seconds", 0.0) + elapsed
-
-        if cost_tracker and cost_tracker.turns > 0:
-            context_tokens = cost_tracker.last_input_tokens
-            context_window = current_agent.model.context_window if current_agent.model else 128000
-            tui_state["context_tokens"] = context_tokens
-            tui_state["context_window"] = context_window
-            tui_state["cost_usd"] = tui_state.get("cost_usd", 0.0) + cost_tracker.total_cost_usd
-            tui_state["total_api_calls"] = tui_state.get("total_api_calls", 0) + cost_tracker.turns
+        # Final reconcile of the live status fields. Same idempotent helper
+        # the spinner loop calls mid-turn — overwrites with exact end-of-turn
+        # totals. Replaces the old ``+=`` accumulation which would double-count
+        # (the spinner loop had already been writing ``baseline + delta``
+        # continuously throughout the turn).
+        _refresh_live_status(
+            tui_state, current_agent, request_start,
+            _cost_baseline, _active_baseline, _calls_baseline,
+        )
+        # Clear the stashed turn baselines so a stale value can't bleed into
+        # the next turn (or into the spinner loop after the agent stops).
+        tui_state.pop("_turn_request_start", None)
+        tui_state.pop("_turn_cost_baseline", None)
+        tui_state.pop("_turn_active_baseline", None)
+        tui_state.pop("_turn_calls_baseline", None)
 
         if not display.has_content_output and display.tool_count == 0 and not display.thinking_shown:
             _set_phase("idle")
@@ -1322,9 +1382,33 @@ def _setup_tui(
                 event.app.invalidate()
                 return
 
-        pending_queue.put(payload)
+        # Enter-while-running, plain text (no leading "/"): treat as steering
+        # guidance for the CURRENT task rather than a queued new turn — the
+        # Claude-Code-style "nudge mid-flight" experience. steer() is the
+        # atomic arbiter: it accepts the text only if a run is still active
+        # (checked under the agent's _steer_lock, closing the TOCTOU window
+        # between this agent_running read and the run actually ending). If it
+        # returns False (the run just finished), we fall through to the queue
+        # so the text is NEVER silently dropped.
+        if (
+            state.agent_running
+            and text
+            and not text.startswith("/")
+            and state.current_agent is not None
+        ):
+            if state.current_agent.steer(text):
+                tui_state["spinner_text"] = "Steering current task…"
+                event.app.current_buffer.reset(append_to_history=True)
+                event.app.invalidate()
+                return
+            # Run ended between the check and here — degrade to a fresh turn.
+            pending_queue.put(payload)
+            tui_state["spinner_text"] = "Task already finished — queued as new turn"
+            event.app.current_buffer.reset(append_to_history=True)
+            event.app.invalidate()
+            return
 
-        # The queue bar above the input box renders queued items live (with
+        pending_queue.put(payload)
         # per-item timestamps), so we deliberately do NOT print a notice
         # into the chat stream — that would interleave with the running
         # AI response box.
@@ -1437,7 +1521,14 @@ def _setup_tui(
                 bc = b.get("content", "")
                 parts.append(f"=== {bt} · {len(bc.splitlines())} lines ===\n{bc}")
             content = "\n\n".join(parts)
-        run_in_terminal(lambda: _open_in_pager(title, content))
+
+        def _paged():
+            # Hold the TTY write lock for the whole pager session so the
+            # background streaming thread can't print over `less`.
+            with _tty_write_lock:
+                _open_in_pager(title, content)
+
+        run_in_terminal(_paged)
         event.app.invalidate()
 
     class _PlaceholderProcessor(Processor):
@@ -1456,7 +1547,7 @@ def _setup_tui(
             return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
             return "type + Enter to queue, Ctrl+C to cancel"
-        return ""
+        return "Enter to send · Ctrl+J newline · / commands · @ files · Ctrl+X shell"
 
     def _get_prompt():
         if state.agent_running:
@@ -1490,12 +1581,12 @@ def _setup_tui(
     if history_dir:
         os.makedirs(history_dir, exist_ok=True)
 
-    _MAX_INPUT_ROWS = 12
+    _MAX_INPUT_ROWS = 8
 
     def _get_input_height() -> Dimension:
         widget = input_area
         if widget is None:
-            return Dimension(min=1, max=_MAX_INPUT_ROWS, preferred=1)
+            return Dimension(min=1, max=1, preferred=1)
         # Count *visual* rows, not just logical lines. With wrap_lines=True a
         # single long line wraps onto multiple terminal rows; counting only
         # explicit '\n' (document.line_count) would keep the box one row tall
@@ -1513,18 +1604,22 @@ def _setup_tui(
             total_rows += max(1, -(-len(line) // usable_width))
         total_rows = max(1, total_rows)
         needed = min(_MAX_INPUT_ROWS, total_rows)
-        # IMPORTANT: use `min=needed`, not `min=1`. prompt_toolkit's HSplit
-        # dimension solver treats `min` as an inviolable floor and only uses
-        # `preferred` when there is spare space. If we set min=1 the solver is
-        # free to shrink the input box back down to a single row whenever the
-        # sibling widgets (status bar, queue bar, streaming output, etc.) ask
-        # for more space — which produced the reported bug: on line 2 the box
-        # collapsed to 1 row and hid line 1; on line 3 there was suddenly
-        # enough slack for the box to expand to 3 rows and line 1 reappeared.
-        # By pinning min == needed we guarantee everything the user has
-        # already typed stays visible (up to _MAX_INPUT_ROWS; beyond that the
-        # TextArea itself scrolls, still keeping the cursor line visible).
-        return Dimension(min=needed, max=_MAX_INPUT_ROWS, preferred=needed)
+        # IMPORTANT: pin min == max == preferred == needed (a fixed size, not
+        # a range). prompt_toolkit's HSplit dimension solver treats `max` as
+        # "how far this child may grow to soak up spare terminal rows", not
+        # just a content cap: once every child hits its `preferred` size, a
+        # second pass keeps growing children (up to their `max`) to fill the
+        # rest of the reported terminal height. With `max=_MAX_INPUT_ROWS`
+        # that inflated the input box to a full 8 rows of blank padding any
+        # time the terminal had spare height, then the renderer had to jump
+        # the cursor back up to the real (much higher) row — desyncing the
+        # redraw and making already-typed lines appear to vanish/duplicate.
+        # A fixed dimension (min=max=preferred) gives the box exactly the
+        # rows its content needs, every render, with no room for the solver
+        # to expand it. Growth beyond `_MAX_INPUT_ROWS` is handled by the
+        # TextArea's own internal scrolling, which keeps the cursor line
+        # visible.
+        return Dimension(min=needed, max=needed, preferred=needed)
 
     input_area = TextArea(
         height=_get_input_height,
@@ -1640,7 +1735,7 @@ def _setup_tui(
 
     style = PTStyle.from_dict(
         {
-            "input-area": "#FFF8DC",
+            "input-area": "bg:#20203a #F8F8F2 bold",
             "placeholder": "#555555 italic",
             "prompt": "#FFD700 bold",
             "prompt-working": "#888888 italic",
@@ -2219,6 +2314,21 @@ def run_interactive(
             tui_state["spinner_text"] = _render_spinner_text(
                 _frame_idx[0], phase, base, elapsed
             )
+            # Refresh live status-bar fields (tokens / cost / time) every tick.
+            # The cost_tracker is updated by the model layer on every LLM call,
+            # so this picks up new token/cost totals within ~120ms of any API
+            # call returning — including right after each tool completes and the
+            # next "decide what to do" call lands. Time fields tick smoothly.
+            # Guarded by ``_turn_request_start`` being set (only valid mid-turn);
+            # the stream loop clears it at turn end.
+            _req_start = tui_state.get("_turn_request_start")
+            if _req_start is not None:
+                _refresh_live_status(
+                    tui_state, state.current_agent, _req_start,
+                    tui_state.get("_turn_cost_baseline", 0.0),
+                    tui_state.get("_turn_active_baseline", 0.0),
+                    tui_state.get("_turn_calls_baseline", 0),
+                )
             _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
             app.invalidate()
             time.sleep(0.12)

@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """Tests for history filtering pipeline (HistoryConfig + history_filter callable)."""
+
 import os
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.agent.config import HistoryConfig
-from agentica.agent.history_filter import apply_history_pipeline
+from agentica.agent.history_filter import apply_history_pipeline, strip_all_tool_artifacts
 from agentica.model.message import Message
 
 
@@ -73,9 +74,7 @@ def test_excluded_tools_drops_assistant_message_when_all_calls_removed():
         _tool("c1", "search", "..."),
         _assistant("final"),
     ]
-    out = apply_history_pipeline(
-        history, config=HistoryConfig(excluded_tools=["search"]), user_filter=None
-    )
+    out = apply_history_pipeline(history, config=HistoryConfig(excluded_tools=["search"]), user_filter=None)
     # Assistant turn was pure tool_calls and got fully dropped.
     assert not any(m.role == "assistant" and not m.content for m in out)
     assert any(m.role == "assistant" and m.content == "final" for m in out)
@@ -86,9 +85,7 @@ def test_assistant_max_chars_truncates_long_content():
         _user("q"),
         _assistant("x" * 500),
     ]
-    out = apply_history_pipeline(
-        history, config=HistoryConfig(assistant_max_chars=100), user_filter=None
-    )
+    out = apply_history_pipeline(history, config=HistoryConfig(assistant_max_chars=100), user_filter=None)
     truncated = next(m for m in out if m.role == "assistant")
     assert len(truncated.content) == 103  # 100 + "..."
     assert truncated.content.endswith("...")
@@ -96,9 +93,7 @@ def test_assistant_max_chars_truncates_long_content():
 
 def test_assistant_max_chars_does_not_touch_short_content():
     history = [_assistant("short")]
-    out = apply_history_pipeline(
-        history, config=HistoryConfig(assistant_max_chars=100), user_filter=None
-    )
+    out = apply_history_pipeline(history, config=HistoryConfig(assistant_max_chars=100), user_filter=None)
     assert out[0].content == "short"
 
 
@@ -165,9 +160,7 @@ def test_excluded_tools_preserves_assistant_content_when_partial_drop():
         _tool("c1", "search", "..."),
         _assistant("final"),
     ]
-    out = apply_history_pipeline(
-        history, config=HistoryConfig(excluded_tools=["search"]), user_filter=None
-    )
+    out = apply_history_pipeline(history, config=HistoryConfig(excluded_tools=["search"]), user_filter=None)
     target = next(m for m in out if m.role == "assistant" and m.content == "thinking out loud...")
     assert target.tool_calls is None
 
@@ -183,9 +176,7 @@ def test_multimodal_assistant_content_with_partial_tool_call_drop():
         ),
         _tool("c1", "search", "..."),
     ]
-    out = apply_history_pipeline(
-        history, config=HistoryConfig(excluded_tools=["search"]), user_filter=None
-    )
+    out = apply_history_pipeline(history, config=HistoryConfig(excluded_tools=["search"]), user_filter=None)
     target = next(m for m in out if m.role == "assistant")
     assert target.content == multimodal
     assert target.tool_calls is None
@@ -205,3 +196,77 @@ def test_user_message_strip_via_callable():
 
     out = apply_history_pipeline(history, config=None, user_filter=strip_prefix)
     assert out[0].content == "你好"
+
+
+# --- strip_all_tool_artifacts: cross-provider /model switch sanitizer ---
+
+
+def test_strip_openai_style_tool_artifacts():
+    """OpenAI wire format: role='tool' dropped, assistant.tool_calls -> text only."""
+    history = [
+        _user("hello"),
+        _assistant("ok", tool_calls=[{"id": "c1", "type": "function", "function": {"name": "ls"}}]),
+        _tool("c1", "ls", "file1"),
+        _assistant("done"),
+    ]
+    out = strip_all_tool_artifacts(history, drop_system=True)
+    assert [(m.role, m.content) for m in out] == [
+        ("user", "hello"),
+        ("assistant", "ok"),
+        ("assistant", "done"),
+    ]
+    assert all(m.role != "tool" for m in out)
+    assert all(not m.tool_calls for m in out)
+
+
+def test_strip_anthropic_style_list_content_tool_artifacts():
+    """Anthropic wire format: list content blocks (tool_use/tool_result) stripped.
+
+    Regression for the /model cross-provider switch 400:
+    'unexpected tool_use_id found in tool_result blocks'.
+    """
+    history = [
+        Message(role="system", content="sys"),
+        _user("run a tool"),
+        Message(
+            role="assistant",
+            content=[
+                {"type": "text", "text": "Let me check."},
+                {"type": "tool_use", "id": "toolu_01", "name": "ls", "input": {}},
+            ],
+            tool_calls=[{"id": "toolu_01", "type": "function", "function": {"name": "ls"}}],
+        ),
+        Message(
+            role="user",
+            content=[{"type": "tool_result", "tool_use_id": "toolu_01", "content": "file1 file2"}],
+        ),
+        _assistant("I see two files."),
+    ]
+    out = strip_all_tool_artifacts(history, drop_system=True)
+    assert [(m.role, m.content) for m in out] == [
+        ("user", "run a tool"),
+        ("assistant", "Let me check."),
+        ("assistant", "I see two files."),
+    ]
+    # No tool_use / tool_result blocks may survive in any content list.
+    for m in out:
+        if isinstance(m.content, list):
+            assert not any(isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result") for b in m.content)
+
+
+def test_strip_pure_tool_call_assistant_is_dropped():
+    """An assistant turn that is only a tool_use block (no text) is removed entirely."""
+    history = [
+        Message(
+            role="assistant",
+            content=[{"type": "tool_use", "id": "x", "name": "f", "input": {}}],
+            tool_calls=[{"id": "x"}],
+        ),
+    ]
+    assert strip_all_tool_artifacts(history) == []
+
+
+def test_strip_keeps_system_when_not_dropping():
+    history = [Message(role="system", content="sys"), _user("hi")]
+    out = strip_all_tool_artifacts(history, drop_system=False)
+    assert [(m.role, m.content) for m in out] == [("system", "sys"), ("user", "hi")]

@@ -75,7 +75,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
     get_console().print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
-    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand all truncated inputs/tool outputs in pager (Ctrl+O or Esc to return)")
+    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool output (e.g. long execute results) in pager (Ctrl+O or Esc to return)")
     get_console().print()
     # Input features
     get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files (images auto-attach)")
@@ -128,10 +128,12 @@ def inject_file_contents(prompt_text: str, mentioned_files: List[Path]) -> str:
 _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 
 
-# All blocks (user input or tool output) truncated in the CLI display during
-# the current run. Remembered so the user can expand them on demand: Ctrl+O
-# opens EVERY folded block in one pager (CC-style "expand all"), instead of
-# only the most recent one. Cleared at the start of each run.
+# Tool output blocks truncated in the CLI display during the current run
+# (currently only execute output that exceeds the inline budget). Remembered
+# so the user can expand them on demand: Ctrl+O opens EVERY folded block in
+# one pager (CC-style "expand all"). User input and write-tool diffs are
+# always shown in full, so they are never stashed here. Cleared at the start
+# of each run.
 _truncated_blocks: List[Dict[str, str]] = []
 
 
@@ -329,43 +331,28 @@ class _GutteredConsole:
 
 
 def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int = 0) -> None:
-    """Display user message with file mentions colored.
+    """Display the full user message with file mentions colored.
 
-    For long pasted content, shows a trimmed preview with line count.
+    Long messages are no longer folded behind Ctrl+O — the complete text is
+    always rendered inline so the user sees exactly what they sent.
     """
     # A new user turn starts here: drop the previous turn's folded blocks so
-    # Ctrl+O expands the CURRENT turn (this query + its tool results), not
-    # stale history. The clear is done here rather than in
-    # StreamDisplayManager.__init__ because display_user_message runs BEFORE
-    # the manager is created — clearing in __init__ would wipe the
-    # just-remembered user input, which is exactly why Ctrl+O used to show
-    # only tool results and never the long query.
+    # Ctrl+O expands the CURRENT turn's tool results, not stale history.
     clear_truncated_blocks()
     cleaned = _PASTE_PATH_RE.sub("", text).strip()
     if not cleaned and pasted_blocks:
         cleaned = f"[Pasted text: {pasted_lines} lines]"
 
-    # Show the message nearly in full; only fold when it exceeds 12 lines so
-    # typical multi-line questions and pastes stay visible without Ctrl+O.
-    lines = cleaned.split('\n')
-    if len(lines) > 12:
-        # Show first 10 lines + summary
-        preview_lines = lines[:10]
-        preview = '\n'.join(preview_lines)
-        remaining = len(lines) - 10
-        rich_text = Text()
-        rich_text.append(preview, style=COLORS["user"])
-        rich_text.append(f"\n... (+{remaining} more lines · Ctrl+O 展开)", style="dim")
-        remember_truncated("User input", cleaned)
-    else:
-        pattern = r"(@[\w./-]+)"
-        parts = re.split(pattern, cleaned)
-        rich_text = Text()
-        for part in parts:
-            if part.startswith("@"):
-                rich_text.append(part, style="magenta")
-            else:
-                rich_text.append(part, style=COLORS["user"])
+    # Always render the complete message (no Ctrl+O fold); only colorize
+    # @file mentions.
+    pattern = r"(@[\w./-]+)"
+    parts = re.split(pattern, cleaned)
+    rich_text = Text()
+    for part in parts:
+        if part.startswith("@"):
+            rich_text.append(part, style="bold magenta")
+        else:
+            rich_text.append(part, style=f"bold {COLORS['user']}")
 
     if pasted_blocks:
         suffix = "s" if pasted_blocks > 1 else ""
@@ -374,7 +361,15 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
             style="dim",
         )
 
-    _GutteredConsole(get_console(), "▎", "cyan").print(rich_text)
+    # Wrap the echoed user query in blank lines and render it with a bright
+    # bold gutter so the human turn stands out clearly from the AI response
+    # body above/below it — the blank lines give it breathing room, the bold
+    # ``▎`` bar + bright_cyan text are the visual anchor for "this is what I
+    # asked".
+    console = get_console()
+    console.print()
+    _GutteredConsole(console, "▎", "bold bright_cyan").print(rich_text)
+    console.print()
 
 
 def get_file_completions(document_text: str) -> List[str]:
@@ -490,7 +485,7 @@ def show_help(skills_registry=None):
         "Ctrl+C":            "Interrupt current operation",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Ctrl+V":            "Paste image from clipboard",
-        "Ctrl+O":            "Expand all truncated inputs/tool outputs in pager",
+        "Ctrl+O":            "Expand truncated tool output (e.g. long execute results) in pager",
     }
     for key, desc in shortcuts.items():
         get_console().print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
@@ -970,17 +965,17 @@ class StreamDisplayManager:
         self._assistant_console.print(line)
 
     # Max diff lines shown inline beneath an edit_file/multi_edit_file summary.
-    _EDIT_DIFF_MAX_LINES = 8
+    # Write tools now render their FULL diff inline (no truncation), so this is
+    # unused; kept only as a named constant for clarity of intent.
 
     def _display_edit_merged(self, tool_name: str, tool_args: dict,
                              result_content: str, is_error: bool,
                              elapsed_str: str) -> None:
-        """One summary line + a truncated unified diff for edit tools.
+        """One summary line + the FULL unified diff for edit tools.
 
-        ``  ✎ edit_file config.py - ✓ 1 edit (120ms)`` followed by a short
-        CC/opencode-style diff so the user sees the actual code change. Errors
-        surface a truncated message instead. The full diff is remembered for
-        Ctrl+O expansion when truncated.
+        ``  ✎ edit_file config.py - ✓ 1 edit (120ms)`` followed by the complete
+        CC/opencode-style diff so the user always sees the actual code change.
+        Errors surface a truncated message instead.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         filename = _extract_filename(tool_args.get("file_path", ""))
@@ -1007,22 +1002,15 @@ class StreamDisplayManager:
             line += f" [dim]- ✓ {n_edits} {unit}{elapsed_str}[/dim]"
         self._assistant_console.print(line)
 
-        # Render a truncated unified diff from the edit args (skip on error).
+        # Render the FULL unified diff from the edit args (skip on error) so the
+        # user always sees the complete change, never folded behind Ctrl+O.
         if is_error:
             return
         diff_text = self._build_edit_diff(tool_name, tool_args, filename)
         if not diff_text:
             return
-        diff_lines = diff_text.splitlines()
-        show = diff_lines[: self._EDIT_DIFF_MAX_LINES]
-        self._assistant_console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
+        self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
                                   line_numbers=False))
-        remaining = len(diff_lines) - self._EDIT_DIFF_MAX_LINES
-        if remaining > 0:
-            self._assistant_console.print(
-                f"      [dim italic]... ({remaining} more diff lines · Ctrl+O 展开)[/dim italic]"
-            )
-            remember_truncated(f"Edit diff · {filename}", diff_text)
 
     @staticmethod
     def _build_edit_diff(tool_name: str, tool_args: dict, filename: str) -> str:
@@ -1069,13 +1057,13 @@ class StreamDisplayManager:
     def _display_write_merged(self, tool_name: str, tool_args: dict,
                               result_content: str, is_error: bool,
                               elapsed_str: str) -> None:
-        """One summary line + a truncated old→new diff for write_file.
+        """One summary line + the FULL old→new diff for write_file.
 
         ``  ✎ write_file config.py - ✓ created 42 lines (120ms)`` followed by
-        a head/tail unified diff (old content was stashed at call-start; for a
+        the complete unified diff (old content was stashed at call-start; for a
         brand-new file the "old" side is empty so the diff is all additions).
-        Errors surface a truncated message instead. The full diff is remembered
-        for Ctrl+O expansion when truncated.
+        Errors surface a truncated message instead. The diff is always shown in
+        full — no Ctrl+O fold.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         filename = _extract_filename(tool_args.get("file_path", ""))
@@ -1114,24 +1102,10 @@ class StreamDisplayManager:
         )).rstrip("\n")
         if not diff_text:
             return
-        diff_lines = diff_text.splitlines()
-        # Render the diff itself as head/tail (the new tail of a file is often
-        # the most relevant part), with the middle hidden.
-        n = len(diff_lines)
-        head, tail = self._WRITE_DIFF_HEAD_LINES, self._WRITE_DIFF_TAIL_LINES
-        if n <= head + tail:
-            show = diff_lines
-            hidden = 0
-        else:
-            show = diff_lines[:head] + diff_lines[-tail:]
-            hidden = n - head - tail
-        self._assistant_console.print(Syntax("\n".join(show) + "\n", "diff", theme="monokai",
+        # Render the FULL diff so the user always sees the complete file change,
+        # never folded behind Ctrl+O.
+        self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
                                   line_numbers=False))
-        if hidden > 0:
-            self._assistant_console.print(
-                f"      [dim italic]... ({hidden} hidden diff lines · Ctrl+O 展开)[/dim italic]"
-            )
-            remember_truncated(f"Write diff · {filename}", diff_text)
 
     # Read-only tools whose call line is deferred to completion so the call
     # line and elapsed time collapse into ONE line, e.g.
@@ -1139,10 +1113,10 @@ class StreamDisplayManager:
     _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
 
     # Write tools that edit/create files: call line is deferred to completion
-    # and rendered as one summary line + a truncated unified diff
-    # (CC/opencode-style) so the user sees the actual code change, not an
-    # absolute path or noise. write_file diffs the pre-write content (stashed
-    # at call start) against the new content arg.
+    # and rendered as one summary line + the FULL unified diff (CC/opencode-style)
+    # so the user always sees the actual code change, not an absolute path or
+    # noise. write_file diffs the pre-write content (stashed at call start)
+    # against the new content arg.
     _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file", "write_file"})
 
     # Tools whose success result is pure noise on success. The call line itself
@@ -1151,13 +1125,14 @@ class StreamDisplayManager:
 
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
-    # execute: head/tail window (middle hidden) — the tail carries the
-    # command's final status/output which is usually what the user needs.
-    _EXECUTE_HEAD_LINES = 6
-    _EXECUTE_TAIL_LINES = 4
-    # write_file diff window (head/tail, middle hidden).
-    _WRITE_DIFF_HEAD_LINES = 6
-    _WRITE_DIFF_TAIL_LINES = 4
+    # execute: show up to this many lines inline; beyond that, a head+tail
+    # window with the middle collapsed into a blank/.../blank separator so long
+    # command output stays scannable without flooding the transcript.
+    _EXECUTE_MAX_INLINE_LINES = 20
+    # execute head/tail window — the tail carries the command's final status /
+    # output, which is usually what the user needs at a glance.
+    _EXECUTE_HEAD_LINES = 10
+    _EXECUTE_TAIL_LINES = 10
 
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: float = None,
@@ -1256,9 +1231,9 @@ class StreamDisplayManager:
         """Render a head/tail window with the middle hidden.
 
         Shows the first ``head`` lines and the last ``tail`` lines; anything in
-        between is collapsed into a ``... (N hidden lines · Ctrl+O 展开)``
-        separator. The full content is remembered for Ctrl+O expansion. Used
-        for execute output and write_file diffs where the tail matters.
+        between is collapsed into a blank / ``...`` / blank separator. The full
+        content is still remembered for on-demand Ctrl+O expansion. Used for
+        execute output where the tail carries the command's final status.
         """
         first_prefix = error_prefix or prefix
         n = len(lines)
@@ -1276,8 +1251,14 @@ class StreamDisplayManager:
             self._assistant_console.print(f"{p}{line}", style=style)
 
         if hidden > 0:
+            # Blank / ... / blank separator, then a trailing hint line telling
+            # how many lines were hidden and how to expand them. The full
+            # content is still stashed for Ctrl+O expansion.
+            self._assistant_console.print(f"{cont_prefix}")
+            self._assistant_console.print(f"{cont_prefix}...")
+            self._assistant_console.print(f"{cont_prefix}")
             self._assistant_console.print(
-                f"{cont_prefix}... ({hidden} hidden lines · Ctrl+O 展开)",
+                f"{cont_prefix}({hidden} hidden lines · Ctrl+O 展开)",
                 style="dim italic",
             )
             remember_truncated(truncated_title, full_content)

@@ -16,6 +16,7 @@ Pipeline order (see ``HistoryConfig`` docstring):
 The original Message objects are never mutated; we copy via
 ``model_copy(update=...)`` whenever we change a field.
 """
+
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
@@ -80,6 +81,87 @@ def apply_history_pipeline(
     return out
 
 
+def _content_has_block_type(content, block_type: str) -> bool:
+    """True if ``content`` is a list containing a dict block of ``block_type``.
+
+    Anthropic serialises tool calls/results as *list content blocks*:
+      - tool result -> role="user",  content=[{"type": "tool_result", "tool_use_id": ...}]
+      - tool call   -> role="assistant", content=[..., {"type": "tool_use", "id": ...}]
+    OpenAI-compatible providers instead use flat ``role="tool"`` messages and
+    the ``assistant.tool_calls`` field. When history recorded under one wire
+    format is replayed on the other provider, these list blocks are rejected
+    (e.g. "unexpected tool_use_id found in tool_result blocks").
+    """
+    if not isinstance(content, list):
+        return False
+    return any(isinstance(b, dict) and b.get("type") == block_type for b in content)
+
+
+def _text_from_content_blocks(content) -> str:
+    """Extract concatenated text from an Anthropic-style content-block list.
+
+    Drops tool_use/tool_result blocks, keeps only ``{"type": "text", ...}``.
+    Returns "" when there's no reusable text.
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: List[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            txt = block.get("text")
+            if isinstance(txt, str) and txt.strip():
+                parts.append(txt)
+    return "\n".join(parts)
+
+
+def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = False) -> List[Message]:
+    """Strip every tool-call/tool-result artifact from history, wire-format agnostic.
+
+    Removes both OpenAI-style and Anthropic-style tool encodings so history
+    recorded under one provider can be safely replayed on another (the
+    ``/model`` switch case and the post-error recovery case):
+
+      OpenAI style:
+        * role="tool" messages                          -> dropped
+        * assistant messages with ``tool_calls`` field   -> keep text only
+
+      Anthropic style (list content blocks):
+        * role="user" whose content holds tool_result blocks   -> dropped
+        * role="assistant" whose content holds tool_use blocks  -> keep text only
+
+    Only plain user/assistant text survives. ``drop_system`` also removes
+    system messages (used by the recovery path where the system prompt is
+    rebuilt fresh each run).
+    """
+    cleaned: List[Message] = []
+    for m in messages:
+        # OpenAI-style flat tool result.
+        if m.role == "tool":
+            continue
+
+        # Anthropic-style tool result carried on a user message.
+        if m.role == "user" and _content_has_block_type(m.content, "tool_result"):
+            continue
+
+        if m.role == "assistant":
+            # OpenAI-style tool_calls field, or Anthropic-style tool_use blocks.
+            has_openai_calls = bool(m.tool_calls)
+            has_anthropic_calls = _content_has_block_type(m.content, "tool_use")
+            if has_openai_calls or has_anthropic_calls:
+                text = _text_from_content_blocks(m.content)
+                if text.strip():
+                    cleaned.append(Message(role="assistant", content=text))
+                continue
+
+        if drop_system and m.role == "system":
+            continue
+
+        cleaned.append(m)
+    return cleaned
+
+
 def _matches_any(name: Optional[str], patterns: List[str]) -> bool:
     if not name:
         return False
@@ -128,9 +210,7 @@ def _scrub_reasoning_leak(history: List[Message]) -> List[Message]:
     out: List[Message] = []
     for m in history:
         if m.role == "assistant" and isinstance(m.content, str) and contains_reasoning_leak(m.content):
-            m = m.model_copy(
-                update={"content": sanitize_assistant_content_for_history(m.content)}
-            )
+            m = m.model_copy(update={"content": sanitize_assistant_content_for_history(m.content)})
         out.append(m)
     return out
 
@@ -151,9 +231,7 @@ def _strip_orphan_tool_calls(history: List[Message]) -> List[Message]:
     cleaning the paired tool_calls. Without this, the next LLM API call
     would 400 with "tool_call_id has no matching tool message".
     """
-    present_tool_call_ids: set[str] = {
-        m.tool_call_id for m in history if m.role == "tool" and m.tool_call_id
-    }
+    present_tool_call_ids: set[str] = {m.tool_call_id for m in history if m.role == "tool" and m.tool_call_id}
 
     out: List[Message] = []
     for m in history:

@@ -39,11 +39,27 @@ class _ToDict(Protocol):
 _LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
 
 
-def _get_default_base_dir() -> str:
-    """Get default session storage directory: <AGENTICA_PROJECTS_DIR>/<cwd-name>/
+def _get_default_base_dir(
+    work_dir: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> str:
+    """Get default session storage directory.
+
+    Sessions are scoped by project (work_dir) AND user, so the same project
+    resolves to the same directory regardless of entrypoint (CLI or Web). This
+    is what lets both entrypoints list a consistent set of sessions for a given
+    project + user.
+
+    Path: <AGENTICA_PROJECTS_DIR>/<user_id>/<work_dir-hash>/
+
+    Args:
+        work_dir: Project working directory. Defaults to the process cwd, which
+            is correct for the CLI (cwd == project) but must be passed explicitly
+            for the Web (per-session work_dir differs from the server cwd).
+        user_id: Owner of the sessions. Keeps different users' sessions apart.
     """
     from agentica.compression.tool_result_storage import get_project_dir
-    return get_project_dir(os.getcwd())
+    return get_project_dir(work_dir or os.getcwd(), user_id=user_id)
 
 
 def _iso_now() -> str:
@@ -70,9 +86,18 @@ class SessionLog:
         session_id: str,
         base_dir: Optional[str] = None,
         search_index: Optional[Any] = None,
+        work_dir: Optional[str] = None,
+        user_id: Optional[str] = None,
     ):
         self.session_id = session_id
-        self.base_dir = Path(base_dir) if base_dir else Path(_get_default_base_dir())
+        self.user_id = user_id
+        # base_dir wins when given (explicit override). Otherwise derive it from
+        # the project (work_dir) + user_id so CLI and Web scope sessions the
+        # same way for the same project + user.
+        self.base_dir = (
+            Path(base_dir) if base_dir
+            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
+        )
         self.path = self.base_dir / f"{session_id}.jsonl"
         self.meta_path = self.base_dir / f"{session_id}.meta.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -395,12 +420,24 @@ class SessionLog:
     # ------------------------------------------------------------------
 
     @classmethod
-    def list_sessions(cls, base_dir: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_sessions(
+        cls,
+        base_dir: Optional[str] = None,
+        work_dir: Optional[str] = None,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         """List all available sessions for resume.
+
+        When ``base_dir`` is not given, sessions are scoped by project
+        (``work_dir``) + ``user_id`` so CLI and Web list a consistent set for
+        the same project + user.
 
         Returns list of dicts sorted by mtime descending (most recent first).
         """
-        base = Path(base_dir) if base_dir else Path(_get_default_base_dir())
+        base = (
+            Path(base_dir) if base_dir
+            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
+        )
         if not base.exists():
             return []
 
@@ -584,6 +621,8 @@ class SessionLog:
         session_id: str,
         name: str,
         base_dir: Optional[str] = None,
+        work_dir: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> bool:
         """Convenience classmethod to rename a session by id without
         instantiating the full ``SessionLog`` (no JSONL must exist either —
@@ -591,7 +630,10 @@ class SessionLog:
 
         Returns ``True`` on success. Raises ``ValueError`` for empty names.
         """
-        base = Path(base_dir) if base_dir else Path(_get_default_base_dir())
+        base = (
+            Path(base_dir) if base_dir
+            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
+        )
         log = cls(session_id=session_id, base_dir=str(base))
         log.set_name(name)
         return True
@@ -602,9 +644,14 @@ class SessionLog:
         session_id: str,
         archived: bool = True,
         base_dir: Optional[str] = None,
+        work_dir: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> bool:
         """Archive or unarchive a session by id using sidecar metadata."""
-        base = Path(base_dir) if base_dir else Path(_get_default_base_dir())
+        base = (
+            Path(base_dir) if base_dir
+            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
+        )
         log = cls(session_id=session_id, base_dir=str(base))
         log.set_archived(archived)
         return True

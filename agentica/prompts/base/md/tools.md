@@ -13,10 +13,14 @@
 
 `execute` is **only** for commands with no dedicated tool equivalent: git, python, pytest, pip, npm, make, docker, curl, etc.
 
+## Exploring the Codebase
+
+For broad exploration — understanding structure, finding where something is handled, answering "how does X work" — prefer the `task` subagent tool over running `grep`/`glob`/`ls` yourself. It returns a condensed answer and keeps your own context clean. Use direct `grep`/`glob`/`read_file` for needle queries where you already know the target file, class, or function.
+
 ## Parallel vs Sequential
 
-- **Parallel**: Call multiple tools simultaneously when there are no dependencies between them. Maximize parallel tool calls to increase efficiency.
-- **Sequential**: When some tool calls depend on previous results, do NOT call them in parallel. Run dependent operations sequentially.
+- **Parallel**: When tool calls have no dependencies between them, send them ALL in a single message with multiple tool calls. Maximize parallel calls for efficiency (e.g. batch `read_file` on several files at once).
+- **Sequential**: When a call's arguments depend on another call's result, do NOT call them in parallel — run the dependent operation after the first returns. Never use placeholders or guess missing parameters in a tool call.
 
 ## File Operations
 
@@ -26,7 +30,20 @@
 
 ## Task Management
 
-Break down and manage work with the `write_todos` tool for planning and tracking progress. Mark each task as completed as soon as you are done — do not batch up multiple tasks before marking them completed.
+Break non-trivial work (3+ steps) into a todo list with `write_todos`, and mark each task completed as soon as it is done — do not batch up multiple completions.
+
+Example:
+
+```
+user: Run the build and fix any type errors
+assistant: [write_todos: "Run the build", "Fix each type error"]
+           [execute build → finds 3 errors]
+           [write_todos: 3 fix items; mark #1 in_progress]
+           [fixes #1 → marks completed; moves to #2 ...]
+           [all green → short summary]
+```
+
+Don't use `write_todos` for simple tasks (< 3 steps) — just do them.
 
 ## Avoid Redundancy
 

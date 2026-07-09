@@ -405,7 +405,7 @@ class PromptsMixin:
         if self.description:
             identity = self.description
         elif self.name:
-            identity = f"You are {self.name}, a helpful AI assistant."
+            identity = f"You are {self.name}, an AI agent."
 
         workspace_context = await self.get_workspace_context_prompt()
 

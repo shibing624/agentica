@@ -207,13 +207,11 @@ def parse_args():
     if len(sys.argv) > 1 and sys.argv[1] == "cron":
         cron_parser = argparse.ArgumentParser(description="Agentica cron scheduler")
         cron_sub = cron_parser.add_subparsers(dest="cron_command", required=True)
-        daemon_parser = cron_sub.add_parser(
-            "daemon", help="Run the cron scheduler in the foreground (Ctrl-C to stop)")
+        daemon_parser = cron_sub.add_parser("daemon", help="Run the cron scheduler in the foreground (Ctrl-C to stop)")
         daemon_parser.add_argument(
-            "--interval", type=int, default=60,
-            help="Seconds between schedule checks (default: 60)")
-        daemon_parser.add_argument(
-            "--verbose", action="store_true", help="Verbose tick logging")
+            "--interval", type=int, default=60, help="Seconds between schedule checks (default: 60)"
+        )
+        daemon_parser.add_argument("--verbose", action="store_true", help="Verbose tick logging")
         args = cron_parser.parse_args(sys.argv[2:])
         args.command = "cron"
         return args
@@ -317,7 +315,8 @@ def parse_args():
         help="Provider for the auxiliary model (defaults to --model_provider)",
     )
     parser.add_argument(
-        "--auxiliary_model_name", type=str,
+        "--auxiliary_model_name",
+        type=str,
         help="Model id for the auxiliary model (background tasks + `task` subagent; required to enable a separate auxiliary)",
     )
     parser.add_argument("--auxiliary_base_url", type=str, help="Base URL for the auxiliary model")
@@ -474,11 +473,19 @@ def get_model(
     # value auto-filled from the model catalog. Every Model subclass has it.
     if context_window is not None:
         params["context_window"] = context_window
-    # Anthropic's Claude has no base_url / reasoning_effort fields; the SDK
-    # reads its endpoint from client defaults, so skip those params for it.
-    if model_provider != "anthropic":
-        if base_url is not None:
-            params["base_url"] = base_url
+    # base_url applies to every provider, including anthropic: a corporate
+    # proxy that forwards the native /v1/messages endpoint (e.g. Venus
+    # http://.../llmproxy/anthropic) can be targeted, and the Claude client
+    # seeds the bearer header for such proxies.
+    if base_url is not None:
+        params["base_url"] = base_url
+    # OpenAI-only tuning: reasoning_effort + raw passthrough dicts. Anthropic
+    # takes reasoning_effort too (mapped to adaptive thinking inside the Claude
+    # model class), but NOT the OpenAI extra_body/extra_headers passthrough.
+    if model_provider == "anthropic":
+        if reasoning_effort is not None:
+            params["reasoning_effort"] = reasoning_effort
+    else:
         if model_provider == "deepseek":
             params["reasoning_effort"] = reasoning_effort or "max"
         elif reasoning_effort is not None:
@@ -535,10 +542,8 @@ def _build_sibling_model(agent_config: dict, prefix: str):
     return get_model(
         model_provider=sibling_provider,
         model_name=sibling_name,
-        base_url=agent_config.get(f"{prefix}_base_url")
-        or (agent_config.get("base_url") if same_provider else None),
-        api_key=agent_config.get(f"{prefix}_api_key")
-        or (agent_config.get("api_key") if same_provider else None),
+        base_url=agent_config.get(f"{prefix}_base_url") or (agent_config.get("base_url") if same_provider else None),
+        api_key=agent_config.get(f"{prefix}_api_key") or (agent_config.get("api_key") if same_provider else None),
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
         reasoning_effort=agent_config.get("reasoning_effort"),
@@ -636,15 +641,11 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     auxiliary_model_name = agent_config.get("auxiliary_model_name")
     if auxiliary_provider and auxiliary_model_name:
         lines.append(
-            f"- Auxiliary model: {auxiliary_provider}/{auxiliary_model_name}  "
-            "(background calls + task subagent)"
+            f"- Auxiliary model: {auxiliary_provider}/{auxiliary_model_name}  (background calls + task subagent)"
         )
 
     tool_names = sorted(
-        name
-        for t in (agent.tools or [])
-        if isinstance(t, Tool) and t.functions
-        for name in t.functions.keys()
+        name for t in (agent.tools or []) if isinstance(t, Tool) and t.functions for name in t.functions.keys()
     )
     lines.append(f"- Active tools: {', '.join(tool_names) if tool_names else 'none'}")
 
@@ -660,21 +661,18 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     except Exception:
         pass
     lines.append(f"- Subagent types: {', '.join(subagent_types)}")
-    lines.append(
-        "- Slash commands: /status /model /tools /skills /agents /config "
-        "/cost /permissions /help /exit"
-    )
+    lines.append("- Slash commands: /status /model /tools /skills /agents /config /cost /permissions /help /exit")
     lines.append("- To extend: /skills install <name>, /agents create <name>")
 
     return "\n".join(lines)
 
 
 def create_agent(
-    agent_config: dict, 
-    extra_tools: Optional[List] = None, 
-    workspace: Optional[Workspace] = None, 
+    agent_config: dict,
+    extra_tools: Optional[List] = None,
+    workspace: Optional[Workspace] = None,
     skills_registry=None,
-    ask_user_question_callback=None, 
+    ask_user_question_callback=None,
     enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
 ):
@@ -726,6 +724,20 @@ def create_agent(
     # Build extra tools list
     work_dir = agent_config.get("work_dir")
 
+    # Resolve an explicit user_id for the agent so session storage is keyed
+    # deterministically. The CLI has no first-class user concept, so it falls
+    # back to the workspace's user_id (if any) or "default". Passing this
+    # explicitly (instead of leaving user_id=None) makes the CLI's session
+    # directory match the Web gateway's (which uses settings.default_user_id,
+    # "default") without relying on downstream None->"default" normalization.
+    from agentica.workspace import Workspace as _Workspace
+
+    cli_user_id = agent_config.get("user_id")
+    if cli_user_id is None and workspace is not None:
+        cli_user_id = workspace.user_id
+    if cli_user_id is None:
+        cli_user_id = _Workspace.DEFAULT_USER_ID
+
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
@@ -737,10 +749,12 @@ def create_agent(
     # returning output, not just a "mark due" that silently needs the daemon.
     cron_job_runner = None
     if enable_cron_immediate_run:
+
         def cron_job_runner(job):
             import asyncio
             from agentica.cron.scheduler import _execute_job
             from agentica.cron.cli_runner import CliAgentRunner, build_cli_agent_factory
+
             factory = build_cli_agent_factory(agent_config, extra_tools, workspace, skills_registry)
             runner = CliAgentRunner(factory)
             return asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
@@ -758,9 +772,16 @@ def create_agent(
         model=model,
         auxiliary_model=auxiliary_model,
         task_model=task_model,
+        description=(
+            "You are DeepAgent, an interactive CLI coding agent running in the "
+            "user's terminal. You help with software engineering tasks: reading "
+            "and editing files, running commands, and iterating until the task "
+            "is done."
+        ),
         tools=cli_tools,  # self-management + user-specified extra tools
         work_dir=work_dir,
         workspace=workspace,
+        user_id=cli_user_id,
         session_id=agent_config.get("session_id") or _generate_session_id(),
         debug=agent_config["debug"],
         enable_experience_capture=agent_config.get("enable_experience_capture", True),

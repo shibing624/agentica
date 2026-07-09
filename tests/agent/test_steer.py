@@ -3,6 +3,7 @@
 @author: XuMing(xuming624@qq.com)
 @description: Unit tests for mid-run steering (agent.steer + post-tool injection).
 """
+
 import os
 import sys
 import unittest
@@ -16,8 +17,13 @@ from agentica.model.message import Message
 
 
 class TestSteerBuffer(unittest.TestCase):
+    # steer() only accepts guidance while a run is active (the Runner opens the
+    # window via _begin_steer_window and closes it via _end_steer_window). This
+    # gate prevents stale guidance from leaking into an unrelated later run.
+    # Tests open the window explicitly to exercise the in-run path.
     def test_steer_buffers_and_drains(self):
         agent = Agent()
+        agent._begin_steer_window()
         self.assertTrue(agent.steer("keep it compatible"))
         self.assertEqual(agent._drain_steer(), ["keep it compatible"])
         # Drained -> empty on next call.
@@ -25,12 +31,21 @@ class TestSteerBuffer(unittest.TestCase):
 
     def test_empty_steer_ignored(self):
         agent = Agent()
+        agent._begin_steer_window()
         self.assertFalse(agent.steer(""))
         self.assertFalse(agent.steer("   "))
         self.assertEqual(agent._drain_steer(), [])
 
+    def test_steer_rejected_when_not_running(self):
+        # Outside a run window steer() must return False (caller falls back to
+        # queuing a fresh turn) and must NOT buffer anything.
+        agent = Agent()
+        self.assertFalse(agent.steer("no active run"))
+        self.assertEqual(agent._drain_steer(), [])
+
     def test_multiple_steers_preserve_order(self):
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("first")
         agent.steer("second")
         self.assertEqual(agent._drain_steer(), ["first", "second"])
@@ -41,7 +56,9 @@ class TestSteerInjection(unittest.TestCase):
 
     def test_inject_steering_appends_guidance(self):
         from agentica.runner import Runner
+
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("don't change the API")
         messages = [Message(role="user", content="do the task")]
         Runner._inject_steering(messages, agent)
@@ -51,6 +68,7 @@ class TestSteerInjection(unittest.TestCase):
 
     def test_inject_noop_without_steer(self):
         from agentica.runner import Runner
+
         agent = Agent()
         messages = [Message(role="user", content="do the task")]
         Runner._inject_steering(messages, agent)
@@ -58,7 +76,9 @@ class TestSteerInjection(unittest.TestCase):
 
     def test_steer_consumed_once(self):
         from agentica.runner import Runner
+
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("guidance")
         messages = []
         Runner._inject_steering(messages, agent)
@@ -66,12 +86,18 @@ class TestSteerInjection(unittest.TestCase):
         injected = [m for m in messages if "guidance" in (m.content or "")]
         self.assertEqual(len(injected), 1)
 
-    def test_leftover_survives_to_next_run(self):
-        # If a run ends before flush, guidance stays buffered for the next run.
+    def test_leftover_survives_until_injected(self):
+        # Guidance steered during a run stays buffered until an inference drains
+        # it. (Under the run-window model, _begin_steer_window clears stale
+        # guidance at run start, so "leftover" only means "not yet injected in
+        # THIS run" — it is drained on the next inference, not carried across
+        # runs.)
         from agentica.runner import Runner
+
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("later")
-        # No inference happened (buffer untouched) -> still there.
+        # No inference happened yet (buffer untouched) -> still there.
         messages = []
         Runner._inject_steering(messages, agent)
         self.assertEqual(len([m for m in messages if "later" in (m.content or "")]), 1)
@@ -81,7 +107,9 @@ class TestSteerInjection(unittest.TestCase):
         # folded into that tool result instead of appending a new user message,
         # so role alternation stays intact (no double user turn).
         from agentica.runner import Runner
+
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("focus on the edge cases")
         messages = [
             Message(role="user", content="run the task"),
@@ -100,7 +128,9 @@ class TestSteerInjection(unittest.TestCase):
         # Regression: must not create two consecutive user-role turns after a
         # tool result (breaks Anthropic alternation on live call and on replay).
         from agentica.runner import Runner
+
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("g")
         messages = [
             Message(role="tool", content="out", tool_call_id="c1", tool_name="t"),
@@ -110,7 +140,9 @@ class TestSteerInjection(unittest.TestCase):
 
     def test_multiple_steers_folded_together(self):
         from agentica.runner import Runner
+
         agent = Agent()
+        agent._begin_steer_window()
         agent.steer("first")
         agent.steer("second")
         messages = [Message(role="tool", content="out", tool_call_id="c1", tool_name="t")]

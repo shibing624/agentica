@@ -34,14 +34,40 @@ _MAX_TOKENS_RETRY_SAFETY_MARGIN = 64
 try:
     from anthropic import AsyncAnthropic as AnthropicClient
     from anthropic.types import (
-        Message as AnthropicMessage, TextBlock, ToolUseBlock, Usage, TextDelta,
-        ThinkingBlock, RedactedThinkingBlock, ThinkingDelta, SignatureDelta,
+        Message as AnthropicMessage,
+        TextBlock,
+        ToolUseBlock,
+        Usage,
+        TextDelta,
+        ThinkingBlock,
+        RedactedThinkingBlock,
+        ThinkingDelta,
+        SignatureDelta,
     )
     from anthropic.lib.streaming._types import (
         MessageStopEvent,
         RawContentBlockDeltaEvent,
         ContentBlockStopEvent,
     )
+
+    # The high-level ``messages.stream()`` helper yields *parsed* event
+    # subtypes (ParsedContentBlockStopEvent / ParsedMessageStopEvent) that do
+    # NOT inherit from the base ContentBlockStopEvent / MessageStopEvent. If we
+    # only isinstance-check the base types, tool_use blocks and stop_reason are
+    # silently dropped from the stream (text still flows, but tools never fire).
+    # Import the parsed variants and match against both. Guard with try/except
+    # so older SDKs without these names still import.
+    try:
+        from anthropic.lib.streaming._types import (
+            ParsedContentBlockStopEvent,
+            ParsedMessageStopEvent,
+        )
+    except ImportError:
+        ParsedContentBlockStopEvent = None
+        ParsedMessageStopEvent = None
+    # Build isinstance tuples that include only the classes that resolved.
+    _CONTENT_BLOCK_STOP_TYPES = tuple(t for t in (ContentBlockStopEvent, ParsedContentBlockStopEvent) if t is not None)
+    _MESSAGE_STOP_TYPES = tuple(t for t in (MessageStopEvent, ParsedMessageStopEvent) if t is not None)
 except (ModuleNotFoundError, ImportError):
     AnthropicClient = None
     AnthropicMessage = None
@@ -56,6 +82,10 @@ except (ModuleNotFoundError, ImportError):
     MessageStopEvent = None
     RawContentBlockDeltaEvent = None
     ContentBlockStopEvent = None
+    ParsedContentBlockStopEvent = None
+    ParsedMessageStopEvent = None
+    _CONTENT_BLOCK_STOP_TYPES = ()
+    _MESSAGE_STOP_TYPES = ()
 
 
 @dataclass
@@ -91,17 +121,48 @@ class Claude(Model):
     stop_sequences: Optional[List[str]] = None
     top_p: Optional[float] = None
     top_k: Optional[int] = None
-    # Extended thinking: {"type": "enabled", "budget_tokens": 10000}
+    # Extended thinking. Two shapes are supported:
+    #   * Fixed budget (older models): {"type": "enabled", "budget_tokens": N}
+    #   * Adaptive (opus-4-7+/sonnet-4-6+): {"type": "adaptive"} paired with
+    #     output_config.effort. Set this directly for full control, or use the
+    #     ``reasoning_effort`` shortcut below which builds the adaptive form.
     thinking: Optional[Dict[str, Any]] = None
+    # Adaptive-thinking effort shortcut: "low"|"medium"|"high"|"xhigh"|"max".
+    # When set (and ``thinking`` is not already given), prepare_request_kwargs
+    # enables adaptive thinking via thinking={"type":"adaptive"} +
+    # output_config={"effort": ...}. Adaptive thinking requires temperature=1,
+    # which is enforced automatically. Mirrors the CLI reasoning_effort knob so
+    # one setting controls thinking depth across all providers.
+    reasoning_effort: Optional[str] = None
+    # Adaptive-thinking display: "summarized" (return a thinking summary) or
+    # "omitted" (hide thinking). Only meaningful when adaptive thinking is on.
+    # Model default varies: opus-4-7/opus-4-8 default to "omitted" (thinking is
+    # NOT surfaced regardless of what you pass), while opus-4-6 / sonnet-4-6
+    # default to "summarized". Set this to force a value when the model supports
+    # it. Rides along in extra_body next to output_config.
+    thinking_display: Optional[str] = None
     request_params: Optional[Dict[str, Any]] = None
 
     # Client parameters
     api_key: Optional[str] = None
+    # Custom Anthropic-compatible endpoint (e.g. a corporate proxy that
+    # forwards /v1/messages). When set, it is passed to the SDK client and the
+    # bearer Authorization header is seeded (some proxies auth by header
+    # rather than the x-api-key the SDK sends by default).
+    base_url: Optional[str] = None
     timeout: Optional[float] = None
+    default_headers: Optional[Dict[str, str]] = None
     client_params: Optional[Dict[str, Any]] = None
 
     # Anthropic client
     client: Optional[AnthropicClient] = None
+    # The event loop the cached client is bound to. AsyncAnthropic binds its
+    # httpx pool to the loop it was created on; the CLI runs each turn on a
+    # fresh loop (run_stream_sync -> asyncio.run), so we rebuild the client when
+    # the loop changes/closes instead of reusing a pool bound to a dead loop.
+    # A hard reference (not id()) is required: loop id()s get recycled after GC,
+    # so a stale-but-same-id loop would be mistaken for the live one.
+    _client_loop: Optional[Any] = field(default=None, init=False, repr=False, compare=False)
 
     # Structured output support
     use_structured_outputs: bool = False
@@ -141,7 +202,25 @@ class Claude(Model):
         if AnthropicClient is None:
             raise ImportError("`anthropic` not installed. Please install using `pip install anthropic`")
 
-        if self.client:
+        # Reuse the client only within the SAME event loop. AsyncAnthropic binds
+        # its httpx connection pool to the loop it was created on; the CLI's
+        # run_stream_sync runs each turn on a fresh loop (asyncio.run), so a
+        # client cached across runs would carry a pool bound to a now-closed
+        # loop — reuse would crash and, at GC time, the stale pool's aclose()
+        # prints "RuntimeError: Event loop is closed". Reuse the client only
+        # when the current running loop is the exact same object we built it on
+        # (identity, not id(), since loop id()s are recycled after GC).
+        # An externally-injected client (tests / manual override) has no
+        # associated _client_loop; honour it unconditionally. Otherwise reuse
+        # the auto-built client only while the loop it was created on is still
+        # the current, open loop.
+        if self.client is not None and self._client_loop is None:
+            return self.client
+        try:
+            _loop: Optional[Any] = asyncio.get_running_loop()
+        except RuntimeError:
+            _loop = None
+        if self.client is not None and _loop is not None and self._client_loop is _loop and not _loop.is_closed():
             return self.client
 
         self.api_key = self.api_key or getenv("ANTHROPIC_API_KEY")
@@ -152,11 +231,25 @@ class Claude(Model):
         # Set client parameters if they are provided
         if self.api_key:
             _client_params["api_key"] = self.api_key
+        # Custom endpoint (corporate proxy). Also seed the bearer header —
+        # proxies like Venus authenticate via Authorization: Bearer <token>
+        # rather than the SDK's default x-api-key, so send both to be safe.
+        if self.base_url:
+            _client_params["base_url"] = self.base_url
+        _headers: Dict[str, str] = {}
+        if self.base_url and self.api_key:
+            _headers["Authorization"] = f"Bearer {self.api_key}"
+        if self.default_headers:
+            _headers.update(self.default_headers)
+        if _headers:
+            _client_params["default_headers"] = _headers
         if self.timeout is not None:
             _client_params["timeout"] = self.timeout
         if self.client_params:
             _client_params.update(self.client_params)
-        return AnthropicClient(**_client_params)
+        self.client = AnthropicClient(**_client_params)
+        self._client_loop = _loop
+        return self.client
 
     @property
     def request_kwargs(self) -> Dict[str, Any]:
@@ -170,7 +263,9 @@ class Claude(Model):
         # Resolve the output cap: positive user-passed value, else per-model
         # ceiling, optionally clamped to context_window - 1 for small endpoints.
         _request_params["max_tokens"] = resolve_anthropic_messages_max_tokens(
-            self.max_tokens, self.id, context_length=self.context_window,
+            self.max_tokens,
+            self.id,
+            context_length=self.context_window,
         )
         # Use `is not None` for numeric sampling params so legitimate falsy
         # values (temperature=0 deterministic, top_p=0/top_k=0) reach the API
@@ -183,8 +278,21 @@ class Claude(Model):
             _request_params["top_p"] = self.top_p
         if self.top_k is not None:
             _request_params["top_k"] = self.top_k
+        # Thinking configuration. Priority: an explicit ``thinking`` dict wins;
+        # otherwise ``reasoning_effort`` enables adaptive thinking.
         if self.thinking:
             _request_params["thinking"] = self.thinking
+        elif self.reasoning_effort:
+            # Adaptive thinking (opus-4-7+/sonnet-4-6+): thinking.type=adaptive
+            # plus output_config.effort. output_config is not a native SDK param,
+            # so it rides along in extra_body (the SDK forwards it verbatim).
+            # Adaptive thinking requires temperature=1 — enforce it here so a
+            # stale temperature can't 400 the request.
+            _request_params["thinking"] = {"type": "adaptive"}
+            _extra = _request_params.get("extra_body") or {}
+            _extra["output_config"] = {"effort": self.reasoning_effort}
+            _request_params["extra_body"] = _extra
+            _request_params["temperature"] = 1
         if self.request_params:
             _request_params.update(self.request_params)
         return _request_params
@@ -192,13 +300,18 @@ class Claude(Model):
     def describe_thinking_mode(self) -> str:
         """Describe Anthropic extended-thinking configuration.
 
-        ``self.thinking`` is shaped like ``{"type": "enabled", "budget_tokens": 10000}``.
+        ``self.thinking`` is shaped like ``{"type": "enabled", "budget_tokens": N}``
+        (fixed budget) or ``{"type": "adaptive"}`` (paired with reasoning_effort).
         """
         if isinstance(self.thinking, dict):
             t = self.thinking.get("type")
+            if t == "adaptive":
+                return f"adaptive(effort={self.reasoning_effort})" if self.reasoning_effort else "adaptive"
             budget = self.thinking.get("budget_tokens")
             if t == "enabled":
                 return f"on(budget={budget})" if budget else "on"
+        if self.reasoning_effort:
+            return f"adaptive(effort={self.reasoning_effort})"
         return "off"
 
     async def format_messages(self, messages: List[Message]) -> Tuple[List[Dict[str, str]], str]:
@@ -216,8 +329,21 @@ class Claude(Model):
 
         for idx, message in enumerate(messages):
             content = message.content or ""
-            if message.role == "system" or (message.role != "user" and idx in [0, 1]):
+            if message.role == "system" or (
+                message.role != "user"
+                and message.role != "assistant"
+                and idx in [0, 1]
+                and not getattr(message, "tool_call_id", None)
+            ):
                 system_messages.append(content)  # type: ignore
+            elif message.role == "tool":
+                # OpenAI-style tool-result message (role="tool"). Anthropic only
+                # allows "user"/"assistant", and this class already emits tool
+                # results as a "user" message carrying tool_result blocks (see
+                # format_function_call_results). The shared Runner may leave a
+                # duplicate role="tool" copy in history; skip it so we don't send
+                # an invalid role or a duplicate tool_result for the same id.
+                continue
             else:
                 if isinstance(content, str):
                     content = [{"type": "text", "text": content}]
@@ -230,22 +356,53 @@ class Claude(Model):
 
                 chat_messages.append({"role": message.role, "content": content})  # type: ignore
 
-        # system_and_3 strategy: cache system prompt (in prepare_request_kwargs)
-        # + last 3 non-system messages for rolling cache window.
-        # Anthropic allows max 4 cache breakpoints total.
+        # system_and_3 strategy: cache the system prompt (breakpoint added in
+        # prepare_request_kwargs) + the last 3 messages for a rolling cache
+        # window. Anthropic caps the WHOLE request at 4 cache_control blocks.
+        #
+        # Two subtleties this must handle to avoid a 400 "max 4 blocks" error:
+        #   1. ``messages`` is a mutable list reused across turns; a message may
+        #      already carry a cache_control block from a previous request's
+        #      formatting. Re-adding one on the same message would double-count.
+        #   2. A single message's content list may already end with a block that
+        #      has cache_control (e.g. a tool_result). We must not stack a second.
+        # So we first STRIP every existing cache_control block, then re-apply at
+        # most 3 (system takes the 4th), newest-first.
         if self.enable_cache_control and chat_messages:
-            for msg in chat_messages[-3:]:
+            self._strip_cache_control(chat_messages)
+            applied = 0
+            # Newest messages first so the freshest context stays cached when we
+            # hit the budget. Budget is 3 here; the system prompt takes the 4th.
+            for msg in reversed(chat_messages):
+                if applied >= 3:
+                    break
                 content = msg.get("content")
                 if isinstance(content, list) and content:
                     last_block = content[-1]
                     if isinstance(last_block, dict):
                         last_block["cache_control"] = {"type": "ephemeral"}
+                        applied += 1
                 elif isinstance(content, str) and content:
-                    msg["content"] = [
-                        {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
-                    ]
+                    msg["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                    applied += 1
 
         return chat_messages, " ".join(system_messages)
+
+    @staticmethod
+    def _strip_cache_control(chat_messages: List[Dict[str, Any]]) -> None:
+        """Remove any existing cache_control blocks from message content.
+
+        ``messages`` is reused across turns, so a message formatted in a prior
+        request may already carry a cache_control breakpoint. Stripping first
+        guarantees we re-apply a clean, bounded set (Anthropic caps the request
+        at 4 total) instead of accumulating one per turn until the API 400s.
+        """
+        for msg in chat_messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "cache_control" in block:
+                        block.pop("cache_control", None)
 
     async def add_image(self, image: Union[str, bytes]) -> Optional[Dict[str, Any]]:
         """
@@ -396,9 +553,7 @@ class Claude(Model):
             tools.append(tool)
         return tools
 
-    def _maybe_recover_max_tokens(
-        self, error: Exception, request_kwargs: Dict[str, Any]
-    ) -> bool:
+    def _maybe_recover_max_tokens(self, error: Exception, request_kwargs: Dict[str, Any]) -> bool:
         """Detect "max_tokens too large given prompt" and adjust in-place.
 
         Returns True when the caller should retry the request with the
@@ -435,13 +590,17 @@ class Claude(Model):
 
         try:
             return await self.get_client().messages.create(
-                model=self.id, messages=chat_messages, **request_kwargs,
+                model=self.id,
+                messages=chat_messages,
+                **request_kwargs,
             )
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
             if self._maybe_recover_max_tokens(e, request_kwargs):
                 return await self.get_client().messages.create(
-                    model=self.id, messages=chat_messages, **request_kwargs,
+                    model=self.id,
+                    messages=chat_messages,
+                    **request_kwargs,
                 )
             raise
 
@@ -466,12 +625,12 @@ class Claude(Model):
         chat_messages, system_message = await self.format_messages(messages)
         request_kwargs = self.prepare_request_kwargs(system_message)
         return self.get_client().messages.stream(
-            model=self.id, messages=chat_messages, **request_kwargs,
+            model=self.id,
+            messages=chat_messages,
+            **request_kwargs,
         )
 
-    async def _open_stream_with_recovery(
-        self, messages: List[Message]
-    ) -> Tuple[Any, Any]:
+    async def _open_stream_with_recovery(self, messages: List[Message]) -> Tuple[Any, Any]:
         """Open an Anthropic stream, retrying once on max_tokens-too-large.
 
         Returns ``(stream_mgr, stream)`` where ``stream_mgr`` is the context
@@ -493,7 +652,9 @@ class Claude(Model):
 
         def _open():
             return self.get_client().messages.stream(
-                model=self.id, messages=chat_messages, **request_kwargs,
+                model=self.id,
+                messages=chat_messages,
+                **request_kwargs,
             )
 
         async def _try_enter() -> Tuple[Any, Any]:
@@ -515,13 +676,17 @@ class Claude(Model):
                     # do not consume retry budget for transient bucket.
                     return await _try_enter()
                 if attempt < max_retries and default_is_parser_error(
-                    e, extra_substrings=self.extra_retryable_substrings,
+                    e,
+                    extra_substrings=self.extra_retryable_substrings,
                 ):
-                    wait = 0.5 * (2 ** attempt) + _random.uniform(0.0, 0.25)
+                    wait = 0.5 * (2**attempt) + _random.uniform(0.0, 0.25)
                     logger.warning(
-                        "[stream-retry] anthropic/%s open attempt %d/%d failed, "
-                        "retrying in %.2fs: %s",
-                        self.id, attempt + 1, max_retries + 1, wait, e,
+                        "[stream-retry] anthropic/%s open attempt %d/%d failed, retrying in %.2fs: %s",
+                        self.id,
+                        attempt + 1,
+                        max_retries + 1,
+                        wait,
+                        e,
                     )
                     await _asyncio.sleep(wait)
                     attempt += 1
@@ -529,10 +694,10 @@ class Claude(Model):
                 raise
 
     def update_usage_metrics(
-            self,
-            assistant_message: Message,
-            usage: Optional[Usage] = None,
-            metrics: Metrics = Metrics(),
+        self,
+        assistant_message: Message,
+        usage: Optional[Usage] = None,
+        metrics: Metrics = Metrics(),
     ) -> None:
         """
         Update the usage metrics for the assistant message.
@@ -564,6 +729,7 @@ class Claude(Model):
 
             # Build structured RequestUsage entry
             from agentica.model.usage import RequestUsage, TokenDetails
+
             entry = RequestUsage(
                 input_tokens=metrics.input_tokens,
                 output_tokens=metrics.output_tokens,
@@ -654,7 +820,13 @@ class Claude(Model):
         # Update assistant message if tool calls are present
         if len(message_data.tool_calls) > 0:
             assistant_message.tool_calls = message_data.tool_calls
-            assistant_message.content = message_data.response_block
+            # Store content blocks as plain dicts rather than raw anthropic SDK
+            # objects: the SDK models carry internal fields (e.g. __json_buf)
+            # that trip pydantic serializer warnings on later model_dump()
+            # (session persistence / logging), and the API accepts dicts too.
+            assistant_message.content = [
+                b.model_dump(exclude_none=True) if hasattr(b, "model_dump") else b for b in message_data.response_block
+            ]
 
         # Update usage metrics
         self.update_usage_metrics(assistant_message, message_data.response_usage, metrics)
@@ -686,7 +858,7 @@ class Claude(Model):
         return function_calls_to_run
 
     def format_function_call_results(
-            self, function_call_results: List[Message], tool_ids: List[str], messages: List[Message]
+        self, function_call_results: List[Message], tool_ids: List[str], messages: List[Message]
     ) -> None:
         """
         Handle the results of function calls.
@@ -709,7 +881,10 @@ class Claude(Model):
             messages.append(Message(role="user", content=fc_responses))
 
     def parse_tool_calls(
-        self, assistant_message: Message, messages: List[Message], tool_role: str = "tool",
+        self,
+        assistant_message: Message,
+        messages: List[Message],
+        tool_role: str = "tool",
     ) -> tuple:
         """Parse tool calls for Anthropic format.
 
@@ -736,19 +911,22 @@ class Claude(Model):
         return function_calls_to_run, {"tool_ids": tool_ids}
 
     def format_tool_results(
-        self, function_call_results: List[Message], messages: List[Message], provider_metadata: dict,
+        self,
+        function_call_results: List[Message],
+        messages: List[Message],
+        provider_metadata: dict,
     ) -> None:
         """Format tool results for Anthropic (role='user' with tool_result content blocks)."""
         tool_ids = provider_metadata.get("tool_ids", [])
         self.format_function_call_results(function_call_results, tool_ids, messages)
 
     async def handle_tool_calls(
-            self,
-            assistant_message: Message,
-            messages: List[Message],
-            model_response: ModelResponse,
-            response_content: str,
-            tool_ids: List[str],
+        self,
+        assistant_message: Message,
+        messages: List[Message],
+        model_response: ModelResponse,
+        response_content: str,
+        tool_ids: List[str],
     ) -> Optional[ModelResponse]:
         """
         Handle tool calls in the assistant message.
@@ -770,8 +948,8 @@ class Claude(Model):
             function_call_results: List[Message] = []
 
             async for _ in self.run_function_calls(
-                    function_calls=function_calls_to_run,
-                    function_call_results=function_call_results,
+                function_calls=function_calls_to_run,
+                function_call_results=function_call_results,
             ):
                 pass
 
@@ -850,9 +1028,7 @@ class Claude(Model):
         # -*- Handle tool calls
         # Expose stop_reason so Runner's agentic loop can detect
         # max_tokens truncation (stop_reason == "max_tokens") for recovery.
-        model_response.finish_reason = (
-            "length" if response.stop_reason == "max_tokens" else response.stop_reason
-        )
+        model_response.finish_reason = "length" if response.stop_reason == "max_tokens" else response.stop_reason
         self.last_finish_reason = model_response.finish_reason
         assistant_message.finish_reason = model_response.finish_reason
 
@@ -868,10 +1044,10 @@ class Claude(Model):
         return model_response
 
     async def handle_stream_tool_calls(
-            self,
-            assistant_message: Message,
-            messages: List[Message],
-            tool_ids: List[str],
+        self,
+        assistant_message: Message,
+        messages: List[Message],
+        tool_ids: List[str],
     ) -> AsyncIterator[ModelResponse]:
         """
         Parse and run function calls from the assistant message.
@@ -890,7 +1066,7 @@ class Claude(Model):
             function_call_results: List[Message] = []
 
             async for intermediate_model_response in self.run_function_calls(
-                    function_calls=function_calls_to_run, function_call_results=function_call_results
+                function_calls=function_calls_to_run, function_call_results=function_call_results
             ):
                 yield intermediate_model_response
 
@@ -923,7 +1099,7 @@ class Claude(Model):
                     elif isinstance(delta.delta, SignatureDelta):
                         pass
 
-                if isinstance(delta, ContentBlockStopEvent):
+                if isinstance(delta, _CONTENT_BLOCK_STOP_TYPES):
                     if isinstance(delta.content_block, ToolUseBlock):
                         tool_use = delta.content_block
                         tool_name = tool_use.name
@@ -940,15 +1116,23 @@ class Claude(Model):
                                 "id": tool_use.id,
                             }
                         )
-                    message_data.response_block.append(delta.content_block)
+                    # Store the assistant content block as a plain dict, not the
+                    # raw anthropic SDK object. The SDK's Parsed*/ToolUseBlock
+                    # models carry internal fields (e.g. __json_buf) that trip
+                    # pydantic serializer warnings when this Message is later
+                    # model_dump()'d for session persistence / logging. A dict is
+                    # also what the Anthropic API accepts on the next request.
+                    _block = delta.content_block
+                    if hasattr(_block, "model_dump"):
+                        message_data.response_block.append(_block.model_dump(exclude_none=True))
+                    else:
+                        message_data.response_block.append(_block)
 
-                if isinstance(delta, MessageStopEvent):
+                if isinstance(delta, _MESSAGE_STOP_TYPES):
                     message_data.response_usage = delta.message.usage
                     # Capture stop_reason: "max_tokens" → "length" for consistency with OpenAI
                     _stop = delta.message.stop_reason
-                    self.last_finish_reason = (
-                        "length" if _stop == "max_tokens" else _stop
-                    )
+                    self.last_finish_reason = "length" if _stop == "max_tokens" else _stop
         finally:
             await stream_mgr.__aexit__(None, None, None)
         yield ModelResponse(content="\n\n")
@@ -981,7 +1165,6 @@ class Claude(Model):
 
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             async for _resp in self.handle_stream_tool_calls(assistant_message, messages, message_data.tool_ids):
-
                 yield _resp
 
     def get_tool_call_prompt(self) -> Optional[str]:

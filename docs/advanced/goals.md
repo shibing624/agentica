@@ -2,6 +2,8 @@
 
 让 Agent **持续向一个用户目标推进**，每轮结束自动判断是否完成，没完成就续跑——直到 judge 判 done、预算耗尽、或用户主动停下。CLI 用户用 `/goal xxx`，SDK 用户一行 `await agent.run_goal(...)`。
 
+> **主成本闸是 `token_budget` / `wall_clock_budget_sec`；`turn_budget`（默认 100，不可关）只是防 runaway 的安全网，不是成本预算。** 便宜工具在 100 轮内就能烧掉大量 token，别指望 `turn_budget` 控成本——生产 / 长任务务必显式设 `token_budget`。
+
 > 本特性已包含 P0 基础环 + P1 S/A 档（Runner 锚点、token/wall-clock 预算、`update_goal` 受限工具、`goal.*` 事件）。设计文档：`docs/learn_cc/goal.md`（内部）。
 
 ---

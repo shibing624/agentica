@@ -172,6 +172,19 @@ class TaskAnchor:
                 lines.append(f"  - {item}")
         if self.next_step_hint:
             lines.append(f"NEXT STEP HINT: {self.next_step_hint}")
+        # Standing-goal completion contract. This block is re-rendered every
+        # turn (including turn 1), so it is the earliest place to tell the
+        # model HOW to finish: prove completion with the verify_completion
+        # tool rather than just narrating "done". The run_goal loop only ends
+        # when verify_completion passes (or a budget cap is hit).
+        lines.append(
+            "COMPLETION: Do not stop until done. When you believe the goal is "
+            "met, call the `verify_completion` tool to PROVE it — for code use "
+            "mode=\"test\" with a verify_command like `pytest ...` (exit 0 == "
+            "done); for other deliverables use mode=\"criteria\". Only a passing "
+            "verify_completion ends the task; if it fails, fix the gap and "
+            "verify again. If blocked, call update_goal(status=\"paused\")."
+        )
         lines.append("</original_task>")
         return "\n".join(lines)
 

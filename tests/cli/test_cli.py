@@ -417,8 +417,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertTrue(sep_lines, "separator line must exist")
         # The rendered line (without ANSI) should be substantially shorter
         # than the console width — fixed 4+1+summary+1+4 layout.
-        self.assertLess(len(sep_lines[-1]), 60,
-                        "separator must be fixed-width, not stretch to full console width")
+        self.assertLess(len(sep_lines[-1]), 60, "separator must be fixed-width, not stretch to full console width")
 
     def test_stream_display_manager_suppresses_micro_compact(self):
         from agentica.cli.display import StreamDisplayManager
@@ -477,13 +476,11 @@ class TestCLIHelpers(unittest.TestCase):
 
         dm.stream_response("# Title")
         pre_final = buf.getvalue()
-        self.assertNotIn("Title", pre_final,
-                         "markdown mode should buffer stream text until finalize")
+        self.assertNotIn("Title", pre_final, "markdown mode should buffer stream text until finalize")
 
         dm.finalize()
         post_final = buf.getvalue()
-        self.assertIn("Title", post_final,
-                      "finalize must flush the buffered markdown")
+        self.assertIn("Title", post_final, "finalize must flush the buffered markdown")
         # Assistant ▏ gutter no longer decorates markdown — plain output
         self.assertNotIn("▏", post_final)
 
@@ -621,7 +618,10 @@ class TestCLIHelpers(unittest.TestCase):
         fake.width = 80
         dm = StreamDisplayManager(fake)
         dm.display_tool_result(
-            "read_file", "FileNotFoundError: nope", is_error=True, elapsed=0.01,
+            "read_file",
+            "FileNotFoundError: nope",
+            is_error=True,
+            elapsed=0.01,
             tool_args={"file_path": "x.py"},
         )
         text = "\n".join(str(c) for c in fake.print.call_args_list)
@@ -721,8 +721,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("created", text)
         self.assertIn("(120ms)", text)
         # A diff Syntax block is rendered; for a new file it's all additions.
-        syntax_args = [c.args[0] for c in fake.print.call_args_list
-                       if c.args and "Syntax" in type(c.args[0]).__name__]
+        syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertTrue(syntax_args, "expected a diff Syntax block")
         self.assertIn("line 0", getattr(syntax_args[0], "code", ""))
 
@@ -747,8 +746,7 @@ class TestCLIHelpers(unittest.TestCase):
                 elapsed=0.10,
                 tool_args={"file_path": path, "content": new_content},
             )
-        syntax_args = [c.args[0] for c in fake.print.call_args_list
-                       if c.args and "Syntax" in type(c.args[0]).__name__]
+        syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertTrue(syntax_args)
         code = getattr(syntax_args[0], "code", "")
         # Real diff: -False / +True, and unchanged KEEP has no +/-.
@@ -758,50 +756,53 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("updated", text)
 
     def test_display_execute_head_tail_window(self):
-        """execute shows head 6 + tail 4 with the middle hidden."""
+        """execute shows up to 20 lines inline; beyond that head 10 + tail 10 with the middle hidden."""
         from agentica.cli.display import StreamDisplayManager
 
-        # 10 lines: head+tail = 10, so fully shown, no fold hint.
+        # 10 lines: <= 20, fully shown, no fold hint.
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
         dm.display_tool_result(
-            "execute", "\n".join(f"line {i}" for i in range(10)),
-            is_error=False, elapsed=0.1,
+            "execute",
+            "\n".join(f"line {i}" for i in range(10)),
+            is_error=False,
+            elapsed=0.1,
         )
         text = "\n".join(str(c) for c in fake.print.call_args_list)
-        self.assertNotIn("hidden lines", text)
+        self.assertNotIn("hidden", text)
+        self.assertNotIn("...", text)
 
-        # 12 lines: head 6 + tail 4 shown, 2 hidden in the middle.
+        # 30 lines: > 20, head 10 + tail 10 shown, 10 hidden in the middle.
         fake2 = MagicMock()
         fake2.width = 80
         dm2 = StreamDisplayManager(fake2)
         dm2.display_tool_result(
-            "execute", "\n".join(f"line {i}" for i in range(12)),
-            is_error=False, elapsed=0.1,
+            "execute",
+            "\n".join(f"line {i}" for i in range(30)),
+            is_error=False,
+            elapsed=0.1,
         )
         text2 = "\n".join(str(c) for c in fake2.print.call_args_list)
-        self.assertIn("2 hidden lines", text2)
         # Head and tail present; middle lines hidden.
         self.assertIn("line 0", text2)
-        self.assertIn("line 11", text2)
-        self.assertNotIn("line 6", text2)
-        self.assertNotIn("line 7", text2)
+        self.assertIn("line 29", text2)
+        self.assertNotIn("line 15", text2)
 
     def test_truncated_blocks_are_remembered_for_expand(self):
-        """Long user input and long tool output are stashed for Ctrl+O expansion."""
+        """Long execute output is stashed for Ctrl+O; user input is shown in full (not stashed)."""
         from agentica.cli import display as disp
         from agentica.cli.display import StreamDisplayManager
 
-        # Long user input (>12 lines) is remembered.
+        # Long user input (>20 lines) is NOT remembered — it is rendered in
+        # full inline, so there is nothing to fold behind Ctrl+O.
         disp.clear_truncated_blocks()
         long_input = "\n".join(f"line {i}" for i in range(20))
         disp.display_user_message(long_input)
         block = disp.get_last_truncated()
-        self.assertIn("User input", block["title"])
-        self.assertEqual(block["content"], long_input)
+        self.assertEqual(block["content"], "")
 
-        # Long tool output (>head+tail) is remembered.
+        # Long execute output (>20 lines) IS remembered.
         long_output = "\n".join(f"out {i}" for i in range(50))
         fake = MagicMock()
         fake.width = 80
@@ -811,15 +812,10 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("execute", block["title"])
         self.assertEqual(block["content"], long_output)
 
-        # The long query survives StreamDisplayManager construction — the
-        # per-turn clear lives in display_user_message now, not __init__, so
-        # Ctrl+O expands BOTH the query and the tool result (regression guard:
-        # previously __init__'s clear wiped the query, so Ctrl+O showed only
-        # tool results).
+        # Only the execute block is remembered (the query was shown in full).
         blocks = disp.get_truncated_blocks()
-        self.assertEqual(len(blocks), 2)
-        self.assertIn("User input", blocks[0]["title"])
-        self.assertIn("execute", blocks[1]["title"])
+        self.assertEqual(len(blocks), 1)
+        self.assertIn("execute", blocks[0]["title"])
 
         # Short output is NOT remembered (no truncation → nothing to expand).
         disp.clear_truncated_blocks()
@@ -835,10 +831,8 @@ class TestCLIHelpers(unittest.TestCase):
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
-        dm.display_tool_result("execute", "\n".join(f"a{i}" for i in range(50)),
-                                is_error=False, elapsed=0.1)
-        dm.display_tool_result("execute", "\n".join(f"b{i}" for i in range(50)),
-                                is_error=False, elapsed=0.1)
+        dm.display_tool_result("execute", "\n".join(f"a{i}" for i in range(50)), is_error=False, elapsed=0.1)
+        dm.display_tool_result("execute", "\n".join(f"b{i}" for i in range(50)), is_error=False, elapsed=0.1)
         blocks = disp.get_truncated_blocks()
         self.assertEqual(len(blocks), 2)
         self.assertIn("a0", blocks[0]["content"])
@@ -1109,7 +1103,9 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertNotEqual(default_model.context_window, 42000)
         self.assertEqual(override_model.context_window, 42000)
 
-    def test_anthropic_accepts_top_p_skips_reasoning_effort(self):
+    def test_anthropic_accepts_top_p_and_reasoning_effort(self):
+        # Anthropic now takes reasoning_effort too: the Claude model maps it to
+        # adaptive thinking (thinking.type=adaptive + output_config.effort).
         from agentica.cli.config import get_model
 
         model = get_model(
@@ -1123,7 +1119,13 @@ class TestCLIModelParams(unittest.TestCase):
         )
         self.assertEqual(model.top_p, 0.8)
         self.assertEqual(model.context_window, 300000)
-        self.assertFalse(hasattr(model, "reasoning_effort"))
+        self.assertEqual(model.reasoning_effort, "high")
+        # And it must actually enable adaptive thinking in the request kwargs.
+        kwargs = model.request_kwargs
+        self.assertEqual(kwargs.get("thinking"), {"type": "adaptive"})
+        self.assertEqual(kwargs.get("extra_body", {}).get("output_config"), {"effort": "high"})
+        # Adaptive thinking requires temperature=1; it must be forced.
+        self.assertEqual(kwargs.get("temperature"), 1)
 
     def test_get_model_passes_extra_body_and_extra_headers(self):
         from agentica.cli.config import get_model
@@ -1387,6 +1389,7 @@ class TestCLIConfiguration(unittest.TestCase):
         clobbered whatever main/aux/tuning the active profile had stored.
         """
         from agentica import global_config as gc
+
         ctx = cli_commands.CommandContext(
             agent_config={
                 "model_provider": "deepseek",
@@ -1409,10 +1412,15 @@ class TestCLIConfiguration(unittest.TestCase):
                 patch.object(cli_commands, "get_model", return_value=MagicMock()),
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
             ):
-                gc.upsert_profile("default", {
-                    "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
-                    "base_url": "https://api.deepseek.com", "api_key": "sk-original",
-                })
+                gc.upsert_profile(
+                    "default",
+                    {
+                        "model_provider": "deepseek",
+                        "model_name": "deepseek-v4-flash",
+                        "base_url": "https://api.deepseek.com",
+                        "api_key": "sk-original",
+                    },
+                )
                 cli_commands._cmd_model(ctx, "openai/gpt-5")
                 saved = gc.get_profile("default")
 
@@ -1432,6 +1440,7 @@ class TestCLIConfiguration(unittest.TestCase):
         must survive intact.
         """
         from agentica import global_config as gc
+
         ctx = cli_commands.CommandContext(
             agent_config={
                 "model_provider": "deepseek",
@@ -1458,14 +1467,25 @@ class TestCLIConfiguration(unittest.TestCase):
                 # real ~/.agentica/projects/<repo>/profile file on every test run.
                 patch.object(cli_commands, "set_project_profile"),
             ):
-                gc.upsert_profile("deepseek", {
-                    "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
-                    "base_url": "https://api.deepseek.com", "api_key": "sk-ds",
-                }, make_active=True)
-                gc.upsert_profile("opus", {
-                    "model_provider": "anthropic", "model_name": "claude-opus-4",
-                    "base_url": "https://api.anthropic.com", "api_key": "sk-anthropic",
-                })
+                gc.upsert_profile(
+                    "deepseek",
+                    {
+                        "model_provider": "deepseek",
+                        "model_name": "deepseek-v4-flash",
+                        "base_url": "https://api.deepseek.com",
+                        "api_key": "sk-ds",
+                    },
+                    make_active=True,
+                )
+                gc.upsert_profile(
+                    "opus",
+                    {
+                        "model_provider": "anthropic",
+                        "model_name": "claude-opus-4",
+                        "base_url": "https://api.anthropic.com",
+                        "api_key": "sk-anthropic",
+                    },
+                )
                 cli_commands._cmd_model(ctx, "opus")
                 ds_after = gc.get_profile("deepseek")
                 opus_after = gc.get_profile("opus")
@@ -1488,13 +1508,20 @@ class TestCLIConfiguration(unittest.TestCase):
         up the wrong key and silently falls back to the stale global default.
         """
         from agentica import global_config as gc
+
         ctx = cli_commands.CommandContext(
             agent_config={
-                "model_provider": "openai", "model_name": "gpt-4o",
-                "base_url": "https://api.openai.com/v1", "api_key": "sk-a",
-                "debug": False, "work_dir": None,
+                "model_provider": "openai",
+                "model_name": "gpt-4o",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-a",
+                "debug": False,
+                "work_dir": None,
             },
-            current_agent=None, extra_tools=[], workspace=None, skills_registry=None,
+            current_agent=None,
+            extra_tools=[],
+            workspace=None,
+            skills_registry=None,
         )
         with tempfile.TemporaryDirectory() as tmp:
             home = os.path.join(tmp, "agentica_home")
@@ -1507,14 +1534,26 @@ class TestCLIConfiguration(unittest.TestCase):
                 patch.object(cli_commands, "get_model", return_value=MagicMock()),
                 patch.object(cli_commands, "create_agent", return_value=MagicMock()),
             ):
-                gc.upsert_profile("venus", {
-                    "model_provider": "openai", "model_name": "gpt-4o",
-                    "base_url": "https://api.openai.com/v1", "api_key": "sk-a",
-                }, make_active=True)
-                gc.upsert_profile("ark", {
-                    "model_provider": "openai", "model_name": "gpt-5",
-                    "base_url": "https://api.openai.com/v1", "api_key": "sk-b",
-                }, make_active=False)
+                gc.upsert_profile(
+                    "venus",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "gpt-4o",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-a",
+                    },
+                    make_active=True,
+                )
+                gc.upsert_profile(
+                    "ark",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "gpt-5",
+                        "base_url": "https://api.openai.com/v1",
+                        "api_key": "sk-b",
+                    },
+                    make_active=False,
+                )
 
                 cli_commands._cmd_model(ctx, "ark")
 
@@ -1524,9 +1563,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 )
                 # Sanity: the pre-fix call (no os.getcwd() fallback) misses the
                 # override and silently shows the stale global default instead.
-                stale_name, stale_source = gc.resolve_active_profile_name(
-                    work_dir=ctx.agent_config.get("work_dir")
-                )
+                stale_name, stale_source = gc.resolve_active_profile_name(work_dir=ctx.agent_config.get("work_dir"))
 
         self.assertEqual((fixed_name, fixed_source), ("ark", "project"))
         self.assertEqual((stale_name, stale_source), ("venus", "global"))
@@ -1896,6 +1933,7 @@ class TestPendingQueueTimestamps(unittest.TestCase):
 
         # tiny sleep so the new timestamp is strictly greater
         import time
+
         time.sleep(0.001)
 
         self.assertTrue(q.replace_index(1, "b2"))
@@ -1936,8 +1974,7 @@ class TestPendingQueueTimestamps(unittest.TestCase):
         # insert at the end (idx == len) is valid → append
         n = q.qsize()
         self.assertTrue(q.insert_index(n, "tail"))
-        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()],
-                         ["head", "a", "mid", "c", "tail"])
+        self.assertEqual([p[0] for p in q.peek_all_with_timestamps()], ["head", "a", "mid", "c", "tail"])
 
     def test_insert_index_out_of_range_returns_false(self):
         from agentica.cli.commands import PendingQueue
@@ -1982,8 +2019,7 @@ class TestQueueCommandEditInsert(unittest.TestCase):
         pq.put("third")
 
         _cmd_queue(ctx, "edit 2 SECOND v2")
-        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()],
-                         ["first", "SECOND v2", "third"])
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["first", "SECOND v2", "third"])
 
     def test_edit_rejects_missing_text(self):
         from agentica.cli.commands import _cmd_queue
@@ -2010,8 +2046,7 @@ class TestQueueCommandEditInsert(unittest.TestCase):
         pq.put("a")
         pq.put("b")
         _cmd_queue(ctx, "insert 1 head")
-        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()],
-                         ["head", "a", "b"])
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["head", "a", "b"])
 
     def test_insert_at_back_equivalent_to_append(self):
         """``/queue insert <qsize+1> text`` is documented as 'back' and must
@@ -2023,8 +2058,7 @@ class TestQueueCommandEditInsert(unittest.TestCase):
         pq.put("b")
         # qsize+1 (1-based) → idx == len (0-based) → append
         _cmd_queue(ctx, f"insert {pq.qsize() + 1} tail")
-        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()],
-                         ["a", "b", "tail"])
+        self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["a", "b", "tail"])
 
     def test_insert_rejects_bad_index(self):
         from agentica.cli.commands import _cmd_queue
@@ -2077,8 +2111,8 @@ class TestSessionCommand(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             ctx, slog = self._ctx_with_agent(d)
-            _cmd_session(ctx, "rename")          # missing name
-            _cmd_session(ctx, "rename    ")      # whitespace-only
+            _cmd_session(ctx, "rename")  # missing name
+            _cmd_session(ctx, "rename    ")  # whitespace-only
             self.assertIsNone(slog.get_name())
 
     def test_rename_by_id_prefix(self):
@@ -2149,12 +2183,13 @@ class TestSessionCommand(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as d:
             ctx, slog = self._ctx_with_agent(d)
-            _cmd_session(ctx, "")        # unnamed branch
+            _cmd_session(ctx, "")  # unnamed branch
             slog.set_name("Named")
-            _cmd_session(ctx, "")        # named branch
+            _cmd_session(ctx, "")  # named branch
 
     def test_session_command_registered(self):
         from agentica.cli.commands import COMMAND_REGISTRY
+
         self.assertIn("/session", COMMAND_REGISTRY)
 
 
@@ -2167,17 +2202,40 @@ class TestResumeArchivedFilter(unittest.TestCase):
 
     def _sessions(self):
         return [
-            {"session_id": "sess-active-1111", "path": "/tmp/sess-active-1111.jsonl", "size_bytes": 100, "last_timestamp": "2026-01-01T00:00:00", "archived": False},
-            {"session_id": "sess-archived-2222", "path": "/tmp/sess-archived-2222.jsonl", "size_bytes": 100, "last_timestamp": "2026-01-02T00:00:00", "archived": True},
-            {"session_id": "sess-active-3333", "path": "/tmp/sess-active-3333.jsonl", "size_bytes": 100, "last_timestamp": "2026-01-03T00:00:00", "archived": False},
+            {
+                "session_id": "sess-active-1111",
+                "path": "/tmp/sess-active-1111.jsonl",
+                "size_bytes": 100,
+                "last_timestamp": "2026-01-01T00:00:00",
+                "archived": False,
+            },
+            {
+                "session_id": "sess-archived-2222",
+                "path": "/tmp/sess-archived-2222.jsonl",
+                "size_bytes": 100,
+                "last_timestamp": "2026-01-02T00:00:00",
+                "archived": True,
+            },
+            {
+                "session_id": "sess-active-3333",
+                "path": "/tmp/sess-active-3333.jsonl",
+                "size_bytes": 100,
+                "last_timestamp": "2026-01-03T00:00:00",
+                "archived": False,
+            },
         ]
 
     def test_picker_listing_excludes_archived(self):
         from agentica.cli.commands import _cmd_resume, CommandContext
 
         ctx = CommandContext(agent_config={}, current_agent=None)
-        with patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()), \
-                patch("agentica.memory.session_log.SessionLog.session_preview", return_value={"user_count": 0, "first_user": None}):
+        with (
+            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch(
+                "agentica.memory.session_log.SessionLog.session_preview",
+                return_value={"user_count": 0, "first_user": None},
+            ),
+        ):
             with patch("agentica.cli.commands.get_console") as mock_console:
                 console = MagicMock()
                 mock_console.return_value = console
@@ -2193,11 +2251,13 @@ class TestResumeArchivedFilter(unittest.TestCase):
         from agentica.cli.commands import _cmd_resume, CommandContext
 
         ctx = CommandContext(agent_config={"model_provider": "zhipuai", "model_name": "glm-5"}, current_agent=None)
-        with patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()), \
-                patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]), \
-                patch("agentica.memory.session_log.SessionLog.exists", return_value=False), \
-                patch("agentica.cli.commands.create_agent") as mock_create_agent, \
-                patch("agentica.cli.commands.GoalManager") as mock_goal_manager:
+        with (
+            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]),
+            patch("agentica.memory.session_log.SessionLog.exists", return_value=False),
+            patch("agentica.cli.commands.create_agent") as mock_create_agent,
+            patch("agentica.cli.commands.GoalManager") as mock_goal_manager,
+        ):
             agent = MagicMock()
             agent._session_log = None
             mock_create_agent.return_value = agent
@@ -2214,11 +2274,13 @@ class TestResumeArchivedFilter(unittest.TestCase):
         from agentica.cli.commands import _cmd_resume, CommandContext
 
         ctx = CommandContext(agent_config={"model_provider": "zhipuai", "model_name": "glm-5"}, current_agent=None)
-        with patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()), \
-                patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]), \
-                patch("agentica.memory.session_log.SessionLog.exists", return_value=False), \
-                patch("agentica.cli.commands.create_agent") as mock_create_agent, \
-                patch("agentica.cli.commands.GoalManager") as mock_goal_manager:
+        with (
+            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]),
+            patch("agentica.memory.session_log.SessionLog.exists", return_value=False),
+            patch("agentica.cli.commands.create_agent") as mock_create_agent,
+            patch("agentica.cli.commands.GoalManager") as mock_goal_manager,
+        ):
             agent = MagicMock()
             agent._session_log = None
             mock_create_agent.return_value = agent
@@ -2263,8 +2325,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         # No box glyphs anywhere — gutter design replaced them
         self.assertNotIn("╭", out)
         self.assertNotIn("╰", out)
-        self.assertNotIn("Response", out,
-                         "no 'Response' title — gutter design has no box header")
+        self.assertNotIn("Response", out, "no 'Response' title — gutter design has no box header")
         # Rule glyph + timestamp on the closing line
         self.assertIn("─", out, "closing rule must be drawn")
         self.assertRegex(out, r"\d{2}:\d{2}:\d{2}", "rule must embed HH:MM:SS")
@@ -2288,6 +2349,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         because ``display_tool`` returned before incrementing. A turn that only
         read/edited files would then show "0 tools", contradicting the visible
         tool calls. Every tool call must count."""
+
         def render(mgr):
             mgr.display_tool("read_file", {"file_path": "a.py"})
             mgr.display_tool("grep", {"pattern": "x"})
@@ -2307,6 +2369,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         ``+$C`` respectively so a user scrolling back can locate turn #7
         and see it cost 3.2K tokens / $0.08.
         """
+
         def render(mgr):
             mgr.stream_response("ok")
             mgr.finalize(turn_no=7, delta_tokens=3200, delta_cost_usd=0.08)
@@ -2322,6 +2385,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         Guards the K-suffix boundary so a 42-token turn doesn't render as
         the misleading ``+0.0K``.
         """
+
         def render(mgr):
             mgr.stream_response("tiny")
             mgr.finalize(turn_no=1, delta_tokens=42, delta_cost_usd=0.0)
@@ -2338,6 +2402,7 @@ class TestStreamDisplayManagerCompletionTimestamp(unittest.TestCase):
         skeleton (timestamp + elapsed [+ tool count]) — no phantom ``#None``
         or stray ``+`` markers.
         """
+
         def render(mgr):
             mgr.stream_response("plain")
             mgr.finalize()  # no kwargs at all
@@ -2379,7 +2444,8 @@ class TestStreamDisplayManagerSegmentOrdering(unittest.TestCase):
         self.assertIn("PREAMBLETEXT", out)
         self.assertIn("THINKINGLINE", out)
         self.assertLess(
-            out.index("PREAMBLETEXT"), out.index("THINKINGLINE"),
+            out.index("PREAMBLETEXT"),
+            out.index("THINKINGLINE"),
             "preamble text must appear BEFORE the thinking it preceded",
         )
 
@@ -2392,7 +2458,8 @@ class TestStreamDisplayManagerSegmentOrdering(unittest.TestCase):
         self.assertIn("PREAMBLETEXT", out)
         self.assertIn("execute", out)
         self.assertLess(
-            out.index("PREAMBLETEXT"), out.index("execute"),
+            out.index("PREAMBLETEXT"),
+            out.index("execute"),
             "preamble text must appear BEFORE the tool call it preceded",
         )
 
@@ -2402,7 +2469,8 @@ class TestStreamDisplayManagerSegmentOrdering(unittest.TestCase):
         mgr, buf = self._mgr_and_buf()
         mgr.stream_response("FINALANSWER")
         self.assertNotIn(
-            "FINALANSWER", buf.getvalue(),
+            "FINALANSWER",
+            buf.getvalue(),
             "final answer must not be printed token-by-token during streaming",
         )
         mgr.finalize()
@@ -2417,16 +2485,19 @@ class TestLessLesskeyDetection(unittest.TestCase):
     def setUp(self):
         # Reset the module-level cache between tests.
         from agentica.cli import interactive as it
+
         it._LESS_LESSKEY_OK = None
 
     def test_supported_when_no_error(self):
         from agentica.cli import interactive as it
+
         fake = MagicMock(returncode=0, stderr="")
         with patch("agentica.cli.interactive.subprocess.run", return_value=fake):
             self.assertTrue(it._less_supports_lesskey("/usr/bin/less"))
 
     def test_unsupported_when_stderr_mentions_option(self):
         from agentica.cli import interactive as it
+
         fake = MagicMock(returncode=0, stderr="There is no lesskey-content=... option")
         with patch("agentica.cli.interactive.subprocess.run", return_value=fake):
             self.assertFalse(it._less_supports_lesskey("/usr/bin/less"))
@@ -2439,6 +2510,7 @@ class TestCompileLesskey(unittest.TestCase):
 
     def test_returns_path_when_lesskey_compiles(self):
         from agentica.cli import interactive as it
+
         run_calls = []
 
         def fake_run(cmd, **kw):
@@ -2450,16 +2522,20 @@ class TestCompileLesskey(unittest.TestCase):
                 return MagicMock(returncode=0, stderr="")
             return MagicMock(returncode=0, stderr="")
 
-        with patch("agentica.cli.interactive.shutil.which", return_value="/usr/bin/lesskey"), \
-             patch("agentica.cli.interactive.subprocess.run", side_effect=fake_run):
+        with (
+            patch("agentica.cli.interactive.shutil.which", return_value="/usr/bin/lesskey"),
+            patch("agentica.cli.interactive.subprocess.run", side_effect=fake_run),
+        ):
             out = it._compile_lesskey("\n#command\n^O quit\n")
         self.assertTrue(out and out.endswith(".bin"))
         self.assertTrue(run_calls and run_calls[0][0].endswith("lesskey"))
         import os as _os
+
         _os.unlink(out)
 
     def test_returns_none_when_no_lesskey_binary(self):
         from agentica.cli import interactive as it
+
         with patch("agentica.cli.interactive.shutil.which", return_value=None):
             self.assertIsNone(it._compile_lesskey("\n#command\n^O quit\n"))
 
@@ -2485,12 +2561,14 @@ class TestBuildSiblingModel(unittest.TestCase):
 
     def test_none_when_no_sibling_name(self):
         from agentica.cli.config import _build_sibling_model
+
         with patch("agentica.cli.config.get_model") as gm:
             self.assertIsNone(_build_sibling_model(self._cfg(), "auxiliary"))
             gm.assert_not_called()
 
     def test_same_provider_inherits_main_base_and_key(self):
         from agentica.cli.config import _build_sibling_model
+
         cfg = self._cfg(auxiliary_model_name="deepseek-chat")  # only name; same provider
         with patch("agentica.cli.config.get_model") as gm:
             _build_sibling_model(cfg, "auxiliary")
@@ -2502,6 +2580,7 @@ class TestBuildSiblingModel(unittest.TestCase):
 
     def test_cross_provider_uses_sibling_base_and_key(self):
         from agentica.cli.config import _build_sibling_model
+
         cfg = self._cfg(
             auxiliary_model_provider="zhipuai",
             auxiliary_model_name="glm-4.7-flash",
@@ -2517,6 +2596,7 @@ class TestBuildSiblingModel(unittest.TestCase):
 
     def test_cross_provider_missing_key_not_filled_with_main_key(self):
         from agentica.cli.config import _build_sibling_model
+
         cfg = self._cfg(
             auxiliary_model_provider="zhipuai",
             auxiliary_model_name="glm-4.7-flash",
@@ -2531,6 +2611,7 @@ class TestBuildSiblingModel(unittest.TestCase):
 
     def test_cross_provider_missing_base_not_filled_with_main_base(self):
         from agentica.cli.config import _build_sibling_model
+
         cfg = self._cfg(
             auxiliary_model_provider="zhipuai",
             auxiliary_model_name="glm-4.7-flash",
@@ -2545,6 +2626,7 @@ class TestBuildSiblingModel(unittest.TestCase):
 
     def test_auxiliary_extra_body_passed_and_never_inherits_main(self):
         from agentica.cli.config import _build_sibling_model
+
         cfg = self._cfg(
             auxiliary_model_name="deepseek-chat",  # same provider as main
             extra_body={"main": True},  # main model's own extra_body
@@ -2779,9 +2861,7 @@ class TestCLIAwareness(unittest.TestCase):
                 )
                 cli_commands._apply_profile(ctx, "hy3")
 
-        self.assertEqual(
-            ctx.agent_config["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}}
-        )
+        self.assertEqual(ctx.agent_config["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}})
         self.assertEqual(ctx.agent_config["auxiliary_extra_body"], {"aux": True})
         # get_model (main model rebuild) received the profile's extra_body.
         _args, kw = mock_get_model.call_args
@@ -2869,6 +2949,7 @@ class TestInputRequestCancel(unittest.TestCase):
         # Imported lazily so a broken import surfaces as a test failure rather
         # than a collection error.
         from agentica.cli.interactive import _InputRequest
+
         return _InputRequest
 
     def test_cancel_unblocks_pending_get(self):

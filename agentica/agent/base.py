@@ -486,7 +486,15 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self.session_id = session_id
         self._session_log = None
         if session_id is not None:
-            self._session_log = SessionLog(session_id=session_id)
+            # Scope session storage by project (work_dir) + user so the same
+            # project resolves to the same directory across entrypoints. For the
+            # CLI work_dir==cwd; for the Web it is the per-session work_dir which
+            # differs from the server process cwd.
+            self._session_log = SessionLog(
+                session_id=session_id,
+                work_dir=self.work_dir,
+                user_id=self.user_id,
+            )
 
     def _init_packed_config(
         self,
@@ -876,11 +884,23 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         so the agent can course-correct mid-task. Thread-safe: callers (e.g. a
         CLI input thread) may invoke this while ``run()`` executes elsewhere.
 
-        Returns True if the guidance was buffered (non-empty), else False.
+        Returns True if the guidance was accepted into the CURRENTLY running
+        loop (an upcoming inference will drain it), False otherwise — including
+        the case where the run just finished between the caller's check and
+        this call (a TOCTOU window that the caller cannot close on its own).
+        A False return means the caller MUST fall back to queuing a fresh turn
+        rather than silently dropping the text: the guidance is not buffered
+        here, so it can never leak into an unrelated later run.
         """
         if not guidance or not guidance.strip():
             return False
         with self._steer_lock:
+            # Atomic gate: only accept steering while a run is active. Checking
+            # _running under the same lock that _begin/_end_steer_window use to
+            # flip it closes the race where the run ends right after a UI-thread
+            # `agent_running` check but before we append.
+            if not self._running:
+                return False
             self._pending_steer.append(guidance.strip())
         return True
 
@@ -892,6 +912,28 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             drained = self._pending_steer
             self._pending_steer = []
             return drained
+
+    def _begin_steer_window(self) -> None:
+        """Open the steering window at run start (called by the Runner).
+
+        Flips ``_running`` True under ``_steer_lock`` so ``steer()`` observes a
+        consistent state, and drops any guidance left over from a prior run so
+        stale steering can never bleed into this one.
+        """
+        with self._steer_lock:
+            self._running = True
+            self._pending_steer = []
+
+    def _end_steer_window(self) -> None:
+        """Close the steering window at run end (called by the Runner).
+
+        After this, ``steer()`` returns False so the CLI falls back to queuing
+        a fresh turn. Also clears any guidance that arrived too late to be
+        drained by an inference, preventing leakage into the next run.
+        """
+        with self._steer_lock:
+            self._running = False
+            self._pending_steer = []
 
     def _merge_tool_system_prompts(self) -> None:
         """Collect tool prompts and split them into static vs dynamic sections."""
@@ -1636,6 +1678,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         default_turn_budget: Optional[int] = None,
         event_callback: Optional[Callable[..., None]] = None,
         verifier: Optional[Callable[..., Any]] = None,
+        auto_judge: bool = False,
     ) -> Any:
         """Return (and lazily create) this agent's ``GoalManager``.
 
@@ -1661,7 +1704,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if self._session_log is None:
             if self.session_id is None:
                 self.session_id = str(uuid4())
-            self._session_log = SessionLog(session_id=self.session_id)
+            self._session_log = SessionLog(
+                session_id=self.session_id,
+                work_dir=self.work_dir,
+                user_id=self.user_id,
+            )
 
         if self.goal_manager is None:
             self.goal_manager = GoalManager(
@@ -1670,6 +1717,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 judge_model=self.resolve_auxiliary_model("goal_judge"),
                 event_callback=event_callback,
                 verifier=verifier,
+                auto_judge=auto_judge,
             )
             # Load any persisted state from a previous session.
             self.goal_manager.load()
@@ -1684,9 +1732,21 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         return self.goal_manager
 
     def enable_goal_tool(self) -> None:
-        """Attach ``GoalTool.update_goal`` so the model can self-mark the
-        goal ``complete`` or ``paused``, short-circuiting the external
-        judge. Idempotent.
+        """Attach ``GoalTool`` so the model can drive goal completion itself.
+
+        Exposes two tools to the model:
+
+        - ``verify_completion`` — the primary, evidence-backed completion
+          check. The model calls it only when it believes the goal is done;
+          the tool runs tests / checks criteria and marks the goal complete
+          only when green (short-circuiting any judge).
+        - ``update_goal`` — narrow control channel to pause when blocked (or
+          force-complete as an escape hatch).
+
+        The ``verify_completion`` criteria mode needs a judge model, so the
+        tool is bound to the manager's ``judge_model`` and the agent's
+        working directory (for running ``verify_command`` in test mode).
+        Idempotent.
         """
         from agentica.tools.goal_tool import GoalTool
 
@@ -1696,7 +1756,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         for t in self.tools:
             if isinstance(t, GoalTool):
                 return
-        self.tools.append(GoalTool(mgr.session_log))
+        work_dir = getattr(self, "work_dir", None) or getattr(self, "base_dir", None)
+        self.tools.append(
+            GoalTool(mgr.session_log, judge_model=mgr.judge_model, work_dir=work_dir)
+        )
 
     async def run_goal(
         self,
@@ -1709,8 +1772,16 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         event_callback: Optional[Callable[..., None]] = None,
         verifier: Optional[Callable[..., Any]] = None,
         seed_messages: Optional[Sequence[Union[Message, Dict[str, Any]]]] = None,
+        auto_judge: bool = False,
     ) -> "GoalRunResult":
         """Drive the standing-goal loop until completion / pause / budget.
+
+        Budget model: ``token_budget`` / ``wall_clock_budget_sec`` are the
+        primary cost gates — set at least one for any production / long task.
+        ``turn_budget`` (default 100, cannot be fully disabled) is only a
+        runaway safety net, NOT a cost budget: with cheap tools a task can
+        burn a lot of tokens well within 100 turns, so do not rely on it to
+        cap spend.
 
         Ergonomic entry point: callers do NOT touch ``SessionLog``,
         ``GoalManager``, or ``GoalTool`` directly. The loop:
@@ -1739,8 +1810,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 The three budgets are **independent hard caps — whichever
                 hits first stops the loop** (AND/intersection semantics).
                 Priority each turn: ``budget > tool short-circuit > judge``.
-            attach_goal_tool: Register ``GoalTool`` on this agent. Set
-                False if you want the external judge to be authoritative.
+            attach_goal_tool: Register ``GoalTool`` (``verify_completion`` +
+                ``update_goal``) on this agent so the model can drive
+                completion itself. This is the DEFAULT completion path.
+            auto_judge: When True, restore the legacy per-turn LLM judge as a
+                completion fallback (costs a judge call every turn). Default
+                False: completion comes only from ``verify_completion`` /
+                verifier, and the loop otherwise runs until a budget cap.
             event_callback: ``goal.*`` event hook.
             verifier: Optional callable that decides per-turn whether the
                 goal is satisfied, WITHOUT an LLM call. Signature:
@@ -1784,7 +1860,9 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             ]
             agent.working_memory.hydrate_runs_from_history(seed_dicts)
 
-        mgr = agent.get_goal_manager(event_callback=event_callback, verifier=verifier)
+        mgr = agent.get_goal_manager(
+            event_callback=event_callback, verifier=verifier, auto_judge=auto_judge
+        )
         state = mgr.set(
             objective,
             turn_budget=turn_budget,
@@ -1811,43 +1889,83 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         tokens_baseline = 0
 
         while True:
-            t0 = time.monotonic()
-            response = await agent.run(prompt)
-            elapsed = time.monotonic() - t0
-            last_run_response = response
+            step = await agent.run_goal_step(prompt, tokens_baseline=tokens_baseline)
+            last_run_response = step.run_response
+            tokens_baseline = step.tokens_baseline
 
-            token_delta = 0
-            if response.cost_tracker is not None:
-                total_now = response.cost_tracker.total_input_tokens + response.cost_tracker.total_output_tokens
-                token_delta = max(0, total_now - tokens_baseline)
-                tokens_baseline = total_now
-
-            # Pluck (tool_name, is_error) pairs from the just-finished
-            # turn so the judge sees what work actually happened and the
-            # manager can track consecutive tool failures. No LLM call —
-            # names + flags only.
-            tool_pairs: List[Tuple[str, bool]] = []
-            for tc in response.tool_calls:
-                if tc.tool_name:
-                    tool_pairs.append((tc.tool_name, bool(tc.is_error)))
-
-            decision = await mgr.evaluate_after_turn(
-                response.content or "",
-                token_delta=token_delta,
-                elapsed_sec=elapsed,
-                tool_calls=tool_pairs or None,
-            )
-
-            if not decision.should_continue:
+            if not step.decision.should_continue:
                 final_state = mgr.load()
                 return GoalRunResult(
-                    status=decision.status,
-                    reason=decision.reason,
+                    status=step.decision.status,
+                    reason=step.decision.reason,
                     run_response=last_run_response,
                     goal=final_state,
                     turns_used=final_state.turns_used if final_state else 0,
                 )
-            prompt = decision.continuation_prompt
+            prompt = step.decision.continuation_prompt
+
+    async def run_goal_step(
+        self,
+        prompt: str,
+        *,
+        tokens_baseline: int = 0,
+    ) -> "GoalStepResult":
+        """Run ONE turn of the standing-goal loop and evaluate it.
+
+        This is the shared, loop-agnostic unit of ``run_goal()``: it runs a
+        single ``self.run(prompt)``, computes the turn's token delta and tool
+        signals, feeds them to ``GoalManager.evaluate_after_turn()``, and
+        returns the resulting :class:`~agentica.goals.GoalStepResult`.
+
+        Both drivers reuse this:
+
+        - ``run_goal()`` calls it in a ``while True`` until
+          ``decision.should_continue`` is False (SDK / Gateway path).
+        - The CLI ``/goal`` handler calls it once per turn from its REPL
+          loop, so it keeps its own outer shell (user-input preemption,
+          Ctrl+C pause, continuation queueing) instead of re-implementing the
+          per-turn evaluation.
+
+        The agent must already have a goal set (``get_goal_manager().set()``)
+        — this method does NOT set the objective, bind the anchor, or attach
+        the goal tool; the caller owns that setup once, up front.
+
+        Args:
+            prompt: The prompt for this turn (objective on turn 1, then each
+                ``decision.continuation_prompt``).
+            tokens_baseline: Accumulated input+output tokens across all PRIOR
+                turns of this goal. Each turn's per-run token usage is added
+                on and returned as ``result.tokens_baseline``; pass it back on
+                the next call.
+
+        Returns:
+            ``GoalStepResult`` with the turn's ``run_response``, the
+            ``decision`` from the manager, and the updated ``tokens_baseline``.
+        """
+        from agentica.goals import GoalStepResult
+
+        mgr = self.get_goal_manager()
+
+        t0 = time.monotonic()
+        response = await self.run(prompt)
+        elapsed = time.monotonic() - t0
+
+        final_text, token_delta, new_baseline, tool_pairs = mgr.extract_turn_signals(
+            response, tokens_baseline
+        )
+
+        decision = await mgr.evaluate_after_turn(
+            final_text,
+            token_delta=token_delta,
+            elapsed_sec=elapsed,
+            tool_calls=tool_pairs or None,
+        )
+
+        return GoalStepResult(
+            run_response=response,
+            decision=decision,
+            tokens_baseline=new_baseline,
+        )
 
     def run_sync(
         self,

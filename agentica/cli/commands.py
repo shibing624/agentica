@@ -256,24 +256,28 @@ IMAGE_EXTENSIONS = frozenset(
 
 
 def _sanitize_history_for_model_switch(agent) -> None:
-    """Strip tool_calls and tool messages from working memory history."""
+    """Strip tool artifacts from history so it replays on a different provider.
+
+    Cross-provider switches (e.g. OpenAI chat/completions <-> Anthropic
+    /v1/messages) fail because tool calls/results are serialised differently:
+    OpenAI uses flat role="tool" messages + assistant.tool_calls, while
+    Anthropic uses list content blocks (tool_use / tool_result with
+    tool_use_id). Replaying one format on the other API 400s
+    ("unexpected tool_use_id found in tool_result blocks"). We drop every
+    tool artifact (both formats) and keep only plain user/assistant text.
+
+    Both ``wm.runs[].response.messages`` (the source for future prompts) and
+    the flat ``wm.messages`` list are sanitised.
+    """
+    from agentica.agent.history_filter import strip_all_tool_artifacts
+
     wm = agent.working_memory
     for run in wm.runs:
         if not run.response or not run.response.messages:
             continue
-        cleaned = []
-        for msg in run.response.messages:
-            if msg.role == "tool":
-                continue
-            if msg.role == "assistant" and msg.tool_calls:
-                text = msg.content if isinstance(msg.content, str) else ""
-                if text:
-                    cleaned.append(Message(role="assistant", content=text))
-                continue
-            if msg.role == "system":
-                continue
-            cleaned.append(msg)
-        run.response.messages = cleaned
+        run.response.messages = strip_all_tool_artifacts(run.response.messages, drop_system=True)
+    if getattr(wm, "messages", None):
+        wm.messages = strip_all_tool_artifacts(wm.messages, drop_system=False)
 
 
 def _refresh_skills_session(ctx: CommandContext):
@@ -281,8 +285,13 @@ def _refresh_skills_session(ctx: CommandContext):
     reset_skill_registry()
     load_skills()
     new_registry = get_skill_registry()
-    new_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, new_registry,
-                             ask_user_question_callback=ctx.ask_user_question_callback)
+    new_agent = create_agent(
+        ctx.agent_config,
+        ctx.extra_tools,
+        ctx.workspace,
+        new_registry,
+        ask_user_question_callback=ctx.ask_user_question_callback,
+    )
     return {
         "skills_registry": new_registry,
         "current_agent": new_agent,
@@ -341,6 +350,7 @@ def _get_subagent_loader():
     """
     try:
         import agentica.subagent_loader as loader  # noqa: PLC0415
+
         return loader
     except ImportError:
         return None
@@ -571,14 +581,16 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
 
     model_str = f"{provider}/{model_name}" if provider and model_name else "(unset)"
     auxiliary_str = (
-        f"{auxiliary_provider}/{auxiliary_model_name}" if auxiliary_provider and auxiliary_model_name else "(reuse main)"
+        f"{auxiliary_provider}/{auxiliary_model_name}"
+        if auxiliary_provider and auxiliary_model_name
+        else "(reuse main)"
     )
     skills_str = str(skills_count) if skills_count is not None else "n/a"
     perm_str = perm_mode or "(default)"
     ctx_str = f"{ctx_pct:.0f}% ({int(ctx_tokens):,}/{int(ctx_window):,})" if ctx_pct is not None else "n/a"
     cost_str = f"${session_cost:.4f}" if isinstance(session_cost, (int, float)) else "n/a"
 
-    profile_label = profile or '(none)'
+    profile_label = profile or "(none)"
     if profile and profile_source in ("project", "global", "default"):
         profile_label = f"{profile} ({profile_source})"
     con.print(f"  [bold]Agentica[/bold] [dim]v{__version__}[/dim]  profile: [cyan]{profile_label}[/cyan]")
@@ -619,16 +631,11 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
         if not description:
             con.print("  [red]Description is required.[/red]")
             return
-        tools_raw = _ask_text_via_tui(
-            ctx, "  Allowed tools (comma-separated, blank to inherit parent): "
-        )
+        tools_raw = _ask_text_via_tui(ctx, "  Allowed tools (comma-separated, blank to inherit parent): ")
         allowed_tools = None
         if tools_raw:
             allowed_tools = [t.strip() for t in tools_raw.split(",") if t.strip()]
-        system_prompt = (
-            f"You are a {name} specialist. {description}\n\n"
-            "(Describe how this subagent should behave.)"
-        )
+        system_prompt = f"You are a {name} specialist. {description}\n\n(Describe how this subagent should behave.)"
         try:
             path = loader.create_agent_file(
                 name=name,
@@ -640,10 +647,7 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"  [red]Failed to create agent: {exc}[/red]")
             return
         con.print(f"  [green]Created subagent '{name}' at {path}[/green]")
-        con.print(
-            "  [dim]Edit the .md file to customize its system prompt, "
-            "then /agents reload.[/dim]"
-        )
+        con.print("  [dim]Edit the .md file to customize its system prompt, then /agents reload.[/dim]")
         return
 
     # ── /agents reload — rescan disk and re-register ──
@@ -676,9 +680,7 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
     # ── /agents (no args) or /agents list ──
     if subcmd and subcmd != "list":
         con.print(f"  [red]Unknown subcommand: {subcmd}[/red]")
-        con.print(
-            "  [dim]Usage: /agents [list | create <name> | reload | remove <name>][/dim]"
-        )
+        con.print("  [dim]Usage: /agents [list | create <name> | reload | remove <name>][/dim]")
         return
 
     builtin_configs = [
@@ -710,9 +712,7 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
     else:
         con.print("  [dim]No custom subagents. Create one with /agents create <name>.[/dim]")
     con.print()
-    con.print(
-        "  [dim]Commands: /agents [list] | create <name> | reload | remove <name>[/dim]"
-    )
+    con.print("  [dim]Commands: /agents [list] | create <name> | reload | remove <name>[/dim]")
 
 
 def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
@@ -762,8 +762,7 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
         name = _safe_tool_module_name(raw_name)
         if name is None:
             con.print(
-                f"  [red]Invalid tool name: {raw_name!r}. Use a plain filename "
-                "(no path, no ~, no module:attr).[/red]"
+                f"  [red]Invalid tool name: {raw_name!r}. Use a plain filename (no path, no ~, no module:attr).[/red]"
             )
             return
         agent = ctx.current_agent
@@ -905,7 +904,9 @@ def _cmd_tools(ctx: CommandContext, cmd_args: str = ""):
     con.print(
         f"  [green]● = active ({active_count})[/green]  [dim]○ = available ({len(all_tools) - active_count})[/dim]"
     )
-    con.print(f"  [dim]Commands: /tools add <name> | add-from <name> | remove <name> | info <name> | search <keyword>[/dim]")
+    con.print(
+        f"  [dim]Commands: /tools add <name> | add-from <name> | remove <name> | info <name> | search <keyword>[/dim]"
+    )
     con.print()
 
 
@@ -1338,9 +1339,9 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     args = cmd_args.strip()
     sub = args.split()[0].lower() if args else ""
     if sub == "set":
-        return _cmd_config_set(ctx, args[len(sub):].strip())
+        return _cmd_config_set(ctx, args[len(sub) :].strip())
     if sub == "env":
-        return _cmd_config_env(ctx, args[len(sub):].strip())
+        return _cmd_config_env(ctx, args[len(sub) :].strip())
     if sub == "path":
         con = get_console()
         con.print(f"  config.yaml: [cyan]{self_manage.config_file_path()}[/cyan]")
@@ -1466,9 +1467,7 @@ def _rebuild_live_model(ctx: CommandContext):
         "extra_headers": ctx.agent_config.get("extra_headers"),
     }
     ctx.current_agent.model = get_model(**model_kwargs)
-    ctx.current_agent.environment_context = _build_environment_context(
-        ctx.current_agent, ctx.agent_config
-    )
+    ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
 
 
 def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
@@ -1486,6 +1485,7 @@ def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
     if len(parts) >= 3:
         candidate = parts[-1]
         from agentica.global_config import load_global_config
+
         cfg = load_global_config() or {}
         if candidate in (cfg.get("profiles") or {}):
             profile_name = candidate
@@ -1499,17 +1499,14 @@ def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
     # is actually *using*, not the global default. Passing an explicit
     # profile_name into set_profile_field also avoids self_manage having to
     # know about work_dir.
-    effective_active, _src = resolve_active_profile_name(
-        work_dir=ctx.agent_config.get("work_dir") or os.getcwd()
-    )
+    effective_active, _src = resolve_active_profile_name(work_dir=ctx.agent_config.get("work_dir") or os.getcwd())
     target = profile_name or effective_active
     try:
         updated = self_manage.set_profile_field(field, value, target)
     except ValueError as e:
         con.print(f"[red]{e}[/red]")
         return
-    con.print(f"[green]Updated profile '{target}': {field} = "
-              f"{self_manage.mask_secret(field, value)}[/green]")
+    con.print(f"[green]Updated profile '{target}': {field} = {self_manage.mask_secret(field, value)}[/green]")
     # If editing the active profile, sync ctx + rebuild the live model.
     if target == effective_active:
         coerced = self_manage._coerce_profile_value(field, value)
@@ -1519,8 +1516,7 @@ def _cmd_config_set(ctx: CommandContext, cmd_args: str = ""):
             con.print("[dim]Applied to running agent (no restart needed).[/dim]")
             return {"model_switched": True}
         except Exception as e:
-            con.print(f"[yellow]Saved, but live-apply failed: {e}. "
-                      f"Restart to take effect.[/yellow]")
+            con.print(f"[yellow]Saved, but live-apply failed: {e}. Restart to take effect.[/yellow]")
     return
 
 
@@ -1538,8 +1534,7 @@ def _cmd_config_env(ctx: CommandContext, cmd_args: str = ""):
             con.print(f"[green]Deleted .env var {key}[/green]")
         else:
             self_manage.set_dotenv_var(key, value)
-            con.print(f"[green]Set .env var {key} = "
-                      f"{self_manage.mask_secret(key, value)}[/green]")
+            con.print(f"[green]Set .env var {key} = {self_manage.mask_secret(key, value)}[/green]")
         con.print("[dim]Applied to current process environment.[/dim]")
     except ValueError as e:
         con.print(f"[red]{e}[/red]")
@@ -1591,6 +1586,7 @@ def _cmd_upgrade(ctx: CommandContext, cmd_args: str = ""):
 def _fmt_ms(ms) -> str:
     """Format an epoch-millis timestamp as 'YYYY-MM-DD HH:MM:SS', or '-' if falsy."""
     import datetime as _dt
+
     if not ms:
         return "-"
     try:
@@ -1661,15 +1657,18 @@ Rules:
 async def _refine_cron_prompt(model, raw_prompt: str, schedule_human: str) -> str:
     """One-shot LLM rewrite of a cron task prompt. Returns "" on any failure."""
     from agentica.model.message import Message
+
     user = (
         f"Rough task description: {raw_prompt}\n"
         f"Schedule (handled by the system, do not re-implement): {schedule_human}\n\n"
         "Rewrite it into the unattended per-run execution prompt."
     )
-    resp = await model.response(messages=[
-        Message(role="system", content=_CRON_PROMPT_REFINE_SYSTEM),
-        Message(role="user", content=user),
-    ])
+    resp = await model.response(
+        messages=[
+            Message(role="system", content=_CRON_PROMPT_REFINE_SYSTEM),
+            Message(role="user", content=user),
+        ]
+    )
     return (resp.content or "").strip()
 
 
@@ -1692,34 +1691,36 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
 
     args = cmd_args.strip()
     sub = args.split()[0].lower() if args else "list"
-    rest = args[len(sub):].strip() if args else ""
+    rest = args[len(sub) :].strip() if args else ""
 
     if sub in ("list", "ls", ""):
         all_jobs = cronjobs.list_jobs()
         if not all_jobs:
-            con.print("[dim]No cron jobs. Add one with: /cron add \"<prompt>\" <schedule>[/dim]")
+            con.print('[dim]No cron jobs. Add one with: /cron add "<prompt>" <schedule>[/dim]')
             return
         con.print("[bold]Cron jobs[/bold]")
         for j in all_jobs:
             status = getattr(getattr(j, "status", None), "value", getattr(j, "status", "?"))
             human = cronjobs.schedule_to_human(j.schedule)
-            con.print(f"  [cyan]{j.id}[/cyan]  [yellow]{j.name}[/yellow]  "
-                      f"[{'green' if status == 'active' else 'dim'}]{status}[/]  "
-                      f"next: {_fmt_next_run(j)}  [dim]({human})[/dim]")
+            con.print(
+                f"  [cyan]{j.id}[/cyan]  [yellow]{j.name}[/yellow]  "
+                f"[{'green' if status == 'active' else 'dim'}]{status}[/]  "
+                f"next: {_fmt_next_run(j)}  [dim]({human})[/dim]"
+            )
         return
 
     if sub == "add":
         # Parse: /cron add "prompt with spaces" <schedule>
         import shlex
+
         try:
             tokens = shlex.split(rest)
         except ValueError:
-            con.print("[red]Could not parse. Use: /cron add \"<prompt>\" <schedule>[/red]")
+            con.print('[red]Could not parse. Use: /cron add "<prompt>" <schedule>[/red]')
             return
         if len(tokens) < 2:
-            con.print("[red]Usage: /cron add \"<prompt>\" <schedule>[/red]")
-            con.print("[dim]schedule examples: '0 9 * * *' (9am daily), 'every 30m', "
-                      "'2026-07-01T09:00:00'[/dim]")
+            con.print('[red]Usage: /cron add "<prompt>" <schedule>[/red]')
+            con.print("[dim]schedule examples: '0 9 * * *' (9am daily), 'every 30m', '2026-07-01T09:00:00'[/dim]")
             return
         prompt = tokens[0]
         schedule = " ".join(tokens[1:])
@@ -1755,10 +1756,12 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                 opt_original = "Keep the original prompt"
                 opt_manual = "Write it myself"
                 try:
-                    choice = str(ctx.ask_user_question_callback(
-                        "Which prompt should this scheduled job run?",
-                        [opt_refined, opt_original, opt_manual],
-                    )).strip()
+                    choice = str(
+                        ctx.ask_user_question_callback(
+                            "Which prompt should this scheduled job run?",
+                            [opt_refined, opt_original, opt_manual],
+                        )
+                    ).strip()
                 except AgentCancelledError:
                     con.print("[dim]cancelled — job not created[/dim]")
                     return
@@ -1781,13 +1784,11 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         except Exception as e:
             con.print(f"[red]Failed to create job: {e}[/red]")
             return
-        con.print(f"[green]Created job [cyan]{job.id}[/cyan] '{job.name}'[/green] "
-                  f"next: {_fmt_next_run(job)}")
+        con.print(f"[green]Created job [cyan]{job.id}[/cyan] '{job.name}'[/green] next: {_fmt_next_run(job)}")
         if final_prompt != prompt:
             con.print(f"[dim]execution prompt: {final_prompt}[/dim]")
         if not (ctx.tui_state and ctx.tui_state.get("cron_is_running", lambda: False)()):
-            con.print("[yellow]Scheduler is OFF — job won't run until you enable it: "
-                      "/cron daemon on[/yellow]")
+            con.print("[yellow]Scheduler is OFF — job won't run until you enable it: /cron daemon on[/yellow]")
         return
 
     if sub in ("pause", "resume", "remove", "rm", "delete"):
@@ -1816,8 +1817,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         # /cron edit <id> prompt "<text>"   |   /cron edit <id> schedule <schedule>
         parts = rest.split(maxsplit=2)
         if len(parts) < 3 or parts[1].lower() not in ("prompt", "schedule"):
-            con.print('[red]Usage: /cron edit <id> prompt "<text>"  |  '
-                      '/cron edit <id> schedule <schedule>[/red]')
+            con.print('[red]Usage: /cron edit <id> prompt "<text>"  |  /cron edit <id> schedule <schedule>[/red]')
             return
         job_id, field_name, value = parts[0], parts[1].lower(), parts[2].strip()
         if cronjobs.get_job(job_id) is None:
@@ -1833,8 +1833,7 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
                 parsed = cronjobs.parse_schedule(value)
                 next_run = cronjobs.compute_next_run_at_ms(parsed)
                 cronjobs.update_job(job_id, {"schedule": parsed, "next_run_at_ms": next_run or 0})
-                con.print(f"[green]Updated schedule for {job_id}: "
-                          f"{cronjobs.schedule_to_human(parsed)}[/green]")
+                con.print(f"[green]Updated schedule for {job_id}: {cronjobs.schedule_to_human(parsed)}[/green]")
         except Exception as e:
             con.print(f"[red]{e}[/red]")
         return
@@ -1865,10 +1864,9 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"[dim]Running job {job_id} once now...[/dim]")
         try:
             from agentica.cron.scheduler import _execute_job
-            from agentica.cron.cli_runner import (
-                CliAgentRunner, build_cli_agent_factory)
-            factory = build_cli_agent_factory(
-                ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+            from agentica.cron.cli_runner import CliAgentRunner, build_cli_agent_factory
+
+            factory = build_cli_agent_factory(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
             runner = CliAgentRunner(factory)
             asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
             con.print(f"[green]Job {job_id} executed.[/green]")
@@ -1882,35 +1880,44 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
         is_running = ts.get("cron_is_running", lambda: False)()
         if action == "status":
             from agentica.global_config import get_setting
+
             enabled = bool(get_setting("cron.enabled", False))
             interval = int(get_setting("cron.interval", 60) or 60)
-            con.print(f"  this session:   [{'green' if is_running else 'dim'}]"
-                      f"{'RUNNING' if is_running else 'STOPPED'}[/]")
-            con.print(f"  config (persisted): cron.enabled="
-                      f"[{'green' if enabled else 'red'}]{enabled}[/]  interval={interval}s")
+            con.print(
+                f"  this session:   [{'green' if is_running else 'dim'}]{'RUNNING' if is_running else 'STOPPED'}[/]"
+            )
+            con.print(
+                f"  config (persisted): cron.enabled="
+                f"[{'green' if enabled else 'red'}]{enabled}[/]  interval={interval}s"
+            )
             # The live thread only reflects THIS process. Explain a mismatch so
             # "status can't be seen" never looks like a silent failure.
             if enabled and not is_running:
-                con.print("  [yellow]Enabled in config but no scheduler thread in this "
-                          "session[/yellow] — a separate `agentica cron daemon` process may be "
-                          "running it (the file lock prevents double execution), or the thread "
-                          "failed to start. Run [cyan]/cron daemon on[/cyan] to start it here.")
+                con.print(
+                    "  [yellow]Enabled in config but no scheduler thread in this "
+                    "session[/yellow] — a separate `agentica cron daemon` process may be "
+                    "running it (the file lock prevents double execution), or the thread "
+                    "failed to start. Run [cyan]/cron daemon on[/cyan] to start it here."
+                )
             elif not enabled and is_running:
-                con.print("  [yellow]Running in this session but disabled in config[/yellow] — "
-                          "it will not auto-start next launch. Run [cyan]/cron daemon on[/cyan] to persist.")
+                con.print(
+                    "  [yellow]Running in this session but disabled in config[/yellow] — "
+                    "it will not auto-start next launch. Run [cyan]/cron daemon on[/cyan] to persist."
+                )
             return
         if action == "on":
             from agentica.global_config import set_setting
+
             set_setting("cron.enabled", True)  # persist so it survives restart
             start = ts.get("cron_start")
             if start and start():
                 con.print("[green]Scheduler started (and enabled in config).[/green]")
             else:
-                con.print("[yellow]Enabled in config; could not start thread "
-                          "in this session. Restart CLI.[/yellow]")
+                con.print("[yellow]Enabled in config; could not start thread in this session. Restart CLI.[/yellow]")
             return
         if action == "off":
             from agentica.global_config import set_setting
+
             set_setting("cron.enabled", False)
             stop = ts.get("cron_stop")
             if stop:
@@ -1925,12 +1932,30 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
-    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 ask_user_question_callback=ctx.ask_user_question_callback)
+    current_agent = create_agent(
+        ctx.agent_config,
+        ctx.extra_tools,
+        ctx.workspace,
+        ctx.skills_registry,
+        ask_user_question_callback=ctx.ask_user_question_callback,
+    )
     con.print("[green]New chat session created.[/green]")
     con.print("[dim]Conversation history cleared.[/dim]")
     # Drop any goal manager — the new session has a new SessionLog.
     return {"current_agent": current_agent, "goal_manager": None}
+
+
+def _resume_base_dir(ctx: CommandContext) -> Optional[str]:
+    """Resolve the sessions directory the CLI operates on.
+
+    Prefer the active agent's live ``SessionLog.base_dir`` so the list is scoped
+    by the same project (work_dir) + user the agent writes to. Falling back to
+    ``None`` lets ``SessionLog`` derive the default from the process cwd, which
+    for the CLI equals the current project.
+    """
+    agent = getattr(ctx, "current_agent", None)
+    log = agent._session_log if agent is not None else None
+    return str(log.base_dir) if log is not None else None
 
 
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
@@ -1939,7 +1964,13 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 
     con = get_console()
 
-    sessions = SessionLog.list_sessions()
+    # Scope the session list by project (work_dir) + user, exactly like the Web
+    # sidebar, so both entrypoints show a consistent set for the same project.
+    # The running agent already carries the correctly-scoped work_dir/user_id;
+    # fall back to the process cwd (which for the CLI equals the project).
+    base_dir = _resume_base_dir(ctx)
+
+    sessions = SessionLog.list_sessions(base_dir=base_dir)
     if not sessions:
         con.print("[yellow]No sessions found to resume.[/yellow]")
         return
@@ -1980,7 +2011,9 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 con.print(f"[red]No session matching '{args_str}'[/red]")
                 return
             if len(matching) > 1:
-                con.print(f"[red]Ambiguous: '{args_str}' matches {len(matching)} sessions. Use a longer prefix or the number.[/red]")
+                con.print(
+                    f"[red]Ambiguous: '{args_str}' matches {len(matching)} sessions. Use a longer prefix or the number.[/red]"
+                )
                 return
             chosen = matching[0]
 
@@ -2004,7 +2037,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         # Show a preview of recent user queries so the human confirms the right
         # session was picked (also useful for finding an `at <uuid>` cut point).
         if resume_at_uuid is None:
-            log = SessionLog(chosen["session_id"])
+            log = SessionLog(chosen["session_id"], base_dir=base_dir)
             user_msgs = log.list_user_messages(limit=10)
             if user_msgs:
                 con.print(f"\n[bold]Session: {chosen['session_id']}[/bold]")
@@ -2013,8 +2046,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                     ts = m.get("timestamp", "")[:19].replace("T", " ") if m.get("timestamp") else ""
                     con.print(f"  {i}. [dim]{ts}[/dim] {m['content']}")
                 con.print(
-                    f"\n[dim]Tip: fork from an earlier point with "
-                    f"`/resume {chosen['session_id']} at <uuid>`[/dim]"
+                    f"\n[dim]Tip: fork from an earlier point with `/resume {chosen['session_id']} at <uuid>`[/dim]"
                 )
 
         con.print(
@@ -2074,17 +2106,16 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             else:
                 summary = "(empty session)"
                 subline = None
-            con.print(
-                f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
-                f"({size_kb:.0f}KB, {turns} turns)"
-            )
+            con.print(f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  ({size_kb:.0f}KB, {turns} turns)")
             if user_name:
                 con.print(f"     [bold]{summary}[/bold]")
                 if subline:
                     con.print(f"     [dim]> {subline}[/dim]")
             else:
                 con.print(f"     [dim]> {summary}[/dim]")
-        con.print(f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {visible_sessions[0]['session_id'][:8]})[/dim]")
+        con.print(
+            f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {visible_sessions[0]['session_id'][:8]})[/dim]"
+        )
         return
 
 
@@ -2139,11 +2170,7 @@ def _cmd_session(ctx: CommandContext, cmd_args: str = ""):
             return
         con.print(f"\n  [cyan]Sessions ({len(sessions)}):[/cyan]")
         for i, s in enumerate(sessions, start=1):
-            label = (
-                s.get("name")
-                or SessionLog.session_preview(s["path"]).get("first_user", "")
-                or "(empty)"
-            )
+            label = s.get("name") or SessionLog.session_preview(s["path"]).get("first_user", "") or "(empty)"
             con.print(f"  {i:>3}. [bold]{s['session_id'][:12]}[/bold]  {label[:60]}")
         return
 
@@ -2217,8 +2244,13 @@ def _cmd_session(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     os.system("clear" if os.name != "nt" else "cls")
-    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 ask_user_question_callback=ctx.ask_user_question_callback)
+    current_agent = create_agent(
+        ctx.agent_config,
+        ctx.extra_tools,
+        ctx.workspace,
+        ctx.skills_registry,
+        ask_user_question_callback=ctx.ask_user_question_callback,
+    )
     print_header(
         ctx.agent_config["model_provider"],
         ctx.agent_config["model_name"],
@@ -2287,9 +2319,7 @@ def _apply_profile(ctx: CommandContext, name: str):
         try:
             new_auxiliary_model = _build_sibling_model(ctx.agent_config, "auxiliary")
         except Exception as exc:
-            con.print(
-                f"[yellow]Auxiliary model build failed, falling back to main model: {exc}[/yellow]"
-            )
+            con.print(f"[yellow]Auxiliary model build failed, falling back to main model: {exc}[/yellow]")
             ctx.agent_config["auxiliary_model_provider"] = None
             ctx.agent_config["auxiliary_model_name"] = None
             ctx.agent_config["auxiliary_base_url"] = None
@@ -2342,22 +2372,24 @@ def _apply_profile(ctx: CommandContext, name: str):
         _sanitize_history_for_model_switch(ctx.current_agent)
         # Refresh the self-description block so the agent reports its new
         # model/auxiliary model on the next turn.
-        ctx.current_agent.environment_context = _build_environment_context(
-            ctx.current_agent, ctx.agent_config
-        )
+        ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
         auxiliary_provider = ctx.agent_config.get("auxiliary_model_provider")
         auxiliary_model_name = ctx.agent_config.get("auxiliary_model_name")
         auxiliary_str = (
-            f"{auxiliary_provider}/{auxiliary_model_name}" if auxiliary_provider and auxiliary_model_name else "reuse main"
+            f"{auxiliary_provider}/{auxiliary_model_name}"
+            if auxiliary_provider and auxiliary_model_name
+            else "reuse main"
         )
-        con.print(
-            f"[green]Switched to profile '{name}': {new_provider}/{new_model} "
-            f"(session preserved)[/green]"
-        )
+        con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model} (session preserved)[/green]")
         con.print(f"[dim]Auxiliary model: {auxiliary_str}[/dim]")
         return {"model_switched": True}
-    current_agent = create_agent(ctx.agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry,
-                                 ask_user_question_callback=ctx.ask_user_question_callback)
+    current_agent = create_agent(
+        ctx.agent_config,
+        ctx.extra_tools,
+        ctx.workspace,
+        ctx.skills_registry,
+        ask_user_question_callback=ctx.ask_user_question_callback,
+    )
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
     return {"current_agent": current_agent}
 
@@ -2412,7 +2444,9 @@ def _list_profiles(active_name: Optional[str] = None, active_source: Optional[st
             auxiliary_provider = auxiliary_block.get("model_provider") or provider
             auxiliary_model = auxiliary_block.get("model_name")
             auxiliary_has_key = "key set" if auxiliary_block.get("api_key") else "inherits main"
-            con.print(f"      auxiliary:  [cyan]{auxiliary_provider}/{auxiliary_model}[/cyan] [dim]({auxiliary_has_key})[/dim]")
+            con.print(
+                f"      auxiliary:  [cyan]{auxiliary_provider}/{auxiliary_model}[/cyan] [dim]({auxiliary_has_key})[/dim]"
+            )
         else:
             con.print("      auxiliary:  [dim]reuse main[/dim]")
         tuning = []
@@ -2475,7 +2509,10 @@ def _cmd_model(ctx: CommandContext, cmd_args: str = ""):
     # Reject it with an actionable pointer rather than silently mutating config.
     if "/" in stripped:
         con.print(f"[yellow]/model no longer accepts free-form '{stripped}'.[/yellow]")
-        con.print("This used to overwrite the active profile in config.yaml. Run [bold]agentica setup[/bold] to add or edit a profile.", style="dim")
+        con.print(
+            "This used to overwrite the active profile in config.yaml. Run [bold]agentica setup[/bold] to add or edit a profile.",
+            style="dim",
+        )
         con.print("To switch between saved profiles: /model <profile_name>", style="dim")
         return
 
@@ -2495,13 +2532,13 @@ def _model_list_overview(ctx: CommandContext) -> None:
         f"Current model: [bold cyan]{ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}[/bold cyan]"
     )
     con.print()
-    active_name, active_source = resolve_active_profile_name(
-        work_dir=ctx.agent_config.get("work_dir") or os.getcwd()
-    )
+    active_name, active_source = resolve_active_profile_name(work_dir=ctx.agent_config.get("work_dir") or os.getcwd())
     _list_profiles(active_name=active_name, active_source=active_source)
     con.print("Usage:", style="cyan")
     con.print("  /model                  list saved profiles (this view)", style="dim")
-    con.print("  /model <profile_name>   switch to a saved profile (project-scoped; config.yaml untouched)", style="dim")
+    con.print(
+        "  /model <profile_name>   switch to a saved profile (project-scoped; config.yaml untouched)", style="dim"
+    )
     con.print("  /model --clear          drop project override, fall back to global default", style="dim")
     con.print("To add or edit a profile, run [bold]agentica setup[/bold] outside the session.", style="dim")
 
@@ -2810,7 +2847,9 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
                 preview = _extract_queue_text(item)[:80]
                 con.print(f"    {i + 1}. [dim]{preview}[/dim]")
             con.print()
-        con.print("  [dim]Usage: /queue <prompt>  |  /queue list  |  /queue edit <n> <text>  |  /queue insert <n> <text>  |  /queue remove <n>  |  /queue clear[/dim]")
+        con.print(
+            "  [dim]Usage: /queue <prompt>  |  /queue list  |  /queue edit <n> <text>  |  /queue insert <n> <text>  |  /queue remove <n>  |  /queue clear[/dim]"
+        )
         con.print("  [dim]See also: /steer (nudge current run) · /background (run in parallel)[/dim]")
         return
 
@@ -3430,7 +3469,8 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
                 "Goal-bound retrieval will activate from the next /new session.[/dim]"
             )
 
-    # Attach the update_goal tool so the model can break the loop.
+    # Attach the goal tool (verify_completion + update_goal) so the model can
+    # verify completion with evidence and break the loop when actually done.
     _attach_goal_tool(agent)
 
     budget_bits = [f"{state.turn_budget} turns"]
@@ -3521,7 +3561,10 @@ COMMAND_REGISTRY = {
     "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done)"),
     "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
     "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),
-    "/queue": (_cmd_queue, "Run as the NEXT turn after the current run finishes | list | edit <n> | insert <n> | remove <n> | clear"),
+    "/queue": (
+        _cmd_queue,
+        "Run as the NEXT turn after the current run finishes | list | edit <n> | insert <n> | remove <n> | clear",
+    ),
     "/q": (_cmd_queue, "Run as the next turn after current run (alias)"),
     "/background": (_cmd_background, "Run NOW in a parallel independent agent (own session)"),
     "/bg": (_cmd_background, "Run now in a parallel independent agent (alias)"),
@@ -3571,10 +3614,13 @@ COMMAND_HANDLERS = {cmd: handler for cmd, (handler, _) in COMMAND_REGISTRY.items
 # Commands that produce their own conversational output (so an extra header
 # would just add visual noise) or that are silently no-op control verbs.
 _SILENT_CMDS: set = {
-    "/exit", "/quit",
-    "/clear", "/reset",   # these wipe the screen — the echo would vanish anyway
-    "/btw",               # has its own concurrent UI
-    "/paste", "/image",   # part of the user's message construction, not a query
+    "/exit",
+    "/quit",
+    "/clear",
+    "/reset",  # these wipe the screen — the echo would vanish anyway
+    "/btw",  # has its own concurrent UI
+    "/paste",
+    "/image",  # part of the user's message construction, not a query
 }
 
 

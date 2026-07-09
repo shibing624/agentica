@@ -30,7 +30,11 @@ from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
 from agentica.model.stream_retry import stream_with_retry
 from agentica.utils.log import logger
-from agentica.utils.langfuse_integration import is_langfuse_available, build_langfuse_metadata, get_langfuse_openai_client
+from agentica.utils.langfuse_integration import (
+    is_langfuse_available,
+    build_langfuse_metadata,
+    get_langfuse_openai_client,
+)
 
 
 class OpenAIImageTypeMeta(EnumMeta):
@@ -55,11 +59,28 @@ class OpenAIImageType(Enum, metaclass=OpenAIImageTypeMeta):
 
 # Request parameter names shared between request_kwargs and to_dict
 _OPENAI_REQUEST_PARAMS = [
-    "store", "reasoning_effort", "verbosity", "frequency_penalty", "logit_bias",
-    "logprobs", "top_logprobs", "max_tokens", "max_completion_tokens",
-    "modalities", "audio", "presence_penalty", "response_format", "seed",
-    "stop", "temperature", "user", "top_p", "extra_headers", "extra_body",
-    "extra_query", "metadata",
+    "store",
+    "reasoning_effort",
+    "verbosity",
+    "frequency_penalty",
+    "logit_bias",
+    "logprobs",
+    "top_logprobs",
+    "max_tokens",
+    "max_completion_tokens",
+    "modalities",
+    "audio",
+    "presence_penalty",
+    "response_format",
+    "seed",
+    "stop",
+    "temperature",
+    "user",
+    "top_p",
+    "extra_headers",
+    "extra_body",
+    "extra_query",
+    "metadata",
 ]
 _DEEPSEEK_THINKING_UNSUPPORTED_PARAMS = (
     "temperature",
@@ -166,7 +187,7 @@ class OpenAIChat(Model):
     top_logprobs: Optional[int] = None
     max_tokens: Optional[int] = None
     max_completion_tokens: Optional[int] = None
-    modalities: Optional[List[str]] = None # "text" and/or "audio"
+    modalities: Optional[List[str]] = None  # "text" and/or "audio"
     audio: Optional[Dict[str, Any]] = None
     presence_penalty: Optional[float] = None
     response_format: Optional[Any] = None
@@ -294,6 +315,9 @@ class OpenAIChat(Model):
         - ``reasoning_effort`` (OpenAI o-series, gpt-5.x)
         - ``extra_body.thinking`` (DeepSeek, Ark/Doubao: ``{"type": "enabled"|"disabled", ...}``)
         - ``extra_body.enable_thinking`` (Qwen / DashScope-compatible)
+        - ``extra_body.thinking_enabled`` (Anthropic-via-OpenAI proxy, e.g. Venus;
+          the flat thinking params ``thinking_enabled`` / ``reasoning_effort`` /
+          ``thinking_display`` are forwarded as top-level request fields)
         """
         details: List[str] = []
         is_on: Optional[bool] = None
@@ -314,6 +338,16 @@ class OpenAIChat(Model):
             enable_thinking = self.extra_body.get("enable_thinking")
             if isinstance(enable_thinking, bool):
                 is_on = enable_thinking
+            # Anthropic-via-OpenAI proxy (Venus) flat thinking params.
+            thinking_enabled = self.extra_body.get("thinking_enabled")
+            if isinstance(thinking_enabled, bool):
+                is_on = thinking_enabled
+            eb_effort = self.extra_body.get("reasoning_effort")
+            if eb_effort and not self.reasoning_effort:
+                details.append(f"reasoning_effort={eb_effort}")
+            eb_display = self.extra_body.get("thinking_display")
+            if eb_display:
+                details.append(f"display={eb_display}")
         if is_on is None:
             return "off"
         status = "on" if is_on else "off"
@@ -401,9 +435,7 @@ class OpenAIChat(Model):
         headers.setdefault(self.cache_control_session_header, self._cache_session_id)
         return headers
 
-    def _apply_cache_control(
-        self, formatted: List[Dict[str, Any]], request_kwargs: Dict[str, Any]
-    ) -> tuple:
+    def _apply_cache_control(self, formatted: List[Dict[str, Any]], request_kwargs: Dict[str, Any]) -> tuple:
         """Inject Anthropic-style cache_control breakpoints within the 4-breakpoint budget.
 
         Returns ``(messages, request_kwargs)`` (copies, original not mutated).
@@ -463,9 +495,7 @@ class OpenAIChat(Model):
 
         # Sticky routing so consecutive invokes hit the same backend cache.
         if self.cache_control_session_header:
-            new_kwargs["extra_headers"] = self._with_cache_session_header(
-                new_kwargs.get("extra_headers")
-            )
+            new_kwargs["extra_headers"] = self._with_cache_session_header(new_kwargs.get("extra_headers"))
         return out, new_kwargs
 
     def _get_langfuse_extra_params(self) -> Dict[str, Any]:
@@ -568,10 +598,10 @@ class OpenAIChat(Model):
     # handle_tool_calls and handle_stream_tool_calls are inherited from Model base class.
 
     def create_assistant_message(
-            self,
-            response_message: ChatCompletionMessage,
-            metrics: Metrics,
-            response_usage: Optional[CompletionUsage],
+        self,
+        response_message: ChatCompletionMessage,
+        metrics: Metrics,
+        response_usage: Optional[CompletionUsage],
     ) -> Message:
         """Create an assistant message from the response."""
         content = response_message.content
@@ -621,18 +651,15 @@ class OpenAIChat(Model):
         # Parse structured outputs — fallback to text content on validation failure
         try:
             if (
-                    self.response_format is not None
-                    and self.use_structured_outputs
-                    and issubclass(self.response_format, BaseModel)
+                self.response_format is not None
+                and self.use_structured_outputs
+                and issubclass(self.response_format, BaseModel)
             ):
                 parsed_object = response_message.parsed  # type: ignore
                 if parsed_object is not None:
                     model_response.parsed = parsed_object
         except Exception as e:
-            logger.warning(
-                f"Structured output parse failed for model '{self.id}', "
-                f"falling back to text content: {e}"
-            )
+            logger.warning(f"Structured output parse failed for model '{self.id}', falling back to text content: {e}")
 
         assistant_message = self.create_assistant_message(
             response_message=response_message, metrics=metrics, response_usage=response_usage
@@ -657,13 +684,13 @@ class OpenAIChat(Model):
 
         tool_role = "tool"
         if (
-                await self.handle_tool_calls(
-                    assistant_message=assistant_message,
-                    messages=messages,
-                    model_response=model_response,
-                    tool_role=tool_role,
-                )
-                is not None
+            await self.handle_tool_calls(
+                assistant_message=assistant_message,
+                messages=messages,
+                model_response=model_response,
+                tool_role=tool_role,
+            )
+            is not None
         ):
             return model_response
         return model_response
@@ -754,6 +781,26 @@ class OpenAIChat(Model):
             if len(_tool_calls) > 0:
                 assistant_message.tool_calls = _tool_calls
 
+        # Diagnostic: some OpenAI-compatible proxies fronting Anthropic Claude
+        # (e.g. Venus) occasionally emit tool_use as *text* in the content
+        # stream instead of structured tool_calls. When that happens the turn
+        # silently degrades to plain text and the agent loop stalls with no
+        # error. We can't reliably re-parse arbitrary proxy text into a tool
+        # call, but we can surface a loud, actionable warning instead of a
+        # silent hang. Only fires when tools were offered, none were parsed,
+        # and the content looks like a leaked structured call.
+        if self.run_tools and self.functions and not assistant_message.tool_calls and stream_data.response_content:
+            _c = stream_data.response_content
+            if ("<invoke" in _c and "</invoke" in _c) or ('"type"' in _c and '"tool_use"' in _c):
+                logger.warning(
+                    "Detected a tool call leaked into the text stream (proxy did "
+                    "not emit structured tool_calls). This causes the turn to "
+                    "stall. If you are using an OpenAI-compatible proxy in front "
+                    "of Anthropic Claude (e.g. Venus /llmproxy/v1), switch to the "
+                    "native Anthropic endpoint by using model_provider='anthropic' "
+                    "with base_url '.../llmproxy/anthropic'."
+                )
+
         self.update_stream_metrics(assistant_message=assistant_message, metrics=metrics)
 
         # Expose finish_reason so Runner's agentic loop can detect truncated output
@@ -767,37 +814,88 @@ class OpenAIChat(Model):
         if assistant_message.tool_calls is not None and len(assistant_message.tool_calls) > 0 and self.run_tools:
             tool_role = "tool"
             async for tool_call_response in self.handle_stream_tool_calls(
-                    assistant_message=assistant_message, messages=messages, tool_role=tool_role
+                assistant_message=assistant_message, messages=messages, tool_role=tool_role
             ):
                 yield tool_call_response
 
     def build_tool_calls(self, tool_calls_data: List[ChoiceDeltaToolCall]) -> List[Dict[str, Any]]:
-        """Build tool calls from streaming tool call data."""
-        tool_calls: List[Dict[str, Any]] = []
-        for _tool_call in tool_calls_data:
-            _index = _tool_call.index
-            _tool_call_id = _tool_call.id
-            _tool_call_type = _tool_call.type
-            _function_name = _tool_call.function.name if _tool_call.function else None
-            _function_arguments = _tool_call.function.arguments if _tool_call.function else None
+        """Build tool calls from streaming tool call deltas.
 
-            if len(tool_calls) <= _index:
-                tool_calls.extend([{}] * (_index - len(tool_calls) + 1))
-            tool_call_entry = tool_calls[_index]
-            if not tool_call_entry:
-                tool_call_entry["id"] = _tool_call_id
-                tool_call_entry["type"] = _tool_call_type
-                tool_call_entry["function"] = {
-                    "name": _function_name or "",
-                    "arguments": _function_arguments or "",
-                }
+        Standard OpenAI streams number each tool_call delta with a stable
+        ``index`` so fragments (name in one chunk, arguments split across the
+        next) can be reassembled positionally. Some OpenAI-compatible proxies —
+        notably ones that translate Anthropic Claude tool_use into the OpenAI
+        wire format (e.g. Venus) — omit ``index`` (send ``None``) or hold it at
+        0 while relying on ``id`` to delimit calls. The original positional-only
+        logic raised ``TypeError`` on ``None`` index, dropping every tool call
+        and silently degrading the turn to plain text.
+
+        This reassembles defensively:
+          * ``index`` present  -> positional accumulation (standard path).
+          * ``index`` missing  -> group by ``id``; a fragment with a fresh id
+            starts a new call, id-less fragments append to the current one.
+        Missing name/arguments/id/type fragments are tolerated throughout.
+        """
+        tool_calls: List[Dict[str, Any]] = []
+        # Maps an id -> position in ``tool_calls`` for the index-less fallback.
+        id_to_pos: Dict[str, int] = {}
+
+        def _new_entry(tid, ttype, fname, fargs) -> Dict[str, Any]:
+            return {
+                "id": tid or "",
+                "type": ttype or "function",
+                "function": {"name": fname or "", "arguments": fargs or ""},
+            }
+
+        def _merge_into(entry: Dict[str, Any], tid, ttype, fname, fargs) -> None:
+            if fname:
+                entry["function"]["name"] += fname
+            if fargs:
+                entry["function"]["arguments"] += fargs
+            if tid:
+                entry["id"] = tid
+            if ttype:
+                entry["type"] = ttype
+
+        for _tool_call in tool_calls_data:
+            _index = getattr(_tool_call, "index", None)
+            _tool_call_id = getattr(_tool_call, "id", None)
+            _tool_call_type = getattr(_tool_call, "type", None)
+            _fn = getattr(_tool_call, "function", None)
+            _function_name = _fn.name if _fn else None
+            _function_arguments = _fn.arguments if _fn else None
+
+            if isinstance(_index, int):
+                # Standard positional path.
+                if len(tool_calls) <= _index:
+                    tool_calls.extend([{}] * (_index - len(tool_calls) + 1))
+                entry = tool_calls[_index]
+                if not entry:
+                    tool_calls[_index] = _new_entry(_tool_call_id, _tool_call_type, _function_name, _function_arguments)
+                else:
+                    _merge_into(entry, _tool_call_id, _tool_call_type, _function_name, _function_arguments)
+                continue
+
+            # ── index-less fallback (loose proxy) ──
+            # A fragment carrying a NEW id begins a new call; otherwise it
+            # continues the most recent call (or starts the first one).
+            if _tool_call_id and _tool_call_id in id_to_pos:
+                _merge_into(
+                    tool_calls[id_to_pos[_tool_call_id]],
+                    _tool_call_id,
+                    _tool_call_type,
+                    _function_name,
+                    _function_arguments,
+                )
+            elif _tool_call_id:
+                tool_calls.append(_new_entry(_tool_call_id, _tool_call_type, _function_name, _function_arguments))
+                id_to_pos[_tool_call_id] = len(tool_calls) - 1
+            elif tool_calls:
+                # id-less continuation of the current (last) call.
+                _merge_into(tool_calls[-1], _tool_call_id, _tool_call_type, _function_name, _function_arguments)
             else:
-                if _function_name:
-                    tool_call_entry["function"]["name"] += _function_name
-                if _function_arguments:
-                    tool_call_entry["function"]["arguments"] += _function_arguments
-                if _tool_call_id:
-                    tool_call_entry["id"] = _tool_call_id
-                if _tool_call_type:
-                    tool_call_entry["type"] = _tool_call_type
-        return tool_calls
+                # First fragment has no id and no index — open a fresh call.
+                tool_calls.append(_new_entry(_tool_call_id, _tool_call_type, _function_name, _function_arguments))
+
+        # Drop any empty slots left by sparse positional indices.
+        return [tc for tc in tool_calls if tc]

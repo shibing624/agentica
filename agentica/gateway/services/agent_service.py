@@ -348,9 +348,15 @@ class AgentService:
             model=model,
             auxiliary_model=auxiliary_model,
             task_model=task_model,
+            description=(
+                "You are DeepAgent, an AI coding agent served over the Agentica "
+                "gateway (web UI and chat channels). You help users with software "
+                "engineering and general tasks through a conversational interface."
+            ),
             tools=extra if extra else None,
             workspace=self._workspace,
             work_dir=work_dir,
+            user_id=settings.default_user_id,
             num_history_turns=settings.num_history_turns,
             instructions=instructions,
             debug=settings.debug,
@@ -779,8 +785,11 @@ class AgentService:
         sessions and shouldn't clutter the sidebar; their execution history
         is tracked separately via the cron TaskRun store.
         """
+        # Scope to the current project (global base_dir) + user, so the sidebar
+        # matches what the CLI shows when run from the same project directory.
+        base_dir = self._session_base_dir(str(settings.base_dir))
         out: List[Dict[str, Any]] = []
-        for s in SessionLog.list_sessions():
+        for s in SessionLog.list_sessions(base_dir=base_dir):
             sid = s["session_id"]
             if sid.startswith(CRON_SESSION_PREFIX):
                 continue
@@ -813,12 +822,13 @@ class AgentService:
         reappear after restart (SessionLog is the single source of truth).
         Returns True if either the cache or the on-disk log existed.
         """
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
         removed = self._cache.delete(session_id)
         self._session_work_dirs.pop(session_id, None)
         self._session_locks.pop(session_id, None)
         log_existed = False
         try:
-            log = SessionLog(session_id=session_id)
+            log = SessionLog(session_id=session_id, base_dir=base_dir)
             if log.path.exists():
                 log.path.unlink()
                 log_existed = True
@@ -832,11 +842,13 @@ class AgentService:
 
     def rename_session(self, session_id: str, name: str) -> None:
         """Rename a session by writing the sidecar .meta.json (SessionLog)."""
-        SessionLog.rename_session(session_id, name)
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        SessionLog.rename_session(session_id, name, base_dir=base_dir)
 
     def archive_session(self, session_id: str, archived: bool = True) -> None:
         """Archive/unarchive a session by writing SessionLog sidecar metadata."""
-        SessionLog.archive_session(session_id, archived=archived)
+        base_dir = self._session_base_dir(self.get_session_work_dir(session_id))
+        SessionLog.archive_session(session_id, archived=archived, base_dir=base_dir)
 
     def clear_session(self, session_id: str) -> bool:
         """Alias for delete_session (for compatibility)."""
@@ -871,6 +883,19 @@ class AgentService:
     def get_session_work_dir(self, session_id: str) -> str:
         """Get the working directory for a session (falls back to global base_dir)."""
         return self._session_work_dirs.get(session_id, str(settings.base_dir))
+
+    # ============== Session storage scoping ==============
+
+    def _session_base_dir(self, work_dir: str) -> str:
+        """Resolve the SessionLog storage dir for a given project work_dir.
+
+        Sessions are scoped by project (work_dir) + user, mirroring exactly how
+        the Agent writes them (see ``SessionLog`` construction in the agent).
+        This is what makes the Web sidebar and the CLI ``/resume`` list a
+        consistent set of sessions for the same project + user.
+        """
+        from agentica.compression.tool_result_storage import get_project_dir
+        return get_project_dir(work_dir, user_id=settings.default_user_id)
 
     def update_work_dir(self, new_dir: str) -> None:
         """Update the global work_dir and clear ALL cached agents.

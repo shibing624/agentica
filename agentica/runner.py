@@ -186,10 +186,7 @@ class Runner:
         if isinstance(value, (str, int, float, bool)):
             return value
         if isinstance(value, dict):
-            return {
-                str(key): Runner._serialize_langfuse_data(item)
-                for key, item in value.items()
-            }
+            return {str(key): Runner._serialize_langfuse_data(item) for key, item in value.items()}
         if isinstance(value, (list, tuple)):
             return [Runner._serialize_langfuse_data(item) for item in value]
         return str(value)
@@ -253,7 +250,9 @@ class Runner:
             await call_factory(hooks)
         else:
             await self.agent._hook_recorder.run(
-                hooks, "agent", method_name,
+                hooks,
+                "agent",
+                method_name,
                 call_factory(hooks),
                 base_class=AgentHooks,
             )
@@ -270,7 +269,9 @@ class Runner:
             await call_factory(hooks)
         else:
             await self.agent._hook_recorder.run(
-                hooks, "run", method_name,
+                hooks,
+                "run",
+                method_name,
                 call_factory(hooks),
                 base_class=RunHooks,
             )
@@ -282,7 +283,9 @@ class Runner:
         if isinstance(hooks, _CompositeRunHooks):
             return await hooks.on_user_prompt(agent=self.agent, message=message)
         return await self.agent._hook_recorder.run(
-            hooks, "run", "on_user_prompt",
+            hooks,
+            "run",
+            "on_user_prompt",
             hooks.on_user_prompt(agent=self.agent, message=message),
             base_class=RunHooks,
         )
@@ -351,8 +354,7 @@ class Runner:
             return None
         if cost_tracker.total_cost_usd >= max_cost_usd:
             return (
-                f"Cost budget exceeded: ${cost_tracker.total_cost_usd:.4f} >= "
-                f"${max_cost_usd:.4f}. Stopping execution."
+                f"Cost budget exceeded: ${cost_tracker.total_cost_usd:.4f} >= ${max_cost_usd:.4f}. Stopping execution."
             )
         return None
 
@@ -394,19 +396,13 @@ class Runner:
                 "All tool calls have failed repeatedly. Stopping to prevent infinite loop.",
             )
 
-        if (
-            loop_state.max_turns is not None
-            and loop_state.turn_count >= loop_state.max_turns
-        ):
+        if loop_state.max_turns is not None and loop_state.turn_count >= loop_state.max_turns:
             return LoopBreak(
                 RunBreakReason.MAX_TURNS.value,
-                f"Reached max_turns={loop_state.max_turns} limit. "
-                f"Returning results collected so far.",
+                f"Reached max_turns={loop_state.max_turns} limit. Returning results collected so far.",
             )
 
-        _cost_msg = self._check_cost_budget(
-            agent.model._cost_tracker, agent._run_max_cost_usd
-        )
+        _cost_msg = self._check_cost_budget(agent.model._cost_tracker, agent._run_max_cost_usd)
         if _cost_msg:
             return LoopBreak(RunBreakReason.COST_BUDGET.value, _cost_msg)
 
@@ -443,33 +439,35 @@ class Runner:
         agent._run_fallback_models = fb_chain[1:]
         try:
             recovery_call = await self._call_with_retry(
-                fb_chain[0], messages, loop_state, agent, stream=False,
+                fb_chain[0],
+                messages,
+                loop_state,
+                agent,
+                stream=False,
             )
             recovery = recovery_call.response
         except Exception as exc:
             logger.error(
-                f"[fallback.on_break] recovery inference failed "
-                f"(reason={break_reason}, primary={primary_id}): {exc}"
+                f"[fallback.on_break] recovery inference failed (reason={break_reason}, primary={primary_id}): {exc}"
             )
             return None
         finally:
             agent._run_fallback_models = saved_chain
 
         used_id = loop_state.last_used_model_id or fb_chain[0].id
-        logger.warning(
-            f"[fallback.on_break] recovered: primary={primary_id} -> "
-            f"used={used_id} (reason={break_reason})"
-        )
+        logger.warning(f"[fallback.on_break] recovered: primary={primary_id} -> used={used_id} (reason={break_reason})")
         cb = agent._event_callback
         if cb is not None:
             try:
-                cb({
-                    "type": "fallback.on_break",
-                    "agent_name": agent.name or "Agent",
-                    "primary_model": primary_id,
-                    "used_model": used_id,
-                    "break_reason": break_reason,
-                })
+                cb(
+                    {
+                        "type": "fallback.on_break",
+                        "agent_name": agent.name or "Agent",
+                        "primary_model": primary_id,
+                        "used_model": used_id,
+                        "break_reason": break_reason,
+                    }
+                )
             except Exception as e:
                 logger.warning(f"event callback failed for fallback.on_break: {e}")
         return recovery
@@ -496,10 +494,7 @@ class Runner:
         drained = agent._drain_steer()
         if not drained:
             return
-        marker = "\n\n".join(
-            f"[User guidance received while you were working]\n{guidance}"
-            for guidance in drained
-        )
+        marker = "\n\n".join(f"[User guidance received while you were working]\n{guidance}" for guidance in drained)
         last = messages[-1] if messages else None
         if last is not None and last.role == "tool":
             existing = (last.content or "").rstrip()
@@ -593,32 +588,21 @@ class Runner:
         if not had_tool_calls:
             # Max-tokens recovery: if output was truncated, inject "Continue"
             _finish = model.last_finish_reason
-            if (
-                _finish == "length"
-                and loop_state.max_tokens_recovery_count < loop_state.max_tokens_recovery_limit
-            ):
+            if _finish == "length" and loop_state.max_tokens_recovery_count < loop_state.max_tokens_recovery_limit:
                 loop_state.max_tokens_recovery_count += 1
-                messages.append(
-                    Message(role="user", content="Continue from where you left off.")
-                )
+                messages.append(Message(role="user", content="Continue from where you left off."))
                 logger.debug(
                     f"[loop] max_tokens recovery #{loop_state.max_tokens_recovery_count}: "
                     "injecting 'Continue' and looping"
                 )
                 return True  # continue
-            logger.debug(
-                f"[loop] exit: no tool_calls, finish_reason={_finish!r}, "
-                f"turn={loop_state.turn_count}"
-            )
+            logger.debug(f"[loop] exit: no tool_calls, finish_reason={_finish!r}, turn={loop_state.turn_count}")
             return False  # break
 
         # Check stop_after_tool_call
         for m in reversed(messages):
             if m.stop_after_tool_call:
-                logger.debug(
-                    f"[loop] exit: stop_after_tool_call on {m.tool_name!r}, "
-                    f"turn={loop_state.turn_count}"
-                )
+                logger.debug(f"[loop] exit: stop_after_tool_call on {m.tool_name!r}, turn={loop_state.turn_count}")
                 return False  # break
             if m.role == "assistant" and not m.tool_calls:
                 break
@@ -658,9 +642,7 @@ class Runner:
             return ToolHandlingResult(False, [])
 
         # Parse tool calls (provider-specific)
-        function_calls, provider_metadata = model.parse_tool_calls(
-            assistant_msg, messages, tool_role="tool"
-        )
+        function_calls, provider_metadata = model.parse_tool_calls(assistant_msg, messages, tool_role="tool")
         if not function_calls:
             # All tool calls had errors (already appended to messages by parse_tool_calls)
             return ToolHandlingResult(True, [])
@@ -674,13 +656,9 @@ class Runner:
                 _args = function_calls[0].arguments or {}
                 if isinstance(_args, dict):
                     _first_args = {
-                        k: (str(v)[:80] + "..." if len(str(v)) > 80 else v)
-                        for k, v in list(_args.items())[:3]
+                        k: (str(v)[:80] + "..." if len(str(v)) > 80 else v) for k, v in list(_args.items())[:3]
                     }
-            logger.debug(
-                f"[tool-calls] LLM requested {len(function_calls)} tool(s): "
-                f"{_names} first_args={_first_args}"
-            )
+            logger.debug(f"[tool-calls] LLM requested {len(function_calls)} tool(s): {_names} first_args={_first_args}")
 
         # Execute tool calls
         function_call_results: List[Message] = []
@@ -716,9 +694,7 @@ class Runner:
         if assistant_msg is None or not assistant_msg.tool_calls:
             return
 
-        function_calls, provider_metadata = model.parse_tool_calls(
-            assistant_msg, messages, tool_role="tool"
-        )
+        function_calls, provider_metadata = model.parse_tool_calls(assistant_msg, messages, tool_role="tool")
         if not function_calls:
             return
 
@@ -779,16 +755,9 @@ class Runner:
     @staticmethod
     def _resolve_max_api_retry(agent: "Agent", config: RunConfig) -> int:
         """Resolve and validate Runner-level API call attempts for one run."""
-        value = (
-            config.max_api_retry
-            if config.max_api_retry is not None
-            else agent.max_api_retry
-        )
+        value = config.max_api_retry if config.max_api_retry is not None else agent.max_api_retry
         if value < 1:
-            raise ValueError(
-                "max_api_retry must be >= 1; "
-                "use 1 to disable Runner-level same-model retry"
-            )
+            raise ValueError("max_api_retry must be >= 1; use 1 to disable Runner-level same-model retry")
         return value
 
     @staticmethod
@@ -810,12 +779,14 @@ class Runner:
         agent_name = agent.name or "Agent"
 
         # Stage 1: tool result budget (persist oversized results to disk)
-        _sid = agent.run_id or 'default'
+        _sid = agent.run_id or "default"
         _uid = agent.workspace.user_id if agent.workspace is not None else None
         _recent_tools = [m for m in messages if m.role == "tool" and not m.compressed_content]
         if _recent_tools:
             enforce_tool_result_budget(
-                tool_results=_recent_tools, session_id=_sid, user_id=_uid,
+                tool_results=_recent_tools,
+                session_id=_sid,
+                user_id=_uid,
             )
 
         # Stage 2: micro-compact (clear old tool results, free)
@@ -823,11 +794,13 @@ class Runner:
         if n:
             logger.debug(f"Stage 2 (micro-compact): cleared {n} old tool result(s)")
             if cb is not None:
-                cb({
-                    "type": "compact.micro",
-                    "agent_name": agent_name,
-                    "cleared": n,
-                })
+                cb(
+                    {
+                        "type": "compact.micro",
+                        "agent_name": agent_name,
+                        "cleared": n,
+                    }
+                )
 
         # Stage 3 & 4 require CompressionManager
         if not agent.tool_config.compress_tool_results:
@@ -844,7 +817,7 @@ class Runner:
 
         # Stage 3: rule-based compress (truncate + drop old rounds, free)
         if cm.should_compress(messages, tools=model.tools, model=model):
-            await _fire_compact_hooks('on_pre_compact')
+            await _fire_compact_hooks("on_pre_compact")
             logger.debug("Stage 3 (rule-based compress): truncating + dropping old messages")
             before = len(messages)
             t0 = time.monotonic()
@@ -860,16 +833,18 @@ class Runner:
             if compression_report and agent.run_response is not None:
                 agent.run_response.metrics = agent.run_response.metrics or {}
                 agent.run_response.metrics["compression"] = {"last_report": compression_report}
-            await _fire_compact_hooks('on_post_compact')
+            await _fire_compact_hooks("on_post_compact")
             if cb is not None:
-                cb({
-                    "type": "compact.rule_based",
-                    "agent_name": agent_name, 
-                    "before": before,
-                    "after": len(messages),
-                    "elapsed": time.monotonic() - t0,
-                    "report": compression_report,
-                })
+                cb(
+                    {
+                        "type": "compact.rule_based",
+                        "agent_name": agent_name,
+                        "before": before,
+                        "after": len(messages),
+                        "elapsed": time.monotonic() - t0,
+                        "report": compression_report,
+                    }
+                )
 
         # Stage 4: auto-compact via LLM summarisation.
         # auto_compact() returns False fast when threshold not met; only fire
@@ -879,15 +854,17 @@ class Runner:
         compacted = await cm.auto_compact(messages, model=model)
         if compacted:
             logger.debug("Stage 4 (auto-compact): conversation summarised by LLM")
-            await _fire_compact_hooks('on_post_compact')
+            await _fire_compact_hooks("on_post_compact")
             if cb is not None:
-                cb({
-                    "type": "compact.auto",
-                    "agent_name": agent_name,
-                    "before": before,
-                    "after": len(messages),
-                    "elapsed": time.monotonic() - t0,
-                })
+                cb(
+                    {
+                        "type": "compact.auto",
+                        "agent_name": agent_name,
+                        "before": before,
+                        "after": len(messages),
+                        "elapsed": time.monotonic() - t0,
+                    }
+                )
 
     @staticmethod
     async def _try_reactive_compact(
@@ -909,37 +886,32 @@ class Runner:
             logger.info("Reactive compact triggered (prompt_too_long) -- retrying")
             cb = agent._event_callback
             if cb is not None:
-                cb({
-                    "type": "compact.reactive",
-                    "agent_name": agent.name or "Agent",
-                    "before": before,
-                    "after": len(messages),
-                    "elapsed": time.monotonic() - t0,
-                })
+                cb(
+                    {
+                        "type": "compact.reactive",
+                        "agent_name": agent.name or "Agent",
+                        "before": before,
+                        "after": len(messages),
+                        "elapsed": time.monotonic() - t0,
+                    }
+                )
             return True
         return False
 
     @staticmethod
     def _strip_tool_artifacts(msgs: List[Message], *, drop_system: bool = False) -> List[Message]:
-        """Drop 'tool' role messages and 'tool_calls' from assistant messages.
+        """Drop tool-call/tool-result artifacts (OpenAI *and* Anthropic wire formats).
 
-        Keeps only the assistant's text content (if any) and every other
-        message untouched. Used to recover from cross-provider tool-call
-        format mismatches — see _sanitize_tool_history_after_error.
+        Keeps only plain user/assistant text so history recorded under one
+        provider can be replayed on another. Handles both OpenAI-style
+        (role="tool" + assistant.tool_calls) and Anthropic-style (list content
+        blocks with tool_use/tool_result) encodings. Used to recover from
+        cross-provider tool-call format mismatches — see
+        _sanitize_tool_history_after_error.
         """
-        cleaned: List[Message] = []
-        for m in msgs:
-            if m.role == "tool":
-                continue
-            if m.role == "assistant" and m.tool_calls:
-                text = m.content if isinstance(m.content, str) else ""
-                if text:
-                    cleaned.append(Message(role="assistant", content=text))
-                continue
-            if drop_system and m.role == "system":
-                continue
-            cleaned.append(m)
-        return cleaned
+        from agentica.agent.history_filter import strip_all_tool_artifacts
+
+        return strip_all_tool_artifacts(msgs, drop_system=drop_system)
 
     @staticmethod
     def _sanitize_tool_history_after_error(agent: "Agent", messages: List[Message]) -> None:
@@ -956,9 +928,7 @@ class Runner:
         """
         for run in agent.working_memory.runs:
             if run.response and run.response.messages:
-                run.response.messages = Runner._strip_tool_artifacts(
-                    run.response.messages, drop_system=True
-                )
+                run.response.messages = Runner._strip_tool_artifacts(run.response.messages, drop_system=True)
         messages[:] = Runner._strip_tool_artifacts(messages)
 
     @staticmethod
@@ -1020,20 +990,21 @@ class Runner:
             fallback model" without scraping retry/switch warnings.
             """
             logger.warning(
-                f"[fallback.recovered] primary={primary_id} -> "
-                f"used={used_model_id} (idx={used_idx}, trigger={trigger})"
+                f"[fallback.recovered] primary={primary_id} -> used={used_model_id} (idx={used_idx}, trigger={trigger})"
             )
             cb = agent._event_callback
             if cb is not None:
                 try:
-                    cb({
-                        "type": "fallback.recovered",
-                        "agent_name": agent.name or "Agent",
-                        "primary_model": primary_id,
-                        "used_model": used_model_id,
-                        "fallback_index": used_idx,
-                        "trigger": trigger,
-                    })
+                    cb(
+                        {
+                            "type": "fallback.recovered",
+                            "agent_name": agent.name or "Agent",
+                            "primary_model": primary_id,
+                            "used_model": used_model_id,
+                            "fallback_index": used_idx,
+                            "trigger": trigger,
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"event callback failed for fallback.recovered: {e}")
 
@@ -1041,8 +1012,7 @@ class Runner:
             is_fallback = model_idx > 0
             if is_fallback:
                 logger.warning(
-                    f"[fallback] switching to {current.id} "
-                    f"({model_idx}/{len(candidates) - 1}) trigger={trigger}"
+                    f"[fallback] switching to {current.id} ({model_idx}/{len(candidates) - 1}) trigger={trigger}"
                 )
 
             for attempt in range(state.max_api_retry):
@@ -1080,10 +1050,7 @@ class Runner:
                         # prompt, not continue after the primary model's refusal.
                         del messages[message_checkpoint:]
                         trigger = "content_filter"
-                        last_exc = RuntimeError(
-                            f"content_filter on {current.id} "
-                            f"(finish_reason={resp.finish_reason})"
-                        )
+                        last_exc = RuntimeError(f"content_filter on {current.id} (finish_reason={resp.finish_reason})")
                         break  # exit retry loop, go to next model
 
                     # Success: stamp who actually answered.
@@ -1133,9 +1100,7 @@ class Runner:
                             state.last_used_model_idx = model_idx
                             if is_fallback:
                                 _emit_fallback_recovery(current.id, model_idx)
-                            return ModelCallResult(
-                                response=resp, used_model=current, used_fallback=is_fallback
-                            )
+                            return ModelCallResult(response=resp, used_model=current, used_fallback=is_fallback)
                         except Exception as exc2:
                             del messages[message_checkpoint:]
                             last_exc = exc2
@@ -1155,27 +1120,17 @@ class Runner:
                     # Content filter raised as exception (some providers do this
                     # instead of setting finish_reason). No point retrying same
                     # model — moderation is deterministic.
-                    is_content_filter = any(
-                        h in err for h in state.CONTENT_FILTER_HINTS
-                    )
+                    is_content_filter = any(h in err for h in state.CONTENT_FILTER_HINTS)
                     if is_content_filter:
-                        logger.warning(
-                            f"[content_filter] {current.id} raised "
-                            f"content_filter exception: {exc}"
-                        )
+                        logger.warning(f"[content_filter] {current.id} raised content_filter exception: {exc}")
                         trigger = "content_filter"
                         break  # next model
 
                     # Hard outage errors: do not retry the same model. Switch
                     # directly to the next fallback model when configured.
-                    is_fallback_only = any(
-                        r in err for r in state.FALLBACK_ONLY_SUBSTRINGS
-                    )
+                    is_fallback_only = any(r in err for r in state.FALLBACK_ONLY_SUBSTRINGS)
                     if is_fallback_only:
-                        logger.warning(
-                            f"[fallback] {current.id} hit non-retry outage: {exc}; "
-                            "trying next fallback"
-                        )
+                        logger.warning(f"[fallback] {current.id} hit non-retry outage: {exc}; trying next fallback")
                         trigger = "fallback_only"
                         break
 
@@ -1187,7 +1142,7 @@ class Runner:
                     _retryable = current.get_retryable_substrings(state.RETRYABLE_SUBSTRINGS)
                     is_retryable = any(r in err for r in _retryable)
                     if is_retryable and attempt < state.max_api_retry - 1:
-                        wait = (2 ** attempt) + random.uniform(0.0, 1.0)
+                        wait = (2**attempt) + random.uniform(0.0, 1.0)
                         logger.warning(
                             f"[APIRetry] {current.id} attempt "
                             f"{attempt + 1}/{state.max_api_retry}, "
@@ -1199,8 +1154,7 @@ class Runner:
                     if is_retryable:
                         # Exhausted local attempts → fall through to next model.
                         logger.warning(
-                            f"[APIRetry] {current.id} exhausted "
-                            f"{state.max_api_retry} attempts; trying next fallback"
+                            f"[APIRetry] {current.id} exhausted {state.max_api_retry} attempts; trying next fallback"
                         )
                         trigger = "exhausted_retry"
                         break
@@ -1210,10 +1164,7 @@ class Runner:
                     raise
 
         # All models in the chain failed.
-        logger.error(
-            f"[fallback] All {len(candidates)} models exhausted. "
-            f"Last error: {last_exc}"
-        )
+        logger.error(f"[fallback] All {len(candidates)} models exhausted. Last error: {last_exc}")
         raise RuntimeError(
             f"LLM call failed across {len(candidates)} model(s) "
             f"(primary + {len(candidates) - 1} fallback). Last error: {last_exc}"
@@ -1234,9 +1185,7 @@ class Runner:
             else:
                 logger.warning("Did not use message in output file name: message is not a string")
         try:
-            fn = _save_path.format(
-                name=self.agent.name, message=message_str
-            )
+            fn = _save_path.format(name=self.agent.name, message=message_str)
             fn_path = Path(fn)
             if not fn_path.parent.exists():
                 fn_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1258,7 +1207,9 @@ class Runner:
                     aggregated_metrics[k].append(v)
         return aggregated_metrics
 
-    def generic_run_response(self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response) -> RunResponse:
+    def generic_run_response(
+        self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response
+    ) -> RunResponse:
         return RunResponse(
             run_id=self.agent.run_id,
             agent_id=self.agent.agent_id,
@@ -1342,13 +1293,14 @@ class Runner:
             if _user_text:
                 agent._session_log.append("user", _user_text)
             # Log tool results from this run so /resume matches /history.
-            for tc in (agent.run_response.tools or []):
+            for tc in agent.run_response.tools or []:
                 _tool_content = tc.get("content", "") or ""
                 if len(_tool_content) > 2000:
                     _tool_content = _tool_content[:2000] + "\n... [truncated]"
                 _log_role = "tool_audit" if tc.get("replay") is False else "tool"
                 agent._session_log.append(
-                    _log_role, _tool_content,
+                    _log_role,
+                    _tool_content,
                     tool_name=tc.get("tool_name", ""),
                     tool_call_id=tc.get("tool_call_id", ""),
                     is_error=tc.get("tool_call_error", False),
@@ -1441,8 +1393,7 @@ class Runner:
 
             if message is None and (messages is None or len(messages) == 0):
                 logger.warning(
-                    f"Agent '{agent.identifier}' called with no message and no messages. "
-                    "Returning empty response."
+                    f"Agent '{agent.identifier}' called with no message and no messages. Returning empty response."
                 )
                 yield RunResponse(
                     run_id=str(uuid4()),
@@ -1452,14 +1403,14 @@ class Runner:
                 )
                 return
 
-            agent._running = True
+            # Open the steering window under _steer_lock (flips _running True
+            # and clears any stale guidance from a prior run). Keeps steer()'s
+            # accept/reject decision atomic w.r.t. run start/end.
+            agent._begin_steer_window()
             # CHAT-level lines are the conversation flow record. Print the
             # full user message — turn boundaries are *the* thing to keep at
             # CHAT level, so truncating them defeats the purpose of the level.
-            logger.chat(
-                f"[user] -> {agent.identifier}: "
-                f"{str(message) if message else '<no message>'}"
-            )
+            logger.chat(f"[user] -> {agent.identifier}: {str(message) if message else '<no message>'}")
             # Capture asyncio handles so cancel() can hard-cancel from another thread
             try:
                 agent._run_loop = asyncio.get_running_loop()
@@ -1476,10 +1427,7 @@ class Runner:
             # Task" block stay stable across multi-turn conversations.
             # When session_id changes, the anchor resets so a brand-new
             # conversation can establish its own original task.
-            if (
-                agent.task_anchor is None
-                or agent._anchor_session_id != agent.session_id
-            ):
+            if agent.task_anchor is None or agent._anchor_session_id != agent.session_id:
                 # Standing-goal awareness (P1 S1): if the session has a
                 # persisted ACTIVE goal, bind the anchor to it instead of
                 # the (possibly transient) current message. This makes goal
@@ -1500,7 +1448,8 @@ class Runner:
                 ):
                     objective = str(_persisted_goal["objective"])
                     agent.task_anchor = TaskAnchor(
-                        goal=objective, source_query=objective,
+                        goal=objective,
+                        source_query=objective,
                         source="goal",
                     )
                 else:
@@ -1567,9 +1516,7 @@ class Runner:
                 ):
                     resumed_messages = agent._session_log.load()
                     if resumed_messages:
-                        runs_built = agent.working_memory.hydrate_runs_from_history(
-                            resumed_messages
-                        )
+                        runs_built = agent.working_memory.hydrate_runs_from_history(resumed_messages)
                         logger.debug(
                             f"Session resumed from JSONL: {len(resumed_messages)} messages, "
                             f"{runs_built} runs reconstructed"
@@ -1685,8 +1632,7 @@ class Runner:
 
                 # 3. Prepare messages
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
-                    message=message, audio=audio, images=images, videos=videos,
-                    messages=messages, **kwargs
+                    message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
                 )
                 num_input_messages = len(messages_for_model)
 
@@ -1737,7 +1683,9 @@ class Runner:
                         # RunResponse, NOT streamed as content, so downstream
                         # never has to strip internal error text from the reply.
                         _loop_break = self._loop_safety_checks(
-                            messages_for_model, loop_state, agent,
+                            messages_for_model,
+                            loop_state,
+                            agent,
                         )
                         if _loop_break:
                             agent.run_response.break_reason = _loop_break.reason
@@ -1747,7 +1695,10 @@ class Runner:
                                 f"({_loop_break.reason}) — {_loop_break.message}"
                             )
                             _recovery = await self._recover_with_fallback(
-                                messages_for_model, loop_state, agent, _loop_break.reason,
+                                messages_for_model,
+                                loop_state,
+                                agent,
+                                _loop_break.reason,
                             )
                             if _recovery is not None:
                                 agent.run_response.fallback_used = True
@@ -1878,7 +1829,9 @@ class Runner:
                         if assistant_msg is not None and assistant_msg.tool_calls:
                             _had_tool_calls = True
                             async for tool_resp in self._handle_tool_calls_in_runner_stream(
-                                messages_for_model, agent, active_model,
+                                messages_for_model,
+                                agent,
+                                active_model,
                             ):
                                 if tool_resp.event == ModelResponseEvent.tool_call_started.value:
                                     tool_call_dict = tool_resp.tool_call
@@ -1900,10 +1853,7 @@ class Runner:
                                     if tool_call_dict is not None and agent.run_response.tools:
                                         target_id = tool_call_dict.get("tool_call_id")
                                         for tool_call in agent.run_response.tools:
-                                            if (
-                                                target_id is not None
-                                                and tool_call.get("tool_call_id") == target_id
-                                            ):
+                                            if target_id is not None and tool_call.get("tool_call_id") == target_id:
                                                 tool_call.update(tool_call_dict)
                                                 break
                                     if agent.stream_intermediate_steps:
@@ -1933,7 +1883,10 @@ class Runner:
 
                         # Check if loop should continue
                         should_continue = self._loop_post_response(
-                            messages_for_model, active_model, loop_state, _had_tool_calls,
+                            messages_for_model,
+                            active_model,
+                            loop_state,
+                            _had_tool_calls,
                         )
                         if not should_continue:
                             if fallback_transaction_model is not None and fallback_transaction_marker is not None:
@@ -1970,7 +1923,9 @@ class Runner:
                         # RunResponse, NOT appended to content, so downstream
                         # never has to strip internal error text from the reply.
                         _loop_break = self._loop_safety_checks(
-                            messages_for_model, loop_state, agent,
+                            messages_for_model,
+                            loop_state,
+                            agent,
                         )
                         if _loop_break:
                             agent.run_response.break_reason = _loop_break.reason
@@ -1980,7 +1935,10 @@ class Runner:
                                 f"({_loop_break.reason}) — {_loop_break.message}"
                             )
                             _recovery = await self._recover_with_fallback(
-                                messages_for_model, loop_state, agent, _loop_break.reason,
+                                messages_for_model,
+                                loop_state,
+                                agent,
+                                _loop_break.reason,
                             )
                             if _recovery is not None:
                                 model_response = _recovery
@@ -2037,7 +1995,10 @@ class Runner:
 
                         # --- Runner-owned tool execution ---
                         tool_result = await self._handle_tool_calls_in_runner(
-                            messages_for_model, agent, active_model, stream=False,
+                            messages_for_model,
+                            agent,
+                            active_model,
+                            stream=False,
                         )
                         _had_tool_calls = tool_result.had_tool_calls
                         if fallback_transaction_model is not None and tool_result.tool_results:
@@ -2053,7 +2014,10 @@ class Runner:
 
                         # Check if loop should continue
                         should_continue = self._loop_post_response(
-                            messages_for_model, active_model, loop_state, _had_tool_calls,
+                            messages_for_model,
+                            active_model,
+                            loop_state,
+                            _had_tool_calls,
                         )
                         if not should_continue:
                             if fallback_transaction_model is not None and fallback_transaction_marker is not None:
@@ -2075,7 +2039,7 @@ class Runner:
                         _ctx_tokens = count_tokens(messages_for_model, None, agent.model.id, None)
                         _pct = _ctx_tokens / _window
                         agent.run_response.metrics = agent.run_response.metrics or {}
-                        agent.run_response.metrics['context_window_pct'] = round(_pct, 3)
+                        agent.run_response.metrics["context_window_pct"] = round(_pct, 3)
                         if _pct >= 0.8:
                             logger.warning(
                                 f"Agent '{agent.identifier}': context usage "
@@ -2188,7 +2152,10 @@ class Runner:
                     agent.working_memory.add_run(agent_run)
                     _memory_persisted = True
 
-                    if agent.working_memory.create_session_summary and agent.working_memory.update_session_summary_after_run:
+                    if (
+                        agent.working_memory.create_session_summary
+                        and agent.working_memory.update_session_summary_after_run
+                    ):
                         await agent.working_memory.update_summary()
 
                 # 6. Save output to file
@@ -2257,7 +2224,8 @@ class Runner:
                                     _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
                             _log_role = "tool_audit" if tc.get("replay") is False else "tool"
                             agent._session_log.append(
-                                _log_role, _tool_content,
+                                _log_role,
+                                _tool_content,
                                 tool_name=tc.get("tool_name", ""),
                                 tool_call_id=tc.get("tool_call_id", ""),
                                 is_error=tc.get("tool_call_error", False),
@@ -2312,13 +2280,17 @@ class Runner:
                 if not _memory_persisted:
                     try:
                         self._persist_interrupted_turn(
-                            agent, message, messages, user_messages, system_message,
-                            messages_for_model, num_input_messages, model_response,
+                            agent,
+                            message,
+                            messages,
+                            user_messages,
+                            system_message,
+                            messages_for_model,
+                            num_input_messages,
+                            model_response,
                         )
                     except Exception:
-                        logger.warning(
-                            "interrupted-turn persistence failed", exc_info=True
-                        )
+                        logger.warning("interrupted-turn persistence failed", exc_info=True)
                 raise
             except Exception as _run_exc:
                 _run_ctx.mark_failed(error=f"{type(_run_exc).__name__}: {_run_exc}")
@@ -2331,7 +2303,11 @@ class Runner:
                 )
                 raise
             finally:
-                agent._running = False
+                # Close the steering window under _steer_lock: flips _running
+                # False and drops late-arriving guidance so it can't leak into
+                # the next run. After this, steer() returns False and the CLI
+                # falls back to queuing a fresh turn.
+                agent._end_steer_window()
                 agent._run_loop = None
                 agent._run_task = None
                 agent._run_max_api_retry = agent.max_api_retry
@@ -2372,10 +2348,7 @@ class Runner:
                         # line is full — CHAT level is the authoritative
                         # conversation transcript.
                         reply_preview = str(output_content) if output_content else "<no reply>"
-                        logger.chat(
-                            f"[{agent.identifier}] -> user: "
-                            f"{reply_preview}"
-                        )
+                        logger.chat(f"[{agent.identifier}] -> user: {reply_preview}")
                 finally:
                     # Issue #3 fix: dump hook_calls even on exception, so
                     # failure traces still carry the hook timeline that's
@@ -2557,14 +2530,13 @@ class Runner:
 
         self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_max_api_retry = self._resolve_max_api_retry(
-            self.agent, config,
+            self.agent,
+            config,
         )
         self.agent._run_fallback_models = self._isolate_fallback_models(
             list(config.fallback_models or self.agent.fallback_models or [])
         )
-        self.agent._run_fallback_on_break = bool(
-            config.fallback_on_break or self.agent.fallback_on_break
-        )
+        self.agent._run_fallback_on_break = bool(config.fallback_on_break or self.agent.fallback_on_break)
 
         if run_timeout is not None:
             return await self._run_with_timeout(
@@ -2647,14 +2619,13 @@ class Runner:
 
         self.agent._run_max_cost_usd = config.max_cost_usd
         self.agent._run_max_api_retry = self._resolve_max_api_retry(
-            self.agent, config,
+            self.agent,
+            config,
         )
         self.agent._run_fallback_models = self._isolate_fallback_models(
             list(config.fallback_models or self.agent.fallback_models or [])
         )
-        self.agent._run_fallback_on_break = bool(
-            config.fallback_on_break or self.agent.fallback_on_break
-        )
+        self.agent._run_fallback_on_break = bool(config.fallback_on_break or self.agent.fallback_on_break)
 
         if self.agent.response_model is not None:
             raise ValueError("Structured output does not support streaming. Use run() instead.")
@@ -2676,7 +2647,9 @@ class Runner:
         )
         if run_timeout is not None or first_token_timeout is not None or idle_timeout is not None:
             resp = self._wrap_stream_with_timeout(
-                resp, run_timeout=run_timeout, first_token_timeout=first_token_timeout,
+                resp,
+                run_timeout=run_timeout,
+                first_token_timeout=first_token_timeout,
                 idle_timeout=idle_timeout,
             )
 

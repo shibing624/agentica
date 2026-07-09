@@ -214,6 +214,27 @@ class GoalDecision:
     message: str  # human-readable summary for UI
 
 
+@dataclass
+class GoalStepResult:
+    """Result of ``Agent.run_goal_step()`` — ONE evaluated turn.
+
+    The shared unit both the SDK ``run_goal()`` loop and the CLI ``/goal``
+    REPL handler build their loops on, so per-turn evaluation lives in one
+    place.
+
+    Attributes:
+        run_response:    The ``RunResponse`` from this turn's ``agent.run()``.
+        decision:        The ``GoalDecision`` from ``evaluate_after_turn()``.
+        tokens_baseline: Updated cumulative token count to feed into the next
+                         ``run_goal_step()`` call so per-turn deltas stay
+                         isolated.
+    """
+
+    run_response: "RunResponse"
+    decision: GoalDecision
+    tokens_baseline: int
+
+
 # ---------------------------------------------------------------------------
 # Callable verifier (Gap 1)
 # ---------------------------------------------------------------------------
@@ -226,11 +247,14 @@ class GoalDecision:
 # that an LLM verifier would only approximate.
 #
 # Priority each turn (highest first):
-#   1. Hard budget caps (turn / token / wall-clock)
-#   2. Tool short-circuit (``GoalTool.update_goal(status="complete")``)
+#   1. Hard budget caps (token / wall-clock)
+#   2. Tool short-circuit (``verify_completion`` / ``update_goal`` marked the
+#      goal complete or paused — the DEFAULT completion path)
 #   3. Consecutive tool-failure auto-pause
 #   4. **Callable verifier** ← inserted here
-#   5. LLM judge (fallback when verifier returns ``None``)
+#   5a. DEFAULT (``auto_judge=False``): no per-turn LLM judge; continue until
+#       the turn budget caps the loop. Completion comes from step 2.
+#   5b. OPT-IN (``auto_judge=True``): legacy per-turn LLM judge fallback.
 #
 # Verifier may be sync or async. Exceptions are caught and treated as
 # ``None`` (fail-open to judge) — a buggy verifier must not crash the
@@ -525,10 +549,21 @@ class GoalManager:
         judge_model: Optional["Model"] = None,
         event_callback: Optional[Callable[[RunEventType, Dict[str, Any]], None]] = None,
         verifier: Optional[GoalVerifier] = None,
+        auto_judge: bool = False,
     ):
         self.session_log = session_log
         self.default_turn_budget = default_turn_budget
         self.judge_model = judge_model
+        # When False (default), the loop does NOT run an LLM judge every turn.
+        # Completion is decided by the agent actively calling the
+        # ``verify_completion`` tool (evidence-backed: it runs tests / checks
+        # criteria and, only when green, marks the goal complete — taking the
+        # tool short-circuit path above). Without any such signal the loop
+        # keeps going until a hard budget cap — "誓不罢休". Set True to restore
+        # the legacy per-turn auto-judge behaviour (costs a judge LLM call
+        # every turn). ``judge_model`` is still used by ``verify_completion``
+        # in criteria mode regardless of this flag.
+        self.auto_judge = auto_judge
         # Optional emit-site for RunEventType.goal_* (A2). Caller wires it to
         # tracing exporter / hooks / printer. Must NOT raise.
         self.event_callback = event_callback
@@ -807,6 +842,57 @@ class GoalManager:
             subgoals_block=subgoals_block,
         )
 
+    @staticmethod
+    def extract_turn_signals(
+        run_response: Optional["RunResponse"],
+        tokens_baseline: int,
+    ) -> Tuple[str, int, int, List[Tuple[str, bool]]]:
+        """Pull the per-turn signals ``evaluate_after_turn`` needs from a
+        finished ``RunResponse``.
+
+        Shared by both goal-loop drivers so the token-delta / tool-pair
+        extraction lives in one place instead of being copy-pasted in
+        ``Agent.run_goal_step()`` and the CLI ``_maybe_continue_goal`` hook.
+
+        Args:
+            run_response:    The just-finished turn's ``RunResponse`` (or None).
+            tokens_baseline: Cumulative input+output tokens observed across all
+                             PRIOR turns of this goal (for the running total /
+                             next ``new_baseline``).
+
+        Returns:
+            ``(final_text, token_delta, new_baseline, tool_pairs)`` where
+            ``new_baseline`` should be fed back on the next turn.
+
+        Note:
+            A fresh ``CostTracker`` is created per ``Agent.run()`` (see
+            ``runner.py`` / ``CostTracker`` docstring), so ``cost_tracker``
+            totals hold THIS turn's tokens only — they are NOT cumulative
+            across turns. ``token_delta`` is therefore the turn total taken
+            directly; ``new_baseline`` accumulates it onto the prior baseline.
+        """
+        if run_response is None:
+            return "", 0, tokens_baseline, []
+
+        final_text = run_response.content or ""
+
+        new_baseline = tokens_baseline
+        token_delta = 0
+        ct = run_response.cost_tracker
+        if ct is not None:
+            # per-run CostTracker => this is the current turn's usage, not a
+            # cumulative total. Use it directly as the delta and add it onto
+            # the running baseline.
+            token_delta = max(0, ct.total_input_tokens + ct.total_output_tokens)
+            new_baseline = tokens_baseline + token_delta
+
+        tool_pairs: List[Tuple[str, bool]] = []
+        for tc in run_response.tool_calls:
+            if tc.tool_name:
+                tool_pairs.append((tc.tool_name, bool(tc.is_error)))
+
+        return final_text, token_delta, new_baseline, tool_pairs
+
     async def evaluate_after_turn(
         self,
         final_response: str,
@@ -1074,6 +1160,68 @@ class GoalManager:
                 )
             # v_result is None → fall through to LLM judge.
 
+        if not self.auto_judge:
+            # DEFAULT PATH: no per-turn LLM judge. Completion comes from the
+            # agent calling ``verify_completion`` (handled above as a tool
+            # short-circuit) or from an explicit verifier. Neither fired this
+            # turn, so keep working until a hard budget cap — this is what
+            # makes the loop actually persist ("誓不罢休") instead of an
+            # optimistic judge ending it early. Only the turn budget stops us
+            # here (token / wall-clock caps are enforced earlier).
+            if self._state.turns_used >= self._state.turn_budget:
+                self._state.status = "budget_limited"
+                self._state.paused_reason = "budget"
+                self._state.last_verdict = "continue"
+                self._state.last_reason = "turn budget exhausted; no completion signal from verify_completion"
+                self._persist()
+                self._emit(
+                    RunEventType.goal_paused,
+                    paused_reason="budget",
+                    budget_message="turn budget exhausted",
+                    message=(
+                        f"⊙ Goal budget-limited: turn budget exhausted "
+                        f"({self._state.turns_used}/{self._state.turn_budget}). "
+                        f"The agent never confirmed completion via verify_completion. "
+                        f"Use /goal resume to continue."
+                    ),
+                )
+                return GoalDecision(
+                    status="budget_limited",
+                    should_continue=False,
+                    continuation_prompt=None,
+                    verdict="continue",
+                    reason=self._state.last_reason,
+                    message=(
+                        f"⊙ Goal budget-limited: turn budget exhausted "
+                        f"({self._state.turns_used}/{self._state.turn_budget}). "
+                        f"Use /goal resume to continue."
+                    ),
+                )
+            self._state.last_verdict = "continue"
+            self._state.last_reason = "no completion signal yet; keep working (call verify_completion when done)"
+            self._persist()
+            self._emit(
+                RunEventType.goal_continuing,
+                verdict="continue",
+                reason=self._state.last_reason,
+                message=(
+                    f"↻ Goal continuing ({self._state.turns_used}/"
+                    f"{self._state.turn_budget}): keep working; call verify_completion when you believe it's done."
+                ),
+            )
+            return GoalDecision(
+                status="active",
+                should_continue=True,
+                continuation_prompt=self.next_continuation_prompt(),
+                verdict="continue",
+                reason=self._state.last_reason,
+                message=(
+                    f"↻ Goal continuing ({self._state.turns_used}/"
+                    f"{self._state.turn_budget}): keep working; call verify_completion when done."
+                ),
+            )
+
+        # auto_judge=True (legacy / opt-in): run the per-turn LLM judge.
         if self.judge_model is None:
             # No judge AND verifier didn't produce a verdict (or no verifier).
             # Fail-open: pause so the user sees the configuration gap.
@@ -1086,7 +1234,7 @@ class GoalManager:
                 continuation_prompt=None,
                 verdict="parse_failed",
                 reason="no judge model configured and verifier deferred",
-                message=("⊙ Goal paused: no judge model configured (and verifier returned None / not provided)."),
+                message=("⊙ Goal paused: auto_judge=True but no judge model configured (and verifier returned None / not provided)."),
             )
 
         verdict, reason, parse_failed = await judge_goal(

@@ -276,7 +276,7 @@ def test_manager_add_subgoal_without_goal_raises(tmp_path: Path):
 
 def test_evaluate_done_completes_goal(tmp_path: Path):
     model = _fake_model('{"done": true, "reason": "all set"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x")
     decision = asyncio.run(mgr.evaluate_after_turn("final answer"))
     assert decision.status == "complete"
@@ -287,7 +287,7 @@ def test_evaluate_done_completes_goal(tmp_path: Path):
 
 def test_evaluate_continue_returns_continuation_prompt(tmp_path: Path):
     model = _fake_model('{"done": false, "reason": "needs more"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x")
     decision = asyncio.run(mgr.evaluate_after_turn("partial"))
     assert decision.should_continue is True
@@ -299,7 +299,7 @@ def test_evaluate_continue_returns_continuation_prompt(tmp_path: Path):
 
 def test_evaluate_continuation_includes_subgoals(tmp_path: Path):
     model = _fake_model('{"done": false, "reason": "more"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("main")
     mgr.add_subgoal("write tests")
     mgr.add_subgoal("update docs")
@@ -310,7 +310,7 @@ def test_evaluate_continuation_includes_subgoals(tmp_path: Path):
 
 def test_evaluate_turn_budget_exhaustion_is_budget_limited(tmp_path: Path):
     model = _fake_model('{"done": false, "reason": "still not"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x", turn_budget=2)
     asyncio.run(mgr.evaluate_after_turn("r1"))
     decision = asyncio.run(mgr.evaluate_after_turn("r2"))
@@ -325,7 +325,7 @@ def test_evaluate_turn_budget_exhaustion_is_budget_limited(tmp_path: Path):
 def test_evaluate_token_budget_exhaustion(tmp_path: Path):
     """token_delta accumulates and hits the cap BEFORE the judge runs."""
     model = _fake_model('{"done": false, "reason": "more"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x", token_budget=100)
     # Spend 60 tokens — under cap, runs the judge.
     d1 = asyncio.run(mgr.evaluate_after_turn("r1", token_delta=60))
@@ -340,7 +340,7 @@ def test_evaluate_token_budget_exhaustion(tmp_path: Path):
 
 def test_evaluate_wall_clock_budget_exhaustion(tmp_path: Path):
     model = _fake_model('{"done": false, "reason": "more"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x", wall_clock_budget_sec=10.0)
     asyncio.run(mgr.evaluate_after_turn("r1", elapsed_sec=6.0))
     assert mgr.load().wall_clock_used_sec == pytest.approx(6.0)
@@ -351,7 +351,7 @@ def test_evaluate_wall_clock_budget_exhaustion(tmp_path: Path):
 
 def test_evaluate_three_parse_failures_pause(tmp_path: Path):
     model = _fake_model("this is not json")
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x")
     decisions = [asyncio.run(mgr.evaluate_after_turn(f"r{i}")) for i in range(MAX_CONSECUTIVE_PARSE_FAILURES)]
     # First N-1 are soft retries.
@@ -373,7 +373,7 @@ def test_evaluate_parse_failure_then_recover_resets_counter(tmp_path: Path):
             ModelResponse(content='{"done": true, "reason": "done"}'),
         ]
     )
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x")
     asyncio.run(mgr.evaluate_after_turn("r1"))
     assert mgr.load().consecutive_parse_failures == 1
@@ -391,8 +391,38 @@ def test_evaluate_no_active_goal_is_noop(tmp_path: Path):
     model.response.assert_not_called()
 
 
-def test_evaluate_without_judge_model_pauses(tmp_path: Path):
-    mgr = GoalManager(_make_session_log(tmp_path))  # no judge_model
+def test_default_no_judge_continues_until_budget(tmp_path: Path):
+    """New default (auto_judge=False): no per-turn judge. With no completion
+    signal from verify_completion, the loop keeps going until the turn budget
+    caps it — "誓不罢休" — instead of pausing on a missing judge."""
+    mgr = GoalManager(_make_session_log(tmp_path))  # no judge_model, auto_judge defaults False
+    mgr.set("x", turn_budget=3)
+    d1 = asyncio.run(mgr.evaluate_after_turn("r1"))
+    assert d1.status == "active"
+    assert d1.should_continue is True
+    assert d1.verdict == "continue"
+    d2 = asyncio.run(mgr.evaluate_after_turn("r2"))
+    assert d2.status == "active"
+    # Third turn hits the budget cap.
+    d3 = asyncio.run(mgr.evaluate_after_turn("r3"))
+    assert d3.status == "budget_limited"
+    assert d3.should_continue is False
+    assert mgr.load().paused_reason == "budget"
+
+
+def test_default_no_judge_does_not_call_judge_model(tmp_path: Path):
+    """Even when a judge_model is present, auto_judge=False must not call it."""
+    model = _fake_model('{"done": true, "reason": "would say done"}')
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model)  # auto_judge False
+    mgr.set("x", turn_budget=2)
+    d1 = asyncio.run(mgr.evaluate_after_turn("r1"))
+    assert d1.status == "active"
+    model.response.assert_not_called()
+
+
+def test_auto_judge_without_judge_model_pauses(tmp_path: Path):
+    """Legacy opt-in path: auto_judge=True + no judge_model → fail-open pause."""
+    mgr = GoalManager(_make_session_log(tmp_path), auto_judge=True)  # no judge_model
     mgr.set("x")
     decision = asyncio.run(mgr.evaluate_after_turn("r"))
     assert decision.status == "paused"
@@ -418,7 +448,7 @@ def test_event_callback_fires_for_lifecycle(tmp_path: Path):
         events.append((event_type, payload["status"]))
 
     model = _fake_model('{"done": true, "reason": "ok"}')
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, event_callback=cb)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, event_callback=cb, auto_judge=True)
     mgr.set("x")
     asyncio.run(mgr.evaluate_after_turn("done now"))
     types = [e[0] for e in events]
@@ -650,14 +680,17 @@ def test_agent_run_goal_drives_to_completion(tmp_path):
     agent.session_id = "agent-rungoal-1"
     agent._session_log = None
     agent.goal_manager = None
+    agent.work_dir = None
     agent.tools = None
     agent.task_anchor = None
     agent._anchor_session_id = None
 
     # Stub agent.run to return a synthetic RunResponse with no cost data.
+    # auto_judge=True: this test specifically exercises the legacy judge-driven
+    # completion path (the fake judge says done on turn 1).
     rr = RunResponse(content="42")
     with patch.object(Agent, "run", new=AsyncMock(return_value=rr)):
-        result = asyncio.run(agent.run_goal("compute 17+9+16", turn_budget=3))
+        result = asyncio.run(agent.run_goal("compute 17+9+16", turn_budget=3, auto_judge=True))
 
     assert isinstance(result, GoalRunResult)
     assert result.status == "complete"
@@ -683,6 +716,7 @@ def test_agent_run_goal_token_budget_stops_loop(tmp_path):
     agent.session_id = "agent-rungoal-budget"
     agent._session_log = None
     agent.goal_manager = None
+    agent.work_dir = None
     agent.tools = None
     agent.task_anchor = None
     agent._anchor_session_id = None
@@ -989,7 +1023,7 @@ def test_verifier_none_falls_back_to_judge(tmp_path: Path):
         calls.append(ctx)
         return None  # defer
 
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier, auto_judge=True)
     mgr.set("x")
     decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
 
@@ -1053,7 +1087,7 @@ def test_verifier_exception_fails_open_to_judge(tmp_path: Path):
     def verifier(ctx: VerifierContext):
         raise RuntimeError("boom")
 
-    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier)
+    mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, verifier=verifier, auto_judge=True)
     mgr.set("x")
     decision = asyncio.run(mgr.evaluate_after_turn("r1", tool_calls=None))
 
@@ -1121,11 +1155,12 @@ def test_verifier_without_judge_model_can_drive_loop(tmp_path: Path):
 
 
 def test_verifier_without_judge_and_None_returns_pauses(tmp_path: Path):
-    """No judge + verifier defers → must pause (no way to ever say done)."""
+    """No judge + verifier defers + auto_judge → must pause (no way to say done)."""
     mgr = GoalManager(
         _make_session_log(tmp_path),
         judge_model=None,
         verifier=lambda ctx: None,
+        auto_judge=True,
     )
     mgr.set("x")
     decision = asyncio.run(mgr.evaluate_after_turn("r1"))
