@@ -899,6 +899,40 @@ class Runner:
         return False
 
     @staticmethod
+    def _persist_assistant_tool_calls(agent: "Agent") -> None:
+        """Persist the turn's assistant tool-call messages to the session log.
+
+        The session log otherwise records only ``user`` -> ``tool`` results ->
+        final ``assistant`` text. The intermediate assistant messages that
+        CARRY the ``tool_calls`` are never written, so on resume the tool
+        results become orphaned (a ``tool`` message with no preceding assistant
+        holding ``tool_calls``) and the provider rejects the replay with
+        "messages with role 'tool' must be a response to a preceding message
+        with 'tool_calls'".
+
+        This writes each assistant message from the turn transcript
+        (``run_response.messages``) that has ``tool_calls``, IN ORDER and BEFORE
+        the tool-result entries, so ``_build_messages`` (which already lists
+        ``tool_calls`` in its replay fields) reconstructs a valid
+        ``assistant(tool_calls) -> tool`` sequence.
+
+        Must be called before the tool results are appended so JSONL order is
+        ``user -> assistant(tool_calls) -> tool -> ... -> assistant(text)``.
+        """
+        if agent._session_log is None:
+            return
+        for msg in agent.run_response.messages or []:
+            if not isinstance(msg, Message):
+                continue
+            if msg.role == "assistant" and msg.tool_calls:
+                _text = msg.content if isinstance(msg.content, str) else ""
+                agent._session_log.append(
+                    "assistant",
+                    _text,
+                    tool_calls=msg.tool_calls,
+                )
+
+    @staticmethod
     def _strip_tool_artifacts(msgs: List[Message], *, drop_system: bool = False) -> List[Message]:
         """Drop tool-call/tool-result artifacts (OpenAI *and* Anthropic wire formats).
 
@@ -1292,6 +1326,9 @@ class Runner:
                 _user_text = message.content if isinstance(message.content, str) else str(message.content)
             if _user_text:
                 agent._session_log.append("user", _user_text)
+            # Log assistant tool-call messages before their results so /resume
+            # rebuilds a valid assistant(tool_calls)->tool sequence.
+            self._persist_assistant_tool_calls(agent)
             # Log tool results from this run so /resume matches /history.
             for tc in agent.run_response.tools or []:
                 _tool_content = tc.get("content", "") or ""
@@ -2205,7 +2242,12 @@ class Runner:
                     if _user_text:
                         agent._session_log.append("user", _user_text)
 
-                    # 2. Log tool results from this run (if any)
+                    # 2. Log assistant tool-call messages BEFORE their results,
+                    #    so /resume rebuilds a valid assistant(tool_calls)->tool
+                    #    sequence instead of orphaned tool messages.
+                    self._persist_assistant_tool_calls(agent)
+
+                    # 3. Log tool results from this run (if any)
                     if agent.run_response.tools:
                         _functions = (agent.model.functions or {}) if agent.model else {}
                         for tc in agent.run_response.tools:
@@ -2357,6 +2399,18 @@ class Runner:
                         trace.set_metadata("hook_calls", agent._hook_recorder.export())
         finally:
             Model.reset_run_state(run_state_token)
+            # Release async HTTP clients on the (still-alive) run loop so they
+            # are not garbage-collected later on a closed loop — httpx raises
+            # "Event loop is closed" during aclose() in that case. The next turn
+            # rebuilds a fresh client bound to its own loop. The CLI runs each
+            # turn on a fresh asyncio.run loop, so this is what makes /model
+            # switches and per-turn churn of Anthropic/OpenAI clients clean.
+            for _m in (agent.model, agent.auxiliary_model):
+                if _m is not None and hasattr(_m, "close_client"):
+                    try:
+                        await _m.close_client()
+                    except Exception:
+                        pass
 
     # =========================================================================
     # Timeout wrappers

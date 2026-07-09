@@ -269,6 +269,30 @@ class Model(ABC):
     def current_run_state() -> Optional[ModelRunState]:
         return _MODEL_RUN_STATE.get()
 
+    async def close_client(self) -> None:
+        """Release the underlying async HTTP client, if any.
+
+        Called by the Runner at the end of each turn while the event loop is
+        still alive. Without this, a cached ``AsyncOpenAI``/``AsyncAnthropic``
+        client (and its httpx connection pool) would be garbage-collected later
+        on a closed loop — httpx then raises ``RuntimeError: Event loop is
+        closed`` during ``aclose()``. Closing here lets the next turn rebuild a
+        fresh client bound to its own loop. No-op when there is no async client
+        (e.g. sync clients, or subclasses without a cached client).
+        """
+        client = getattr(self, "client", None)
+        if client is None or not hasattr(client, "aclose"):
+            return
+        try:
+            await client.aclose()
+        except Exception:
+            # Best-effort teardown at an I/O boundary — never let a failed
+            # close abort the run's cleanup.
+            pass
+        self.client = None
+        if getattr(self, "_client_loop", None) is not None:
+            self._client_loop = None
+
     def _get_model_run_state(self) -> ModelRunState:
         state = _MODEL_RUN_STATE.get()
         if state is None:

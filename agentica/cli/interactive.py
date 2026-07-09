@@ -1382,36 +1382,14 @@ def _setup_tui(
                 event.app.invalidate()
                 return
 
-        # Enter-while-running, plain text (no leading "/"): treat as steering
-        # guidance for the CURRENT task rather than a queued new turn — the
-        # Claude-Code-style "nudge mid-flight" experience. steer() is the
-        # atomic arbiter: it accepts the text only if a run is still active
-        # (checked under the agent's _steer_lock, closing the TOCTOU window
-        # between this agent_running read and the run actually ending). If it
-        # returns False (the run just finished), we fall through to the queue
-        # so the text is NEVER silently dropped.
-        if (
-            state.agent_running
-            and text
-            and not text.startswith("/")
-            and state.current_agent is not None
-        ):
-            if state.current_agent.steer(text):
-                tui_state["spinner_text"] = "Steering current task…"
-                event.app.current_buffer.reset(append_to_history=True)
-                event.app.invalidate()
-                return
-            # Run ended between the check and here — degrade to a fresh turn.
-            pending_queue.put(payload)
-            tui_state["spinner_text"] = "Task already finished — queued as new turn"
-            event.app.current_buffer.reset(append_to_history=True)
-            event.app.invalidate()
-            return
-
+        # Any non-command message — including a follow-up typed while the agent
+        # is still running — is queued as a new turn and shown live in the bottom
+        # ``Queued (N):`` bar (the old default behavior). The queue bar already
+        # renders queued items with timestamps, so we deliberately do NOT also
+        # print a notice into the chat stream — that would interleave with the
+        # running AI response box. Explicit mid-flight nudges are still available
+        # via the ``/steer`` command.
         pending_queue.put(payload)
-        # per-item timestamps), so we deliberately do NOT print a notice
-        # into the chat stream — that would interleave with the running
-        # AI response box.
 
         event.app.current_buffer.reset(append_to_history=True)
         event.app.invalidate()
@@ -2216,7 +2194,15 @@ def run_interactive(
             # Expand paste references
             _paste_ref_re = re.compile(r"\[Pasted text #\d+: \d+ lines -> (.+?)\]")
             paste_refs = list(_paste_ref_re.finditer(user_input))
-            n_pasted_blocks = len(paste_refs) + len(state.pasted_files)
+            # A pasted block is recorded BOTH as a ``[Pasted text #N: ...]``
+            # placeholder in the buffer (matched by ``paste_refs``) and as an
+            # entry in ``state.pasted_files`` by the bracketed-paste handler.
+            # The two are 1:1, so counting both double-counts — a single pasted
+            # block would wrongly render as "2 pasted blocks". Derive both the
+            # block count and the line total from ``state.pasted_files`` only
+            # (it already carries accurate per-block line counts); ``paste_refs``
+            # is used solely to expand the placeholders into the real content.
+            n_pasted_blocks = len(state.pasted_files)
             n_pasted_lines = sum(n for _, n in state.pasted_files) if state.pasted_files else 0
             if paste_refs:
 
@@ -2227,7 +2213,6 @@ def run_interactive(
                     return m.group(0)
 
                 expanded = _paste_ref_re.sub(_expand_ref, user_input)
-                n_pasted_lines += expanded.count("\n") + 1
                 user_input = expanded
             state.pasted_files.clear()
 
@@ -2235,9 +2220,10 @@ def run_interactive(
             final_input = inject_file_contents(prompt_text, mentioned_files)
 
             if submit_images:
-                for img in submit_images:
-                    size_kb = img.stat().st_size // 1024 if img.exists() else 0
-                    _cprint(f"  📎 {img.name} ({size_kb}KB) -> {img}")
+                n = len(submit_images)
+                label = f"{'Images' if n > 1 else 'Image'}"
+                names = ", ".join(img.name for img in submit_images)
+                _cprint(f"  📎 {label}: {names}")
 
             if not is_btw:
                 display_user_message(

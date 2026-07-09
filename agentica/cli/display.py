@@ -361,15 +361,14 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
             style="dim",
         )
 
-    # Wrap the echoed user query in blank lines and render it with a bright
-    # bold gutter so the human turn stands out clearly from the AI response
-    # body above/below it — the blank lines give it breathing room, the bold
-    # ``▎`` bar + bright_cyan text are the visual anchor for "this is what I
-    # asked".
+    # Wrap the echoed user query in a blank line above and render it with a bright
+    # bold gutter so the human turn stands out clearly from the AI response body
+    # above/below it — the bold ``▎`` bar + bright_cyan text are the visual anchor
+    # for "this is what I asked". No trailing blank line here: the response
+    # section (start_tool_section / _start_response) injects its own spacing.
     console = get_console()
     console.print()
     _GutteredConsole(console, "▎", "bold bright_cyan").print(rich_text)
-    console.print()
 
 
 def get_file_completions(document_text: str) -> List[str]:
@@ -1126,7 +1125,7 @@ class StreamDisplayManager:
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
     # execute: show up to this many lines inline; beyond that, a head+tail
-    # window with the middle collapsed into a blank/.../blank separator so long
+    # window with the middle collapsed into a single dim hint line so long
     # command output stays scannable without flooding the transcript.
     _EXECUTE_MAX_INLINE_LINES = 20
     # execute head/tail window — the tail carries the command's final status /
@@ -1231,9 +1230,10 @@ class StreamDisplayManager:
         """Render a head/tail window with the middle hidden.
 
         Shows the first ``head`` lines and the last ``tail`` lines; anything in
-        between is collapsed into a blank / ``...`` / blank separator. The full
-        content is still remembered for on-demand Ctrl+O expansion. Used for
-        execute output where the tail carries the command's final status.
+        between is collapsed into a single dim ``(N hidden lines · Ctrl+O 展开)``
+        hint line. The full content is still remembered for on-demand Ctrl+O
+        expansion. Used for execute output where the tail carries the command's
+        final status.
         """
         first_prefix = error_prefix or prefix
         n = len(lines)
@@ -1251,12 +1251,8 @@ class StreamDisplayManager:
             self._assistant_console.print(f"{p}{line}", style=style)
 
         if hidden > 0:
-            # Blank / ... / blank separator, then a trailing hint line telling
-            # how many lines were hidden and how to expand them. The full
-            # content is still stashed for Ctrl+O expansion.
-            self._assistant_console.print(f"{cont_prefix}")
-            self._assistant_console.print(f"{cont_prefix}...")
-            self._assistant_console.print(f"{cont_prefix}")
+            # Single dim hint line between head and tail (no blank/.../blank
+            # separator). The full content is still stashed for Ctrl+O expansion.
             self._assistant_console.print(
                 f"{cont_prefix}({hidden} hidden lines · Ctrl+O 展开)",
                 style="dim italic",

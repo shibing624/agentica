@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Tests for SessionLog — CC-style append-only JSONL with UUID chain and compact boundaries."""
+
 import json
 import os
 import sys
@@ -87,7 +88,8 @@ class TestSessionLogBasic:
     def test_load_preserves_assistant_replay_metadata(self, tmp_dir):
         log = SessionLog("replay", base_dir=tmp_dir)
         log.append(
-            "assistant", "answer",
+            "assistant",
+            "answer",
             reasoning_content="reason",
             finish_reason="stop",
             model="m1",
@@ -100,6 +102,45 @@ class TestSessionLogBasic:
         assert messages[0]["finish_reason"] == "stop"
         assert messages[0]["model"] == "m1"
         assert messages[0]["usage"] == {"input_tokens": 10, "output_tokens": 2}
+
+    def test_assistant_tool_calls_round_trip_no_orphan_tool(self, tmp_dir):
+        """Resume-400 regression: assistant(tool_calls) must be persisted before
+        its tool result so the replay is a valid assistant->tool pair, not an
+        orphaned tool message (which 400s on OpenAI-compatible providers).
+        """
+        log = SessionLog("resume-400", base_dir=tmp_dir)
+        log.append("user", "read the file")
+        tool_calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }
+        ]
+        log.append("assistant", "", tool_calls=tool_calls)
+        log.append("tool", "file content", tool_name="read_file", tool_call_id="call_1")
+        log.append("assistant", "done", model="m1")
+
+        messages = log.load()
+
+        # tool_calls survive the round trip
+        assistant_tc = messages[1]
+        assert assistant_tc["role"] == "assistant"
+        assert assistant_tc["tool_calls"] == tool_calls
+
+        # every tool message is preceded (within the turn) by an assistant
+        # carrying tool_calls -> no orphan.
+        for i, m in enumerate(messages):
+            if m["role"] != "tool":
+                continue
+            prev_tc = None
+            for j in range(i - 1, -1, -1):
+                if messages[j]["role"] == "assistant":
+                    prev_tc = messages[j].get("tool_calls")
+                    break
+                if messages[j]["role"] == "user":
+                    break
+            assert prev_tc, f"orphaned tool message at index {i}"
 
     def test_sidecar_name_and_archived_coexist(self, tmp_dir):
         log = SessionLog("meta", base_dir=tmp_dir)
@@ -365,8 +406,7 @@ class TestToolResultLogging:
     def test_tool_result_with_metadata(self, tmp_dir):
         log = SessionLog("tool-test", base_dir=tmp_dir)
         log.append("user", "list files")
-        log.append("tool", "file1.py\nfile2.py",
-                   tool_name="execute", tool_call_id="call-123", is_error=False)
+        log.append("tool", "file1.py\nfile2.py", tool_name="execute", tool_call_id="call-123", is_error=False)
         log.append("assistant", "Found 2 files")
 
         # Verify JSONL has tool metadata
