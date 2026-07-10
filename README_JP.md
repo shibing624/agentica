@@ -16,16 +16,15 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#コミュニティとサポート)
 
-**Agentica** は単なる LLM API のチャットラッパーではなく、Async-First の agent harness です。エージェントを本当に「動かす」ためのものです：ツール呼び出し、長時間タスク、マルチエージェント協調、セッションをまたぐ記憶の保持、そして Skill system による進化可能な self-learn ワークフローへの接続。
+**Agentica** は単なる LLM API のチャットラッパーではなく、Async-First の agent harness です——エージェントを本当に「動かす」：ツール呼び出し、長時間タスク、マルチエージェント協調、セッションをまたぐ記憶、そして継続的な自己進化。
 
-| 能力 | 説明 |
+| 何が違うのか | |
 |------|------|
-| **Long-running Agent Loop** | `Runner` が駆動する LLM ↔ ツールループ。圧縮・リトライ・コスト予算・無限ループ防止を内蔵 |
-| **Works Beyond Chat** | ファイル・実行・検索・ブラウザ・MCP・マルチエージェント・Workflow。単一 IDE シナリオに依存しない |
-| **Memory That Survives Sessions** | Workspace 記憶はエントリ単位で保存・関連性想起でき、確認済みの好みを `~/.agentica/AGENTS.md` に同期 |
-| **Skill-Based Self-Learn** | SkillTool が外部スキルをロード；内蔵 Agent の継続学習戦略 |
-| **Self-Evolution** | ツール失敗 / ユーザー修正 / 成功シーケンス → 経験カード → `SKILL.md` を自動生成、セッションをまたいで再利用 |
-| **Open, Composable Harness** | モデル・ツール・記憶・Skill・Guardrails・MCP はすべて置換可能な部品。閉鎖的な SaaS ブラックボックスではない |
+| **長く走る、暴走しない** | `Runner` 駆動の LLM ↔ ツール長ループ。コンテキスト圧縮・コスト予算・無限ループ防止を内蔵し、長時間タスクが途切れない |
+| **手を動かす、雑談だけではない** | ファイル・実行・検索・ブラウザ・MCP・マルチエージェント・Workflow——単一 IDE に縛られず実際に作業する |
+| **覚える、そして忘れる** | 記憶はエントリ単位で保存・関連性想起・drift 防御。確認済みの好みをグローバルな `~/.agentica/AGENTS.md` に同期 |
+| **使うほど強くなる** | ツール失敗 / ユーザー修正 / 成功シーケンスが経験カードになり、再利用可能な `SKILL.md` へ自動コンパイル、セッションをまたいで有効 |
+| **すべて交換可能、ロックインしない** | モデル・ツール・記憶・Skill・Guardrails・MCP はすべて置換可能な部品。閉鎖的な SaaS ブラックボックスではない |
 
 ## 🔥 News
 
@@ -77,7 +76,6 @@ print(result.content)
 ## 機能
 
 - **Async-First** — ネイティブ async API、`asyncio.gather()` による並列ツール実行、同期アダプター対応
-- **Runner Agentic Loop** — LLM ↔ ツール呼び出し自動ループ、多ターン連鎖推論、無限ループ検出、コスト予算、圧縮パイプライン、API リトライ
 - **20以上のモデル** — OpenAI / DeepSeek / Claude / ZhipuAI / Qwen / Moonshot / Ollama / LiteLLM など
 - **40以上の組み込みツール** — 検索、コード実行、ファイル操作、ブラウザ、OCR、画像生成
 - **RAG** — ナレッジベース管理、ハイブリッド検索、Rerank、LangChain / LlamaIndex 統合
@@ -87,12 +85,9 @@ print(result.content)
 - **ガードレール** — 入力 / 出力 / ツールレベルのガードレール、ストリーミングリアルタイム検出
 - **MCP / ACP** — Model Context Protocol と Agent Communication Protocol のサポート
 - **スキルシステム** — Markdown ベースのスキル注入、モデル非依存
+- **永続メモリ** — インデックス / コンテンツ分離、関連性ベースの想起、4タイプ分類、drift 防御、グローバル `AGENTS.md` への同期対応
 - **マルチモーダル** — テキスト、画像、音声、動画の理解
-- **永続メモリ** — インデックス / コンテンツ分離、関連性ベースの想起、4タイプ分類、ドリフト防御
-
-## 自己進化（Self-Evolution）
-
-Agentica は「事実を覚える」だけでなく、**「やり方を覚える」** ことができます。
+- **自己進化** — 経験カードがセッションをまたいで再利用できる `SKILL.md` に自動コンパイル（フローは下図）
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />

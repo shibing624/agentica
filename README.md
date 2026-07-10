@@ -16,17 +16,15 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#社区与支持)
 
-**Agentica** 不是套一层 LLM API 的聊天壳，而是一个 Async-First 的 agent harness。
-它让 Agent 能真正跑起来: 调工具、跑长任务、做多智能体协作、跨会话保留记忆，并通过 Skill system 接入可演进的 self-learn 工作流。
+**Agentica** 不是套一层 LLM API 的聊天壳，而是一个 Async-First 的 agent harness——让 Agent 真正跑起来：调工具、跑长任务、多智能体协作、跨会话记忆，并持续自我进化。
 
-| 能力 | 说明 |
+| 它凭什么不一样 | |
 |------|------|
-| **Long-running Agent Loop** | `Runner` 驱动的 LLM ↔ Tool 循环，内置压缩、重试、成本预算、死循环防护 |
-| **Works Beyond Chat** | 文件、执行、搜索、浏览器、MCP、多智能体、Workflow，不依附单一 IDE 场景 |
-| **Memory That Survives Sessions** | Workspace 记忆按条目存储、相关性召回，并可把确认过的偏好同步到 `~/.agentica/AGENTS.md` |
-| **Skill-Based Self-Learn** | SkillTool 可加载外部技能；内置 Agent 持续学习策略 |
-| **Self-Evolution** | 工具失败 / 用户纠正 / 成功序列 → 经验卡片 → 自动生成 SKILL.md，跨会话复用 |
-| **Open, Composable Harness** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而不是封闭 SaaS 黑盒 |
+| **跑得久，不跑飞** | 专门 Agentic loop 驱动的 LLM ↔ Tool 长循环，内置上下文压缩、成本预算、死循环防护，长任务不断链 |
+| **能干活，不只聊天** | 文件、执行、搜索、浏览器、MCP、多智能体、Workflow——真实动手，不绑定单一 IDE |
+| **记得住，会遗忘** | 记忆按条目存储、相关性召回、drift 防御，确认过的偏好同步到全局 `~/.agentica/AGENTS.md` |
+| **越用越强** | 工具失败 / 用户纠正 / 成功序列沉淀为经验卡片，自动编译成可复用的 `SKILL.md`，跨会话生效 |
+| **全可换，不锁死** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而非封闭 SaaS 黑盒 |
 
 ## 🔥 News
 
@@ -69,14 +67,9 @@ result = agent.run_sync("一句话介绍北京")
 print(result.content)
 ```
 
-```
-北京是中国的首都，是一座拥有三千多年历史的文化名城，也是全国的政治、文化和国际交流中心。
-```
-
 ## 功能特性
 
 - **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
-- **Runner Agentic Loop** — LLM ↔ 工具调用自动循环，多轮链式推理、死循环检测、成本预算、压缩 pipeline、API 重试
 - **20+ 模型** — OpenAI / DeepSeek / Claude / 智谱 / Qwen / Moonshot / Ollama / LiteLLM 等
 - **40+ 内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
@@ -86,13 +79,9 @@ print(result.content)
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测
 - **MCP / ACP** — Model Context Protocol 和 Agent Communication Protocol 支持
 - **Skill 系统** — 基于 Markdown 的技能注入，支持项目级、用户级和外部托管 skill 目录
+- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御，可同步长期偏好到全局 `AGENTS.md`
 - **多模态** — 文本、图像、音频、视频理解
-- **持久化记忆** — 索引/内容分离、相关性召回、四类型分类、drift 防御，并可同步长期偏好到全局 `AGENTS.md`
-
-
-## 自进化（Self-Evolution）
-
-Agentica 不止"记住事实"，还能**记住做事方式**。
+- **自进化** — 经验卡片自动编译为可跨会话复用的 `SKILL.md`（流程见下图）
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />

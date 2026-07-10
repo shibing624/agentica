@@ -16,17 +16,16 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#community--support)
 
-**Agentica** is not just a chat wrapper around an LLM API. It is an Async-First agent harness for running real agents:
-tool calling, long-running task loops, multi-agent orchestration, cross-session memory, and skill-driven self-learning workflows.
+**Agentica** is not a chat wrapper around an LLM API. It is an Async-First agent harness that makes agents actually *run*:
+tool calling, long-running tasks, multi-agent orchestration, cross-session memory, and continuous self-evolution.
 
-| Capability | What it means |
+| Why it's different | |
 |------------|---------------|
-| **Long-running Agent Loop** | `Runner` manages the LLM ↔ tool loop with compression, retries, cost budgets, and loop safety |
-| **Works Beyond Chat** | Files, execution, search, browser, MCP, multi-agent collaboration, and workflows instead of a single chat endpoint |
-| **Memory That Survives Sessions** | Workspace memory is stored as indexed entries with relevance recall, and confirmed preferences can sync into `~/.agentica/AGENTS.md` |
-| **Skill-Based Self-Learn** | SkillTool can load external skills, built-in agent self-learning strategy |
-| **Self-Evolution** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` files across sessions |
-| **Open Composable Harness** | Models, tools, memory, skills, guardrails, and MCP are replaceable building blocks instead of a closed hosted platform |
+| **Runs long, doesn't run away** | `Runner`-driven LLM ↔ tool loop with context compaction, cost budgets, and loop safety — long tasks stay on track |
+| **Does work, not just chat** | Files, execution, search, browser, MCP, multi-agent, Workflow — real actions, not tied to a single IDE |
+| **Remembers and forgets** | Memory stored as indexed entries with relevance recall and drift defense; confirmed preferences sync into global `~/.agentica/AGENTS.md` |
+| **Gets better with use** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` across sessions |
+| **Fully swappable, not locked in** | Models, tools, memory, skills, guardrails, and MCP are replaceable parts — not a closed hosted platform |
 
 ## 🔥 News
 
@@ -78,7 +77,6 @@ Beijing is the capital of China, a historic city with over 3,000 years of histor
 ## Features
 
 - **Async-First** — Native async API, `asyncio.gather()` parallel tool execution, sync adapter included
-- **Runner Agentic Loop** — LLM ↔ tool-call auto-loop, multi-turn chain-of-thought, infinite-loop detection, cost budgeting, compression pipeline, API retry
 - **20+ Models** — OpenAI / DeepSeek / Claude / ZhipuAI / Qwen / Moonshot / Ollama / LiteLLM and more
 - **40+ Built-in Tools** — Search, code execution, file operations, browser, OCR, image generation
 - **RAG** — Knowledge base management, hybrid retrieval, Rerank, LangChain / LlamaIndex integration
@@ -88,12 +86,9 @@ Beijing is the capital of China, a historic city with over 3,000 years of histor
 - **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
 - **MCP / ACP** — Model Context Protocol and Agent Communication Protocol support
 - **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
+- **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense, optional sync into global `AGENTS.md`
 - **Multi-Modal** — Text, image, audio, video understanding
-- **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense, and optional sync into global `AGENTS.md`
-
-## Self-Evolution
-
-Agentica doesn't just *remember facts* — it remembers *how to do things*.
+- **Self-Evolution** — Experience cards auto-compile into reusable `SKILL.md` across sessions (pipeline below)
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />
