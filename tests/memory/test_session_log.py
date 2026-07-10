@@ -10,6 +10,28 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from agentica.memory.session_log import SessionLog
+from agentica.model.message import Message
+from agentica.runner import Runner
+
+
+class _FakeModel:
+    functions = {}
+
+
+class _FakeRunResponse:
+    def __init__(self, messages, tools):
+        self.messages = messages
+        self.tools = tools
+
+
+class _FakeAgent:
+    """Minimal stand-in so we can call Runner._persist_assistant_tool_calls
+    without booting a real Agent / Model (no API key needed)."""
+
+    def __init__(self, log, messages, tools):
+        self._session_log = log
+        self.model = _FakeModel()
+        self.run_response = _FakeRunResponse(messages, tools)
 
 
 @pytest.fixture
@@ -141,6 +163,59 @@ class TestSessionLogBasic:
                 if messages[j]["role"] == "user":
                     break
             assert prev_tc, f"orphaned tool message at index {i}"
+
+    def test_multi_round_tool_interleaving_preserved(self, tmp_dir):
+        """Resume-400 regression (multi-round agentic turn).
+
+        A single turn that issues tool calls across several assistant rounds
+        (e.g. ``read_file`` then ``grep``) must be persisted as an interleaved
+        ``assistant(tool_calls) -> tool`` sequence for EVERY round. The earlier
+        implementation grouped all assistant tool-calls before all tool results,
+        which produced ``assistant(tc_A), assistant(tc_B), tool_A, tool_B`` and
+        re-broke resume on OpenAI-compatible providers for any multi-round turn.
+        This test drives ``Runner._persist_assistant_tool_calls`` directly and
+        asserts each tool result immediately follows its requesting assistant.
+        """
+        log = SessionLog("multi-round", base_dir=tmp_dir)
+        agent = _FakeAgent(
+            log,
+            messages=[
+                Message(
+                    role="assistant",
+                    tool_calls=[{"id": "A", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+                ),
+                Message(role="tool", tool_call_id="A", content="file content", tool_name="read_file"),
+                Message(
+                    role="assistant",
+                    tool_calls=[{"id": "B", "type": "function", "function": {"name": "grep", "arguments": "{}"}}],
+                ),
+                Message(role="tool", tool_call_id="B", content="matches", tool_name="grep"),
+                Message(role="assistant", content="done"),
+            ],
+            tools=[
+                {"tool_call_id": "A", "tool_name": "read_file", "content": "file content", "replay": True},
+                {"tool_call_id": "B", "tool_name": "grep", "content": "matches", "replay": True},
+            ],
+        )
+        Runner._persist_assistant_tool_calls(agent)
+
+        messages = log.load()
+        # Expect strict interleaving: assistant(A), tool(A), assistant(B), tool(B).
+        roles = [m["role"] for m in messages]
+        assert roles == ["assistant", "tool", "assistant", "tool"], roles
+        assert messages[0]["tool_calls"][0]["id"] == "A"
+        assert messages[1].get("tool_call_id") == "A"
+        assert messages[2]["tool_calls"][0]["id"] == "B"
+        assert messages[3].get("tool_call_id") == "B"
+
+        # Invariant: every tool message is immediately preceded by an assistant
+        # whose tool_calls contains that tool's id.
+        for i, m in enumerate(messages):
+            if m["role"] != "tool":
+                continue
+            prev = messages[i - 1]
+            assert prev["role"] == "assistant"
+            assert m["tool_call_id"] in [t["id"] for t in prev.get("tool_calls", [])]
 
     def test_sidecar_name_and_archived_coexist(self, tmp_dir):
         log = SessionLog("meta", base_dir=tmp_dir)

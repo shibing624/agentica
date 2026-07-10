@@ -910,17 +910,34 @@ class Runner:
         "messages with role 'tool' must be a response to a preceding message
         with 'tool_calls'".
 
-        This writes each assistant message from the turn transcript
-        (``run_response.messages``) that has ``tool_calls``, IN ORDER and BEFORE
-        the tool-result entries, so ``_build_messages`` (which already lists
-        ``tool_calls`` in its replay fields) reconstructs a valid
-        ``assistant(tool_calls) -> tool`` sequence.
+        A single agentic turn may issue tool calls across several assistant
+        rounds (e.g. ``read_file`` then ``grep``). For each round we must log
+        ``assistant(tool_calls)`` immediately followed by its ``tool`` result,
+        preserving the exact interleaving — OpenAI-compatible providers require
+        every ``tool`` message to immediately follow the assistant message that
+        requested it. Grouping all assistants before all tools (the previous
+        implementation) re-introduced the same 400 on resume for any multi-round
+        tool turn.
 
-        Must be called before the tool results are appended so JSONL order is
-        ``user -> assistant(tool_calls) -> tool -> ... -> assistant(text)``.
+        We walk ``run_response.messages`` (this turn only, see the
+        ``num_input_messages`` slice in ``_run_impl``) in order: for each
+        assistant-with-tool_calls we log the assistant, and for each
+        ``role="tool"`` message we log the matching tool result (rich metadata
+        taken from ``run_response.tools`` by id). ``_build_messages`` already
+        lists ``tool_calls`` / ``tool_call_id`` in its replay fields, so the
+        replay reconstructs a valid, interleaved sequence.
+
+        Called once per turn (before the final assistant text is logged) so the
+        JSONL order is
+        ``user -> assistant(tool_calls) -> tool -> assistant(tool_calls) -> tool -> ... -> assistant(text)``.
         """
         if agent._session_log is None:
             return
+        tool_by_id = {
+            tc.get("tool_call_id"): tc
+            for tc in (agent.run_response.tools or [])
+        }
+        _functions = (agent.model.functions or {}) if agent.model else {}
         for msg in agent.run_response.messages or []:
             if not isinstance(msg, Message):
                 continue
@@ -931,6 +948,41 @@ class Runner:
                     _text,
                     tool_calls=msg.tool_calls,
                 )
+            elif msg.role == "tool":
+                _tc = tool_by_id.get(msg.tool_call_id)
+                if _tc is not None:
+                    _tool_content = _tc.get("content", "") or ""
+                    if len(_tool_content) > 2000:
+                        _tool_content = _tool_content[:2000] + "\n... [truncated]"
+                    _origin_meta: Dict[str, Any] = {}
+                    _fn = _functions.get(_tc.get("tool_name", ""))
+                    if _fn is not None and _fn.origin is not None:
+                        _origin_meta["origin_type"] = _fn.origin.type
+                        if _fn.origin.provider_name:
+                            _origin_meta["origin_provider_name"] = _fn.origin.provider_name
+                        if _fn.origin.agent_name:
+                            _origin_meta["origin_agent_name"] = _fn.origin.agent_name
+                        if _fn.origin.source_tool_name:
+                            _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
+                    agent._session_log.append(
+                        "tool_audit" if _tc.get("replay") is False else "tool",
+                        _tool_content,
+                        tool_name=_tc.get("tool_name", ""),
+                        tool_call_id=_tc.get("tool_call_id", ""),
+                        is_error=_tc.get("tool_call_error", False),
+                        fallback_compacted=_tc.get("fallback_compacted", False),
+                        fallback_model=_tc.get("fallback_model"),
+                        replay=_tc.get("replay", True),
+                        **_origin_meta,
+                    )
+                else:
+                    # Tool message without matching FunctionCall metadata: log a
+                    # minimal entry so resume still has a valid assistant->tool pair.
+                    agent._session_log.append(
+                        "tool",
+                        msg.content if isinstance(msg.content, str) else "",
+                        tool_call_id=msg.tool_call_id or "",
+                    )
 
     @staticmethod
     def _strip_tool_artifacts(msgs: List[Message], *, drop_system: bool = False) -> List[Message]:
@@ -1326,23 +1378,10 @@ class Runner:
                 _user_text = message.content if isinstance(message.content, str) else str(message.content)
             if _user_text:
                 agent._session_log.append("user", _user_text)
-            # Log assistant tool-call messages before their results so /resume
-            # rebuilds a valid assistant(tool_calls)->tool sequence.
+            # Log assistant tool-call messages AND their tool results in the
+            # exact interleaved order so /resume rebuilds a valid
+            # assistant(tool_calls)->tool sequence instead of orphaned tools.
             self._persist_assistant_tool_calls(agent)
-            # Log tool results from this run so /resume matches /history.
-            for tc in agent.run_response.tools or []:
-                _tool_content = tc.get("content", "") or ""
-                if len(_tool_content) > 2000:
-                    _tool_content = _tool_content[:2000] + "\n... [truncated]"
-                _log_role = "tool_audit" if tc.get("replay") is False else "tool"
-                agent._session_log.append(
-                    _log_role,
-                    _tool_content,
-                    tool_name=tc.get("tool_name", ""),
-                    tool_call_id=tc.get("tool_call_id", ""),
-                    is_error=tc.get("tool_call_error", False),
-                    replay=tc.get("replay", True),
-                )
             agent._session_log.append("assistant", persisted, finish_reason="cancelled")
 
     # =========================================================================
@@ -2242,40 +2281,11 @@ class Runner:
                     if _user_text:
                         agent._session_log.append("user", _user_text)
 
-                    # 2. Log assistant tool-call messages BEFORE their results,
-                    #    so /resume rebuilds a valid assistant(tool_calls)->tool
-                    #    sequence instead of orphaned tool messages.
+                    # 2. Log assistant tool-call messages AND their tool results in
+                    #    the exact interleaved order, so /resume rebuilds a valid
+                    #    assistant(tool_calls)->tool sequence instead of orphaned
+                    #    (or mis-ordered) tool messages.
                     self._persist_assistant_tool_calls(agent)
-
-                    # 3. Log tool results from this run (if any)
-                    if agent.run_response.tools:
-                        _functions = (agent.model.functions or {}) if agent.model else {}
-                        for tc in agent.run_response.tools:
-                            _tool_content = tc.get("content", "") or ""
-                            if len(_tool_content) > 2000:
-                                _tool_content = _tool_content[:2000] + "\n... [truncated]"
-                            _origin_meta: Dict[str, Any] = {}
-                            _fn = _functions.get(tc.get("tool_name", ""))
-                            if _fn is not None and _fn.origin is not None:
-                                _origin_meta["origin_type"] = _fn.origin.type
-                                if _fn.origin.provider_name:
-                                    _origin_meta["origin_provider_name"] = _fn.origin.provider_name
-                                if _fn.origin.agent_name:
-                                    _origin_meta["origin_agent_name"] = _fn.origin.agent_name
-                                if _fn.origin.source_tool_name:
-                                    _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
-                            _log_role = "tool_audit" if tc.get("replay") is False else "tool"
-                            agent._session_log.append(
-                                _log_role,
-                                _tool_content,
-                                tool_name=tc.get("tool_name", ""),
-                                tool_call_id=tc.get("tool_call_id", ""),
-                                is_error=tc.get("tool_call_error", False),
-                                fallback_compacted=tc.get("fallback_compacted", False),
-                                fallback_model=tc.get("fallback_model"),
-                                replay=tc.get("replay", True),
-                                **_origin_meta,
-                            )
 
                     # 3. Log assistant output (with model info + usage, mirrors CC)
                     _assistant_text = agent.run_response.content
