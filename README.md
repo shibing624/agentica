@@ -57,8 +57,6 @@ pip install -U agentica
 
 ## 快速开始
 
-不用学 asyncio 也能跑。`run_sync` 在内部跑完整 agentic loop（工具并发、流式、压缩、重试都在），从外面看就是一个普通同步函数：
-
 ```python
 from agentica import Agent, OpenAIChat
 
@@ -149,11 +147,9 @@ agentica-gateway
 ```
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
 
-默认会启动在 `http://127.0.0.1:8789/chat`。
+Web网页会启动在 `http://127.0.0.1:8789/chat`。
 
-支持接入QQ / 飞书 / 微信 / 企微 / Telegram / Discord / Slack。
-
-支持定时任务。
+除Web网页，还支持手机端接入 QQ / 飞书 / 微信 / 企微 / Telegram / Discord / Slack 等。内置调度定时任务。
 
 ## 示例
 

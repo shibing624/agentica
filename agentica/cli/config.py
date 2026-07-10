@@ -187,7 +187,10 @@ def parse_args():
     if len(sys.argv) > 1 and sys.argv[1] == "doctor":
         doctor_parser = argparse.ArgumentParser(description="Run Agentica environment diagnostics")
         doctor_parser.add_argument(
-            "--enable-diagnostics", action="store_true", help="Report diagnostics as enabled for this invocation"
+            "--enable-diagnostics",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Report diagnostics as enabled (default: on; use --no-enable-diagnostics to disable)",
         )
         doctor_parser.add_argument(
             "--diagnostics-server",
@@ -386,7 +389,10 @@ def parse_args():
     )
     parser.add_argument("--no-workspace", action="store_true", help="Disable workspace context injection")
     parser.add_argument(
-        "--enable-diagnostics", action="store_true", help="Enable edit-time LSP diagnostics for built-in file tools"
+        "--enable-diagnostics",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Enable edit-time LSP diagnostics for built-in file tools (default: on; use --no-enable-diagnostics to disable)",
     )
     parser.add_argument(
         "--diagnostics-server",

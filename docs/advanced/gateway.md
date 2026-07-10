@@ -80,6 +80,7 @@ flowchart TB
 
 | 渠道 | 依赖 extras | 连接方式 | 需要公网 | 启用所需环境变量 |
 |------|------------|----------|----------|------------------|
+| Web 网页 | 内置 `[gateway]` | HTTP（内置 `/chat` UI） | 否（本机 `http://localhost:8789/chat`） | 无需配置，启动即开；可用 `HOST` / `PORT` 调整监听 |
 | 飞书 Lark | 内置 `[gateway]` | WebSocket 长连接 | 否 | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` |
 | Telegram | `telegram` | 长轮询 | 否 | `TELEGRAM_BOT_TOKEN` |
 | Discord | `discord` | Gateway 长连接 | 否 | `DISCORD_BOT_TOKEN` |
@@ -91,6 +92,14 @@ flowchart TB
 
 > 所有渠道都**不需要公网 IP / 域名 / webhook**：飞书 / QQ / 企业微信 / Slack 走各自厂商的
 > WebSocket 长连，Telegram / Discord / 个人微信走长轮询或 HTTP 轮询，内网部署即可。
+
+### Web 网页（内置 UI）
+
+`agentica-gateway` 启动后自带 Web UI，无需任何 IM 配置即可直接对话，记忆落在 `~/.agentica/workspace`：
+
+<img src="https://github.com/shibing624/agentica/raw/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
+
+> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8789/chat` 就能用；其余 IM 渠道都是可选的叠加层。
 
 ## 配置（环境变量）
 
@@ -326,6 +335,13 @@ if settings.wechat_token_file or settings.wechat_allowed_users:
    同时把 PNG 自动保存到 `<token_file_dir>/wx_qr.png` 并尝试用默认浏览器打开（PNG 需要 Pillow）
 3. 用微信扫码确认 → token 落盘 `WECHAT_TOKEN_FILE`
 4. 后续启动直接从 token 文件恢复
+
+<div style="display: flex; gap: 16px; align-items: flex-start;">
+  <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
+  <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="400" />
+</div>
+
+> 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。
 
 #### 实现细节
 

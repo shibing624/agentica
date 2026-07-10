@@ -1241,7 +1241,7 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertIsNone(args.model_provider)
         self.assertIsNone(args.model_name)
         self.assertIsNone(args.reasoning_effort)
-        self.assertFalse(args.enable_diagnostics)
+        self.assertTrue(args.enable_diagnostics)
         self.assertIsNone(args.diagnostics_servers)
 
     def test_parse_diagnostics_flags(self):

@@ -360,9 +360,11 @@ class AgentService:
             num_history_turns=settings.num_history_turns,
             instructions=instructions,
             debug=settings.debug,
-            # memory, skills, user input, experience capture, workspace memory
-            # all on by DeepAgent default — no explicit overrides needed.
-            include_ask_user_question=True,
+            # memory, skills, experience capture, workspace memory all on by
+            # DeepAgent default — no explicit overrides needed. ask_user_question
+            # is intentionally OFF: the gateway is headless (web/chat channels)
+            # with no stdin, so the tool would block on a bare input() call.
+            include_ask_user_question=False,
             permission_mode=self.get_session_approval_mode(session_id),
         )
 
