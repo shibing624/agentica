@@ -108,7 +108,76 @@ tmux new -s agentica-cron 'agentica cron daemon --interval 60'
 
 ---
 
-## 六、安全须知
+## 六、在 Gateway 中使用（HTTP API）
+
+Gateway 与 CLI **共用同一套任务存储**（`~/.agentica/cron/jobs.json`）和同一个开关。
+只要 `config.yaml` 里 `settings.cron.enabled: true`，`agentica-gateway` 启动后就会
+在后台按 `cron.interval` 轮询到点任务，并通过内置的 `_GatewayAgentRunner` 运行——
+无需再开一个 `agentica cron daemon` 进程。
+
+启动 Gateway 时日志会打印：
+
+```
+Cron scheduler started (60s tick)
+```
+
+未开启时则打印（正常行为）：
+
+```
+Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to enable)
+```
+
+除了在 CLI 里用 `/cron add` 建任务，也可以**直接通过 Gateway 的 HTTP API** 管理任务：
+
+`POST /api/scheduler/jobs`：
+
+```bash
+curl -X POST http://localhost:8789/api/scheduler/jobs \
+  -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "汇总昨天项目进展，用中文输出要点",
+    "schedule": "0 8 * * 1-5",
+    "name": "工作日晨报",
+    "timezone": "Asia/Shanghai",
+    "timeout_seconds": 120
+  }'
+```
+
+带 `validate_run: true` 可在创建后**立即跑一次**验证 prompt / 调度是否可用：
+
+```bash
+curl -X POST http://localhost:8789/api/scheduler/jobs \
+  -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "ping", "schedule": "*/30 * * * *", "validate_run": true}'
+```
+
+管理接口一览：
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET | `/api/scheduler/jobs` | 列出任务（`include_disabled`, `limit`） |
+| GET | `/api/scheduler/jobs/{job_id}` | 任务详情 |
+| POST | `/api/scheduler/jobs` | 创建任务 |
+| PUT | `/api/scheduler/jobs/{job_id}` | 更新任务 |
+| DELETE | `/api/scheduler/jobs/{job_id}` | 删除任务 |
+| POST | `/api/scheduler/jobs/{job_id}/pause` | 暂停 |
+| POST | `/api/scheduler/jobs/{job_id}/resume` | 恢复 |
+| POST | `/api/scheduler/jobs/{job_id}/trigger` | 手动触发一次 |
+| GET | `/api/scheduler/jobs/{job_id}/runs` | 运行历史 |
+
+请求体字段（`CronJobCreateRequest`）：`prompt`（必填）、`schedule`（必填，三种语法见第三节）、
+`name`、`timezone`（默认 `Asia/Shanghai`）、`deliver`（默认 `local`，预留字段）、
+`timeout_seconds`、`max_retries`、`retry_delay_ms`、`permissions`、`validate_run`。
+
+> ⚠️ 关于 `deliver`：当前版本 `deliver` 仅作为任务元数据被持久化，调度器**不会**自动把
+> 运行结果推送到 IM 渠道。查看结果请走 Web UI / API 的运行历史，或让 Agent 在 `prompt`
+> 里自行调用工具（如发消息）。
+
+---
+
+## 七、安全须知
 
 - 定时任务会**自动、无人值守地**让 agent 执行你写的 prompt，并消耗 token。请确认 prompt 的副作用可控。
 - 删除任务需二次确认；开关状态会持久化到 `config.yaml`，重启后保持。
