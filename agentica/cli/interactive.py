@@ -80,6 +80,50 @@ from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 # ==================== SessionState ====================
 
 
+class _ToolResultSequencer:
+    """Align parallel tool results with their call lines.
+
+    The runner emits ``tool_call_started`` then ``tool_call_completed``
+    events. Each completed event carries the FULL accumulated tool list
+    (``chunk.tools``), so a naive handler that renders the first tool
+    with content mis-dispatches under parallelism — results get duplicated
+    or land under the wrong call line.
+
+    This sequencer keeps one ordered slot per started tool and flushes
+    results front-to-back in call order: a slow tool never blocks later
+    tools from being shown (they queue until the earlier slot is ready),
+    and every result renders exactly once, directly beneath its own call
+    line. Backend stays parallel; the frontend stays aligned.
+    """
+
+    def __init__(self) -> None:
+        self._slots: List[dict] = []
+        self._shown: set = set()
+
+    def on_start(self, tool_call_id: Optional[str], tool_name: str) -> str:
+        tc_id = tool_call_id or f"{tool_name}:{len(self._slots)}"
+        self._slots.append({"id": tc_id, "done": False, "result": None})
+        return tc_id
+
+    def on_complete(self, tool_call_id: Optional[str], tool_info: dict) -> None:
+        if not tool_call_id or tool_call_id in self._shown:
+            return
+        if "content" not in tool_info:
+            return
+        for slot in self._slots:
+            if slot["id"] == tool_call_id and not slot["done"]:
+                slot["done"] = True
+                slot["result"] = tool_info
+                return
+
+    def drain(self):
+        """Yield completed result infos in call order, popping done front slots."""
+        while self._slots and self._slots[0]["done"]:
+            slot = self._slots.pop(0)
+            self._shown.add(slot["id"])
+            yield slot["result"]
+
+
 @dataclass
 class _InputRequest:
     """A pending ask_user_question tool request awaiting a typed reply.
@@ -977,6 +1021,10 @@ def _process_stream_response(
         response_stream = current_agent.run_stream_sync(final_input, **run_kwargs)
 
         shown_tool_count = 0
+        # Sequencer aligns parallel tool results with their call lines:
+        # backend runs tools concurrently, frontend prints each result exactly
+        # once and directly beneath its own tool-call line.
+        _tool_seq = _ToolResultSequencer()
 
         for chunk in response_stream:
             if current_agent._cancelled:
@@ -1003,6 +1051,9 @@ def _process_stream_response(
                             except ValueError:
                                 tool_args = {"args": tool_args}
 
+                        _tool_seq.on_start(
+                            tool_info.get("tool_call_id"), tool_name
+                        )
                         display.display_tool(tool_name, tool_args)
                         _set_phase("tool", f"🔧 {tool_name}")
                     shown_tool_count = len(chunk.tools)
@@ -1011,21 +1062,27 @@ def _process_stream_response(
             if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
                 _set_phase("thinking")
                 if chunk.tools:
-                    for tool_info in reversed(chunk.tools):
-                        if "content" in tool_info:
-                            tool_name = tool_info.get("tool_name") or tool_info.get("name", "unknown")
-                            result_content = tool_info.get("content", "")
-                            is_error = tool_info.get("tool_call_error", False)
-                            elapsed = (tool_info.get("metrics") or {}).get("time")
-                            tool_args = tool_info.get("tool_args") or tool_info.get("arguments") or {}
-                            display.display_tool_result(
-                                tool_name,
-                                str(result_content) if result_content else "",
-                                is_error=is_error,
-                                elapsed=elapsed,
-                                tool_args=tool_args,
-                            )
-                            break
+                    for tool_info in chunk.tools:
+                        _tool_seq.on_complete(
+                            tool_info.get("tool_call_id"), tool_info
+                        )
+                    # Flush completed results in call order. The front slot
+                    # only prints once it is done, so a slow tool never blocks
+                    # later tools from being shown — they just queue until the
+                    # earlier slot is ready, preserving call→result alignment.
+                    for info in _tool_seq.drain():
+                        tool_name = info.get("tool_name") or info.get("name", "unknown")
+                        result_content = info.get("content", "")
+                        is_error = info.get("tool_call_error", False)
+                        elapsed = (info.get("metrics") or {}).get("time")
+                        tool_args = info.get("tool_args") or info.get("arguments") or {}
+                        display.display_tool_result(
+                            tool_name,
+                            str(result_content) if result_content else "",
+                            is_error=is_error,
+                            elapsed=elapsed,
+                            tool_args=tool_args,
+                        )
                 continue
 
             has_content = chunk.content and isinstance(chunk.content, str)
@@ -2072,6 +2129,7 @@ def run_interactive(
     _ui_holder["app"] = app
 
     # ── Background thread: process input queue and run agent ──
+
     def process_loop():
         nonlocal skills_registry
         while not state.should_exit:
