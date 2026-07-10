@@ -785,11 +785,11 @@ class SubagentRegistry:
                 "elapsed_seconds": elapsed,
                 "partial": True,
                 "next_action": (
-                    "To finish this task, call the ``task`` tool again with the SAME "
-                    f"description, subagent_type={config.type.value!r}, "
-                    f"resume_from_run_id={run_id!r}, and a larger "
-                    f"timeout (e.g. timeout={config.timeout * 2}). The previous partial "
-                    "output will be stitched into the continuation prompt automatically."
+                    f"Partial output above reflects the work completed before the "
+                    f"{config.timeout}s timeout. Prefer synthesizing it directly. Only if the "
+                    "task genuinely needs to run to completion may you resume it once via the "
+                    f"task tool with resume_from_run_id={run_id!r} and a larger timeout "
+                    f"(e.g. timeout={config.timeout * 2}); do not resume repeatedly."
                 ),
             }
         except (asyncio.CancelledError, AgentCancelledError):
@@ -833,11 +833,11 @@ class SubagentRegistry:
                     "elapsed_seconds": elapsed,
                     "partial": True,
                     "next_action": (
-                        "To finish this task, call the ``task`` tool again with the SAME "
-                        f"description, subagent_type={config.type.value!r}, "
-                        f"resume_from_run_id={run_id!r}, and a larger "
-                        f"timeout (e.g. timeout={config.timeout * 2}). The previous partial "
-                        "output will be stitched into the continuation prompt automatically."
+                        f"Partial output above reflects the work completed before the "
+                        f"{config.timeout}s timeout. Prefer synthesizing it directly. Only if "
+                        "the task genuinely needs to run to completion may you resume it once "
+                        f"via the task tool with resume_from_run_id={run_id!r} and a larger "
+                        f"timeout (e.g. timeout={config.timeout * 2}); do not resume repeatedly."
                     ),
                 }
 
@@ -872,15 +872,15 @@ class SubagentRegistry:
                 "partial": bool(partial_content or partial_tools),
                 "next_action": (
                     (
-                        "To recover this task, call the ``task`` tool again with the SAME "
-                        f"description, subagent_type={config.type.value!r}, "
-                        f"resume_from_run_id={run_id!r}. The previous partial output will "
-                        "be stitched in so the subagent doesn't redo finished work."
+                        "Partial output above was recovered before the error. Prefer using it "
+                        "directly. If the task must be completed you may resume it once via the "
+                        f"task tool with resume_from_run_id={run_id!r}; do not retry repeatedly."
                     )
                     if partial_content or partial_tools else
                     (
-                        "The subagent failed before producing any output. Consider retrying "
-                        "with a simpler description or a different subagent_type."
+                        "The subagent failed before producing any output. If this task is "
+                        "essential you may retry once with a simpler description or a different "
+                        "subagent_type; otherwise proceed without it."
                     )
                 ),
             }
@@ -930,12 +930,12 @@ class SubagentRegistry:
                 "elapsed_seconds": elapsed,
                 "partial": True,
                 "next_action": (
-                    "To finish this task, call the ``task`` tool again with the SAME "
-                    f"description, subagent_type={config.type.value!r}, "
-                    f"resume_from_run_id={run_id!r}, and a larger budget "
-                    f"(e.g. max_turns={(config.max_turns or 100) * 2}, "
-                    f"tool_call_limit={(config.tool_call_limit or 100) * 2}). "
-                    "The previous partial output will be stitched into the continuation prompt."
+                    f"Partial output above was produced before the {reason_str} limit. Prefer "
+                    "synthesizing it directly. Only if the task genuinely needs to finish may "
+                    f"you resume it once via the task tool with resume_from_run_id={run_id!r} "
+                    f"and a larger budget (e.g. max_turns={(config.max_turns or 100) * 2}, "
+                    f"tool_call_limit={(config.tool_call_limit or 100) * 2}); do not resume "
+                    "repeatedly."
                 ),
             }
 

@@ -82,7 +82,24 @@ class BuiltinTaskTool(Tool):
     - You need to see intermediate steps
     - Task depends heavily on the main conversation context
     - Reading a specific known file — use read_file instead
-    - Searching for a specific definition — use grep/glob instead""")
+    - Searching for a specific definition — use grep/glob instead
+
+    ### Handling Partial Results (retry/resume)
+
+    A subagent may stop early with ``partial=true`` (timeout, max_turns, or
+    tool_call_limit). When that happens:
+
+    - **Default to synthesizing the partial output yourself.** It usually
+      contains enough to proceed — do not reflexively relaunch the task.
+    - Only resume when the task genuinely must run to completion. To resume,
+      call ``task`` again with the SAME ``description`` and
+      ``resume_from_run_id`` set to the failed call's ``run_id`` (from its
+      ``next_action`` field), optionally raising ``timeout`` / ``max_turns`` /
+      ``tool_call_limit``. The partial output is stitched in automatically.
+    - **Resume at most once per task.** If a resumed call still stops early,
+      synthesize what you have instead of looping.
+    - Use ``system_prompt_override`` only when the default subagent prompt is
+      pulling the model off-task.""")
 
     def __init__(self, model_override: Optional["Model"] = None):
         """
@@ -156,29 +173,17 @@ class BuiltinTaskTool(Tool):
         Args:
             description: Detailed description of the task. Brief the subagent
                 like a colleague who has no prior context.
-            subagent_type: Subagent type id. Built-ins:
-                - ``explore``  — read-only codebase exploration
-                - ``research`` — web search and document analysis
-                - ``code``     — code generation and execution (default)
-                Any custom type registered via ``register_custom_subagent`` is
-                also accepted.
-            timeout: Optional per-call override for the subagent's timeout in
-                seconds. Use this to retry a task that hit ``status=timeout`` on
-                the previous call — e.g. ``timeout=3600`` for a long research
-                task. Default (``None``) keeps the subagent config's own value.
-            max_turns: Optional per-call override for the ReAct turn budget.
-                Use this to retry a task that hit ``status=max_turns``.
-            tool_call_limit: Optional per-call override for the tool call
-                budget. Use this to retry a task that hit ``status=tool_call_limit``.
-            system_prompt_override: Optional replacement system prompt for
-                this one call. Use this when the default subagent prompt is
-                pulling the model off-task and you want tighter instructions.
-            resume_from_run_id: Optional ``run_id`` from a previous call that
-                returned ``partial=true``. When provided, the previous partial
-                output is stitched into the continuation prompt so the
-                subagent picks up where it left off instead of restarting.
-                The failed call's ``next_action`` field tells you which
-                ``run_id`` to pass here.
+            subagent_type: Subagent type id (``explore`` / ``research`` /
+                ``code``, default ``code``), or any custom type registered via
+                ``register_custom_subagent``.
+            timeout: Optional per-call timeout override (seconds).
+            max_turns: Optional per-call ReAct turn budget override.
+            tool_call_limit: Optional per-call tool-call budget override.
+            system_prompt_override: Optional replacement system prompt for this call.
+            resume_from_run_id: Optional ``run_id`` to resume a prior partial run.
+
+        The retry/resume parameters above are only for continuing an
+        interrupted run; see the task tool system prompt for guidance.
 
         Returns:
             JSON string with the subagent's final result and execution summary.
