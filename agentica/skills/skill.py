@@ -9,6 +9,7 @@ allowing the LLM to read and follow the instructions to complete tasks.
 
 Reference: https://claude.com/blog/skills
 """
+import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -224,7 +225,58 @@ class Skill:
         except Exception:
             pass
 
+        # Fallback: tolerant line-based parse. Strict YAML rejects common
+        # real-world frontmatter where a scalar value contains an unquoted
+        # colon-with-space (e.g. ``description: Learn from experience: ...``),
+        # which YAML misreads as a nested mapping. This keeps the whole tail of
+        # each ``key: value`` line as the value so such skills still load.
+        lenient = Skill._parse_frontmatter_lenient(yaml_content)
+        if lenient and lenient.get("name"):
+            return lenient, body
+
         return {}, content
+
+    @staticmethod
+    def _parse_frontmatter_lenient(yaml_content: str) -> Dict[str, Any]:
+        """Best-effort fallback for frontmatter that is not strict YAML.
+
+        Splits the frontmatter block into ``key: value`` lines and keeps the
+        entire remainder of each line as the value, tolerating unquoted colons
+        inside scalar values. Single-line JSON values (``metadata``,
+        ``allowed-tools``, etc.) are decoded when possible. Only the common
+        scalar coerctions (bool / null / int / float) are applied; multi-line
+        or nested YAML structures are intentionally NOT supported here.
+        """
+        result: Dict[str, Any] = {}
+        for line in yaml_content.splitlines():
+            if not line.strip():
+                continue
+            m = re.match(r"^([A-Za-z0-9_-]+):\s?(.*)$", line)
+            if not m:
+                continue
+            key = m.group(1)
+            value = m.group(2).strip()
+            # Strip a single layer of matching quotes.
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            # Decode single-line structured values (JSON).
+            if value and value[0] in ("{", "["):
+                try:
+                    value = json.loads(value)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            else:
+                low = value.lower()
+                if low in ("true", "false"):
+                    value = low == "true"
+                elif low in ("null", "~"):
+                    value = None
+                elif re.fullmatch(r"-?\d+", value):
+                    value = int(value)
+                elif re.fullmatch(r"-?\d+\.\d+", value):
+                    value = float(value)
+            result[key] = value
+        return result
 
     def get_prompt(self) -> str:
         """

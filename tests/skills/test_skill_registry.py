@@ -55,6 +55,39 @@ Instructions here.
             self.assertEqual(skill.location, "project")
             self.assertIn("Instructions here.", skill.content)
 
+    def test_unquoted_colon_in_description_still_parses(self):
+        """Regression: a ``description`` containing an unquoted ``': '`` is
+        not strict YAML (the second colon looks like a nested mapping), so the
+        lenient line-based fallback must load it instead of skipping the skill.
+
+        See the real learn-from-experience SKILL.md that triggered
+        'Skill skipped ... has no valid YAML frontmatter'.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = self._write_skill_md(tmpdir, """---
+name: learn-from-experience
+slug: learn-from-experience
+version: 1.3.0
+description: Learn from experience: self-reflection + self-criticism + self-learning. Use when (1) a command fails; (2) the user corrects you.
+changelog: "v1.3.0: Rebrand to learn-from-experience."
+metadata: {"clawdbot":{"emoji":"🧠","os":["linux","darwin"]}}
+allowed-tools:
+disable: false
+---
+
+## When to Use
+Body text.
+""")
+            skill = Skill.from_skill_md(path)
+            self.assertIsNotNone(skill)
+            self.assertEqual(skill.name, "learn-from-experience")
+            # Colon inside the value must be preserved verbatim, not split.
+            self.assertIn("self-reflection", skill.description)
+            self.assertTrue(skill.description.startswith("Learn from experience:"))
+            self.assertEqual(skill.metadata, {"clawdbot": {"emoji": "🧠", "os": ["linux", "darwin"]}})
+            self.assertTrue(skill.user_invocable)  # user-invocable absent -> default True
+            self.assertIn("Body text.", skill.content)
+
     def test_missing_name_returns_none(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             path = self._write_skill_md(tmpdir, """---
