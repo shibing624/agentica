@@ -16,7 +16,16 @@
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#コミュニティとサポート)
 
-**Agentica** は軽量な Python フレームワークで、AIエージェントの構築に使用します。Async-First アーキテクチャで、ツール呼び出し、RAG、マルチエージェントチーム、ワークフローオーケストレーション、MCP プロトコルをサポートします。
+**Agentica** は単なる LLM API のチャットラッパーではなく、Async-First の agent harness です。エージェントを本当に「動かす」ためのものです：ツール呼び出し、長時間タスク、マルチエージェント協調、セッションをまたぐ記憶の保持、そして Skill system による進化可能な self-learn ワークフローへの接続。
+
+| 能力 | 説明 |
+|------|------|
+| **Long-running Agent Loop** | `Runner` が駆動する LLM ↔ ツールループ。圧縮・リトライ・コスト予算・無限ループ防止を内蔵 |
+| **Works Beyond Chat** | ファイル・実行・検索・ブラウザ・MCP・マルチエージェント・Workflow。単一 IDE シナリオに依存しない |
+| **Memory That Survives Sessions** | Workspace 記憶はエントリ単位で保存・関連性想起でき、確認済みの好みを `~/.agentica/AGENTS.md` に同期 |
+| **Skill-Based Self-Learn** | SkillTool が外部スキルをロード；内蔵 Agent の継続学習戦略 |
+| **Self-Evolution** | ツール失敗 / ユーザー修正 / 成功シーケンス → 経験カード → `SKILL.md` を自動生成、セッションをまたいで再利用 |
+| **Open, Composable Harness** | モデル・ツール・記憶・Skill・Guardrails・MCP はすべて置換可能な部品。閉鎖的な SaaS ブラックボックスではない |
 
 ## 🔥 News
 
@@ -24,7 +33,6 @@
 - [2026/06/03] **v1.4.6**：クロスプロバイダー fallback がツール呼び出しターンに対応——fallback モデルがツールを呼び出して最終回答を生成でき、そのプロバイダー固有の履歴は圧縮され、主モデルへのリプレイがクリーンに保たれます。fallback モデルは run ごとにクローンされ並行安全性を確保。編集時 LSP 診断 CLI フラグ（`--enable-diagnostics`/`--diagnostics-server`）、強化版 `agentica doctor`、`/checkpoint restore --yes` 確認、`/goal` 予算フラグを追加。詳細は [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
 - [2026/05/11] **v1.4.4**：MemoryExtractHooks の最適化——新しい `auto_extract_memory_background` がメモリ抽出をバックグラウンドで実行（`on_agent_end` をブロックしなくなりました）、抽出は高速・低コストな `auxiliary_model` を優先。詳細は [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
 - [2026/05/10] **v1.4.3**：Skill ライフサイクルのリファクタリング + VaG の分離——VaG 実験コードは `evaluation/vag/` 研究モジュールへ移動、統一された `SkillLifecycleHooks` 拡張ポイントを追加。詳細は [Release-v1.4.3](https://github.com/shibing624/agentica/releases/tag/v1.4.3)
-
 
 ## アーキテクチャ
 
@@ -66,57 +74,6 @@ print(result.content)
 北京は中国の首都であり、三千年以上の歴史を持つ文化都市で、政治・文化・国際交流の中心地です。
 ```
 
-まず API キーを設定してください：
-
-```bash
-export OPENAI_API_KEY="sk-xxx"              # OpenAI
-export ZHIPUAI_API_KEY="your-api-key"       # ZhipuAI（glm-4.7-flash は無料）
-export DEEPSEEK_API_KEY="your-api-key"      # DeepSeek
-```
-
-### 同期 vs 非同期
-
-| コードスタイル | 推奨 API |
-|---|---|
-| 通常スクリプト / Jupyter / FastAPI ルート（デフォルト） | `agent.run_sync(...)`、`agent.print_response_sync(...)`、`for chunk in agent.run_stream_sync(...)` |
-| 既に asyncio イベントループ内 / 複数 agent を並列実行したい | `await agent.run(...)`、`async for chunk in agent.run_stream(...)` |
-
-`run_sync` は内部的には `asyncio.run(self.run(...))` で、ツール呼び出しは
-`asyncio.gather` により並行実行されます。**同期 API は性能を犠牲にしません**——
-イベントループを隠しているだけです。
-
-```python
-import asyncio
-from agentica import Agent, OpenAIChat
-
-async def main():
-    agent = Agent(model=OpenAIChat(id="gpt-4o-mini"))
-    result = await agent.run("上海を一文で紹介してください")
-    print(result.content)
-
-asyncio.run(main())
-```
-
-### 推奨インポート方法
-
-コア SDK と組み込みツールはトップレベルでエクスポート済みで、長いパスを覚える必要はありません：
-
-```python
-from agentica import (
-    Agent, DeepAgent, Workspace, tool,
-    OpenAIChat,                                       # openai はコア依存
-    BuiltinFileTool, BuiltinExecuteTool,              # ファイル / 実行
-    BuiltinFetchUrlTool, BuiltinWebSearchTool,        # Web
-    BuiltinTodoTool, BuiltinTaskTool,                 # タスク管理 / サブエージェント
-    HistoryConfig, WorkspaceMemoryConfig, RunConfig,  # 設定
-)
-
-# 他のモデル / 重いツールはサブモジュール経由（起動時の依存読み込みを回避）
-from agentica.model.anthropic.claude import Claude   # pip install anthropic
-from agentica.model.ollama.chat import Ollama
-from agentica.tools.shell_tool import ShellTool
-```
-
 ## 機能
 
 - **Async-First** — ネイティブ async API、`asyncio.gather()` による並列ツール実行、同期アダプター対応
@@ -126,230 +83,24 @@ from agentica.tools.shell_tool import ShellTool
 - **RAG** — ナレッジベース管理、ハイブリッド検索、Rerank、LangChain / LlamaIndex 統合
 - **マルチエージェント** — `Agent.as_tool()`（軽量合成）、Swarm（並列 / 自律）、Workflow（確定的オーケストレーション）
 - **Actor-Critic 精錬** — `refine()` による複数 Critic 並列レビュー、`SchemaCritic` のゼロコストプログラム検証 / `AgentCritic` の異種強モデル監査、ループ検出による自動早期停止
+- **`/goal` 長時間タスク** — `await agent.run_goal("xxx")` で目標に向けて継続的に推進、完了・再開・一時停止を自動判定；token / wall-clock / turn の 3 種ハードキャップ対応；CLI の `/goal /subgoal` はそのまま使えます。詳細は [ドキュメント](https://shibing624.github.io/agentica/advanced/goals)
 - **ガードレール** — 入力 / 出力 / ツールレベルのガードレール、ストリーミングリアルタイム検出
 - **MCP / ACP** — Model Context Protocol と Agent Communication Protocol のサポート
 - **スキルシステム** — Markdown ベースのスキル注入、モデル非依存
 - **マルチモーダル** — テキスト、画像、音声、動画の理解
 - **永続メモリ** — インデックス / コンテンツ分離、関連性ベースの想起、4タイプ分類、ドリフト防御
 
-## Workspace メモリ
-
-Workspace はセッション間で永続するメモリを提供し、インデックス / 想起設計を採用しています：
-
-```python
-from agentica import Workspace
-
-workspace = Workspace("./workspace")
-workspace.initialize()
-
-# 型付きメモリエントリを書き込み（各エントリは独立ファイル、インデックス自動更新）
-await workspace.write_memory_entry(
-    title="Python Style",
-    content="User prefers concise, typed Python.",
-    memory_type="feedback",              # user|feedback|project|reference
-    description="python coding style",   # 関連性スコアリング用キーワード
-)
-
-# 関連性ベースの想起（クエリに最も関連する上位 ≤5 件を返す）
-memory = await workspace.get_relevant_memories(query="how to write python")
-```
-
-Agent は現在のクエリに最も関連するメモリを自動的に想起し、全メモリを注入することはありません：
-
-```python
-from agentica import Agent, Workspace
-from agentica.agent.config import WorkspaceMemoryConfig
-
-agent = Agent(
-    workspace=Workspace("./workspace"),
-    long_term_memory_config=WorkspaceMemoryConfig(
-        max_memory_entries=5,  # 最大 5 件の関連メモリを注入
-    ),
-)
-```
-
 ## 自己進化（Self-Evolution）
 
-Agentica は「事実を覚える」だけでなく、**「やり方を覚える」** ことができます。Agent がツールを実行する過程で発生するすべてのシグナル（ツール失敗、ユーザーからの修正、成功シーケンス）は **Experience イベント** として収集され、ルールベースで **経験カード（cards）** にコンパイルされます。同一のルールが N 回繰り返し確認されると、**`SKILL.md` が自動生成され**、workspace の `generated_skills/` ディレクトリに保存されます。次のセッションで新しい Agent を起動すると、`SkillTool` がそのスキルを自動検出して注入し、過去に学んだやり方を新セッションでそのまま再利用できます。
-
-パイプライン全体はローカル・監査可能・外部依存ゼロで動作します。決定論的な収集（tool error / success）は LLM コストゼロ、「ユーザー修正の分類」と「新スキルを生成すべきか」の 2 ステップのみが `auxiliary_model` を使用します。
-
-### フロー図
+Agentica は「事実を覚える」だけでなく、**「やり方を覚える」** ことができます。
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/evo_pipeline.png" width="900" alt="Agentica Self-Evolution Pipeline" />
 </div>
 
-イベント収集（黄）→ 経験コンパイルとライフサイクル（青ストレージ + 破線グレー枠）→ スキル生成ゲート + LLM 判定（ピンク）→ 次セッションでの自動再利用。全工程が監査可能で外部依存ゼロ。
-
-### 有効化の方法
-
-最小変更：`ExperienceCaptureHooks` を Agent に取り付け、`ExperienceConfig.skill_upgrade=SkillUpgradeConfig(mode="shadow")` を設定するだけで自己進化の完全クローズドループが有効になります。
-
-```python
-from agentica import Agent, Workspace, OpenAIChat
-from agentica.agent.config import ExperienceConfig, SkillUpgradeConfig
-from agentica.hooks import (
-    ConversationArchiveHooks,
-    ExperienceCaptureHooks,
-    MemoryExtractHooks,
-    _CompositeRunHooks,
-)
-
-workspace = Workspace("./workspace", user_id="alice")
-workspace.initialize()
-
-model = OpenAIChat(id="gpt-4o-mini")
-
-hooks = _CompositeRunHooks([
-    ConversationArchiveHooks(),                # 会話を自動アーカイブ
-    MemoryExtractHooks(),                      # LLM が長期メモリを抽出
-    ExperienceCaptureHooks(
-        ExperienceConfig(
-            capture_tool_errors=True,          # 決定論的、LLM コスト 0
-            capture_success_patterns=True,     # 決定論的、LLM コスト 0
-            capture_user_corrections=True,     # auxiliary_model で分類
-            feedback_confidence_threshold=0.6,
-            promotion_count=3,                 # 同一ルールが 3 回確認 → tier=hot
-            skill_upgrade=SkillUpgradeConfig(
-                mode="shadow",                 # off | draft | shadow
-                min_repeat_count=3,            # spawn 検討に最低 3 回必要
-                min_tier="warm",
-                min_success_applications=1,    # コールドスタート demo は 0 に
-            ),
-        )
-    ),
-])
-
-agent = Agent(
-    model=model,
-    auxiliary_model=model,                     # 修正分類 / skill 判定で使用
-    workspace=workspace,
-)
-agent._default_run_hooks = hooks
-
-# 通常のワークロードを実行 — 失敗 / 修正 / 成功は workspace に蓄積される
-agent.run_sync("./docs/agent.md を読んでください")
-```
-
-数セッション実行後、workspace は次のような状態になります：
-
-```
-workspace/users/alice/
-├── experiences/
-│   ├── events.jsonl                        # 全生イベント（append-only）
-│   ├── EXPERIENCE.md                       # カードインデックス
-│   └── <hash>__list_dir_before_read.md     # コンパイル済み経験カード
-├── generated_skills/
-│   ├── INDEX.md                            # L1 キーワードルーター
-│   └── list-dir-before-read/
-│       ├── SKILL.md                        # 自動生成された再利用可能スキル
-│       └── meta.json                       # status: shadow / draft / promoted
-└── reports/learning/                       # 各 run の学習レポート
-```
-
-完全な e2e demo（Session 1 で自己進化により skill 生成 → Session 2 で全く新しい Agent がクロスセッションで再利用）：[`examples/self_evolution/01_self_evolution_e2e.py`](examples/self_evolution/01_self_evolution_e2e.py)。
-
-> **トレードオフ**：`mode="shadow"` は workspace ローカルに自動インストールされ、他ユーザーには影響しません。`mode="draft"` はドラフトのみ生成しインストールせず、人間レビュー向きです。`mode="off"` は skill 自動生成を無効化（経験カードの収集は継続）。`min_success_applications` は「最低 N 回の `tool_recovery` イベントが必要」という安全ゲート — Agent が永遠に解決できないタスクから skill を生成するのを防ぎます。コールドスタート demo のときのみ `0` に設定してください。
-
-## Actor-Critic 精錬（refine）
-
-Agentica は **プロトコルレベルの Actor-Critic パターン** を提供します：Actor がドラフトを生成し、複数の Critic が並列でレビュー、却下されたドラフトはフィードバックに基づいて修正され、全 Critic 承認またはループ早期停止で終了します。これは [CarePilot 論文（arXiv:2603.24157）](https://arxiv.org/abs/2603.24157) で検証されたアーキテクチャ — 7B のファインチューニングモデル + Actor-Critic フレームワークが医療 GUI ベンチマークで 48.9% のタスク完了率を達成し、ゼロショット GPT-5 を約 13 ポイント上回りました。アブレーションでは Critic ループを除外するとタスク精度が 48.9% → 12.5% に急落しています。
-
-agentica の設計原則は **「SDK は能力ではなくプロトコルを提供する」** です。基盤モデル内の汎用的な自己批判は LLM 自体に任せ、SDK は LLM では代替不可能な 3 つを担当します —
-
-- **ビジネス制約の注入** — `SchemaCritic` は Pydantic スキーマ検証によるゼロ LLM コストの決定論的検証器（スキーマ適合性ではいかなる LLM critic にも勝つ）
-- **監査可能なリフレクション trail** — `RefineResult.history` は各ラウンドのドラフトと critic ごとの verdict を記録、全プロセスが観測・再現可能
-- **異種構成** — 安価な Actor + 強力な Critic、複数 Critic 並列レビュー、決定論的検証器と LLM 検証器の混在 — SDK レイヤだけが表現可能
-
-```python
-import asyncio
-from typing import Literal
-from pydantic import BaseModel, Field
-
-from agentica import Agent, OpenAIChat
-from agentica.critic import SchemaCritic, AgentCritic, CritiqueStyle, refine
-
-
-class IntentReply(BaseModel):
-    intent: Literal["question", "command", "complaint", "smalltalk"]
-    confidence: float = Field(ge=0.0, le=1.0)
-
-
-async def main():
-    actor = Agent(
-        name="classifier",
-        model=OpenAIChat(id="gpt-4o-mini"),
-        instructions=(
-            "ユーザーメッセージを question / command / complaint / smalltalk のいずれかに分類してください。"
-            'JSON のみを出力: {"intent": "<4 つのうち 1 つ>", "confidence": <0~1 の浮動小数点>}。'
-            "説明や markdown コードフェンスは不要です。"
-        ),
-    )
-    reviewer = Agent(
-        name="reviewer",
-        model=OpenAIChat(id="gpt-4o"),
-        instructions="分類が妥当か確認してください。妥当なら APPROVED と返答、そうでなければ問題を列挙してください。",
-    )
-
-    result = await refine(
-        actor,
-        task='次のユーザーメッセージを分類してください:\n「電話がフリーズし続けます。返金してください！」',
-        critics=[
-            SchemaCritic(IntentReply),                              # プログラムレベル（ゼロ LLM コスト）
-            AgentCritic(reviewer, style=CritiqueStyle.STRICT),      # LLM レベル（スタイル指定可）
-        ],
-        max_iter=3,
-    )
-
-    print(result.final_draft)        # 例: {"intent": "complaint", "confidence": 0.95}
-    print(result.approved, result.stopped_reason, result.iterations)
-    for r in result.history:         # ラウンドごとの draft + 各 critic の verdict（監査可能）
-        print(r.draft, [(v.critic_name, v.approved) for v in r.verdicts])
-
-
-asyncio.run(main())
-```
-
-**主な特徴**：
-
-- `Critic` Protocol — duck-typed、カスタム critic（regex / API call / 任意のビジネスルール）は 20 行未満で実装可能
-- 複数 Critic 並列実行（`asyncio.gather`）、LLM critic とゼロコストプログラム critic を自由に混在
-- `CritiqueStyle.STRICT/NEUTRAL/LENIENT` — LLM critic のレビュー温度を制御（論文ではデフォルト NEUTRAL を推奨）
-- **ループ検出による早期停止** — 連続 2 ラウンドで同じ verdict が出た場合、自動的に終了しトークンの浪費を防止
-- `RefineResult.history` は完全なリフレクション trail を提供し、CHAT ログ（`logger.chat`）と連携してマルチエージェントの可観測性を実現
-
-**使うべきでない場合**：基盤モデルが GPT-5+ クラスでタスクにビジネス固有の制約がない場合、`refine()` は限られたゲインのためにトークンを浪費します。使うべきは：(1) 出力がプログラム的スキーマを満たす必要がある、(2) 異種 actor + critic（安価な actor + 強力な critic）が欲しい、(3) 汎用的な自己批判では強制できないビジネス上のレッドラインがある場合。
-
-完全なサンプル：
-
-- [`examples/agent_patterns/13_actor_critic_refine.py`](examples/agent_patterns/13_actor_critic_refine.py) — `refine()` の標準的な使い方、`SchemaCritic` と `AgentCritic` を並列混在、ラウンドごとの監査 trail 付き
-- [`examples/agent_patterns/04_debate.py`](examples/agent_patterns/04_debate.py) — `AgentCritic` で構造化反論を抽出するマルチエージェント討論
-
 ## Agent レシピ（Recipes）
 
-`Agent` のパラメータは多いですが、よく使う組み合わせは以下の 5 つで十分です。コピペしてどうぞ：
-
-### ワンショットスクリプト（最小）
-
-```python
-agent = Agent(model=OpenAIChat(id="gpt-4o-mini"))
-print(agent.run_sync("北京を一文で紹介してください").content)
-```
-
-### マルチターン会話
-
-```python
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o-mini"),
-    add_history_to_context=True,
-    num_history_turns=5,
-)
-agent.run_sync("私の名前は Alice、ML エンジニアです。")
-agent.run_sync("私の名前は？")  # モデルは覚えています
-```
-
-### ツール型 Agent（カスタムツール組み合わせ）
+### カスタムツールの組み合わせ
 
 ```python
 from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFileTool, BuiltinExecuteTool
@@ -361,50 +112,6 @@ agent = Agent(
 agent.run_sync("Python 3.13 の新機能を調べて features.md に書いてください")
 ```
 
-### マルチユーザー + 長期記憶 + 会話アーカイブ
-
-ユーザーごとに 1 つの Agent インスタンス。`session_id` は通常 `user_id` と同じで OK：
-
-```python
-from agentica import Agent, OpenAIChat, Workspace, WorkspaceMemoryConfig
-
-def create_agent(user_id: str) -> Agent:
-    return Agent(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        workspace=Workspace("~/.agentica/workspace", user_id=user_id),
-        session_id=user_id,                      # 会話ログは ~/.agentica/projects/.../{user_id}.jsonl に保存
-        enable_long_term_memory=True,            # ← 必須：明示的に有効化
-        long_term_memory_config=WorkspaceMemoryConfig(
-            auto_archive=True,                   # 各 run 後に会話をアーカイブ
-            auto_extract_memory=True,            # LLM が記憶エントリを自動抽出
-        ),
-        add_history_to_context=True,
-        num_history_turns=5,
-    )
-```
-
-> **よくある落とし穴**：`long_term_memory_config` を設定しても `enable_long_term_memory=True` を忘れると、すべての記憶/アーカイブ機能が静かに無視されます。v1.4.1 から `Agent.__init__` がこの設定ミスを警告します。
-
-### 長セッションのトークン削減：履歴メッセージのカスタマイズ
-
-検索ツールの結果は通常巨大で後続ターンでは不要なことが多いので、履歴から削除し、AI の返答は切り詰められます：
-
-```python
-from agentica import Agent, OpenAIChat, HistoryConfig
-
-agent = Agent(
-    model=OpenAIChat(id="gpt-4o-mini"),
-    add_history_to_context=True,
-    num_history_turns=10,
-    history_config=HistoryConfig(
-        excluded_tools=["search_*", "web_search"],   # マッチするツール結果を削除、対応する tool_calls も自動的に剥離
-        assistant_max_chars=200,                      # AI の返答を 200 文字に切り詰め
-    ),
-)
-```
-
-より複雑なフィルタ（ユーザープロンプトの prefix 削除、metadata によるメッセージ削除など）には `history_filter` コールバックを使います。`examples/memory/03_history_filter.py` を参照。
-
 ### フルパワー（CLI / Gateway / 長時間タスク）
 
 ```python
@@ -415,14 +122,48 @@ agent = DeepAgent()  # 40+ 組み込みツール + 圧縮 + 長期記憶 + skill
 ## CLI
 
 ```bash
-agentica --model_provider zhipuai --model_name glm-4.7-flash
+agentica 
 ```
 
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/cli_snap.png" width="800" />
 
-## Web UI
+### 長時間タスク：`/goal`
 
-[agentica-gateway](https://github.com/shibing624/agentica-gateway) を通じて Web ページを提供し、Feishu アプリや企業微信から Agentica を直接利用することもできます。
+Agent に目標へ向けて継続的に推進させ、各ラウンド終了時に自動で完了を判定、未完了なら続行——judge が done と言うか、予算が尽きるか、ユーザーが手動で止めるまで。
+
+CLI：
+
+```text
+/goal xxx 機能を実装し pytest を通す    # 目標設定 + 自動開始
+/goal status                         # 状態・予算・subgoals を表示
+/goal pause | resume | clear
+/subgoal 単体テストを追加する            # 目標に受入条件を追加
+```
+
+完全な解説：[Standing Goal Loop ドキュメント](https://shibing624.github.io/agentica/advanced/goals)。
+
+## Web UI / Gateway
+
+**Gateway は現在 `agentica` メインライブラリに統合されています。**
+
+Gateway ランタイムをインストール：
+
+```bash
+pip install -U "agentica[gateway]"
+```
+
+起動：
+
+```bash
+agentica-gateway
+```
+<img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
+
+デフォルトでは `http://127.0.0.1:8789/chat` で起動します。
+
+QQ / 飛書 / 微信 / 企微 / Telegram / Discord / Slack への接続をサポート。
+
+定期タスクをサポート。
 
 ## サンプル
 
