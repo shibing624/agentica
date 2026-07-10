@@ -235,6 +235,7 @@ async def _setup_channels() -> None:
     from .channels.wecom import WeComChannel
     from .channels.dingtalk import DingTalkChannel
     from .channels.wechat import WeChatChannel
+    from .channels.slack import SlackChannel
 
     if settings.feishu_app_id and settings.feishu_app_secret:
         try:
@@ -315,12 +316,46 @@ async def _setup_channels() -> None:
         except Exception as e:
             logger.error(f"Failed to create WeChat channel: {e}")
 
+    # Slack: enabled when both bot token and app-level (Socket Mode) token
+    # are provided.
+    if settings.slack_bot_token and settings.slack_app_token:
+        try:
+            slack = SlackChannel(
+                bot_token=settings.slack_bot_token,
+                app_token=settings.slack_app_token,
+                allowed_users=settings.slack_allowed_users,
+                allowed_channels=settings.slack_allowed_channels,
+            )
+            deps.channel_manager.register(slack)
+        except Exception as e:
+            logger.error(f"Failed to create Slack channel: {e}")
+
     deps.channel_manager.set_handler(_handle_channel_message)
     await deps.channel_manager.connect_all()
 
 
+# Per-session FIFO queues for inbound channel messages. IM users (WeChat,
+# etc.) routinely fire several messages in quick succession before the agent
+# has replied; the session run-lock would reject the second message
+# ("already has an active run") and it would be lost. Each session gets its
+# own queue drained by a single worker task, so messages are answered in
+# order, one at a time, instead of colliding on the lock.
+_channel_queues: dict[str, asyncio.Queue] = {}
+_channel_workers: dict[str, asyncio.Task] = {}
+_channel_queue_lock = asyncio.Lock()
+
+# Cap pending messages per session so a spamming user can't grow the queue
+# without bound; messages beyond this are dropped with a warning.
+_MAX_CHANNEL_QUEUE = 20
+
+
 async def _handle_channel_message(message) -> None:
-    """Route an incoming channel message through the agent and reply."""
+    """Enqueue an inbound channel message for serialized, in-order handling.
+
+    Returns immediately after queuing. A per-session worker task drains the
+    queue and processes one message at a time via ``_process_channel_message``,
+    so rapid-fire messages from the same user never hit the session run-lock.
+    """
     logger.info(f"[{message.channel.value}] {message.sender_id}: {message.content[:500]}")
 
     if not deps.agent_service:
@@ -329,6 +364,50 @@ async def _handle_channel_message(message) -> None:
 
     agent_id = deps.message_router.route(message)
     session_id = deps.message_router.get_session_id(message, agent_id)
+
+    async with _channel_queue_lock:
+        queue = _channel_queues.get(session_id)
+        if queue is None:
+            queue = asyncio.Queue()
+            _channel_queues[session_id] = queue
+        if queue.qsize() >= _MAX_CHANNEL_QUEUE:
+            logger.warning(
+                f"Channel queue full for session {session_id} "
+                f"({queue.qsize()} pending); dropping message"
+            )
+            return
+        queue.put_nowait(message)
+        worker = _channel_workers.get(session_id)
+        if worker is None or worker.done():
+            _channel_workers[session_id] = asyncio.create_task(
+                _channel_queue_worker(session_id, queue)
+            )
+
+
+async def _channel_queue_worker(session_id: str, queue: asyncio.Queue) -> None:
+    """Drain one session's message queue, processing messages sequentially.
+
+    Exits (and removes itself from the registries) once the queue is empty.
+    The empty-check and teardown happen under ``_channel_queue_lock`` so they
+    are atomic with respect to ``_handle_channel_message`` enqueuing — a
+    message added just as the worker is about to exit is never stranded.
+    """
+    while True:
+        message = await queue.get()
+        try:
+            await _process_channel_message(message, session_id)
+        finally:
+            queue.task_done()
+
+        async with _channel_queue_lock:
+            if queue.empty():
+                _channel_queues.pop(session_id, None)
+                _channel_workers.pop(session_id, None)
+                return
+
+
+async def _process_channel_message(message, session_id: str) -> None:
+    """Route a single channel message through the agent and reply."""
     user_id = message.sender_id or settings.default_user_id
 
     try:

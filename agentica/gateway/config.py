@@ -90,6 +90,12 @@ class Settings:
     wechat_token_file: Optional[str] = None
     wechat_allowed_users: List[str] = field(default_factory=list)
 
+    # Slack (Socket Mode)
+    slack_bot_token: Optional[str] = None
+    slack_app_token: Optional[str] = None
+    slack_allowed_users: List[str] = field(default_factory=list)
+    slack_allowed_channels: List[str] = field(default_factory=list)
+
     # Model / path settings — loaded from the active config.yaml profile at
     # startup (see Settings.from_env), with env vars as fallback. Routes
     # update these at runtime (profile switch, base_dir change).
@@ -231,6 +237,16 @@ class Settings:
             wechat_token_file=os.getenv("WECHAT_TOKEN_FILE") or None,
             wechat_allowed_users=[
                 u.strip() for u in os.getenv("WECHAT_ALLOWED_USERS", "").split(",") if u.strip()
+            ],
+
+            # Slack (Socket Mode)
+            slack_bot_token=os.getenv("SLACK_BOT_TOKEN"),
+            slack_app_token=os.getenv("SLACK_APP_TOKEN"),
+            slack_allowed_users=[
+                u.strip() for u in os.getenv("SLACK_ALLOWED_USERS", "").split(",") if u.strip()
+            ],
+            slack_allowed_channels=[
+                u.strip() for u in os.getenv("SLACK_ALLOWED_CHANNELS", "").split(",") if u.strip()
             ],
 
             # Model / path — profile first, env fallback, built-in default last.

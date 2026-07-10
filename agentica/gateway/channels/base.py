@@ -20,6 +20,7 @@ class ChannelType(Enum):
     DINGTALK = "dingtalk"
     QQ = "qq"
     WECOM = "wecom"       # Enterprise WeChat (WeCom)
+    SLACK = "slack"       # Slack (Socket Mode)
 
 
 @dataclass
