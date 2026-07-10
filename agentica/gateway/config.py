@@ -30,7 +30,6 @@ class Settings:
     host: str = "0.0.0.0"
     port: int = 8789
     debug: bool = False
-    gateway_token: Optional[str] = None
 
     # Default user ID (single-user scenario)
     default_user_id: str = "default"
@@ -167,7 +166,6 @@ class Settings:
             host=os.getenv("HOST", "0.0.0.0"),
             port=int(os.getenv("PORT", "8789")),
             debug=os.getenv("DEBUG", "").lower() in ("1", "true"),
-            gateway_token=os.getenv("GATEWAY_TOKEN") or None,
 
             # Default user
             default_user_id=os.getenv("DEFAULT_USER_ID", "default"),
@@ -264,7 +262,8 @@ class Settings:
                 or os.getenv("AGENTICA_BASE_URL", "")),
             model_api_key=(profile.get("api_key")
                 or os.getenv("AGENTICA_API_KEY", "")),
-            model_thinking=os.getenv("AGENTICA_MODEL_THINKING", ""),
+            model_thinking=(profile.get("thinking")
+                or os.getenv("AGENTICA_MODEL_THINKING", "")),
             model_reasoning_effort=(profile.get("reasoning_effort")
                 or os.getenv("AGENTICA_REASONING_EFFORT", "")),
             max_tokens=int(profile.get("max_tokens")

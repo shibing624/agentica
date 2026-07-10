@@ -71,12 +71,6 @@ async def websocket_endpoint(websocket: WebSocket):
             return
 
         params = data.get("params", {})
-        auth_token = params.get("auth", {}).get("token")
-
-        if settings.gateway_token and auth_token != settings.gateway_token:
-            await websocket.close(code=4001, reason="Invalid token")
-            return
-
         client_id = params.get("client", {}).get("id", "unknown")
         ws_manager.active_connections[client_id] = websocket
         logger.debug(f"WebSocket connected: {client_id}")

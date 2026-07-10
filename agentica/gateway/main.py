@@ -49,10 +49,6 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Workspace: {settings.workspace_path}")
     logger.info(f"  Work dir:  {settings.base_dir}")
     logger.info(f"  Model:     {settings.model_provider}/{settings.model_name}")
-    if settings.gateway_token:
-        logger.info("  Auth:      token enabled")
-    else:
-        logger.warning("  Auth:      GATEWAY_TOKEN not set — API is open (local dev only)")
     logger.info("=" * 50)
 
     # Agent service
@@ -135,7 +131,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow all origins by default (personal daemon, locked down via gateway_token)
+# CORS — allow all origins by default (personal local daemon)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -163,46 +159,6 @@ async def request_id_middleware(request: Request, call_next) -> Response:
         _request_id_var.reset(token)
     response.headers["X-Request-ID"] = req_id
     return response
-
-
-# ============== Authentication middleware ==============
-
-# Endpoints that bypass token authentication
-_AUTH_EXEMPT = {"/", "/health", "/api/health", "/chat", "/webhook/feishu"}
-
-
-@app.middleware("http")
-async def auth_middleware(request: Request, call_next) -> Response:
-    """Enforce gateway_token for all /api/* and /ws requests.
-
-    Skips auth when:
-    - gateway_token is not configured (local dev)
-    - path is in _AUTH_EXEMPT
-    - path is a static asset
-    """
-    if not settings.gateway_token:
-        return await call_next(request)
-
-    path = request.url.path
-    if path in _AUTH_EXEMPT or path.startswith("/static"):
-        return await call_next(request)
-
-    # Check Authorization header (Bearer <token>) or ?token= query param
-    auth_header = request.headers.get("Authorization", "")
-    token = ""
-    if auth_header.startswith("Bearer "):
-        token = auth_header[len("Bearer "):]
-    if not token:
-        token = request.query_params.get("token", "")
-
-    if token != settings.gateway_token:
-        from fastapi.responses import JSONResponse
-        return JSONResponse(
-            status_code=401,
-            content={"detail": "Unauthorized: invalid or missing gateway token"},
-        )
-
-    return await call_next(request)
 
 
 # ============== Static files + SPA ==============

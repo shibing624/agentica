@@ -4,24 +4,9 @@
 // how to interpret ok/status/data — this module never throws on non-2xx.
 export const API = '';
 
-// ---- GATEWAY_TOKEN auth ----
-// Local single-user debug panel: the token is entered once (Account panel)
-// and persisted in localStorage, then attached to every request. When
-// GATEWAY_TOKEN isn't set server-side, the header is simply ignored.
-const TOKEN_KEY = 'ag_token';
-export const getToken = () => localStorage.getItem(TOKEN_KEY) || '';
-export const setToken = (token) => {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
-};
-function authHeaders() {
-  const token = getToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
 async function request(url, options = {}) {
   try {
-    const headers = { ...authHeaders(), ...(options.headers || {}) };
+    const headers = { ...(options.headers || {}) };
     const r = await fetch(`${API}${url}`, { ...options, headers });
     let data = null;
     try { data = await r.json(); } catch { /* no/invalid JSON body */ }
@@ -102,7 +87,7 @@ export const deleteProfileApi = (name) => request(`/api/profile/${encodeURICompo
 export function streamChat(payload, signal) {
   return fetch(`${API}/api/chat/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
     signal,
   });

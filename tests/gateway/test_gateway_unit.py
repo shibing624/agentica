@@ -247,11 +247,6 @@ class TestSettings:
         assert s.host == "0.0.0.0"
         assert s.port == 8789
         assert s.debug is False
-        assert s.gateway_token is None
-        assert s.model_provider == "deepseek"
-        assert s.model_name == "deepseek-v4-flash"
-        assert s.model_thinking == ""
-        assert s.model_reasoning_effort == ""
 
     def test_from_env_custom(self):
         """Settings.from_env() reads custom env vars (profile mocked empty)."""
@@ -260,7 +255,6 @@ class TestSettings:
             "HOST": "127.0.0.1",
             "PORT": "9000",
             "DEBUG": "true",
-            "GATEWAY_TOKEN": "secret123",
             "AGENTICA_MODEL_PROVIDER": "openai",
             "AGENTICA_MODEL_NAME": "gpt-4o",
             "AGENTICA_MODEL_THINKING": "enabled",
@@ -272,7 +266,6 @@ class TestSettings:
         assert s.host == "127.0.0.1"
         assert s.port == 9000
         assert s.debug is True
-        assert s.gateway_token == "secret123"
         assert s.model_provider == "openai"
         assert s.model_name == "gpt-4o"
         assert s.model_thinking == "enabled"

@@ -133,7 +133,6 @@ Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to 
 
 ```bash
 curl -X POST http://localhost:8789/api/scheduler/jobs \
-  -H "Authorization: Bearer $GATEWAY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "汇总昨天项目进展，用中文输出要点",
@@ -148,7 +147,6 @@ curl -X POST http://localhost:8789/api/scheduler/jobs \
 
 ```bash
 curl -X POST http://localhost:8789/api/scheduler/jobs \
-  -H "Authorization: Bearer $GATEWAY_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"prompt": "ping", "schedule": "*/30 * * * *", "validate_run": true}'
 ```

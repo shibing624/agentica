@@ -83,10 +83,6 @@ async def health():
         "version": __version__,
         "channels": deps.channel_manager.get_status() if deps.channel_manager else {},
         "scheduler": {"active_jobs": active_jobs},
-        # This endpoint is auth-exempt (see main.py's _AUTH_EXEMPT), so the
-        # frontend can call it to learn whether GATEWAY_TOKEN is configured
-        # before any other /api/* call 401s.
-        "auth_required": bool(settings.gateway_token),
     }
 
 
