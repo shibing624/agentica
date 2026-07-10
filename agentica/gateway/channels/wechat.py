@@ -40,6 +40,7 @@ from urllib.parse import quote
 
 import requests
 
+from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
 from agentica.version import __version__
 
@@ -48,7 +49,10 @@ from ..config import settings
 
 # ── ilinkai protocol constants ──
 _API = "https://ilinkai.weixin.qq.com"
-_DEFAULT_TOKEN_FILE = Path.home() / ".wxbot" / "token.json"
+# Cache the WeChat bot token under the shared Agentica cache root
+# (~/.agentica/cache/) alongside every other regenerable scratch file,
+# instead of a stray ~/.wxbot/ directory.
+_DEFAULT_TOKEN_FILE = Path(AGENTICA_CACHE_DIR) / "wxbot_token.json"
 _VERSION = __version__
 _BOT_AGENT = f"Agentica/{__version__}"
 

@@ -47,6 +47,7 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 50)
     logger.info(f"  Agentica Gateway v{__version__}")
     logger.info(f"  Workspace: {settings.workspace_path}")
+    logger.info(f"  Work dir:  {settings.base_dir}")
     logger.info(f"  Model:     {settings.model_provider}/{settings.model_name}")
     if settings.gateway_token:
         logger.info("  Auth:      token enabled")
@@ -97,10 +98,18 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to enable)")
 
-    # Channels
+    # Channels (IM integrations: WeChat / WeCom / Feishu / QQ / ... )
     await _setup_channels()
 
-    logger.info(f"Gateway started — http://{settings.host}:{settings.port}/chat")
+    # Distinguish the always-on Web service from any optional IM channels the
+    # user enabled via config, so the startup log makes it obvious which
+    # surfaces are live.
+    logger.info(f"Web service started — http://{settings.host}:{settings.port}/chat")
+    if deps.channel_manager.channels:
+        enabled = ", ".join(c.value for c in deps.channel_manager.channels)
+        logger.info(f"IM channels started — {enabled}")
+    else:
+        logger.info("IM channels — none enabled (configure a channel to enable)")
 
     yield
 

@@ -127,7 +127,11 @@ class Settings:
 
     @property
     def base_dir(self) -> Path:
-        return Path(self._base_dir) if self._base_dir else Path(os.getenv("AGENTICA_BASE_DIR", str(Path.home())))
+        # Default project work_dir = the directory `agentica-gateway` was
+        # launched from (os.getcwd()), mirroring the CLI. Falls back to that
+        # cwd rather than $HOME so the agent operates on the user's current
+        # project by default instead of dumping files into the home dir.
+        return Path(self._base_dir) if self._base_dir else Path(os.getenv("AGENTICA_BASE_DIR", os.getcwd()))
 
     @base_dir.setter
     def base_dir(self, value):
