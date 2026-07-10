@@ -68,7 +68,7 @@ print(result.content)
 ## 功能特性
 
 - **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
-- **20+ 模型** — OpenAI / DeepSeek / Claude / 智谱 / Qwen / Moonshot / Ollama / LiteLLM 等
+- **20+ 模型** — OpenAI / DeepSeek / Claude / ZhipuAI / Qwen / Moonshot / Ollama / LiteLLM 等
 - **40+ 内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
 - **多智能体** — `Agent.as_tool()`（轻量组合）、Swarm（并行/自治）和 Workflow（确定性编排）
