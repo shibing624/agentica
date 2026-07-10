@@ -295,11 +295,23 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 > ⚠️ **风险提示**：iLink 协议可能随微信升级调整。仅推荐用于个人 / 内部小范围实验场景。
 
 ```bash
-WECHAT_TOKEN_FILE=/abs/path/to/token.json   # 可选，默认 ~/.agentica/cache/wxbot_token.json
+export WECHAT_TOKEN_FILE=~/.agentica/cache/wxbot_token.json
+agentica-gateway`
+```
+
+<div style="display: flex; gap: 16px; align-items: flex-start;">
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" style="max-height: 400px; width: auto;" />
+</div>
+
+> 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。
+
+说明：
+```bash
 WECHAT_ALLOWED_USERS=   # 留空 = 不限制，任何用户都能访问
 ```
 
-#### 启用条件（重要）
+#### 启用条件
 
 为了避免 `agentica-gateway` 每次启动都弹出扫码窗口，
 微信渠道**只在以下任一变量被显式设置时**才会注册：
@@ -328,26 +340,7 @@ if settings.wechat_token_file or settings.wechat_allowed_users:
 > 3. 只在这台机器上启用微信渠道，token 失效时手动重扫并替换文件，
 >    不要让无人值守的 gateway 进程意外触发交互式登录。
 
-#### 首次启动行为
 
-1. 找不到缓存 token → 渠道在后台线程里调用 `WxBotClient.login_qr()`
-2. 在**终端直接打印一张 ASCII 二维码**（SSH / 无桌面环境也能直接拿手机扫），
-   同时把 PNG 自动保存到 `<token_file_dir>/wx_qr.png` 并尝试用默认浏览器打开（PNG 需要 Pillow）
-3. 用微信扫码确认 → token 落盘 `WECHAT_TOKEN_FILE`
-4. 后续启动直接从 token 文件恢复
-
-<div style="display: flex; gap: 16px; align-items: flex-start;">
-  <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
-  <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="400" />
-</div>
-
-> 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。
-
-#### 实现细节
-
-- 上行：阻塞 `run_loop` 跑在 daemon 线程里，通过 `loop.call_soon_threadsafe()` 派发到主事件循环
-- 下行：每条回复用 `asyncio.to_thread(send_text)` 调用同步客户端
-- 渠道自动缓存每个用户最新的 `context_token`，回复时回填以保持微信侧对话线索
 
 ## 提供的 HTTP API
 
