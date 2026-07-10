@@ -29,11 +29,27 @@ DEFAULT_IMAGE_HEIGHT = 1024
 
 @lru_cache(maxsize=16)
 def _get_tiktoken_encoding(model_id: str):
-    """Get tiktoken encoding for a model, with caching."""
+    """Get tiktoken encoding for a model, with caching.
+
+    OpenAI model ids map directly. Unknown ids (e.g. ``deepseek-v4-flash``)
+    fall back to a general encoding. When tiktoken cannot load an encoding
+    (an offline host with no network to fetch the ``.tiktoken`` blob), return
+    ``None`` so callers fall back to the char-based estimator instead of
+    hanging on a slow fetch or crashing the run.
+    """
     try:
         return tiktoken.encoding_for_model(model_id.lower())
     except KeyError:
+        pass
+    try:
         return tiktoken.get_encoding("o200k_base")
+    except Exception:
+        logger.warning(
+            "tiktoken encoding unavailable (offline host?); "
+            "falling back to char-based token estimate for %r",
+            model_id,
+        )
+        return None
 
 
 def _estimate_tokens_by_chars(text: str) -> int:
@@ -360,10 +376,12 @@ def _to_tool_dict(tool: Union[Function, ModelTool, Dict[str, Any]]) -> Optional[
 
 
 def count_text_tokens(text: str, model_id: str = "gpt-4o") -> int:
-    """Count tokens in a text string using tiktoken."""
+    """Count tokens in a text string using tiktoken (char-based fallback)."""
     if not text:
         return 0
     encoding = _get_tiktoken_encoding(model_id)
+    if encoding is None:
+        return _estimate_tokens_by_chars(text)
     return len(encoding.encode(text, disallowed_special=()))
 
 
