@@ -138,11 +138,7 @@ CLI:
 
 Full guide: [Standing Goal Loop docs](https://shibing624.github.io/agentica/advanced/goals).
 
-## Web UI / Gateway
-
-**The Gateway is now integrated into the `agentica` main library.**
-
-Install the Gateway runtime:
+## Web UI / IM Integration
 
 ```bash
 pip install -U "agentica[gateway]"
@@ -153,13 +149,14 @@ Launch:
 ```bash
 agentica-gateway
 ```
+
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
 
 By default it serves at `http://127.0.0.1:8881/chat`.
 
-Supports QQ / Feishu / WeChat / WeCom / Telegram / Discord / Slack.
+Supports IM (QQ / Feishu / WeChat / WeCom / Telegram / Discord / Slack). Supports scheduled tasks. 
 
-Supports scheduled tasks.
+IM integration details (scan code binding, channel configuration, environment variables): [Gateway docs](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md).
 
 ## Examples
 

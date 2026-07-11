@@ -137,11 +137,7 @@ CLI：
 
 完全な解説：[Standing Goal Loop ドキュメント](https://shibing624.github.io/agentica/advanced/goals)。
 
-## Web UI / Gateway
-
-**Gateway は現在 `agentica` メインライブラリに統合されています。**
-
-Gateway ランタイムをインストール：
+## Web UI / IM Integration
 
 ```bash
 pip install -U "agentica[gateway]"
@@ -152,13 +148,14 @@ pip install -U "agentica[gateway]"
 ```bash
 agentica-gateway
 ```
+
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
 
 デフォルトでは `http://127.0.0.1:8881/chat` で起動します。
 
-QQ / 飛書 / 微信 / 企微 / Telegram / Discord / Slack への接続をサポート。
-
-定期タスクをサポート。
+IM (QQ / Feishu / WeChat / WeCom / Telegram / Discord / Slack) への接続をサポート。
+  
+IM 集成詳細（スキャンコードバインディング、チャネル設定、環境変数）：[Gateway ドキュメント](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
 
 ## サンプル
 
