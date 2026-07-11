@@ -147,9 +147,11 @@ agentica-gateway
 ```
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
 
-Web网页会启动在 `http://127.0.0.1:8789/chat`。
+Web网页会启动在 `http://127.0.0.1:8881/chat`。
 
 除Web网页，还支持手机端接入 QQ / 飞书 / 微信 / 企微 / Telegram / Discord / Slack 等。内置调度定时任务。
+
+IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway 文档](https://shibing624.github.io/agentica/advanced/gateway.md)。
 
 ## 示例
 

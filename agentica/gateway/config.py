@@ -28,7 +28,7 @@ class Settings:
 
     # Server
     host: str = "0.0.0.0"
-    port: int = 8789
+    port: int = 8881
     debug: bool = False
 
     # Default user ID (single-user scenario)
@@ -164,7 +164,7 @@ class Settings:
         return cls(
             # Server
             host=os.getenv("HOST", "0.0.0.0"),
-            port=int(os.getenv("PORT", "8789")),
+            port=int(os.getenv("PORT", "8881")),
             debug=os.getenv("DEBUG", "").lower() in ("1", "true"),
 
             # Default user

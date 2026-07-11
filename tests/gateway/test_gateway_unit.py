@@ -245,7 +245,7 @@ class TestSettings:
             with patch("agentica.gateway.config.apply_global_config", return_value={}):
                 s = Settings.from_env()
         assert s.host == "0.0.0.0"
-        assert s.port == 8789
+        assert s.port == 8881
         assert s.debug is False
 
     def test_from_env_custom(self):

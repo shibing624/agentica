@@ -26,7 +26,7 @@ def _ensure_slack_sdk():
     try:
         import slack_sdk  # noqa: F401
     except ImportError:
-        raise ImportError("slack_sdk not installed. Run: pip install agentica[slack]")
+        raise ImportError("slack_sdk not installed. Run: pip install 'agentica[slack]'")
 
 
 class SlackChannel(Channel):

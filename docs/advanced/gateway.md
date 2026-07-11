@@ -36,12 +36,12 @@ agentica-gateway
 # 等价：python -m agentica.gateway.main
 ```
 
-默认监听 `0.0.0.0:8789`，浏览器打开 `http://localhost:8789/chat` 进入内置 Web UI。
+默认监听 `0.0.0.0:8881`，浏览器打开 `http://localhost:8881/chat` 进入内置 Web UI。
 
 启动日志会明确区分两类服务，避免与 IM 渠道混淆：
 
 ```
-Web service started — http://0.0.0.0:8789/chat            # 始终运行的 Web / HTTP 服务
+Web service started — http://0.0.0.0:8881/chat            # 始终运行的 Web / HTTP 服务
 IM channels started — wechat, wecom                       # 按配置启用的 IM 渠道
 # 或：IM channels — none enabled (configure a channel to enable)
 ```
@@ -80,7 +80,7 @@ flowchart TB
 
 | 渠道 | 依赖 extras | 连接方式 | 需要公网 | 启用所需环境变量 |
 |------|------------|----------|----------|------------------|
-| Web 网页 | 内置 `[gateway]` | HTTP（内置 `/chat` UI） | 否（本机 `http://localhost:8789/chat`） | 无需配置，启动即开；可用 `HOST` / `PORT` 调整监听 |
+| Web 网页 | 内置 `[gateway]` | HTTP（内置 `/chat` UI） | 否（本机 `http://localhost:8881/chat`） | 无需配置，启动即开；可用 `HOST` / `PORT` 调整监听 |
 | 飞书 Lark | 内置 `[gateway]` | WebSocket 长连接 | 否 | `FEISHU_APP_ID` + `FEISHU_APP_SECRET` |
 | Telegram | `telegram` | 长轮询 | 否 | `TELEGRAM_BOT_TOKEN` |
 | Discord | `discord` | Gateway 长连接 | 否 | `DISCORD_BOT_TOKEN` |
@@ -99,7 +99,7 @@ flowchart TB
 
 <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/agentica-web.png" width="800" alt="Agentica Gateway Web UI" />
 
-> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8789/chat` 就能用；其余 IM 渠道都是可选的叠加层。
+> 这是**默认开启**的渠道：只要 `agentica-gateway` 在跑，`http://localhost:8881/chat` 就能用；其余 IM 渠道都是可选的叠加层。
 
 ## 配置（环境变量）
 
@@ -112,7 +112,7 @@ flowchart TB
 | 变量 | 默认 | 说明 |
 |------|------|------|
 | `HOST` | `0.0.0.0` | 监听地址 |
-| `PORT` | `8789` | 监听端口 |
+| `PORT` | `8881` | 监听端口 |
 | `OPENAI_API_KEY` / 各家 provider key | — | 走标准 provider 配置；config.yaml profile 也自带 `api_key`，二者等价 |
 
 ### 模型（优先 config.yaml）
@@ -155,14 +155,14 @@ agentica-gateway
 
 ### 最简启动（先跑起来）
 
-零配置就能先跑：`agentica-gateway` 启动后自带 Web UI（`http://localhost:8789/chat`），
+零配置就能先跑：`agentica-gateway` 启动后自带 Web UI（`http://localhost:8881/chat`），
 无需任何 IM 配置即可对话，记忆落地在 `~/.agentica/workspace`。
 
 想接一个 IM 渠道，**微信 ClawBot 最省事**：不用去开放平台申请应用，
 装好依赖、启动后终端直接打印二维码，用**个人微信**扫码确认即上线：
 
 ```bash
-pip install agentica[wechat]   # 提供 qrcode / pycryptodome / Pillow，用于扫码与媒体收发
+pip install 'agentica[wechat]'   # 提供 qrcode / pycryptodome / Pillow，用于扫码与媒体收发
 # 启动 gateway 后按提示扫码；白名单留空 = 不限制，任何用户都能访问
 WECHAT_ALLOWED_USERS=
 ```
@@ -296,12 +296,12 @@ SLACK_ALLOWED_CHANNELS=   # 留空 = 接收所有频道
 
 ```bash
 export WECHAT_TOKEN_FILE=~/.agentica/cache/wxbot_token.json
-agentica-gateway`
+agentica-gateway
 ```
 
 <div style="display: flex; gap: 16px; align-items: flex-start;">
   <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-qr.png" alt="微信 ClawBot 扫码绑定" width="400" />
-  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" style="max-height: 400px; width: auto;" />
+  <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/wechat-clawbot-snap.jpg" alt="微信 ClawBot 直接对话 Agentica" width="150" />
 </div>
 
 > 左：终端 / 浏览器弹出的扫码二维码，个人微信扫码即完成绑定；右：扫码后直接在微信里和 Agentica 对话，无需申请任何开放平台应用。
@@ -315,12 +315,6 @@ WECHAT_ALLOWED_USERS=   # 留空 = 不限制，任何用户都能访问
 
 为了避免 `agentica-gateway` 每次启动都弹出扫码窗口，
 微信渠道**只在以下任一变量被显式设置时**才会注册：
-
-```python
-# agentica/gateway/main.py
-if settings.wechat_token_file or settings.wechat_allowed_users:
-    deps.channel_manager.register(WeChatChannel(...))
-```
 
 | 你设置了… | 行为 |
 |----------|------|
@@ -344,7 +338,7 @@ if settings.wechat_token_file or settings.wechat_allowed_users:
 
 ## 提供的 HTTP API
 
-启动后访问 `http://localhost:8789/docs` 查看 OpenAPI 全文档。常用：
+启动后访问 `http://localhost:8881/docs` 查看 OpenAPI 全文档。常用：
 
 | Method | Path | 说明 |
 |--------|------|------|
@@ -359,7 +353,7 @@ if settings.wechat_token_file or settings.wechat_allowed_users:
 `/api/send` 示例：
 
 ```bash
-curl -X POST http://localhost:8789/api/send \
+curl -X POST http://localhost:8881/api/send \
   -H "Content-Type: application/json" \
   -d '{
     "channel": "qq",
@@ -456,7 +450,7 @@ settings:
 ## 故障排查
 
 - **某个渠道启动后立刻报 "Missing xxx, skipped"**：环境变量没设，渠道被跳过；这是正常行为
-- **`pip install agentica[xxx]`：找不到 extras**：检查使用的是 `agentica` 包名（非旧名），且 pip 版本 ≥ 21
+- **`pip install 'agentica[xxx]'`：找不到 extras**：检查使用的是 `agentica` 包名（非旧名），且 pip 版本 ≥ 21；注意 extras 里的 `[]` 在 zsh 下需用单引号包裹，否则会被当成 glob 报错
 - **WeCom `send` 一直返回 False**：该 chat 还没收到过用户消息，没有缓存到 `frame`；让用户先发一条
 - **DingTalk 401 / errcode 9001**：`accessToken` 过期或 robotCode 与 ChatBot 创建时不一致，检查 `DINGTALK_CLIENT_ID`
 - **WeChat 扫码后无响应**：检查日志里 `bot_id` 是否落盘到 `WECHAT_TOKEN_FILE`；如已过期把 token 文件删了重启即可重新扫码

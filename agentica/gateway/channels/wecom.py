@@ -36,7 +36,7 @@ def _ensure_wecom_sdk():
             generate_req_id = _gen
         except ImportError:
             raise ImportError(
-                "WeCom SDK not installed. Run: pip install agentica[wecom]"
+                "WeCom SDK not installed. Run: pip install 'agentica[wecom]'"
             )
 
 

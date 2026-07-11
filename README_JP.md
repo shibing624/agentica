@@ -154,7 +154,7 @@ agentica-gateway
 ```
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
 
-デフォルトでは `http://127.0.0.1:8789/chat` で起動します。
+デフォルトでは `http://127.0.0.1:8881/chat` で起動します。
 
 QQ / 飛書 / 微信 / 企微 / Telegram / Discord / Slack への接続をサポート。
 

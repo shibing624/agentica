@@ -53,7 +53,7 @@ def _ensure_dingtalk_sdk():
             ChatbotMessage = _CMsg
         except ImportError:
             raise ImportError(
-                "DingTalk SDK not installed. Run: pip install agentica[dingtalk]"
+                "DingTalk SDK not installed. Run: pip install 'agentica[dingtalk]'"
             )
 
 

@@ -132,7 +132,7 @@ Cron scheduler disabled (set `cron.enabled: true` in ~/.agentica/config.yaml to 
 `POST /api/scheduler/jobs`：
 
 ```bash
-curl -X POST http://localhost:8789/api/scheduler/jobs \
+curl -X POST http://localhost:8881/api/scheduler/jobs \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "汇总昨天项目进展，用中文输出要点",
@@ -146,7 +146,7 @@ curl -X POST http://localhost:8789/api/scheduler/jobs \
 带 `validate_run: true` 可在创建后**立即跑一次**验证 prompt / 调度是否可用：
 
 ```bash
-curl -X POST http://localhost:8789/api/scheduler/jobs \
+curl -X POST http://localhost:8881/api/scheduler/jobs \
   -H "Content-Type: application/json" \
   -d '{"prompt": "ping", "schedule": "*/30 * * * *", "validate_run": true}'
 ```

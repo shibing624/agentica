@@ -155,7 +155,7 @@ agentica-gateway
 ```
 <img src="https://github.com/shibing624/agentica/blob/main/docs/assets/agentica-web.png" width="800" />
 
-By default it serves at `http://127.0.0.1:8789/chat`.
+By default it serves at `http://127.0.0.1:8881/chat`.
 
 Supports QQ / Feishu / WeChat / WeCom / Telegram / Discord / Slack.
 

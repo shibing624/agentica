@@ -83,7 +83,7 @@ def _ensure_qrcode():
             qrcode = _qr
         except ImportError:
             raise ImportError(
-                "qrcode not installed. Run: pip install agentica[wechat]"
+                "qrcode not installed. Run: pip install 'agentica[wechat]'"
             )
 
 
@@ -161,7 +161,7 @@ class WxBotClient:
                 from Crypto.Util.Padding import pad as _p, unpad as _u
             except ImportError:
                 raise ImportError(
-                    "pycryptodome not installed. Run: pip install agentica[wechat]"
+                    "pycryptodome not installed. Run: pip install 'agentica[wechat]'"
                 )
             Crypto = True
             _AES = _aes

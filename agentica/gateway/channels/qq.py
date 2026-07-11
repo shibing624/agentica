@@ -42,7 +42,7 @@ def _ensure_qq_sdk():
             GroupMessage = _Group
         except ImportError:
             raise ImportError(
-                "QQ SDK not installed. Run: pip install agentica[qq]"
+                "QQ SDK not installed. Run: pip install 'agentica[qq]'"
             )
 
 
