@@ -18,7 +18,7 @@
 
 **Agentica** は単なる LLM API のチャットラッパーではなく、Async-First の agent harness です——エージェントを本当に「動かす」：ツール呼び出し、長時間タスク、マルチエージェント協調、セッションをまたぐ記憶、そして継続的な自己進化。
 
-| 何が違うのか | |
+|  | |
 |------|------|
 | **長く走る、暴走しない** | `Runner` 駆動の LLM ↔ ツール長ループ。コンテキスト圧縮・コスト予算・無限ループ防止を内蔵し、長時間タスクが途切れない |
 | **手を動かす、雑談だけではない** | ファイル・実行・検索・ブラウザ・MCP・マルチエージェント・Workflow——単一 IDE に縛られず実際に作業する |
@@ -154,7 +154,7 @@ agentica-gateway
 デフォルトでは `http://127.0.0.1:8881/chat` で起動します。
 
 IM (QQ / Feishu / WeChat / WeCom / Telegram / Discord / Slack) への接続をサポート。
-  
+
 IM 集成詳細（スキャンコードバインディング、チャネル設定、環境変数）：[Gateway ドキュメント](https://github.com/shibing624/agentica/blob/main/docs/advanced/gateway.md)。
 
 ## サンプル

@@ -19,7 +19,7 @@
 **Agentica** is not a chat wrapper around an LLM API. It is an Async-First agent harness that makes agents actually *run*:
 tool calling, long-running tasks, multi-agent orchestration, cross-session memory, and continuous self-evolution.
 
-| Why it's different | |
+|  | |
 |------------|---------------|
 | **Runs long, doesn't run away** | `Runner`-driven LLM ↔ tool loop with context compaction, cost budgets, and loop safety — long tasks stay on track |
 | **Does work, not just chat** | Files, execution, search, browser, MCP, multi-agent, Workflow — real actions, not tied to a single IDE |
