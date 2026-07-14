@@ -61,7 +61,7 @@ def get_json_schema_for_arg(t: Any) -> Optional[Dict[str, Any]]:
             # Handle dict types - use simple object schema for maximum API compatibility
             # Note: additionalProperties may not be supported by some APIs
             return {"type": "object"}
-        elif type_origin is Union:
+        elif type_origin is Union or type(None) in type_args:
             # Filter out NoneType from Union
             non_none_types = [arg for arg in type_args if arg is not type(None)]
             
@@ -108,7 +108,7 @@ def get_json_schema(type_hints: Dict[str, Any], strict: bool = False) -> Dict[st
             # Check if type is Optional (Union with NoneType)
             type_origin = get_origin(v)
             type_args = get_args(v)
-            is_optional = type_origin is Union and len(type_args) == 2 and any(arg is type(None) for arg in type_args)
+            is_optional = (type_origin is Union or type(None) in type_args) and len(type_args) == 2 and any(arg is type(None) for arg in type_args)
 
             # Get the actual type if it's Optional
             if is_optional:
