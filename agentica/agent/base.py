@@ -35,6 +35,7 @@ from typing import (
 if TYPE_CHECKING:
     from agentica.goals import GoalRunResult
 import copy
+import json
 import os
 import threading
 import time
@@ -47,6 +48,7 @@ from agentica.utils.hook_recorder import HookRecorder
 from agentica.utils.log import logger, set_log_level_to_debug, set_log_level_to_info
 from agentica.model.message import Message
 from agentica.tools.base import ModelTool, Tool, Function
+from agentica.tools.buildin_tools import BuiltinFileTool
 from agentica.tools.skill_tool import SkillTool
 from agentica.model.base import Model
 from agentica.run_response import RunResponse, AgentCancelledError
@@ -1114,6 +1116,74 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             return func_name in mode_whitelist
         return True
 
+    def mark_evicted_file_reads(
+        self,
+        tool_messages: Sequence[Message],
+        *,
+        all_reads: bool = False,
+    ) -> List[str]:
+        """Invalidate file reads whose exact tool output left model context.
+
+        Compression owns message lifetimes; BuiltinFileTool owns per-agent file
+        freshness. This narrow bridge keeps those responsibilities separate and
+        deliberately ignores custom tools with a coincidental ``read_file`` name.
+        """
+        file_tools = [tool for tool in (self.tools or []) if isinstance(tool, BuiltinFileTool)]
+        if not file_tools:
+            return []
+
+        if all_reads:
+            stale_paths = []
+            for tool in file_tools:
+                stale_paths.extend(tool.mark_all_read_context_stale())
+            return sorted(set(stale_paths))
+
+        paths = []
+        for message in tool_messages:
+            if message.role != "tool" or message.tool_name != "read_file":
+                continue
+            arguments = message.tool_args
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except ValueError:
+                    continue
+            if not isinstance(arguments, dict):
+                continue
+            file_path = arguments.get("file_path")
+            if isinstance(file_path, str) and file_path:
+                paths.append(file_path)
+
+        stale_paths = []
+        for tool in file_tools:
+            stale_paths.extend(tool.mark_read_context_stale(paths))
+        return sorted(set(stale_paths))
+
+    @staticmethod
+    def append_evicted_file_read_notice(
+        messages: List["Message"], stale_paths: Sequence[str], reason: str
+    ) -> None:
+        """Append a user-role notice so the model knows its file reads are stale.
+
+        Shared by the runner compression pipeline and the context-overflow
+        fallback so both paths make eviction visible (the overflow path used
+        to mark reads stale silently, leaving the model to discover it only
+        when an edit was rejected).
+        """
+        if not stale_paths:
+            return
+        display_paths = "\n".join(f"- {path}" for path in stale_paths)
+        messages.append(Message(
+            role="user",
+            content=(
+                "[Context maintenance]\n"
+                f"Exact read_file output was removed from context by {reason} for:\n"
+                f"{display_paths}\n"
+                "Before editing or quoting exact code from these files, call read_file again. "
+                "Do not construct old_string from memory or use execute to bypass edit_file."
+            ),
+        ))
+
     def set_permission_mode(self, mode: str) -> None:
         """Switch the tool permission tier at runtime — no Agent rebuild needed.
 
@@ -1447,6 +1517,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
             if compression_manager is not None:
                 _uid_compress = agent_ref.workspace.user_id if agent_ref.workspace is not None else None
                 await compression_manager.compress(messages, user_id=_uid_compress)
+                stale_paths = agent_ref.mark_evicted_file_reads(
+                    compression_manager.get_evicted_tool_messages()
+                )
+                agent_ref.append_evicted_file_read_notice(
+                    messages, stale_paths, "context-overflow compression"
+                )
                 compressed = True
                 usage_ratio = _estimate_usage_ratio(messages, context_window)
 
@@ -1461,6 +1537,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
                 else:
                     break  # Only system messages left
                 usage_ratio = _estimate_usage_ratio(messages, context_window)
+            if evicted:
+                stale_paths = agent_ref.mark_evicted_file_reads([], all_reads=True)
+                agent_ref.append_evicted_file_read_notice(
+                    messages, stale_paths, "context-overflow eviction"
+                )
 
             # Demote to debug + only once per Agent instance lifetime to
             # avoid flooding the CLI across multiple user turns.

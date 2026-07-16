@@ -27,6 +27,8 @@ For broad exploration — understanding structure, finding where something is ha
 - **Batch reads** — call `read_file` on multiple files in parallel
 - **Use `edit_file`** for targeted changes (safer than `write_file`)
 - **Use `multi_edit_file`** when making multiple changes to the SAME file — it applies all edits atomically in one call
+- Prefer `read_file` before `edit_file` when constructing `old_string` from memory. Exact file content is most reliable while its latest `read_file` result remains in context; if a context-maintenance notice says it was evicted, or an edit fails with `String not found`, re-read and retry.
+- Never bypass `edit_file` with `execute` to rewrite files. Re-reading the same file is always allowed (other people may have edited it).
 
 ## Task Management
 

@@ -106,12 +106,38 @@ class CompressionManager:
     # concurrently via asyncio.gather() — sharing mutable state would race.
     # Pattern borrowed from hermes-agent ContextCompressor.
     _conversation_previous_summary: Optional[str] = field(init=False, default=None, repr=False)
+    _last_evicted_tool_messages: List["Message"] = field(
+        init=False, default_factory=list, repr=False,
+    )
 
     def reset_run_state(self) -> None:
         """Reset per-run state. Call at the start of each agent run to prevent
         circuit breaker and stats from leaking across runs."""
         self._consecutive_auto_compact_failures = 0
         self._conversation_previous_summary = None
+        self._last_evicted_tool_messages = []
+
+    def get_evicted_tool_messages(self) -> List["Message"]:
+        """Return tool messages whose exact content was evicted in the last compress."""
+        return list(self._last_evicted_tool_messages)
+
+    def _evicted_file_read_paths(self) -> List[str]:
+        """Return raw read_file paths for the last compression report."""
+        paths = []
+        for message in self._last_evicted_tool_messages:
+            if message.tool_name != "read_file":
+                continue
+            arguments = message.tool_args
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except ValueError:
+                    continue
+            if isinstance(arguments, dict):
+                file_path = arguments.get("file_path")
+                if isinstance(file_path, str) and file_path:
+                    paths.append(file_path)
+        return sorted(set(paths))
 
     def __post_init__(self):
         # Default target: 60% of trigger threshold
@@ -244,6 +270,7 @@ class CompressionManager:
 
             msg.content = new_content
             msg.compressed_content = new_content
+            self._last_evicted_tool_messages.append(msg)
             truncated += 1
             self.stats["rule_truncated"] = self.stats.get("rule_truncated", 0) + 1
             self.stats["rule_truncated_saved_chars"] = (
@@ -303,6 +330,11 @@ class CompressionManager:
             return 0
 
         # Archive dropped messages to workspace before deletion
+        self._last_evicted_tool_messages.extend(
+            message
+            for message in messages[drop_start_idx:keep_from_idx]
+            if message.role == "tool"
+        )
         if self.workspace is not None:
             dropped_messages = messages[drop_start_idx:keep_from_idx]
             await self._archive_dropped_messages(dropped_messages)
@@ -515,6 +547,7 @@ class CompressionManager:
         """
         if not self.compress_tool_results:
             return
+        self._last_evicted_tool_messages = []
 
         # Count tokens before compression
         _model_id = model.id if model else 'gpt-4o'
@@ -567,6 +600,7 @@ class CompressionManager:
             "llm_summary_used": self.stats.get("llm_compressed", 0) > _stats_before.get("llm_compressed", 0),
             "task_anchor_preserved": task_anchor_preserved,
             "tool_call_args_shrunk": tool_call_args_shrunk,
+            "evicted_file_reads": self._evicted_file_read_paths(),
         }
         self.stats["last_report"] = report
         _window = model.context_window if model is not None else None

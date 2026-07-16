@@ -111,6 +111,14 @@ class TestBuiltinFileToolLs:
 
 
 class TestBuiltinFileToolReadFile:
+    def test_empty_file_returns_reminder_and_metadata(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "empty.txt")
+        Path(fp).touch()
+        result = asyncio.run(file_tool.read_file(fp))
+        assert "<system-reminder>" in result
+        assert "0 bytes" in result
+        assert "[File metadata:" in result
+
     def test_read_simple_file(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "test.txt")
         p.write_text("line1\nline2\nline3\n")
@@ -296,9 +304,73 @@ class TestBuiltinFileToolRequestPathAccess:
 
 
 class TestBuiltinFileToolEditFile:
+    @staticmethod
+    def _read(file_tool, file_path):
+        asyncio.run(file_tool.read_file(file_path))
+
+    def test_edit_without_read_still_succeeds_with_tip(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "unread.txt")
+        Path(fp).write_text("before")
+        result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
+        assert "Successfully" in result
+        assert "Tip:" in result and "not read_file'd" in result
+        assert Path(fp).read_text() == "after"
+
+    def test_stale_context_edit_still_succeeds_with_tip(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "stale.txt")
+        Path(fp).write_text("before")
+        self._read(file_tool, fp)
+        file_tool.mark_read_context_stale([fp])
+        result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
+        assert "Successfully" in result
+        assert "left context" in result
+        assert Path(fp).read_text() == "after"
+
+    def test_same_size_external_change_tips_but_still_edits(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "fingerprint.txt")
+        Path(fp).write_text("before")
+        self._read(file_tool, fp)
+        original_mtime_ns = file_tool._file_read_state[str(Path(fp).resolve())].mtime_ns
+        Path(fp).write_text("after!")
+        os.utime(fp, ns=(original_mtime_ns, original_mtime_ns))
+        result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
+        assert "Successfully" in result
+        assert "changed on disk" in result
+        assert Path(fp).read_text() == "final!"
+
+    def test_lazy_hash_skipped_when_mtime_changed(self, file_tool, tmp_dir):
+        """Tip path must NOT hash the file when mtime already signals a change."""
+        from unittest.mock import patch
+        fp = os.path.join(tmp_dir, "mtime_change.txt")
+        Path(fp).write_text("before")
+        self._read(file_tool, fp)
+        Path(fp).write_text("totally different and longer content")
+        with patch.object(file_tool, "_file_hash", wraps=file_tool._file_hash) as spy:
+            # old_string no longer matches → natural String not found + tip
+            with pytest.raises(ValueError) as exc:
+                asyncio.run(file_tool.edit_file(fp, "before", "after"))
+        assert "changed on disk" in str(exc.value)
+        assert spy.call_count == 0, "hash must be skipped when mtime/size differ"
+
+    def test_lazy_hash_runs_when_mtime_and_size_match(self, file_tool, tmp_dir):
+        """Tip path must hash when mtime+size match to catch a same-size rewrite."""
+        from unittest.mock import patch
+        fp = os.path.join(tmp_dir, "same_fingerprint.txt")
+        Path(fp).write_text("before")
+        self._read(file_tool, fp)
+        original_mtime_ns = file_tool._file_read_state[str(Path(fp).resolve())].mtime_ns
+        Path(fp).write_text("after!")  # same length, different content
+        os.utime(fp, ns=(original_mtime_ns, original_mtime_ns))
+        with patch.object(file_tool, "_file_hash", wraps=file_tool._file_hash) as spy:
+            result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
+        assert "Successfully" in result
+        assert "changed on disk" in result
+        assert spy.call_count == 1, "hash must run when mtime+size match"
+
     def test_single_edit(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "edit.txt")
         Path(fp).write_text("hello world")
+        self._read(file_tool, fp)
         result = asyncio.run(file_tool.edit_file(fp, "world", "python"))
         assert "Successfully" in result
         assert Path(fp).read_text() == "hello python"
@@ -306,6 +378,7 @@ class TestBuiltinFileToolEditFile:
     def test_multiple_edits_via_separate_calls(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "multi.txt")
         Path(fp).write_text("aaa bbb ccc")
+        self._read(file_tool, fp)
         result1 = asyncio.run(file_tool.edit_file(fp, "aaa", "111"))
         assert "Successfully" in result1
         result2 = asyncio.run(file_tool.edit_file(fp, "ccc", "333"))
@@ -316,6 +389,7 @@ class TestBuiltinFileToolEditFile:
         """Default best-effort: successful edits land, failing ones are reported."""
         fp = os.path.join(tmp_dir, "be.txt")
         Path(fp).write_text("alpha bravo charlie")
+        self._read(file_tool, fp)
         # First edit succeeds, second fails (string absent), third succeeds.
         result = asyncio.run(file_tool.multi_edit_file(fp, [
             {"old_string": "alpha", "new_string": "ALPHA"},
@@ -333,6 +407,7 @@ class TestBuiltinFileToolEditFile:
         """If every edit fails in best-effort mode the file is left untouched."""
         fp = os.path.join(tmp_dir, "be_all.txt")
         Path(fp).write_text("untouched")
+        self._read(file_tool, fp)
         result = asyncio.run(file_tool.multi_edit_file(fp, [
             {"old_string": "nope1", "new_string": "x"},
             {"old_string": "nope2", "new_string": "y"},
@@ -375,6 +450,7 @@ class TestBuiltinFileToolEditFile:
         """continue_on_error=False keeps the historical atomic semantics."""
         fp = os.path.join(tmp_dir, "atomic.txt")
         Path(fp).write_text("alpha bravo")
+        self._read(file_tool, fp)
         with pytest.raises(ValueError):
             asyncio.run(file_tool.multi_edit_file(fp, [
                 {"old_string": "alpha", "new_string": "ALPHA"},
@@ -386,6 +462,7 @@ class TestBuiltinFileToolEditFile:
     def test_edit_replace_all(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "replall.txt")
         Path(fp).write_text("x x x")
+        self._read(file_tool, fp)
         result = asyncio.run(file_tool.edit_file(fp, "x", "y", replace_all=True))
         assert "Successfully" in result
         assert Path(fp).read_text() == "y y y"
@@ -393,6 +470,7 @@ class TestBuiltinFileToolEditFile:
     def test_edit_string_not_found(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "nf.txt")
         Path(fp).write_text("hello")
+        self._read(file_tool, fp)
         with pytest.raises(ValueError):
             asyncio.run(file_tool.edit_file(fp, "zzz", "yyy"))
         # File should be unchanged
@@ -405,6 +483,7 @@ class TestBuiltinFileToolEditFile:
     def test_edit_multiple_matches_no_replace_all(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "dup.txt")
         Path(fp).write_text("foo bar foo")
+        self._read(file_tool, fp)
         with pytest.raises(ValueError, match="Found 2 occurrences"):
             asyncio.run(file_tool.edit_file(fp, "foo", "baz"))
         # File unchanged
@@ -414,6 +493,7 @@ class TestBuiltinFileToolEditFile:
         """A failed edit should not modify the file."""
         fp = os.path.join(tmp_dir, "atomic.txt")
         Path(fp).write_text("aaa bbb")
+        self._read(file_tool, fp)
         with pytest.raises(ValueError):
             asyncio.run(file_tool.edit_file(fp, "zzz", "999"))
         # File should be unchanged

@@ -14,7 +14,7 @@ Mirrors CC's microCompact.ts time-based path:
 This is the cheapest possible compression: O(n) scan, in-place mutation,
 no API call.  It should run every turn regardless of context size.
 """
-from typing import List, TYPE_CHECKING
+from typing import Callable, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentica.model.message import Message
@@ -33,6 +33,7 @@ DEFAULT_KEEP_RECENT = 5
 def micro_compact(
     messages: "List[Message]",
     keep_recent: int = DEFAULT_KEEP_RECENT,
+    on_compacted: Optional[Callable[["List[Message]"], None]] = None,
 ) -> int:
     """Replace old tool-result content with a short placeholder (in-place).
 
@@ -57,6 +58,7 @@ def micro_compact(
     # The oldest (len - keep_recent) entries are candidates for compaction.
     candidates = tool_indices[:-keep_recent]
     compacted = 0
+    compacted_messages = []
 
     for idx in candidates:
         msg = messages[idx]
@@ -71,5 +73,8 @@ def micro_compact(
         # Mark so subsequent calls don't double-process this message.
         msg._micro_compacted = True
         compacted += 1
+        compacted_messages.append(msg)
 
+    if compacted_messages and on_compacted is not None:
+        on_compacted(compacted_messages)
     return compacted

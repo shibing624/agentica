@@ -75,6 +75,19 @@ class TestMicroCompact(unittest.TestCase):
         micro_compact(msgs, keep_recent=5)
         self.assertTrue(msgs[1]._micro_compacted)
 
+    def test_reports_compacted_messages_to_callback(self):
+        from agentica.compression.micro import micro_compact
+        compacted = []
+        messages = [
+            Message(role="tool", content="old " + ("x" * 100), tool_call_id="old"),
+        ] + [
+            Message(role="tool", content=f"recent {i}" + ("x" * 100), tool_call_id=str(i))
+            for i in range(5)
+        ]
+        count = micro_compact(messages, on_compacted=compacted.extend)
+        self.assertEqual(count, 1)
+        self.assertEqual([message.tool_call_id for message in compacted], ["old"])
+
 
 # ===========================================================================
 # tool_result_storage tests
@@ -642,7 +655,13 @@ class TestCompressionManagerCompress(unittest.TestCase):
             Message(role="system", content="sys"),
             Message(role="user", content="hi"),
             Message(role="assistant", content="old", tool_calls=[{"id": "1"}]),
-            Message(role="tool", content="x" * 1000, tool_call_id="1"),
+            Message(
+                role="tool",
+                content="x" * 1000,
+                tool_call_id="1",
+                tool_name="read_file",
+                tool_args={"file_path": "src/example.py"},
+            ),
             Message(role="assistant", content="recent", tool_calls=[{"id": "2"}]),
             Message(role="tool", content="y" * 100, tool_call_id="2"),
         ]
@@ -655,6 +674,10 @@ class TestCompressionManagerCompress(unittest.TestCase):
             "<persisted-output>" in str(old_tool.content) or
             old_tool.compressed_content is not None or
             len(str(old_tool.content)) <= 1000
+        )
+        self.assertEqual(
+            cm.get_stats()["last_report"]["evicted_file_reads"],
+            ["src/example.py"],
         )
 
 

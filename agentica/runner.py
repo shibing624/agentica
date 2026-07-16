@@ -778,6 +778,19 @@ class Runner:
         cb = agent._event_callback
         agent_name = agent.name or "Agent"
 
+        def _notify_evicted_file_reads(stale_paths: List[str], reason: str) -> None:
+            """Make file-context invalidation visible to both the model and observers."""
+            if not stale_paths:
+                return
+            agent.append_evicted_file_read_notice(messages, stale_paths, reason)
+            if cb is not None:
+                cb({
+                    "type": "compact.file_reads_evicted",
+                    "agent_name": agent_name,
+                    "reason": reason,
+                    "paths": stale_paths,
+                })
+
         # Stage 1: tool result budget (persist oversized results to disk)
         _sid = agent.run_id or "default"
         _uid = agent.workspace.user_id if agent.workspace is not None else None
@@ -788,9 +801,26 @@ class Runner:
                 session_id=_sid,
                 user_id=_uid,
             )
+            persisted_reads = [
+                message
+                for message in _recent_tools
+                if message.tool_name == "read_file"
+                and isinstance(message.content, str)
+                and "<persisted-output>" in message.content
+            ]
+            if persisted_reads:
+                _notify_evicted_file_reads(
+                    agent.mark_evicted_file_reads(persisted_reads),
+                    "tool-result persistence",
+                )
 
         # Stage 2: micro-compact (clear old tool results, free)
-        n = micro_compact(messages)
+        micro_stale_paths: List[str] = []
+
+        def _mark_micro_compacted(compacted_messages: List[Message]) -> None:
+            micro_stale_paths.extend(agent.mark_evicted_file_reads(compacted_messages))
+
+        n = micro_compact(messages, on_compacted=_mark_micro_compacted)
         if n:
             logger.debug(f"Stage 2 (micro-compact): cleared {n} old tool result(s)")
             if cb is not None:
@@ -799,8 +829,10 @@ class Runner:
                         "type": "compact.micro",
                         "agent_name": agent_name,
                         "cleared": n,
+                        "evicted_file_reads": sorted(set(micro_stale_paths)),
                     }
                 )
+            _notify_evicted_file_reads(micro_stale_paths, "micro-compaction")
 
         # Stage 3 & 4 require CompressionManager
         if not agent.tool_config.compress_tool_results:
@@ -829,6 +861,12 @@ class Runner:
                 task_anchor=agent.task_anchor,
                 user_id=_uid,
             )
+            evicted_messages = cm.get_evicted_tool_messages()
+            if any(message.tool_name == "read_file" for message in evicted_messages):
+                _notify_evicted_file_reads(
+                    agent.mark_evicted_file_reads(evicted_messages),
+                    "rule-based compression",
+                )
             compression_report = cm.get_stats().get("last_report")
             if compression_report and agent.run_response is not None:
                 agent.run_response.metrics = agent.run_response.metrics or {}
@@ -853,6 +891,10 @@ class Runner:
         t0 = time.monotonic()
         compacted = await cm.auto_compact(messages, model=model)
         if compacted:
+            stale_paths = (
+                agent.mark_evicted_file_reads([], all_reads=True)
+                if agent.tools else []
+            )
             logger.debug("Stage 4 (auto-compact): conversation summarised by LLM")
             await _fire_compact_hooks("on_post_compact")
             if cb is not None:
@@ -863,8 +905,10 @@ class Runner:
                         "before": before,
                         "after": len(messages),
                         "elapsed": time.monotonic() - t0,
+                        "evicted_file_reads": stale_paths,
                     }
                 )
+            _notify_evicted_file_reads(stale_paths, "context compaction")
 
     @staticmethod
     async def _try_reactive_compact(
@@ -885,6 +929,10 @@ class Runner:
         if compacted:
             logger.info("Reactive compact triggered (prompt_too_long) -- retrying")
             cb = agent._event_callback
+            stale_paths = (
+                agent.mark_evicted_file_reads([], all_reads=True)
+                if agent.tools else []
+            )
             if cb is not None:
                 cb(
                     {
@@ -893,7 +941,12 @@ class Runner:
                         "before": before,
                         "after": len(messages),
                         "elapsed": time.monotonic() - t0,
+                        "evicted_file_reads": stale_paths,
                     }
+                )
+            if stale_paths:
+                agent.append_evicted_file_read_notice(
+                    messages, stale_paths, "reactive compaction"
                 )
             return True
         return False

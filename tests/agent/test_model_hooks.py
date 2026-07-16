@@ -128,6 +128,53 @@ class TestContextOverflowHandling(unittest.TestCase):
         # With effective compression, no eviction should occur.
         self.assertEqual(len(messages), n_before, "Compression alone should suffice")
 
+    def test_overflow_eviction_appends_context_maintenance_notice(self):
+        """FIFO eviction must make file-read invalidation visible to the model.
+
+        Regression for the silent-stale path: the overflow handler used to
+        mark reads stale without appending any notice, leaving the model to
+        discover staleness only when an edit was rejected.
+        """
+        import os
+        import tempfile
+        from pathlib import Path
+        from agentica.tools.buildin_tools import BuiltinFileTool
+
+        agent = _make_agent(ToolConfig(context_overflow_threshold=0.5))
+        agent.update_model()
+        agent.model.context_window = 200
+
+        file_tool = BuiltinFileTool()
+        agent.tools = [file_tool]
+        with tempfile.TemporaryDirectory() as tmp:
+            fp = os.path.join(tmp, "read_then_evicted.py")
+            Path(fp).write_text("value = 1\n", encoding="utf-8")
+            asyncio.run(file_tool.read_file(fp))
+            # Sanity: the read is recorded as context-fresh.
+            self.assertTrue(
+                file_tool._file_read_state[str(Path(fp).resolve())].context_available
+            )
+
+            hook = agent._build_pre_tool_hook()
+            messages = [
+                Message(role="system", content="sys"),
+                Message(role="user", content="A" * 200),
+                Message(role="assistant", content="B" * 200),
+                Message(role="user", content="C" * 200),
+            ]
+            asyncio.run(hook(messages, []))
+
+            # The read was marked stale and a [Context maintenance] notice appended.
+            self.assertFalse(
+                file_tool._file_read_state[str(Path(fp).resolve())].context_available
+            )
+            notices = [
+                m for m in messages
+                if m.role == "user" and "[Context maintenance]" in str(m.content)
+            ]
+            self.assertEqual(len(notices), 1, "Expected one context-maintenance notice")
+            self.assertIn(str(Path(fp).resolve()), notices[0].content)
+
 
 class TestPostToolHook(unittest.TestCase):
     """_build_post_tool_hook: None when no TodoTool, set when TodoTool is present."""

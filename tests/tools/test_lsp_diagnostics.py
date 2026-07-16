@@ -92,6 +92,7 @@ class TestFileToolDiagnosticsIntegration(unittest.TestCase):
             f.write("a = 1\n")
         checker = _FakeChecker(new_text="New diagnostics introduced by this edit:\n  error app.py:1:1 oops")
         tool = BuiltinFileTool(work_dir=self.work, diagnostics_checker=checker)
+        asyncio.run(tool.read_file("app.py"))
         result = asyncio.run(tool.edit_file("app.py", "a = 1", "a = undefined_name"))
         self.assertIn("oops", result)
 
