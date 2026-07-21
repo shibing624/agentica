@@ -19,6 +19,7 @@ from rich.text import Text
 
 from agentica.cli.runtime import get_console, TOOL_ICONS, BUILTIN_TOOLS
 from agentica.global_config import get_setting
+from agentica.version import __version__
 
 
 # Rich console color scheme (unified - no separate ANSI codes)
@@ -36,7 +37,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     """Print the application header with version and model information"""
     box_width = min(get_console().width, 80)
     get_console().print("=" * box_width, style="bright_cyan")
-    get_console().print("  Agentica CLI - Interactive AI Assistant")
+    get_console().print(f"  Agentica CLI v{__version__} - Interactive AI Assistant")
     get_console().print(f"  Model: [bright_green]{model_provider}/{model_name}[/bright_green]")
 
     # Working directory
