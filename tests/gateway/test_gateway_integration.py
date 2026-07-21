@@ -403,7 +403,7 @@ class TestProfileCrudEndpoints:
                                 "base_url": "https://open.bigmodel.cn", "api_key": "sk-aux"},
             "env": {"SERPER_API_KEY": "xxx"},
         }
-        with patch("agentica.gateway.routes.config.get_profile", return_value=fake):
+        with patch("agentica.gateway.routes.settings.get_profile", return_value=fake):
             resp = client.get("/api/profile/default")
         assert resp.status_code == 200
         d = resp.json()
@@ -415,13 +415,13 @@ class TestProfileCrudEndpoints:
 
     def test_get_profile_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.config.get_profile", return_value={}):
+        with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
             resp = client.get("/api/profile/none")
         assert resp.status_code == 404
 
     def test_create_profile(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.config.upsert_profile") as m:
+        with patch("agentica.gateway.routes.settings.upsert_profile") as m:
             resp = client.post("/api/profile", json={
                 "name": "test-p", "model_provider": "deepseek",
                 "model_name": "deepseek-v4-flash", "base_url": "https://api.deepseek.com",
@@ -443,8 +443,8 @@ class TestProfileCrudEndpoints:
         client, _ = mock_app
         existing = {"model_provider": "deepseek", "model_name": "deepseek-v4-flash",
                     "base_url": "https://api.deepseek.com", "api_key": "sk-existing"}
-        with patch("agentica.gateway.routes.config.get_profile", return_value=existing), \
-             patch("agentica.gateway.routes.config.upsert_profile") as m:
+        with patch("agentica.gateway.routes.settings.get_profile", return_value=existing), \
+             patch("agentica.gateway.routes.settings.upsert_profile") as m:
             resp = client.put("/api/profile/default", json={
                 "name": "default", "model_provider": "deepseek",
                 "model_name": "deepseek-v4-flash", "temperature": 0.5,
@@ -459,7 +459,7 @@ class TestProfileCrudEndpoints:
 
     def test_update_profile_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.config.get_profile", return_value={}):
+        with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
             resp = client.put("/api/profile/none", json={
                 "name": "none", "model_provider": "x", "model_name": "y",
             })
@@ -467,14 +467,14 @@ class TestProfileCrudEndpoints:
 
     def test_delete_profile(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.config.get_profile", return_value={"model_provider": "x"}), \
-             patch("agentica.gateway.routes.config.delete_profile", return_value=True) as m:
+        with patch("agentica.gateway.routes.settings.get_profile", return_value={"model_provider": "x"}), \
+             patch("agentica.gateway.routes.settings.delete_profile", return_value=True) as m:
             resp = client.delete("/api/profile/default")
         assert resp.status_code == 200
         m.assert_called_with("default")
 
     def test_delete_profile_not_found(self, mock_app):
         client, _ = mock_app
-        with patch("agentica.gateway.routes.config.get_profile", return_value={}):
+        with patch("agentica.gateway.routes.settings.get_profile", return_value={}):
             resp = client.delete("/api/profile/none")
         assert resp.status_code == 404

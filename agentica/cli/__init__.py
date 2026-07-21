@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: command line interface for agentica
 """
-from agentica.cli.config import (
+from agentica.cli.runtime import (
     TOOL_ICONS,
     TOOL_REGISTRY,
     MODEL_REGISTRY,

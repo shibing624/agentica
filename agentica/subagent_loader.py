@@ -190,7 +190,7 @@ def load_all_agents() -> int:
                     system_prompt=descriptor["system_prompt"],
                     allowed_tools=descriptor["allowed_tools"],
                     denied_tools=descriptor["denied_tools"],
-                    tool_call_limit=descriptor["tool_call_limit"] or 100,
+                    tool_call_limit=descriptor["tool_call_limit"],
                 )
                 registered += 1
         return registered
@@ -297,7 +297,7 @@ def create_agent_file(
         system_prompt=system_prompt.strip(),
         allowed_tools=allowed_tools,
         denied_tools=denied_tools,
-        tool_call_limit=tool_call_limit or 100,
+        tool_call_limit=tool_call_limit,
     )
     logger.info(f"Created subagent file: {file_path}")
     return str(file_path)

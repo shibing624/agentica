@@ -159,7 +159,7 @@ class AgentService:
     # ============== Model config (single source of truth: `settings`) ==============
     # These proxy directly to the gateway's global `settings` singleton instead
     # of keeping a duplicate copy, so routes only ever need to write to one
-    # place (settings.xxx) and every reader (here, routes/config.py, etc.)
+    # place (settings.xxx) and every reader (here, routes/settings.py, etc.)
     # sees the same value with no risk of drift.
 
     @property

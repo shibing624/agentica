@@ -28,6 +28,30 @@ from agentica.model.message import Message
 from agentica.utils.log import logger
 
 
+# Module-level default callback registry. The CLI's TUI registers its
+# ask_user_question callback here at startup (see cli/interactive.py). Any
+# AskUserQuestionTool instance created WITHOUT an explicit input_callback — a
+# subagent spawned mid-turn, a cron job runner, a regression, or an older
+# install where the wiring was missing — will then route through the TUI
+# callback instead of falling back to bare ``input()``. Bare ``input()`` inside
+# a running prompt_toolkit app deadlocks: pt owns stdin in raw mode, so the
+# user's keystrokes go to the TextArea and never reach ``input()``, which blocks
+# forever (the "CLI froze at ask_user_question, Ctrl+C/Ctrl+D do nothing" bug).
+# A registered default breaks that deadlock for every instance, not just the
+# one the CLI wired explicitly.
+_default_callback_holder: List[Optional[Callable]] = [None]
+
+
+def set_default_ask_user_question_callback(callback: Optional[Callable]) -> None:
+    """Register/clear the process-wide default ask_user_question callback.
+
+    Called by the CLI TUI on startup and teardown. SDK/library callers that
+    never start a TUI leave this None, preserving the legacy bare-``input()``
+    behavior for non-interactive scripts.
+    """
+    _default_callback_holder[0] = callback
+
+
 class AskUserQuestionTool(Tool):
     """
     Human-in-the-loop tool that allows agents to request user input during execution.
@@ -129,15 +153,25 @@ You have access to the `ask_user_question` tool to request input or confirmation
         Returns:
             User's input as a string
         """
-        if self.input_callback is not None:
+        # Prefer the instance callback; fall back to the process-wide default
+        # registered by the TUI (covers callback-less instances created by
+        # subagents / cron / regressions). Only when BOTH are None do we use
+        # bare input() — which is only safe in a non-interactive script where
+        # nothing else owns stdin.
+        callback = (
+            self.input_callback
+            if self.input_callback is not None
+            else _default_callback_holder[0]
+        )
+        if callback is not None:
             try:
-                return self.input_callback(prompt, options)
+                return callback(prompt, options)
             except Exception as e:
                 logger.error(f"Error in input callback: {e}")
                 if self.default_on_timeout:
                     return self.default_on_timeout
                 raise
-        
+
         # Default console input
         print("\n" + "=" * 60)
         print("🤖 Agent is requesting your input:")

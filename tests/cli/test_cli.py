@@ -1071,7 +1071,7 @@ class TestCLIModelParams(unittest.TestCase):
     """get_model() and resolution should honour the extended tuning params."""
 
     def test_get_model_passes_top_p_and_context_window(self):
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         model = get_model(
             "deepseek",
@@ -1089,7 +1089,7 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.reasoning_effort, "high")
 
     def test_get_model_context_window_overrides_catalog(self):
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         # Without an explicit value the catalog fills it (deepseek -> 1_000_000);
         # an explicit value must win.
@@ -1106,7 +1106,7 @@ class TestCLIModelParams(unittest.TestCase):
     def test_anthropic_accepts_top_p_and_reasoning_effort(self):
         # Anthropic now takes reasoning_effort too: the Claude model maps it to
         # adaptive thinking (thinking.type=adaptive + output_config.effort).
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         model = get_model(
             "anthropic",
@@ -1128,7 +1128,7 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(kwargs.get("temperature"), 1)
 
     def test_get_model_passes_extra_body_and_extra_headers(self):
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         model = get_model(
             "openai",
@@ -1142,7 +1142,7 @@ class TestCLIModelParams(unittest.TestCase):
         self.assertEqual(model.extra_headers, {"X-Custom": "value"})
 
     def test_get_model_skips_extra_body_for_anthropic(self):
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         model = get_model(
             "anthropic",
@@ -1154,7 +1154,7 @@ class TestCLIModelParams(unittest.TestCase):
 
     def test_reasoning_effort_accepts_low_medium(self):
         import sys
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(sys, "argv", ["agentica", "--reasoning_effort", "low"]):
             args = parse_args()
@@ -1233,7 +1233,7 @@ class TestCLIConfiguration(unittest.TestCase):
         Final defaults (deepseek/deepseek-v4-flash) are filled in by
         resolve_model_config (args > config.yaml profile > hardcoded).
         """
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(sys, "argv", ["agentica"]):
             args = parse_args()
@@ -1245,7 +1245,7 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertIsNone(args.diagnostics_servers)
 
     def test_parse_diagnostics_flags(self):
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(
             sys,
@@ -1265,7 +1265,7 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(args.diagnostics_servers, ["pyright", "typescript-language-server"])
 
     def test_parse_doctor_diagnostics_flags(self):
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(
             sys,
@@ -1302,7 +1302,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_get_model_defaults_deepseek_cli_reasoning_effort_to_max(self):
         """CLI DeepSeek usage should default to max effort for agentic tasks."""
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         model = get_model("deepseek", "deepseek-v4-flash", api_key="fake_key")
 
@@ -1310,7 +1310,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_get_model_respects_explicit_deepseek_reasoning_effort(self):
         """Explicit CLI reasoning effort should override the agentic default."""
-        from agentica.cli.config import get_model
+        from agentica.cli.runtime import get_model
 
         model = get_model(
             "deepseek",
@@ -1323,7 +1323,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_create_agent_uses_deepseek_cli_reasoning_default(self):
         """DeepAgent creation should inherit the CLI's max-thinking default."""
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
 
         captured = {}
 
@@ -1348,7 +1348,7 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(captured["model"].reasoning_effort, "max")
 
     def test_create_agent_passes_diagnostics_controls_to_deep_agent(self):
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
 
         captured = {}
 
@@ -1358,7 +1358,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 self.tools = []
 
         with (
-            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
             patch(
                 "agentica.agent.deep.DeepAgent",
                 FakeDeepAgent,
@@ -1581,7 +1581,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_parse_extensions_remove_command(self):
         """CLI supports `agentica extensions remove <skill-name>`."""
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(
             sys,
@@ -1596,7 +1596,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_parse_extensions_install_command(self):
         """CLI parses local install sources without network access."""
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(
             sys,
@@ -1611,7 +1611,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_parse_experience_flags(self):
         """CLI exposes explicit DeepAgent self-evolution controls."""
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(
             sys,
@@ -1634,7 +1634,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_parse_memory_sync_flag(self):
         """CLI exposes explicit DeepAgent memory global-sync control."""
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
 
         with patch.object(
             sys,
@@ -1717,7 +1717,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_create_agent_moves_skills_summary_out_of_instructions(self):
         """CLI should not stuff skill summaries into static instructions."""
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
         from agentica.skills.skill import Skill
         from agentica.skills.skill_registry import SkillRegistry
 
@@ -1741,7 +1741,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 self.session_guidance.append(text)
 
         with (
-            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
             patch(
                 "agentica.agent.deep.DeepAgent",
                 FakeDeepAgent,
@@ -1765,7 +1765,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_create_agent_passes_experience_controls_to_deep_agent(self):
         """CLI flags should map to DeepAgent experience settings deterministically."""
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
 
         captured = {}
 
@@ -1775,7 +1775,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 self.tools = []
 
         with (
-            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
             patch(
                 "agentica.agent.deep.DeepAgent",
                 FakeDeepAgent,
@@ -1807,7 +1807,7 @@ class TestCLIConfiguration(unittest.TestCase):
 
     def test_create_agent_passes_memory_sync_control_to_deep_agent(self):
         """CLI memory sync flag should map to DeepAgent long-term memory config."""
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
 
         captured = {}
 
@@ -1817,7 +1817,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 self.tools = []
 
         with (
-            patch("agentica.cli.config.get_model", return_value=MagicMock()),
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
             patch(
                 "agentica.agent.deep.DeepAgent",
                 FakeDeepAgent,
@@ -2560,17 +2560,17 @@ class TestBuildSiblingModel(unittest.TestCase):
         return base
 
     def test_none_when_no_sibling_name(self):
-        from agentica.cli.config import _build_sibling_model
+        from agentica.cli.runtime import _build_sibling_model
 
-        with patch("agentica.cli.config.get_model") as gm:
+        with patch("agentica.cli.runtime.get_model") as gm:
             self.assertIsNone(_build_sibling_model(self._cfg(), "auxiliary"))
             gm.assert_not_called()
 
     def test_same_provider_inherits_main_base_and_key(self):
-        from agentica.cli.config import _build_sibling_model
+        from agentica.cli.runtime import _build_sibling_model
 
         cfg = self._cfg(auxiliary_model_name="deepseek-chat")  # only name; same provider
-        with patch("agentica.cli.config.get_model") as gm:
+        with patch("agentica.cli.runtime.get_model") as gm:
             _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertEqual(kw["model_provider"], "deepseek")
@@ -2579,7 +2579,7 @@ class TestBuildSiblingModel(unittest.TestCase):
         self.assertEqual(kw["api_key"], "sk-main")
 
     def test_cross_provider_uses_sibling_base_and_key(self):
-        from agentica.cli.config import _build_sibling_model
+        from agentica.cli.runtime import _build_sibling_model
 
         cfg = self._cfg(
             auxiliary_model_provider="zhipuai",
@@ -2587,7 +2587,7 @@ class TestBuildSiblingModel(unittest.TestCase):
             auxiliary_base_url="https://open.bigmodel.cn/api/paas/v4",
             auxiliary_api_key="sk-zhipu",
         )
-        with patch("agentica.cli.config.get_model") as gm:
+        with patch("agentica.cli.runtime.get_model") as gm:
             _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertEqual(kw["model_provider"], "zhipuai")
@@ -2595,7 +2595,7 @@ class TestBuildSiblingModel(unittest.TestCase):
         self.assertEqual(kw["api_key"], "sk-zhipu")
 
     def test_cross_provider_missing_key_not_filled_with_main_key(self):
-        from agentica.cli.config import _build_sibling_model
+        from agentica.cli.runtime import _build_sibling_model
 
         cfg = self._cfg(
             auxiliary_model_provider="zhipuai",
@@ -2603,14 +2603,14 @@ class TestBuildSiblingModel(unittest.TestCase):
             auxiliary_base_url="https://open.bigmodel.cn/api/paas/v4",
             auxiliary_api_key=None,  # no sibling key
         )
-        with patch("agentica.cli.config.get_model") as gm:
+        with patch("agentica.cli.runtime.get_model") as gm:
             _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertIsNone(kw["api_key"])  # must NOT fall back to sk-main
         self.assertEqual(kw["base_url"], "https://open.bigmodel.cn/api/paas/v4")
 
     def test_cross_provider_missing_base_not_filled_with_main_base(self):
-        from agentica.cli.config import _build_sibling_model
+        from agentica.cli.runtime import _build_sibling_model
 
         cfg = self._cfg(
             auxiliary_model_provider="zhipuai",
@@ -2618,14 +2618,14 @@ class TestBuildSiblingModel(unittest.TestCase):
             auxiliary_base_url=None,  # no sibling base_url
             auxiliary_api_key="sk-zhipu",
         )
-        with patch("agentica.cli.config.get_model") as gm:
+        with patch("agentica.cli.runtime.get_model") as gm:
             _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertIsNone(kw["base_url"])  # must NOT fall back to deepseek base_url
         self.assertEqual(kw["api_key"], "sk-zhipu")
 
     def test_auxiliary_extra_body_passed_and_never_inherits_main(self):
-        from agentica.cli.config import _build_sibling_model
+        from agentica.cli.runtime import _build_sibling_model
 
         cfg = self._cfg(
             auxiliary_model_name="deepseek-chat",  # same provider as main
@@ -2633,7 +2633,7 @@ class TestBuildSiblingModel(unittest.TestCase):
             auxiliary_extra_body={"chat_template_kwargs": {"reasoning_effort": "low"}},
             auxiliary_extra_headers={"X-Aux": "1"},
         )
-        with patch("agentica.cli.config.get_model") as gm:
+        with patch("agentica.cli.runtime.get_model") as gm:
             _build_sibling_model(cfg, "auxiliary")
         _args, kw = gm.call_args
         self.assertEqual(kw["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "low"}})
@@ -2679,7 +2679,7 @@ class TestCLIAwareness(unittest.TestCase):
 
     def test_environment_context_injected(self):
         """create_agent injects framework/model/tools/subagent/auxiliary self-description."""
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
 
         agent_config = {
             "model_provider": "openai",
@@ -2713,7 +2713,7 @@ class TestCLIAwareness(unittest.TestCase):
 
     def test_environment_context_omits_auxiliary_when_none(self):
         """No auxiliary_model_* fields -> environment_context has no auxiliary line."""
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
 
         agent_config = {
             "model_provider": "openai",
@@ -3029,6 +3029,90 @@ class TestInputRequestCancel(unittest.TestCase):
         self.assertFalse(request.cancel())
 
         self.assertEqual(request.result.get_nowait(), "final answer")
+
+
+class TestAskActiveFreeze(unittest.TestCase):
+    """While a ask_user_question prompt is armed, ``_cprint`` must drop output
+    so background ``run_in_terminal`` writes can't starve the main
+    prompt_toolkit event loop (the CLI-appears-frozen bug)."""
+
+    def test_cprint_drops_while_ask_active(self):
+        import agentica.cli.interactive as it
+
+        prev = it._ask_active[0]
+        it._ask_active[0] = True
+        try:
+            # Must return without raising and without touching the terminal.
+            it._cprint("should be dropped")
+        finally:
+            it._ask_active[0] = prev
+
+    def test_ask_active_defaults_false(self):
+        import agentica.cli.interactive as it
+
+        self.assertFalse(it._ask_active[0])
+
+
+class TestTranscriptPause(unittest.TestCase):
+    def test_paused_output_is_buffered_then_flushed_in_order(self):
+        import agentica.cli.interactive as it
+
+        it._clear_output_pause()
+        with patch.object(it, "print_formatted_text") as render:
+            paused, count = it._toggle_output_pause()
+            self.assertTrue(paused)
+            self.assertEqual(count, 0)
+
+            it._cprint("first")
+            it._cprint("second")
+            render.assert_not_called()
+
+            paused, count = it._toggle_output_pause()
+            self.assertFalse(paused)
+            self.assertEqual(count, 2)
+
+        self.assertEqual(render.call_count, 2)
+
+    def test_session_cleanup_discards_paused_output(self):
+        import agentica.cli.interactive as it
+
+        it._clear_output_pause()
+        it._toggle_output_pause()
+        it._cprint("discard me")
+        it._clear_output_pause()
+        paused, count = it._toggle_output_pause()
+        self.assertTrue(paused)
+        self.assertEqual(count, 0)
+        it._clear_output_pause()
+
+
+class TestSigquitEscape(unittest.TestCase):
+    def test_restores_preexisting_handler_after_tui_exit(self):
+        import agentica.cli.interactive as it
+
+        previous_handler = object()
+        escape_handler = object()
+        with (
+            patch.object(it.signal, "getsignal", return_value=previous_handler),
+            patch.object(it.signal, "signal") as set_handler,
+        ):
+            installation = it._install_sigquit_escape(escape_handler)
+            self.assertEqual(installation, (it.signal.SIGQUIT, previous_handler))
+            it._restore_sigquit_escape(installation)
+
+        self.assertEqual(
+            set_handler.call_args_list,
+            [
+                ((it.signal.SIGQUIT, escape_handler),),
+                ((it.signal.SIGQUIT, previous_handler),),
+            ],
+        )
+
+    def test_skips_sigquit_on_windows(self):
+        import agentica.cli.interactive as it
+
+        with patch.object(it.os, "name", "nt"):
+            self.assertIsNone(it._install_sigquit_escape(object()))
 
 
 class TestCmdPermissions(unittest.TestCase):

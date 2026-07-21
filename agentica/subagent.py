@@ -81,10 +81,10 @@ class SubagentConfig:
     # Denied tools (takes precedence over allowed_tools)
     denied_tools: Optional[List[str]] = None
 
-    # Maximum number of tool calls allowed for this subagent
-    tool_call_limit: int = 100
+    # Optional total tool-call cap. None = unlimited; prefer max_turns alone.
+    tool_call_limit: Optional[int] = None
 
-    # Maximum LLM loop turns (safety net for runaway subagents)
+    # Maximum LLM loop turns (primary safety net for runaway subagents)
     max_turns: int = 100
 
     # Whether this subagent can spawn its own subagents
@@ -403,6 +403,8 @@ class SubagentRegistry:
         task: str,
         run_id: Optional[str] = None,
         output_sink: Optional[Dict[str, Any]] = None,
+        max_turns: Optional[int] = None,
+        tool_call_limit: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Drive the subagent through ``run_stream`` and bubble events to parent CLI.
 
@@ -430,6 +432,8 @@ class SubagentRegistry:
                 "run_id": run_id,
                 "agent_name": child.name,
                 "task": task,
+                "max_turns": max_turns,
+                "tool_call_limit": tool_call_limit,
             })
 
         # ``chunk.tools`` mirrors ``agent.run_response.tools`` — the cumulative
@@ -534,7 +538,7 @@ class SubagentRegistry:
         self,
         parent_agent: "Agent",
         task: str,
-        agent_type: Union[str, SubagentType] = SubagentType.CODE,
+        agent_type: Union[str, SubagentType] = SubagentType.EXPLORE,
         context: str = "",
         depth: int = 1,
         model_override: Optional["Model"] = None,
@@ -612,8 +616,8 @@ class SubagentRegistry:
 
         # Apply per-call overrides so the parent Agent's ReAct loop can retry
         # a failed / truncated task with a larger budget or a tweaked prompt
-        # without having to register a whole new subagent type. We copy the
-        # config to avoid mutating the shared registry entry.
+        # without having to register a whole new subagent type. No process-level
+        # hard ceilings: long-running investigations may raise budgets freely.
         if any(v is not None for v in (
             timeout_override, max_turns_override,
             tool_call_limit_override, system_prompt_override,
@@ -621,7 +625,10 @@ class SubagentRegistry:
             config = dataclasses.replace(
                 config,
                 timeout=timeout_override if timeout_override is not None else config.timeout,
-                max_turns=max_turns_override if max_turns_override is not None else config.max_turns,
+                max_turns=(
+                    max_turns_override if max_turns_override is not None
+                    else config.max_turns
+                ),
                 tool_call_limit=(
                     tool_call_limit_override if tool_call_limit_override is not None
                     else config.tool_call_limit
@@ -751,7 +758,13 @@ class SubagentRegistry:
         partial_sink: Dict[str, Any] = {"content": "", "tool_calls_summary": []}
         try:
             run_coro = self._run_child_streaming(
-                parent_agent, child, task, run_id=run_id, output_sink=partial_sink
+                parent_agent,
+                child,
+                task,
+                run_id=run_id,
+                output_sink=partial_sink,
+                max_turns=config.max_turns,
+                tool_call_limit=config.tool_call_limit,
             )
             if config.timeout > 0:
                 stream_result = await asyncio.wait_for(run_coro, timeout=config.timeout)
@@ -933,9 +946,8 @@ class SubagentRegistry:
                     f"Partial output above was produced before the {reason_str} limit. Prefer "
                     "synthesizing it directly. Only if the task genuinely needs to finish may "
                     f"you resume it once via the task tool with resume_from_run_id={run_id!r} "
-                    f"and a larger budget (e.g. max_turns={(config.max_turns or 100) * 2}, "
-                    f"tool_call_limit={(config.tool_call_limit or 100) * 2}); do not resume "
-                    "repeatedly."
+                    f"and a larger max_turns (e.g. {(config.max_turns or 100) * 2}); "
+                    "do not resume repeatedly."
                 ),
             }
 
@@ -970,7 +982,7 @@ class SubagentRegistry:
             parent_agent: The parent Agent instance.
             tasks: List of task specs, each with keys:
                 - "task" (str, required): Task description
-                - "type" (str/SubagentType, optional): Agent type (default: CODE)
+                - "type" (str/SubagentType, optional): Agent type (default: EXPLORE)
                 - "context" (str, optional): Additional context
             max_concurrent: Max parallel subagents (default: MAX_CONCURRENT).
 
@@ -986,7 +998,7 @@ class SubagentRegistry:
                     return {
                         "status": "error",
                         "error": "Task spec missing required 'task' field",
-                        "agent_type": str(spec.get("type", SubagentType.CODE)),
+                        "agent_type": str(spec.get("type", SubagentType.EXPLORE)),
                         "content": "",
                     }
                 # No broad ``except Exception`` here on purpose: ``spawn()``
@@ -1001,7 +1013,7 @@ class SubagentRegistry:
                 return await self.spawn(
                     parent_agent=parent_agent,
                     task=task,
-                    agent_type=spec.get("type", SubagentType.CODE),
+                    agent_type=spec.get("type", SubagentType.EXPLORE),
                     context=spec.get("context", ""),
                 )
 
@@ -1034,15 +1046,16 @@ Guidelines:
 - Use ls to list directory contents and understand project structure
 - Adapt your search approach based on the thoroughness level specified by the caller
 - Return file paths as absolute paths in your final response
+- Stop and synthesize as soon as you have enough evidence to answer the task. Do
+  not keep expanding search coverage merely to inspect every possible file.
 - For clear communication, avoid using emojis
 - Do NOT create or modify any files - you are read-only
 - Do NOT run commands that modify the user's system state
 
 Complete the user's search request efficiently and report your findings clearly.""",
     allowed_tools=["ls", "read_file", "glob", "grep"],  # Read-only tools
-    denied_tools=["write_file", "edit_file", "execute", "task"],  # No write/execute/spawn
-    tool_call_limit=150,
-    max_turns=150,
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "execute", "task"],  # No write/execute/spawn
+    max_turns=200,
     timeout=1800,
     can_spawn_subagents=False,
 )
@@ -1068,40 +1081,45 @@ Guidelines:
 
 Complete your research task and provide a comprehensive summary of your findings.""",
     allowed_tools=["web_search", "fetch_url", "read_file", "ls", "glob", "grep"],
-    denied_tools=["write_file", "edit_file", "execute", "task"],
-    tool_call_limit=150,
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "execute", "task"],
     max_turns=150,
     timeout=1800,
     can_spawn_subagents=False,
 )
 
 
-# Code agent: code generation and execution
+# Code agent: READ-ONLY code analysis. Subagents run on the cheaper auxiliary
+# model, so they must NOT edit files or run commands — letting a cheap model
+# write code was the root cause of "the LLM delegated my query to a task
+# subagent and the aux model wrote garbage code". The main agent does all
+# edits/implementation; the code subagent only reads, traces, and reports.
 CODE_SUBAGENT_CONFIG = SubagentConfig(
     type=SubagentType.CODE,
     name="Code Agent",
-    description="""Code agent specialized for code generation and execution.
-Use this agent for:
-- Writing and executing code
-- Running tests and commands
-- Code analysis and debugging""",
-    system_prompt="""You are a code specialist that excels at writing and executing code.
+    description="""Read-only code analysis agent. Use this agent to analyze and understand
+code, trace logic, and report findings. It CANNOT edit files or run commands —
+the main agent does all edits and implementation. Use it for:
+- Code analysis and debugging (read-only)
+- Tracing call graphs and data flow
+- Summarizing how a module works""",
+    system_prompt="""You are a read-only code analysis specialist. You excel at reading and
+understanding code, but you do NOT modify it.
 
 Guidelines:
-1. Write clean, well-documented code
-2. Test your code before reporting results
-3. Handle errors gracefully and report them clearly
-4. Follow best practices for the programming language being used
-5. Provide clear explanations of what your code does
+1. Read and analyze code to answer the caller's question.
+2. Trace logic, call graphs, and data flow as needed.
+3. Report findings clearly: file paths, line numbers, relevant snippets.
+4. Do NOT create, edit, or write any file — you are read-only.
+5. Do NOT run commands. If verification is needed, tell the caller to run it.
+6. The MAIN agent does all implementation and edits based on your findings.
 
-Complete your coding task and provide a summary of the results.""",
-    allowed_tools=["read_file", "write_file", "edit_file", "execute", "ls", "glob", "grep"],
-    denied_tools=["task"],  # Cannot spawn nested subagents
-    tool_call_limit=200,
+Complete your analysis and report your findings clearly.""",
+    allowed_tools=["read_file", "ls", "glob", "grep"],
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "execute", "task"],
     max_turns=200,
     timeout=1800,
     can_spawn_subagents=False,
-    inherit_context=True,  # Code tasks benefit from parent context
+    inherit_context=True,  # Code analysis benefits from parent context
 )
 
 
@@ -1122,7 +1140,8 @@ def register_custom_subagent(
     system_prompt: str,
     allowed_tools: Optional[List[str]] = None,
     denied_tools: Optional[List[str]] = None,
-    tool_call_limit: int = 100,
+    tool_call_limit: Optional[int] = None,
+    max_turns: int = 100,
 ) -> SubagentConfig:
     """
     Register a custom subagent type.
@@ -1136,7 +1155,8 @@ def register_custom_subagent(
         system_prompt: System prompt for the subagent
         allowed_tools: List of allowed tool names (None = inherit from parent)
         denied_tools: List of denied tool names
-        tool_call_limit: Maximum number of tool calls allowed for this subagent
+        tool_call_limit: Optional total tool-call cap (None = unlimited)
+        max_turns: Maximum ReAct turns (primary budget)
         
     Returns:
         The created SubagentConfig
@@ -1147,7 +1167,7 @@ def register_custom_subagent(
         ...     description="Reviews code for quality and bugs",
         ...     system_prompt="You are a code review expert...",
         ...     allowed_tools=["read_file", "ls", "glob", "grep"],
-        ...     tool_call_limit=10,
+        ...     max_turns=50,
         ... )
     """
     config = SubagentConfig(
@@ -1158,6 +1178,7 @@ def register_custom_subagent(
         allowed_tools=allowed_tools,
         denied_tools=denied_tools or ["task"],  # Prevent nesting by default
         tool_call_limit=tool_call_limit,
+        max_turns=max_turns,
         can_spawn_subagents=False,
     )
     _CUSTOM_SUBAGENT_CONFIGS[name.lower()] = config

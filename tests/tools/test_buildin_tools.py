@@ -1384,3 +1384,44 @@ class TestAskUserQuestionTool:
         result = json.loads(tool.ask_user_question(prompt="What now?", mode="text"))
         assert result["response"] == "my answer"
         assert "What now?" in captured["prompt"]
+
+    def test_callback_less_instance_uses_registered_default(self):
+        """A callback-less AskUserQuestionTool (subagent / cron / regression)
+        must route through the process-wide default callback registered by the
+        TUI, instead of deadlocking on bare input() while prompt_toolkit owns
+        stdin."""
+        from agentica.tools.ask_user_question_tool import (
+            AskUserQuestionTool,
+            set_default_ask_user_question_callback,
+        )
+
+        captured = {}
+
+        def default_cb(prompt, options=None):
+            captured["prompt"] = prompt
+            captured["options"] = options
+            return "default answer"
+
+        set_default_ask_user_question_callback(default_cb)
+        try:
+            tool = AskUserQuestionTool()  # no explicit callback
+            assert tool.input_callback is None
+            result = json.loads(tool.ask_user_question(prompt="Pick", mode="text"))
+            assert result["response"] == "default answer"
+            assert "Pick" in captured["prompt"]
+        finally:
+            set_default_ask_user_question_callback(None)
+
+    def test_no_callback_no_default_falls_back_to_input(self):
+        """Without the TUI registered, a callback-less tool keeps the legacy
+        bare-input() behavior (non-interactive scripts). We can't drive input()
+        in a unit test, so we verify the routing decision indirectly: the
+        default holder is None and the instance callback is None."""
+        from agentica.tools.ask_user_question_tool import (
+            AskUserQuestionTool,
+            set_default_ask_user_question_callback,
+        )
+
+        set_default_ask_user_question_callback(None)
+        tool = AskUserQuestionTool()
+        assert tool.input_callback is None

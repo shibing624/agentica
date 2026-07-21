@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from agentica.cli.config import (
+from agentica.cli.runtime import (
     get_console,
     BUILTIN_TOOLS,
     TOOL_REGISTRY,

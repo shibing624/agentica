@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Tests for agentica.subagent registry execution helpers."""
 import asyncio
+import inspect
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,8 +14,10 @@ from agentica.subagent import (
     SubagentRegistry,
     SubagentType,
     _CUSTOM_SUBAGENT_CONFIGS,
+    get_subagent_config,
 )
 from agentica.tools.base import Function, Tool
+from agentica.tools.buildin_tools import BuiltinFileTool
 
 
 class FakeToolConfig:
@@ -275,6 +280,9 @@ def test_spawn_dedupes_subagent_tool_events_by_call_id():
     assert len(completed) == 2
     assert [e["tool_name"] for e in started] == ["read_file", "ls"]
     assert [e["tool_name"] for e in completed] == ["read_file", "ls"]
+    start_event = next(event for event in received if event["type"] == "subagent.start")
+    assert start_event["max_turns"] == 100
+    assert start_event["tool_call_limit"] is None
 
 
 def test_spawn_batch_returns_error_for_invalid_spec_and_keeps_order():
@@ -670,3 +678,181 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
     assert "timeout" in hint
     # Larger timeout suggestion must be strictly greater than the failed one.
     assert "2" in hint  # 1s * 2 = 2s
+
+
+# ---------------------------------------------------------------------------
+# Read-only subagent guarantee: built-in subagents must NOT be able to edit
+# files or run commands. Subagents run on the cheap auxiliary model, so letting
+# them edit was the root cause of "the LLM delegated my query to a task
+# subagent and the aux model wrote garbage code". The main agent does edits.
+# ---------------------------------------------------------------------------
+
+
+def test_builtin_subagent_configs_are_read_only():
+    """Every built-in subagent config must deny write/edit/execute tools."""
+    from agentica.subagent import (
+        CODE_SUBAGENT_CONFIG,
+        EXPLORE_SUBAGENT_CONFIG,
+        RESEARCH_SUBAGENT_CONFIG,
+    )
+
+    forbidden = {"write_file", "edit_file", "multi_edit_file", "execute"}
+    for cfg in (EXPLORE_SUBAGENT_CONFIG, RESEARCH_SUBAGENT_CONFIG, CODE_SUBAGENT_CONFIG):
+        denied = set(cfg.denied_tools or [])
+        missing = forbidden - denied
+        assert not missing, f"{cfg.type.value} config fails to deny {missing}"
+        allowed = set(cfg.allowed_tools or [])
+        assert not (allowed & forbidden), (
+            f"{cfg.type.value} config exposes forbidden tools: {allowed & forbidden}"
+        )
+
+
+def test_select_child_tools_strips_edit_tools_for_code_subagent():
+    """Even if the parent has write_file/edit_file/execute, a ``code`` subagent
+    must not inherit them — the cheap aux model must not be able to edit."""
+    from agentica.subagent import SubagentRegistry, get_subagent_config
+
+    parent = SimpleNamespace(
+        name="parent",
+        agent_id="parent-agent-id",
+        model=_FakeModel(),
+        tools=[
+            Function(name="read_file", entrypoint=lambda: None),
+            Function(name="write_file", entrypoint=lambda: None),
+            Function(name="edit_file", entrypoint=lambda: None),
+            Function(name="multi_edit_file", entrypoint=lambda: None),
+            Function(name="execute", entrypoint=lambda: None),
+            Function(name="ls", entrypoint=lambda: None),
+            Function(name="glob", entrypoint=lambda: None),
+            Function(name="grep", entrypoint=lambda: None),
+        ],
+    )
+
+    config = get_subagent_config("code")
+    child_tool_names: set = set()
+    for tool in SubagentRegistry()._select_child_tools(parent.tools, config):
+        if isinstance(tool, Tool):
+            child_tool_names.update(tool.functions.keys())
+        else:
+            child_tool_names.update(SubagentRegistry._tool_names(tool))
+
+    assert child_tool_names == {"read_file", "ls", "glob", "grep"}, (
+        f"code subagent must only inherit read-only tools, got {child_tool_names}"
+    )
+
+
+def test_task_tool_default_subagent_type_is_explore():
+    """The ``task`` tool must default to the read-only ``explore`` type, not
+    ``code`` — delegating implementation by default is what caused the aux-model
+    garbage-code bug."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    sig = inspect.signature(BuiltinTaskTool.task)
+    assert sig.parameters["subagent_type"].default == "explore"
+    assert "tool_call_limit" not in sig.parameters
+
+
+def test_registry_spawn_defaults_to_explore():
+    """Direct SDK callers must not silently create a Code child."""
+    sig = inspect.signature(SubagentRegistry.spawn)
+    assert sig.parameters["agent_type"].default is SubagentType.EXPLORE
+
+
+def test_explore_budget_is_max_turns_only():
+    """Builtin subagents budget by max_turns; tool_call_limit stays unlimited."""
+    from agentica.subagent import (
+        CODE_SUBAGENT_CONFIG,
+        EXPLORE_SUBAGENT_CONFIG,
+        RESEARCH_SUBAGENT_CONFIG,
+    )
+
+    assert EXPLORE_SUBAGENT_CONFIG.max_turns == 200
+    assert EXPLORE_SUBAGENT_CONFIG.tool_call_limit is None
+    assert CODE_SUBAGENT_CONFIG.max_turns == 200
+    assert CODE_SUBAGENT_CONFIG.tool_call_limit is None
+    assert RESEARCH_SUBAGENT_CONFIG.max_turns == 150
+    assert RESEARCH_SUBAGENT_CONFIG.tool_call_limit is None
+    assert "Stop and synthesize" in EXPLORE_SUBAGENT_CONFIG.system_prompt
+
+
+def test_subagent_max_turns_override_is_applied_without_hard_ceiling():
+    """Per-call max_turns overrides pass through as-is for long-running work."""
+    registry = SubagentRegistry()
+    _CUSTOM_SUBAGENT_CONFIGS["long_run"] = SubagentConfig(
+        type=SubagentType.CUSTOM,
+        name="long_run",
+        description="long_run",
+        system_prompt="prompt",
+        max_turns=100,
+    )
+    parent = _make_parent_agent()
+    events = []
+    parent._event_callback = events.append
+
+    with patch("agentica.agent.Agent", RecordingAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(
+                parent_agent=parent,
+                task="inspect",
+                agent_type="long_run",
+                max_turns_override=2000,
+            )
+        )
+
+    assert result["status"] == "completed"
+    start_event = next(event for event in events if event["type"] == "subagent.start")
+    assert start_event["max_turns"] == 2000
+    assert start_event["tool_call_limit"] is None
+
+
+def test_spawn_batch_defaults_each_task_to_explore():
+    """Batch specs without an explicit type must use the read-only default."""
+    registry = SubagentRegistry()
+    captured_types = []
+
+    async def fake_spawn(**kwargs):
+        captured_types.append(kwargs["agent_type"])
+        return {"status": "completed", "content": ""}
+
+    with patch.object(registry, "spawn", side_effect=fake_spawn):
+        asyncio.run(
+            registry.spawn_batch(
+                parent_agent=SimpleNamespace(),
+                tasks=[{"task": "inspect the codebase"}],
+            )
+        )
+
+    assert captured_types == [SubagentType.EXPLORE]
+
+
+def test_readonly_subagent_investigation_leaves_edits_to_parent():
+    """A task worker can inspect a file, while the parent retains edit authority."""
+    with tempfile.TemporaryDirectory() as work_dir:
+        file_path = Path(work_dir) / "example.py"
+        file_path.write_text("value = 'before'\n", encoding="utf-8")
+        parent_file_tool = BuiltinFileTool(work_dir=work_dir)
+        child_tools = SubagentRegistry()._select_child_tools(
+            [parent_file_tool],
+            get_subagent_config("code"),
+        )
+
+        child_functions = {
+            name
+            for tool in child_tools
+            for name in tool.functions
+        }
+        assert child_functions == {"read_file", "ls", "glob", "grep"}
+
+        async def parent_edits_after_investigation():
+            await parent_file_tool.read_file(str(file_path))
+            return await parent_file_tool.edit_file(
+                str(file_path),
+                "before",
+                "after",
+            )
+
+        result = asyncio.run(parent_edits_after_investigation())
+        assert "Successfully" in result
+        assert file_path.read_text(encoding="utf-8") == "value = 'after'\n"

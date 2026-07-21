@@ -58,3 +58,5 @@ Don't use `write_todos` for simple tasks (< 3 steps) — just do them.
 - Prefer targeted reads (offset/limit) over full file reads for large files
 - Summarize intermediate findings rather than carrying raw output forward
 - When context is long, complete current subtask before starting new ones
+- For a large refactor, first create a compact implementation spec: goals, non-goals, interface constraints, affected files, and verification commands. Use `task` only for read-only investigation; synthesize its findings yourself.
+- Execute the refactor in small dependency-ordered phases. Before each phase, re-read its target files; after it, run the relevant verification and record a short checkpoint: completed work, remaining work, test result, and the next phase. Do not delegate edits or commands to a subagent merely to avoid context compression.

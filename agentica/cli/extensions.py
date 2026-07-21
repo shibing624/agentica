@@ -5,7 +5,7 @@
 
 Handles both `agentica skills ...` and legacy `agentica extensions ...`.
 """
-from agentica.cli.config import get_console
+from agentica.cli.runtime import get_console
 from agentica.config import AGENTICA_SKILL_DIR
 from agentica.skills import get_skill_registry, load_skills, reset_skill_registry
 from agentica.skills.installer import install_skills, list_installed_skills, remove_skill

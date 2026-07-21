@@ -1,8 +1,11 @@
 from os import getenv
 from dataclasses import dataclass, field
+import json
+import re
 import sys
 from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
 from uuid import uuid4
+from xml.etree import ElementTree
 
 if sys.version_info >= (3, 12):
     from typing import override
@@ -298,6 +301,74 @@ class OpenAIChat(Model):
         else:
             self.client = AsyncOpenAIClient(**client_params)
         return self.client
+
+    def _uses_claude_text_tool_call_compatibility(self) -> bool:
+        """Return whether this OpenAI-compatible model is a Claude model.
+
+        Native Anthropic models use ``agentica.model.anthropic.Claude`` and
+        return structured ``tool_use`` blocks. This fallback is only for Claude
+        models reached through an OpenAI-compatible endpoint that leaks
+        ``<invoke>`` calls into text content.
+        """
+        return "claude" in self.id.lower()
+
+    @staticmethod
+    def _parse_claude_text_tool_calls(text: str) -> Optional[List[Dict[str, Any]]]:
+        """Convert complete Claude ``<invoke>`` XML blocks into OpenAI calls.
+
+        Returns ``None`` when the text contains no XML tool call. If text
+        starts an invoke block but the proxy emitted malformed or incomplete
+        XML, raises instead of allowing the markup into assistant history.
+        """
+        if "<invoke" not in text:
+            return None
+
+        blocks = re.findall(r"<invoke\b[^>]*>.*?</invoke\s*>", text, flags=re.DOTALL)
+        if not blocks:
+            raise ValueError(
+                "OpenAI-compatible provider returned a malformed Claude XML tool call. "
+                "Expected a complete <invoke name=\"...\">...</invoke> block."
+            )
+        if "<invoke" in re.sub(r"<invoke\b[^>]*>.*?</invoke\s*>", "", text, flags=re.DOTALL):
+            raise ValueError(
+                "OpenAI-compatible provider returned a malformed Claude XML tool call. "
+                "Expected a complete <invoke name=\"...\">...</invoke> block."
+            )
+
+        calls: List[Dict[str, Any]] = []
+        for block in blocks:
+            try:
+                invoke = ElementTree.fromstring(block)
+            except ElementTree.ParseError as exc:
+                raise ValueError(
+                    "OpenAI-compatible provider returned a malformed Claude XML tool call."
+                ) from exc
+
+            if invoke.tag != "invoke" or not invoke.attrib.get("name"):
+                raise ValueError(
+                    "OpenAI-compatible provider returned a malformed Claude XML tool call."
+                )
+
+            arguments: Dict[str, str] = {}
+            for parameter in invoke:
+                name = parameter.attrib.get("name") if parameter.tag == "parameter" else None
+                if not name or name in arguments:
+                    raise ValueError(
+                        "OpenAI-compatible provider returned a malformed Claude XML tool call."
+                    )
+                arguments[name] = "".join(parameter.itertext()).strip()
+
+            calls.append(
+                {
+                    "id": f"call_{uuid4().hex}",
+                    "type": "function",
+                    "function": {
+                        "name": invoke.attrib["name"],
+                        "arguments": json.dumps(arguments, ensure_ascii=False),
+                    },
+                }
+            )
+        return calls
 
     def _collect_request_params(self) -> Dict[str, Any]:
         """Collect non-None request parameters (shared by request_kwargs and to_dict)."""
@@ -664,6 +735,17 @@ class OpenAIChat(Model):
         assistant_message = self.create_assistant_message(
             response_message=response_message, metrics=metrics, response_usage=response_usage
         )
+        if (
+            self.run_tools
+            and self.functions
+            and not assistant_message.tool_calls
+            and isinstance(assistant_message.content, str)
+            and self._uses_claude_text_tool_call_compatibility()
+        ):
+            text_tool_calls = self._parse_claude_text_tool_calls(assistant_message.content)
+            if text_tool_calls:
+                assistant_message.content = None
+                assistant_message.tool_calls = text_tool_calls
 
         messages.append(assistant_message)
         assistant_message.log()
@@ -721,6 +803,11 @@ class OpenAIChat(Model):
         self._log_messages(messages)
         stream_data: StreamData = StreamData()
         metrics: Metrics = Metrics()
+        buffer_content_for_claude_xml = bool(
+            self.run_tools
+            and self.functions
+            and self._uses_claude_text_tool_call_compatibility()
+        )
 
         stream_finish_reason: Optional[str] = None
         metrics.response_timer.start()
@@ -750,7 +837,8 @@ class OpenAIChat(Model):
 
                 if hasattr(response_delta, "content") and response_delta.content:
                     stream_data.response_content += response_delta.content
-                    yield ModelResponse(content=response_delta.content)
+                    if not buffer_content_for_claude_xml:
+                        yield ModelResponse(content=response_delta.content)
 
                 if hasattr(response_delta, "audio"):
                     response_audio = response_delta.audio
@@ -781,25 +869,18 @@ class OpenAIChat(Model):
             if len(_tool_calls) > 0:
                 assistant_message.tool_calls = _tool_calls
 
-        # Diagnostic: some OpenAI-compatible proxies fronting Anthropic Claude
-        # (e.g. Venus) occasionally emit tool_use as *text* in the content
-        # stream instead of structured tool_calls. When that happens the turn
-        # silently degrades to plain text and the agent loop stalls with no
-        # error. We can't reliably re-parse arbitrary proxy text into a tool
-        # call, but we can surface a loud, actionable warning instead of a
-        # silent hang. Only fires when tools were offered, none were parsed,
-        # and the content looks like a leaked structured call.
-        if self.run_tools and self.functions and not assistant_message.tool_calls and stream_data.response_content:
-            _c = stream_data.response_content
-            if ("<invoke" in _c and "</invoke" in _c) or ('"type"' in _c and '"tool_use"' in _c):
-                logger.warning(
-                    "Detected a tool call leaked into the text stream (proxy did "
-                    "not emit structured tool_calls). This causes the turn to "
-                    "stall. If you are using an OpenAI-compatible proxy in front "
-                    "of Anthropic Claude (e.g. Venus /llmproxy/v1), switch to the "
-                    "native Anthropic endpoint by using model_provider='anthropic' "
-                    "with base_url '.../llmproxy/anthropic'."
-                )
+        if (
+            buffer_content_for_claude_xml
+            and not assistant_message.tool_calls
+            and isinstance(assistant_message.content, str)
+        ):
+            text_tool_calls = self._parse_claude_text_tool_calls(assistant_message.content)
+            if text_tool_calls:
+                assistant_message.content = None
+                assistant_message.tool_calls = text_tool_calls
+
+        if buffer_content_for_claude_xml and assistant_message.content:
+            yield ModelResponse(content=assistant_message.get_content_string())
 
         self.update_stream_metrics(assistant_message=assistant_message, metrics=metrics)
 

@@ -28,7 +28,7 @@ from .config import settings
 from .services.agent_service import AgentService
 from .services.channel_manager import ChannelManager
 from .services.router import MessageRouter
-from .routes import chat, config as config_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes
+from .routes import chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes
 
 # ContextVar holding the current request ID — async-safe, no threading issues
 _request_id_var: ContextVar[str] = ContextVar("request_id", default="")
@@ -178,7 +178,7 @@ async def web_chat():
 
 # ============== Route registration ==============
 
-app.include_router(config_routes.router)
+app.include_router(settings_routes.router)
 app.include_router(chat.router)
 app.include_router(scheduler_routes.router)
 app.include_router(plugins_routes.router)

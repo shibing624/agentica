@@ -6,6 +6,7 @@
 
 import json
 import os
+import signal
 import asyncio
 import queue
 import re
@@ -39,7 +40,7 @@ from prompt_toolkit.styles import Style as PTStyle
 from prompt_toolkit.widgets import TextArea
 from rich.console import Console as RichConsole
 
-from agentica.cli.config import (
+from agentica.cli.runtime import (
     get_console,
     set_active_console,
     history_file,
@@ -226,6 +227,43 @@ class SessionState:
 _tty_write_lock = threading.RLock()
 
 
+# While a ask_user_question prompt is armed, the agent worker thread is parked
+# on a queue waiting for the user's line. Background terminal writes (_cprint →
+# print_formatted_text under patch_stdout) are serialized onto the main
+# prompt_toolkit event loop via run_in_terminal; a burst of them while the user
+# is typing an answer can starve the loop so Enter / Ctrl+C / Ctrl+D never get
+# processed (the CLI appears frozen). We drop background writes while an ask is
+# pending — the agent itself is blocked so there is normally nothing to print,
+# and anything else (/btw, cron) would only corrupt the answer prompt anyway.
+_ask_active = [False]
+_output_pause_lock = threading.RLock()
+_output_paused = False
+_paused_output: List[str] = []
+
+
+def _install_sigquit_escape(handler):
+    """Install a temporary SIGQUIT handler when the platform supports it."""
+    if os.name == "nt":
+        return None
+    try:
+        previous_handler = signal.getsignal(signal.SIGQUIT)
+        signal.signal(signal.SIGQUIT, handler)
+    except (AttributeError, ValueError, OSError):
+        return None
+    return signal.SIGQUIT, previous_handler
+
+
+def _restore_sigquit_escape(installation) -> None:
+    """Restore the SIGQUIT handler saved by _install_sigquit_escape."""
+    if installation is None:
+        return
+    signal_number, previous_handler = installation
+    try:
+        signal.signal(signal_number, previous_handler)
+    except (ValueError, OSError):
+        pass
+
+
 def _cprint(text: str):
     """Print ANSI text through prompt_toolkit's renderer.
 
@@ -233,8 +271,38 @@ def _cprint(text: str):
     swallowed.  Routing through ``print_formatted_text(ANSI(...))`` lets
     prompt_toolkit parse the escapes and render colors correctly.
     """
-    with _tty_write_lock:
-        print_formatted_text(ANSI(text))
+    if _ask_active[0]:
+        return
+    with _output_pause_lock:
+        if _output_paused:
+            _paused_output.append(text)
+            return
+        with _tty_write_lock:
+            print_formatted_text(ANSI(text))
+
+
+def _toggle_output_pause() -> Tuple[bool, int]:
+    """Pause transcript rendering, or flush output accumulated while paused."""
+    global _output_paused
+    with _output_pause_lock:
+        _output_paused = not _output_paused
+        if _output_paused:
+            return True, 0
+
+        buffered = list(_paused_output)
+        _paused_output.clear()
+        with _tty_write_lock:
+            for line in buffered:
+                print_formatted_text(ANSI(line))
+        return False, len(buffered)
+
+
+def _clear_output_pause() -> None:
+    """Discard buffered transcript output when an interactive session ends."""
+    global _output_paused
+    with _output_pause_lock:
+        _output_paused = False
+        _paused_output.clear()
 
 
 def _less_supports_lesskey(pager: str) -> bool:
@@ -527,7 +595,7 @@ def _detect_file_drop(user_input: str) -> Optional[dict]:
 def _try_attach_clipboard_image(attached_images: list, image_counter: list) -> bool:
     """Check clipboard for an image and attach it if found."""
     from agentica.cli.clipboard import save_clipboard_image
-    from agentica.cli.config import CACHE_DIR
+    from agentica.cli.runtime import CACHE_DIR
 
     img_dir = Path(CACHE_DIR) / "images"
     image_counter[0] += 1
@@ -947,7 +1015,7 @@ def _process_stream_response(
         # Both results are merged into the prompt for the final agent call.
         # If one fails, the other provides a fallback.
         if images:
-            image_paths = [str(p) for p in images]
+            image_paths = [str(Path(p).resolve()) for p in images]
             _set_phase("tool", "analyzing images")
 
             ocr_future = None
@@ -982,8 +1050,14 @@ def _process_stream_response(
                 except Exception:
                     ocr_text = ""
 
-            # Build combined image context — keep it concise, focus on user's query
-            extra_parts = []
+            # Preserve source paths for the main agent. The vision trial is
+            # deliberately removed from working memory below, so descriptions
+            # and OCR alone would otherwise leave later tool calls unable to
+            # locate the original attachment.
+            extra_parts = [
+                "[Attached image files]\n"
+                + "\n".join(f"- {image_path}" for image_path in image_paths)
+            ]
             if vision_result:
                 extra_parts.append(f"[Image description]\n{vision_result}")
             if ocr_text and ocr_text.strip():
@@ -1335,7 +1409,8 @@ def _setup_tui(
                 event.app.exit()
                 return
             state.last_ctrl_c = now
-            _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit)")
+            _ask_active[0] = False
+            _cprint("\n⚡ Interrupting agent... (press Ctrl+C again to force exit, Ctrl+\\ to kill)")
             # If the agent is currently blocked in a ask_user_question tool call, the
             # asyncio task.cancel() route alone won't help: the tool runs on a
             # worker thread waiting on a queue.Queue.get(), and Python threads
@@ -1345,6 +1420,7 @@ def _setup_tui(
             pending_req = state.input_request
             if pending_req is not None:
                 cancelled = pending_req.cancel()
+                logger.info(f"[ask] ctrl-c cancel: cancelled={cancelled}")
                 if state.input_request is pending_req:
                     state.input_request = None
                 tui_state["spinner_text"] = (
@@ -1381,6 +1457,20 @@ def _setup_tui(
         pending_queue.put("__TOGGLE_SHELL_MODE__")
         event.app.current_buffer.reset()
 
+    @kb.add("escape", "p")
+    def _toggle_transcript_pause(event):
+        paused, buffered_lines = _toggle_output_pause()
+        tui_state["output_paused"] = paused
+        if paused:
+            tui_state["spinner_text"] = "Output paused · browse history · Alt+P to resume"
+        else:
+            tui_state["spinner_text"] = (
+                f"Output resumed · flushed {buffered_lines} line(s)"
+                if buffered_lines
+                else "Output resumed"
+            )
+        event.app.invalidate()
+
     @kb.add("enter")
     def _handle_enter(event):
         raw_text = event.app.current_buffer.text
@@ -1394,6 +1484,9 @@ def _setup_tui(
         if state.input_request is not None:
             req = state.input_request
             submitted = req.submit(raw_text)
+            logger.info(
+                f"[ask] enter submit: submitted={submitted} text={raw_text[:60]!r}"
+            )
             if state.input_request is req:
                 state.input_request = None
             if submitted:
@@ -1498,7 +1591,7 @@ def _setup_tui(
             line_count = pasted.count("\n")
             buf = event.current_buffer
             if line_count >= 5 and not buf.text.strip().startswith("/"):
-                from agentica.cli.config import CACHE_DIR
+                from agentica.cli.runtime import CACHE_DIR
 
                 paste_dir = Path(CACHE_DIR) / "pastes"
                 paste_dir.mkdir(parents=True, exist_ok=True)
@@ -1677,6 +1770,13 @@ def _setup_tui(
     )
 
     def _get_spinner_fragments():
+        if tui_state.get("output_paused"):
+            return [
+                (
+                    "class:spinner",
+                    "  Output paused · browse history · Alt+P to resume",
+                )
+            ]
         text = tui_state.get("spinner_text", "")
         if not text:
             return []
@@ -1898,6 +1998,9 @@ def run_interactive(
             return input(f"{prompt}\nYour response: ").strip()
 
         req = _InputRequest(prompt=prompt, options=options)
+        logger.info(
+            f"[ask] armed: prompt={str(prompt)[:80]!r} options={bool(options)}"
+        )
 
         # Arm the request and repaint. The prompt text itself is rendered by
         # the layout's input_prompt_widget on the main thread (see
@@ -1912,17 +2015,46 @@ def run_interactive(
         # clean answer field. Deciding that for them would silently change the
         # meaning of their keystrokes.
         state_ref.input_request = req
+        _ask_active[0] = True
         app_ref.invalidate()
 
         # Block the agent thread until the user submits a line, or Ctrl+C
-        # puts the CANCELLED sentinel on the queue to release us.
-        answer = req.result.get()
+        # puts the CANCELLED sentinel on the queue to release us. We poll with
+        # a short timeout (watchdog) instead of a bare get(): a bare get()
+        # parks this worker thread forever, so any desync — input_request
+        # pointing at a different req (e.g. a nested vision trial run that
+        # re-asked), or the turn returning without resolving us — would hang
+        # the turn permanently with no recovery. On each empty poll we
+        # re-validate: re-arm if overwritten, abort if the run ended.
+        answer = None
+        try:
+            while True:
+                try:
+                    answer = req.result.get(timeout=1.0)
+                    break
+                except queue.Empty:
+                    if state_ref.should_exit or not state_ref.agent_running:
+                        logger.info("[ask] watchdog: run ended, aborting prompt")
+                        answer = _InputRequest.CANCELLED
+                        break
+                    if state_ref.input_request is not req:
+                        logger.info("[ask] watchdog: re-arming after overwrite")
+                        state_ref.input_request = req
+                        app_ref.invalidate()
+                    continue
+        finally:
+            _ask_active[0] = False
+            if state_ref.input_request is req:
+                state_ref.input_request = None
+
         if answer is _InputRequest.CANCELLED:
             # Propagate as AgentCancelledError so the agent runtime unwinds
             # cleanly. Any layer between us and the agent that catches Exception
             # will still respect this because AgentCancelledError subclasses
             # Exception but is explicitly re-raised by the tool infra.
+            logger.info("[ask] resolved: CANCELLED")
             raise AgentCancelledError("ask_user_question aborted by user (Ctrl+C)")
+        logger.info(f"[ask] resolved: answer={str(answer)[:80]!r}")
 
         # If the user typed an option number, map it back to the option text.
         if options and answer:
@@ -2127,6 +2259,15 @@ def run_interactive(
     # so the ask_user_question tool reads via the TUI instead of a blocking input().
     _ui_holder["state"] = state
     _ui_holder["app"] = app
+
+    # Also register the callback as the process-wide default so ANY
+    # AskUserQuestionTool without an explicit callback (a subagent spawned
+    # mid-turn, a cron job, a regression) routes through the TUI instead of
+    # deadlocking on bare input() while pt owns stdin.
+    from agentica.tools.ask_user_question_tool import (
+        set_default_ask_user_question_callback,
+    )
+    set_default_ask_user_question_callback(_cli_ask_user_question_callback)
 
     # ── Background thread: process input queue and run agent ──
 
@@ -2381,6 +2522,23 @@ def run_interactive(
     spinner_thread.start()
 
     # ── Run the TUI ──
+    # Install a SIGQUIT hard-escape. When the main prompt_toolkit event loop is
+    # blocked (the ask_user_question freeze bug: background run_in_terminal
+    # writes starve the loop so Ctrl+C / Ctrl+D keybindings never fire), the
+    # only escape that does NOT depend on the loop being responsive is an
+    # OS-level signal. SIGQUIT (Ctrl+\) is delivered to the main thread and its
+    # handler runs asynchronously between bytecodes, so it works even when the
+    # pt keybindings can't. Keybinding-based escapes (double Ctrl+C → app.exit)
+    # can't help here because the keybindings themselves won't fire.
+    def _hard_exit(signum, frame):
+        try:
+            os.write(2, b"\n[agentica] hard exit (signal)\n")
+        except Exception:
+            pass
+        os._exit(1)
+
+    sigquit_installation = _install_sigquit_escape(_hard_exit)
+
     try:
         with patch_stdout():
             app.run()
@@ -2390,5 +2548,8 @@ def run_interactive(
         state.should_exit = True
         _stop_cron(state)
         set_active_console(None)
+        set_default_ask_user_question_callback(None)
+        _restore_sigquit_escape(sigquit_installation)
+        _clear_output_pause()
 
     get_console().print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")

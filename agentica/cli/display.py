@@ -17,7 +17,7 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
 
-from agentica.cli.config import get_console, TOOL_ICONS, BUILTIN_TOOLS
+from agentica.cli.runtime import get_console, TOOL_ICONS, BUILTIN_TOOLS
 from agentica.global_config import get_setting
 
 
@@ -76,6 +76,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
     get_console().print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
     get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool output (e.g. long execute results) in pager (Ctrl+O or Esc to return)")
+    get_console().print("  [bright_green]Alt+P[/bright_green]       Pause/resume live output while browsing terminal history")
     get_console().print()
     # Input features
     get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files (images auto-attach)")
@@ -1383,10 +1384,17 @@ class StreamDisplayManager:
             preview = task.replace("\n", " ").strip()
             if len(preview) > 100:
                 preview = preview[:97] + "..."
+            max_turns = event.get("max_turns")
+            tool_call_limit = event.get("tool_call_limit")
+            budget = ""
+            if max_turns is not None and tool_call_limit is not None:
+                budget = f" [turns≤{max_turns}, calls≤{tool_call_limit}]"
+            elif max_turns is not None:
+                budget = f" [turns≤{max_turns}]"
             self._assistant_console.print(
                 f"{self._SUB_INDENT}{self._subagent_prefix(run_id)}"
                 f"[dim cyan]⮕ {agent_name}[/dim cyan] "
-                f"[dim italic]{preview}[/dim italic]"
+                f"[dim italic]{preview}[/dim italic][dim]{budget}[/dim]"
             )
 
         elif et == "subagent.tool_started":

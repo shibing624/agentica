@@ -36,8 +36,17 @@ class BuiltinTaskTool(Tool):
 
     TASK_SYSTEM_PROMPT_TEMPLATE = dedent("""## task Tool (Subagent Spawner)
 
-    Launch a subagent to handle complex, multi-step tasks autonomously.
+    Launch a READ-ONLY subagent to investigate a complex task autonomously.
     Each subagent runs in its own isolated context window and returns a single result.
+
+    ### Subagents are READ-ONLY (IMPORTANT)
+
+    Every built-in subagent runs on a cheaper/faster model than you and CANNOT
+    edit files or run commands — it can only read, search, and analyze. YOU (the
+    main agent) do ALL edits, writes, and command execution yourself, based on
+    the subagent's findings. Never delegate implementation to a subagent:
+    delegate *investigation*, then implement the result yourself. Delegating edits
+    to a subagent means a weaker model writes the code — do not do it.
 
     ### Available Subagent Types
 
@@ -66,18 +75,24 @@ class BuiltinTaskTool(Tool):
 
     ### Parallel Execution
 
-    When you have **multiple independent tasks**, launch them in parallel:
+    When you have **multiple independent READ-ONLY tasks**, launch them in parallel:
     - Tasks execute simultaneously — total time = max(task_times), not sum(task_times)
-    - Ideal for: exploring multiple directories, researching multiple topics, running multiple experiments
+    - Ideal for: exploring multiple directories, researching multiple topics
 
     ### When to Use
 
-    - Research: open-ended exploration across many files or directories
-    - Implementation: work that requires more than a couple of edits
-    - Multi-part tasks: independent subtasks that can run in parallel
+    - Exploration: open-ended search across many files or directories
+    - Research: web search and document analysis
+    - Code analysis: read-only investigation (trace logic, summarize a module)
+    - Multi-part READ-ONLY tasks that can run in parallel
 
     ### When NOT to Use
 
+    - Editing / writing files — do it YOURSELF, do not delegate to a subagent
+    - Running commands — do it YOURSELF
+    - Avoiding context compression during a large refactor — make a compact
+      implementation spec, investigate with a subagent if needed, then edit and
+      verify one dependency-ordered phase at a time yourself
     - Task is trivial (1-3 tool calls) — just do it directly
     - You need to see intermediate steps
     - Task depends heavily on the main conversation context
@@ -86,16 +101,16 @@ class BuiltinTaskTool(Tool):
 
     ### Handling Partial Results (retry/resume)
 
-    A subagent may stop early with ``partial=true`` (timeout, max_turns, or
-    tool_call_limit). When that happens:
+    A subagent may stop early with ``partial=true`` (timeout or max_turns).
+    When that happens:
 
     - **Default to synthesizing the partial output yourself.** It usually
       contains enough to proceed — do not reflexively relaunch the task.
     - Only resume when the task genuinely must run to completion. To resume,
       call ``task`` again with the SAME ``description`` and
       ``resume_from_run_id`` set to the failed call's ``run_id`` (from its
-      ``next_action`` field), optionally raising ``timeout`` / ``max_turns`` /
-      ``tool_call_limit``. The partial output is stitched in automatically.
+      ``next_action`` field), optionally raising ``timeout`` or ``max_turns``.
+      The partial output is stitched in automatically.
     - **Resume at most once per task.** If a resumed call still stops early,
       synthesize what you have instead of looping.
     - Use ``system_prompt_override`` only when the default subagent prompt is
@@ -161,24 +176,24 @@ class BuiltinTaskTool(Tool):
     async def task(
         self,
         description: str,
-        subagent_type: str = "code",
+        subagent_type: str = "explore",
         timeout: Optional[int] = None,
         max_turns: Optional[int] = None,
-        tool_call_limit: Optional[int] = None,
         system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
     ) -> str:
-        """Launch a subagent to handle a complex task.
+        """Launch a read-only subagent to investigate a complex task.
 
         Args:
             description: Detailed description of the task. Brief the subagent
                 like a colleague who has no prior context.
             subagent_type: Subagent type id (``explore`` / ``research`` /
-                ``code``, default ``code``), or any custom type registered via
-                ``register_custom_subagent``.
+                ``code``, default ``explore``), or any custom type registered via
+                ``register_custom_subagent``. All built-in types are READ-ONLY —
+                they cannot edit files or run commands; the main agent does all
+                edits based on the subagent's findings.
             timeout: Optional per-call timeout override (seconds).
             max_turns: Optional per-call ReAct turn budget override.
-            tool_call_limit: Optional per-call tool-call budget override.
             system_prompt_override: Optional replacement system prompt for this call.
             resume_from_run_id: Optional ``run_id`` to resume a prior partial run.
 
@@ -203,7 +218,6 @@ class BuiltinTaskTool(Tool):
             model_override=self._model_override,
             timeout_override=timeout,
             max_turns_override=max_turns,
-            tool_call_limit_override=tool_call_limit,
             system_prompt_override=system_prompt_override,
             resume_from_run_id=resume_from_run_id,
         )

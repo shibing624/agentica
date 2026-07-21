@@ -266,7 +266,7 @@ class TestCronInCliTools(unittest.TestCase):
     def test_cli_agent_has_cron_tool(self):
         import sys
         sys.argv = ["agentica"]
-        from agentica.cli.config import create_agent, parse_args
+        from agentica.cli.runtime import create_agent, parse_args
         cfg = vars(parse_args())
         cfg.update({"model_provider": "openai", "model_name": "gpt-4o",
                     "api_key": "sk-test", "base_url": None})
@@ -282,7 +282,7 @@ class TestCronInCliTools(unittest.TestCase):
         silently dropped and the agent could not manage cron via natural language."""
         import sys
         sys.argv = ["agentica"]
-        from agentica.cli.config import create_agent, parse_args
+        from agentica.cli.runtime import create_agent, parse_args
         cfg = vars(parse_args())
         cfg.update({"model_provider": "openai", "model_name": "gpt-4o",
                     "api_key": "sk-test", "base_url": None})
@@ -299,7 +299,7 @@ class TestCronInCliTools(unittest.TestCase):
         factory wires a non-interactive callback that returns immediately."""
         import sys
         sys.argv = ["agentica"]
-        from agentica.cli.config import parse_args
+        from agentica.cli.runtime import parse_args
         from agentica.cron.cli_runner import build_cli_agent_factory
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 

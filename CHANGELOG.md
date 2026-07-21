@@ -19,6 +19,20 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-07-21
+
+### Added
+- **Unified 3-tier tool permission model** (`ask` / `auto` / `allow-all`) across SDK, CLI, and Web/Gateway, centralized in `agentica/agent/permissions.py`. `ask` exposes only read-only tools; `auto` allows reads everywhere + writes restricted to `work_dir` (sandbox-enforced); `allow-all` is unrestricted. `ToolConfig.permission_mode` carries the mode; `Agent.set_permission_mode()` flips it at runtime without rebuilding the agent. CLI `--permissions` and `/permissions` command, Gateway per-session approval mode, and the SDK constructor all share one source of truth. Removed legacy `yolo`/`full`/`strict` naming.
+- **Claude-over-OpenAI-compatible `<invoke>` tool-call compatibility** in `OpenAIChat`: when a Claude model is reached through an OpenAI-compatible proxy that leaks `antml:invoke` blocks into text content (instead of structured `tool_calls`), the model layer now buffers the turn, parses the XML, and rewrites it into standard OpenAI function calls — so the tool actually executes and neither the leaked XML nor stray preamble (e.g. `course`) enters assistant history or the CLI. Native Anthropic (`model_provider="anthropic"`) and standard OpenAI/DeepSeek/Qwen paths are unchanged.
+
+### Changed
+- **Subagents are read-only by design.** All built-in subagent types (`explore`/`research`/`code`) now deny `write_file`/`edit_file`/`multi_edit_file`/`execute`; the `task` tool's default `subagent_type` changed from `code` to `explore`, and its system prompt states subagents are read-only and the main agent does all edits. This fixes the root cause of "the LLM delegated my query to a `task` subagent and the cheap auxiliary model wrote garbage code" — subagents run on the auxiliary model and can no longer edit. User-registered custom subagents are untouched.
+- **`edit_file` / `multi_edit_file` freshness checks are advisory tips, not hard blocks.** Stale/unread/externally-modified files now produce a `freshness_tip` appended to the result (or included in a `String not found` error) instead of rejecting the edit. Sensitive-path writes still hard-fail. File version tracking is lazy (content hash only when mtime+size match) and `_record_file_read` hashes in-memory content to avoid re-reading just-written files.
+- **Evicted `read_file` results are surfaced to the LLM.** When compression / context-overflow evicts a `read_file` tool result, a `[Context maintenance]` user message is appended naming the affected paths and advising a re-read before editing — so the agent no longer silently edits from stale memory.
+
+### Fixed
+- **CLI `ask_user_question` freeze.** A callback-less `AskUserQuestionTool` could fall back to bare `input()` and deadlock against prompt_toolkit's stdin ownership. Added a process-wide default-callback registry (`set_default_ask_user_question_callback`) the TUI registers at startup, a watchdog that aborts/re-arms the prompt if the agent's turn ends or the request is overwritten, a `_cprint` freeze while an ask prompt is active, and a `SIGQUIT` (Ctrl+\\) hard-escape that calls `os._exit(1)`.
+
 ## [1.4.8] - 2026-07-07
 
 ### Fixed

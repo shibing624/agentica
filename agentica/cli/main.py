@@ -7,7 +7,7 @@
 import os
 from datetime import datetime
 
-from agentica.cli.config import get_console, parse_args, configure_tools, create_agent
+from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.interactive import run_interactive
 from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.utils.log import suppress_console_logging

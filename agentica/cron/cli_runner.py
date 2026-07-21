@@ -87,7 +87,7 @@ def build_cli_agent_factory(agent_config: Dict[str, Any], extra_tools=None,
     workspace_default = workspace
 
     def _factory(workspace=None):
-        from agentica.cli.config import create_agent
+        from agentica.cli.runtime import create_agent
         return create_agent(
             agent_config,
             extra_tools=extra_tools or [],

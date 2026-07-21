@@ -23,7 +23,7 @@ surfaces expose the exact same vocabulary and behavior:
                   Only the existing SandboxConfig.blocked_commands safety net
                   (best-effort dangerous-command blocklist) applies.
   - "allow-all" : every tool is exposed, no sandbox path restriction. The CLI's
-                  actual default (see agentica.cli.config.parse_args). Note
+                  actual default (see agentica.cli.runtime.parse_args). Note
                   that a small set of always-sensitive write targets (/etc,
                   ~/.ssh, ~/.aws/credentials, etc.) are still refused by
                   default even in this mode — the model should never silently
