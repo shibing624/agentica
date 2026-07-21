@@ -1539,7 +1539,45 @@ class Runner:
             # CHAT-level lines are the conversation flow record. Print the
             # full user message — turn boundaries are *the* thing to keep at
             # CHAT level, so truncating them defeats the purpose of the level.
-            logger.chat(f"[user] -> {agent.identifier}: {str(message) if message else '<no message>'}")
+            #
+            # messages mode note: when the caller supplies a pre-built transcript
+            # via ``messages=[...]`` (message is None), we surface the last
+            # user-role entry so CHAT logs still show what the user just said
+            # this turn — otherwise every messages-mode run would log
+            # ``<no message>`` and mask the real inbound content. dict/Message
+            # element shapes are both handled; content may be a plain string or
+            # a multimodal list (image_url / audio / video parts) — we render
+            # multimodal lists as a compact tag so the transcript stays scannable.
+            if message is not None:
+                _chat_preview = str(message)
+            elif messages:
+                _last_user_content = None
+                for _m in reversed(messages):
+                    _role = _m.role if isinstance(_m, Message) else _m.get("role")
+                    if _role != "user":
+                        continue
+                    _last_user_content = (
+                        _m.content if isinstance(_m, Message) else _m.get("content")
+                    )
+                    break
+                if isinstance(_last_user_content, list):
+                    _parts = []
+                    for _p in _last_user_content:
+                        _ptype = _p.get("type") if isinstance(_p, dict) else None
+                        if _ptype == "text":
+                            _parts.append(_p.get("text", ""))
+                        elif _ptype:
+                            _parts.append(f"[{_ptype}]")
+                        else:
+                            _parts.append(str(_p))
+                    _chat_preview = " ".join(p for p in _parts if p)
+                elif _last_user_content is None:
+                    _chat_preview = f"<messages len={len(messages)}, no user role>"
+                else:
+                    _chat_preview = str(_last_user_content)
+            else:
+                _chat_preview = "<no message>"
+            logger.chat(f"[user] -> {agent.identifier}: {_chat_preview}")
             # Capture asyncio handles so cancel() can hard-cancel from another thread
             try:
                 agent._run_loop = asyncio.get_running_loop()
