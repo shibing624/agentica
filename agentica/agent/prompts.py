@@ -725,6 +725,10 @@ class PromptsMixin:
                     user_messages.append(Message.model_validate(_m))
                 else:
                     raise ValueError(f"Invalid messages item type: {type(_m)}")
+
+        if any(user_message.images for user_message in user_messages):
+            self.model.validate_image_input()
+
         messages_for_model.extend(user_messages)
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model

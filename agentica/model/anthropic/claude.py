@@ -1,6 +1,9 @@
+import base64
 import json
+from io import BytesIO
 from os import getenv
 from dataclasses import dataclass, field
+from pathlib import Path
 import sys
 from typing import Optional, List, AsyncIterator, Dict, Any, Union, Tuple
 
@@ -11,6 +14,8 @@ else:
 
 import asyncio
 
+import httpx
+from PIL import Image
 from pydantic import BaseModel
 
 from agentica.model.base import Model
@@ -349,10 +354,9 @@ class Claude(Model):
                     content = [{"type": "text", "text": content}]
 
                 if message.role == "user" and message.images is not None:
+                    self.validate_image_input()
                     for image in message.images:
-                        image_content = await self.add_image(image)
-                        if image_content:
-                            content.append(image_content)
+                        content.append(await self.add_image(image))
 
                 chat_messages.append({"role": message.role, "content": content})  # type: ignore
 
@@ -404,72 +408,48 @@ class Claude(Model):
                     if isinstance(block, dict) and "cache_control" in block:
                         block.pop("cache_control", None)
 
-    async def add_image(self, image: Union[str, bytes]) -> Optional[Dict[str, Any]]:
-        """
-        Add an image to a message by converting it to base64 encoded format.
-
-        Args:
-            image: URL string, local file path, or bytes object
-
-        Returns:
-            Optional[Dict[str, Any]]: Dictionary containing the processed image information if successful
-        """
-        import base64
-        import imghdr
-
-        type_mapping = {"jpeg": "image/jpeg", "png": "image/png", "gif": "image/gif", "webp": "image/webp"}
-
-        try:
-            content = None
-            # Case 1: Image is a string
-            if isinstance(image, str):
-                # Case 1.1: Image is a URL
-                if image.startswith(("http://", "https://")):
-                    import httpx
-
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get(image)
-                        content = resp.content
-                # Case 1.2: Image is a local file path
-                else:
-                    from pathlib import Path
-
-                    path = Path(image)
-                    if path.exists() and path.is_file():
-                        loop = asyncio.get_running_loop()
-                        content = await loop.run_in_executor(None, path.read_bytes)
-                    else:
-                        logger.error(f"Image file not found: {image}")
-                        return None
-            # Case 2: Image is a bytes object
-            elif isinstance(image, bytes):
-                content = image
+    async def add_image(self, image: Union[str, bytes]) -> Dict[str, Any]:
+        """Convert a URL, local path, or byte payload to an Anthropic image block."""
+        if isinstance(image, str):
+            if image.startswith(("http://", "https://")):
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(image)
+                    response.raise_for_status()
+                    content = response.content
             else:
-                logger.error(f"Unsupported image type: {type(image)}")
-                return None
+                path = Path(image)
+                if not path.is_file():
+                    raise FileNotFoundError(f"Image file not found: {image}")
+                loop = asyncio.get_running_loop()
+                content = await loop.run_in_executor(None, path.read_bytes)
+        elif isinstance(image, bytes):
+            content = image
+        else:
+            raise TypeError(f"Unsupported image type: {type(image)}")
 
-            img_type = imghdr.what(None, h=content)
-            if not img_type:
-                logger.error("Unable to determine image type")
-                return None
+        with Image.open(BytesIO(content)) as image_data:
+            image_format = image_data.format
+        if image_format is None:
+            raise ValueError("Unable to determine image type")
 
-            media_type = type_mapping.get(img_type)
-            if not media_type:
-                logger.error(f"Unsupported image type: {img_type}")
-                return None
+        type_mapping = {
+            "JPEG": "image/jpeg",
+            "PNG": "image/png",
+            "GIF": "image/gif",
+            "WEBP": "image/webp",
+        }
+        media_type = type_mapping.get(image_format)
+        if media_type is None:
+            raise ValueError(f"Unsupported image type: {image_format}")
 
-            return {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": base64.b64encode(content).decode("utf-8"),
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Error processing image: {e}")
-            return None
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": base64.b64encode(content).decode("utf-8"),
+            },
+        }
 
     def prepare_request_kwargs(self, system_message: str) -> Dict[str, Any]:
         """

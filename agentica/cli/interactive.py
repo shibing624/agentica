@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,11 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style as PTStyle
 from prompt_toolkit.widgets import TextArea
 from rich.console import Console as RichConsole
+
+try:
+    from imgocr import ImgOcr
+except ImportError:
+    ImgOcr = None
 
 from agentica.cli.runtime import (
     get_console,
@@ -768,25 +774,19 @@ _OCR_TIMEOUT_SECS = 30
 
 def _ocr_single_image(image_path: str) -> str:
     """OCR a single image, returning extracted text (truncated to limit)."""
-    try:
-        from imgocr import ImgOcr
+    if ImgOcr is None:
+        return ""
 
-        ocr = ImgOcr()
-        result = ocr.ocr(image_path)
-        text = " ".join(item["text"] for item in result if "text" in item)
-        if len(text) > _OCR_PER_IMAGE_CHARS:
-            text = text[:_OCR_PER_IMAGE_CHARS] + f"\n... (truncated, {len(text)} chars total)"
-        return text
-    except ImportError:
-        return ""
-    except Exception:
-        return ""
+    ocr = ImgOcr()
+    result = ocr.ocr(image_path)
+    text = " ".join(item["text"] for item in result if "text" in item)
+    if len(text) > _OCR_PER_IMAGE_CHARS:
+        text = text[:_OCR_PER_IMAGE_CHARS] + f"\n... (truncated, {len(text)} chars total)"
+    return text
 
 
 def _ocr_images_parallel(image_paths: list) -> str:
     """OCR multiple images in parallel with timeout. Returns combined text."""
-    from concurrent.futures import ThreadPoolExecutor
-
     results = []
     total_len = 0
     with ThreadPoolExecutor(max_workers=min(len(image_paths), 4)) as pool:
@@ -796,8 +796,9 @@ def _ocr_images_parallel(image_paths: list) -> str:
             name = Path(path).name
             try:
                 text = future.result(timeout=_OCR_TIMEOUT_SECS)
-            except Exception:
-                text = ""
+            except Exception as error:
+                logger.warning(f"OCR failed for {path}: {error}")
+                continue
 
             if not text:
                 continue
@@ -1011,73 +1012,30 @@ def _process_stream_response(
 
         run_kwargs = {"config": run_config}
 
-        # When images are attached, run LLM vision API and OCR in parallel.
-        # Both results are merged into the prompt for the final agent call.
-        # If one fails, the other provides a fallback.
+        # Preserve local paths for later file operations. Vision-capable base
+        # models receive the original image directly; text-only models receive
+        # external OCR observations instead.
         if images:
             image_paths = [str(Path(p).resolve()) for p in images]
-            _set_phase("tool", "analyzing images")
-
-            ocr_future = None
-            vision_result = None
-            vision_error = None
-
-            from concurrent.futures import ThreadPoolExecutor
-
-            def _run_vision():
-                """Call LLM API with images (blocking, runs in thread)."""
-                kwargs = dict(run_kwargs)
-                kwargs["images"] = image_paths
-                chunks = []
-                for chunk in current_agent.run_stream_sync(final_input, **kwargs):
-                    if chunk and chunk.content:
-                        chunks.append(chunk.content)
-                return "".join(chunks)
-
-            with ThreadPoolExecutor(max_workers=2) as pool:
-                # Start OCR and vision API in parallel
-                ocr_future = pool.submit(_ocr_images_parallel, image_paths)
-                vision_future = pool.submit(_run_vision)
-
-                # Collect results (both may succeed, one may fail)
-                try:
-                    vision_result = vision_future.result(timeout=120)
-                except Exception as e:
-                    vision_error = str(e)
-
-                try:
-                    ocr_text = ocr_future.result(timeout=_OCR_TIMEOUT_SECS + 10)
-                except Exception:
-                    ocr_text = ""
-
-            # Preserve source paths for the main agent. The vision trial is
-            # deliberately removed from working memory below, so descriptions
-            # and OCR alone would otherwise leave later tool calls unable to
-            # locate the original attachment.
             extra_parts = [
                 "[Attached image files]\n"
                 + "\n".join(f"- {image_path}" for image_path in image_paths)
             ]
-            if vision_result:
-                extra_parts.append(f"[Image description]\n{vision_result}")
-            if ocr_text and ocr_text.strip():
-                extra_parts.append(f"[Text extracted from image]\n{ocr_text}")
 
-            if extra_parts:
-                final_input += "\n\n" + "\n\n".join(extra_parts)
+            if current_agent.model.supports_images:
+                run_kwargs["images"] = image_paths
+            else:
+                _set_phase("tool", "extracting image text")
+                ocr_text = _ocr_images_parallel(image_paths)
+                if not ocr_text.strip():
+                    raise ValueError(
+                        f"Model '{current_agent.model.id}' does not support image input "
+                        "and no text could be extracted by the external OCR tool. "
+                        "Use a vision-capable model or configure an image analysis tool."
+                    )
+                extra_parts.append(f"[External OCR observation]\n{ocr_text}")
 
-            # Clean up: remove messages from the vision trial run (if any were added)
-            wm = current_agent.working_memory
-            if vision_result or vision_error:
-                # The vision run added messages to working memory; remove them
-                # so the combined re-run starts clean
-                if wm.runs:
-                    wm.runs.pop()
-                while wm.messages and wm.messages[-1].role in ("assistant", "tool"):
-                    wm.messages.pop()
-                if wm.messages and wm.messages[-1].role == "user":
-                    wm.messages.pop()
-
+            final_input += "\n\n" + "\n\n".join(extra_parts)
             _set_phase("thinking")
 
         # Subagent verbosity follows the global ``--debug`` flag (carried
@@ -1258,6 +1216,14 @@ def _process_stream_response(
     finally:
         # Clear the live-event callback so it doesn't outlive this run.
         current_agent._event_callback = None
+        # Strip image payloads from history: the turn already consumed them
+        # multimodally; re-encoding and re-sending every local image on each
+        # later turn would bloat context and cost. Paths and OCR text remain
+        # in the message content, so the model still knows an image exists.
+        if images:
+            for m in current_agent.working_memory.messages:
+                if m.role == "user" and m.images:
+                    m.images = None
 
 
 # ==================== TUI setup ====================
@@ -2416,6 +2382,12 @@ def run_interactive(
             state.pasted_files.clear()
 
             prompt_text, mentioned_files = parse_file_mentions(user_input)
+            # @-mentioned image files are multimodal attachments, not text to
+            # inject — reading a jpg as utf-8 yields garbage / a decode error.
+            image_mentions = [f for f in mentioned_files if f.suffix.lower() in IMAGE_EXTENSIONS]
+            if image_mentions:
+                mentioned_files = [f for f in mentioned_files if f not in image_mentions]
+                submit_images.extend(image_mentions)
             final_input = inject_file_contents(prompt_text, mentioned_files)
 
             if submit_images:

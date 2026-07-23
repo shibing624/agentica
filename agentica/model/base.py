@@ -10,13 +10,17 @@ import contextvars
 import io
 import json
 import base64
+import mimetypes
 import os
 import re
 import weakref
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from types import GeneratorType
 from typing import List, Iterator, AsyncIterator, Optional, Dict, Any, Callable, Union, Sequence
+
+from PIL.Image import Image as PILImage
 
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import logger
@@ -31,7 +35,7 @@ from agentica.security.redact import (
 )
 from agentica.tools.base import ModelTool, Tool, Function, FunctionCall, ToolCallException, get_function_call_for_tool_call
 from agentica.utils.timer import Timer
-from agentica.cost_tracker import CostTracker, get_model_context_window
+from agentica.cost_tracker import CostTracker, get_model_context_window, get_model_supports_images
 from agentica.hooks import RunHooks, _CompositeRunHooks
 
 
@@ -190,6 +194,7 @@ class Model(ABC):
 
     # -*- Model capability limits (not sent to the API) -*-
     context_window: int = 128000
+    supports_images: Optional[bool] = None
 
     # Extra retryable error substrings, merged on top of the SDK's default
     # protocol-level transients (see ``LoopState.RETRYABLE_SUBSTRINGS``).
@@ -256,6 +261,18 @@ class Model(ABC):
             catalog_cw = get_model_context_window(self.id, default=0)
             if catalog_cw > 0:
                 self.context_window = catalog_cw
+
+        if self.supports_images is None:
+            self.supports_images = get_model_supports_images(self.id)
+
+    def validate_image_input(self) -> None:
+        """Reject image input when the selected model has no declared support."""
+        if not self.supports_images:
+            raise ValueError(
+                f"Model '{self.id}' does not support image input. "
+                "Use a vision-capable model, set supports_images=True for a custom "
+                "compatible endpoint, or analyze the image with an external tool first."
+            )
 
     @staticmethod
     def begin_run_state(tool_choice: Optional[Union[str, Dict[str, Any]]] = None) -> contextvars.Token:
@@ -1427,9 +1444,6 @@ class Model(ABC):
             return {"type": "image_url", "image_url": {"url": image}}
 
         # Process local file image
-        import mimetypes
-        from pathlib import Path
-
         path = Path(image)
         if not path.exists():
             raise FileNotFoundError(f"Image file not found: {image}")
@@ -1460,7 +1474,6 @@ class Model(ABC):
 
     def process_image(self, image: Any) -> Optional[Dict[str, Any]]:
         """Process an image based on the format."""
-        from PIL.Image import Image as PILImage
         if isinstance(image, dict):
             return {"type": "image_url", "image_url": image}
 
@@ -1494,6 +1507,8 @@ class Model(ABC):
         if images is None or len(images) == 0:
             return message
 
+        self.validate_image_input()
+
         # Ignore non-string message content
         # because we assume that the images/audio are already added to the message
         if not isinstance(message.content, str):
@@ -1504,13 +1519,9 @@ class Model(ABC):
 
         # Add images to the message content
         for image in images:
-            try:
-                image_data = self.process_image(image)
-                if image_data:
-                    message_content_with_image.append(image_data)
-            except Exception as e:
-                logger.error(f"Failed to process image: {str(e)}")
-                continue
+            image_data = self.process_image(image)
+            if image_data:
+                message_content_with_image.append(image_data)
 
         # Update the message content with the images
         message.content = message_content_with_image

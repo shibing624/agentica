@@ -125,9 +125,9 @@ class Ollama(Model):
             "role": message.role,
             "content": message.content,
         }
-        if message.role == "user":
-            if message.images is not None:
-                _message["images"] = message.images
+        if message.role == "user" and message.images is not None:
+            self.validate_image_input()
+            _message["images"] = message.images
         return _message
 
     @override

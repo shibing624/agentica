@@ -243,6 +243,9 @@ class LiteLLMChat(Model):
     
     def format_message(self, message: Message) -> Dict[str, Any]:
         """Format a message for LiteLLM API."""
+        if message.role == "user" and message.images:
+            message = self.add_images_to_message(message=message, images=message.images)
+
         msg_dict: Dict[str, Any] = {"role": message.role}
         
         if message.content is not None:

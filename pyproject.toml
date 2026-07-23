@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 # ─────────────────────────────────────────────────────────
-# Core dependencies (M1-核心 A+ 方案：19 个)
+# Core dependencies (M1-核心 A+ 方案：20 个)
 #   包含 Agent 运行时 + 默认产品化能力（Workspace + CLI + DeepAgent 内置工具）
 #   保证 `agentica` CLI 开箱即用
 # ─────────────────────────────────────────────────────────
@@ -34,6 +34,7 @@ dependencies = [
     "anthropic>=0.40",            # Claude 直接默认装（agentica 主推 provider）
     "pydantic>=2.0",
     "httpx>=0.24",
+    "Pillow>=10.0",               # 多模态图片编码与格式检测
     "aiofiles>=23.0",
     "tiktoken>=0.5",
     "pyyaml>=6.0",

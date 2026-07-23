@@ -1,8 +1,23 @@
 # -*- coding: utf-8 -*-
 """Tests for agentica.cost_tracker — per-run LLM cost accounting."""
+import json
+import os
+import tempfile
 import unittest
 
-from agentica.cost_tracker import CostTracker, ModelUsageStat, MODEL_PRICING
+from agentica.cost_tracker import (
+    _CACHE_SCHEMA_VERSION,
+    _CACHE_TTL,
+    _FALLBACK_PRICING,
+    _get_catalog,
+    _load_cached,
+    _parse_catalog,
+    CostTracker,
+    get_model_context_window,
+    get_model_supports_images,
+    ModelUsageStat,
+    MODEL_PRICING,
+)
 
 
 class TestCostTrackerNormalise(unittest.TestCase):
@@ -142,28 +157,73 @@ class TestModelUsageStat(unittest.TestCase):
 class TestPricingCache(unittest.TestCase):
     """Cache load/save via file mtime TTL."""
 
+    def test_remote_catalog_overrides_fallback(self):
+        remote = {
+            "gpt-4o": {
+                "input": 99.0,
+                "output": 199.0,
+                "cache_read": 9.0,
+                "cache_write": 0.0,
+                "context_window": 999999,
+                "input_modalities": ("text",),
+            }
+        }
+        with (
+            unittest.mock.patch("agentica.cost_tracker._MODEL_CATALOG", None),
+            unittest.mock.patch("agentica.cost_tracker._load_cached", return_value=remote),
+        ):
+            catalog = _get_catalog()
+
+        self.assertEqual(catalog["gpt-4o"], remote["gpt-4o"])
+        self.assertIn("gpt-5", catalog)
+
+    def test_all_fallback_entries_declare_input_modalities(self):
+        self.assertTrue(
+            all(entry.get("input_modalities") for entry in _FALLBACK_PRICING.values())
+        )
+        self.assertIn("image", _FALLBACK_PRICING["claude-haiku-3-5"]["input_modalities"])
+        self.assertIn("image", _FALLBACK_PRICING["gemini-1.5-pro"]["input_modalities"])
+
     def test_cache_round_trip(self):
         """Write cache, load it back — pricing should match."""
-        import tempfile, json, os
-        from agentica.cost_tracker import _load_cached, _parse_catalog, _CACHE_TTL
 
-        pricing = {"gpt-test": {"input": 1.0, "output": 2.0, "cache_read": 0.0, "cache_write": 0.0}}
+        pricing = {
+            "gpt-test": {
+                "input": 1.0,
+                "output": 2.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0,
+                "input_modalities": ("text", "image"),
+            }
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cache_path = os.path.join(tmpdir, "model_pricing_cache.json")
             with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value=cache_path):
                 with open(cache_path, "w") as f:
-                    json.dump(pricing, f)
+                    json.dump(
+                        {"schema_version": _CACHE_SCHEMA_VERSION, "models": pricing},
+                        f,
+                    )
 
                 loaded = _load_cached()
                 self.assertIsNotNone(loaded)
                 self.assertIn("gpt-test", loaded)
                 self.assertEqual(loaded["gpt-test"]["input"], 1.0)
+                self.assertEqual(loaded["gpt-test"]["input_modalities"], ("text", "image"))
+
+    def test_old_cache_schema_returns_none(self):
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = os.path.join(tmpdir, "model_pricing_cache.json")
+            with open(cache_path, "w") as f:
+                json.dump({"gpt-test": {"input": 1.0}}, f)
+
+            with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value=cache_path):
+                self.assertIsNone(_load_cached())
 
     def test_cache_expired_returns_none(self):
         """Stale cache (mtime older than TTL) should return None."""
-        import tempfile, json, os
-        from agentica.cost_tracker import _load_cached, _CACHE_TTL
 
         pricing = {"gpt-stale": {"input": 1.0, "output": 2.0, "cache_read": 0.0, "cache_write": 0.0}}
 
@@ -182,12 +242,10 @@ class TestPricingCache(unittest.TestCase):
     def test_missing_cache_returns_none(self):
         """Non-existent cache file should return None."""
         with unittest.mock.patch("agentica.cost_tracker._get_cache_path", return_value="/nonexistent/path.json"):
-            from agentica.cost_tracker import _load_cached
             self.assertIsNone(_load_cached())
 
     def test_parse_catalog_extracts_pricing(self):
         """_parse_catalog should convert models.dev format to flat pricing dict."""
-        from agentica.cost_tracker import _parse_catalog
 
         catalog = {
             "openai": {
@@ -195,6 +253,7 @@ class TestPricingCache(unittest.TestCase):
                     "gpt-test-model": {
                         "cost": {"input": 5.0, "output": 15.0, "cache_read": 0.5},
                         "limit": {"context": 128000},
+                        "modalities": {"input": ["text", "image"], "output": ["text"]},
                     }
                 }
             }
@@ -206,10 +265,10 @@ class TestPricingCache(unittest.TestCase):
         self.assertEqual(result["gpt-test-model"]["cache_read"], 0.5)
         self.assertEqual(result["gpt-test-model"]["cache_write"], 0.0)
         self.assertEqual(result["gpt-test-model"]["context_window"], 128000)
+        self.assertEqual(result["gpt-test-model"]["input_modalities"], ("text", "image"))
 
     def test_parse_catalog_official_provider_takes_priority(self):
         """Official provider (openai) should override third-party (302ai)."""
-        from agentica.cost_tracker import _parse_catalog
 
         catalog = {
             "302ai": {
@@ -235,7 +294,6 @@ class TestPricingCache(unittest.TestCase):
 
     def test_parse_catalog_third_party_does_not_override_official(self):
         """Once official is recorded, third-party entries are ignored."""
-        from agentica.cost_tracker import _parse_catalog
 
         catalog = {
             "openai": {
@@ -264,29 +322,41 @@ class TestGetModelContextWindow(unittest.TestCase):
     """get_model_context_window: catalog lookup for context limits."""
 
     def test_exact_match_from_fallback(self):
-        from agentica.cost_tracker import get_model_context_window
         cw = get_model_context_window("gpt-4o")
         self.assertEqual(cw, 128000)
 
     def test_exact_match_glm5(self):
-        from agentica.cost_tracker import get_model_context_window
         cw = get_model_context_window("glm-5")
         self.assertEqual(cw, 204800)
 
     def test_prefix_match(self):
-        from agentica.cost_tracker import get_model_context_window
         cw = get_model_context_window("gpt-4o-2024-11-20")
         self.assertGreater(cw, 0)
 
     def test_unknown_returns_default(self):
-        from agentica.cost_tracker import get_model_context_window
         cw = get_model_context_window("totally-unknown-xyz", default=32000)
         self.assertEqual(cw, 32000)
 
     def test_qwen_max_context(self):
-        from agentica.cost_tracker import get_model_context_window
         cw = get_model_context_window("qwen-max")
         self.assertEqual(cw, 32768)
+
+
+class TestGetModelSupportsImages(unittest.TestCase):
+    """get_model_supports_images: catalog lookup for image input support."""
+
+    def test_fallback_vision_model(self):
+
+        self.assertTrue(get_model_supports_images("openai/gpt-4o"))
+
+    def test_dated_model_uses_longest_prefix(self):
+
+        self.assertTrue(get_model_supports_images("gpt-4o-2024-11-20"))
+
+    def test_text_only_and_unknown_models(self):
+
+        self.assertFalse(get_model_supports_images("gpt-4"))
+        self.assertFalse(get_model_supports_images("unknown-company-model"))
 
 
 if __name__ == "__main__":
