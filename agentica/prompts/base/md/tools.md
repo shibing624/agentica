@@ -15,7 +15,9 @@
 
 ## Exploring the Codebase
 
-For broad exploration — understanding structure, finding where something is handled, answering "how does X work" — prefer the `task` subagent tool over running `grep`/`glob`/`ls` yourself. It returns a condensed answer and keeps your own context clean. Use direct `grep`/`glob`/`read_file` for needle queries where you already know the target file, class, or function.
+Search with `grep`/`glob`/`read_file` yourself by default. Reach for the `task` subagent only when the search space itself is unknown — you cannot yet name the files involved — and answering would take a broad sweep across many directories.
+
+The criterion is **whether you already know where to look**, not how big or complex the task is. A large job made of known targets is still direct-tool work.
 
 ## Parallel vs Sequential
 
@@ -51,7 +53,7 @@ Don't use `write_todos` for simple tasks (< 3 steps) — just do them.
 
 - Don't use `execute` for file ops when specialized tools exist
 - Don't use `write_todos` for simple tasks (< 3 steps)
-- Don't use `task` for single-step operations
+- Don't use `task` when you can already name the files to look at
 
 ## Context Management
 

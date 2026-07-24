@@ -41,123 +41,82 @@ class BuiltinTaskTool(Tool):
     TASK_SYSTEM_PROMPT_TEMPLATE = dedent("""\
     ## task Tool (Subagent Spawner)
 
-    Launch a READ-ONLY subagent to investigate a complex task autonomously.
-    Each subagent runs in its own isolated context window and returns a single result.
+    Launch a READ-ONLY subagent to investigate an open-ended question in its own
+    isolated context window. It returns one summary; you do all edits yourself.
 
-    ### Subagents are READ-ONLY (IMPORTANT)
+    When broadly exploring the codebase to gather context for a large task —
+    the search would span directories you cannot enumerate yet — prefer `task`
+    with an exploration type over running the search tools yourself. Outside
+    that case, search yourself.
 
-    No subagent can edit files. It can read, search, analyze, and run commands
-    that only *inspect* state (`git diff`, `git log`, `git show`, test and lint
-    runners) — anything that changes state (commits, installs, writes) is
-    refused. YOU (the main agent) do ALL edits and state-changing commands
-    yourself, based on the subagent's findings. Never delegate implementation:
-    delegate *investigation*, then implement the result yourself.
+    ### When NOT to use the task tool
 
-    ### Two Model Tiers (IMPORTANT)
+    - Reading a specific known file — use `read_file`, it reaches the answer sooner
+    - Finding a specific definition like `class Foo` — use `grep`, it reaches the answer sooner
+    - Anything scoped to one file or a few known files — read them directly, it reaches the answer sooner
+    - Editing files or running state-changing commands — subagents are refused
+      these. Do it YOURSELF; delegate *investigation*, never implementation
+    - A judgement question ("is this correct?", "is this ready?") on an
+      `auxiliary` type — answer it yourself or use a `main` type
+    - Work that depends on this conversation's context, or where you need to see
+      the intermediate steps
+    - No listed subagent type is a good fit — use the direct tools
 
-    The `Model` column below tells you which model a type runs on.
+    The test is **whether you already know where to look**, not how big the job
+    is. A large task made of known targets is still direct-tool work; delegate
+    only when the search space itself is the unknown. Never reach for `task`
+    merely to keep your own context small.
 
-    - `auxiliary` types run on a **cheaper, weaker** model. They are for
-      **gathering facts**: where is X, which files touch Y, what does this module
-      do, what does the web say. A weak model is reliable at retrieval.
-    - `main` types run on **your own model** and cost real money. They are for
-      **judgement**: is this code correct, what is the root cause, is this ready
-      to ship. Use them sparingly and always narrowly scoped.
+    Examples:
+    - "Where is CompressionManager defined?" → `grep` directly; the target is known
+    - "Read runner.py and tell me what num_input_messages does" → `read_file` directly
+    - "Fix the failing test in test_runner.py" → do it yourself; known file, and it needs edits
+    - "How does compaction interact with session resume?" → `task` with `explore`;
+      open-ended, spans files you cannot name yet
+    - "Does this diff break the retry path?" → `task` with a `main` type, scoped to
+      the changed files; it is a judgement question
 
-    **Never send a judgement question to an `auxiliary` type.** A weak model
-    answers "looks fine" with total confidence and you will believe it — that is
-    worse than not delegating at all. If the question is "is this right?", either
-    answer it yourself or use a `main` type.
+    ### Two Model Tiers
 
-    Read the results accordingly: an `auxiliary` result is **evidence** (paths,
-    snippets, quotes) that you still reason over yourself; a `main` result is an
-    **opinion** you can weigh directly.
+    The `Model` column below says which model a type runs on. `auxiliary` is a
+    cheaper, weaker model — reliable at **retrieval** (where is X, which files
+    touch Y, what does the web say). `main` is your own model — for **judgement**,
+    used sparingly and always narrowly scoped.
+
+    **Never send a judgement question to an `auxiliary` type.** A weak model says
+    "looks fine" with total confidence and you will believe it — worse than not
+    delegating at all. Treat an `auxiliary` result as **evidence** you still
+    reason over; a `main` result as an **opinion** you can weigh.
 
     ### Available Subagent Types
 
     {subagent_table}
 
-    ### Scoping a `main`-tier Task
+    ### Briefing a Subagent
 
-    A vague brief wastes the expensive model. Before launching one:
-    - Name the exact files and functions to look at — it cannot see your
-      conversation, though it can run `git diff` itself to see what changed
-    - State the single question you want answered
-    - Say what you already checked so it does not repeat your work
-    - Ask for findings as path:line plus the concrete failure, not general advice
+    It cannot see this conversation. State what you want to know and why, what
+    you already ruled out, and the exact files or functions to start from. Ask
+    for findings as path:line plus the concrete detail, not general advice.
 
-    ### Writing the Description (IMPORTANT)
+    Never write "based on your findings, fix the bug" or "then implement it" —
+    that pushes synthesis onto the subagent. **You** synthesize the result.
 
-    Brief the subagent like a smart colleague who just walked into the room — it hasn't seen
-    this conversation, doesn't know what you've tried, doesn't understand why this task matters.
+    After launching one you know nothing until it returns: do not predict its
+    findings, and do not re-read what it examined unless you need to verify a
+    specific claim.
 
-    - Explain what you're trying to accomplish and why
-    - Describe what you've already learned or ruled out
-    - Give enough context about the surrounding problem
-    - If you need a short response, say so ("report in under 200 words")
+    ### Usage Notes
 
-    **Never delegate understanding.** Don't write "based on your findings, fix the bug" or
-    "based on the research, implement it." Those phrases push synthesis onto the subagent
-    instead of doing it yourself. You should synthesize the subagent's result yourself.
-
-    ### Don't Peek, Don't Race
-
-    After launching a subagent, you know nothing about what it found until it returns.
-    - Do NOT fabricate or predict subagent results
-    - Take the reported facts (paths, snippets, quotes) at face value
-    - Do NOT re-read files the subagent already examined unless you need to verify something specific
-    - An `auxiliary` subagent's *conclusions* are not authoritative: if one draws
-      a surprising conclusion, check it against the evidence it cited
-
-    ### Parallel Execution
-
-    When you have **multiple independent READ-ONLY tasks**, launch them in parallel:
-    - Tasks execute simultaneously — total time = max(task_times), not sum(task_times)
-    - Ideal for: exploring multiple directories, researching multiple topics
-    - Do not fan out `main`-tier tasks in parallel; they are expensive
-
-    ### When to Use
-
-    - Exploration: open-ended search across many files or directories
-    - Research: web search and document analysis
-    - Code analysis: descriptive read-only questions (trace logic, summarize a module)
-    - Review: a narrow correctness / root-cause question worth a fresh, unbiased
-      read on your own model — give it the changed files, since it cannot see
-      your diff
-    - Multi-part READ-ONLY tasks that can run in parallel
-
-    ### When NOT to Use
-
-    - Editing / writing files — do it YOURSELF, do not delegate to a subagent
-    - Running commands — do it YOURSELF
-    - Any judgement question on an `auxiliary` type — answer it yourself or use `review`
-    - Broad "review everything / check my work" sweeps — either scope it to a
-      module and one question, or do it yourself
-    - Avoiding context compression during a large refactor — make a compact
-      implementation spec, investigate with a subagent if needed, then edit and
-      verify one dependency-ordered phase at a time yourself
-    - Task is trivial (1-3 tool calls) — just do it directly
-    - You need to see intermediate steps
-    - Task depends heavily on the main conversation context
-    - Reading a specific known file — use read_file instead
-    - Searching for a specific definition — use grep/glob instead
-
-    ### Handling Partial Results (retry/resume)
-
-    A subagent may stop early with ``partial=true`` (timeout or max_turns).
-    When that happens:
-
-    - **Default to synthesizing the partial output yourself.** It usually
-      contains enough to proceed — do not reflexively relaunch the task.
-    - Only resume when the task genuinely must run to completion. To resume,
-      call ``task`` again with the SAME ``description`` and
-      ``resume_from_run_id`` set to the failed call's ``run_id`` (from its
-      ``next_action`` field), optionally raising ``timeout`` or ``max_turns``.
-      The partial output is stitched in automatically.
-    - **Resume at most once per task.** If a resumed call still stops early,
-      synthesize what you have instead of looping.
-    - Use ``system_prompt_override`` only when the default subagent prompt is
-      pulling the model off-task.""")
+    1. Launch independent READ-ONLY tasks in a single message to run them in
+       parallel — total time becomes max, not sum. Do not fan out `main`-tier
+       tasks; they are expensive.
+    2. Once delegated, do not duplicate that work yourself.
+    3. On `partial=true` (timeout or max_turns), default to synthesizing the
+       partial output — it usually suffices. Resume at most once, by calling
+       `task` again with the SAME `description` plus `resume_from_run_id` set to
+       the failed `run_id`; the partial output is stitched in automatically.
+    4. Use `system_prompt_override` only when the default subagent prompt is
+       pulling the model off-task.""")
 
     def __init__(self, auxiliary_model: Optional["Model"] = None):
         """
@@ -231,7 +190,13 @@ class BuiltinTaskTool(Tool):
         system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
     ) -> str:
-        """Launch a read-only subagent to investigate a complex task.
+        """Launch a read-only subagent to investigate an open-ended question.
+
+        Use this only when you cannot name the files to look at yet. If you
+        already know the target file, definition, or a handful of files, use
+        `read_file` / `grep` / `glob` directly — they reach the answer sooner.
+        Task size is not the criterion; a big job made of known targets is still
+        direct-tool work.
 
         Args:
             description: Detailed description of the task. Brief the subagent
