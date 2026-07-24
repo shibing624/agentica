@@ -151,35 +151,25 @@ class PrinterMixin:
             event = run_response.event
 
             if show_tool_calls and event == RunEvent.tool_call_started.value:
-                tool_info = run_response.tools[-1] if run_response.tools else None
+                tool_info = run_response.tool_call
                 if tool_info:
-                    tool_name = tool_info.get("tool_name", "unknown")
-                    tool_args = tool_info.get("tool_args", {})
                     display_args = {}
-                    for k, v in tool_args.items():
+                    for k, v in tool_info.tool_args.items():
                         if isinstance(v, str) and len(v) > 100:
                             display_args[k] = v[:100] + "..."
                         else:
                             display_args[k] = v
-                    print(f"\n  🔧 {tool_name}({display_args})", flush=True)
+                    print(f"\n  🔧 {tool_info.tool_name}({display_args})", flush=True)
                 continue
 
             if show_tool_calls and event == RunEvent.tool_call_completed.value:
-                # The event carries the whole accumulated tool list, and a
-                # parallel batch is announced up front then completed in call
-                # order, so the tool that just finished is the LAST one holding a
-                # result — ``tools[-1]`` is the last tool *called*, whose result
-                # usually doesn't exist yet. The name goes on the result line
-                # because a batch prints all its call lines before any result.
-                tool_info = next(
-                    (t for t in reversed(run_response.tools or []) if "content" in t),
-                    None,
-                )
+                # The name goes on the result line because a parallel batch prints
+                # all of its call lines before any of its results.
+                tool_info = run_response.tool_call
                 if tool_info:
-                    tool_name = tool_info.get("tool_name", "unknown")
-                    tool_result = tool_info.get("content", "")
-                    result_preview = str(tool_result)[:200] + "..." if len(str(tool_result)) > 200 else str(tool_result)
-                    print(f"     📤 {tool_name}: {result_preview}", flush=True)
+                    tool_result = str(tool_info.content or "")
+                    result_preview = tool_result[:200] + "..." if len(tool_result) > 200 else tool_result
+                    print(f"     📤 {tool_info.tool_name}: {result_preview}", flush=True)
                 continue
 
             if event in (RunEvent.run_started.value, RunEvent.run_completed.value, RunEvent.updating_memory.value):

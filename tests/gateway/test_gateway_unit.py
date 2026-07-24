@@ -89,6 +89,87 @@ class TestAgentServiceRunSource:
         assert config.source == RunSource.cron
 
 
+class TestAgentServiceStreamToolDispatch:
+    """Each tool callback must fire once, for its OWN tool.
+
+    A parallel batch is announced up front and completed in call order, all
+    events carrying the same cumulative ``tools`` list — so the stream handler
+    must read ``chunk.tool_call`` (the subject of the event) instead of guessing
+    by position.
+    """
+
+    @staticmethod
+    def _parallel_batch_chunks():
+        from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+
+        calls = [
+            ("c1", "read_file", {"file_path": "a.py"}, "ALPHA"),
+            ("c2", "execute", {"command": "ls"}, "BETA"),
+            ("c3", "grep", {"pattern": "x"}, "GAMMA"),
+        ]
+        tools = [{"tool_call_id": cid, "tool_name": n, "tool_args": a} for cid, n, a, _ in calls]
+        chunks = [
+            RunResponse(event=RunEvent.tool_call_started.value, tools=tools,
+                        tool_call=ToolCallInfo(tool_call_id=cid, tool_name=n, tool_args=a))
+            for cid, n, a, _ in calls
+        ]
+        for cid, n, a, content in calls:
+            for t in tools:
+                if t["tool_call_id"] == cid:
+                    t["content"] = content
+            chunks.append(RunResponse(
+                event=RunEvent.tool_call_completed.value, tools=tools,
+                tool_call=ToolCallInfo(tool_call_id=cid, tool_name=n, tool_args=a,
+                                       content=content),
+            ))
+        chunks.append(RunResponse(event=RunEvent.run_response.value, content="done"))
+        return chunks
+
+    def _run(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+
+        chunks = self._parallel_batch_chunks()
+
+        async def fake_run_stream(*args, **kwargs):
+            for c in chunks:
+                yield c
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._ensure_initialized = AsyncMock()
+        svc._workspace = None
+        agent = MagicMock()
+        agent.run_stream = fake_run_stream
+        svc._get_agent = AsyncMock(return_value=agent)
+
+        started, results = [], []
+
+        async def on_tool_call(name, args):
+            started.append(name)
+
+        async def on_tool_result(name, result):
+            results.append((name, result))
+
+        result = asyncio.run(svc.chat_stream(
+            "go", session_id="s1", user_id="u1",
+            on_tool_call=on_tool_call, on_tool_result=on_tool_result,
+        ))
+        return started, results, result
+
+    def test_each_tool_reports_once_in_call_order(self, tmp_path):
+        started, results, chat_result = self._run(tmp_path)
+        assert started == ["read_file", "execute", "grep"]
+        assert [n for n, _ in results] == ["read_file", "execute", "grep"]
+        assert chat_result.tool_calls == 3
+
+    def test_each_result_belongs_to_its_own_tool(self, tmp_path):
+        _, results, _ = self._run(tmp_path)
+        assert results == [
+            ("read_file", "ALPHA"),
+            ("execute", "BETA"),
+            ("grep", "GAMMA"),
+        ]
+
+
 class TestAgentServiceCronUsesAuxiliaryModel:
     """Scheduled (cron) sessions default to the cheaper auxiliary model as
     their main model when one is configured; interactive chat sessions and
@@ -592,39 +673,38 @@ class TestResponseFormatter:
 
     def test_format_tool_result_normal(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        name, result_str, is_task = format_tool_result({
-            "tool_name": "read_file",
-            "content": "file contents here",
-        })
+        from agentica.run_response import ToolCallInfo
+        name, result_str, is_task = format_tool_result(
+            ToolCallInfo(tool_name="read_file", content="file contents here")
+        )
         assert name == "read_file"
         assert result_str == "file contents here"
         assert is_task is False
 
     def test_format_tool_result_empty(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        name, result_str, is_task = format_tool_result({
-            "tool_name": "ls",
-            "content": "",
-        })
+        from agentica.run_response import ToolCallInfo
+        name, result_str, is_task = format_tool_result(
+            ToolCallInfo(tool_name="ls", content="")
+        )
         assert result_str == "(no output)"
 
     def test_format_tool_result_error(self):
         from agentica.gateway.services.response_formatter import format_tool_result
-        name, result_str, is_task = format_tool_result({
-            "tool_name": "execute",
-            "content": "permission denied",
-            "tool_call_error": True,
-        })
+        from agentica.run_response import ToolCallInfo
+        name, result_str, is_task = format_tool_result(
+            ToolCallInfo(tool_name="execute", content="permission denied", is_error=True)
+        )
         assert result_str.startswith("Error: ")
 
     def test_format_tool_result_task_meta(self):
         import json
         from agentica.gateway.services.response_formatter import format_tool_result
+        from agentica.run_response import ToolCallInfo
         task_content = json.dumps({"success": True, "tool_count": 3, "tool_calls_summary": ["a", "b"]})
-        name, result_str, is_task = format_tool_result({
-            "tool_name": "task",
-            "content": task_content,
-        })
+        name, result_str, is_task = format_tool_result(
+            ToolCallInfo(tool_name="task", content=task_content)
+        )
         assert is_task is True
         parsed = json.loads(result_str)
         assert parsed["_task_meta"] is True

@@ -27,7 +27,7 @@ from agentica.hooks import AgentHooks, RunHooks
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.run_response import RunResponse, RunEvent
+from agentica.run_response import RunResponse, RunEvent, ToolCallInfo
 
 
 # ---------------------------------------------------------------------------
@@ -610,13 +610,15 @@ class TestPrintResponseStreamParallelToolResults:
             for t in tools:
                 yield RunResponse(event=RunEvent.tool_call_started.value,
                                   content=f"Running tool: {t['tool_name']}",
-                                  tools=tools)
+                                  tools=tools,
+                                  tool_call=ToolCallInfo.from_dict(t))
             # Completions arrive in call order; content is filled IN PLACE.
             for t in tools:
                 t["content"] = results[t["tool_call_id"]]
                 yield RunResponse(event=RunEvent.tool_call_completed.value,
                                   content=f"Tool completed: {t['tool_name']}",
-                                  tools=tools)
+                                  tools=tools,
+                                  tool_call=ToolCallInfo.from_dict(t))
             yield RunResponse(event=RunEvent.run_response.value, content="all done")
 
         return _stream

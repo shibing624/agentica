@@ -10,7 +10,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-from agentica.run_response import RunResponse, RunEvent, RunResponseExtraData
+from agentica.run_response import RunResponse, RunEvent, RunResponseExtraData, ToolCallInfo
 from agentica.model.message import Message
 
 
@@ -76,6 +76,40 @@ class TestRunResponse:
     def test_cost_summary_without_tracker_is_printable(self):
         resp = RunResponse()
         assert resp.cost_summary == "No cost data available (cost_tracker not set)"
+
+
+class TestRunResponseToolCallField:
+    """A tool event must say WHICH tool it is about.
+
+    ``tools`` is the cumulative list of every call in the run, so a
+    ``ToolCallStarted`` / ``ToolCallCompleted`` event carrying only that list
+    forces each consumer to guess (``tools[-1]``, backwards scans, sequencers).
+    ``tool_call`` names the subject of the event directly.
+    """
+
+    def test_defaults_to_none(self):
+        assert RunResponse().tool_call is None
+
+    def test_carries_a_typed_tool_call(self):
+        resp = RunResponse(
+            event=RunEvent.tool_call_completed.value,
+            tool_call=ToolCallInfo(tool_call_id="c2", tool_name="execute",
+                                   content="ok", elapsed=0.5),
+        )
+        assert resp.tool_call.tool_call_id == "c2"
+        assert resp.tool_call.tool_name == "execute"
+        assert resp.tool_call.content == "ok"
+
+    def test_excluded_from_serialisation(self):
+        """In-process consumers only — keep it out of SSE / session-log payloads
+        where it would duplicate ``tools``."""
+        resp = RunResponse(
+            content="x",
+            tools=[{"tool_call_id": "c1", "tool_name": "grep", "content": "hit"}],
+            tool_call=ToolCallInfo(tool_call_id="c1", tool_name="grep"),
+        )
+        assert "tool_call" not in resp.model_dump()
+        assert "tool_call" not in json.loads(resp.to_json())
 
 
 # ===========================================================================

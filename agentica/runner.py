@@ -58,7 +58,7 @@ from agentica.model.message import Message
 from agentica.model.response import ModelResponse, ModelResponseEvent
 from agentica.model.usage import Usage
 from agentica.run_input import merge_run_config, reject_unknown_run_kwargs
-from agentica.run_response import AgentCancelledError, RunBreakReason, RunEvent, RunResponse
+from agentica.run_response import AgentCancelledError, RunBreakReason, RunEvent, RunResponse, ToolCallInfo
 from agentica.run_config import RunConfig
 from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
 from agentica.run_events import RunEventRecord, RunEventType
@@ -1368,8 +1368,15 @@ class Runner:
         return aggregated_metrics
 
     def generic_run_response(
-        self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response
+        self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response,
+        tool_call: Optional[Dict[str, Any]] = None,
     ) -> RunResponse:
+        """Build a RunResponse for a mid-run event.
+
+        ``tool_call`` is the raw tool-call dict a tool event is about; it is
+        surfaced as the typed ``RunResponse.tool_call`` so consumers never have to
+        infer the subject from ``tools`` by position.
+        """
         return RunResponse(
             run_id=self.agent.run_id,
             agent_id=self.agent.agent_id,
@@ -1382,6 +1389,7 @@ class Runner:
             reasoning_content=self.agent.run_response.reasoning_content,
             extra_data=self.agent.run_response.extra_data,
             event=event.value,
+            tool_call=ToolCallInfo.from_dict(tool_call) if tool_call else None,
         )
 
     def _persist_interrupted_turn(
@@ -2061,6 +2069,7 @@ class Runner:
                                         yield self.generic_run_response(
                                             f"Running tool: {tool_call_dict.get('tool_name') if tool_call_dict else 'Unknown'}",
                                             RunEvent.tool_call_started,
+                                            tool_call=tool_call_dict,
                                         )
                                 elif tool_resp.event == ModelResponseEvent.tool_call_completed.value:
                                     tool_call_dict = tool_resp.tool_call
@@ -2074,6 +2083,7 @@ class Runner:
                                         yield self.generic_run_response(
                                             f"Tool completed: {tool_call_dict.get('tool_name') if tool_call_dict else 'Unknown'}",
                                             RunEvent.tool_call_completed,
+                                            tool_call=tool_call_dict,
                                         )
                                 elif tool_resp.event == ModelResponseEvent.assistant_response.value:
                                     if tool_resp.content is not None:

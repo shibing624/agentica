@@ -361,5 +361,93 @@ class TestRunnerCostTracking(unittest.TestCase):
         self.assertEqual(response.cost_tracker.total_output_tokens, 5)
 
 
+class TestRunnerToolEventsCarryTheirToolCall(unittest.TestCase):
+    """Every tool event must name the tool it is about.
+
+    ``chunk.tools`` is the cumulative list of the whole run, so consumers used to
+    guess the subject of a ``ToolCallStarted`` / ``ToolCallCompleted`` event from
+    its position (``tools[-1]``, backwards scans). Under a parallel batch those
+    guesses mis-attribute results. ``chunk.tool_call`` states it outright.
+    """
+
+    @staticmethod
+    def _stream_agent():
+        """Agent whose LLM fans out TWO parallel tool calls, then answers."""
+        from types import SimpleNamespace
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        def alpha() -> str:
+            """Return the alpha marker."""
+            return "ALPHA_RESULT"
+
+        def beta() -> str:
+            """Return the beta marker."""
+            return "BETA_RESULT"
+
+        def _tc(index, call_id, name):
+            return SimpleNamespace(
+                index=index, id=call_id, type="function",
+                function=SimpleNamespace(name=name, arguments="{}"),
+            )
+
+        def _chunk(content=None, tool_calls=None, finish_reason=None):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(
+                    finish_reason=finish_reason,
+                    delta=SimpleNamespace(content=content, reasoning_content=None,
+                                          audio=None, tool_calls=tool_calls),
+                )],
+                usage=None,
+            )
+
+        model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        turns = iter([
+            [_chunk(tool_calls=[_tc(0, "c1", "alpha"), _tc(1, "c2", "beta")],
+                    finish_reason="tool_calls")],
+            [_chunk(content="done", finish_reason="stop")],
+        ])
+
+        async def fake_invoke_stream(messages):
+            for c in next(turns):
+                yield c
+
+        model.invoke_stream = fake_invoke_stream
+        return Agent(name="t", model=model, tools=[alpha, beta])
+
+    def _collect(self):
+        from agentica.run_config import RunConfig
+
+        agent = self._stream_agent()
+        started, completed = [], []
+
+        async def _drive():
+            async for chunk in agent.run_stream(
+                "run both", config=RunConfig(stream_intermediate_steps=True)
+            ):
+                if chunk is None:
+                    continue
+                if chunk.event == RunEvent.tool_call_started.value:
+                    started.append(chunk.tool_call)
+                elif chunk.event == RunEvent.tool_call_completed.value:
+                    completed.append(chunk.tool_call)
+
+        asyncio.run(_drive())
+        return started, completed
+
+    def test_started_events_name_their_own_call(self):
+        started, _ = self._collect()
+        self.assertEqual([(t.tool_call_id, t.tool_name) for t in started],
+                         [("c1", "alpha"), ("c2", "beta")])
+
+    def test_completed_events_carry_their_own_result(self):
+        _, completed = self._collect()
+        self.assertEqual(
+            [(t.tool_call_id, t.tool_name, t.content) for t in completed],
+            [("c1", "alpha", "ALPHA_RESULT"), ("c2", "beta", "BETA_RESULT")],
+            "each completion must report the tool that finished, not the last one called",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

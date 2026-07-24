@@ -11,6 +11,8 @@ making them easy to test and reuse across different response paths
 import json
 from typing import Any, Dict, Optional
 
+from agentica.run_response import ToolCallInfo
+
 
 def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:
     """Extract metrics from the agent's last run_response.
@@ -87,7 +89,7 @@ def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
     return display_args
 
 
-def format_tool_result(tool_info: dict) -> tuple[str, str, bool]:
+def format_tool_result(tool_call: ToolCallInfo) -> tuple[str, str, bool]:
     """Format a tool result for frontend display.
 
     For the ``task`` tool (subagent execution), parses the JSON result
@@ -95,17 +97,17 @@ def format_tool_result(tool_info: dict) -> tuple[str, str, bool]:
     the result to 500 characters.
 
     Args:
-        tool_info: A dict containing at least ``tool_name``/``name``
-                   and ``content`` fields.
+        tool_call: The completed tool call, as carried by
+                   ``RunResponse.tool_call`` on a ToolCallCompleted event.
 
     Returns:
         A tuple of (tool_name, result_string, is_task_meta).
         ``is_task_meta`` is True when the result is structured JSON
         from a subagent task execution.
     """
-    t_name = tool_info.get("tool_name") or tool_info.get("name", "unknown")
-    t_content = tool_info.get("content", "")
-    is_error = tool_info.get("tool_call_error", False)
+    t_name = tool_call.tool_name or "unknown"
+    t_content = tool_call.content or ""
+    is_error = tool_call.is_error
 
     # task tool: parse subagent JSON and produce structured metadata
     if t_name == "task" and t_content:

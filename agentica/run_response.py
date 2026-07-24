@@ -127,6 +127,13 @@ class RunResponse(BaseModel):
     workflow_id: Optional[str] = None
 
     tools: Optional[List[Dict[str, Any]]] = None
+    # Subject of a ToolCallStarted / ToolCallCompleted event. ``tools`` is the
+    # cumulative list of every call in the run, so without this a consumer can
+    # only guess which entry an event is about — and positional guesses
+    # (``tools[-1]``, backwards scans) mis-attribute results under a parallel
+    # batch. Excluded from serialisation: consumers are in-process, and the same
+    # data already rides in ``tools`` for SSE / session-log payloads.
+    tool_call: Optional[ToolCallInfo] = Field(default=None, exclude=True)
     images: Optional[List[Image]] = None  # Images attached to the response
     videos: Optional[List[Video]] = None  # Videos attached to the response
     audio: Optional[List[Audio]] = None  # Audio attached to the response

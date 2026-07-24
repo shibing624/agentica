@@ -728,11 +728,10 @@ class AgentService:
                 display_event = classify_run_response(chunk)
 
                 if display_event.kind == RunDisplayEventKind.TOOL_STARTED:
-                    tool_info = chunk.tools[-1] if chunk.tools else None
+                    tool_info = chunk.tool_call
                     if tool_info:
-                        tool_name = tool_info.get("tool_name") or tool_info.get("name", "unknown")
-                        tool_args = tool_info.get("tool_args") or tool_info.get("arguments", {})
-                        display_args = format_tool_call_args(tool_name, tool_args)
+                        tool_name = tool_info.tool_name or "unknown"
+                        display_args = format_tool_call_args(tool_name, tool_info.tool_args)
                         tools_used.append(tool_name)
                         tool_calls += 1
                         if on_tool_call:
@@ -740,12 +739,9 @@ class AgentService:
                     continue
 
                 if display_event.kind == RunDisplayEventKind.TOOL_COMPLETED:
-                    if chunk.tools and on_tool_result:
-                        for ti in reversed(chunk.tools):
-                            if "content" in ti:
-                                t_name, result_str, _ = format_tool_result(ti)
-                                await on_tool_result(t_name, result_str)
-                                break
+                    if chunk.tool_call and on_tool_result:
+                        t_name, result_str, _ = format_tool_result(chunk.tool_call)
+                        await on_tool_result(t_name, result_str)
                     continue
 
                 if display_event.kind == RunDisplayEventKind.METADATA_SKIP:
