@@ -8,11 +8,17 @@
 
 -----------------
 
-# Agentica: Build AI Agents
+# Agentica
+
+**Make agents that run for hours — not seconds. Stay on track, do real work, get better with use.**
+Async-first Python agent harness · 40+ tools · 20+ models · MCP · CLI + Web Gateway
+
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
+[![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![python_version](https://img.shields.io/badge/Python-3.12%2B-green.svg)](requirements.txt)
+[![python_version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](requirements.txt)
+[![last commit](https://img.shields.io/github/last-commit/shibing624/agentica)](https://github.com/shibing624/agentica/commits/main)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#community--support)
 
@@ -26,6 +32,16 @@ tool calling, long-running tasks, multi-agent orchestration, cross-session memor
 | **Remembers and forgets** | Memory stored as indexed entries with relevance recall and drift defense; confirmed preferences sync into global `~/.agentica/AGENTS.md` |
 | **Gets better with use** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` across sessions |
 | **Fully swappable, not locked in** | Models, tools, memory, skills, guardrails, and MCP are replaceable parts — not a closed hosted platform |
+
+### How it compares
+
+| | Agentica | LangChain | AutoGen / CrewAI | Pydantic AI |
+|---|---|---|---|---|
+| Async-first agentic loop | ✅ compaction/budget/anti-death-spiral built-in | bolted-on | ✅ | ✅ |
+| Self-evolving skills | ✅ auto-compiles `SKILL.md` | ❌ | ❌ | ❌ |
+| `/goal` long-task loop | ✅ | ❌ | ❌ | ❌ |
+| Persistent cross-session memory | ✅ out of the box | DIY | partial | DIY |
+| Ships a CLI + Web Gateway | ✅ | ❌ | ❌ | ❌ |
 
 ## 🔥 News
 
@@ -74,6 +90,18 @@ print(result.content)
 
 ```
 Beijing is the capital of China, a historic city with over 3,000 years of history, and the nation's political, cultural, and international exchange center.
+```
+
+Make an agent that actually *works* — search the web and write a file, one `run_sync`:
+
+```python
+from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFileTool, BuiltinExecuteTool
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o-mini"),
+    tools=[BuiltinWebSearchTool(), BuiltinFileTool(work_dir="./workspace"), BuiltinExecuteTool(work_dir="./workspace")],
+)
+agent.run_sync("Search Python 3.13 new features and write them to features.md")
 ```
 
 ## Features
@@ -184,6 +212,8 @@ See [examples/](https://github.com/shibing624/agentica/tree/main/examples) for f
 Full documentation: **https://shibing624.github.io/agentica**
 
 ## Community & Support
+
+> If Agentica helps you, please give it a ⭐ Star so more people find it — 337 stars and growing 🚀
 
 - **GitHub Issues** — [Open an issue](https://github.com/shibing624/agentica/issues)
 - **WeChat Group** — Add `xuming624` on WeChat, mention "llm" to join the developer group

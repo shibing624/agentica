@@ -22,6 +22,7 @@ from agentica.agent.config import (
 )
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.tools.base import Tool
+from agentica.version import __version__
 from agentica.workspace import Workspace
 
 # Plain Rich console — used outside TUI mode (non-interactive queries, startup).
@@ -275,6 +276,9 @@ def parse_args():
         return args
 
     parser = argparse.ArgumentParser(description="CLI for agentica")
+    parser.add_argument(
+        "-V", "-v", "--version", action="version", version=f"agentica {__version__}"
+    )
 
     parser.add_argument("--query", type=str, help="Question to ask the LLM", default=None)
     # Default is None so saved CLI config (from the first-run wizard) can take

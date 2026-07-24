@@ -8,11 +8,17 @@
 
 -----------------
 
-# Agentica: Build AI Agents
+# Agentica
+
+**让 Agent 真正跑起来——跑得久、不跑飞、能干活、会进化。**
+Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web Gateway
+
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
+[![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![python_version](https://img.shields.io/badge/Python-3.12%2B-green.svg)](requirements.txt)
+[![python_version](https://img.shields.io/badge/Python-3.10%2B-green.svg)](requirements.txt)
+[![last commit](https://img.shields.io/github/last-commit/shibing624/agentica)](https://github.com/shibing624/agentica/commits/main)
 [![GitHub issues](https://img.shields.io/github/issues/shibing624/agentica.svg)](https://github.com/shibing624/agentica/issues)
 [![Wechat Group](https://img.shields.io/badge/wechat-group-green.svg?logo=wechat)](#社区与支持)
 
@@ -25,6 +31,16 @@
 | **记得住，会遗忘** | 记忆按条目存储、相关性召回、drift 防御，确认过的偏好同步到全局 `~/.agentica/AGENTS.md` |
 | **越用越强** | 工具失败 / 用户纠正 / 成功序列沉淀为经验卡片，自动编译成可复用的 `SKILL.md`，跨会话生效 |
 | **全可换，不锁死** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而非封闭 SaaS 黑盒 |
+
+### 和其它框架对比
+
+| | Agentica | LangChain | AutoGen / CrewAI | Pydantic AI |
+|---|---|---|---|---|
+| Async-first agentic loop | ✅ 内置压缩/预算/防死循环 | 片段拼装 | ✅ | ✅ |
+| 自进化 Skill | ✅ 自动编译 `SKILL.md` | ❌ | ❌ | ❌ |
+| `/goal` 长任务循环 | ✅ | ❌ | ❌ | ❌ |
+| 持久跨会话记忆 | ✅ 开箱即用 | 需自行拼装 | 部分 | 需自行拼装 |
+| 开箱 CLI + Web Gateway | ✅ | ❌ | ❌ | ❌ |
 
 ## 🔥 News
 
@@ -65,6 +81,18 @@ from agentica import Agent, OpenAIChat
 agent = Agent(model=OpenAIChat(id="gpt-4o-mini"))
 result = agent.run_sync("一句话介绍北京")
 print(result.content)
+```
+
+让 Agent 真正干活——搜资料 + 写文件，一行 `run_sync` 搞定：
+
+```python
+from agentica import Agent, OpenAIChat, BuiltinWebSearchTool, BuiltinFileTool, BuiltinExecuteTool
+
+agent = Agent(
+    model=OpenAIChat(id="gpt-4o-mini"),
+    tools=[BuiltinWebSearchTool(), BuiltinFileTool(work_dir="./workspace"), BuiltinExecuteTool(work_dir="./workspace")],
+)
+agent.run_sync("帮我搜 Python 3.13 新特性，写到 features.md")
 ```
 
 ## 功能特性
@@ -176,6 +204,8 @@ IM 接入详细参考（扫码绑定、渠道配置、环境变量）：[Gateway
 完整使用文档：**https://shibing624.github.io/agentica**
 
 ## 社区与支持
+
+> 如果 Agentica 帮到了你，欢迎点个 ⭐ Star，让更多人看到！
 
 - **GitHub Issues** — [提交 issue](https://github.com/shibing624/agentica/issues)
 - **微信群** — 添加微信号 `xuming624`，备注 "llm"，加入技术交流群

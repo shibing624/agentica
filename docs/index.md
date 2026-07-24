@@ -1,6 +1,7 @@
 # Agentica
 
-**轻量级、功能强大的 Python 框架，用于构建自主 AI 智能体。**
+**让 Agent 真正跑起来——跑得久、不跑飞、能干活、会进化。**
+Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web Gateway
 
 <div align="center">
   <img src="https://github.com/shibing624/agentica/raw/main/docs/assets/logo.png" height="30" alt="Logo">
@@ -8,8 +9,10 @@
 
 [![PyPI version](https://badge.fury.io/py/agentica.svg)](https://badge.fury.io/py/agentica)
 [![Downloads](https://static.pepy.tech/badge/agentica)](https://pepy.tech/project/agentica)
+[![GitHub stars](https://img.shields.io/github/stars/shibing624/agentica?style=social)](https://github.com/shibing624/agentica)
 [![License Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/shibing624/agentica/blob/main/LICENSE)
-[![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-green.svg)](https://github.com/shibing624/agentica)
+[![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-green.svg)](https://github.com/shibing624/agentica)
+[![last commit](https://img.shields.io/github/last-commit/shibing624/agentica)](https://github.com/shibing624/agentica/commits/main)
 
 ---
 
