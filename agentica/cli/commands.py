@@ -443,15 +443,15 @@ def _set_skill_runtime_state(ctx: CommandContext, name: str, enabled: bool) -> O
     return path
 
 
-def _update_task_tool_model_override(agent, model_override) -> None:
-    """Repoint the BuiltinTaskTool's model override on the live agent."""
+def _update_task_tool_auxiliary_model(agent, auxiliary_model) -> None:
+    """Repoint the BuiltinTaskTool's cheap-tier model on the live agent."""
     from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
     if not agent or not agent.tools:
         return
     for tool in agent.tools:
         if isinstance(tool, BuiltinTaskTool):
-            tool._model_override = model_override
+            tool._auxiliary_model = auxiliary_model
             return
 
 
@@ -610,7 +610,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
     """Manage subagents: list, create, reload, remove.
 
-    Built-in types (explore/research/code) come from subagent.py defaults;
+    Built-in types (explore/research/code/review) come from subagent.py defaults;
     custom types come from .agentica/agents/*.md via the subagent loader.
     """
     con = get_console()
@@ -2285,9 +2285,10 @@ def _apply_profile(ctx: CommandContext, name: str):
     if ctx.current_agent is not None:
         ctx.current_agent.model = new_model_obj
         ctx.current_agent.auxiliary_model = new_auxiliary_model
-        # Repoint the task subagent tool onto the new auxiliary model (None = clone
-        # the parent's main model, matching create_agent's default).
-        _update_task_tool_model_override(ctx.current_agent, new_auxiliary_model)
+        # Repoint the cheap tier of the task subagent tool onto the new auxiliary
+        # model (None = fall back to the parent's main model, matching
+        # create_agent's default).
+        _update_task_tool_auxiliary_model(ctx.current_agent, new_auxiliary_model)
         _sanitize_history_for_model_switch(ctx.current_agent)
         # Refresh the self-description block so the agent reports its new
         # model/auxiliary model on the next turn.

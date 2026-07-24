@@ -1130,10 +1130,11 @@ class TestBuiltinTaskTool:
         assert tool.functions["task"].manages_own_timeout is True
         assert tool.functions["task"].interrupt_behavior == "block"
 
-    def test_task_passes_model_override_to_spawn(self):
-        """When ``model_override`` is set, the adapter forwards it to spawn."""
+    def test_task_passes_auxiliary_model_to_spawn(self):
+        """When ``auxiliary_model`` is set, the adapter forwards it to spawn as
+        the cheap-tier model (main-tier types ignore it)."""
         custom_model = MagicMock()
-        tool = BuiltinTaskTool(model_override=custom_model)
+        tool = BuiltinTaskTool(auxiliary_model=custom_model)
         tool.set_parent_agent(MagicMock())
 
         captured: Dict[str, Any] = {}
@@ -1146,7 +1147,7 @@ class TestBuiltinTaskTool:
         with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
             asyncio.run(tool.task("test", subagent_type="code"))
 
-        assert captured["model_override"] is custom_model
+        assert captured["auxiliary_model_override"] is custom_model
 
 
 # ===========================================================================

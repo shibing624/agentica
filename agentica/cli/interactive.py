@@ -84,6 +84,14 @@ from agentica.cli.commands import (
 from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 
 
+# Slash commands that keep working in shell mode instead of being handed to the
+# shell. Shared by the queue-bar preview and the process loop so the bar never
+# claims a line runs as a shell command when it does not.
+SHELL_MODE_EXEMPT_CMDS = frozenset(
+    {"/exit", "/quit", "/help", "/model", "/debug", "/clear", "/reset"}
+)
+
+
 # ==================== SessionState ====================
 
 
@@ -563,6 +571,33 @@ def _resolve_attachment_path(raw_path: str) -> Optional[Path]:
     if not resolved.exists() or not resolved.is_file():
         return None
     return resolved
+
+
+def queue_item_preview(item, shell_mode: bool = False) -> str:
+    """Render one pending-queue payload for the TUI ``Queued (N):`` bar.
+
+    Every queued payload is shown, including slash commands and skill
+    invocations — hiding them made a queued ``/requesting-code-review ...``
+    look like it never entered the queue.
+
+    In shell mode a queued line executes as a shell command rather than an LLM
+    turn, so it is prefixed with ``$``. The prompt's own ``$`` indicator is
+    replaced by the working marker while the agent runs, which is exactly when
+    items get queued.
+    """
+    if isinstance(item, tuple):
+        if item and item[0] == "__BTW__":
+            body = str(item[1]) if len(item) > 1 else ""
+            return f"__BTW__: {body}" if body else "__BTW__"
+        text = str(item[0]) if item else str(item)
+    else:
+        text = str(item)
+
+    if shell_mode and not text.startswith("__"):
+        first_word = text.split()[0].lower() if text.split() else ""
+        if first_word not in SHELL_MODE_EXEMPT_CMDS:
+            return f"$ {text}"
+    return text
 
 
 def _detect_file_drop(user_input: str) -> Optional[dict]:
@@ -1505,6 +1540,8 @@ def _setup_tui(
         # print a notice into the chat stream — that would interleave with the
         # running AI response box. Explicit mid-flight nudges are still available
         # via the ``/steer`` command.
+        # Skill auto-commands (``/requesting-code-review ...``) also go here —
+        # they are next-turn prompts, not concurrent CLI ops.
         pending_queue.put(payload)
 
         event.app.current_buffer.reset(append_to_history=True)
@@ -1789,29 +1826,17 @@ def _setup_tui(
         pairs = pending_queue.peek_all_with_timestamps()
         if not pairs:
             return []
-        display_pairs = []
-        for item, ts in pairs:
-            if isinstance(item, str) and (item.startswith("/") or item.startswith("__")):
-                continue
-            if isinstance(item, tuple) and item[0] == "__BTW__":
-                continue
-            display_pairs.append((item, ts))
-        if not display_pairs:
-            return []
-        frags = [("class:queue-label", f"  Queued ({len(display_pairs)}): ")]
-        for i, (item, ts) in enumerate(display_pairs[:3]):
-            if isinstance(item, tuple):
-                text = str(item[0])
-            else:
-                text = str(item)
+        frags = [("class:queue-label", f"  Queued ({len(pairs)}): ")]
+        for i, (item, ts) in enumerate(pairs[:3]):
+            text = queue_item_preview(item, shell_mode=state.shell_mode)
             preview = text[:40] + ("..." if len(text) > 40 else "")
             ts_str = time.strftime("%H:%M:%S", time.localtime(ts))
             if i > 0:
                 frags.append(("class:queue-dim", "  |  "))
             frags.append(("class:queue-time", f"({ts_str}) "))
             frags.append(("class:queue-dim", preview))
-        if len(display_pairs) > 3:
-            frags.append(("class:queue-dim", f"  ... +{len(display_pairs) - 3} more"))
+        if len(pairs) > 3:
+            frags.append(("class:queue-dim", f"  ... +{len(pairs) - 3} more"))
         return frags
 
     queue_bar = ConditionalContainer(
@@ -2299,15 +2324,10 @@ def run_interactive(
 
             # Shell mode
             if state.shell_mode:
-                if user_input.startswith("/") and user_input.split()[0].lower() in {
-                    "/exit",
-                    "/quit",
-                    "/help",
-                    "/model",
-                    "/debug",
-                    "/clear",
-                    "/reset",
-                }:
+                if (
+                    user_input.startswith("/")
+                    and user_input.split()[0].lower() in SHELL_MODE_EXEMPT_CMDS
+                ):
                     pass
                 else:
                     _handle_shell_command(user_input, agent_config.get("work_dir"))
@@ -2348,13 +2368,8 @@ def run_interactive(
                     # Skill auto-command dispatch
                     matched_skill = skill_cmds.get(cmd)
                     if matched_skill:
-                        skill_prompt = matched_skill.get_prompt()
-                        user_instruction = cmd_args.strip()
-                        skill_msg = f"# {matched_skill.name} Skill\n\n{skill_prompt}"
-                        if user_instruction:
-                            skill_msg += f"\n\n## User Request\n{user_instruction}"
                         _cprint(f"  Skill activated: {matched_skill.name}")
-                        user_input = skill_msg
+                        user_input = matched_skill.render_invocation(cmd_args)
 
             # Expand paste references
             _paste_ref_re = re.compile(r"\[Pasted text #\d+: \d+ lines -> (.+?)\]")

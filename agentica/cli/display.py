@@ -1393,9 +1393,14 @@ class StreamDisplayManager:
                 budget = f" [turns≤{max_turns}, calls≤{tool_call_limit}]"
             elif max_turns is not None:
                 budget = f" [turns≤{max_turns}]"
+            # Show which model is actually running the subagent: whether a task
+            # went to the cheap auxiliary model or the main one is the single
+            # most useful thing to know when judging its output.
+            model_id = event.get("model_id")
+            model_note = f" [dim]({model_id})[/dim]" if model_id else ""
             self._assistant_console.print(
                 f"{self._SUB_INDENT}{self._subagent_prefix(run_id)}"
-                f"[dim cyan]⮕ {agent_name}[/dim cyan] "
+                f"[dim cyan]⮕ {agent_name}[/dim cyan]{model_note} "
                 f"[dim italic]{preview}[/dim italic][dim]{budget}[/dim]"
             )
 

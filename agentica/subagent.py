@@ -6,13 +6,16 @@
 This module implements a subagent system that allows main agents to:
 - Spawn isolated subagents for complex tasks
 - Track subagent lifecycle and results
-- Support different subagent types with varying tool permissions
+- Support different subagent types with varying tool permissions and model tiers
+  (retrieval types run on the cheap auxiliary model, judgement types on the main one)
 - Enable parallel execution of multiple subagents
 
 Based on the subagent design pattern from modern AI coding assistants.
 """
 import asyncio
 import copy
+import functools
+import inspect
 import json
 import time
 import uuid
@@ -36,6 +39,7 @@ from datetime import datetime
 from agentica.handoff import default_handoff_mapper
 from agentica.run_response import AgentCancelledError
 from agentica.tools.base import Function, ModelTool, Tool
+from agentica.tools.safety import is_read_only_command
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
@@ -54,6 +58,9 @@ class SubagentType(str, Enum):
 
     # Code agent: code generation and execution
     CODE = "code"
+
+    # Review agent: judgement work (correctness review, root cause) on the main model
+    REVIEW = "review"
 
     # Custom agent: user-defined subagent type
     CUSTOM = "custom"
@@ -81,6 +88,18 @@ class SubagentConfig:
     # Denied tools (takes precedence over allowed_tools)
     denied_tools: Optional[List[str]] = None
 
+    # Shell policy for the ``execute`` tool, mirroring Cursor's `readonly`
+    # subagent semantics ("no file edits, no state-changing shell commands"):
+    #   "inherit"   — ``execute`` runs unrestricted, like the parent agent.
+    #   "read_only" — ``execute`` rejects commands that change state, so the
+    #                 subagent can still run `git diff` or the test suite to
+    #                 gather evidence without being able to commit or install.
+    # Whether ``execute`` is exposed at all remains controlled by
+    # ``allowed_tools`` / ``denied_tools``.
+    # BEST-EFFORT: "read_only" allows test runners, which execute project code
+    # and can therefore write files. See ``agentica.tools.safety``.
+    execute_policy: Literal["inherit", "read_only"] = "inherit"
+
     # Optional total tool-call cap. None = unlimited; prefer max_turns alone.
     tool_call_limit: Optional[int] = None
 
@@ -89,6 +108,14 @@ class SubagentConfig:
 
     # Whether this subagent can spawn its own subagents
     can_spawn_subagents: bool = False
+
+    # Which model tier runs this subagent:
+    #   "auxiliary" — the cheap/fast model (``Agent.resolve_auxiliary_model("task")``).
+    #     Correct for retrieval work: locating code, collecting facts, summarizing.
+    #   "main" — the parent agent's own model. Required for judgement work
+    #     (correctness review, root cause, trade-offs) where a weak model returns a
+    #     confidently wrong verdict that the parent then trusts and acts on.
+    model_tier: Literal["auxiliary", "main"] = "auxiliary"
 
     # --- Permission isolation ---
     # Whether the subagent inherits the parent agent's workspace memory
@@ -315,6 +342,53 @@ class SubagentRegistry:
             return [tool.__name__]
         return []
 
+    @staticmethod
+    def _read_only_execute(function: Function) -> Function:
+        """Return a copy of ``execute`` that refuses state-changing commands.
+
+        The parent's ``Function`` object is left untouched — it is shared with
+        the parent agent, so the guard goes on a ``model_copy``.
+        """
+        original = function.entrypoint
+        if original is None:
+            return function
+
+        @functools.wraps(original)
+        async def guarded(*args, **kwargs):
+            command = kwargs.get("command") or (args[0] if args else "")
+            allowed, reason = is_read_only_command(command)
+            if not allowed:
+                logger.info(f"Subagent read-only shell refused: {command[:100]}")
+                return (
+                    f"Refused: this subagent runs read-only and {reason}. "
+                    "Only commands that inspect state are permitted (git diff/log/"
+                    "show/status/blame, test runners, linters). Report what you "
+                    "found and let the caller run anything that changes state."
+                )
+            result = original(*args, **kwargs)
+            if inspect.isawaitable(result):
+                return await result
+            return result
+
+        guarded_function = function.model_copy()
+        guarded_function.entrypoint = guarded
+        guarded_function.is_read_only = True
+        guarded_function.is_destructive = False
+        guarded_function.description = (
+            "Runs a READ-ONLY shell command. Commands that change state "
+            "(git commit/push/checkout, installs, writes, redirection) are "
+            "refused. Use it to gather evidence: git diff, git log, git show, "
+            "git status, git blame, and test/lint runners.\n\n"
+            f"{function.description or ''}"
+        )
+        return guarded_function
+
+    def _apply_execute_policy(self, function: Function, config: SubagentConfig) -> Function:
+        """Wrap ``execute`` when the subagent's policy restricts it to reads."""
+        if function.name == "execute" and config.execute_policy == "read_only":
+            return self._read_only_execute(function)
+        return function
+
     def _select_child_tools(self, parent_tools: List[Any], config: SubagentConfig) -> List[Any]:
         """Filter parent tools according to subagent policy.
 
@@ -355,11 +429,15 @@ class SubagentRegistry:
                     cloned = Tool(name=tool.name, description=tool.description)
                     cloned.functions = OrderedDict(tool.functions)
                 cloned.functions = OrderedDict(
-                    (name, cloned.functions[name])
+                    (name, self._apply_execute_policy(cloned.functions[name], config))
                     for name in allowed_names
                     if name in cloned.functions
                 )
                 child_tools.append(cloned)
+                continue
+
+            if isinstance(tool, Function):
+                child_tools.append(self._apply_execute_policy(tool, config))
                 continue
 
             child_tools.append(tool)
@@ -434,6 +512,7 @@ class SubagentRegistry:
                 "task": task,
                 "max_turns": max_turns,
                 "tool_call_limit": tool_call_limit,
+                "model_id": child.model.id,
             })
 
         # ``chunk.tools`` mirrors ``agent.run_response.tools`` — the cumulative
@@ -542,6 +621,7 @@ class SubagentRegistry:
         context: str = "",
         depth: int = 1,
         model_override: Optional["Model"] = None,
+        auxiliary_model_override: Optional["Model"] = None,
         timeout_override: Optional[int] = None,
         max_turns_override: Optional[int] = None,
         tool_call_limit_override: Optional[int] = None,
@@ -553,7 +633,8 @@ class SubagentRegistry:
         Single source of truth for subagent execution. Handles:
           - depth check (``MAX_DEPTH=2``) and nested-spawn permission
           - registry registration / status updates
-          - parent model cloning (isolated tools/functions/usage/HTTP client)
+          - model tier selection (``config.model_tier``) + cloning (isolated
+            tools/functions/usage/HTTP client)
           - tool inheritance (parent's tools, filtered by ``BLOCKED_TOOLS`` +
             config ``allowed_tools`` / ``denied_tools``; ``Agent._post_init``
             clones each ``Tool`` again to keep agent-bound state isolated)
@@ -567,9 +648,12 @@ class SubagentRegistry:
             agent_type: Type of subagent (determines tool permissions).
             context: Optional context to inject into the subagent prompt.
             depth: Current nesting depth (1 = direct child of user agent).
-            model_override: Optional model to use for the subagent. When ``None``
-                the parent's model is cloned. Useful when the caller wants the
-                subagent to use a cheaper/faster model than the parent.
+            model_override: Hard override — this exact model runs the subagent
+                regardless of ``config.model_tier``.
+            auxiliary_model_override: Model to use when the resolved config is
+                ``model_tier="auxiliary"``. Defaults to the parent's
+                ``resolve_auxiliary_model("task")``. Ignored by ``main``-tier
+                types, which always run on the parent's own model.
 
         Returns:
             Dict with keys ``status``, ``content``, ``agent_type``, ``run_id``,
@@ -665,7 +749,17 @@ class SubagentRegistry:
             )
             task = resume_prefix + task
 
-        source_model = model_override or parent_agent.model
+        # Model tier: retrieval subagents run on the cheap auxiliary model,
+        # judgement subagents run on the parent's own model. Routing a
+        # judgement task (review / root cause) to a weak model is worse than
+        # not delegating at all — it returns a confident wrong verdict that the
+        # parent trusts. An explicit ``model_override`` still wins.
+        if model_override is not None:
+            source_model = model_override
+        elif config.model_tier == "main":
+            source_model = parent_agent.model
+        else:
+            source_model = auxiliary_model_override or parent_agent.resolve_auxiliary_model("task")
         if source_model is None:
             return {
                 "status": "error",
@@ -688,7 +782,8 @@ class SubagentRegistry:
 
         _parent_label = parent_agent.name or parent_agent.agent_id
         logger.chat(
-            f"[spawn] {_parent_label} -> {config.type.value} subagent: "
+            f"[spawn] {_parent_label} -> {config.type.value} subagent "
+            f"({config.model_tier} model {source_model.id}): "
             f"{task[:120]}{'...' if len(task) > 120 else ''}"
         )
 
@@ -1053,8 +1148,9 @@ Guidelines:
 - Do NOT run commands that modify the user's system state
 
 Complete the user's search request efficiently and report your findings clearly.""",
-    allowed_tools=["ls", "read_file", "glob", "grep"],  # Read-only tools
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "execute", "task"],  # No write/execute/spawn
+    allowed_tools=["ls", "read_file", "glob", "grep", "execute"],  # Read-only tools
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],  # No write/spawn
+    execute_policy="read_only",
     max_turns=200,
     timeout=1800,
     can_spawn_subagents=False,
@@ -1080,46 +1176,101 @@ Guidelines:
 5. Be objective and fact-based in your analysis
 
 Complete your research task and provide a comprehensive summary of your findings.""",
-    allowed_tools=["web_search", "fetch_url", "read_file", "ls", "glob", "grep"],
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "execute", "task"],
+    allowed_tools=["web_search", "fetch_url", "read_file", "ls", "glob", "grep", "execute"],
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],
+    execute_policy="read_only",
     max_turns=150,
     timeout=1800,
     can_spawn_subagents=False,
 )
 
 
-# Code agent: READ-ONLY code analysis. Subagents run on the cheaper auxiliary
-# model, so they must NOT edit files or run commands — letting a cheap model
-# write code was the root cause of "the LLM delegated my query to a task
-# subagent and the aux model wrote garbage code". The main agent does all
-# edits/implementation; the code subagent only reads, traces, and reports.
+# Code agent: READ-ONLY *descriptive* code analysis on the auxiliary model.
+# It answers "what does this do / where does this flow" — questions a cheap
+# model can answer from the code itself. Anything that requires a verdict
+# ("is this correct", "is this ready to ship") belongs to the review agent
+# below, which runs on the main model. Subagents also cannot edit or execute:
+# letting a cheap model write code was the root cause of "the LLM delegated my
+# query to a task subagent and the aux model wrote garbage code".
 CODE_SUBAGENT_CONFIG = SubagentConfig(
     type=SubagentType.CODE,
     name="Code Agent",
-    description="""Read-only code analysis agent. Use this agent to analyze and understand
-code, trace logic, and report findings. It CANNOT edit files or run commands —
-the main agent does all edits and implementation. Use it for:
-- Code analysis and debugging (read-only)
+    description="""Read-only code explainer (cheap model). Answers descriptive questions:
+how a module works, what calls what, where data flows. It CANNOT edit files or
+run commands, and it must NOT be asked to judge correctness — use `review` for
+that. Use it for:
+- Summarizing how a module or flow works
 - Tracing call graphs and data flow
-- Summarizing how a module works""",
-    system_prompt="""You are a read-only code analysis specialist. You excel at reading and
-understanding code, but you do NOT modify it.
+- Locating the code responsible for a behavior""",
+    system_prompt="""You are a read-only code explainer. You describe how code works; you
+do not modify it and you do not pass judgement on it.
 
 Guidelines:
-1. Read and analyze code to answer the caller's question.
+1. Read the code and answer the caller's descriptive question.
 2. Trace logic, call graphs, and data flow as needed.
 3. Report findings clearly: file paths, line numbers, relevant snippets.
-4. Do NOT create, edit, or write any file — you are read-only.
-5. Do NOT run commands. If verification is needed, tell the caller to run it.
-6. The MAIN agent does all implementation and edits based on your findings.
+4. Stick to what the code demonstrably does. If asked whether something is
+   correct, safe, or production-ready, say that verdict is out of scope and
+   report the facts the caller needs to decide instead.
+5. Do NOT create, edit, or write any file — you are read-only.
+6. You may run read-only commands (`git diff`, `git log`, tests) to gather
+   facts. State-changing commands are rejected — ask the caller to run those.
+7. The MAIN agent does all implementation and edits based on your findings.
 
 Complete your analysis and report your findings clearly.""",
-    allowed_tools=["read_file", "ls", "glob", "grep"],
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "execute", "task"],
+    allowed_tools=["read_file", "ls", "glob", "grep", "execute"],
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],
+    execute_policy="read_only",
     max_turns=200,
     timeout=1800,
     can_spawn_subagents=False,
     inherit_context=True,  # Code analysis benefits from parent context
+)
+
+
+# Review agent: the one built-in type that runs on the MAIN model. Judgement
+# work (does this code have a bug, is this the root cause, is this safe to
+# ship) is exactly where a cheap model fails in the most damaging way: it
+# returns "looks good" with confidence and the parent stops looking. Expensive,
+# so its prompt forces narrow scope and evidence-backed findings.
+REVIEW_SUBAGENT_CONFIG = SubagentConfig(
+    type=SubagentType.REVIEW,
+    name="Review Agent",
+    description="""Critical reviewer running on YOUR model (expensive, read-only). Use for
+judgement calls a cheap model gets wrong, always narrowly scoped:
+- Reviewing code you just wrote or changed
+- Root-causing a bug from the evidence
+- Judging whether an approach is correct or ready to ship
+Name the exact files/functions and the one question to answer.""",
+    system_prompt="""You are a senior engineer doing a critical, read-only review.
+
+You are expensive to run and the caller has given you one narrow question.
+Answer that question with evidence; do not drift into a general code tour.
+
+Guidelines:
+1. Read the files the caller named plus what they directly depend on.
+2. Report ONLY problems you can point at: give path:line, quote the code, and
+   state the concrete failure — which input, which path, what goes wrong.
+3. Label every finding `confirmed` (you read the code and the bug follows) or
+   `suspected` (needs a run or test to settle), and say what would settle it.
+4. Order by severity: correctness, data loss, and security first. Skip style,
+   naming, and "consider adding tests" filler.
+5. If the code is fine, say so plainly. Never invent findings to look useful.
+6. If the scope is too vague for an evidence-backed verdict, say what you need
+   (specific files, the diff, a repro) instead of guessing.
+7. You cannot edit files — the caller applies every fix. You CAN run read-only
+   commands: use `git diff` / `git log` to see what actually changed, and run
+   the test suite to settle a `suspected` finding.
+
+Finish with a one-line verdict followed by the findings in severity order.""",
+    allowed_tools=["read_file", "ls", "glob", "grep", "execute"],
+    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],
+    execute_policy="read_only",
+    max_turns=120,
+    timeout=1800,
+    can_spawn_subagents=False,
+    inherit_context=True,
+    model_tier="main",
 )
 
 
@@ -1128,6 +1279,7 @@ DEFAULT_SUBAGENT_CONFIGS: Dict[SubagentType, SubagentConfig] = {
     SubagentType.EXPLORE: EXPLORE_SUBAGENT_CONFIG,
     SubagentType.RESEARCH: RESEARCH_SUBAGENT_CONFIG,
     SubagentType.CODE: CODE_SUBAGENT_CONFIG,
+    SubagentType.REVIEW: REVIEW_SUBAGENT_CONFIG,
 }
 
 # Custom subagent configurations (user-defined, keyed by string name)
@@ -1142,6 +1294,8 @@ def register_custom_subagent(
     denied_tools: Optional[List[str]] = None,
     tool_call_limit: Optional[int] = None,
     max_turns: int = 100,
+    model_tier: Literal["auxiliary", "main"] = "auxiliary",
+    execute_policy: Literal["inherit", "read_only"] = "inherit",
 ) -> SubagentConfig:
     """
     Register a custom subagent type.
@@ -1157,7 +1311,14 @@ def register_custom_subagent(
         denied_tools: List of denied tool names
         tool_call_limit: Optional total tool-call cap (None = unlimited)
         max_turns: Maximum ReAct turns (primary budget)
-        
+        model_tier: ``"auxiliary"`` (default, cheap model — fact gathering) or
+            ``"main"`` (the parent's own model — judgement work such as review
+            or root-cause analysis, where a weak model's confident wrong answer
+            is worse than no answer)
+        execute_policy: ``"inherit"`` (default, ``execute`` runs unrestricted)
+            or ``"read_only"`` (``execute`` refuses state-changing commands, so
+            the subagent can inspect with ``git diff`` but cannot commit)
+
     Returns:
         The created SubagentConfig
         
@@ -1168,6 +1329,7 @@ def register_custom_subagent(
         ...     system_prompt="You are a code review expert...",
         ...     allowed_tools=["read_file", "ls", "glob", "grep"],
         ...     max_turns=50,
+        ...     model_tier="main",
         ... )
     """
     config = SubagentConfig(
@@ -1180,6 +1342,8 @@ def register_custom_subagent(
         tool_call_limit=tool_call_limit,
         max_turns=max_turns,
         can_spawn_subagents=False,
+        model_tier=model_tier,
+        execute_policy=execute_policy,
     )
     _CUSTOM_SUBAGENT_CONFIGS[name.lower()] = config
     logger.info(f"Registered custom subagent: {name}")
@@ -1228,6 +1392,7 @@ def get_subagent_config(subagent_type: Union[str, SubagentType]) -> Optional[Sub
                 "explorer": SubagentType.EXPLORE,
                 "researcher": SubagentType.RESEARCH,
                 "coder": SubagentType.CODE,
+                "reviewer": SubagentType.REVIEW,
             }
             subagent_type = aliases.get(subagent_type.lower())
             if subagent_type is None:
@@ -1250,6 +1415,7 @@ def get_available_subagent_types() -> List[Dict[str, str]]:
             "type": config.type.value,
             "name": config.name,
             "description": config.description,
+            "model_tier": config.model_tier,
             "is_custom": False,
         })
     
@@ -1259,6 +1425,7 @@ def get_available_subagent_types() -> List[Dict[str, str]]:
             "type": name,  # Custom types use their name as type
             "name": config.name,
             "description": config.description,
+            "model_tier": config.model_tier,
             "is_custom": True,
         })
     

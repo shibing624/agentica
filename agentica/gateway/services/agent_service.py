@@ -33,6 +33,7 @@ from agentica.global_config import (
     provider_api_key_env,
 )
 from agentica.memory.session_log import SessionLog
+from agentica.skills import get_skill_registry
 
 from ..config import settings
 from .model_factory import (
@@ -468,6 +469,17 @@ class AgentService:
             return agent.model.context_window
         return 128000
 
+    @staticmethod
+    def _expand_skill_invocation(message: str) -> str:
+        """Turn a ``/skill-trigger [arguments]`` message into the skill prompt.
+
+        The web input box inserts skill references as plain ``/trigger`` text,
+        so without this the model only ever saw the raw slash line. Uses the
+        same renderer as the CLI so both surfaces frame arguments identically.
+        """
+        expanded = get_skill_registry().expand_invocation(message)
+        return expanded if expanded is not None else message
+
     async def chat(
         self,
         message: str,
@@ -508,7 +520,7 @@ class AgentService:
                     await asyncio.to_thread(self._workspace.set_user, user_id)
 
                 response = await agent.run(
-                    message,
+                    self._expand_skill_invocation(message),
                     config=self._run_config_for_session(session_id, source),
                 )
 
@@ -703,7 +715,7 @@ class AgentService:
             tool_calls = 0
 
             async for chunk in agent.run_stream(
-                message,
+                self._expand_skill_invocation(message),
                 config=self._run_config_for_session(
                     session_id,
                     source,

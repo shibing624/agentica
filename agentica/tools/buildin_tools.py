@@ -2014,8 +2014,10 @@ def get_builtin_tools(
         include_task: Whether to include subagent task tool
         include_skills: Whether to include skill tool for executing skills (default: False)
         include_ask_user_question: Whether to include ask_user_question tool for human-in-the-loop (default: False)
-        task_model: Optional model override for subagents spawned by the
-            ``task`` tool. When ``None`` the parent agent's model is cloned.
+        task_model: Optional model for the cheap (``auxiliary``) tier of subagents
+            spawned by the ``task`` tool. When ``None`` the parent agent's
+            ``resolve_auxiliary_model("task")`` decides. ``main``-tier types such
+            as ``review`` always run on the parent's own model.
         custom_skill_dirs: Custom skill directories to load (optional)
         ask_user_question_callback: Custom callback for ask_user_question tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
@@ -2063,7 +2065,7 @@ def get_builtin_tools(
         tools.append(BuiltinTodoTool())
 
     if include_task:
-        tools.append(BuiltinTaskTool(model_override=task_model))
+        tools.append(BuiltinTaskTool(auxiliary_model=task_model))
 
     if include_skills:
         from agentica.tools.skill_tool import SkillTool

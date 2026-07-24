@@ -306,6 +306,25 @@ class SkillRegistry:
                 cmds[slug] = skill
         return cmds
 
+    def expand_invocation(self, text: str) -> Optional[str]:
+        """Expand a ``/trigger [arguments]`` line into the skill's full prompt.
+
+        Returns ``None`` when the text is not a skill invocation, so callers can
+        pass the original message through untouched. Shared by the CLI, the SDK
+        and the gateway so every surface frames the arguments identically.
+        """
+        if not text:
+            return None
+        stripped = text.strip()
+        if not stripped.startswith("/"):
+            return None
+
+        parts = stripped.split(maxsplit=1)
+        skill = self.auto_commands().get(parts[0].lower())
+        if skill is None:
+            return None
+        return skill.render_invocation(parts[1] if len(parts) > 1 else "")
+
     def __len__(self) -> int:
         return len(self._skills)
 

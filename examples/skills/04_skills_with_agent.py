@@ -54,23 +54,23 @@ def demo_skill_injection():
     if matched_skill:
         print(f"\nDetected skill trigger: {matched_skill.name}")
 
-        # Get the skill prompt
-        skill_prompt = matched_skill.get_prompt()
-        print(f"Skill prompt loaded ({len(skill_prompt)} chars)")
-
-        # Inject skill prompt into agent using add_instruction()
-        agent.add_instruction(skill_prompt)
-
-        # Extract the actual message (remove trigger prefix)
+        # Extract the arguments that followed the trigger
         # e.g., "/commit fix bug" -> "fix bug"
         trigger = matched_skill.trigger
         if trigger and user_input.startswith(trigger):
-            actual_message = user_input[len(trigger):].strip()
+            arguments = user_input[len(trigger):].strip()
         else:
-            actual_message = user_input
+            arguments = user_input
 
-        print(f"\nProcessing: '{actual_message}'")
-        # In real usage, you would call: agent.run_sync(actual_message)
+        # render_invocation() combines the skill body with the arguments and
+        # states that the arguments are the workflow's target, not a separate
+        # instruction. Sending the bare arguments instead lets the model read
+        # something like "git status的代码" as a task of its own.
+        message = matched_skill.render_invocation(arguments)
+        print(f"Skill prompt loaded ({len(message)} chars)")
+
+        print(f"\nProcessing arguments: '{arguments}'")
+        # In real usage, you would call: agent.run_sync(message)
 
     else:
         print(f"\nNo skill trigger detected in: '{user_input}'")
@@ -164,16 +164,12 @@ def demo_skill_based_agent():
         if matched:
             print(f"[Skill activated: {matched.name}]")
 
-            # Inject skill prompt
-            skill_prompt = matched.get_prompt()
-            agent.add_instruction(skill_prompt)
-
-            # Extract actual message
             trigger = matched.trigger
             if trigger and user_message.startswith(trigger):
-                actual_message = user_message[len(trigger):].strip()
+                arguments = user_message[len(trigger):].strip()
             else:
-                actual_message = user_message
+                arguments = user_message
+            actual_message = matched.render_invocation(arguments)
         else:
             actual_message = user_message
 

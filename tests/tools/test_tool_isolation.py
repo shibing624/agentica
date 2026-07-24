@@ -36,12 +36,12 @@ class TestToolCloneProtocol(unittest.TestCase):
 
     def test_builtin_task_tool_clone_is_fresh_instance(self):
         from unittest.mock import MagicMock
-        sentinel_model = MagicMock(name="model_override")
-        original = BuiltinTaskTool(model_override=sentinel_model)
+        sentinel_model = MagicMock(name="auxiliary_model")
+        original = BuiltinTaskTool(auxiliary_model=sentinel_model)
         clone = original.clone()
         self.assertIsNot(clone, original)
         self.assertIsNone(clone._parent_agent)
-        self.assertIs(clone._model_override, sentinel_model)
+        self.assertIs(clone._auxiliary_model, sentinel_model)
 
     def test_builtin_memory_tool_clone_is_fresh_instance(self):
         original = BuiltinMemoryTool()

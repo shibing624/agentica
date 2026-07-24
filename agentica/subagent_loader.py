@@ -11,12 +11,16 @@ Each ``*.md`` file has a YAML frontmatter + Markdown body:
     allowed_tools: [read_file, ls, glob, grep]   # optional, None = inherit parent
     denied_tools: [task]                          # optional
     tool_call_limit: 10                           # optional
+    model_tier: main                              # optional, auxiliary (default) | main
     ---
     You are a code review expert...
 
 The file stem becomes the subagent name; the body becomes its system prompt.
-``model`` overrides are intentionally NOT supported (see plan P1.2) - custom
-subagents reuse the parent agent's auxiliary/main model.
+Naming a specific ``model`` is intentionally NOT supported - a custom subagent
+picks a *tier*, not a model: ``auxiliary`` (the parent's cheap background model,
+right for fact gathering) or ``main`` (the parent's own model, required for
+judgement work such as review, where a weak model's confident wrong verdict is
+worse than no answer).
 
 Search paths (in priority order, higher wins on name collisions):
 1. ``<cwd>/.agentica/agents/`` (project-level)
@@ -144,6 +148,25 @@ def _parse_agent_file(path: Path) -> Optional[Dict[str, Any]]:
                 f"Subagent loader: invalid tool_call_limit in {path}, ignored"
             )
 
+    # Judgement-style agents (reviewers, critics) must be able to opt into the
+    # main model: a cheap model answering "is this correct?" returns a confident
+    # wrong verdict that the caller then trusts.
+    model_tier = frontmatter.get("model_tier") or "auxiliary"
+    if model_tier not in ("auxiliary", "main"):
+        logger.warning(
+            f"Subagent loader: invalid model_tier {model_tier!r} in {path}, "
+            "using 'auxiliary'"
+        )
+        model_tier = "auxiliary"
+
+    execute_policy = frontmatter.get("execute_policy") or "inherit"
+    if execute_policy not in ("inherit", "read_only"):
+        logger.warning(
+            f"Subagent loader: invalid execute_policy {execute_policy!r} in {path}, "
+            "using 'inherit'"
+        )
+        execute_policy = "inherit"
+
     return {
         "name": path.stem,
         "description": description.strip(),
@@ -151,6 +174,8 @@ def _parse_agent_file(path: Path) -> Optional[Dict[str, Any]]:
         "allowed_tools": _as_str_list(frontmatter.get("allowed_tools")),
         "denied_tools": _as_str_list(frontmatter.get("denied_tools")),
         "tool_call_limit": tool_call_limit,
+        "model_tier": model_tier,
+        "execute_policy": execute_policy,
         "path": str(path),
     }
 
@@ -191,6 +216,8 @@ def load_all_agents() -> int:
                     allowed_tools=descriptor["allowed_tools"],
                     denied_tools=descriptor["denied_tools"],
                     tool_call_limit=descriptor["tool_call_limit"],
+                    model_tier=descriptor["model_tier"],
+                    execute_policy=descriptor["execute_policy"],
                 )
                 registered += 1
         return registered
@@ -233,6 +260,7 @@ def list_defined_agents() -> List[Dict[str, Any]]:
                         "allowed_tools": descriptor["allowed_tools"],
                         "denied_tools": descriptor["denied_tools"],
                         "tool_call_limit": descriptor["tool_call_limit"],
+                        "model_tier": descriptor["model_tier"],
                         "path": descriptor["path"],
                     }
                 )

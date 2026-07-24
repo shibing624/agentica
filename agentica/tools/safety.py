@@ -4,9 +4,11 @@
 @description: Command safety detection and secret redaction.
 
 Dangerous command patterns (31 regex) detect risky shell operations.
+Read-only classification decides whether a command merely inspects state.
 Secret redaction removes API keys, tokens, passwords from tool output.
 """
 import logging
+import os
 import re
 import shlex
 from typing import List, Tuple
@@ -135,6 +137,157 @@ def split_compound_command(command: str) -> List[str]:
         )
         out.append(joined.strip())
     return out
+
+
+# ============== Read-only Command Classification ==============
+# Separate axis from DANGEROUS_PATTERNS above: that answers "is this
+# destructive?", this answers "does this change any state?". `git commit` is
+# not dangerous but is not read-only either.
+#
+# BEST-EFFORT, NOT A SANDBOX. Test runners and linters are allowed (see
+# _RUNNER_COMMANDS) because a review subagent that cannot run the test suite is
+# largely useless — but they execute arbitrary project code (conftest.py, npm
+# scripts, Makefile targets) and therefore CAN write files. Real enforcement
+# needs OS-level sandboxing. Treat this as a guardrail against the model
+# casually running `git commit`, not as a security boundary against an
+# adversary.
+
+# Commands that cannot change state regardless of their arguments.
+_READ_ONLY_COMMANDS = frozenset({
+    "ls", "pwd", "echo", "date", "whoami", "hostname", "uname", "id",
+    "which", "type", "env", "printenv", "cat", "head", "tail", "wc",
+    "diff", "stat", "file", "du", "df", "tree", "basename", "dirname",
+    "sort", "uniq", "cut", "grep", "rg", "jq", "ps", "true", "false",
+})
+
+# Commands whose read-only-ness depends on the subcommand.
+_GUARDED_SUBCOMMANDS = {
+    "git": frozenset({
+        "diff", "diff-tree", "diff-index", "log", "show", "status", "blame",
+        "rev-parse", "rev-list", "describe", "ls-files", "ls-tree", "shortlog",
+        "cat-file", "show-ref", "name-rev", "merge-base", "count-objects",
+        "whatchanged", "reflog", "grep",
+    }),
+    "npm": frozenset({"run", "run-script", "test", "t", "ls", "list", "outdated", "view", "why"}),
+    "yarn": frozenset({"run", "test", "list", "why", "outdated", "info"}),
+    "pnpm": frozenset({"run", "test", "list", "why", "outdated", "view"}),
+    "cargo": frozenset({"test", "check", "clippy", "tree", "metadata", "bench"}),
+    "go": frozenset({"test", "vet", "list", "doc", "env"}),
+}
+
+# Test runners, linters and type checkers. These execute project-controlled
+# code, so they are read-only only by convention — see the caveat above.
+_RUNNER_COMMANDS = frozenset({
+    "pytest", "tox", "nox", "make", "jest", "vitest", "mocha", "rspec",
+    "phpunit", "mypy", "pyright", "flake8", "pylint", "eslint", "tsc", "ruff",
+})
+
+# Interpreter `-m` modules treated as runners (`python -m pytest ...`).
+_RUNNER_MODULES = frozenset({
+    "pytest", "unittest", "tox", "nox", "mypy", "ruff", "flake8", "pylint",
+    "pyright", "coverage",
+})
+
+_INTERPRETERS = frozenset({"python", "python3", "py"})
+
+# Flags/subcommands that turn an otherwise read-only runner into a file writer.
+# Deliberately long-form only: `-i` means "ignore case" to git grep/log/diff,
+# so treating it as in-place-edit would refuse very common read-only commands.
+_WRITE_FLAGS = frozenset({"--fix", "--write", "--in-place", "--apply", "--save"})
+_WRITE_SUBCOMMANDS = frozenset({"fmt", "format"})
+
+# `git -C path diff` — global options that consume the following token.
+_GIT_GLOBAL_OPTS_WITH_VALUE = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace"})
+
+# Redirections that do not write to a file: `2>&1`, `>&2`, `>/dev/null`.
+_BENIGN_REDIRECT = re.compile(r"\d*>&\d*|&>\s*/dev/null|\d*>>?\s*/dev/null")
+
+
+def _git_subcommand(tokens: List[str]) -> str:
+    """Return the git subcommand, skipping global options like `-C <path>`."""
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in _GIT_GLOBAL_OPTS_WITH_VALUE:
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return tok
+    return ""
+
+
+def _segment_is_read_only(segment: str) -> Tuple[bool, str]:
+    """Classify one already-split command segment."""
+    try:
+        tokens = shlex.split(segment)
+    except ValueError:
+        return False, f"cannot parse command: {segment!r}"
+    if not tokens:
+        return True, ""
+
+    name = os.path.basename(tokens[0]).lower()
+
+    if name in _READ_ONLY_COMMANDS:
+        return True, ""
+
+    if name in _GUARDED_SUBCOMMANDS:
+        sub = _git_subcommand(tokens) if name == "git" else (tokens[1] if len(tokens) > 1 else "")
+        if not sub:
+            return False, f"`{name}` needs a read-only subcommand"
+        if sub not in _GUARDED_SUBCOMMANDS[name]:
+            return False, f"`{name} {sub}` is not a read-only subcommand"
+        return _check_write_flags(name, tokens)
+
+    if name in _RUNNER_COMMANDS:
+        return _check_write_flags(name, tokens)
+
+    if name in _INTERPRETERS:
+        if len(tokens) > 2 and tokens[1] == "-m" and tokens[2] in _RUNNER_MODULES:
+            return _check_write_flags(name, tokens)
+        return False, f"`{name}` can run arbitrary code; only `-m {{{','.join(sorted(_RUNNER_MODULES))}}}` is allowed"
+
+    return False, f"`{name}` is not a read-only command"
+
+
+def _check_write_flags(name: str, tokens: List[str]) -> Tuple[bool, str]:
+    """Reject runner invocations that rewrite files (`ruff --fix`, `cargo fmt`)."""
+    for tok in tokens[1:]:
+        if tok in _WRITE_FLAGS:
+            return False, f"`{name} {tok}` rewrites files"
+        if tok in _WRITE_SUBCOMMANDS:
+            return False, f"`{name} {tok}` rewrites files"
+    return True, ""
+
+
+def is_read_only_command(command: str) -> Tuple[bool, str]:
+    """Decide whether a shell command only inspects state.
+
+    Every segment of a compound command is checked independently, so
+    ``git log && rm -rf build`` is rejected on its second segment rather than
+    passing on the benign first token.
+
+    Returns:
+        ``(True, "")`` if read-only, else ``(False, reason)``.
+    """
+    if not command or not command.strip():
+        return False, "empty command"
+
+    # Command substitution hides an unchecked command inside a benign one.
+    if "$(" in command or "`" in command:
+        return False, "command substitution is not allowed in read-only mode"
+
+    # Any redirection that is not `2>&1` / `>/dev/null` writes a file.
+    if ">" in _BENIGN_REDIRECT.sub("", command):
+        return False, "output redirection is not allowed in read-only mode"
+
+    segments = split_compound_command(command) or [command]
+    for segment in segments:
+        ok, reason = _segment_is_read_only(segment)
+        if not ok:
+            return False, f"{reason} (in: {segment!r})"
+    return True, ""
 
 
 def _scan_single(command: str) -> dict:

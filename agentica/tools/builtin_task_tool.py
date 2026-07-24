@@ -34,23 +34,57 @@ class BuiltinTaskTool(Tool):
     and any custom types registered via ``register_custom_subagent``.
     """
 
-    TASK_SYSTEM_PROMPT_TEMPLATE = dedent("""## task Tool (Subagent Spawner)
+    # Note the leading backslash: without it the first line carries no indent,
+    # ``dedent`` finds a common prefix of "" and leaves every other line indented
+    # by 4 spaces — which markdown renders as a code block and which splits the
+    # substituted subagent table from its header row.
+    TASK_SYSTEM_PROMPT_TEMPLATE = dedent("""\
+    ## task Tool (Subagent Spawner)
 
     Launch a READ-ONLY subagent to investigate a complex task autonomously.
     Each subagent runs in its own isolated context window and returns a single result.
 
     ### Subagents are READ-ONLY (IMPORTANT)
 
-    Every built-in subagent runs on a cheaper/faster model than you and CANNOT
-    edit files or run commands — it can only read, search, and analyze. YOU (the
-    main agent) do ALL edits, writes, and command execution yourself, based on
-    the subagent's findings. Never delegate implementation to a subagent:
-    delegate *investigation*, then implement the result yourself. Delegating edits
-    to a subagent means a weaker model writes the code — do not do it.
+    No subagent can edit files. It can read, search, analyze, and run commands
+    that only *inspect* state (`git diff`, `git log`, `git show`, test and lint
+    runners) — anything that changes state (commits, installs, writes) is
+    refused. YOU (the main agent) do ALL edits and state-changing commands
+    yourself, based on the subagent's findings. Never delegate implementation:
+    delegate *investigation*, then implement the result yourself.
+
+    ### Two Model Tiers (IMPORTANT)
+
+    The `Model` column below tells you which model a type runs on.
+
+    - `auxiliary` types run on a **cheaper, weaker** model. They are for
+      **gathering facts**: where is X, which files touch Y, what does this module
+      do, what does the web say. A weak model is reliable at retrieval.
+    - `main` types run on **your own model** and cost real money. They are for
+      **judgement**: is this code correct, what is the root cause, is this ready
+      to ship. Use them sparingly and always narrowly scoped.
+
+    **Never send a judgement question to an `auxiliary` type.** A weak model
+    answers "looks fine" with total confidence and you will believe it — that is
+    worse than not delegating at all. If the question is "is this right?", either
+    answer it yourself or use a `main` type.
+
+    Read the results accordingly: an `auxiliary` result is **evidence** (paths,
+    snippets, quotes) that you still reason over yourself; a `main` result is an
+    **opinion** you can weigh directly.
 
     ### Available Subagent Types
 
     {subagent_table}
+
+    ### Scoping a `main`-tier Task
+
+    A vague brief wastes the expensive model. Before launching one:
+    - Name the exact files and functions to look at — it cannot see your
+      conversation, though it can run `git diff` itself to see what changed
+    - State the single question you want answered
+    - Say what you already checked so it does not repeat your work
+    - Ask for findings as path:line plus the concrete failure, not general advice
 
     ### Writing the Description (IMPORTANT)
 
@@ -70,26 +104,35 @@ class BuiltinTaskTool(Tool):
 
     After launching a subagent, you know nothing about what it found until it returns.
     - Do NOT fabricate or predict subagent results
-    - Trust the returned output — the subagent's results should generally be trusted
+    - Take the reported facts (paths, snippets, quotes) at face value
     - Do NOT re-read files the subagent already examined unless you need to verify something specific
+    - An `auxiliary` subagent's *conclusions* are not authoritative: if one draws
+      a surprising conclusion, check it against the evidence it cited
 
     ### Parallel Execution
 
     When you have **multiple independent READ-ONLY tasks**, launch them in parallel:
     - Tasks execute simultaneously — total time = max(task_times), not sum(task_times)
     - Ideal for: exploring multiple directories, researching multiple topics
+    - Do not fan out `main`-tier tasks in parallel; they are expensive
 
     ### When to Use
 
     - Exploration: open-ended search across many files or directories
     - Research: web search and document analysis
-    - Code analysis: read-only investigation (trace logic, summarize a module)
+    - Code analysis: descriptive read-only questions (trace logic, summarize a module)
+    - Review: a narrow correctness / root-cause question worth a fresh, unbiased
+      read on your own model — give it the changed files, since it cannot see
+      your diff
     - Multi-part READ-ONLY tasks that can run in parallel
 
     ### When NOT to Use
 
     - Editing / writing files — do it YOURSELF, do not delegate to a subagent
     - Running commands — do it YOURSELF
+    - Any judgement question on an `auxiliary` type — answer it yourself or use `review`
+    - Broad "review everything / check my work" sweeps — either scope it to a
+      module and one question, or do it yourself
     - Avoiding context compression during a large refactor — make a compact
       implementation spec, investigate with a subagent if needed, then edit and
       verify one dependency-ordered phase at a time yourself
@@ -116,30 +159,36 @@ class BuiltinTaskTool(Tool):
     - Use ``system_prompt_override`` only when the default subagent prompt is
       pulling the model off-task.""")
 
-    def __init__(self, model_override: Optional["Model"] = None):
+    def __init__(self, auxiliary_model: Optional["Model"] = None):
         """
         Args:
-            model_override: Optional model used by every subagent spawned through
-                this tool instance. When ``None`` (default), the parent agent's
-                model is cloned. Useful when the caller wants subagents to run on
-                a different (cheaper/faster) model than the parent.
+            auxiliary_model: Model used by ``model_tier="auxiliary"`` subagents
+                spawned through this tool. When ``None`` (default) the parent
+                agent's ``resolve_auxiliary_model("task")`` decides. ``main``-tier
+                types (e.g. ``review``) ignore this and always run on the parent's
+                own model — judgement work must not be downgraded to a weak model.
         """
         super().__init__(name="builtin_task_tool")
-        self._model_override = model_override
+        self._auxiliary_model = auxiliary_model
         self._parent_agent: Optional["Agent"] = None
         self.register(self.task)
         self.functions["task"].manages_own_timeout = True
         self.functions["task"].interrupt_behavior = "block"
 
     def _build_subagent_table(self) -> str:
-        """Build a markdown table of available subagent types."""
+        """Build a markdown table of available subagent types with their model tier."""
         from agentica.subagent import get_available_subagent_types
 
-        lines = ["| Type | Name | Description |", "|------|------|-------------|"]
+        lines = [
+            "| Type | Name | Model | Description |",
+            "|------|------|-------|-------------|",
+        ]
         for st in get_available_subagent_types():
             desc_first_line = st["description"].split("\n")[0]
             desc = desc_first_line[:60] + ("..." if len(desc_first_line) > 60 else "")
-            lines.append(f"| `{st['type']}` | {st['name']} | {desc} |")
+            lines.append(
+                f"| `{st['type']}` | {st['name']} | {st['model_tier']} | {desc} |"
+            )
         return "\n".join(lines)
 
     def get_system_prompt(self) -> Optional[str]:
@@ -164,7 +213,7 @@ class BuiltinTaskTool(Tool):
         inherit this tool at all, but the symmetry is worth keeping.
         """
         from collections import OrderedDict
-        new = BuiltinTaskTool(model_override=self._model_override)
+        new = BuiltinTaskTool(auxiliary_model=self._auxiliary_model)
         if set(new.functions) != set(self.functions):
             new.functions = OrderedDict(
                 (name, new.functions[name])
@@ -187,11 +236,15 @@ class BuiltinTaskTool(Tool):
         Args:
             description: Detailed description of the task. Brief the subagent
                 like a colleague who has no prior context.
-            subagent_type: Subagent type id (``explore`` / ``research`` /
-                ``code``, default ``explore``), or any custom type registered via
-                ``register_custom_subagent``. All built-in types are READ-ONLY —
+            subagent_type: Subagent type id (``explore`` / ``research`` / ``code``
+                / ``review``, default ``explore``), or any custom type registered
+                via ``register_custom_subagent``. All built-in types are READ-ONLY —
                 they cannot edit files or run commands; the main agent does all
-                edits based on the subagent's findings.
+                edits based on the subagent's findings. ``explore`` / ``research``
+                / ``code`` run on the cheap auxiliary model and are for gathering
+                facts; ``review`` runs on the main model and is for judgement
+                questions (correctness, root cause, readiness) that a weak model
+                answers confidently and wrongly.
             timeout: Optional per-call timeout override (seconds).
             max_turns: Optional per-call ReAct turn budget override.
             system_prompt_override: Optional replacement system prompt for this call.
@@ -215,7 +268,7 @@ class BuiltinTaskTool(Tool):
             parent_agent=self._parent_agent,
             task=description,
             agent_type=subagent_type,
-            model_override=self._model_override,
+            auxiliary_model_override=self._auxiliary_model,
             timeout_override=timeout,
             max_turns_override=max_turns,
             system_prompt_override=system_prompt_override,

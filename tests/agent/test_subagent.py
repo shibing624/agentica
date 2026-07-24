@@ -53,7 +53,8 @@ class RecordingAgent:
 class _FakeModel:
     """Stand-in for ``Model`` so ``copy.copy`` clones cleanly during tests."""
 
-    def __init__(self):
+    def __init__(self, model_id="fake-main-model"):
+        self.id = model_id
         self.tools = None
         self.functions = None
         self.function_call_stack = None
@@ -63,13 +64,16 @@ class _FakeModel:
         self.usage = Usage()
 
 
-def _make_parent_agent():
+def _make_parent_agent(auxiliary_model=None):
     working_memory = SimpleNamespace(summary=SimpleNamespace(summary="parent summary"))
+    main_model = _FakeModel()
     return SimpleNamespace(
         name="parent",
         agent_id="parent-agent-id",
         instructions=None,
-        model=_FakeModel(),
+        model=main_model,
+        # Mirrors Agent.resolve_auxiliary_model: per-task model -> auxiliary -> main.
+        resolve_auxiliary_model=lambda task="default": auxiliary_model or main_model,
         tools=[
             Function(name="read_file", entrypoint=lambda: None),
             Function(name="write_file", entrypoint=lambda: None),
@@ -682,22 +686,29 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
 
 # ---------------------------------------------------------------------------
 # Read-only subagent guarantee: built-in subagents must NOT be able to edit
-# files or run commands. Subagents run on the cheap auxiliary model, so letting
-# them edit was the root cause of "the LLM delegated my query to a task
-# subagent and the aux model wrote garbage code". The main agent does edits.
+# files. Subagents run on the cheap auxiliary model, so letting them edit was
+# the root cause of "the LLM delegated my query to a task subagent and the aux
+# model wrote garbage code". The main agent does edits. They MAY run
+# state-inspecting shell commands (git diff, tests) — see execute_policy.
 # ---------------------------------------------------------------------------
 
 
 def test_builtin_subagent_configs_are_read_only():
-    """Every built-in subagent config must deny write/edit/execute tools."""
+    """Built-in subagents deny write/edit tools and restrict execute to reads."""
     from agentica.subagent import (
         CODE_SUBAGENT_CONFIG,
         EXPLORE_SUBAGENT_CONFIG,
         RESEARCH_SUBAGENT_CONFIG,
+        REVIEW_SUBAGENT_CONFIG,
     )
 
-    forbidden = {"write_file", "edit_file", "multi_edit_file", "execute"}
-    for cfg in (EXPLORE_SUBAGENT_CONFIG, RESEARCH_SUBAGENT_CONFIG, CODE_SUBAGENT_CONFIG):
+    forbidden = {"write_file", "edit_file", "multi_edit_file"}
+    for cfg in (
+        EXPLORE_SUBAGENT_CONFIG,
+        RESEARCH_SUBAGENT_CONFIG,
+        CODE_SUBAGENT_CONFIG,
+        REVIEW_SUBAGENT_CONFIG,
+    ):
         denied = set(cfg.denied_tools or [])
         missing = forbidden - denied
         assert not missing, f"{cfg.type.value} config fails to deny {missing}"
@@ -705,11 +716,15 @@ def test_builtin_subagent_configs_are_read_only():
         assert not (allowed & forbidden), (
             f"{cfg.type.value} config exposes forbidden tools: {allowed & forbidden}"
         )
+        assert cfg.execute_policy == "read_only", (
+            f"{cfg.type.value} config must restrict execute to read-only commands"
+        )
 
 
 def test_select_child_tools_strips_edit_tools_for_code_subagent():
-    """Even if the parent has write_file/edit_file/execute, a ``code`` subagent
-    must not inherit them — the cheap aux model must not be able to edit."""
+    """Even if the parent has write_file/edit_file, a ``code`` subagent must not
+    inherit them — the cheap aux model must not be able to edit. ``execute`` is
+    inherited but wrapped by the read-only policy."""
     from agentica.subagent import SubagentRegistry, get_subagent_config
 
     parent = SimpleNamespace(
@@ -736,9 +751,160 @@ def test_select_child_tools_strips_edit_tools_for_code_subagent():
         else:
             child_tool_names.update(SubagentRegistry._tool_names(tool))
 
-    assert child_tool_names == {"read_file", "ls", "glob", "grep"}, (
+    assert child_tool_names == {"read_file", "ls", "glob", "grep", "execute"}, (
         f"code subagent must only inherit read-only tools, got {child_tool_names}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Model tier routing. Retrieval subagents (explore/research/code) run on the
+# cheap auxiliary model; judgement subagents (review) run on the parent's own
+# model. Sending a judgement question to a weak model is worse than not
+# delegating: it returns a confident wrong verdict and the parent stops looking.
+# ---------------------------------------------------------------------------
+
+
+def _spawn_and_get_child_model(parent, agent_type, **spawn_kwargs):
+    registry = SubagentRegistry()
+    with patch("agentica.agent.Agent", RecordingAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(parent_agent=parent, task="t", agent_type=agent_type, **spawn_kwargs)
+        )
+    assert result["status"] == "completed"
+    return RecordingAgent.last_init_kwargs["model"]
+
+
+def test_retrieval_subagents_run_on_auxiliary_model():
+    aux = _FakeModel("fake-aux-model")
+    parent = _make_parent_agent(auxiliary_model=aux)
+
+    for agent_type in ("explore", "research", "code"):
+        child_model = _spawn_and_get_child_model(parent, agent_type)
+        assert child_model.id == "fake-aux-model", (
+            f"{agent_type} is a retrieval type and must run on the cheap model"
+        )
+
+
+def test_review_subagent_runs_on_main_model_even_with_auxiliary_configured():
+    """The whole point of the review type: a judgement task must not be
+    downgraded to the auxiliary model, whichever way the aux model is supplied."""
+    aux = _FakeModel("fake-aux-model")
+    parent = _make_parent_agent(auxiliary_model=aux)
+
+    child_model = _spawn_and_get_child_model(parent, "review")
+    assert child_model.id == "fake-main-model"
+
+    child_model = _spawn_and_get_child_model(
+        parent, "review", auxiliary_model_override=_FakeModel("cli-aux-model")
+    )
+    assert child_model.id == "fake-main-model"
+
+
+def test_auxiliary_model_override_wins_over_parent_resolution_for_aux_tier():
+    parent = _make_parent_agent(auxiliary_model=_FakeModel("profile-aux-model"))
+    child_model = _spawn_and_get_child_model(
+        parent, "explore", auxiliary_model_override=_FakeModel("cli-aux-model")
+    )
+    assert child_model.id == "cli-aux-model"
+
+
+def test_explicit_model_override_wins_over_tier():
+    """SDK callers who name a model get exactly that model, both tiers."""
+    parent = _make_parent_agent(auxiliary_model=_FakeModel("fake-aux-model"))
+    for agent_type in ("explore", "review"):
+        child_model = _spawn_and_get_child_model(
+            parent, agent_type, model_override=_FakeModel("chosen-model")
+        )
+        assert child_model.id == "chosen-model"
+
+
+def test_review_config_is_main_tier_and_others_are_auxiliary():
+    from agentica.subagent import (
+        CODE_SUBAGENT_CONFIG,
+        EXPLORE_SUBAGENT_CONFIG,
+        RESEARCH_SUBAGENT_CONFIG,
+        REVIEW_SUBAGENT_CONFIG,
+    )
+
+    assert REVIEW_SUBAGENT_CONFIG.model_tier == "main"
+    for cfg in (EXPLORE_SUBAGENT_CONFIG, RESEARCH_SUBAGENT_CONFIG, CODE_SUBAGENT_CONFIG):
+        assert cfg.model_tier == "auxiliary", f"{cfg.type.value} must stay on the cheap model"
+
+
+def test_custom_subagent_can_opt_into_main_tier():
+    from agentica.subagent import register_custom_subagent
+
+    cfg = register_custom_subagent(
+        name="arch-critic",
+        description="d",
+        system_prompt="s",
+        model_tier="main",
+    )
+    assert cfg.model_tier == "main"
+    assert get_subagent_config("arch-critic").model_tier == "main"
+    # Default stays cheap so custom types don't silently burn the main model.
+    assert register_custom_subagent(name="finder", description="d", system_prompt="s").model_tier == "auxiliary"
+
+
+def test_subagent_start_event_reports_the_model_used():
+    """Users judged subagent output without knowing which model produced it."""
+    parent = _make_parent_agent(auxiliary_model=_FakeModel("fake-aux-model"))
+    events = []
+    parent._event_callback = events.append
+
+    _spawn_and_get_child_model(parent, "explore")
+    start = next(e for e in events if e["type"] == "subagent.start")
+    assert start["model_id"] == "fake-aux-model"
+
+
+def test_task_tool_forwards_auxiliary_model_as_tier_hint_not_hard_override():
+    """The CLI's aux model must not force ``review`` onto the cheap model, so
+    the tool passes it as ``auxiliary_model_override`` rather than
+    ``model_override``."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    aux = _FakeModel("cli-aux-model")
+    tool = BuiltinTaskTool(auxiliary_model=aux)
+    tool.set_parent_agent(SimpleNamespace())
+    captured = {}
+
+    async def fake_spawn(self, **kwargs):
+        captured.update(kwargs)
+        return {"status": "completed", "content": "ok", "agent_type": "review"}
+
+    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+        asyncio.run(tool.task("d", subagent_type="review"))
+
+    assert captured["auxiliary_model_override"] is aux
+    assert "model_override" not in captured
+
+
+def test_task_system_prompt_exposes_model_tier_per_type():
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    prompt = BuiltinTaskTool().get_system_prompt()
+    assert "| Type | Name | Model | Description |" in prompt
+    review_row = next(line for line in prompt.splitlines() if line.startswith("| `review`"))
+    explore_row = next(line for line in prompt.splitlines() if line.startswith("| `explore`"))
+    # The tier labels must be the literal ``model_tier`` values: users copy them
+    # into ``model_tier:`` frontmatter, where anything else is silently rejected.
+    assert "| main |" in review_row
+    assert "| auxiliary |" in explore_row
+
+
+def test_task_system_prompt_is_not_indented():
+    """``dedent`` silently no-ops when the first line carries no indent, which
+    ships the whole prompt as a markdown code block and splits the subagent
+    table from its header row."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    indented = [
+        line for line in BuiltinTaskTool().get_system_prompt().splitlines()
+        if line.startswith("    ") and not line.lstrip().startswith("-")
+    ]
+    assert not indented, f"prompt lines must not be block-indented: {indented[:3]}"
 
 
 def test_task_tool_default_subagent_type_is_explore():

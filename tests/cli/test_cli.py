@@ -1988,6 +1988,53 @@ class TestPendingQueueTimestamps(unittest.TestCase):
         self.assertEqual([p[0] for p in q.peek_all_with_timestamps()], ["a"])
 
 
+class TestQueueItemPreview(unittest.TestCase):
+    """The queue bar shows every queued payload, and says how it will run.
+
+    Regression: the bar used to drop every ``startswith("/")`` item, so a
+    queued ``/requesting-code-review ...`` rendered as a blank row and looked
+    like it never entered the queue.
+    """
+
+    def test_skill_and_cli_slash_prompts_preview(self):
+        from agentica.cli.interactive import queue_item_preview
+
+        self.assertEqual(
+            queue_item_preview("/requesting-code-review git status的代码"),
+            "/requesting-code-review git status的代码",
+        )
+        self.assertEqual(queue_item_preview("/status"), "/status")
+        self.assertEqual(queue_item_preview("normal follow-up"), "normal follow-up")
+
+    def test_shell_mode_items_are_marked(self):
+        from agentica.cli.interactive import queue_item_preview
+
+        self.assertEqual(queue_item_preview("pwd", shell_mode=True), "$ pwd")
+        self.assertEqual(queue_item_preview("pwd", shell_mode=False), "pwd")
+
+    def test_shell_mode_exempt_commands_are_not_marked(self):
+        from agentica.cli.interactive import queue_item_preview
+
+        self.assertEqual(queue_item_preview("/model", shell_mode=True), "/model")
+        self.assertEqual(
+            queue_item_preview("/requesting-code-review x", shell_mode=True),
+            "$ /requesting-code-review x",
+        )
+
+    def test_image_payload_previews_its_text(self):
+        from agentica.cli.interactive import queue_item_preview
+
+        self.assertEqual(queue_item_preview(("describe this", ["/tmp/a.png"])), "describe this")
+
+    def test_btw_tuple_preview(self):
+        from agentica.cli.interactive import queue_item_preview
+
+        self.assertEqual(
+            queue_item_preview(("__BTW__", "what model is this?")),
+            "__BTW__: what model is this?",
+        )
+
+
 class TestQueueCommandEditInsert(unittest.TestCase):
     """``/queue edit <n> <text>`` and ``/queue insert <n> <text>`` give users
     in-place editing of the pending queue without the

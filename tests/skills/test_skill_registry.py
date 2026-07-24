@@ -163,6 +163,39 @@ class TestSkillMethods(unittest.TestCase):
         self.assertIn("Base directory:", prompt)
         self.assertIn("Instructions", prompt)
 
+    def test_render_invocation_without_arguments_is_plain_prompt(self):
+        skill = self._make_skill(name="MySkill", content="Instructions", trigger="/my")
+        self.assertEqual(skill.render_invocation(""), skill.get_prompt())
+        self.assertEqual(skill.render_invocation("   "), skill.get_prompt())
+
+    def test_render_invocation_frames_arguments_as_scope(self):
+        """Regression: arguments used to land under a ``## User Request``
+        heading, so ``/requesting-code-review git status的代码`` read as
+        "commit the code from git status" instead of naming the review scope.
+        """
+        skill = self._make_skill(
+            name="Requesting Code Review",
+            content="Review workflow steps",
+            trigger="/requesting-code-review",
+        )
+        rendered = skill.render_invocation("git status的代码")
+
+        self.assertNotIn("## User Request", rendered)
+        self.assertIn("Review workflow steps", rendered)
+        self.assertIn("`/requesting-code-review git status的代码`", rendered)
+        self.assertIn("Argument: git status的代码", rendered)
+        self.assertIn("never as a standalone instruction", rendered)
+
+    def test_render_invocation_includes_argument_hint(self):
+        skill = self._make_skill(
+            name="MySkill", trigger="/my", argument_hint="<file-path>"
+        )
+        rendered = skill.render_invocation("a.py")
+        self.assertIn("Expected argument: <file-path>", rendered)
+
+        no_hint = self._make_skill(name="Other", trigger="/other")
+        self.assertNotIn("Expected argument:", no_hint.render_invocation("a.py"))
+
     def test_to_xml(self):
         skill = self._make_skill(name="MySkill", description="Does stuff", location="user")
         xml = skill.to_xml()
@@ -213,6 +246,19 @@ class TestSkillRegistry(unittest.TestCase):
         skill = self._make_skill("A")
         self.assertTrue(self.registry.register(skill))
         self.assertIs(self.registry.get("A"), skill)
+
+    def test_expand_invocation_renders_matching_skill(self):
+        self.registry.register(self._make_skill("Reviewer", trigger="/review"))
+        expanded = self.registry.expand_invocation("/review src/app.py")
+        self.assertIsNotNone(expanded)
+        self.assertIn("Argument: src/app.py", expanded)
+        self.assertIn("body", expanded)
+
+    def test_expand_invocation_returns_none_for_non_skill_text(self):
+        self.registry.register(self._make_skill("Reviewer", trigger="/review"))
+        self.assertIsNone(self.registry.expand_invocation("just a question"))
+        self.assertIsNone(self.registry.expand_invocation("/unknown-command x"))
+        self.assertIsNone(self.registry.expand_invocation(""))
 
     def test_exists(self):
         skill = self._make_skill("A")
