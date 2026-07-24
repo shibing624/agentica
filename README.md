@@ -28,6 +28,7 @@
 
 ## 🔥 News
 
+- [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
 - [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)

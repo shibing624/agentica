@@ -19,6 +19,16 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+## [1.4.10] - 2026-07-24
+
+### Added
+- **Native image capability routing.** Model image support is now resolved from `models.dev` catalog metadata, with explicit `supports_images` overrides for private or aliased endpoints. Vision-capable base models receive original images directly; text-only models use the external OCR fallback.
+- **Simplified session naming.** CLI `/rename <name>` replaces `/session rename`, and `/resume` accepts a session number, name, or ID prefix.
+
+### Fixed
+- **Pillow is declared as a core dependency.** The model and default provider import paths use Pillow for PIL image inputs and image format detection, so the `1.4.10` wheel now installs `Pillow>=10.0` automatically.
+- **Wheel installation is validated without checkout shadowing.** CI imports both the latest PyPI release and the newly built wheel outside the repository root, and verifies that the current wheel installs and imports Pillow.
+
 ## [1.4.9] - 2026-07-21
 
 ### Added
