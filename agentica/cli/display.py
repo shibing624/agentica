@@ -756,6 +756,11 @@ class StreamDisplayManager:
         # the overwrite) so the result display can show a real old→new diff.
         # Keyed by the raw file_path arg; popped when the result is rendered.
         self._write_old: Dict[str, str] = {}
+        # tool_call_id of the tool block currently at the bottom of the
+        # transcript — i.e. the call line (or merged block) printed last. A
+        # ``⎿`` result body only reads as "belongs to the line above" while
+        # this still matches its own id; see ``_print_result_anchor``.
+        self._open_block_id: Optional[str] = None
         # Truncated blocks are cleared at the start of each user turn in
         # display_user_message(), NOT here. Clearing here would wipe the
         # user's just-remembered long query (display_user_message runs before
@@ -847,7 +852,8 @@ class StreamDisplayManager:
                 self.console.print()
             self.in_tool_section = True
 
-    def display_tool(self, tool_name: str, tool_args: dict):
+    def display_tool(self, tool_name: str, tool_args: dict,
+                     tool_call_id: Optional[str] = None):
         """Display a single tool call.
 
         Every tool call counts toward the per-turn total reported in the closing
@@ -876,6 +882,7 @@ class StreamDisplayManager:
             return
         self.start_tool_section()
         _display_tool_impl(self._assistant_console, tool_name, tool_args, self.tool_count)
+        self._open_block_id = tool_call_id
 
     def _stash_write_file_old(self, tool_args: dict) -> None:
         """Best-effort read of a write_file target's current content (pre-write).
@@ -1136,15 +1143,47 @@ class StreamDisplayManager:
     _EXECUTE_HEAD_LINES = 10
     _EXECUTE_TAIL_LINES = 10
 
+    def _print_result_anchor(self, tool_name: str, tool_args: dict) -> None:
+        """Re-state the call a detached ``⎿`` result body belongs to.
+
+        Tools render with two different strategies: ``_DEFERRED_TOOLS`` /
+        ``_WRITE_DIFF_TOOLS`` emit ONE self-labelled block at completion, while
+        every other tool prints its call line at START time (so a long
+        ``execute`` is visible while it runs) and its result body at completion.
+        The runner emits a whole parallel batch's completions together, so any
+        earlier-called deferred tool's block lands *between* such a call line
+        and its own body — and ``⎿``, which means "continues the line above",
+        then points at the wrong call. One dim line naming the real call makes
+        the block unambiguous without giving up the live call line.
+        """
+        icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+        params = format_tool_display(tool_name, tool_args).replace("\n", " ")
+        if len(params) > 60:
+            params = params[:57] + "..."
+        line = f"    ↳ {icon} {tool_name}"
+        if params:
+            line += f" {params}"
+        self._assistant_console.print(line, style="dim")
+
     def display_tool_result(self, tool_name: str, result_content: str,
                             is_error: bool = False, elapsed: float = None,
-                            tool_args: Optional[dict] = None):
+                            tool_args: Optional[dict] = None,
+                            tool_call_id: Optional[str] = None):
         """Display tool execution result.
 
         For ``_DEFERRED_TOOLS`` the call line was suppressed at start time, so
         here we emit the merged single line ``icon name params - count (elapsed)``.
+
+        ``tool_call_id`` identifies which call this result belongs to; when the
+        transcript's last tool block is a *different* call, a bare ``⎿`` body
+        would be misread, so it gets an anchor line first. Callers that render
+        one tool at a time can omit it.
         """
         elapsed_str = self._fmt_elapsed(elapsed)
+        detached = self._open_block_id != tool_call_id
+        # This tool's block is the transcript's last one from here on, whichever
+        # branch below renders it.
+        self._open_block_id = tool_call_id
 
         if tool_name in self._DEFERRED_TOOLS:
             self.start_tool_section()
@@ -1170,12 +1209,19 @@ class StreamDisplayManager:
             return
 
         if not result_content:
+            if detached:
+                self._print_result_anchor(tool_name, tool_args or {})
             self._assistant_console.print(f"    [dim]⎿ done{elapsed_str}[/dim]")
             return
 
         if tool_name == "task":
+            # Its footer already reads ``⎿ task done (...)`` and the subagent's
+            # own steps are nested under it, so it never needs an anchor.
             self._display_task_result(result_content, is_error)
             return
+
+        if detached:
+            self._print_result_anchor(tool_name, tool_args or {})
 
         result_str = str(result_content)
 

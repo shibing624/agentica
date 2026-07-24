@@ -281,6 +281,22 @@ class WorkingMemory(BaseModel):
         """Adds an AgentRun to the runs list."""
         self.runs.append(agent_run)
 
+    def collapse_runs(self, messages: List[Message]) -> None:
+        """Replace `runs` with a single AgentRun carrying `messages`.
+
+        Compaction rewrites `self.messages`, but the prompt builder reads
+        history from `runs` via `get_messages_from_last_n_runs()`. Rewriting
+        only `self.messages` shrinks the archive while the next request still
+        carries the full pre-compact history — so any caller that compacts
+        `self.messages` must collapse `runs` through here as well.
+        """
+        if not messages:
+            self.runs = []
+            return
+        self.runs = [
+            AgentRun(response=RunResponse(messages=[m.model_copy(deep=True) for m in messages]))
+        ]
+
     def hydrate_runs_from_history(self, history_messages: List[Dict[str, Any]]) -> int:
         """Rebuild `runs` from a flat list of persisted messages (session resume).
 

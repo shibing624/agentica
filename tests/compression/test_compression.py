@@ -413,10 +413,12 @@ class TestCompressionReport(unittest.TestCase):
             task_anchor=None,
             workspace=None,
         )
-        model = SimpleNamespace(id="gpt-4o", tools=[], context_window=None)
+        model = SimpleNamespace(id="gpt-4o", tools=[], context_window=None, _cost_tracker=None)
+
+        from agentica.model.loop_state import LoopState
 
         with patch("agentica.compression.manager.count_tokens", return_value=10):
-            asyncio.run(Runner._maybe_compress_messages(messages, agent, model))
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
         report = agent.run_response.metrics["compression"]["last_report"]
         self.assertEqual(report["trigger"], "threshold")
@@ -534,6 +536,75 @@ class TestCompressionManagerDropOldMessages(unittest.TestCase):
         self.assertEqual(dropped, 0)
 
 
+class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
+    """auto_compact must not clear the system prompt or the pending turn.
+
+    A blind `messages.clear()` left the rest of the run with no instructions and
+    a conversation ending on an assistant turn, which providers reject with
+    "does not support assistant message prefill".
+    """
+
+    def _compact(self, msgs):
+        from agentica.compression.manager import CompressionManager
+        cm = CompressionManager()
+        with patch.object(cm, "_summarise_conversation",
+                          new_callable=AsyncMock, return_value="the summary"):
+            result = asyncio.run(cm.auto_compact(msgs, force=True))
+        self.assertTrue(result)
+        return msgs
+
+    def test_system_prompt_survives(self):
+        msgs = self._compact([
+            Message(role="system", content="you are a helpful agent"),
+            Message(role="user", content="old question"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current question"),
+        ])
+        self.assertEqual(msgs[0].role, "system")
+        self.assertEqual(msgs[0].content, "you are a helpful agent")
+
+    def test_pending_user_question_survives_verbatim(self):
+        msgs = self._compact([
+            Message(role="system", content="sys"),
+            Message(role="user", content="old question"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current question"),
+        ])
+        self.assertEqual(msgs[-1].role, "user")
+        self.assertEqual(msgs[-1].content, "current question")
+
+    def test_never_ends_on_an_assistant_turn(self):
+        msgs = self._compact([
+            Message(role="user", content="q1"),
+            Message(role="assistant", content="a1"),
+            Message(role="user", content="q2"),
+        ])
+        self.assertNotEqual(msgs[-1].role, "assistant")
+
+    def test_mid_turn_tool_pairing_is_kept(self):
+        """Tool results must stay with the assistant tool_calls that produced them."""
+        msgs = self._compact([
+            Message(role="system", content="sys"),
+            Message(role="user", content="old"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current question"),
+            Message(role="assistant", tool_calls=[{"id": "t1", "function": {"name": "ls", "arguments": "{}"}}]),
+            Message(role="tool", tool_call_id="t1", content="file list"),
+        ])
+        self.assertEqual([m.role for m in msgs[-3:]], ["user", "assistant", "tool"])
+        self.assertEqual(msgs[-1].tool_call_id, "t1")
+
+    def test_old_turns_are_replaced_by_the_summary(self):
+        msgs = self._compact([
+            Message(role="user", content="old question"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current question"),
+        ])
+        joined = " ".join(str(m.content) for m in msgs)
+        self.assertIn("the summary", joined)
+        self.assertNotIn("old answer", joined)
+
+
 class TestCompressionManagerAutoCompact(unittest.TestCase):
     """auto_compact circuit breaker and SM-compact."""
 
@@ -559,9 +630,11 @@ class TestCompressionManagerAutoCompact(unittest.TestCase):
 
         result = asyncio.run(cm.auto_compact(msgs, force=True, working_memory=wm))
         self.assertTrue(result)
-        self.assertEqual(len(msgs), 2)
         self.assertIn("[Context compressed]", msgs[0].content)
         self.assertIn("project setup", msgs[0].content)
+        # The trailing turn is kept verbatim after the summary pair.
+        self.assertEqual([m.role for m in msgs], ["user", "assistant", "user", "assistant"])
+        self.assertEqual(msgs[2].content, "hi")
 
     def test_failure_increments_counter(self):
         from agentica.compression.manager import CompressionManager

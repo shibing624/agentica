@@ -828,12 +828,35 @@ class CompressionManager:
             )
             return False
 
-        # Replace message list in-place
+        # Replace message list in-place, preserving two things a blind clear
+        # would destroy:
+        #
+        # * The system prompt — it carries the instructions, tool guidance and
+        #   workspace context, and the rest of the run would otherwise be sent
+        #   with none of them. Stage 3 (`compress`) keeps it via
+        #   `preserved_head`; stage 4 must match.
+        # * The trailing turn, from the last user message on. That message is
+        #   the request still awaiting an answer; dropping it leaves the
+        #   conversation ending on an assistant turn, which the model is then
+        #   asked to continue from (providers reject the prefill outright).
+        #   Keeping the whole tail also keeps tool_calls paired with their
+        #   results. The summary covers this span too, so nothing is lost when
+        #   the tail turns out to be an injected notice rather than the question.
+        preserved_system = [m for m in messages if m.role == "system"]
+        tail_start = len(messages)
+        for i in range(len(messages) - 1, -1, -1):
+            if messages[i].role == "user":
+                tail_start = i
+                break
+        preserved_tail = [m for m in messages[tail_start:] if m.role != "system"]
+
         messages.clear()
+        messages.extend(preserved_system)
         messages.append(Message(role="user",
                                 content=f"[Context compressed]\n\n{summary}"))
         messages.append(Message(role="assistant",
                                 content="Understood. I have the conversation context. Continuing."))
+        messages.extend(preserved_tail)
 
         self._consecutive_auto_compact_failures = 0
         self.stats["auto_compact_count"] = self.stats.get("auto_compact_count", 0) + 1

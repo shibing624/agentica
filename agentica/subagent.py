@@ -469,6 +469,10 @@ class SubagentRegistry:
         cloned.tool_choice = None
         cloned.metrics = {}
         cloned.usage = Usage()
+        # A shallow copy carries the parent's tracker reference; a `main`-tier
+        # subagent clones the parent's own model, so leaving it attached lets
+        # child calls report into the parent's context watermark and cost.
+        cloned._cost_tracker = None
         for attr in ("client", "http_client", "async_client"):
             if hasattr(cloned, attr):
                 setattr(cloned, attr, None)

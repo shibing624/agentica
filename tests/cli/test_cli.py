@@ -840,6 +840,77 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("b0", blocks[1]["content"])
 
 
+class TestToolResultAnchoring(unittest.TestCase):
+    """A ``⎿`` result block must name its own call when it is not adjacent to it.
+
+    Deferred tools (``read_file`` / ``grep`` / ...) render as ONE atomic block at
+    completion, while ``execute`` prints its call line at START time and its
+    result body at completion. In a parallel batch where a deferred tool is
+    called FIRST, the deferred block lands between ``execute``'s call line and
+    ``execute``'s body — so the ``⎿`` block reads as the deferred tool's result.
+    """
+
+    def _mgr_and_buf(self):
+        from io import StringIO
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        buf = StringIO()
+        con = Console(file=buf, width=120, force_terminal=False, no_color=True)
+        return StreamDisplayManager(con), buf
+
+    def _render_read_then_execute(self):
+        """Batch call order: read_file (deferred) then execute; in-order results."""
+        mgr, buf = self._mgr_and_buf()
+        mgr.display_tool("read_file", {"file_path": "/proj/working.py",
+                                       "offset": 284, "limit": 30},
+                         tool_call_id="c1")
+        mgr.display_tool("execute", {"command": "grep -n needle cost_tracker.py"},
+                         tool_call_id="c2")
+        mgr.display_tool_result("read_file", "\n".join(f"line {i}" for i in range(34)),
+                                elapsed=0.058, tool_args={"file_path": "/proj/working.py"},
+                                tool_call_id="c1")
+        mgr.display_tool_result("execute", "cost_tracker.py:357: needle here",
+                                elapsed=0.025,
+                                tool_args={"command": "grep -n needle cost_tracker.py"},
+                                tool_call_id="c2")
+        return [ln for ln in buf.getvalue().splitlines() if ln.strip()]
+
+    def test_detached_execute_result_is_anchored_to_its_own_call(self):
+        lines = self._render_read_then_execute()
+        body_idx = next(i for i, ln in enumerate(lines) if "needle here" in ln)
+        # The line directly above the result body must identify execute, not
+        # read_file — otherwise the block reads as read_file's output.
+        anchor = lines[body_idx - 1]
+        self.assertIn("execute", anchor,
+                      f"result body must be anchored to execute, got: {anchor!r}")
+        self.assertNotIn("read_file", anchor)
+
+    def test_adjacent_result_is_not_anchored_twice(self):
+        """The common case (call line immediately followed by its own result)
+        must stay byte-identical — no redundant re-statement of the call."""
+        mgr, buf = self._mgr_and_buf()
+        mgr.display_tool("execute", {"command": "ls"}, tool_call_id="c1")
+        mgr.display_tool_result("execute", "a.py\nb.py", elapsed=0.01,
+                                tool_args={"command": "ls"}, tool_call_id="c1")
+        out = buf.getvalue()
+        self.assertEqual(out.count("execute"), 1,
+                         "execute must be named once when its result is adjacent")
+
+    def test_deferred_result_keeps_single_merged_line(self):
+        """Deferred tools are self-labelled already — never anchor them."""
+        mgr, buf = self._mgr_and_buf()
+        mgr.display_tool("execute", {"command": "ls"}, tool_call_id="c1")
+        mgr.display_tool_result("execute", "a.py", elapsed=0.01,
+                                tool_args={"command": "ls"}, tool_call_id="c1")
+        mgr.display_tool_result("grep", "hit\nhit2", elapsed=0.02,
+                                tool_args={"pattern": "x", "path": "p"},
+                                tool_call_id="c2")
+        out = buf.getvalue()
+        self.assertEqual(out.count("grep"), 1,
+                         "deferred merged line must not gain an extra anchor line")
+
+
 class TestStreamDisplayManagerSubagent(unittest.TestCase):
     """Subagent rendering policy: tool-first by default, dedup, batch prefix."""
 

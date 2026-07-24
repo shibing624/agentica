@@ -41,6 +41,14 @@ class LoopState:
     # Reactive compact (one-shot per loop invocation)
     reactive_compact_done: bool = False
 
+    # Set when a compression stage *removed* messages from the in-flight list.
+    # That invalidates the `num_input_messages` prefix boundary the runner uses
+    # to slice out "this turn's new messages", so persistence must switch to
+    # storing the whole surviving list instead. Content-only compaction (tool
+    # result truncation, micro-compact) leaves the boundary intact and does not
+    # set this.
+    context_collapsed: bool = False
+
     # Tool-history sanitize (one-shot per loop invocation)
     tool_history_sanitized_done: bool = False
 

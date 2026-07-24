@@ -119,6 +119,51 @@ class TestCostTrackerRecord(unittest.TestCase):
         self.assertTrue(ct.has_unknown_model)
 
 
+class TestCostTrackerContextWatermark(unittest.TestCase):
+    """context_input_tokens tracks the live context size, not the last call."""
+
+    def test_tracks_growing_prompt(self):
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=1000, output_tokens=10)
+        ct.record("gpt-4o", input_tokens=5000, output_tokens=10)
+        self.assertEqual(ct.context_input_tokens, 5000)
+
+    def test_small_auxiliary_call_does_not_shrink_it(self):
+        """A memory-extraction call sharing the tracker must not clobber it."""
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=120000, output_tokens=200)
+        ct.record("gpt-4o", input_tokens=300, output_tokens=50)
+        self.assertEqual(ct.context_input_tokens, 120000)
+
+    def test_cached_prefix_counts_toward_context(self):
+        """Anthropic-style providers exclude cache hits from input_tokens."""
+        ct = CostTracker()
+        ct.record(
+            "claude-3-5-sonnet",
+            input_tokens=500,
+            output_tokens=50,
+            cache_read_tokens=80000,
+            cache_write_tokens=1500,
+        )
+        self.assertEqual(ct.context_input_tokens, 82000)
+
+    def test_reset_lets_watermark_fall_after_compaction(self):
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=120000, output_tokens=200)
+        ct.reset_context_watermark()
+        ct.record("gpt-4o", input_tokens=8000, output_tokens=200)
+        self.assertEqual(ct.context_input_tokens, 8000)
+
+    def test_reset_preserves_cost_and_totals(self):
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=1000, output_tokens=100)
+        cost_before = ct.total_cost_usd
+        ct.reset_context_watermark()
+        self.assertEqual(ct.total_input_tokens, 1000)
+        self.assertEqual(ct.turns, 1)
+        self.assertEqual(ct.total_cost_usd, cost_before)
+
+
 class TestCostTrackerSummary(unittest.TestCase):
     """summary() generates human-readable output."""
 

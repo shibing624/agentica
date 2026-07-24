@@ -765,6 +765,7 @@ class Runner:
         messages: List[Message],
         agent: "Agent",
         model: "Model",
+        loop_state: "LoopState",
     ) -> None:
         """Run the multi-stage compression pipeline before each LLM call.
 
@@ -774,9 +775,21 @@ class Runner:
           Stage 3 - Rule-based compress (free, O(n))
           Stage 4 - Auto-compact (costly, LLM summarisation)
           Stage 5 (reactive compact) is handled in _call_with_retry on API error.
+
+        Doubles as the chokepoint that clears the CostTracker context watermark:
+        this is the one place every main-loop LLM call passes through, so the
+        watermark ends up holding the prompt size of the *latest* main call
+        rather than a stale pre-compaction peak. Auxiliary calls (memory
+        extraction, summarisation) never come through here, so they can only
+        raise the watermark if they are bigger — which they are not.
+
+        Sets ``loop_state.context_collapsed`` whenever a stage drops messages,
+        so the caller knows the ``num_input_messages`` prefix boundary is gone.
         """
         cb = agent._event_callback
         agent_name = agent.name or "Agent"
+        if model._cost_tracker is not None:
+            model._cost_tracker.reset_context_watermark()
 
         def _notify_evicted_file_reads(stale_paths: List[str], reason: str) -> None:
             """Make file-context invalidation visible to both the model and observers."""
@@ -861,6 +874,8 @@ class Runner:
                 task_anchor=agent.task_anchor,
                 user_id=_uid,
             )
+            if len(messages) < before:
+                loop_state.context_collapsed = True
             evicted_messages = cm.get_evicted_tool_messages()
             if any(message.tool_name == "read_file" for message in evicted_messages):
                 _notify_evicted_file_reads(
@@ -891,6 +906,7 @@ class Runner:
         t0 = time.monotonic()
         compacted = await cm.auto_compact(messages, model=model)
         if compacted:
+            loop_state.context_collapsed = True
             stale_paths = (
                 agent.mark_evicted_file_reads([], all_reads=True)
                 if agent.tools else []
@@ -928,6 +944,10 @@ class Runner:
         compacted = await cm.auto_compact(messages, model=model, force=True)
         if compacted:
             logger.info("Reactive compact triggered (prompt_too_long) -- retrying")
+            # The retry happens inside _call_with_retry, bypassing the
+            # _maybe_compress_messages chokepoint that normally clears this.
+            if model._cost_tracker is not None:
+                model._cost_tracker.reset_context_watermark()
             cb = agent._event_callback
             stale_paths = (
                 agent.mark_evicted_file_reads([], all_reads=True)
@@ -1254,6 +1274,7 @@ class Runner:
                     if is_too_long and not state.reactive_compact_done and not is_fallback:
                         state.reactive_compact_done = True
                         if await Runner._try_reactive_compact(messages, agent, current):
+                            state.context_collapsed = True
                             continue
 
                     # Content filter raised as exception (some providers do this
@@ -1373,6 +1394,8 @@ class Runner:
         messages_for_model: List[Message],
         num_input_messages: int,
         model_response: Any,
+        loop_state: "LoopState",
+        input_message_ids: set,
     ) -> None:
         """On user cancel, preserve the turn instead of discarding it.
 
@@ -1398,16 +1421,24 @@ class Runner:
         # messages_for_model. Patch the turn's last assistant message if one
         # exists (cancel during tool exec / between turns), else synthesize one
         # (cancel mid-stream) so /history surfaces the partial + marker.
-        turn_msgs = list(messages_for_model[num_input_messages:])
+        if loop_state.context_collapsed:
+            turn_msgs = [
+                m for m in messages_for_model
+                if id(m) not in input_message_ids and m.role != "system"
+            ]
+        else:
+            turn_msgs = list(messages_for_model[num_input_messages:])
         last_asst = None
         for _m in reversed(turn_msgs):
             if isinstance(_m, Message) and _m.role == "assistant":
                 last_asst = _m
                 break
+        synthesized: Optional[Message] = None
         if last_asst is not None:
             last_asst.content = persisted
         else:
-            turn_msgs.append(Message(role="assistant", content=persisted))
+            synthesized = Message(role="assistant", content=persisted)
+            turn_msgs.append(synthesized)
 
         # working_memory so /history shows this exchange.
         if system_message is not None:
@@ -1420,6 +1451,17 @@ class Runner:
         if user_messages:
             agent_run.message = user_messages[0]
             agent_run.messages = list(user_messages)
+        if loop_state.context_collapsed:
+            # Mirror the success path: the run must carry the whole surviving
+            # conversation before the runs it supersedes are dropped, or the
+            # cancel would take the entire history down with it.
+            survived = [m for m in messages_for_model if m.role != "system"]
+            if synthesized is not None:
+                survived.append(synthesized)
+            if system_message is not None:
+                survived.insert(0, system_message)
+            agent.run_response.messages = survived
+            agent.working_memory.runs.clear()
         agent.working_memory.add_run(agent_run)
 
         # session log so /resume restores this turn.
@@ -1797,22 +1839,25 @@ class Runner:
                         context=agent.context,
                     )
 
+                # Created before message prep so the cancel handler below can
+                # always read it, however early the interruption lands.
+                loop_state = LoopState(
+                    max_turns=agent._max_turns,
+                    max_api_retry=agent._run_max_api_retry,
+                )
+
                 # 3. Prepare messages
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
                     message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
                 )
                 num_input_messages = len(messages_for_model)
+                input_message_ids = {id(m) for m in messages_for_model}
 
                 if agent.stream_intermediate_steps:
                     yield self.generic_run_response("Run started", RunEvent.run_started)
 
                 # 4. Generate response from the Model
                 # The agentic loop (tool call → LLM → ...) is driven here.
-                loop_state = LoopState(
-                    max_turns=agent._max_turns,
-                    max_api_retry=agent._run_max_api_retry,
-                )
-
                 model_response: ModelResponse
                 agent.model = cast(Model, agent.model)
 
@@ -1904,7 +1949,9 @@ class Runner:
                         active_model = fallback_transaction_model or agent.model
 
                         # Compression pipeline (cheapest-first, before LLM call)
-                        await self._maybe_compress_messages(messages_for_model, agent, active_model)
+                        await self._maybe_compress_messages(
+                            messages_for_model, agent, active_model, loop_state
+                        )
 
                         # --- Lifecycle: LLM start (stream) ---
                         await self._dispatch_run_hook(
@@ -2127,7 +2174,9 @@ class Runner:
                         active_model = fallback_transaction_model or agent.model
 
                         # Compression pipeline (cheapest-first, before LLM call)
-                        await self._maybe_compress_messages(messages_for_model, agent, active_model)
+                        await self._maybe_compress_messages(
+                            messages_for_model, agent, active_model, loop_state
+                        )
 
                         # --- Lifecycle: LLM start (non-stream) ---
                         await self._dispatch_run_hook(
@@ -2260,8 +2309,15 @@ class Runner:
                             deduped_tool_calls.append(tool_call)
                         agent.run_response.tools = deduped_tool_calls
 
-                # Build run messages
-                run_messages = user_messages + messages_for_model[num_input_messages:]
+                # Build run messages. When a compression stage dropped messages
+                # the num_input_messages prefix boundary no longer exists, and
+                # slicing it would silently discard this turn's own reply. What
+                # survived compaction *is* the whole conversation state, so
+                # store that; the superseded runs are dropped below.
+                if loop_state.context_collapsed:
+                    run_messages = [m for m in messages_for_model if m.role != "system"]
+                else:
+                    run_messages = user_messages + messages_for_model[num_input_messages:]
                 if system_message is not None:
                     run_messages.insert(0, system_message)
                 agent.run_response.messages = run_messages
@@ -2308,14 +2364,29 @@ class Runner:
                             system_message,
                             system_message_role=agent.prompt_config.system_message_role,
                         )
-                    agent.working_memory.add_messages(
-                        messages=(user_messages + messages_for_model[num_input_messages:])
-                    )
+                    # The flat archive (/history, /export) only ever wants this
+                    # turn's additions. Identity is the reliable marker once
+                    # compaction has reshuffled the list; the summary messages it
+                    # injected are new, and belong in the transcript.
+                    if loop_state.context_collapsed:
+                        turn_messages = [
+                            m for m in messages_for_model
+                            if id(m) not in input_message_ids and m.role != "system"
+                        ]
+                    else:
+                        turn_messages = messages_for_model[num_input_messages:]
+                    agent.working_memory.add_messages(messages=(user_messages + turn_messages))
 
                     agent_run = AgentRun(response=agent.run_response)
                     if user_messages:
                         agent_run.message = user_messages[0]
                         agent_run.messages = list(user_messages)
+                    if loop_state.context_collapsed:
+                        # This run carries the post-compaction conversation in
+                        # full, so the runs it summarises must go — otherwise the
+                        # next turn rebuilds the pre-compaction history from them
+                        # and the compaction saves nothing beyond this run.
+                        agent.working_memory.runs.clear()
                     agent.working_memory.add_run(agent_run)
                     _memory_persisted = True
 
@@ -2431,6 +2502,8 @@ class Runner:
                             messages_for_model,
                             num_input_messages,
                             model_response,
+                            loop_state,
+                            input_message_ids,
                         )
                     except Exception:
                         logger.warning("interrupted-turn persistence failed", exc_info=True)

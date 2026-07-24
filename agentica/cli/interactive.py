@@ -975,7 +975,7 @@ def _refresh_live_status(
     if ct is not None and ct.turns > 0:
         model = agent.model if agent is not None else None
         ctx_win = (model.context_window if model is not None else None) or 128000
-        tui_state["context_tokens"] = ct.last_input_tokens
+        tui_state["context_tokens"] = ct.context_input_tokens
         tui_state["context_window"] = ctx_win
         tui_state["cost_usd"] = cost_baseline + ct.total_cost_usd
         tui_state["total_api_calls"] = calls_baseline + ct.turns
@@ -1121,7 +1121,10 @@ def _process_stream_response(
                         _tool_seq.on_start(
                             tool_info.get("tool_call_id"), tool_name
                         )
-                        display.display_tool(tool_name, tool_args)
+                        display.display_tool(
+                            tool_name, tool_args,
+                            tool_call_id=tool_info.get("tool_call_id"),
+                        )
                         _set_phase("tool", f"🔧 {tool_name}")
                     shown_tool_count = len(chunk.tools)
                 continue
@@ -1149,6 +1152,7 @@ def _process_stream_response(
                             is_error=is_error,
                             elapsed=elapsed,
                             tool_args=tool_args,
+                            tool_call_id=info.get("tool_call_id"),
                         )
                 continue
 

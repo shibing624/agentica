@@ -75,6 +75,7 @@ from agentica.skills import (
     remove_skill,
 )
 from agentica.skills.skill_registry import reset_skill_registry
+from agentica.utils.tokens import count_tokens
 from agentica.cli import self_manage
 
 
@@ -2463,6 +2464,47 @@ def _model_list_overview(ctx: CommandContext) -> None:
     con.print("To add or edit a profile, run [bold]agentica setup[/bold] outside the session.", style="dim")
 
 
+def _history_tokens(agent) -> int:
+    """Locally measured size of the history the next request will carry.
+
+    Reads the same `runs`-derived list the prompt builder uses, so it tracks
+    compaction. Used only as a delta against the provider-reported figure —
+    never as an absolute context size, since it covers neither the system
+    prompt nor the tool schemas.
+    """
+    history = agent.working_memory.get_messages_from_last_n_runs(last_n=agent.num_history_turns)
+    if not history:
+        return 0
+    model_id = agent.model.id if agent.model is not None else "gpt-4o"
+    return count_tokens(history, None, model_id, None)
+
+
+def _apply_context_shrink(ctx: CommandContext, before_tokens: int, after_tokens: int) -> None:
+    """Lower the status-bar context figure by however much compaction removed.
+
+    The bar normally shows the provider-reported prompt size of the last API
+    call — ground truth, but it only refreshes on the next run, so without this
+    the number would sit stale until then. Subtracting a locally measured delta
+    keeps the fixed overhead (system prompt, tool schemas) and the tokenizer
+    bias out of the arithmetic, since both sides of the subtraction carry them.
+
+    The result is an upper bound, not an estimate of the next prompt: the
+    per-call stages (tool-result budgeting, micro-compact) shrink the real
+    request at send time by an amount no `runs`-based measurement can see. Erring
+    high is the safe direction for a headroom indicator, and the next run
+    replaces it with the provider's own figure. Do not "improve" this into an
+    absolute local count — that reads far below the truth.
+    """
+    ts = ctx.tui_state
+    if not ts:
+        return
+    removed = before_tokens - after_tokens
+    if removed <= 0:
+        return
+    current = ts.get("context_tokens") or 0
+    ts["context_tokens"] = max(after_tokens, current - removed)
+
+
 def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     agent = ctx.current_agent
@@ -2478,6 +2520,7 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
 
     custom_instructions = cmd_args.strip() if cmd_args else None
     cm = agent.tool_config.compression_manager if agent.tool_config else None
+    tokens_before = _history_tokens(agent)
 
     if cm is not None:
         con.print(f"[dim]Compacting {msg_count} messages with LLM summary...[/dim]")
@@ -2494,6 +2537,7 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
             )
         )
         if compacted:
+            wm.collapse_runs(messages)
             con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} summary.[/green]")
         else:
             con.print("[yellow]Compaction failed. Falling back to rule-based.[/yellow]")
@@ -2502,6 +2546,7 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"[dim]Compacting {msg_count} messages (rule-based)...[/dim]")
         _rule_based_compact(agent, messages, msg_count)
 
+    _apply_context_shrink(ctx, tokens_before, _history_tokens(agent))
     con.print("[dim]Workspace memory preserved.[/dim]")
 
 
@@ -2530,8 +2575,15 @@ def _rule_based_compact(current_agent, messages, msg_count):
         messages.extend(recent_messages)
         con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} messages.[/green]")
     else:
+        summary = ""
         messages.clear()
         con.print(f"[green]Context cleared ({msg_count} messages).[/green]")
+
+    current_agent.working_memory.collapse_runs(messages)
+    # The LLM path writes this from auto_compact(); without it here a /resume
+    # would replay the whole pre-compact transcript and undo the compaction.
+    if current_agent._session_log is not None:
+        current_agent._session_log.append_compact_boundary(summary)
 
 
 def _cmd_debug(ctx: CommandContext, cmd_args: str = ""):

@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agentica.run_response import RunResponse, RunEvent
+from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
 from agentica.model.response import ModelResponse
 from agentica.model.usage import RequestUsage
@@ -111,6 +112,8 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
             messages_for_model=messages_for_model,
             num_input_messages=1,
             model_response=model_response,
+            loop_state=LoopState(),
+            input_message_ids={id(user_msg)},
         )
 
         # run_response carries the partial answer + interruption marker
@@ -139,6 +142,8 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
             messages_for_model=[],
             num_input_messages=0,
             model_response=ModelResponse(content="x"),
+            loop_state=LoopState(),
+            input_message_ids=set(),
         )
         self.assertEqual(agent.working_memory.messages, before)
 
@@ -206,6 +211,96 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
             "interruption marker must not stamp a finished answer",
         )
         self.assertIn("The answer is 4.", assistants[0].content or "")
+
+
+class TestRunnerPersistsCompactedContext(unittest.TestCase):
+    """A run whose context got compacted must persist the compacted state.
+
+    Two failures used to happen together: `num_input_messages` was captured
+    before the loop, so once a compression stage dropped messages the
+    "this turn's messages" slice came back empty and the turn's own answer was
+    lost; and `runs` was never touched, so the next turn rebuilt the
+    pre-compaction history and the compaction saved nothing past the run.
+    """
+
+    def _agent_with_history(self, num_runs=3):
+        from agentica.agent import Agent
+        from agentica.compression.manager import CompressionManager
+        from agentica.memory.models import AgentRun
+        from agentica.model.openai import OpenAIChat
+
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            add_history_to_context=True,
+        )
+        for i in range(num_runs):
+            user = Message(role="user", content=f"old question {i}")
+            assistant = Message(role="assistant", content=f"old answer {i}")
+            agent.working_memory.add_run(
+                AgentRun(response=RunResponse(messages=[user, assistant]))
+            )
+
+        async def fake_response(messages=None, **_kw):
+            messages.append(Message(role="assistant", content="The answer is 4."))
+            return ModelResponse(content="The answer is 4.")
+
+        agent.model.response = fake_response
+
+        cm = CompressionManager()
+        agent.tool_config.compress_tool_results = True
+        agent.tool_config.compression_manager = cm
+        return agent, cm
+
+    def _run_with_compaction(self, agent, cm):
+        with patch.object(cm, "should_compress", return_value=False), \
+             patch.object(cm, "_should_auto_compact", return_value=True), \
+             patch.object(cm, "_summarise_conversation",
+                          new_callable=AsyncMock, return_value="a summary of earlier turns"):
+            return agent.run_sync("current question")
+
+    def test_turns_own_answer_is_not_lost(self):
+        agent, cm = self._agent_with_history()
+        self._run_with_compaction(agent, cm)
+
+        stored = agent.working_memory.runs[-1].response.messages
+        self.assertTrue(
+            any(m.role == "assistant" and "The answer is 4." in str(m.content) for m in stored),
+            f"answer missing from persisted run: {[m.role for m in stored]}",
+        )
+
+    def test_superseded_runs_are_dropped(self):
+        agent, cm = self._agent_with_history(num_runs=3)
+        self._run_with_compaction(agent, cm)
+        self.assertEqual(len(agent.working_memory.runs), 1)
+
+    def test_next_turn_history_is_compacted_not_re_expanded(self):
+        agent, cm = self._agent_with_history(num_runs=3)
+        before = len(agent.working_memory.get_messages_from_last_n_runs())
+
+        self._run_with_compaction(agent, cm)
+
+        history = agent.working_memory.get_messages_from_last_n_runs()
+        joined = " ".join(str(m.content) for m in history)
+        self.assertLessEqual(len(history), before)
+        self.assertIn("a summary of earlier turns", joined)
+        self.assertNotIn("old answer 0", joined)
+
+    def test_uncompacted_run_still_uses_the_prefix_slice(self):
+        """No compaction: the existing slice behaviour must be untouched."""
+        agent, cm = self._agent_with_history(num_runs=1)
+        with patch.object(cm, "should_compress", return_value=False), \
+             patch.object(cm, "_should_auto_compact", return_value=False):
+            agent.run_sync("current question")
+
+        self.assertEqual(len(agent.working_memory.runs), 2)
+        stored = agent.working_memory.runs[-1].response.messages
+        roles = [m.role for m in stored]
+        self.assertIn("user", roles)
+        self.assertTrue(
+            any(m.role == "assistant" and "The answer is 4." in str(m.content) for m in stored)
+        )
+        history = agent.working_memory.get_messages_from_last_n_runs()
+        self.assertIn("old answer 0", " ".join(str(m.content) for m in history))
 
 
 class TestRunnerStructuredOutputFallback(unittest.TestCase):
