@@ -288,6 +288,10 @@ class SkillRegistry:
         - Otherwise, generate ``/slug`` from the skill name
           (e.g. "My Cool Skill" -> ``/my-cool-skill``).
 
+        Keys are lowercased because every lookup site (``expand_invocation``,
+        the CLI completer and its command dispatch) lowercases the user's
+        input — a ``/MySkill`` trigger would otherwise be unreachable.
+
         Returns:
             Dict mapping ``/slug`` -> Skill
         """
@@ -297,6 +301,7 @@ class SkillRegistry:
                 continue
             if skill.trigger:
                 slug = skill.trigger if skill.trigger.startswith("/") else f"/{skill.trigger}"
+                slug = slug.lower()
             else:
                 slug = skill.name.lower().replace(" ", "-").replace("_", "-")
                 slug = re.sub(r"[^a-z0-9\-]", "", slug)

@@ -254,6 +254,14 @@ class TestSkillRegistry(unittest.TestCase):
         self.assertIn("Argument: src/app.py", expanded)
         self.assertIn("body", expanded)
 
+    def test_uppercase_trigger_is_reachable(self):
+        """Lookup sites lowercase user input, so command keys must be lowercase."""
+        self.registry.register(self._make_skill("Reviewer", trigger="/MySkill"))
+        self.assertIn("/myskill", self.registry.auto_commands())
+        expanded = self.registry.expand_invocation("/MySkill src/app.py")
+        self.assertIsNotNone(expanded)
+        self.assertIn("Argument: src/app.py", expanded)
+
     def test_expand_invocation_returns_none_for_non_skill_text(self):
         self.registry.register(self._make_skill("Reviewer", trigger="/review"))
         self.assertIsNone(self.registry.expand_invocation("just a question"))
