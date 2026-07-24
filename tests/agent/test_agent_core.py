@@ -585,5 +585,71 @@ class TestAgentFromParts:
         assert agent.output_guardrails == ["output-check"]
 
 
+class TestPrintResponseStreamParallelToolResults:
+    """``print_response_stream(show_tool_calls=True)`` must attribute each result
+    to its own call.
+
+    The runner announces a whole parallel batch first, then emits one
+    ``tool_call_completed`` per tool IN CALL ORDER, each carrying the same
+    accumulated ``tools`` list with the finished tool's ``content`` filled in
+    place. Reading ``tools[-1]`` therefore returns the last tool *called* — whose
+    result usually does not exist yet — so early completions printed an empty
+    result and the first tools' output was never shown at all.
+    """
+
+    def _parallel_batch_stream(self):
+        """Mimic the runner's event stream for a 3-tool parallel batch."""
+        tools = [
+            {"tool_call_id": "c1", "tool_name": "read_file", "tool_args": {"file_path": "a.py"}},
+            {"tool_call_id": "c2", "tool_name": "execute", "tool_args": {"command": "ls"}},
+            {"tool_call_id": "c3", "tool_name": "grep", "tool_args": {"pattern": "x"}},
+        ]
+        results = {"c1": "ALPHA_CONTENT", "c2": "BETA_CONTENT", "c3": "GAMMA_CONTENT"}
+
+        async def _stream(*args, **kwargs):
+            for t in tools:
+                yield RunResponse(event=RunEvent.tool_call_started.value,
+                                  content=f"Running tool: {t['tool_name']}",
+                                  tools=tools)
+            # Completions arrive in call order; content is filled IN PLACE.
+            for t in tools:
+                t["content"] = results[t["tool_call_id"]]
+                yield RunResponse(event=RunEvent.tool_call_completed.value,
+                                  content=f"Tool completed: {t['tool_name']}",
+                                  tools=tools)
+            yield RunResponse(event=RunEvent.run_response.value, content="all done")
+
+        return _stream
+
+    def _run(self, capsys):
+        agent = Agent(name="A", model=_make_model())
+        agent.run_stream = self._parallel_batch_stream()
+        asyncio.run(agent.print_response_stream(
+            "go", show_message=False, show_tool_calls=True))
+        return capsys.readouterr().out
+
+    def test_every_tool_result_is_printed(self, capsys):
+        out = self._run(capsys)
+        for marker in ("ALPHA_CONTENT", "BETA_CONTENT", "GAMMA_CONTENT"):
+            assert marker in out, f"{marker} missing — its completion reported another tool"
+
+    def test_no_empty_result_line_is_printed(self, capsys):
+        out = self._run(capsys)
+        empty = [ln for ln in out.splitlines() if ln.strip() == "📤"]
+        assert not empty, f"completion printed an empty result: {empty}"
+
+    def test_result_line_names_its_tool(self, capsys):
+        """Results are emitted after ALL call lines, so the result line must say
+        which tool it belongs to."""
+        out = self._run(capsys)
+        result_lines = [ln for ln in out.splitlines() if "📤" in ln]
+        assert len(result_lines) == 3
+        for name, marker in (("read_file", "ALPHA_CONTENT"),
+                             ("execute", "BETA_CONTENT"),
+                             ("grep", "GAMMA_CONTENT")):
+            line = next(ln for ln in result_lines if marker in ln)
+            assert name in line, f"result line for {name} does not name it: {line!r}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
