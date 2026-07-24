@@ -20,6 +20,7 @@ from agentica.cli import (
 )
 from agentica.cli import commands as cli_commands
 from agentica.cli import setup as cli_setup
+from agentica.memory.session_log import SessionLog
 
 
 class TestToolIcons(unittest.TestCase):
@@ -2069,128 +2070,77 @@ class TestQueueCommandEditInsert(unittest.TestCase):
         self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["a"])
 
 
-class TestSessionCommand(unittest.TestCase):
-    """``/session`` shows / lists / renames the user-facing label that
-    overrides the auto-generated preview in /resume and /status.
-    """
+class TestRenameCommand(unittest.TestCase):
+    """`/rename <name>` persists a recognizable label for `/resume`."""
 
     def _ctx_with_agent(self, tmp_dir, session_id="sess-cli"):
-        from unittest.mock import MagicMock
-        from agentica.cli import commands as cli_commands
-        from agentica.memory.session_log import SessionLog
-
-        # Use a *real* SessionLog rooted at tmp_dir so the rename actually
-        # writes a sidecar we can verify on disk.
-        slog = SessionLog(session_id, base_dir=str(tmp_dir))
-        slog.append("user", "first turn")  # ensure the JSONL exists for list_sessions
+        session_log = SessionLog(session_id, base_dir=str(tmp_dir))
+        session_log.append("user", "first turn")
 
         agent = MagicMock()
         agent.session_id = session_id
-        agent._session_log = slog
+        agent._session_log = session_log
 
-        ctx = cli_commands.CommandContext(
-            agent_config={"model_provider": "zhipuai", "model_name": "glm-5", "debug": False, "work_dir": None},
+        context = cli_commands.CommandContext(
+            agent_config={"model_provider": "zhipuai", "model_name": "glm-5"},
             current_agent=agent,
             extra_tools=[],
             workspace=None,
         )
-        return ctx, slog
+        return context, session_log
 
     def test_rename_current_session_writes_sidecar(self):
-        import tempfile
-        from agentica.cli.commands import _cmd_session
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx_with_agent(directory)
 
-        with tempfile.TemporaryDirectory() as d:
-            ctx, slog = self._ctx_with_agent(d)
-            _cmd_session(ctx, "rename My favourite session")
-            self.assertEqual(slog.get_name(), "My favourite session")
+            cli_commands._cmd_rename(context, "My favourite session")
 
-    def test_rename_rejects_empty(self):
-        import tempfile
-        from agentica.cli.commands import _cmd_session
+            self.assertEqual(session_log.get_name(), "My favourite session")
 
-        with tempfile.TemporaryDirectory() as d:
-            ctx, slog = self._ctx_with_agent(d)
-            _cmd_session(ctx, "rename")  # missing name
-            _cmd_session(ctx, "rename    ")  # whitespace-only
-            self.assertIsNone(slog.get_name())
+    def test_rename_strips_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx_with_agent(directory)
 
-    def test_rename_by_id_prefix(self):
-        """``/session rename <prefix> <name>`` renames a *different*
-        session when the prefix uniquely matches an existing session. The
-        agent's own session must stay untouched."""
-        import tempfile
-        from agentica.cli.commands import _cmd_session
-        from agentica.memory.session_log import SessionLog
+            cli_commands._cmd_rename(context, "  Release investigation  ")
 
-        with tempfile.TemporaryDirectory() as d:
-            # Active session (the one the agent owns).
-            ctx, active = self._ctx_with_agent(d, session_id="sess-active")
-            # Another historical session.
-            other = SessionLog("sess-other-9876", base_dir=str(d))
-            other.append("user", "other turn")
+            self.assertEqual(session_log.get_name(), "Release investigation")
 
-            _cmd_session(ctx, "rename sess-other Historical archive")
+    def test_rename_rejects_empty_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx_with_agent(directory)
 
-            self.assertEqual(other.get_name(), "Historical archive")
-            # Active session not touched.
-            self.assertIsNone(active.get_name())
+            cli_commands._cmd_rename(context, "   ")
 
-    def test_rename_ambiguous_prefix_refuses(self):
-        """If the id-prefix matches multiple sessions, we must NOT pick
-        one silently — the operation has to fail loudly so the user can
-        disambiguate. (Falling back to "rename current session" here
-        would silently rewrite the *active* session's name and lose the
-        user's intent.)
-        """
-        import tempfile
-        from agentica.cli.commands import _cmd_session
-        from agentica.memory.session_log import SessionLog
+            self.assertIsNone(session_log.get_name())
 
-        with tempfile.TemporaryDirectory() as d:
-            ctx, active = self._ctx_with_agent(d, session_id="sess-active")
-            # Two sessions sharing a prefix.
-            for sid in ("sess-dup-1111", "sess-dup-2222"):
-                s = SessionLog(sid, base_dir=str(d))
-                s.append("user", "x")
+    def test_rename_requires_active_session(self):
+        context = cli_commands.CommandContext(agent_config={}, current_agent=None)
+        console = MagicMock()
+        with patch("agentica.cli.commands.get_console", return_value=console):
+            cli_commands._cmd_rename(context, "Orphan")
 
-            _cmd_session(ctx, "rename sess-dup AmbiguousName")
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+        self.assertIn("No active session", printed)
 
-            # Neither the active session nor either duplicate got named.
-            self.assertIsNone(active.get_name())
-            self.assertIsNone(SessionLog("sess-dup-1111", base_dir=str(d)).get_name())
-            self.assertIsNone(SessionLog("sess-dup-2222", base_dir=str(d)).get_name())
+    def test_rename_reports_metadata_write_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx_with_agent(directory)
+            console = MagicMock()
+            with (
+                patch.object(session_log, "set_name", side_effect=OSError("disk full")),
+                patch("agentica.cli.commands.get_console", return_value=console),
+            ):
+                cli_commands._cmd_rename(context, "Important session")
 
-    def test_rename_short_first_token_treated_as_name(self):
-        """A first token that isn't long enough / id-ish to be a prefix
-        (e.g. ``rename Hi there``) must rename the current session and
-        keep the full text as the name — otherwise users with short
-        names get a confusing 'unknown id prefix' error.
-        """
-        import tempfile
-        from agentica.cli.commands import _cmd_session
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+        self.assertIn("Failed to rename session: disk full", printed)
 
-        with tempfile.TemporaryDirectory() as d:
-            ctx, slog = self._ctx_with_agent(d)
-            _cmd_session(ctx, "rename Hi there")
-            self.assertEqual(slog.get_name(), "Hi there")
-
-    def test_session_show_no_args(self):
-        """``/session`` with no args must not crash, regardless of whether
-        a name has been set."""
-        import tempfile
-        from agentica.cli.commands import _cmd_session
-
-        with tempfile.TemporaryDirectory() as d:
-            ctx, slog = self._ctx_with_agent(d)
-            _cmd_session(ctx, "")  # unnamed branch
-            slog.set_name("Named")
-            _cmd_session(ctx, "")  # named branch
-
-    def test_session_command_registered(self):
-        from agentica.cli.commands import COMMAND_REGISTRY
-
-        self.assertIn("/session", COMMAND_REGISTRY)
+    def test_rename_replaces_session_command(self):
+        self.assertIs(
+            cli_commands.COMMAND_REGISTRY["/rename"][0],
+            cli_commands._cmd_rename,
+        )
+        self.assertNotIn("/session", cli_commands.COMMAND_REGISTRY)
 
 
 class TestResumeArchivedFilter(unittest.TestCase):
@@ -2207,6 +2157,7 @@ class TestResumeArchivedFilter(unittest.TestCase):
                 "path": "/tmp/sess-active-1111.jsonl",
                 "size_bytes": 100,
                 "last_timestamp": "2026-01-01T00:00:00",
+                "name": "Release investigation",
                 "archived": False,
             },
             {
@@ -2214,6 +2165,7 @@ class TestResumeArchivedFilter(unittest.TestCase):
                 "path": "/tmp/sess-archived-2222.jsonl",
                 "size_bytes": 100,
                 "last_timestamp": "2026-01-02T00:00:00",
+                "name": "Archived work",
                 "archived": True,
             },
             {
@@ -2221,14 +2173,35 @@ class TestResumeArchivedFilter(unittest.TestCase):
                 "path": "/tmp/sess-active-3333.jsonl",
                 "size_bytes": 100,
                 "last_timestamp": "2026-01-03T00:00:00",
+                "name": None,
                 "archived": False,
             },
         ]
 
-    def test_picker_listing_excludes_archived(self):
-        from agentica.cli.commands import _cmd_resume, CommandContext
+    def _resume(self, target, sessions=None):
+        context = cli_commands.CommandContext(
+            agent_config={"model_provider": "zhipuai", "model_name": "glm-5"},
+            current_agent=None,
+        )
+        with (
+            patch(
+                "agentica.memory.session_log.SessionLog.list_sessions",
+                return_value=sessions or self._sessions(),
+            ),
+            patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]),
+            patch("agentica.memory.session_log.SessionLog.exists", return_value=False),
+            patch("agentica.cli.commands.create_agent") as create_agent,
+            patch("agentica.cli.commands.GoalManager") as goal_manager,
+        ):
+            agent = MagicMock()
+            agent._session_log = None
+            create_agent.return_value = agent
+            goal_manager.return_value.load.return_value = None
+            result = cli_commands._cmd_resume(context, target)
+        return create_agent, result
 
-        ctx = CommandContext(agent_config={}, current_agent=None)
+    def test_picker_listing_excludes_archived(self):
+        ctx = cli_commands.CommandContext(agent_config={}, current_agent=None)
         with (
             patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
             patch(
@@ -2239,56 +2212,68 @@ class TestResumeArchivedFilter(unittest.TestCase):
             with patch("agentica.cli.commands.get_console") as mock_console:
                 console = MagicMock()
                 mock_console.return_value = console
-                _cmd_resume(ctx, "")
+                cli_commands._cmd_resume(ctx, "")
 
         printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
         self.assertGreaterEqual(printed.count("sess-act"), 2)  # both active sessions listed
+        self.assertIn("Release investigation", printed)
+        self.assertIn("/resume <number|name|id-prefix>", printed)
         self.assertNotIn("sess-arc", printed)
 
+    def test_resume_by_name(self):
+        create_agent, result = self._resume("release investigation")
+
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-active-1111")
+        self.assertIsNotNone(result)
+
+    def test_resume_name_may_contain_at(self):
+        sessions = self._sessions()
+        sessions[0]["name"] = "Looking at performance issues"
+
+        create_agent, result = self._resume("Looking at performance issues", sessions)
+
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-active-1111")
+        self.assertIsNone(create_agent.call_args[0][0]["_resume_at_uuid"])
+        self.assertIsNotNone(result)
+
+    def test_resume_at_parses_valid_uuid_suffix(self):
+        message_uuid = "12345678-1234-1234-1234-123456789abc"
+
+        create_agent, result = self._resume(f"sess-active-1111 at {message_uuid}")
+
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-active-1111")
+        self.assertEqual(create_agent.call_args[0][0]["_resume_at_uuid"], message_uuid)
+        self.assertIsNotNone(result)
+
+    def test_resume_numeric_name_when_not_a_valid_index(self):
+        sessions = self._sessions()
+        sessions[0]["name"] = "99"
+
+        create_agent, result = self._resume("99", sessions)
+
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-active-1111")
+        self.assertIsNotNone(result)
+
+    def test_archived_duplicate_name_does_not_make_visible_name_ambiguous(self):
+        sessions = self._sessions()
+        sessions[1]["name"] = "Release investigation"
+
+        create_agent, result = self._resume("Release investigation", sessions)
+
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-active-1111")
+        self.assertIsNotNone(result)
+
     def test_picker_by_number_skips_archived_indices(self):
-        """Numeric selection indexes into the *visible* (unarchived) list,
-        matching what was actually printed to the user."""
-        from agentica.cli.commands import _cmd_resume, CommandContext
+        """Numeric selection indexes into the visible session list."""
+        create_agent, result = self._resume("2")
 
-        ctx = CommandContext(agent_config={"model_provider": "zhipuai", "model_name": "glm-5"}, current_agent=None)
-        with (
-            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
-            patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]),
-            patch("agentica.memory.session_log.SessionLog.exists", return_value=False),
-            patch("agentica.cli.commands.create_agent") as mock_create_agent,
-            patch("agentica.cli.commands.GoalManager") as mock_goal_manager,
-        ):
-            agent = MagicMock()
-            agent._session_log = None
-            mock_create_agent.return_value = agent
-            mock_goal_manager.return_value.load.return_value = None
-
-            result = _cmd_resume(ctx, "2")
-
-        # "2" selects the 2nd *visible* session (sess-active-3333), not the
-        # raw sessions[1] which would be the archived one.
-        self.assertEqual(mock_create_agent.call_args[0][0]["session_id"], "sess-active-3333")
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-active-3333")
         self.assertIsNotNone(result)
 
     def test_explicit_id_prefix_still_resumes_archived(self):
-        from agentica.cli.commands import _cmd_resume, CommandContext
+        create_agent, result = self._resume("sess-archived")
 
-        ctx = CommandContext(agent_config={"model_provider": "zhipuai", "model_name": "glm-5"}, current_agent=None)
-        with (
-            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
-            patch("agentica.memory.session_log.SessionLog.list_user_messages", return_value=[]),
-            patch("agentica.memory.session_log.SessionLog.exists", return_value=False),
-            patch("agentica.cli.commands.create_agent") as mock_create_agent,
-            patch("agentica.cli.commands.GoalManager") as mock_goal_manager,
-        ):
-            agent = MagicMock()
-            agent._session_log = None
-            mock_create_agent.return_value = agent
-            mock_goal_manager.return_value.load.return_value = None
-
-            result = _cmd_resume(ctx, "sess-archived")
-
-        self.assertEqual(mock_create_agent.call_args[0][0]["session_id"], "sess-archived-2222")
+        self.assertEqual(create_agent.call_args[0][0]["session_id"], "sess-archived-2222")
         self.assertIsNotNone(result)
 
 

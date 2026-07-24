@@ -649,7 +649,7 @@ class TestListUserMessages:
 
 class TestSidecarSessionName:
     """``set_name`` / ``get_name`` / ``clear_name`` form the public sidecar
-    API used by ``/session rename``. The on-disk layout
+    API used by ``/rename``. The on-disk layout
     (``<session_id>.meta.json``) is an implementation detail — these tests
     deliberately go through the public methods only so downstream
     callers (CLI, future TUI) get a single stable surface.
@@ -711,9 +711,8 @@ class TestSidecarSessionName:
         assert sessions[0]["name"] is None
 
     def test_rename_session_classmethod(self, tmp_path):
-        """``rename_session`` lets callers update a name without
-        instantiating ``SessionLog`` themselves — used by the CLI when the
-        user types ``/session rename <id-prefix> <name>``."""
+        """``rename_session`` lets non-CLI callers update a name by id
+        without instantiating ``SessionLog`` themselves."""
         SessionLog.rename_session("s-by-cls", "via-classmethod", base_dir=str(tmp_path))
         assert SessionLog("s-by-cls", base_dir=str(tmp_path)).get_name() == "via-classmethod"
 

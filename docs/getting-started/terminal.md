@@ -219,16 +219,25 @@ mcp, skill, ...
   Started new chat session.
 ```
 
-### `/resume [session_id]`
-恢复之前的会话（基于 Session Log JSONL 机制）：
+### `/rename <name>`
+为当前会话设置易识别的名称。名称会持久化，进程异常退出后仍会显示在 `/resume` 列表中：
+```
+> /rename 前端视觉问题排查
+  Renamed current session to 前端视觉问题排查
+```
+
+### `/resume [number|name|id-prefix]`
+按序号、名称或 ID 前缀恢复之前的会话（基于 Session Log JSONL 机制）：
 ```
 > /resume
   Available sessions:
-    abc-123  (2026-04-05 14:32, 45 messages)
-    def-456  (2026-04-04 09:15, 12 messages)
+    1. a8c3f217  2026-07-24 10:20  (48KB, 23 turns)
+       前端视觉问题排查
+    2. 91be026d  2026-07-23 18:05  (12KB, 6 turns)
+       修复登录超时
 
-> /resume abc-123
-  Session resumed: abc-123 (45 messages loaded)
+> /resume 前端视觉问题排查
+  Resumed session: 前端视觉问题排查 (a8c3f217...)
 ```
 
 ### `/clear` / `/reset`

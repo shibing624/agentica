@@ -667,7 +667,7 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     except Exception:
         pass
     lines.append(f"- Subagent types: {', '.join(subagent_types)}")
-    lines.append("- Slash commands: /status /model /tools /skills /agents /config /cost /permissions /help /exit")
+    lines.append("- Slash commands: /rename /resume /status /model /tools /skills /agents /config /cost /permissions /help /exit")
     lines.append("- To extend: /skills install <name>, /agents create <name>")
 
     return "\n".join(lines)

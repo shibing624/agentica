@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from agentica.cli.runtime import (
     get_console,
@@ -55,6 +56,7 @@ from agentica.global_config import (
 )
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
+from agentica.memory.session_log import SessionLog
 from agentica.model.message import Message
 from agentica.run_context import TaskAnchor
 from agentica.run_response import RunResponse, AgentCancelledError
@@ -1386,7 +1388,7 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     con.print("  [bold]-- Session --[/bold]")
     if ctx.current_agent:
         con.print(f"  Session ID:  {ctx.current_agent.session_id}")
-        # Surface the user-set session name (via /session rename), if any.
+        # Surface the user-set session name (via /rename), if any.
         # Quiet line — only render when a name exists, to keep /status
         # output minimal for unnamed sessions. get_name() never raises
         # (corrupt sidecar == no name), so no defensive try/except needed.
@@ -1953,15 +1955,13 @@ def _resume_base_dir(ctx: CommandContext) -> Optional[str]:
     ``None`` lets ``SessionLog`` derive the default from the process cwd, which
     for the CLI equals the current project.
     """
-    agent = getattr(ctx, "current_agent", None)
+    agent = ctx.current_agent
     log = agent._session_log if agent is not None else None
     return str(log.base_dir) if log is not None else None
 
 
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
     """Resume a previous session from JSONL log."""
-    from agentica.memory.session_log import SessionLog
-
     con = get_console()
 
     # Scope the session list by project (work_dir) + user, exactly like the Web
@@ -1983,30 +1983,50 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 
     args_str = (cmd_args or "").strip()
     resume_at_uuid = None
-    if " at " in args_str:
-        parts = args_str.split(" at ", 1)
-        args_str = parts[0].strip()
-        resume_at_uuid = parts[1].strip()
+    session_target, separator, at_candidate = args_str.rpartition(" at ")
+    if separator and session_target.strip() and at_candidate.strip():
+        try:
+            UUID(at_candidate.strip())
+        except ValueError:
+            pass
+        else:
+            args_str = session_target.strip()
+            resume_at_uuid = at_candidate.strip()
 
     if args_str:
-        try:
-            idx = int(args_str) - 1
-            if 0 <= idx < len(visible_sessions):
-                chosen = visible_sessions[idx]
+        named_matches = [
+            session
+            for session in visible_sessions
+            if isinstance(session.get("name"), str)
+            and session["name"].casefold() == args_str.casefold()
+        ]
+        if args_str.isdecimal():
+            index = int(args_str) - 1
+            if 0 <= index < len(visible_sessions):
+                chosen = visible_sessions[index]
+            elif len(named_matches) == 1:
+                chosen = named_matches[0]
             else:
                 con.print("[red]Invalid number.[/red]")
                 return
-        except ValueError:
+        elif len(named_matches) == 1:
+            chosen = named_matches[0]
+        elif len(named_matches) > 1:
+            con.print(
+                f"[red]Ambiguous: multiple sessions are named '{args_str}'. Use the number or id prefix.[/red]"
+            )
+            return
+        else:
             # Accept the exact id, any unique prefix, or the truncated
-            # "7154826e...0358" form printed by the picker (strip the
-            # ellipsis and match on the leading prefix). This makes the
-            # displayed id directly copy-pasteable.
+            # "7154826e...0358" form printed by the picker.
             needle = args_str
             if "..." in needle:
                 needle = needle.split("...", 1)[0].strip()
-            matching = [s for s in sessions if needle and needle in s["session_id"]]
-            if not matching:
-                matching = [s for s in sessions if needle and s["session_id"].startswith(needle)]
+            matching = [
+                session
+                for session in sessions
+                if needle and session["session_id"].startswith(needle)
+            ]
             if not matching:
                 con.print(f"[red]No session matching '{args_str}'[/red]")
                 return
@@ -2036,11 +2056,13 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 
         # Show a preview of recent user queries so the human confirms the right
         # session was picked (also useful for finding an `at <uuid>` cut point).
+        session_name = chosen.get("name")
+        session_label = f"{session_name} ({chosen['session_id']})" if session_name else chosen["session_id"]
         if resume_at_uuid is None:
             log = SessionLog(chosen["session_id"], base_dir=base_dir)
             user_msgs = log.list_user_messages(limit=10)
             if user_msgs:
-                con.print(f"\n[bold]Session: {chosen['session_id']}[/bold]")
+                con.print(f"\n[bold]Session: {session_label}[/bold]")
                 con.print("[dim]Recent user queries in this session:[/dim]\n")
                 for i, m in enumerate(user_msgs, 1):
                     ts = m.get("timestamp", "")[:19].replace("T", " ") if m.get("timestamp") else ""
@@ -2050,7 +2072,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 )
 
         con.print(
-            f"[green]Resumed session: {chosen['session_id']}"
+            f"[green]Resumed session: {session_label}"
             f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}"
             f" — loaded {loaded_count} messages ({runs_built} runs) into context[/green]"
         )
@@ -2087,10 +2109,8 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             # directly. Avoid the old "abc...wxyz" form which users would copy
             # verbatim (ellipsis included) and which then failed to match.
             short_id = sid if len(sid) <= 12 else sid[:8]
-            # Show what the session was about: prefer the user-set name
-            # (via /session rename) for an at-a-glance label; if unset,
-            # fall back to the first user message (the task that started
-            # the session). Reads the log once; cheap.
+            # Prefer the user-set `/rename` label; otherwise show the first
+            # user message that started the session.
             preview = SessionLog.session_preview(s["path"])
             turns = preview["user_count"]
             first_user = preview["first_user"]
@@ -2114,131 +2134,30 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             else:
                 con.print(f"     [dim]> {summary}[/dim]")
         con.print(
-            f"\n[dim]Usage: /resume <number>, or /resume <id-prefix> (e.g. /resume {visible_sessions[0]['session_id'][:8]})[/dim]"
+            f"\n[dim]Usage: /resume <number|name|id-prefix> (e.g. /resume {visible_sessions[0]['session_id'][:8]})[/dim]"
         )
         return
 
 
-def _cmd_session(ctx: CommandContext, cmd_args: str = ""):
-    """Show / rename / list sessions.
-
-    Subcommands:
-      /session                       Show the current session (id + name).
-      /session rename <new name>     Rename the current session.
-      /session rename <id> <name>    Rename a session by id (or unique prefix).
-      /session list                  List all sessions (alias of /resume's list view).
-    """
-    from agentica.memory.session_log import SessionLog
-
+def _cmd_rename(ctx: CommandContext, cmd_args: str = ""):
+    """Rename the active session so it is easy to identify in `/resume`."""
     con = get_console()
-    args = (cmd_args or "").strip()
+    new_name = (cmd_args or "").strip()
+    if not new_name:
+        con.print("  [dim]Usage: /rename <name>[/dim]")
+        return
+
     agent = ctx.current_agent
-
-    # Resolve which sessions directory we operate on. Prefer the active
-    # agent's live SessionLog.base_dir so tests / custom workspaces that
-    # use a non-default location keep working; only fall back to the
-    # SessionLog default when no agent is attached.
-    _agent_log = agent._session_log if agent is not None else None
-    base_dir = str(_agent_log.base_dir) if _agent_log is not None else None
-
-    # ---- /session (no args) → show current ------------------------------
-    if not args:
-        if agent is None or not agent.session_id:
-            con.print("[yellow]No active session.[/yellow]")
-            return
-        sid = agent.session_id
-        # Prefer the live SessionLog on the agent so we read the same
-        # base_dir the agent is writing to.
-        log = _agent_log or SessionLog(sid, base_dir=base_dir)
-        name = log.get_name()
-        con.print()
-        con.print("  [bold]-- Session --[/bold]")
-        con.print(f"  ID:    {sid}")
-        con.print(f"  Name:  {name if name else '[dim](unnamed — use /session rename <name>)[/dim]'}")
-        con.print(f"  File:  [dim]{log.path}[/dim]")
+    if agent is None or not agent.session_id or agent._session_log is None:
+        con.print("[yellow]No active session to rename.[/yellow]")
         return
 
-    parts = args.split(maxsplit=1)
-    sub = parts[0].lower()
-    rest = parts[1].strip() if len(parts) > 1 else ""
-
-    # ---- /session list --------------------------------------------------
-    if sub == "list":
-        sessions = SessionLog.list_sessions(base_dir=base_dir)
-        if not sessions:
-            con.print("[yellow]No sessions found.[/yellow]")
-            return
-        con.print(f"\n  [cyan]Sessions ({len(sessions)}):[/cyan]")
-        for i, s in enumerate(sessions, start=1):
-            label = s.get("name") or SessionLog.session_preview(s["path"]).get("first_user", "") or "(empty)"
-            con.print(f"  {i:>3}. [bold]{s['session_id'][:12]}[/bold]  {label[:60]}")
+    try:
+        agent._session_log.set_name(new_name)
+    except OSError as error:
+        con.print(f"  [red]Failed to rename session: {error}[/red]")
         return
-
-    # ---- /session rename ------------------------------------------------
-    if sub == "rename":
-        if not rest:
-            con.print("  [dim]Usage: /session rename <new name>   |   /session rename <id-or-prefix> <new name>[/dim]")
-            return
-
-        # Two shapes:
-        #   rename <name...>                  → rename current session
-        #   rename <id-or-prefix> <name...>   → rename a specific session
-        sub_parts = rest.split(maxsplit=1)
-        first = sub_parts[0]
-        looks_like_id = (
-            len(sub_parts) > 1
-            and len(first) >= 4
-            and all(c.isalnum() or c in "-_" for c in first)
-            and not first[0].isspace()
-        )
-
-        target_id: Optional[str] = None
-        new_name: str = ""
-
-        if looks_like_id:
-            # Try to resolve <first> as an id prefix. If exactly one session
-            # matches, treat the rest as the new name. Otherwise fall back
-            # to "everything renames the current session".
-            sessions = SessionLog.list_sessions(base_dir=base_dir)
-            matches = [s for s in sessions if s["session_id"].startswith(first)]
-            if len(matches) == 1:
-                target_id = matches[0]["session_id"]
-                new_name = sub_parts[1].strip()
-            elif len(matches) > 1:
-                con.print(f"  [red]Ambiguous id prefix '{first}' — matches {len(matches)} sessions.[/red]")
-                return
-
-        if target_id is None:
-            # Rename current session, treating the full `rest` as the name.
-            if agent is None or not agent.session_id:
-                con.print("[yellow]No active session to rename.[/yellow]")
-                return
-            target_id = agent.session_id
-            new_name = rest
-
-        if not new_name:
-            con.print("  [dim]Usage: /session rename <new name>[/dim]")
-            return
-
-        try:
-            # Reuse the agent's live SessionLog when targeting the current
-            # session — it already knows the right base_dir.
-            if _agent_log is not None and target_id == agent.session_id:
-                _agent_log.set_name(new_name)
-            else:
-                SessionLog.rename_session(target_id, new_name, base_dir=base_dir)
-        except ValueError as e:
-            con.print(f"  [red]{e}[/red]")
-            return
-        except Exception as e:
-            con.print(f"  [red]Failed to rename: {e}[/red]")
-            return
-
-        con.print(f"  [green]Renamed[/green] [bold]{target_id[:12]}[/bold] → [cyan]{new_name}[/cyan]")
-        return
-
-    con.print(f"  [red]Unknown subcommand: {sub}[/red]")
-    con.print("  [dim]Usage: /session [rename <name> | list][/dim]")
+    con.print(f"  [green]Renamed current session to[/green] [cyan]{new_name}[/cyan]")
 
 
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
@@ -3556,8 +3475,8 @@ COMMAND_REGISTRY = {
     "/retry": (_cmd_retry, "Retry the last message (resend to agent)"),
     "/undo": (_cmd_undo, "Remove the last user/assistant exchange"),
     "/compact": (_cmd_compact, "Compact context (summarize history)"),
-    "/resume": (_cmd_resume, "Resume a previous session"),
-    "/session": (_cmd_session, "Show / rename / list sessions | /session rename <name>"),
+    "/rename": (_cmd_rename, "Rename the current session for easy resume"),
+    "/resume": (_cmd_resume, "Resume by number, name, or id prefix"),
     "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done)"),
     "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
     "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),

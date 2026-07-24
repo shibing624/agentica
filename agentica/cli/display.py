@@ -419,7 +419,8 @@ def show_help(skills_registry=None):
         "Session": {
             "/new":             "Start a new chat session",
             "/clear, /reset":   "Clear screen and reset conversation",
-            "/resume [name]":   "Resume a previous session",
+            "/rename <name>":   "Name current session for easy resume",
+            "/resume [target]": "Resume by number, name, or id prefix",
             "/history":         "Show conversation history",
             "/save, /export":   "Save conversation to JSON (no system prompts)",
             "/retry":           "Retry the last message (resend to agent)",
