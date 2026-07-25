@@ -789,7 +789,7 @@ class Runner:
         cb = agent._event_callback
         agent_name = agent.name or "Agent"
         if model._cost_tracker is not None:
-            model._cost_tracker.reset_context_watermark()
+            model._cost_tracker.invalidate_context_watermark()
 
         def _notify_evicted_file_reads(stale_paths: List[str], reason: str) -> None:
             """Make file-context invalidation visible to both the model and observers."""
@@ -947,7 +947,7 @@ class Runner:
             # The retry happens inside _call_with_retry, bypassing the
             # _maybe_compress_messages chokepoint that normally clears this.
             if model._cost_tracker is not None:
-                model._cost_tracker.reset_context_watermark()
+                model._cost_tracker.invalidate_context_watermark()
             cb = agent._event_callback
             stale_paths = (
                 agent.mark_evicted_file_reads([], all_reads=True)

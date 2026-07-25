@@ -147,18 +147,38 @@ class TestCostTrackerContextWatermark(unittest.TestCase):
         )
         self.assertEqual(ct.context_input_tokens, 82000)
 
-    def test_reset_lets_watermark_fall_after_compaction(self):
+    def test_invalidate_lets_watermark_fall_after_compaction(self):
         ct = CostTracker()
         ct.record("gpt-4o", input_tokens=120000, output_tokens=200)
-        ct.reset_context_watermark()
+        ct.invalidate_context_watermark()
         ct.record("gpt-4o", input_tokens=8000, output_tokens=200)
         self.assertEqual(ct.context_input_tokens, 8000)
 
-    def test_reset_preserves_cost_and_totals(self):
+    def test_invalidate_keeps_last_value_until_the_next_call_lands(self):
+        """The status bar polls this on a timer while a request is in flight.
+
+        The main loop invalidates before every request, so zeroing here would
+        make the bar read 0 for the whole duration of a slow call.
+        """
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=120000, output_tokens=200)
+        ct.invalidate_context_watermark()
+        self.assertEqual(ct.context_input_tokens, 120000)
+
+    def test_invalidate_only_applies_to_the_next_call(self):
+        """One invalidation must not turn the watermark into a plain 'last call'."""
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=120000, output_tokens=200)
+        ct.invalidate_context_watermark()
+        ct.record("gpt-4o", input_tokens=8000, output_tokens=200)
+        ct.record("gpt-4o", input_tokens=300, output_tokens=50)
+        self.assertEqual(ct.context_input_tokens, 8000)
+
+    def test_invalidate_preserves_cost_and_totals(self):
         ct = CostTracker()
         ct.record("gpt-4o", input_tokens=1000, output_tokens=100)
         cost_before = ct.total_cost_usd
-        ct.reset_context_watermark()
+        ct.invalidate_context_watermark()
         self.assertEqual(ct.total_input_tokens, 1000)
         self.assertEqual(ct.turns, 1)
         self.assertEqual(ct.total_cost_usd, cost_before)

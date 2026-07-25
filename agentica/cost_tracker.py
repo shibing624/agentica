@@ -368,6 +368,10 @@ class CostTracker:
     has_unknown_model: bool = False
     model_usage: Dict[str, ModelUsageStat] = field(default_factory=dict)
 
+    # Set by invalidate_context_watermark(): the next recorded prompt replaces
+    # the watermark rather than maxing with it.
+    _context_watermark_stale: bool = False
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -387,8 +391,9 @@ class CostTracker:
         with much smaller auxiliary calls (memory extraction, summarisation,
         correction judging) that share this tracker whenever the auxiliary model
         falls back to the main model; taking the maximum keeps those from
-        reporting a near-empty context. Compaction shrinks the real prompt, so
-        callers that compact must call `reset_context_watermark()`.
+        reporting a near-empty context. The main loop calls
+        `invalidate_context_watermark()` before each of its own requests, so the
+        figure tracks the latest main prompt and can fall after compaction.
 
         Cached tokens count toward the prompt: providers that bill cache reads
         separately (Anthropic-style) exclude them from `input_tokens`, so
@@ -418,17 +423,29 @@ class CostTracker:
         self.turns               += 1
 
         prompt_tokens = input_tokens + cache_read_tokens + cache_write_tokens
-        self.context_input_tokens = max(self.context_input_tokens, prompt_tokens)
+        if self._context_watermark_stale:
+            self.context_input_tokens = prompt_tokens
+            self._context_watermark_stale = False
+        else:
+            self.context_input_tokens = max(self.context_input_tokens, prompt_tokens)
 
         return cost
 
-    def reset_context_watermark(self) -> None:
-        """Forget the peak prompt size after the context was compacted.
+    def invalidate_context_watermark(self) -> None:
+        """Let the next recorded prompt set the watermark instead of raising it.
 
-        Without this the watermark would keep reporting the pre-compact peak
-        for the rest of the run.
+        The watermark is a maximum so that small auxiliary calls sharing this
+        tracker can't report a near-empty context. But the real prompt shrinks
+        whenever the context is compacted, so the peak has to be allowed to fall
+        — hence this escape hatch, called before every main-loop call.
+
+        It deliberately does NOT zero the value. The main loop calls this before
+        an LLM request that can take a minute on a large prompt, and the status
+        bar refreshes on a timer throughout; zeroing would make it read 0 for
+        that whole window. The previous figure stays up as the best available
+        estimate until the new one lands.
         """
-        self.context_input_tokens = 0
+        self._context_watermark_stale = True
 
     def summary(self) -> str:
         """Return a human-readable cost summary."""
