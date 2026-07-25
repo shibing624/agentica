@@ -66,7 +66,9 @@ from agentica.cli.display import (
 )
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
+from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger, suppress_console_logging
+from agentica.utils.tokens import count_tokens
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
 from agentica.global_config import resolve_active_profile_name
@@ -693,7 +695,8 @@ _WAITING_FOR_INPUT_TEXT = "⏸  waiting for your answer…"
 def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) -> str:
     """Render one spinner line: ``⠋ <phase label> (Ns)``.
 
-    phase: ``thinking`` | ``reasoning`` | ``tool`` | ``answering`` | ``idle``
+    phase: ``thinking`` | ``reasoning`` | ``tool`` | ``answering`` |
+           ``compacting`` | ``idle``
     base:  tool label (e.g. ``🔧 grep``) for the ``tool`` phase
     """
     if phase == "idle":
@@ -701,6 +704,8 @@ def _render_spinner_text(frame_idx: int, phase: str, base: str, elapsed: float) 
     icon = _BRAILLE_SPINNER[frame_idx % len(_BRAILLE_SPINNER)]
     if phase == "tool" and base:
         return f"{icon} {base} ({elapsed:.0f}s)"
+    if phase == "compacting":
+        return f"{icon} 🗜 compacting context… ({elapsed:.0f}s)"
     if phase == "answering":
         return f"{icon} answering… ({elapsed:.0f}s)"
     if phase == "reasoning":
@@ -981,6 +986,31 @@ def _refresh_live_status(
         tui_state["total_api_calls"] = calls_baseline + ct.turns
 
 
+def _seed_static_context_tokens(agent, tui_state: dict) -> None:
+    """Show the context the session already carries before any API call lands.
+
+    The bar mirrors the provider-reported prompt size, which does not exist yet
+    at session start or right after ``/clear``. Reading 0 there is simply wrong:
+    the system prompt and the tool definitions are already occupying the window,
+    and on a full-tool agent that is tens of thousands of tokens before the user
+    has typed anything. Count them locally so the bar starts from the truth; the
+    first response then replaces the estimate with the provider's own figure.
+
+    Tool schemas are the larger half of that prefix and only get attached to the
+    model by ``update_model()``, which the runner calls per run — calling it here
+    is the same idempotent work done a little earlier.
+    """
+    if agent is None or agent.model is None:
+        return
+    agent.update_model()
+    system_message = run_sync(agent.get_system_message())
+    tui_state["context_tokens"] = count_tokens(
+        [system_message] if system_message is not None else [],
+        agent.model.tools,
+        agent.model.id,
+    )
+
+
 def _process_stream_response(
     current_agent,
     final_input: str,
@@ -996,11 +1026,12 @@ def _process_stream_response(
         """Set the spinner phase and reset the per-phase elapsed timer.
 
         phases:
-          thinking  — waiting for the first token / between tool calls
-          reasoning — streaming reasoning content
-          tool      — running a tool (pass its label as ``base``)
-          answering — streaming the final response
-          idle      — clear the spinner (run ended / cancelled / errored)
+          thinking   — waiting for the first token / between tool calls
+          reasoning  — streaming reasoning content
+          tool       — running a tool (pass its label as ``base``)
+          answering  — streaming the final response
+          compacting — summarising the context to free room
+          idle       — clear the spinner (run ended / cancelled / errored)
 
         The spinner thread renders a continuously spinning braille glyph +
         the phase label + elapsed seconds, so the user can always tell a live
@@ -1083,7 +1114,19 @@ def _process_stream_response(
         # Register live-event callback so the subagent's tool calls and
         # compression events render in real time (instead of being a black
         # box until the parent tool result arrives).
-        current_agent._event_callback = display.handle_event
+        def _on_agent_event(event: dict) -> None:
+            # Auto-compact blocks the turn on an LLM summarisation that can run
+            # 10-20s. Without this the spinner keeps saying "thinking" and the
+            # turn looks hung. Whatever compaction was for, an LLM call follows
+            # it, so "thinking" is the right phase to come back to.
+            et = event.get("type", "")
+            if et == "compact.start":
+                _set_phase("compacting")
+            elif et == "compact.end":
+                _set_phase("thinking")
+            display.handle_event(event)
+
+        current_agent._event_callback = _on_agent_event
 
         response_stream = current_agent.run_stream_sync(final_input, **run_kwargs)
 
@@ -2126,6 +2169,7 @@ def run_interactive(
         "total_api_calls": 0,
         "debug": bool(agent_config.get("debug")),
     }
+    _seed_static_context_tokens(current_agent, tui_state)
 
     # Cron control surface for the /cron daemon on|off command. We expose
     # start/stop closures via tui_state so the slash command can toggle the
@@ -2210,8 +2254,10 @@ def run_interactive(
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
             session_tokens[0] = 0
-            tui_state["context_tokens"] = 0
             tui_state["cost_usd"] = 0.0
+            # A fresh agent (/clear, /model) carries a fresh system prompt and
+            # tool set — re-measure rather than dropping the bar to zero.
+            _seed_static_context_tokens(state.current_agent, tui_state)
         if result.get("model_switched"):
             # `/model profile <name>` (or `/model provider/name`) changed the
             # active profile and model — sync every status-bar field that

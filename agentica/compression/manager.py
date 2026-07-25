@@ -818,7 +818,20 @@ class CompressionManager:
             logger.debug("Auto-compact: reusing WorkingMemory session summary (SM-compact)")
 
         if summary is None:
-            summary = await self._summarise_conversation(messages, model, custom_instructions)
+            # Summarisation is a full LLM round-trip and routinely takes 10-20s
+            # on a large context. Bracket it with events so the CLI can say why
+            # the spinner is sitting still instead of looking hung. The SM-compact
+            # branch above is instant and needs no announcement.
+            agent = self._agent_of(model)
+            cb = agent._event_callback if agent is not None else None
+            agent_name = (agent.name or "Agent") if agent is not None else "Agent"
+            if cb is not None:
+                cb({"type": "compact.start", "agent_name": agent_name, "stage": "auto"})
+            try:
+                summary = await self._summarise_conversation(messages, model, custom_instructions)
+            finally:
+                if cb is not None:
+                    cb({"type": "compact.end", "agent_name": agent_name, "stage": "auto"})
 
         if not summary:
             self._consecutive_auto_compact_failures += 1
@@ -864,18 +877,22 @@ class CompressionManager:
 
         # Write compact boundary to JSONL session log (if configured)
         try:
-            if model is not None:
-                _agent_ref = model._agent_ref
-                _agent = _agent_ref() if _agent_ref else None
-                if _agent is not None:
-                    _slog = _agent._session_log
-                    if _slog is not None:
-                        _slog.append_compact_boundary(summary)
-                        logger.debug("Compact boundary written to session log")
+            _agent = self._agent_of(model)
+            if _agent is not None:
+                _slog = _agent._session_log
+                if _slog is not None:
+                    _slog.append_compact_boundary(summary)
+                    logger.debug("Compact boundary written to session log")
         except Exception as cb_err:
             logger.warning(f"Failed to write compact boundary: {cb_err}")
 
         return True
+
+    @staticmethod
+    def _agent_of(model: Optional[Any]) -> Optional[Any]:
+        """Resolve the Agent behind a Model, or None if it's gone."""
+        ref = model._agent_ref if model is not None else None
+        return ref() if ref is not None else None
 
     # -------------------------------------------------------------------------
     # Stats
