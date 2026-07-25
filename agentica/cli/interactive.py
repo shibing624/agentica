@@ -64,11 +64,11 @@ from agentica.cli.display import (
     get_file_completions,
     get_truncated_blocks,
 )
+from agentica.cli.context_usage import measure_context
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
 from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger, suppress_console_logging
-from agentica.utils.tokens import count_tokens
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
 from agentica.global_config import resolve_active_profile_name
@@ -986,29 +986,72 @@ def _refresh_live_status(
         tui_state["total_api_calls"] = calls_baseline + ct.turns
 
 
-def _seed_static_context_tokens(agent, tui_state: dict) -> None:
+def _make_compact_phase_handler(set_phase, tui_state: dict):
+    """Bridge ``compact.start`` / ``compact.end`` onto the spinner phase.
+
+    Auto-compact blocks the turn on an LLM summarisation that routinely runs
+    10-20s; without a phase change the spinner keeps saying "thinking" and the
+    turn looks hung.
+
+    The interrupted phase is restored afterwards rather than assumed to be
+    "thinking": subagents share the parent's event callback, so a subagent
+    compaction happens while the parent sits in its ``task`` tool phase, which
+    would otherwise lose both its label and its clock. For the same reason the
+    nesting is counted, not flagged — with several subagents summarising at once
+    the first one to finish must not clear a notice the others still need.
+    """
+    depth = [0]
+    interrupted = [("thinking", "", 0.0)]
+
+    def handle(event: dict) -> None:
+        et = event.get("type", "")
+        if et == "compact.start":
+            if depth[0] == 0:
+                interrupted[0] = (
+                    tui_state.get("_phase", "thinking"),
+                    tui_state.get("_spinner_base", ""),
+                    tui_state.get("_phase_start") or time.monotonic(),
+                )
+                set_phase("compacting")
+            depth[0] += 1
+        elif et == "compact.end":
+            depth[0] = max(depth[0] - 1, 0)
+            if depth[0] == 0:
+                phase, base, started = interrupted[0]
+                set_phase(phase, base)
+                # Keep the interrupted phase's original clock: a tool that has
+                # been running 40s must not come back reading 0s.
+                tui_state["_phase_start"] = started
+
+    return handle
+
+
+def _seed_context_tokens(agent, tui_state: dict) -> None:
     """Show the context the session already carries before any API call lands.
 
     The bar mirrors the provider-reported prompt size, which does not exist yet
-    at session start or right after ``/clear``. Reading 0 there is simply wrong:
-    the system prompt and the tool definitions are already occupying the window,
-    and on a full-tool agent that is tens of thousands of tokens before the user
-    has typed anything. Count them locally so the bar starts from the truth; the
+    at session start, right after ``/clear``, or on a fresh ``/resume``. Reading
+    0 there is simply wrong: the system prompt and the tool definitions are
+    already occupying the window, and a resumed session brings its whole history
+    back on top of them. Count locally what the next request would carry; the
     first response then replaces the estimate with the provider's own figure.
 
-    Tool schemas are the larger half of that prefix and only get attached to the
-    model by ``update_model()``, which the runner calls per run — calling it here
-    is the same idempotent work done a little earlier.
+    Shares ``measure_context`` with ``/usage`` so the headline number and the
+    breakdown behind it can never disagree.
+
+    The count is a local tiktoken estimate and will not match the provider's
+    tokenizer exactly; it is a starting figure, not an accounting record.
     """
     if agent is None or agent.model is None:
         return
-    agent.update_model()
-    system_message = run_sync(agent.get_system_message())
-    tui_state["context_tokens"] = count_tokens(
-        [system_message] if system_message is not None else [],
-        agent.model.tools,
-        agent.model.id,
-    )
+    try:
+        tui_state["context_tokens"] = run_sync(measure_context(agent)).total
+    except Exception as e:
+        # A status-bar estimate is never worth aborting startup or a command
+        # over; leave whatever the bar was showing. Warn rather than whisper:
+        # this path failing means prompt assembly is broken, which the next real
+        # turn will hit too.
+        logger.warning(f"Could not seed status-bar context tokens: {e}")
 
 
 def _process_stream_response(
@@ -1114,16 +1157,10 @@ def _process_stream_response(
         # Register live-event callback so the subagent's tool calls and
         # compression events render in real time (instead of being a black
         # box until the parent tool result arrives).
+        compact_phase = _make_compact_phase_handler(_set_phase, tui_state)
+
         def _on_agent_event(event: dict) -> None:
-            # Auto-compact blocks the turn on an LLM summarisation that can run
-            # 10-20s. Without this the spinner keeps saying "thinking" and the
-            # turn looks hung. Whatever compaction was for, an LLM call follows
-            # it, so "thinking" is the right phase to come back to.
-            et = event.get("type", "")
-            if et == "compact.start":
-                _set_phase("compacting")
-            elif et == "compact.end":
-                _set_phase("thinking")
+            compact_phase(event)
             display.handle_event(event)
 
         current_agent._event_callback = _on_agent_event
@@ -2169,7 +2206,7 @@ def run_interactive(
         "total_api_calls": 0,
         "debug": bool(agent_config.get("debug")),
     }
-    _seed_static_context_tokens(current_agent, tui_state)
+    _seed_context_tokens(current_agent, tui_state)
 
     # Cron control surface for the /cron daemon on|off command. We expose
     # start/stop closures via tui_state so the slash command can toggle the
@@ -2257,7 +2294,7 @@ def run_interactive(
             tui_state["cost_usd"] = 0.0
             # A fresh agent (/clear, /model) carries a fresh system prompt and
             # tool set — re-measure rather than dropping the bar to zero.
-            _seed_static_context_tokens(state.current_agent, tui_state)
+            _seed_context_tokens(state.current_agent, tui_state)
         if result.get("model_switched"):
             # `/model profile <name>` (or `/model provider/name`) changed the
             # active profile and model — sync every status-bar field that
@@ -2346,6 +2383,7 @@ def run_interactive(
             # Unpack payload
             submit_images = []
             is_btw = False
+            skill_to_invoke = None
             if isinstance(payload, tuple):
                 if payload[0] == "__BTW__":
                     is_btw = True
@@ -2415,11 +2453,14 @@ def run_interactive(
                     app.invalidate()
                     continue
                 else:
-                    # Skill auto-command dispatch
+                    # Skill auto-command dispatch. The rendered body is built
+                    # later, against the LLM payload only — ``user_input`` stays
+                    # as typed so the transcript shows `/skill-name args` instead
+                    # of the whole SKILL.md.
                     matched_skill = skill_cmds.get(cmd)
                     if matched_skill:
                         _cprint(f"  Skill activated: {matched_skill.name}")
-                        user_input = matched_skill.render_invocation(cmd_args)
+                        skill_to_invoke = matched_skill
 
             # Expand paste references
             _paste_ref_re = re.compile(r"\[Pasted text #\d+: \d+ lines -> (.+?)\]")
@@ -2446,7 +2487,15 @@ def run_interactive(
                 user_input = expanded
             state.pasted_files.clear()
 
-            prompt_text, mentioned_files = parse_file_mentions(user_input)
+            # Split display from payload: the transcript keeps the typed line,
+            # the model gets the skill body. Expanding here (after paste
+            # expansion, before @-mention handling) keeps the payload byte-for-
+            # byte what it was when it owned ``user_input``.
+            llm_input = user_input
+            if skill_to_invoke is not None:
+                llm_input = skills_registry.expand_invocation(user_input) or user_input
+
+            prompt_text, mentioned_files = parse_file_mentions(llm_input)
             # @-mentioned image files are multimodal attachments, not text to
             # inject — reading a jpg as utf-8 yields garbage / a decode error.
             image_mentions = [f for f in mentioned_files if f.suffix.lower() in IMAGE_EXTENSIONS]

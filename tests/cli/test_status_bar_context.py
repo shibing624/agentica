@@ -8,7 +8,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from agentica.cli.interactive import _render_spinner_text, _seed_static_context_tokens
+from agentica.cli.interactive import (
+    _make_compact_phase_handler,
+    _render_spinner_text,
+    _seed_context_tokens,
+)
 from agentica.model.message import Message
 
 
@@ -28,7 +32,7 @@ class TestStaticContextSeed(unittest.TestCase):
     def test_seed_is_not_zero_before_any_api_call(self):
         agent = _make_agent()
         tui_state = {"context_tokens": 0}
-        _seed_static_context_tokens(agent, tui_state)
+        _seed_context_tokens(agent, tui_state)
         self.assertGreater(tui_state["context_tokens"], 0)
 
     def test_seed_counts_tool_definitions_on_top_of_the_system_prompt(self):
@@ -41,7 +45,7 @@ class TestStaticContextSeed(unittest.TestCase):
 
         bare = _make_agent()
         tui_bare = {}
-        _seed_static_context_tokens(bare, tui_bare)
+        _seed_context_tokens(bare, tui_bare)
 
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
@@ -50,15 +54,66 @@ class TestStaticContextSeed(unittest.TestCase):
             tools=[sample_tool],
         )
         tui_tool = {}
-        _seed_static_context_tokens(with_tool, tui_tool)
+        _seed_context_tokens(with_tool, tui_tool)
 
         self.assertGreater(tui_tool["context_tokens"], tui_bare["context_tokens"])
         self.assertTrue(with_tool.model.tools, "update_model() must attach tool schemas")
 
     def test_no_agent_leaves_state_untouched(self):
         tui_state = {"context_tokens": 123}
-        _seed_static_context_tokens(None, tui_state)
+        _seed_context_tokens(None, tui_state)
         self.assertEqual(tui_state["context_tokens"], 123)
+
+    def test_resumed_history_counts_on_top_of_the_prefix(self):
+        """/resume hydrates a whole conversation before the bar is reseeded."""
+        from agentica.agent import Agent
+        from agentica.memory.models import AgentRun
+        from agentica.model.openai import OpenAIChat
+        from agentica.run_response import RunResponse
+
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            add_history_to_context=True,
+        )
+        empty = {}
+        _seed_context_tokens(agent, empty)
+
+        agent.working_memory.add_run(AgentRun(response=RunResponse(messages=[
+            Message(role="user", content="a long resumed question " * 200),
+            Message(role="assistant", content="a long resumed answer " * 200),
+        ])))
+        resumed = {}
+        _seed_context_tokens(agent, resumed)
+        self.assertGreater(resumed["context_tokens"], empty["context_tokens"] * 2)
+
+    def test_history_ignored_when_the_agent_does_not_replay_it(self):
+        """The seed must mirror the prompt builder, which gates on this flag."""
+        from agentica.agent import Agent
+        from agentica.memory.models import AgentRun
+        from agentica.model.openai import OpenAIChat
+        from agentica.run_response import RunResponse
+
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            add_history_to_context=False,
+        )
+        before = {}
+        _seed_context_tokens(agent, before)
+        agent.working_memory.add_run(AgentRun(response=RunResponse(
+            messages=[Message(role="user", content="ignored " * 500)]
+        )))
+        after = {}
+        _seed_context_tokens(agent, after)
+        self.assertEqual(after["context_tokens"], before["context_tokens"])
+
+    def test_failure_leaves_the_previous_figure_alone(self):
+        """A cosmetic estimate must never abort CLI startup or a command."""
+        agent = _make_agent()
+        tui_state = {"context_tokens": 4321}
+        with patch.object(type(agent), "get_system_message",
+                          side_effect=OSError("git exploded")):
+            _seed_context_tokens(agent, tui_state)
+        self.assertEqual(tui_state["context_tokens"], 4321)
 
 
 class TestCompactingSpinner(unittest.TestCase):
@@ -113,6 +168,35 @@ class TestAutoCompactEmitsSpinnerEvents(unittest.TestCase):
         """Cancellation propagates out; a stuck 'compacting' spinner must not."""
         types = self._run_compact(AsyncMock(side_effect=RuntimeError("boom")))
         self.assertIn("compact.end", types)
+
+    def test_concurrent_compactions_keep_the_notice_up(self):
+        """Subagents share the callback; the first to finish must not clear it."""
+        phases = []
+
+        def set_phase(phase, base=""):
+            phases.append(phase)
+
+        handler = _make_compact_phase_handler(set_phase, {"_phase": "tool",
+                                                          "_spinner_base": "🔧 task"})
+        handler({"type": "compact.start"})
+        handler({"type": "compact.start"})
+        handler({"type": "compact.end"})
+        self.assertEqual(phases, ["compacting"], "notice cleared while one still runs")
+        handler({"type": "compact.end"})
+        self.assertEqual(phases, ["compacting", "tool"])
+
+    def test_interrupted_tool_phase_is_restored_not_assumed(self):
+        """A subagent compaction must not cost the parent its tool label."""
+        restored = []
+
+        def set_phase(phase, base=""):
+            restored.append((phase, base))
+
+        handler = _make_compact_phase_handler(set_phase, {"_phase": "tool",
+                                                          "_spinner_base": "🔧 task"})
+        handler({"type": "compact.start"})
+        handler({"type": "compact.end"})
+        self.assertEqual(restored[-1], ("tool", "🔧 task"))
 
     def test_sm_compact_path_stays_silent(self):
         """Reusing the stored summary is instant — no spinner churn for it."""

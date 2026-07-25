@@ -7,9 +7,43 @@ Provides type-safe token usage tracking that aggregates across multiple LLM call
 within a single agent run, following the OpenAI Agent SDK Usage pattern.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
+
+
+def split_prompt_usage(
+    prompt_tokens: int,
+    prompt_details: Optional[Dict[str, Any]],
+) -> Tuple[int, int, int]:
+    """Split a prompt into disjoint (fresh_input, cache_read, cache_write).
+
+    Providers disagree on whether the cached prefix sits inside the headline
+    prompt figure, and the two conventions need opposite arithmetic:
+
+    - OpenAI reports ``prompt_tokens`` INCLUSIVE of
+      ``prompt_tokens_details.cached_tokens`` — the cached count is a subset
+      breakdown, so it has to be carved out.
+    - Anthropic, and the OpenAI-compatible proxies that pass Claude's numbers
+      through as ``cache_read_tokens`` / ``cache_creation_tokens``, report input
+      EXCLUSIVE of the cache, so the parts are already disjoint.
+
+    The key names are the discriminator, because they come from whichever API
+    contract produced the response. Treating an inclusive figure as exclusive
+    counts the cached prefix twice — once at full price and once at the cache
+    rate for cost, and again on top of itself for context size.
+
+    Returns three parts that sum to the true prompt size and can each be priced
+    exactly once.
+    """
+    details = prompt_details or {}
+    cache_write = details.get("cache_creation_tokens") or 0
+    exclusive_read = details.get("cache_read_tokens") or 0
+    if exclusive_read or cache_write:
+        return prompt_tokens, exclusive_read, cache_write
+
+    inclusive_read = details.get("cached_tokens") or 0
+    return max(prompt_tokens - inclusive_read, 0), inclusive_read, 0
 
 
 class TokenDetails(BaseModel):

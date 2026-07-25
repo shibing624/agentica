@@ -395,9 +395,15 @@ class CostTracker:
         `invalidate_context_watermark()` before each of its own requests, so the
         figure tracks the latest main prompt and can fall after compaction.
 
-        Cached tokens count toward the prompt: providers that bill cache reads
-        separately (Anthropic-style) exclude them from `input_tokens`, so
-        ignoring them would under-report the context by the cached prefix.
+        The three token counts must be DISJOINT: `input_tokens` is the freshly
+        processed prompt only, with any cached prefix reported separately. Both
+        the cost formula and the context watermark add all three, so passing an
+        OpenAI-style `prompt_tokens` (which already contains `cached_tokens`)
+        would bill and display the cached prefix twice. Adapters normalise via
+        `agentica.model.usage.split_prompt_usage()` before calling this.
+
+        Cached tokens do count toward the prompt: a cache hit is cheaper, not
+        absent from the context window.
         """
         normalised = self._normalise(model_id)
         pricing = self._lookup_pricing(normalised)

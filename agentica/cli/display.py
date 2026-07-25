@@ -436,7 +436,7 @@ def show_help(skills_registry=None):
         "Configure": {
             "/model [p/m]":     "Show or switch model",
             "/config":          "Show current configuration",
-            "/cost, /usage":    "Show detailed token usage and cost",
+            "/usage":           "Token usage, cost, and what fills the context",
             "/debug":           "Show debug info (model, history count)",
             "/reasoning":       "Toggle reasoning display: on | off",
             "/statusbar, /sb":  "Toggle the status bar",

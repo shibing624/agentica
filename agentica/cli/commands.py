@@ -77,6 +77,7 @@ from agentica.skills import (
 from agentica.skills.skill_registry import reset_skill_registry
 from agentica.utils.tokens import count_tokens
 from agentica.cli import self_manage
+from agentica.cli.context_usage import measure_context
 
 
 # ==================== CommandContext ====================
@@ -217,7 +218,6 @@ CONCURRENT_CMDS = frozenset(
         "/q",
         "/queue",
         "/steer",
-        "/cost",
         "/usage",
         "/config",
         "/debug",
@@ -2611,13 +2611,71 @@ def _cmd_reload_skills(ctx: CommandContext, cmd_args: str = ""):
     return result
 
 
-def _cmd_cost(ctx: CommandContext, cmd_args: str = ""):
-    """Display detailed token usage and cost for the current session."""
+def _render_context_breakdown(con, agent) -> None:
+    """Print what is currently occupying the context window, by origin.
+
+    The provider only ever reports one number for the whole prompt, so the
+    split is measured locally and labelled as an estimate. The live figure from
+    the last request is printed next to it: when the two drift apart, it is the
+    local tokenizer being approximate, not the context having changed.
+    """
+    try:
+        breakdown = _run_async_safe(measure_context(agent))
+    except Exception as e:
+        con.print(f"  [yellow]Could not measure context breakdown: {e}[/yellow]")
+        return
+
+    sections = breakdown.visible_sections()
+    if not sections:
+        return
+
+    total = breakdown.total
+    widest = max(tokens for _, tokens in sections)
+    sep = "─" * 42
+
+    con.print()
+    con.print(
+        f"  [bold cyan]Context Window[/bold cyan]  "
+        f"[dim]{_fmt_tokens(total)} / {_fmt_tokens(breakdown.window)} "
+        f"({breakdown.percent_full:.0f}% full, estimated)[/dim]"
+    )
+    con.print(f"  {sep}")
+    for label, tokens in sections:
+        filled = round(tokens / widest * 10) if widest else 0
+        bar = "▓" * filled + "░" * (10 - filled)
+        con.print(f"  {label:<24} {_fmt_tokens(tokens):>7}  [dim]{bar}[/dim]")
+    con.print(f"  {sep}")
+
+    tracker = agent.run_response.cost_tracker if agent.run_response else None
+    live = tracker.context_input_tokens if tracker else 0
+    if live:
+        con.print(
+            f"  [dim]Last request measured {_fmt_tokens(live)} by the provider "
+            f"— the split above is a local estimate.[/dim]"
+        )
+    con.print()
+
+
+def _fmt_tokens(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
+    """Show session token usage, cost, and what is filling the context window."""
     con = get_console()
-    tracker = ctx.current_agent.run_response.cost_tracker if ctx.current_agent else None
+    agent = ctx.current_agent
+    tracker = agent.run_response.cost_tracker if agent else None
 
     if tracker is None or tracker.turns == 0:
-        con.print("[yellow]No usage data yet.[/yellow]")
+        # No API call yet, but the window is not empty — the prompt is already
+        # assembled. Show what is loaded rather than a bare "no data".
+        con.print("[yellow]No API calls yet this session.[/yellow]")
+        if agent is not None:
+            _render_context_breakdown(con, agent)
         return
 
     model_name = f"{ctx.agent_config.get('model_provider', '')}/{ctx.agent_config.get('model_name', '')}"
@@ -2629,14 +2687,9 @@ def _cmd_cost(ctx: CommandContext, cmd_args: str = ""):
     total_all = prompt_total + tracker.total_output_tokens
 
     ts = ctx.tui_state or {}
-    ctx_tokens = ts.get("context_tokens", 0)
-    ctx_window = ts.get("context_window", 128000)
-    ctx_pct = (ctx_tokens / ctx_window * 100) if ctx_window > 0 else 0
     active_secs = ts.get("active_seconds", 0)
 
-    msg_count = 0
-    if ctx.current_agent:
-        msg_count = len(ctx.current_agent.working_memory.messages)
+    msg_count = len(agent.working_memory.messages)
 
     if active_secs < 60:
         duration_str = f"{active_secs:.0f}s"
@@ -2668,9 +2721,8 @@ def _cmd_cost(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"  {'Session duration:':<30} {duration_str:>12}")
     con.print(f"  {'Total cost:':<30} {cost_str}")
     con.print(f"  {sep}")
-    con.print(f"  Current context:  {ctx_tokens:,} / {ctx_window:,} ({ctx_pct:.0f}%)")
     con.print(f"  Messages:         {msg_count}")
-    con.print()
+    _render_context_breakdown(con, agent)
 
 
 def _cmd_export(ctx: CommandContext, cmd_args: str = ""):
@@ -3548,8 +3600,7 @@ COMMAND_REGISTRY = {
     "/config": (_cmd_config, "Show config | set <field> <value> | env <KEY> <value> | path"),
     "/upgrade": (_cmd_upgrade, "Self-upgrade agentica via pip (check | --pre)"),
     "/cron": (_cmd_cron, "Scheduled jobs: list | add | edit | pause | resume | remove | runs | run | daemon"),
-    "/cost": (_cmd_cost, "Show token usage and cost"),
-    "/usage": (_cmd_cost, "Show token usage and cost (alias)"),
+    "/usage": (_cmd_usage, "Show token usage, cost, and context breakdown"),
     "/debug": (_cmd_debug, "Show debug info"),
     "/reasoning": (_cmd_reasoning, "Toggle reasoning display: on | off"),
     "/statusbar": (_cmd_statusbar, "Toggle the status bar visibility"),

@@ -723,7 +723,10 @@ class Claude(Model):
                 entry.input_tokens_details = TokenDetails(cached_tokens=cache_read)
             self.usage.add(entry)
 
-            # Cost tracking: pass both cache_read and cache_write for accurate cost calculation
+            # Cost tracking: pass both cache_read and cache_write for accurate
+            # cost calculation. Anthropic already reports input_tokens exclusive
+            # of both, which is the disjoint form record() requires — no
+            # split_prompt_usage() normalisation needed here.
             if self._cost_tracker is not None:
                 self._cost_tracker.record(
                     model_id=self.id,

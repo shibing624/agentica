@@ -27,7 +27,7 @@ from agentica.utils.log import logger
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse, ModelResponseEvent
-from agentica.model.usage import Usage, RequestUsage, TokenDetails
+from agentica.model.usage import Usage, RequestUsage, TokenDetails, split_prompt_usage
 from agentica.security.redact import (
     redact_sensitive_text,
     redact_streamed_text_enabled,
@@ -1336,20 +1336,14 @@ class Model(ABC):
 
             # Cost tracking (v3): record USD cost for this invoke()
             if self._cost_tracker is not None:
-                cache_read = 0
-                cache_write = 0
-                prompt_details_dict = metrics.prompt_tokens_details or {}
-                if isinstance(prompt_details_dict, dict):
-                    # OpenAI reports cache hits as cached_tokens; Anthropic-style
-                    # proxies report cache_read_tokens / cache_creation_tokens.
-                    cache_read = prompt_details_dict.get(
-                        "cache_read_tokens",
-                        prompt_details_dict.get("cached_tokens", 0),
-                    )
-                    cache_write = prompt_details_dict.get("cache_creation_tokens", 0)
+                prompt_details_dict = metrics.prompt_tokens_details
+                fresh_input, cache_read, cache_write = split_prompt_usage(
+                    metrics.input_tokens,
+                    prompt_details_dict if isinstance(prompt_details_dict, dict) else None,
+                )
                 self._cost_tracker.record(
                     model_id=self.id,
-                    input_tokens=metrics.input_tokens,
+                    input_tokens=fresh_input,
                     output_tokens=metrics.output_tokens,
                     cache_read_tokens=cache_read,
                     cache_write_tokens=cache_write,
@@ -1416,17 +1410,12 @@ class Model(ABC):
 
         # Cost tracking (v3): record USD cost for this streaming invoke()
         if self._cost_tracker is not None:
-            cache_read = 0
-            cache_write = 0
-            if metrics.prompt_tokens_details is not None:
-                cache_read = metrics.prompt_tokens_details.get(
-                    "cache_read_tokens",
-                    metrics.prompt_tokens_details.get("cached_tokens", 0),
-                )
-                cache_write = metrics.prompt_tokens_details.get("cache_creation_tokens", 0)
+            fresh_input, cache_read, cache_write = split_prompt_usage(
+                metrics.input_tokens, metrics.prompt_tokens_details
+            )
             self._cost_tracker.record(
                 model_id=self.id,
-                input_tokens=metrics.input_tokens,
+                input_tokens=fresh_input,
                 output_tokens=metrics.output_tokens,
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
