@@ -6,6 +6,28 @@ from agentica.media import AudioResponse
 from agentica.utils.log import logger
 
 
+# Marker inserted by the prompt builder (agentica/agent/prompts.py) at the
+# boundary between the stable system-prompt prefix and its volatile tail
+# (workspace memory / learned experiences / session summary / date). Everything
+# after the marker can change between turns; the model layer splits the system
+# content here so only the stable prefix carries a prompt-cache breakpoint and
+# churn in the tail never invalidates the big cached tools+system prefix.
+VOLATILE_SYSTEM_MARKER = "<!-- agentica:volatile -->"
+
+
+def strip_volatile_marker(role: str, content: Any) -> Any:
+    """Remove ``VOLATILE_SYSTEM_MARKER`` from a system message's string content.
+
+    The marker only exists to drive the cache split in providers that implement
+    Anthropic-style prompt caching (the OpenAI-compatible and Claude paths).
+    Providers without that split must never see it — call this when formatting
+    messages for them.
+    """
+    if role == "system" and isinstance(content, str) and VOLATILE_SYSTEM_MARKER in content:
+        return content.replace(VOLATILE_SYSTEM_MARKER, "")
+    return content
+
+
 class MessageReferences(BaseModel):
     """The references added to user message for RAG"""
 

@@ -11,7 +11,7 @@ else:
 from pydantic import BaseModel
 
 from agentica.model.base import Model
-from agentica.model.message import Message
+from agentica.model.message import Message, strip_volatile_marker
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
@@ -123,7 +123,7 @@ class Ollama(Model):
         """Format a message into the format expected by Ollama."""
         _message: Dict[str, Any] = {
             "role": message.role,
-            "content": message.content,
+            "content": strip_volatile_marker(message.role, message.content),
         }
         if message.role == "user" and message.images is not None:
             self.validate_image_input()

@@ -274,5 +274,247 @@ def test_usage_merge_accumulates_cache_fields():
     assert a.input_tokens_details.cache_creation_tokens == 25
 
 
+# ── volatile system split ─────────────────────────────────────────────────────
+
+
+def test_system_split_at_volatile_marker():
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER
+    from agentica.model.openai.chat import _tag_system_content_cache_control
+
+    out = _tag_system_content_cache_control(f"stable part\n{VOLATILE_SYSTEM_MARKER}\nvolatile tail")
+    assert isinstance(out, list) and len(out) == 2
+    assert out[0] == {"type": "text", "text": "stable part", "cache_control": {"type": "ephemeral"}}
+    assert out[1] == {"type": "text", "text": "volatile tail"}
+    # the marker itself is a routing hint and must never reach the model
+    assert VOLATILE_SYSTEM_MARKER not in out[0]["text"]
+    assert VOLATILE_SYSTEM_MARKER not in out[1]["text"]
+
+
+def test_system_split_marker_as_last_line_yields_single_block():
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER
+    from agentica.model.openai.chat import _tag_system_content_cache_control
+
+    out = _tag_system_content_cache_control(f"stable part\n{VOLATILE_SYSTEM_MARKER}")
+    assert out == [{"type": "text", "text": "stable part", "cache_control": {"type": "ephemeral"}}]
+
+
+def test_system_no_marker_single_tagged_block():
+    from agentica.model.openai.chat import _tag_system_content_cache_control
+
+    out = _tag_system_content_cache_control("plain system")
+    assert out == [{"type": "text", "text": "plain system", "cache_control": {"type": "ephemeral"}}]
+
+
+def test_apply_cache_control_splits_volatile_system():
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER
+
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True)
+    msgs = [
+        {"role": "system", "content": f"S\n{VOLATILE_SYSTEM_MARKER}\nV"},
+        {"role": "user", "content": "u"},
+    ]
+    out, _ = model._apply_cache_control(msgs, _rk())
+    sys_blocks = out[0]["content"]
+    assert len(sys_blocks) == 2
+    assert sys_blocks[0].get("cache_control") == {"type": "ephemeral"}
+    assert "cache_control" not in sys_blocks[1]
+    # breakpoint budget still counts the system tag exactly once
+    assert out[1]["content"][-1].get("cache_control") == {"type": "ephemeral"}
+
+
+def test_apply_cache_control_strips_marker_when_caching_off():
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER
+
+    # Default config (enable_cache_control=False): the marker must not reach
+    # the model, since the split that consumes it never runs.
+    model = OpenAIChat(id="m", api_key="fake_openai_key")
+    msgs = [
+        {"role": "system", "content": f"S\n{VOLATILE_SYSTEM_MARKER}\nV"},
+        {"role": "user", "content": "u"},
+    ]
+    out, _ = model._apply_cache_control(msgs, _rk())
+    assert VOLATILE_SYSTEM_MARKER not in out[0]["content"]
+    assert out[0]["content"] == "S\n\nV"
+
+
+# ── persisted sticky routing id ───────────────────────────────────────────────
+
+
+def test_persistent_session_id_stable_per_base_url(tmp_path, monkeypatch):
+    from agentica.model.openai import chat as chat_mod
+
+    monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
+    a = chat_mod._persistent_cache_session_id("https://x.example/v1")
+    b = chat_mod._persistent_cache_session_id("https://x.example/v1")
+    c = chat_mod._persistent_cache_session_id("https://y.example/v1")
+    assert a == b and a.startswith("agentica-cache-")
+    assert c != a
+
+
+def test_persistent_session_id_tolerates_corrupt_file(tmp_path, monkeypatch):
+    from agentica.model.openai import chat as chat_mod
+
+    monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
+    f = tmp_path / ".agentica" / "cache" / "cache_routing.json"
+    f.parent.mkdir(parents=True)
+    f.write_text("not json at all")
+    sid = chat_mod._persistent_cache_session_id("https://x.example/v1")
+    assert sid.startswith("agentica-cache-")
+
+
+def test_session_header_shared_across_instances(tmp_path, monkeypatch):
+    from agentica.model.openai import chat as chat_mod
+
+    monkeypatch.setattr(chat_mod.Path, "home", staticmethod(lambda: tmp_path))
+    kwargs = dict(id="m", api_key="fake_openai_key", enable_cache_control=True,
+                  cache_control_session_header="Venus-Session-Id", base_url="https://x.example/v1")
+    m1 = OpenAIChat(**kwargs)
+    m2 = OpenAIChat(**kwargs)
+    _, kw1 = m1._apply_cache_control(_msgs(1), _rk())
+    _, kw2 = m2._apply_cache_control(_msgs(1), _rk())
+    assert kw1["extra_headers"]["Venus-Session-Id"] == kw2["extra_headers"]["Venus-Session-Id"]
+
+
+# ── cache keep-alive ──────────────────────────────────────────────────────────
+
+
+def test_apply_cache_control_captures_payload_for_keepalive():
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True)
+    assert model._last_cache_payload is None
+    model._apply_cache_control(_msgs(1), _rk())
+    assert model._last_cache_payload is not None
+    messages, request_kwargs = model._last_cache_payload
+    assert messages[0]["role"] == "system"
+
+
+def test_keepalive_not_armed_when_disabled_or_no_payload():
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True, cache_keepalive=False)
+    model._last_cache_payload = ([], {})
+    model._arm_cache_keepalive()
+    assert model._cache_keepalive_generation == 0
+
+    model2 = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=False)
+    model2._arm_cache_keepalive()
+    assert model2._cache_keepalive_generation == 0
+
+
+def test_keepalive_worker_stops_when_superseded():
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True,
+                       cache_keepalive_interval=0, cache_keepalive_max_pings=5)
+    model._last_cache_payload = ([{"role": "system", "content": "S"}], {})
+    calls = []
+
+    async def fake_ping():
+        calls.append(1)
+        return 0
+
+    model._cache_keepalive_ping = fake_ping
+    # supersede immediately: generation 0 worker must exit without pinging
+    model._cache_keepalive_loop(generation=-1)
+    assert calls == []
+
+
+def test_cache_off_strips_volatile_marker():
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER
+
+    model = OpenAIChat(id="m", api_key="fake_openai_key")  # cache off by default
+    msgs = [
+        {"role": "system", "content": f"S\n{VOLATILE_SYSTEM_MARKER}\nV"},
+        {"role": "user", "content": "u"},
+    ]
+    out, _ = model._apply_cache_control(msgs, _rk())
+    assert out[0]["content"] == "S\n\nV"
+    assert VOLATILE_SYSTEM_MARKER not in out[0]["content"]
+    assert out[1] == {"role": "user", "content": "u"}  # non-system untouched
+
+
+def test_keepalive_not_armed_without_sticky_header():
+    # Without backend affinity a ping would land on a random backend and become
+    # a full-price cache write — the arm must refuse (code-review Important #2).
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True,
+                       cache_keepalive_interval=3600)
+    model._apply_cache_control(_msgs(1), _rk())
+    model._arm_cache_keepalive()
+    assert model._cache_keepalive_generation == 0
+
+
+def test_keepalive_armed_with_sticky_header():
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True,
+                       cache_control_session_header="Venus-Session-Id", cache_keepalive_interval=3600)
+    model._apply_cache_control(_msgs(1), _rk())
+    model._arm_cache_keepalive()
+    assert model._cache_keepalive_generation == 1
+
+
+def test_keepalive_ping_request_shape(monkeypatch):
+    from agentica.model.openai import chat as chat_mod
+
+    sent: dict = {}
+
+    class _FakeCompletions:
+        async def create(self, **kwargs):
+            sent.update(kwargs)
+
+            class _U:
+                prompt_tokens_details = None
+
+            class _R:
+                usage = _U()
+
+            return _R()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeClient:
+        def __init__(self, **kwargs):
+            sent["client_params"] = kwargs
+
+        @property
+        def chat(self):
+            return _FakeChat()
+
+    monkeypatch.setattr(chat_mod, "AsyncOpenAIClient", _FakeClient)
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=True,
+                       cache_control_session_header="Venus-Session-Id", base_url="https://x.example/v1")
+    sys_blocks = [{"type": "text", "text": "S", "cache_control": {"type": "ephemeral"}}]
+    model._last_cache_payload = (
+        [{"role": "system", "content": sys_blocks}, {"role": "user", "content": "u"}],
+        {"tools": [{"type": "function"}], "extra_headers": {"Venus-Session-Id": "sid"}},
+    )
+    import asyncio
+
+    asyncio.run(model._cache_keepalive_ping())
+    assert sent["max_tokens"] == 1
+    assert [m["role"] for m in sent["messages"]] == ["system", "user"]  # no conversation replay
+    assert sent["tools"] == [{"type": "function"}]
+    assert sent["extra_headers"] == {"Venus-Session-Id": "sid"}
+    assert "http_client" in sent["client_params"]  # throwaway client, not the shared one
+
+
+# ── marker must not leak to non-caching providers ─────────────────────────────
+
+
+def test_litellm_format_strips_marker():
+    litellm = pytest.importorskip("litellm", reason="litellm not installed")
+    if not hasattr(litellm, "completion"):
+        pytest.skip("litellm importable only as a namespace stub (broken install)")
+    from agentica.model.litellm.chat import LiteLLMChat
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER, Message
+
+    model = LiteLLMChat(id="gpt-test", api_key="fake")
+    out = model.format_message(Message(role="system", content=f"S\n{VOLATILE_SYSTEM_MARKER}\nV"))
+    assert VOLATILE_SYSTEM_MARKER not in out["content"]
+
+
+def test_ollama_format_strips_marker():
+    from agentica.model.ollama.chat import Ollama
+    from agentica.model.message import VOLATILE_SYSTEM_MARKER, Message
+
+    model = Ollama(id="llama-test")
+    out = model.format_message(Message(role="system", content=f"S\n{VOLATILE_SYSTEM_MARKER}\nV"))
+    assert VOLATILE_SYSTEM_MARKER not in out["content"]
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

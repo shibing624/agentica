@@ -73,6 +73,45 @@ class TestSystemMessageCacheControl(unittest.TestCase):
         self.assertEqual(kwargs["temperature"], 0.5)
         self.assertIn("max_tokens", kwargs)
 
+    def test_marker_split_when_enabled(self):
+        """VOLATILE_SYSTEM_MARKER splits stable/volatile; breakpoint on stable head only."""
+        from agentica.model.message import VOLATILE_SYSTEM_MARKER
+
+        model = _make_claude(enable_cache_control=True)
+        system = f"STABLE PREFIX\n{VOLATILE_SYSTEM_MARKER}\nvolatile memory"
+        blocks = model.prepare_request_kwargs(system)["system"]
+
+        self.assertIsInstance(blocks, list)
+        self.assertEqual(len(blocks), 2)
+        # Stable head carries the breakpoint; volatile tail does not.
+        self.assertEqual(blocks[0]["cache_control"], {"type": "ephemeral"})
+        self.assertNotIn("cache_control", blocks[1])
+        # The marker must not leak into either block.
+        for block in blocks:
+            self.assertNotIn(VOLATILE_SYSTEM_MARKER, block["text"])
+        self.assertEqual(blocks[0]["text"], "STABLE PREFIX")
+        self.assertEqual(blocks[1]["text"], "volatile memory")
+
+    def test_marker_stripped_when_disabled(self):
+        """Caching off: marker is still stripped so it never reaches the model."""
+        from agentica.model.message import VOLATILE_SYSTEM_MARKER
+
+        model = _make_claude(enable_cache_control=False)
+        system = f"STABLE PREFIX\n{VOLATILE_SYSTEM_MARKER}\nvolatile memory"
+        result = model.prepare_request_kwargs(system)["system"]
+
+        self.assertIsInstance(result, str)
+        self.assertNotIn(VOLATILE_SYSTEM_MARKER, result)
+        self.assertEqual(result, "STABLE PREFIX\n\nvolatile memory")
+
+    def test_no_marker_single_block(self):
+        """Without a marker the whole system is one cached block (no regression)."""
+        model = _make_claude(enable_cache_control=True)
+        blocks = model.prepare_request_kwargs("Just a plain system prompt.")["system"]
+        self.assertIsInstance(blocks, list)
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0]["cache_control"], {"type": "ephemeral"})
+
 
 class TestConversationCacheControl(unittest.TestCase):
     """format_messages injects cache_control on last 3 conversation messages (system_and_3 strategy)."""

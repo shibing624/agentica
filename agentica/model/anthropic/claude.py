@@ -19,7 +19,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 from agentica.model.base import Model
-from agentica.model.message import Message
+from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics
 from agentica.model.response import ModelResponse
 from agentica.model.anthropic._max_tokens import (
@@ -463,19 +463,33 @@ class Claude(Model):
         """
         request_kwargs = self.request_kwargs.copy()
 
-        # Prompt caching: wrap system message as content block with cache_control.
+        # Prompt caching: wrap system message as content block(s) with cache_control.
         # Anthropic API accepts system as str OR List[ContentBlock].
-        # The cache breakpoint on the system block keeps the static prefix cached
-        # across multi-turn conversations (cache read = 0.1x input cost).
+        # Split at the volatile marker (if present) so the stable prefix carries
+        # the cache breakpoint and per-turn memory/summary churn in the tail never
+        # invalidates the big cached prefix. The marker itself is a routing hint
+        # and must not be sent to the model.
         if self.enable_cache_control and system_message:
-            request_kwargs["system"] = [
-                {
-                    "type": "text",
-                    "text": system_message,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ]
+            head, sep, tail = system_message.partition(VOLATILE_SYSTEM_MARKER)
+            if sep and head.strip():
+                blocks = [
+                    {"type": "text", "text": head.rstrip(), "cache_control": {"type": "ephemeral"}}
+                ]
+                if tail.strip():
+                    blocks.append({"type": "text", "text": tail.lstrip("\n")})
+                request_kwargs["system"] = blocks
+            else:
+                text = (tail if sep else system_message).strip()
+                if text:
+                    request_kwargs["system"] = [
+                        {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+                    ]
+                else:
+                    request_kwargs["system"] = system_message
         else:
+            # Caching off: still strip the marker so it never reaches the model.
+            if VOLATILE_SYSTEM_MARKER in system_message:
+                system_message = system_message.replace(VOLATILE_SYSTEM_MARKER, "")
             request_kwargs["system"] = system_message
 
         # Structured output via tool_use: inject synthetic tool and force tool_choice

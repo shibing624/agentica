@@ -28,7 +28,7 @@ from typing import Optional, List, AsyncIterator, Dict, Any, Union
 from pydantic import BaseModel
 
 from agentica.model.base import Model, require_first_choice
-from agentica.model.message import Message
+from agentica.model.message import Message, strip_volatile_marker
 from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
 from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
@@ -249,7 +249,7 @@ class LiteLLMChat(Model):
         msg_dict: Dict[str, Any] = {"role": message.role}
         
         if message.content is not None:
-            msg_dict["content"] = message.content
+            msg_dict["content"] = strip_volatile_marker(message.role, message.content)
         if message.name is not None:
             msg_dict["name"] = message.name
         if message.tool_call_id is not None:

@@ -258,7 +258,7 @@ _REASONING_EFFORT_CHOICES = ("low", "medium", "high", "max")
 # Profile keys that are optional model-tuning params. Used to carry existing
 # values through a re-run of `agentica setup` when the user declines to edit.
 _TUNING_KEYS = ("reasoning_effort", "max_tokens", "context_window", "temperature", "top_p")
-_CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header")
+_CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header", "cache_keepalive")
 # extra_body / extra_headers are raw passthrough dicts for endpoints whose
 # tuning knobs don't map to a standard OpenAI param (e.g. Hunyuan's taiji
 # gateway wants reasoning_effort inside extra_body.chat_template_kwargs, not

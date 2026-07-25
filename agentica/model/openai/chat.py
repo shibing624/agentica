@@ -1,6 +1,10 @@
 from os import getenv
 from dataclasses import dataclass, field
+from pathlib import Path
+import asyncio
 import json
+import threading
+import time
 import re
 import sys
 from typing import Optional, List, AsyncIterator, Dict, Any, Union, Literal
@@ -28,7 +32,7 @@ from openai.types.chat.chat_completion_chunk import (
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from agentica.model.base import Model, require_first_choice
-from agentica.model.message import Message
+from agentica.model.message import Message, VOLATILE_SYSTEM_MARKER
 from agentica.model.metrics import Metrics, StreamData
 from agentica.model.response import ModelResponse
 from agentica.model.stream_retry import stream_with_retry
@@ -134,6 +138,49 @@ def _tag_content_block_cache_control(content: Any) -> Any:
     return content
 
 
+def _tag_system_content_cache_control(content: Any) -> Any:
+    """Tag the system message content, splitting at the volatile marker.
+
+    With ``VOLATILE_SYSTEM_MARKER`` present, returns two text blocks — the
+    stable head WITH the breakpoint and the volatile tail WITHOUT — so a
+    per-turn memory/summary update no longer busts the whole cached
+    tools+system prefix. Without a marker, identical to
+    :func:`_tag_content_block_cache_control`.
+    """
+    if isinstance(content, str):
+        head, sep, tail = content.partition(VOLATILE_SYSTEM_MARKER)
+        if sep and head.strip():
+            blocks = [{"type": "text", "text": head.rstrip(), "cache_control": {"type": "ephemeral"}}]
+            # The marker itself is a pure routing hint — never send it to the
+            # model. An empty tail (marker was the last line) is dropped too,
+            # since empty text blocks are rejected by the API.
+            if tail.strip():
+                blocks.append({"type": "text", "text": tail.lstrip("\n")})
+            return blocks
+        if sep:
+            # Marker at offset 0: no stable prefix to cache — forward the tail
+            # without the marker rather than leaking it inside a tagged block.
+            content = tail
+    return _tag_content_block_cache_control(content)
+
+
+def _strip_volatile_marker_from_message(message: Any) -> Any:
+    """Drop the volatile marker from a system message.
+
+    The marker only exists to drive the cache split in
+    :func:`_tag_system_content_cache_control`. When caching is disabled that
+    split never runs, so leaving the marker in the prompt is pure noise — it
+    would be sent verbatim to the model on the default (cache-off) config.
+    """
+    if isinstance(message, dict) and message.get("role") == "system":
+        content = message.get("content")
+        if isinstance(content, str) and VOLATILE_SYSTEM_MARKER in content:
+            stripped = dict(message)
+            stripped["content"] = content.replace(VOLATILE_SYSTEM_MARKER, "")
+            return stripped
+    return message
+
+
 def _tag_tools_cache_control(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Tag the last tool definition with an ephemeral cache breakpoint.
 
@@ -149,6 +196,34 @@ def _tag_tools_cache_control(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]
         tagged["cache_control"] = {"type": "ephemeral"}
         out[-1] = tagged
     return out
+
+
+def _persistent_cache_session_id(base_url: Any) -> str:
+    """Load-or-create the sticky cache-routing id for this endpoint.
+
+    Persisted in ``~/.agentica/cache/cache_routing.json`` keyed by base_url so
+    a new CLI process keeps the same routing id and lands on the same proxy
+    backend (a fresh random id would guarantee a cold cache). Best-effort: if
+    the file is unreadable/unwritable, an in-memory id is used for this process.
+    """
+    path = Path.home() / ".agentica" / "cache" / "cache_routing.json"
+    key = str(base_url or "default").rstrip("/")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not isinstance(data, dict):
+            data = {}
+    except (OSError, ValueError):
+        data = {}
+    sid = data.get(key)
+    if not sid:
+        sid = f"agentica-cache-{uuid4()}"
+        data[key] = sid
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError:
+            pass  # persistence is best-effort; the in-memory id still works
+    return sid
 
 
 def _request_has_cache_control(messages: List[Dict[str, Any]], tools: Any) -> bool:
@@ -219,10 +294,23 @@ class OpenAIChat(Model):
     # so the effective count is min(cache_control_messages, 4 - tools - system).
     cache_control_messages: int = 3
     # Optional sticky-routing header name (e.g. "Venus-Session-Id"): when set,
-    # a per-model-run session id is generated once and injected into
-    # ``extra_headers`` so consecutive invokes land on the same backend and
-    # actually hit the cache written by the first request. None = off.
+    # a session id is loaded-or-created once per base_url (persisted in
+    # ~/.agentica/cache/cache_routing.json) and injected into ``extra_headers`` so
+    # consecutive invokes — even across CLI restarts — land on the same
+    # backend and actually hit the cache written by earlier requests. None = off.
     cache_control_session_header: Optional[str] = None
+    _cache_session_id: Optional[str] = field(default=None, init=False, repr=False)
+    # Cache keep-alive: while the session sits idle, re-read the cached
+    # tools+system prefix every `cache_keepalive_interval` seconds (a cache read
+    # costs ~0.1x input price vs ~1.25x for a re-write after the 5-min TTL
+    # lapses; verified against Venus that reads refresh the TTL). The ping chain
+    # stops after `cache_keepalive_max_pings` pings without new traffic, so idle
+    # cost is bounded.
+    cache_keepalive: bool = True
+    cache_keepalive_interval: int = 240
+    cache_keepalive_max_pings: int = 3
+    _last_cache_payload: Any = field(default=None, init=False, repr=False)
+    _cache_keepalive_generation: int = field(default=0, init=False, repr=False)
 
     # Client parameters
     api_key: Optional[str] = None
@@ -489,14 +577,15 @@ class OpenAIChat(Model):
 
         Cache hits require consecutive requests to land on the same backend.
         Proxies like Venus route by a request header (e.g. ``Venus-Session-Id``);
-        we generate one id per model instance and reuse it across invokes.
-        Only merges into a dict-typed extra_headers; other types are returned
-        unchanged (we cannot safely merge into openai Header objects).
+        the id is loaded-or-created once per base_url and persisted in
+        ``~/.agentica/cache/cache_routing.json`` so cache affinity survives CLI
+        restarts. Only merges into a dict-typed extra_headers; other types are
+        returned unchanged (we cannot safely merge into openai Header objects).
         """
         if not self.cache_control_session_header:
             return existing
-        if not getattr(self, "_cache_session_id", None):
-            self._cache_session_id = f"agentica-cache-{uuid4()}"
+        if self._cache_session_id is None:
+            self._cache_session_id = _persistent_cache_session_id(self.base_url)
         if isinstance(existing, dict):
             headers = dict(existing)
         elif existing is None:
@@ -505,6 +594,85 @@ class OpenAIChat(Model):
             return existing
         headers.setdefault(self.cache_control_session_header, self._cache_session_id)
         return headers
+
+    def _arm_cache_keepalive(self) -> None:
+        """(Re)start the idle cache keep-alive timer after a successful request.
+
+        Each call bumps a generation counter; any older worker thread exits when
+        it notices, so at most one ping chain is ever in flight. The chain stops
+        on its own after ``cache_keepalive_max_pings`` pings with no new traffic.
+        Requires a sticky routing header: without backend affinity a ping lands
+        on a random backend and becomes a full-price cache WRITE, which would
+        multiply cost instead of saving it.
+        """
+        if not (
+            self.enable_cache_control
+            and self.cache_keepalive
+            and self.cache_control_session_header
+            and self._last_cache_payload
+        ):
+            return
+        self._cache_keepalive_generation += 1
+        worker = threading.Thread(
+            target=self._cache_keepalive_loop,
+            args=(self._cache_keepalive_generation,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _cache_keepalive_loop(self, generation: int) -> None:
+        for _ in range(max(self.cache_keepalive_max_pings, 0)):
+            time.sleep(self.cache_keepalive_interval)
+            if generation != self._cache_keepalive_generation:
+                return  # newer traffic armed a fresh worker; this chain is done
+            try:
+                read_tokens = asyncio.run(self._cache_keepalive_ping())
+                if read_tokens:
+                    logger.debug(f"cache keepalive ping refreshed prefix (read={read_tokens} tokens)")
+            except Exception as e:
+                logger.warning(f"cache keepalive ping failed, stopping chain: {e}")
+                return
+
+    async def _cache_keepalive_ping(self) -> Optional[int]:
+        """Re-read the cached tools+system prefix with a minimal request.
+
+        A cache read refreshes the entry TTL (verified against Venus), so pinging
+        during idle think-time keeps the expensive prefix alive instead of paying
+        a full re-write on the next real request. Runs in a worker thread with
+        its own event loop and a throwaway client so it never touches the main
+        loop's client. Returns the number of cache-read tokens, if reported.
+        """
+        payload = self._last_cache_payload
+        if payload is None:
+            return None
+        messages, request_kwargs = payload
+        system_messages = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+        if not system_messages:
+            return None
+        ping_kwargs: Dict[str, Any] = {
+            "model": self.id,
+            "messages": system_messages + [{"role": "user", "content": "cache keepalive"}],
+            "max_tokens": 1,
+        }
+        if request_kwargs.get("tools"):
+            ping_kwargs["tools"] = request_kwargs["tools"]
+        if request_kwargs.get("extra_headers"):
+            ping_kwargs["extra_headers"] = request_kwargs["extra_headers"]
+        if self.extra_body:
+            # Mirror the main request shape (e.g. thinking toggles) so strict
+            # backends don't reject the ping for differing params.
+            ping_kwargs["extra_body"] = self.extra_body
+        http_client = httpx.AsyncClient(limits=httpx.Limits(max_connections=10, max_keepalive_connections=2))
+        try:
+            client_params = self.get_client_params()
+            client_params.pop("http_client", None)  # we supply the throwaway one
+            client = AsyncOpenAIClient(http_client=http_client, **client_params)
+            response = await client.chat.completions.create(**ping_kwargs)
+        finally:
+            await http_client.aclose()
+        usage = getattr(response, "usage", None)
+        details = getattr(usage, "prompt_tokens_details", None) if usage else None
+        return getattr(details, "cache_read_tokens", None) if details else None
 
     def _apply_cache_control(self, formatted: List[Dict[str, Any]], request_kwargs: Dict[str, Any]) -> tuple:
         """Inject Anthropic-style cache_control breakpoints within the 4-breakpoint budget.
@@ -521,6 +689,9 @@ class OpenAIChat(Model):
                     "enable_cache_control is off; the backend may ignore them. "
                     "Set enable_cache_control=True to turn on prompt caching."
                 )
+            # The volatile marker only drives the cache split, which is off on
+            # this path; strip it so it never pollutes the prompt.
+            formatted = [_strip_volatile_marker_from_message(m) for m in formatted]
             return formatted, request_kwargs
 
         budget = _CACHE_CONTROL_BREAKPOINT_BUDGET
@@ -531,12 +702,14 @@ class OpenAIChat(Model):
             new_kwargs["tools"] = _tag_tools_cache_control(tools)
             budget -= 1
 
-        # 2) System message: wrap content as a cached text block.
+        # 2) System message: tag the stable prefix; if the prompt builder
+        #    marked a volatile tail (memory/experiences/summary/date), split it
+        #    out so tail churn never invalidates the cached stable prefix.
         out = list(formatted)
         for i, m in enumerate(out):
             if isinstance(m, dict) and m.get("role") == "system":
                 tagged = dict(m)
-                tagged["content"] = _tag_content_block_cache_control(m.get("content"))
+                tagged["content"] = _tag_system_content_cache_control(m.get("content"))
                 out[i] = tagged
                 budget -= 1
                 break
@@ -567,6 +740,8 @@ class OpenAIChat(Model):
         # Sticky routing so consecutive invokes hit the same backend cache.
         if self.cache_control_session_header:
             new_kwargs["extra_headers"] = self._with_cache_session_header(new_kwargs.get("extra_headers"))
+        # Remember the tagged payload for cache keep-alive pings.
+        self._last_cache_payload = (out, new_kwargs)
         return out, new_kwargs
 
     def _get_langfuse_extra_params(self) -> Dict[str, Any]:
@@ -606,12 +781,14 @@ class OpenAIChat(Model):
         if self.response_format is not None and self.use_structured_outputs:
             try:
                 if isinstance(self.response_format, type) and issubclass(self.response_format, BaseModel):
-                    return await self.get_client().beta.chat.completions.parse(
+                    response = await self.get_client().beta.chat.completions.parse(
                         model=self.id,
                         messages=formatted,  # type: ignore
                         **request_kwargs,
                         **langfuse_params,
                     )
+                    self._arm_cache_keepalive()
+                    return response
                 else:
                     raise ValueError("response_format must be a subclass of BaseModel if use_structured_outputs=True")
             except Exception as e:
@@ -620,12 +797,14 @@ class OpenAIChat(Model):
                 raise
 
         try:
-            return await self.get_client().chat.completions.create(
+            response = await self.get_client().chat.completions.create(
                 model=self.id,
                 messages=formatted,  # type: ignore
                 **request_kwargs,
                 **langfuse_params,
             )
+            self._arm_cache_keepalive()
+            return response
         except Exception as e:
             self._learn_context_limit_from_error(str(e))
             raise
@@ -665,6 +844,7 @@ class OpenAIChat(Model):
             provider_label=f"openai/{self.id}",
         ):
             yield chunk
+        self._arm_cache_keepalive()
 
     # handle_tool_calls and handle_stream_tool_calls are inherited from Model base class.
 

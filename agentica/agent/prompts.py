@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.utils.log import logger
 from agentica.document import Document
-from agentica.model.message import Message, MessageReferences
+from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
 from agentica.run_input import build_user_message_from_sequence
 from agentica.run_response import RunResponseExtraData
 from agentica.utils.timer import Timer
@@ -345,6 +345,11 @@ class PromptsMixin:
             )
             system_message_lines.append("")
 
+        # Cache boundary: everything below (workspace memory / experiences /
+        # session summary / date) is volatile across turns. The marker lets the
+        # model layer keep the cache breakpoint on the stable prefix above, so
+        # memory churn never invalidates the cached tools+system prefix.
+        system_message_lines.append(VOLATILE_SYSTEM_MARKER)
         _query = self._get_anchor_query()
         workspace_memory = await self.get_workspace_memory_prompt(query=_query)
         if workspace_memory:
@@ -507,6 +512,11 @@ class PromptsMixin:
                 )
             )
 
+        # Cache boundary: everything below (workspace memory / experiences /
+        # session summary / date) is volatile across turns. The marker lets the
+        # model layer keep the cache breakpoint on the stable prefix above, so
+        # memory churn never invalidates the cached tools+system prefix.
+        system_message_lines.append(VOLATILE_SYSTEM_MARKER)
         _query = self._get_anchor_query()
         workspace_memory = await self.get_workspace_memory_prompt(query=_query)
         if workspace_memory:
