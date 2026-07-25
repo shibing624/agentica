@@ -2630,8 +2630,7 @@ def _render_context_breakdown(con, agent) -> None:
         return
 
     total = breakdown.total
-    widest = max(tokens for _, tokens in sections)
-    sep = "─" * 42
+    sep = "─" * 46
 
     con.print()
     con.print(
@@ -2640,10 +2639,16 @@ def _render_context_breakdown(con, agent) -> None:
         f"({breakdown.percent_full:.0f}% full, estimated)[/dim]"
     )
     con.print(f"  {sep}")
+    # Bars are shares of what is loaded, so they add up to the whole row of
+    # blocks. Scaling to the largest row instead would peg it at full width and
+    # read as "this section filled the window".
     for label, tokens in sections:
-        filled = round(tokens / widest * 10) if widest else 0
+        share = tokens / total if total else 0
+        filled = round(share * 10)
         bar = "▓" * filled + "░" * (10 - filled)
-        con.print(f"  {label:<24} {_fmt_tokens(tokens):>7}  [dim]{bar}[/dim]")
+        con.print(
+            f"  {label:<24} {_fmt_tokens(tokens):>7} {share * 100:>3.0f}%  [dim]{bar}[/dim]"
+        )
     con.print(f"  {sep}")
 
     tracker = agent.run_response.cost_tracker if agent.run_response else None
