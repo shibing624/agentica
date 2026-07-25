@@ -1140,6 +1140,9 @@ def resolve_model_config(args, console=None) -> Dict:
         # a standard OpenAI param (e.g. Hunyuan's taiji gateway).
         "extra_body": profile_params.get("extra_body"),
         "extra_headers": profile_params.get("extra_headers"),
+        # Client-level static headers (anthropic provider only, e.g.
+        # Venus-Sticky-Routing on the native /v1/messages path).
+        "default_headers": profile_params.get("default_headers"),
         "auxiliary_model_provider": auxiliary_provider,
         "auxiliary_model_name": auxiliary_name,
         "auxiliary_base_url": auxiliary_base,

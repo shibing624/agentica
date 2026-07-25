@@ -465,6 +465,7 @@ def get_model(
     cache_keepalive=None,
     extra_body=None,
     extra_headers=None,
+    default_headers=None,
 ):
     """Create a model instance based on the provider name.
 
@@ -493,9 +494,14 @@ def get_model(
     # OpenAI-only tuning: reasoning_effort + raw passthrough dicts. Anthropic
     # takes reasoning_effort too (mapped to adaptive thinking inside the Claude
     # model class), but NOT the OpenAI extra_body/extra_headers passthrough.
+    # default_headers goes to the Anthropic client's static headers — the only
+    # way to pin sticky routing (e.g. Venus-Sticky-Routing) on the native
+    # /v1/messages path, which has no per-request extra_headers mechanism.
     if model_provider == "anthropic":
         if reasoning_effort is not None:
             params["reasoning_effort"] = reasoning_effort
+        if default_headers is not None:
+            params["default_headers"] = default_headers
     else:
         if model_provider == "deepseek":
             params["reasoning_effort"] = reasoning_effort or "max"
@@ -723,6 +729,7 @@ def create_agent(
         cache_keepalive=agent_config.get("cache_keepalive"),
         extra_body=agent_config.get("extra_body"),
         extra_headers=agent_config.get("extra_headers"),
+        default_headers=agent_config.get("default_headers"),
     )
 
     # Auxiliary model: the cheap/fast model for all background LLM work (memory

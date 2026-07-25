@@ -1468,6 +1468,7 @@ def _rebuild_live_model(ctx: CommandContext):
         "context_window": ctx.agent_config.get("context_window"),
         "extra_body": ctx.agent_config.get("extra_body"),
         "extra_headers": ctx.agent_config.get("extra_headers"),
+        "default_headers": ctx.agent_config.get("default_headers"),
     }
     ctx.current_agent.model = get_model(**model_kwargs)
     ctx.current_agent.environment_context = _build_environment_context(ctx.current_agent, ctx.agent_config)
@@ -2208,6 +2209,7 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_context_window = profile.get("context_window")
     new_extra_body = profile.get("extra_body")
     new_extra_headers = profile.get("extra_headers")
+    new_default_headers = profile.get("default_headers")
 
     ctx.agent_config["model_provider"] = new_provider
     ctx.agent_config["model_name"] = new_model
@@ -2220,6 +2222,7 @@ def _apply_profile(ctx: CommandContext, name: str):
     ctx.agent_config["context_window"] = new_context_window
     ctx.agent_config["extra_body"] = new_extra_body
     ctx.agent_config["extra_headers"] = new_extra_headers
+    ctx.agent_config["default_headers"] = new_default_headers
 
     # Auxiliary model: a profile switch fully replaces the auxiliary model too. An
     # auxiliary_model block rebuilds the sibling (background calls + task subagent);
@@ -2281,6 +2284,7 @@ def _apply_profile(ctx: CommandContext, name: str):
         "context_window": new_context_window,
         "extra_body": new_extra_body,
         "extra_headers": new_extra_headers,
+        "default_headers": new_default_headers,
     }
     new_model_obj = get_model(**model_kwargs)
     if ctx.current_agent is not None:
