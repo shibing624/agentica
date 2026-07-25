@@ -184,6 +184,36 @@ class TestCostTrackerContextWatermark(unittest.TestCase):
         self.assertEqual(ct.total_cost_usd, cost_before)
 
 
+class TestCostTrackerPromptTotals(unittest.TestCase):
+    """total_prompt_tokens is the figure anything showing "tokens used" wants.
+
+    total_input_tokens counts only freshly billed input, so on a cache-pricing
+    provider it omits the whole cached prefix.
+    """
+
+    def test_counts_cached_prefix(self):
+        ct = CostTracker()
+        ct.record("claude-3-5-sonnet", input_tokens=1000, output_tokens=50,
+                  cache_read_tokens=80000, cache_write_tokens=1500)
+        self.assertEqual(ct.total_input_tokens, 1000)
+        self.assertEqual(ct.total_cache_read_tokens, 80000)
+        self.assertEqual(ct.total_cache_write_tokens, 1500)
+        self.assertEqual(ct.total_prompt_tokens, 82500)
+
+    def test_sums_across_calls_and_models(self):
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=500, output_tokens=10)
+        ct.record("claude-3-5-sonnet", input_tokens=200, output_tokens=10,
+                  cache_read_tokens=9000)
+        self.assertEqual(ct.total_prompt_tokens, 9700)
+
+    def test_matches_input_total_without_caching(self):
+        ct = CostTracker()
+        ct.record("gpt-4o", input_tokens=1000, output_tokens=100)
+        ct.record("gpt-4o", input_tokens=2000, output_tokens=100)
+        self.assertEqual(ct.total_prompt_tokens, ct.total_input_tokens)
+
+
 class TestCostTrackerSummary(unittest.TestCase):
     """summary() generates human-readable output."""
 

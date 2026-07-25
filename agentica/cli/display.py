@@ -1691,7 +1691,11 @@ class StreamDisplayManager:
                 ``#N`` at the head of the summary. When ``None`` the field
                 is omitted — useful for tests or synthetic turns that have
                 no meaningful ordinal.
-            delta_tokens: Tokens consumed by this turn (input + output).
+            delta_tokens: Tokens consumed by this turn — every prompt token
+                (cached ones included) plus output, summed over the turn's API
+                calls. A tool loop sends the prompt once per call, so this runs
+                well above the context size shown in the status bar; that one is
+                the largest single prompt, not the total.
                 Rendered as ``+Tk`` (``+3.2K`` when ≥ 1000, ``+42`` else).
                 Omitted when ``None`` or ``<= 0``.
             delta_cost_usd: USD cost incurred by this turn. Rendered as
@@ -1870,8 +1874,8 @@ def display_token_stats(
         parts.append(f"[dim]{elapsed_seconds:.2f}s[/dim]")
 
     # Prompt-cache hits / writes (Anthropic-style, e.g. Venus proxying Claude).
-    cache_read = sum(s.cache_read_tokens for s in cost_tracker.model_usage.values())
-    cache_write = sum(s.cache_write_tokens for s in cost_tracker.model_usage.values())
+    cache_read = cost_tracker.total_cache_read_tokens
+    cache_write = cost_tracker.total_cache_write_tokens
     if cache_read or cache_write:
         seg = []
         if cache_read:

@@ -2622,13 +2622,10 @@ def _cmd_cost(ctx: CommandContext, cmd_args: str = ""):
 
     model_name = f"{ctx.agent_config.get('model_provider', '')}/{ctx.agent_config.get('model_name', '')}"
 
-    total_cache_read = 0
-    total_cache_write = 0
-    for stat in tracker.model_usage.values():
-        total_cache_read += stat.cache_read_tokens
-        total_cache_write += stat.cache_write_tokens
+    total_cache_read = tracker.total_cache_read_tokens
+    total_cache_write = tracker.total_cache_write_tokens
 
-    prompt_total = tracker.total_input_tokens + total_cache_read + total_cache_write
+    prompt_total = tracker.total_prompt_tokens
     total_all = prompt_total + tracker.total_output_tokens
 
     ts = ctx.tui_state or {}

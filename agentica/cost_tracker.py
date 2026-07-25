@@ -431,6 +431,31 @@ class CostTracker:
 
         return cost
 
+    @property
+    def total_cache_read_tokens(self) -> int:
+        """Cache-hit prompt tokens across all calls, summed over models."""
+        return sum(s.cache_read_tokens for s in self.model_usage.values())
+
+    @property
+    def total_cache_write_tokens(self) -> int:
+        """Cache-write prompt tokens across all calls, summed over models."""
+        return sum(s.cache_write_tokens for s in self.model_usage.values())
+
+    @property
+    def total_prompt_tokens(self) -> int:
+        """Every prompt token sent this run, cached or not.
+
+        `total_input_tokens` counts only what the provider billed as fresh
+        input; providers that price cache hits separately report the cached
+        prefix outside it. Anything showing "tokens used" wants this instead, or
+        it silently under-reports by the whole cached prefix.
+        """
+        return (
+            self.total_input_tokens
+            + self.total_cache_read_tokens
+            + self.total_cache_write_tokens
+        )
+
     def invalidate_context_watermark(self) -> None:
         """Let the next recorded prompt set the watermark instead of raising it.
 

@@ -1183,8 +1183,8 @@ def _process_stream_response(
         delta_tokens: int | None = None
         delta_cost_usd: float | None = None
         if cost_tracker and cost_tracker.turns > 0:
-            delta_tokens = (cost_tracker.total_input_tokens or 0) + (
-                cost_tracker.total_output_tokens or 0
+            delta_tokens = (
+                cost_tracker.total_prompt_tokens + cost_tracker.total_output_tokens
             )
             delta_cost_usd = cost_tracker.total_cost_usd
 
