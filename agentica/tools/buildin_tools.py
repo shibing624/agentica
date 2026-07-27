@@ -292,6 +292,13 @@ class BuiltinFileTool(Tool):
         # write_file. The LLM decides when to re-read (multi-user edits, etc.).
         self._file_read_state: Dict[str, FileReadState] = {}
 
+        # Content memoization for read_file (CC-style read cache). Key:
+        # (abs_path, offset, limit) -> (mtime_ns, size, result). Every hit is
+        # validated against a fresh stat, and own write paths invalidate
+        # explicitly via _record_file_read, so an edited file is never served
+        # stale. LRU-bounded by _READ_CACHE_MAX_ENTRIES.
+        self._read_cache: "OrderedDict[Tuple[str, int, int], Tuple[int, int, str]]" = OrderedDict()
+
         # File snapshots for workspace rollback: {abs_path: [content_before_1, ...]}
         # Stores previous file content before each write/edit, supporting undo.
         self._file_snapshots: Dict[str, List[str]] = {}
@@ -430,6 +437,12 @@ class BuiltinFileTool(Tool):
     def _hash_bytes(data: bytes) -> str:
         return hashlib.sha256(data).hexdigest()
 
+    def _invalidate_read_cache(self, path: Path) -> None:
+        """Drop all read_file cache entries for path after an own write."""
+        abs_path = str(path.resolve())
+        for key in [k for k in self._read_cache if k[0] == abs_path]:
+            self._read_cache.pop(key, None)
+
     async def _record_file_read(
         self,
         path: Path,
@@ -444,6 +457,13 @@ class BuiltinFileTool(Tool):
         full read of a file we already have in memory). Omit it only when the
         full file content is not in memory (e.g. read_file streamed a slice).
         """
+        if content is not None:
+            # content is only passed by own write paths (write_file /
+            # edit_file / multi_edit_file / undo): the file just changed, so
+            # memoized read_file results are stale. Invalidate deterministically
+            # here — the per-read stat check alone cannot catch a same-size,
+            # same-mtime rewrite.
+            self._invalidate_read_cache(path)
         mtime_ns, size = await asyncio.to_thread(self._file_stat, path)
         if content is not None:
             content_hash = self._hash_bytes(content.encode("utf-8", errors="ignore"))
@@ -742,6 +762,9 @@ class BuiltinFileTool(Tool):
     # Maximum file size (bytes) for read_file.  Larger files must use offset+limit.
     # Mirrors CC's FileReadTool maxSizeBytes (256KB).
     MAX_FILE_SIZE_BYTES = 256_000
+    # read_file content cache: each entry is inherently bounded by
+    # MAX_FILE_SIZE_BYTES; this caps the entry count (LRU eviction).
+    _READ_CACHE_MAX_ENTRIES = 32
 
     # Device files that must never be read: reading /dev/zero or /dev/random
     # hangs indefinitely or exhausts memory.  Absolute paths only — checked
@@ -758,23 +781,15 @@ class BuiltinFileTool(Tool):
             offset: int = 0,
             limit: Optional[int] = 500,
     ) -> str:
-        """Reads a file from the filesystem. You can access any file directly by using this tool.
-        Assume this tool is able to read all files on the machine. If the User provides a path to a file assume that path is valid. It is okay to read a file that does not exist; an error will be returned.
+        """Reads a file from the filesystem. Reading a file that does not exist returns an error.
 
         Usage:
-        - The file_path parameter may be absolute, relative to the working directory, or `~`-prefixed
-        - Relative paths are resolved relative to the base working directory
-        - By default, it reads up to 500 lines starting from the beginning of the file
-        - **IMPORTANT for large files and codebase exploration**: Use pagination with offset and limit parameters to avoid context overflow
-        - First scan: read_file(path, limit=100) to see file structure
-        - Read more sections: read_file(path, offset=100, limit=200) for next 200 lines
-        - Only omit limit (read full file) when necessary for editing
-        - Specify offset and limit: read_file(path, offset=0, limit=100) reads first 100 lines
-        - Any lines longer than 2000 characters will be truncated
-        - Results are returned in numbered-line format (line_number + content), starting at line 1
-        - You have the capability to call multiple tools in a single response. It is always better to speculatively read multiple files as a batch that are potentially useful.
-        - If you read a file that exists but has empty contents you will receive a system reminder warning in place of file contents.
-        - You should ALWAYS make sure a file has been read before editing it.
+        - file_path may be absolute, relative to the working directory, or `~`-prefixed
+        - Reads up to `limit` lines (default 500) starting from `offset` (0-based); use offset+limit to page through large files
+        - Any line longer than 2000 characters is truncated
+        - Results are returned with line-number prefixes starting at line 1; the prefix is metadata only — never include it in edit old_string
+        - An empty file returns a system reminder in place of contents
+        - Prefer one larger read over many small slices; do not re-read a file you have already read unless it changed
 
         Args:
             file_path: File path for md/txt/py/etc. Supports absolute paths, relative paths, and `~`
@@ -820,6 +835,20 @@ class BuiltinFileTool(Tool):
         limit = limit if limit is not None else self.max_read_lines
         max_line_len = self.max_line_length
 
+        # Memoized read: identical (path, offset, limit) with unchanged
+        # mtime+size returns the cached result without re-reading disk.
+        cache_key = (abs_path, offset, limit)
+        try:
+            pre_stat = path.stat()
+        except OSError:
+            pre_stat = None
+        if pre_stat is not None:
+            cached = self._read_cache.get(cache_key)
+            if cached is not None and cached[0] == pre_stat.st_mtime_ns and cached[1] == pre_stat.st_size:
+                self._read_cache.move_to_end(cache_key)
+                logger.debug(f"Read file {file_path}: cache hit")
+                return cached[2]
+
         # Async streaming read — only read the lines we need
         output_lines = []
         total_lines = 0
@@ -857,6 +886,24 @@ class BuiltinFileTool(Tool):
             await self._record_file_read(path)
         except OSError:
             self._file_read_state.pop(abs_path, None)
+
+        # Memoize the result. Post-read stat must match the pre-read one —
+        # a mismatch means the file changed mid-read and the content may be
+        # torn, so skip caching that.
+        try:
+            post_stat = path.stat()
+        except OSError:
+            post_stat = None
+        if (
+            pre_stat is not None
+            and post_stat is not None
+            and post_stat.st_mtime_ns == pre_stat.st_mtime_ns
+            and post_stat.st_size == pre_stat.st_size
+        ):
+            self._read_cache[cache_key] = (post_stat.st_mtime_ns, post_stat.st_size, result)
+            self._read_cache.move_to_end(cache_key)
+            while len(self._read_cache) > self._READ_CACHE_MAX_ENTRIES:
+                self._read_cache.popitem(last=False)
 
         logger.debug(f"Read file {file_path}: lines {offset + 1}-{actual_end}, total {total_lines} lines")
         return result

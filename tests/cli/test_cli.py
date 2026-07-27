@@ -3293,5 +3293,56 @@ class TestCmdPermissions(unittest.TestCase):
         self.assertNotIn("/yolo", cli_commands.COMMAND_REGISTRY)
 
 
+class TestReadFileCountSummary(unittest.TestCase):
+    """_result_count_summary counts read_file content lines via the footer
+    range, not the wrapped string (footers used to inflate the count)."""
+
+    @staticmethod
+    def _read_result(body_lines, total, offset=0):
+        end = offset + len(body_lines)
+        result = "\n".join(body_lines)
+        if end < total:
+            result += f"\n\n[Showing lines {offset + 1}-{end} of {total} total lines]"
+        result += (
+            f"\n\n[File metadata: path=/tmp/x/db.ts, size=999 bytes, "
+            f"mtime_ns=123, lines={total}, range={offset + 1}-{end}]"
+        )
+        return result
+
+    def test_counts_content_not_footers(self):
+        from agentica.cli.display import StreamDisplayManager
+        body = [f"{i:6d}\tline {i}" for i in range(1, 501)]
+        # 504-line file read L1-500 → 500, not 504 (the old bug)
+        res = self._read_result(body, total=504)
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "500 lines")
+
+    def test_short_file_read_with_large_limit(self):
+        from agentica.cli.display import StreamDisplayManager
+        body = [f"{i:6d}\tline {i}" for i in range(1, 101)]
+        # Read L1-500 on a 100-line file → 100, not 500
+        res = self._read_result(body, total=100)
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "100 lines")
+
+    def test_range_text_in_content_does_not_false_match(self):
+        from agentica.cli.display import StreamDisplayManager
+        body = ["     1\tprint('range=3-9')", "     2\tx = 1"]
+        res = self._read_result(body, total=2)
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "2 lines")
+
+    def test_read_past_eof_clamps_to_zero(self):
+        from agentica.cli.display import StreamDisplayManager
+        res = "\n\n[File metadata: path=/tmp/x, size=1 bytes, mtime_ns=1, lines=504, range=601-504]"
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "0 lines")
+
+    def test_fallback_when_no_metadata(self):
+        from agentica.cli.display import StreamDisplayManager
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", "a\nb\nc"), "3 lines")
+
+    def test_grep_count_unchanged(self):
+        from agentica.cli.display import StreamDisplayManager
+        self.assertEqual(StreamDisplayManager._result_count_summary("grep", "m1\nm2"), "2 lines")
+        self.assertEqual(StreamDisplayManager._result_count_summary("grep", ""), "no matches")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -156,6 +156,83 @@ class TestBuiltinFileToolReadFile:
         assert "\t" in result  # tab separator between line number and content
 
 
+class TestBuiltinFileToolReadCache:
+    """read_file content memoization (CC-style read cache)."""
+
+    def test_second_read_returns_cached_object(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "cached.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 11)))
+        r1 = asyncio.run(file_tool.read_file(str(p)))
+        r2 = asyncio.run(file_tool.read_file(str(p)))
+        assert r1 is r2  # identical object → served from cache, no disk re-read
+        assert len(file_tool._read_cache) == 1
+
+    def test_external_size_change_invalidates(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "ext_size.txt")
+        p.write_text("v1")
+        asyncio.run(file_tool.read_file(str(p)))
+        p.write_text("v2 with more bytes")
+        r2 = asyncio.run(file_tool.read_file(str(p)))
+        assert "v2 with more bytes" in r2
+
+    def test_external_mtime_only_change_invalidates(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "ext_mtime.txt")
+        p.write_text("same-size-a")
+        asyncio.run(file_tool.read_file(str(p)))
+        p.write_text("same-size-b")  # identical size, different content
+        st = p.stat()
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+        r2 = asyncio.run(file_tool.read_file(str(p)))
+        assert "same-size-b" in r2
+
+    def test_edit_file_invalidates_immediately(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "edit.txt")
+        p.write_text("hello world")
+        asyncio.run(file_tool.read_file(str(p)))
+        asyncio.run(file_tool.edit_file(str(p), old_string="world", new_string="agentica"))
+        r = asyncio.run(file_tool.read_file(str(p)))
+        assert "hello agentica" in r
+        assert "hello world" not in r
+
+    def test_write_file_invalidates_immediately(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "w.txt")
+        p.write_text("old content")
+        asyncio.run(file_tool.read_file(str(p)))
+        asyncio.run(file_tool.write_file(str(p), "new content"))
+        r = asyncio.run(file_tool.read_file(str(p)))
+        assert "new content" in r
+        assert "old content" not in r
+
+    def test_own_write_with_mtime_rollback_still_fresh(self, file_tool, tmp_dir):
+        """Explicit invalidation covers what the stat check cannot: a same-size
+        own-write whose mtime is then rolled back to the cached value."""
+        p = Path(tmp_dir, "rollback.txt")
+        p.write_text("AAAA")
+        asyncio.run(file_tool.read_file(str(p)))
+        mtime_before = p.stat().st_mtime_ns
+        asyncio.run(file_tool.write_file(str(p), "BBBB"))  # same size
+        os.utime(p, ns=(p.stat().st_atime_ns, mtime_before))
+        r2 = asyncio.run(file_tool.read_file(str(p)))
+        assert "BBBB" in r2
+        assert "AAAA" not in r2
+
+    def test_cache_keyed_by_offset_and_limit(self, file_tool, tmp_dir):
+        p = Path(tmp_dir, "pages.txt")
+        p.write_text("\n".join(f"line{i}" for i in range(1, 21)))
+        r1 = asyncio.run(file_tool.read_file(str(p), offset=0, limit=5))
+        r2 = asyncio.run(file_tool.read_file(str(p), offset=5, limit=5))
+        assert r1 is not r2
+        assert len(file_tool._read_cache) == 2
+        assert "line6" in r2 and "line6" not in r1
+
+    def test_cache_lru_eviction(self, file_tool, tmp_dir):
+        for i in range(file_tool._READ_CACHE_MAX_ENTRIES + 5):
+            p = Path(tmp_dir, f"f{i}.txt")
+            p.write_text(f"content{i}")
+            asyncio.run(file_tool.read_file(str(p)))
+        assert len(file_tool._read_cache) == file_tool._READ_CACHE_MAX_ENTRIES
+
+
 class TestBuiltinFileToolWriteFile:
     def test_write_new_file(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "new.txt")
