@@ -86,7 +86,7 @@ class LiteLLMChat(Model):
     id: str = "openai/gpt-4o"
     name: str = "LiteLLM-gpt-4o"
     provider: str = "openai"
-    context_window: int = 128000
+    context_window: int = 200000
 
     # API configuration
     api_key: Optional[str] = None

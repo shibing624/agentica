@@ -193,7 +193,7 @@ class Model(ABC):
     response_format: Optional[Any] = None
 
     # -*- Model capability limits (not sent to the API) -*-
-    context_window: int = 128000
+    context_window: int = 200000
     supports_images: Optional[bool] = None
 
     # Extra retryable error substrings, merged on top of the SDK's default
@@ -250,7 +250,7 @@ class Model(ABC):
     # Set by provider; consumed by Runner's agentic loop for max_tokens recovery.
     last_finish_reason: Optional[str] = field(init=False, repr=False, default=None)
 
-    _DEFAULT_CONTEXT_WINDOW: int = 128000
+    _DEFAULT_CONTEXT_WINDOW: int = 200000
 
     def __post_init__(self):
         # Auto-set provider if not provided

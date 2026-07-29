@@ -1363,9 +1363,10 @@ class _CleanResizeApplication(Application):
     scrollback where no escape sequence can reach them.
 
     Strategy: during a resize burst we hide the tall parts of the bottom frame
-    (spinner + rule) via ``tui_state["_resize_collapsed"]`` so that at most one
-    row (the input line) can be reflowed into scrollback per SIGWINCH. A short
-    debounce timer restores the full frame once the user stops resizing.
+    (input prompt, queue bar and status bar) via ``tui_state["_resize_collapsed"]``
+    and pin the input area to a single row, so that at most one row can be
+    reflowed into scrollback per SIGWINCH. A short debounce timer restores the
+    full frame once the user stops resizing.
 
     The transcript stays in the terminal's native scrollback, so scrolling up
     still shows prior output.
@@ -1415,10 +1416,21 @@ class _CleanResizeApplication(Application):
             return
         tui_state["_resize_collapsed"] = False
         tui_state.pop("_resize_restore_handle", None)
+        # Force a clean, non-diff repaint. A plain invalidate() would diff the
+        # restored (full) frame against the collapsed (1-row) screen and redraw
+        # the full frame below where the collapsed row landed — pushing the
+        # collapsed row plus the old frame into scrollback as extra ghosts.
+        # Erase with an absolute-cursor resync first, then redraw, so the
+        # restored frame paints in exactly one correct position.
         try:
-            self.invalidate()
-        except Exception:
-            pass
+            renderer = self.renderer
+            renderer.erase(leave_alternate_screen=False)
+            self._request_absolute_cursor_position()
+            self._redraw()
+        except Exception as e:
+            # Terminal I/O boundary: a failed repaint only leaves a cosmetic bad
+            # frame (no data at risk), but log it so the cause is diagnosable.
+            logger.debug(f"resize restore repaint failed: {e}")
 
 
 def _setup_tui(
@@ -1802,6 +1814,13 @@ def _setup_tui(
         widget = input_area
         if widget is None:
             return Dimension(min=1, max=1, preferred=1)
+        # During a resize burst collapse the input box to exactly one row so the
+        # whole bottom frame shrinks to a single line. This caps how much of the
+        # frame the terminal can reflow into scrollback as ghost rows (see
+        # _CleanResizeApplication). _resize_collapsed is set by _on_resize and
+        # cleared by _restore_after_resize.
+        if tui_state.get("_resize_collapsed"):
+            return Dimension(min=1, max=1, preferred=1)
         # Count *visual* rows, not just logical lines. With wrap_lines=True a
         # single long line wraps onto multiple terminal rows; counting only
         # explicit '\n' (document.line_count) would keep the box one row tall
@@ -1853,7 +1872,10 @@ def _setup_tui(
 
     status_bar = ConditionalContainer(
         Window(content=FormattedTextControl(_get_status_bar), height=1, wrap_lines=False),
-        filter=Condition(lambda: tui_state.get("statusbar_visible", True)),
+        filter=Condition(
+            lambda: tui_state.get("statusbar_visible", True)
+            and not tui_state.get("_resize_collapsed")
+        ),
     )
 
     def _get_spinner_fragments():
@@ -1903,7 +1925,10 @@ def _setup_tui(
             height=_get_input_prompt_height,
             wrap_lines=True,
         ),
-        filter=Condition(lambda: state.input_request is not None),
+        filter=Condition(
+            lambda: state.input_request is not None
+            and not tui_state.get("_resize_collapsed")
+        ),
     )
 
     def _get_queue_bar():
@@ -1925,7 +1950,10 @@ def _setup_tui(
 
     queue_bar = ConditionalContainer(
         Window(content=FormattedTextControl(_get_queue_bar), height=1, wrap_lines=False),
-        filter=Condition(lambda: not pending_queue.empty()),
+        filter=Condition(
+            lambda: not pending_queue.empty()
+            and not tui_state.get("_resize_collapsed")
+        ),
     )
 
     # NOTE: no ``input_rule`` and no standalone ``spinner_widget`` here.

@@ -19,6 +19,14 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+### Changed
+- **Removed the `read_file` freshness/staleness machinery entirely** (codex-style simplification): `FileReadState`, `_file_read_state`, `_record_file_read`, `mark_read_context_stale`, `mark_all_read_context_stale`, `_edit_freshness_tip`, `Agent.mark_evicted_file_reads`, `Agent.append_evicted_file_read_notice`, and the `[Context maintenance]` eviction notices are gone. Edits return the absolute path + diagnostics only; a failed `edit_file` ("String not found") remains the natural signal to re-read.
+- **Default model `context_window` raised from 128k to 200k** across `Model` base, OpenAIChat, LiteLLM, Ollama, and Claude, reducing premature tool-result compaction that caused repeated `read_file` calls.
+
+### Fixed
+- **Stale `model_pricing_cache.json` is no longer discarded.** Catalog loading previously treated TTL expiry as "no cache" and, when the network refresh failed, silently fell back to the hardcoded pricing table — so new models (e.g. `claude-opus-5`, 1M context) never resolved. Refresh failures now fall back to the stale-but-valid cache file.
+- **CLI resize no longer leaves repeated `Enter to send` ghost lines.** The `_resize_collapsed` flag (meant to shrink the bottom frame to a single row during a terminal resize) was set but never read by the layout, so the full multi-row frame redrew on every `SIGWINCH` and multiplied ghost copies in scrollback. The collapse is now actually wired across the input prompt, queue bar, status bar, and input height, and the post-resize restore does a clean erase + absolute-cursor redraw instead of a diff `invalidate()`.
+
 ## [1.4.10] - 2026-07-24
 
 ### Added

@@ -251,36 +251,6 @@ class TestFileWriteSafety:
         assert _check_sensitive_write_path("/tmp/test.txt") is None
         assert _check_sensitive_write_path("/home/user/project/main.py") is None
 
-    def test_staleness_detection_via_mtime(self):
-        """Write should warn if file was externally modified since last read."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
-        tool = BuiltinFileTool(work_dir="/tmp")
-
-        # Create a temp file and record its mtime
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-            f.write("original")
-            tmp_path = f.name
-
-        try:
-            abs_path = os.path.realpath(tmp_path)
-            original_mtime = os.path.getmtime(abs_path)
-            tool._file_read_state[abs_path] = {"mtime": original_mtime}
-
-            # Modify file externally (change mtime)
-            import time
-            time.sleep(0.05)
-            with open(tmp_path, 'w') as f:
-                f.write("modified externally")
-            new_mtime = os.path.getmtime(abs_path)
-
-            # Staleness check should detect mismatch
-            assert new_mtime != original_mtime
-            stored_mtime = tool._file_read_state[abs_path]["mtime"]
-            assert stored_mtime != new_mtime  # stale!
-        finally:
-            os.unlink(tmp_path)
-
-
 # ============== TestContextLimitLearning ==============
 
 class TestContextLimitLearning:

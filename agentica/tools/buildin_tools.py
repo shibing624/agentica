@@ -18,14 +18,11 @@ Built-in tool set for Agent, including:
 - task: Launch subagent to handle complex tasks
 """
 import asyncio
-import hashlib
 import json
 import os
 import re
 import shutil
 import tempfile
-from collections import OrderedDict
-from dataclasses import dataclass
 from datetime import datetime
 import time
 import uuid
@@ -232,16 +229,6 @@ def _check_sensitive_write_path(filepath: str) -> Optional[str]:
     return None
 
 
-@dataclass
-class FileReadState:
-    """Disk version and model-context freshness for one file read."""
-
-    mtime_ns: int
-    size: int
-    content_hash: str
-    context_available: bool = True
-
-
 class BuiltinFileTool(Tool):
     """
     Built-in file system tool providing ls, read_file, write_file, edit_file, multi_edit_file, glob, grep functions.
@@ -285,19 +272,6 @@ class BuiltinFileTool(Tool):
         # overriding sandbox writable_dirs / blocked_paths / sensitive-path
         # guards for the rest of this session. Not persisted across restarts.
         self._escalated_paths: List[str] = []
-
-        # Key: resolved absolute path. Tracks on-disk version + whether the
-        # exact read_file result is still in model context. Used only to emit
-        # advisory tips after edits — never to block read_file / edit_file /
-        # write_file. The LLM decides when to re-read (multi-user edits, etc.).
-        self._file_read_state: Dict[str, FileReadState] = {}
-
-        # Content memoization for read_file (CC-style read cache). Key:
-        # (abs_path, offset, limit) -> (mtime_ns, size, result). Every hit is
-        # validated against a fresh stat, and own write paths invalidate
-        # explicitly via _record_file_read, so an edited file is never served
-        # stale. LRU-bounded by _READ_CACHE_MAX_ENTRIES.
-        self._read_cache: "OrderedDict[Tuple[str, int, int], Tuple[int, int, str]]" = OrderedDict()
 
         # File snapshots for workspace rollback: {abs_path: [content_before_1, ...]}
         # Stores previous file content before each write/edit, supporting undo.
@@ -421,126 +395,6 @@ class BuiltinFileTool(Tool):
         except Exception as e:
             logger.warning(f"Diagnostics check failed for {path}: {e}")
             return ""
-
-    @staticmethod
-    def _file_stat(path: Path) -> Tuple[int, int]:
-        """Cheap stat-only version (mtime_ns, size) — no content read."""
-        st = path.stat()
-        return st.st_mtime_ns, st.st_size
-
-    @staticmethod
-    def _file_hash(path: Path) -> str:
-        """Content hash — only call when mtime+size match but content may differ."""
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-
-    @staticmethod
-    def _hash_bytes(data: bytes) -> str:
-        return hashlib.sha256(data).hexdigest()
-
-    def _invalidate_read_cache(self, path: Path) -> None:
-        """Drop all read_file cache entries for path after an own write."""
-        abs_path = str(path.resolve())
-        for key in [k for k in self._read_cache if k[0] == abs_path]:
-            self._read_cache.pop(key, None)
-
-    async def _record_file_read(
-        self,
-        path: Path,
-        *,
-        context_available: bool = True,
-        content: Optional[str] = None,
-    ) -> None:
-        """Record the on-disk version after a read or own write.
-
-        ``content`` is the in-memory text just read/written; when supplied it
-        is hashed instead of re-reading the file from disk (avoids a second
-        full read of a file we already have in memory). Omit it only when the
-        full file content is not in memory (e.g. read_file streamed a slice).
-        """
-        if content is not None:
-            # content is only passed by own write paths (write_file /
-            # edit_file / multi_edit_file / undo): the file just changed, so
-            # memoized read_file results are stale. Invalidate deterministically
-            # here — the per-read stat check alone cannot catch a same-size,
-            # same-mtime rewrite.
-            self._invalidate_read_cache(path)
-        mtime_ns, size = await asyncio.to_thread(self._file_stat, path)
-        if content is not None:
-            content_hash = self._hash_bytes(content.encode("utf-8", errors="ignore"))
-        else:
-            content_hash = await asyncio.to_thread(self._file_hash, path)
-        self._file_read_state[str(path.resolve())] = FileReadState(
-            mtime_ns=mtime_ns,
-            size=size,
-            content_hash=content_hash,
-            context_available=context_available,
-        )
-
-    def mark_read_context_stale(self, file_paths: List[str]) -> List[str]:
-        """Mark already-read files stale after their tool result leaves context."""
-        stale_paths = []
-        for file_path in file_paths:
-            abs_path = str(self._resolve_path(file_path).resolve())
-            state = self._file_read_state.get(abs_path)
-            if state is not None and state.context_available:
-                state.context_available = False
-                stale_paths.append(abs_path)
-        return stale_paths
-
-    def mark_all_read_context_stale(self) -> List[str]:
-        """Mark every cached file read stale after full-context compaction."""
-        stale_paths = []
-        for abs_path, state in self._file_read_state.items():
-            if state.context_available:
-                state.context_available = False
-                stale_paths.append(abs_path)
-        return stale_paths
-
-    async def _edit_freshness_tip(self, file_path: str) -> Optional[str]:
-        """Advisory tip for edit_file / multi_edit_file — never blocks the edit.
-
-        Sensitive-path checks still raise. Freshness / re-read guidance is tip-
-        only so the LLM keeps control (multi-user edits, intentional re-reads,
-        write-without-read). Real edit failures (String not found, etc.) already
-        give the model a natural signal to re-read.
-        """
-        path = self._resolve_path(file_path)
-        abs_path = str(path.resolve())
-        state = self._file_read_state.get(abs_path)
-        if state is None:
-            return (
-                f"Tip: '{file_path}' was not read_file'd in this session. "
-                "Prefer read_file first when constructing old_string from memory."
-            )
-        if not state.context_available:
-            return (
-                f"Tip: the previous read_file result for '{file_path}' left context "
-                "(compression). Prefer re-reading if unsure about the current content."
-            )
-        try:
-            current_mtime_ns, current_size = await asyncio.to_thread(self._file_stat, path)
-        except OSError:
-            return None
-        # Fast path: mtime or size differ → tip without hashing.
-        if current_mtime_ns != state.mtime_ns or current_size != state.size:
-            return (
-                f"Tip: '{file_path}' changed on disk since your last read "
-                "(another editor/process may have edited it). Prefer re-reading "
-                "if the edit looks wrong."
-            )
-        # mtime+size match — hash only to catch same-size rewrite.
-        try:
-            current_hash = await asyncio.to_thread(self._file_hash, path)
-        except OSError:
-            return None
-        if current_hash != state.content_hash:
-            return (
-                f"Tip: '{file_path}' changed on disk since your last read "
-                "(another editor/process may have edited it). Prefer re-reading "
-                "if the edit looks wrong."
-            )
-        return None
-
 
     def _is_escalated(self, resolved: str) -> bool:
         """Whether `resolved` was previously approved via request_path_access."""
@@ -750,8 +604,6 @@ class BuiltinFileTool(Tool):
     MAX_FILE_SIZE_BYTES = 256_000
     # read_file content cache: each entry is inherently bounded by
     # MAX_FILE_SIZE_BYTES; this caps the entry count (LRU eviction).
-    _READ_CACHE_MAX_ENTRIES = 32
-
     # Device files that must never be read: reading /dev/zero or /dev/random
     # hangs indefinitely or exhausts memory.  Absolute paths only — checked
     # after resolving the input path so symlinks cannot bypass the guard.
@@ -800,8 +652,6 @@ class BuiltinFileTool(Tool):
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
-        abs_path = str(path.resolve())
-
         # --- Large-file guard (mirrors CC's maxSizeBytes) ---
         try:
             file_size = path.stat().st_size
@@ -820,20 +670,6 @@ class BuiltinFileTool(Tool):
 
         limit = limit if limit is not None else self.max_read_lines
         max_line_len = self.max_line_length
-
-        # Memoized read: identical (path, offset, limit) with unchanged
-        # mtime+size returns the cached result without re-reading disk.
-        cache_key = (abs_path, offset, limit)
-        try:
-            pre_stat = path.stat()
-        except OSError:
-            pre_stat = None
-        if pre_stat is not None:
-            cached = self._read_cache.get(cache_key)
-            if cached is not None and cached[0] == pre_stat.st_mtime_ns and cached[1] == pre_stat.st_size:
-                self._read_cache.move_to_end(cache_key)
-                logger.debug(f"Read file {file_path}: cache hit")
-                return cached[2]
 
         # Async streaming read — only read the lines we need
         output_lines = []
@@ -861,30 +697,6 @@ class BuiltinFileTool(Tool):
             )
         elif actual_end < total_lines:
             result += f"\n\n[Showing lines {offset + 1}-{actual_end} of {total_lines} total lines]"
-
-        # Record disk version and context freshness for edit_file.
-        try:
-            await self._record_file_read(path)
-        except OSError:
-            self._file_read_state.pop(abs_path, None)
-
-        # Memoize the result. Post-read stat must match the pre-read one —
-        # a mismatch means the file changed mid-read and the content may be
-        # torn, so skip caching that.
-        try:
-            post_stat = path.stat()
-        except OSError:
-            post_stat = None
-        if (
-            pre_stat is not None
-            and post_stat is not None
-            and post_stat.st_mtime_ns == pre_stat.st_mtime_ns
-            and post_stat.st_size == pre_stat.st_size
-        ):
-            self._read_cache[cache_key] = (post_stat.st_mtime_ns, post_stat.st_size, result)
-            self._read_cache.move_to_end(cache_key)
-            while len(self._read_cache) > self._READ_CACHE_MAX_ENTRIES:
-                self._read_cache.popitem(last=False)
 
         logger.debug(f"Read file {file_path}: lines {offset + 1}-{actual_end}, total {total_lines} lines")
         return result
@@ -950,10 +762,6 @@ class BuiltinFileTool(Tool):
 
         # Return absolute path to help LLM use correct path in subsequent operations
         absolute_path = str(path.resolve())
-        try:
-            await self._record_file_read(path, content=content)
-        except OSError:
-            self._file_read_state.pop(absolute_path, None)
         logger.debug(f"{action} file: {absolute_path}, file content length: {len(content)} characters")
         diag_text = await self._diagnostics_after(path)
         suffix = f"\n\n{diag_text}" if diag_text else ""
@@ -1032,12 +840,7 @@ class BuiltinFileTool(Tool):
             result = self._str_replace(content, old_string, new_string, replace_all)
 
             if not result["success"]:
-                err = result["error"]
-                # Freshness hint only on failure — it is the natural signal to re-read.
-                freshness_tip = await self._edit_freshness_tip(file_path)
-                if freshness_tip:
-                    err = f"{err}\n\n{freshness_tip}"
-                raise ValueError(err)
+                raise ValueError(result["error"])
 
             # Atomic write back
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -1054,10 +857,6 @@ class BuiltinFileTool(Tool):
                 raise
 
         logger.debug(f"Replaced {result['count']} occurrence(s) in {file_path}")
-        try:
-            await self._record_file_read(path, content=result["new_content"])
-        except OSError:
-            self._file_read_state.pop(abs_path, None)
         diag_text = await self._diagnostics_after(path)
         parts = [f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"]
         if diag_text:
@@ -1170,10 +969,6 @@ class BuiltinFileTool(Tool):
                     f"No edits applied to '{file_path}' ({len(failures)}/{len(edits)} failed):",
                     *results,
                 ]
-                # Freshness hint only when nothing applied — the signal to re-read.
-                freshness_tip = await self._edit_freshness_tip(file_path)
-                if freshness_tip:
-                    summary_lines.extend(["", freshness_tip])
                 return "\n".join(summary_lines)
 
             # Atomic write (once)
@@ -1202,11 +997,6 @@ class BuiltinFileTool(Tool):
             header = f"Successfully applied {len(edits)} edits to '{file_path}':"
         summary = header + "\n" + "\n".join(results)
         logger.debug(summary)
-        # Update disk version after own write.
-        try:
-            await self._record_file_read(path, content=content)
-        except OSError:
-            self._file_read_state.pop(abs_path, None)
         diag_text = await self._diagnostics_after(path)
         if diag_text:
             summary += f"\n\n{diag_text}"
@@ -1740,12 +1530,6 @@ class BuiltinFileTool(Tool):
                     pass
                 raise
 
-        # The restored content was not read in this context; require a fresh
-        # read before the next targeted edit.
-        try:
-            await self._record_file_read(path, context_available=False, content=previous)
-        except OSError:
-            self._file_read_state.pop(abs_path, None)
         remaining = len(snapshots)
         return (
             f"Restored '{file_path}' to previous version ({len(previous)} chars). "

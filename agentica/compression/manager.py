@@ -117,10 +117,6 @@ class CompressionManager:
         self._conversation_previous_summary = None
         self._last_evicted_tool_messages = []
 
-    def get_evicted_tool_messages(self) -> List["Message"]:
-        """Return tool messages whose exact content was evicted in the last compress."""
-        return list(self._last_evicted_tool_messages)
-
     def _evicted_file_read_paths(self) -> List[str]:
         """Return raw read_file paths for the last compression report."""
         paths = []

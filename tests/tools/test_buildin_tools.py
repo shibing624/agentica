@@ -155,18 +155,17 @@ class TestBuiltinFileToolReadFile:
         assert "\t" in result  # tab separator between line number and content
 
 
-class TestBuiltinFileToolReadCache:
-    """read_file content memoization (CC-style read cache)."""
+class TestBuiltinFileToolReadCorrectness:
+    """read_file always reflects current disk content (no memoization)."""
 
-    def test_second_read_returns_cached_object(self, file_tool, tmp_dir):
+    def test_second_read_returns_same_content(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "cached.txt")
         p.write_text("\n".join(f"line{i}" for i in range(1, 11)))
         r1 = asyncio.run(file_tool.read_file(str(p)))
         r2 = asyncio.run(file_tool.read_file(str(p)))
-        assert r1 is r2  # identical object → served from cache, no disk re-read
-        assert len(file_tool._read_cache) == 1
+        assert r1 == r2  # no cache: each call re-reads, content identical
 
-    def test_external_size_change_invalidates(self, file_tool, tmp_dir):
+    def test_external_size_change_reflected(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "ext_size.txt")
         p.write_text("v1")
         asyncio.run(file_tool.read_file(str(p)))
@@ -174,7 +173,7 @@ class TestBuiltinFileToolReadCache:
         r2 = asyncio.run(file_tool.read_file(str(p)))
         assert "v2 with more bytes" in r2
 
-    def test_external_mtime_only_change_invalidates(self, file_tool, tmp_dir):
+    def test_external_mtime_only_change_reflected(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "ext_mtime.txt")
         p.write_text("same-size-a")
         asyncio.run(file_tool.read_file(str(p)))
@@ -184,7 +183,7 @@ class TestBuiltinFileToolReadCache:
         r2 = asyncio.run(file_tool.read_file(str(p)))
         assert "same-size-b" in r2
 
-    def test_edit_file_invalidates_immediately(self, file_tool, tmp_dir):
+    def test_edit_file_reflected_on_next_read(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "edit.txt")
         p.write_text("hello world")
         asyncio.run(file_tool.read_file(str(p)))
@@ -193,7 +192,7 @@ class TestBuiltinFileToolReadCache:
         assert "hello agentica" in r
         assert "hello world" not in r
 
-    def test_write_file_invalidates_immediately(self, file_tool, tmp_dir):
+    def test_write_file_reflected_on_next_read(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "w.txt")
         p.write_text("old content")
         asyncio.run(file_tool.read_file(str(p)))
@@ -202,34 +201,13 @@ class TestBuiltinFileToolReadCache:
         assert "new content" in r
         assert "old content" not in r
 
-    def test_own_write_with_mtime_rollback_still_fresh(self, file_tool, tmp_dir):
-        """Explicit invalidation covers what the stat check cannot: a same-size
-        own-write whose mtime is then rolled back to the cached value."""
-        p = Path(tmp_dir, "rollback.txt")
-        p.write_text("AAAA")
-        asyncio.run(file_tool.read_file(str(p)))
-        mtime_before = p.stat().st_mtime_ns
-        asyncio.run(file_tool.write_file(str(p), "BBBB"))  # same size
-        os.utime(p, ns=(p.stat().st_atime_ns, mtime_before))
-        r2 = asyncio.run(file_tool.read_file(str(p)))
-        assert "BBBB" in r2
-        assert "AAAA" not in r2
-
-    def test_cache_keyed_by_offset_and_limit(self, file_tool, tmp_dir):
+    def test_offset_and_limit_select_distinct_windows(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "pages.txt")
         p.write_text("\n".join(f"line{i}" for i in range(1, 21)))
         r1 = asyncio.run(file_tool.read_file(str(p), offset=0, limit=5))
         r2 = asyncio.run(file_tool.read_file(str(p), offset=5, limit=5))
-        assert r1 is not r2
-        assert len(file_tool._read_cache) == 2
+        assert r1 != r2
         assert "line6" in r2 and "line6" not in r1
-
-    def test_cache_lru_eviction(self, file_tool, tmp_dir):
-        for i in range(file_tool._READ_CACHE_MAX_ENTRIES + 5):
-            p = Path(tmp_dir, f"f{i}.txt")
-            p.write_text(f"content{i}")
-            asyncio.run(file_tool.read_file(str(p)))
-        assert len(file_tool._read_cache) == file_tool._READ_CACHE_MAX_ENTRIES
 
 
 class TestBuiltinFileToolWriteFile:
@@ -384,8 +362,8 @@ class TestBuiltinFileToolEditFile:
     def _read(file_tool, file_path):
         asyncio.run(file_tool.read_file(file_path))
 
-    def test_edit_without_read_succeeds_without_tip(self, file_tool, tmp_dir):
-        """Success path carries no freshness tip — only failures do."""
+    def test_edit_without_read_succeeds(self, file_tool, tmp_dir):
+        """No freshness machinery: edit works without a prior read, no tips."""
         fp = os.path.join(tmp_dir, "unread.txt")
         Path(fp).write_text("before")
         result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
@@ -393,57 +371,27 @@ class TestBuiltinFileToolEditFile:
         assert "Tip:" not in result
         assert Path(fp).read_text() == "after"
 
-    def test_stale_context_edit_succeeds_without_tip(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "stale.txt")
+    def test_edit_after_external_change_succeeds(self, file_tool, tmp_dir):
+        """External on-disk change is invisible to edit_file — no tip, plain edit."""
+        fp = os.path.join(tmp_dir, "external.txt")
         Path(fp).write_text("before")
         self._read(file_tool, fp)
-        file_tool.mark_read_context_stale([fp])
-        result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
-        assert "Successfully" in result
-        assert "left context" not in result
-        assert Path(fp).read_text() == "after"
-
-    def test_same_size_external_change_still_edits_without_tip(self, file_tool, tmp_dir):
-        fp = os.path.join(tmp_dir, "fingerprint.txt")
-        Path(fp).write_text("before")
-        self._read(file_tool, fp)
-        original_mtime_ns = file_tool._file_read_state[str(Path(fp).resolve())].mtime_ns
         Path(fp).write_text("after!")
-        os.utime(fp, ns=(original_mtime_ns, original_mtime_ns))
         result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
         assert "Successfully" in result
         assert "changed on disk" not in result
         assert Path(fp).read_text() == "final!"
 
-    def test_lazy_hash_skipped_when_mtime_changed(self, file_tool, tmp_dir):
-        """Tip path must NOT hash the file when mtime already signals a change."""
-        from unittest.mock import patch
-        fp = os.path.join(tmp_dir, "mtime_change.txt")
+    def test_edit_failure_reports_string_not_found_only(self, file_tool, tmp_dir):
+        """Failure is the natural re-read signal — plain error, no freshness tip."""
+        fp = os.path.join(tmp_dir, "not_found.txt")
         Path(fp).write_text("before")
         self._read(file_tool, fp)
         Path(fp).write_text("totally different and longer content")
-        with patch.object(file_tool, "_file_hash", wraps=file_tool._file_hash) as spy:
-            # old_string no longer matches → natural String not found + tip
-            with pytest.raises(ValueError) as exc:
-                asyncio.run(file_tool.edit_file(fp, "before", "after"))
-        assert "changed on disk" in str(exc.value)
-        assert spy.call_count == 0, "hash must be skipped when mtime/size differ"
-
-    def test_lazy_hash_skipped_on_success_even_when_mtime_and_size_match(self, file_tool, tmp_dir):
-        """Success path should avoid freshness hashing even for same-size rewrites."""
-        from unittest.mock import patch
-        fp = os.path.join(tmp_dir, "same_fingerprint.txt")
-        Path(fp).write_text("before")
-        self._read(file_tool, fp)
-        original_mtime_ns = file_tool._file_read_state[str(Path(fp).resolve())].mtime_ns
-        Path(fp).write_text("after!")  # same length, different content
-        os.utime(fp, ns=(original_mtime_ns, original_mtime_ns))
-        with patch.object(file_tool, "_file_hash", wraps=file_tool._file_hash) as spy:
-            result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
-        assert "Successfully" in result
-        assert "changed on disk" not in result
-        assert Path(fp).read_text() == "final!"
-        assert spy.call_count == 0, "success path should not pay freshness hash cost"
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.edit_file(fp, "before", "after"))
+        assert "changed on disk" not in str(exc.value)
+        assert "Tip:" not in str(exc.value)
 
     def test_single_edit(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "edit.txt")

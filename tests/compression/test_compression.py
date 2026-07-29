@@ -75,18 +75,17 @@ class TestMicroCompact(unittest.TestCase):
         micro_compact(msgs, keep_recent=5)
         self.assertTrue(msgs[1]._micro_compacted)
 
-    def test_reports_compacted_messages_to_callback(self):
+    def test_compacts_oldest_beyond_keep_recent(self):
         from agentica.compression.micro import micro_compact
-        compacted = []
         messages = [
             Message(role="tool", content="old " + ("x" * 100), tool_call_id="old"),
         ] + [
             Message(role="tool", content=f"recent {i}" + ("x" * 100), tool_call_id=str(i))
             for i in range(5)
         ]
-        count = micro_compact(messages, on_compacted=compacted.extend)
+        count = micro_compact(messages)
         self.assertEqual(count, 1)
-        self.assertEqual([message.tool_call_id for message in compacted], ["old"])
+        self.assertTrue(messages[0]._micro_compacted)
 
 
 # ===========================================================================

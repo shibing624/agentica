@@ -237,12 +237,17 @@ def _fetch_and_cache() -> Optional[Dict[str, ModelEntry]]:
     return entries
 
 
-def _load_cached() -> Optional[Dict[str, ModelEntry]]:
-    """Load catalog from local cache if file mtime is within TTL."""
+def _load_cached(ignore_ttl: bool = False) -> Optional[Dict[str, ModelEntry]]:
+    """Load catalog from local cache.
+
+    TTL only controls when a refresh is *attempted*; with ``ignore_ttl=True``
+    a stale-but-valid cache file is still returned (used as fallback when the
+    remote fetch fails — stale data beats the hardcoded fallback table).
+    """
     cache_path = _get_cache_path()
     try:
         mtime = os.path.getmtime(cache_path)
-        if time.time() - mtime > _CACHE_TTL:
+        if not ignore_ttl and time.time() - mtime > _CACHE_TTL:
             return None
         with open(cache_path) as f:
             payload = json.load(f)
@@ -278,6 +283,11 @@ def _get_catalog() -> Dict[str, ModelEntry]:
     remote = _load_cached()
     if remote is None:
         remote = _fetch_and_cache()
+    if remote is None:
+        # Refresh failed (offline / timeout): fall back to the stale cache
+        # file instead of discarding it — it still carries real context
+        # windows and pricing for models absent from _FALLBACK_PRICING.
+        remote = _load_cached(ignore_ttl=True)
 
     merged: Dict[str, ModelEntry] = {
         key: dict(entry) for key, entry in _FALLBACK_PRICING.items()
