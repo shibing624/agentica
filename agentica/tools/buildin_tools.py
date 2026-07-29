@@ -714,24 +714,10 @@ class BuiltinFileTool(Tool):
         return json.dumps({"granted": False, "message": "User denied access to this path."})
 
     async def ls(self, directory: str = ".") -> str:
-        """List the immediate entries (files AND subdirectories) of a directory, NON-recursive.
+        """List the immediate files and subdirectories of a directory.
 
-        Usage:
-        - The directory parameter can be absolute, relative, or `~`-prefixed
-        - Returns one entry per immediate child — both files and subdirectories.
-          Each entry has a ``type`` field: ``"file"`` or ``"dir"``. Hidden entries
-          (names starting with ``.``) are included.
-        - This tool does NOT recurse. To search a directory tree, use ``glob``
-          (e.g. ``glob("**/*.py", path=...)``) or ``grep`` instead — calling ``ls``
-          repeatedly on every subdirectory wastes turns.
-        - Useful for discovering what's at a known path before ``read_file`` / ``edit_file``.
-
-        Args:
-            directory: Directory path to list (default: current working directory).
-
-        Returns:
-            JSON-formatted list, e.g. ``[{"name": "src", "path": "...", "type": "dir"},
-            {"name": "main.py", "path": "...", "type": "file"}]``.
+        Non-recursive. Use ``glob`` or ``grep`` for tree-wide search.
+        Returns JSON objects with ``name``, ``path``, and ``type``.
         """
         self._validate_path(directory)
         dir_path = self._resolve_path(directory)
@@ -787,9 +773,9 @@ class BuiltinFileTool(Tool):
         - file_path may be absolute, relative to the working directory, or `~`-prefixed
         - Reads up to `limit` lines (default 500) starting from `offset` (0-based); use offset+limit to page through large files
         - Any line longer than 2000 characters is truncated
-        - Results are returned with line-number prefixes starting at line 1; the prefix is metadata only — never include it in edit old_string
+        - Results are returned with line-number prefixes (metadata only)
         - An empty file returns a system reminder in place of contents
-        - Prefer one larger read over many small slices; do not re-read a file you have already read unless it changed
+        - Prefer one larger read over many small slices
 
         Args:
             file_path: File path for md/txt/py/etc. Supports absolute paths, relative paths, and `~`
@@ -875,11 +861,6 @@ class BuiltinFileTool(Tool):
             )
         elif actual_end < total_lines:
             result += f"\n\n[Showing lines {offset + 1}-{actual_end} of {total_lines} total lines]"
-        result += (
-            f"\n\n[File metadata: path={path.resolve()}, size={file_size if file_size is not None else 'unknown'} bytes, "
-            f"mtime_ns={path.stat().st_mtime_ns}, lines={total_lines}, "
-            f"range={offset + 1}-{actual_end}]"
-        )
 
         # Record disk version and context freshness for edit_file.
         try:
@@ -987,11 +968,8 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Replace a specific string in a file.
 
-        Prefer read_file before editing when constructing old_string from memory.
-        Exact matching still fails with String not found if old_string is stale —
-        that is the natural signal to re-read. This tool does NOT refuse edits
-        solely because the file was unread, compressed out of context, or changed
-        on disk (another user may be editing it); it may append a short tip.
+        Prefer read_file before editing when constructing old_string from
+        memory; a String not found failure is the signal to re-read.
 
         Uses literal string matching (NOT regex). Multi-line strings are supported.
         Prefer this tool over write_file or shell `sed` for targeted changes.
@@ -1038,9 +1016,6 @@ class BuiltinFileTool(Tool):
         if sensitive_err:
             raise PermissionError(sensitive_err)
 
-        # Tip only — never blocks. LLM decides whether to re-read.
-        freshness_tip = await self._edit_freshness_tip(file_path)
-
         abs_path = str(path.resolve())
 
         await self._diagnostics_snapshot(path)
@@ -1058,6 +1033,8 @@ class BuiltinFileTool(Tool):
 
             if not result["success"]:
                 err = result["error"]
+                # Freshness hint only on failure — it is the natural signal to re-read.
+                freshness_tip = await self._edit_freshness_tip(file_path)
                 if freshness_tip:
                     err = f"{err}\n\n{freshness_tip}"
                 raise ValueError(err)
@@ -1083,8 +1060,6 @@ class BuiltinFileTool(Tool):
             self._file_read_state.pop(abs_path, None)
         diag_text = await self._diagnostics_after(path)
         parts = [f"Successfully replaced {result['count']} occurrence(s) in '{file_path}'"]
-        if freshness_tip:
-            parts.append(freshness_tip)
         if diag_text:
             parts.append(diag_text)
         return "\n\n".join(parts)
@@ -1097,10 +1072,8 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Apply multiple edits to a single file.
 
-        Prefer read_file before editing when constructing old_string from memory.
-        Does NOT refuse edits solely because the file was unread, compressed out
-        of context, or changed on disk; may append a short tip. String not found
-        remains the natural failure signal to re-read.
+        Prefer read_file before editing when constructing old_string from
+        memory; a String not found failure is the signal to re-read.
 
         Edits are applied sequentially on the same in-memory content, then
         the result is written back atomically once.
@@ -1144,9 +1117,6 @@ class BuiltinFileTool(Tool):
         sensitive_err = self._sensitive_write_guard(str(path))
         if sensitive_err:
             raise PermissionError(sensitive_err)
-
-        # Tip only — never blocks. LLM decides whether to re-read.
-        freshness_tip = await self._edit_freshness_tip(file_path)
 
         abs_path = str(path.resolve())
 
@@ -1200,6 +1170,10 @@ class BuiltinFileTool(Tool):
                     f"No edits applied to '{file_path}' ({len(failures)}/{len(edits)} failed):",
                     *results,
                 ]
+                # Freshness hint only when nothing applied — the signal to re-read.
+                freshness_tip = await self._edit_freshness_tip(file_path)
+                if freshness_tip:
+                    summary_lines.extend(["", freshness_tip])
                 return "\n".join(summary_lines)
 
             # Atomic write (once)
@@ -1228,13 +1202,11 @@ class BuiltinFileTool(Tool):
             header = f"Successfully applied {len(edits)} edits to '{file_path}':"
         summary = header + "\n" + "\n".join(results)
         logger.debug(summary)
-        # Update disk version after own write; tip is advisory only.
+        # Update disk version after own write.
         try:
             await self._record_file_read(path, content=content)
         except OSError:
             self._file_read_state.pop(abs_path, None)
-        if freshness_tip:
-            summary += f"\n\n{freshness_tip}"
         diag_text = await self._diagnostics_after(path)
         if diag_text:
             summary += f"\n\n{diag_text}"

@@ -3303,10 +3303,6 @@ class TestReadFileCountSummary(unittest.TestCase):
         result = "\n".join(body_lines)
         if end < total:
             result += f"\n\n[Showing lines {offset + 1}-{end} of {total} total lines]"
-        result += (
-            f"\n\n[File metadata: path=/tmp/x/db.ts, size=999 bytes, "
-            f"mtime_ns=123, lines={total}, range={offset + 1}-{end}]"
-        )
         return result
 
     def test_counts_content_not_footers(self):
@@ -3331,10 +3327,10 @@ class TestReadFileCountSummary(unittest.TestCase):
 
     def test_read_past_eof_clamps_to_zero(self):
         from agentica.cli.display import StreamDisplayManager
-        res = "\n\n[File metadata: path=/tmp/x, size=1 bytes, mtime_ns=1, lines=504, range=601-504]"
+        res = "\n\n[Showing lines 601-504 of 504 total lines]"
         self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "0 lines")
 
-    def test_fallback_when_no_metadata(self):
+    def test_fallback_when_no_footer(self):
         from agentica.cli.display import StreamDisplayManager
         self.assertEqual(StreamDisplayManager._result_count_summary("read_file", "a\nb\nc"), "3 lines")
 

@@ -111,13 +111,12 @@ class TestBuiltinFileToolLs:
 
 
 class TestBuiltinFileToolReadFile:
-    def test_empty_file_returns_reminder_and_metadata(self, file_tool, tmp_dir):
+    def test_empty_file_returns_reminder(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "empty.txt")
         Path(fp).touch()
         result = asyncio.run(file_tool.read_file(fp))
         assert "<system-reminder>" in result
         assert "0 bytes" in result
-        assert "[File metadata:" in result
 
     def test_read_simple_file(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "test.txt")
@@ -385,25 +384,26 @@ class TestBuiltinFileToolEditFile:
     def _read(file_tool, file_path):
         asyncio.run(file_tool.read_file(file_path))
 
-    def test_edit_without_read_still_succeeds_with_tip(self, file_tool, tmp_dir):
+    def test_edit_without_read_succeeds_without_tip(self, file_tool, tmp_dir):
+        """Success path carries no freshness tip — only failures do."""
         fp = os.path.join(tmp_dir, "unread.txt")
         Path(fp).write_text("before")
         result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
         assert "Successfully" in result
-        assert "Tip:" in result and "not read_file'd" in result
+        assert "Tip:" not in result
         assert Path(fp).read_text() == "after"
 
-    def test_stale_context_edit_still_succeeds_with_tip(self, file_tool, tmp_dir):
+    def test_stale_context_edit_succeeds_without_tip(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "stale.txt")
         Path(fp).write_text("before")
         self._read(file_tool, fp)
         file_tool.mark_read_context_stale([fp])
         result = asyncio.run(file_tool.edit_file(fp, "before", "after"))
         assert "Successfully" in result
-        assert "left context" in result
+        assert "left context" not in result
         assert Path(fp).read_text() == "after"
 
-    def test_same_size_external_change_tips_but_still_edits(self, file_tool, tmp_dir):
+    def test_same_size_external_change_still_edits_without_tip(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "fingerprint.txt")
         Path(fp).write_text("before")
         self._read(file_tool, fp)
@@ -412,7 +412,7 @@ class TestBuiltinFileToolEditFile:
         os.utime(fp, ns=(original_mtime_ns, original_mtime_ns))
         result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
         assert "Successfully" in result
-        assert "changed on disk" in result
+        assert "changed on disk" not in result
         assert Path(fp).read_text() == "final!"
 
     def test_lazy_hash_skipped_when_mtime_changed(self, file_tool, tmp_dir):
@@ -429,8 +429,8 @@ class TestBuiltinFileToolEditFile:
         assert "changed on disk" in str(exc.value)
         assert spy.call_count == 0, "hash must be skipped when mtime/size differ"
 
-    def test_lazy_hash_runs_when_mtime_and_size_match(self, file_tool, tmp_dir):
-        """Tip path must hash when mtime+size match to catch a same-size rewrite."""
+    def test_lazy_hash_skipped_on_success_even_when_mtime_and_size_match(self, file_tool, tmp_dir):
+        """Success path should avoid freshness hashing even for same-size rewrites."""
         from unittest.mock import patch
         fp = os.path.join(tmp_dir, "same_fingerprint.txt")
         Path(fp).write_text("before")
@@ -441,8 +441,9 @@ class TestBuiltinFileToolEditFile:
         with patch.object(file_tool, "_file_hash", wraps=file_tool._file_hash) as spy:
             result = asyncio.run(file_tool.edit_file(fp, "after!", "final!"))
         assert "Successfully" in result
-        assert "changed on disk" in result
-        assert spy.call_count == 1, "hash must run when mtime+size match"
+        assert "changed on disk" not in result
+        assert Path(fp).read_text() == "final!"
+        assert spy.call_count == 0, "success path should not pay freshness hash cost"
 
     def test_single_edit(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "edit.txt")
@@ -1099,14 +1100,13 @@ class TestBuiltinTodoTool:
 
     # ---- Tool result message format tests ----
 
-    def test_tool_result_contains_guidance_text(self, todo_tool):
-        """Tool result should contain guidance text for the LLM."""
+    def test_tool_result_message_is_neutral(self, todo_tool):
+        """Tool result message confirms the update without nudging re-calls."""
         result = todo_tool.write_todos([
             {"content": "Task A", "status": "pending"},
         ])
         parsed = json.loads(result)
-        assert "Ensure that you continue" in parsed["message"]
-        assert "proceed with the current tasks" in parsed["message"]
+        assert parsed["message"] == "Todos updated (1 items)."
 
 
 # ===========================================================================

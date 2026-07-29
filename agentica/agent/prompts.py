@@ -9,13 +9,16 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
-from agentica.utils.log import logger
+from agentica.agent.history_filter import apply_history_pipeline
 from agentica.document import Document
 from agentica.model.message import Message, MessageReferences, VOLATILE_SYSTEM_MARKER
+from agentica.prompts.base.heartbeat import get_heartbeat_prompt
+from agentica.prompts.base.soul import get_soul_prompt
+from agentica.prompts.builder import PromptBuilder
 from agentica.run_input import build_user_message_from_sequence
 from agentica.run_response import RunResponseExtraData
+from agentica.utils.log import logger
 from agentica.utils.timer import Timer
-from agentica.agent.history_filter import apply_history_pipeline
 
 
 class PromptsMixin:
@@ -390,20 +393,13 @@ class PromptsMixin:
 
     def _enhance_with_prompt_builder(self, base_prompt: str) -> str:
         """Enhance an existing prompt with PromptBuilder modules."""
-        from agentica.prompts.base.heartbeat import get_heartbeat_prompt
-        from agentica.prompts.base.soul import get_soul_prompt
-        from agentica.prompts.base.self_verification import get_self_verification_prompt
-
         sections = [base_prompt]
         sections.append(get_soul_prompt())
         sections.append(get_heartbeat_prompt())
-        sections.append(get_self_verification_prompt())
         return "\n\n---\n\n".join(sections)
 
     async def _build_enhanced_system_message(self) -> Optional[Message]:
         """Build an enhanced system message using PromptBuilder."""
-        from agentica.prompts.builder import PromptBuilder
-
         pc = self.prompt_config
 
         identity = None
@@ -429,7 +425,6 @@ class PromptsMixin:
             enable_heartbeat=True,
             enable_soul=True,
             enable_tools_guide=has_tools,
-            enable_self_verification=has_tools,
         )
 
         system_message_lines: List[str] = [base_prompt]

@@ -55,7 +55,6 @@ class TestPromptBuilder:
             enable_soul=True,
             enable_heartbeat=False,
             enable_tools_guide=False,
-            enable_self_verification=False,
         )
         assert isinstance(result, str)
 
@@ -123,12 +122,7 @@ class TestPromptModules:
         content = get_heartbeat_prompt()
         assert isinstance(content, str)
         assert len(content) > 0
-
-    def test_self_verification_module_content(self):
-        from agentica.prompts.base.self_verification import get_self_verification_prompt
-        content = get_self_verification_prompt()
-        assert isinstance(content, str)
-        assert len(content) > 0
+        assert "verify your work" in content
 
 
 # ===========================================================================

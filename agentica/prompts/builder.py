@@ -7,21 +7,19 @@ Section ordering:
 1. Identity (intro)
 2. Soul (behavioral guidelines + tone)
 3. Tools (tool usage strategy + dynamic tool list)
-4. Heartbeat (iteration control)
-5. Self verification (lint/test/typecheck)
-6. Workspace context (dynamic)
+4. Heartbeat (iteration control + verification)
+5. Workspace context (dynamic)
 """
 
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
-from agentica.prompts.base.tools import get_tools_prompt
 from agentica.prompts.base.soul import get_soul_prompt
-from agentica.prompts.base.self_verification import get_self_verification_prompt
+from agentica.prompts.base.tools import get_tools_prompt
 
 
 class PromptBuilder:
-    """System Prompt modular assembler."""
+    """System prompt modular assembler."""
 
     @classmethod
     def build_system_prompt(
@@ -33,49 +31,27 @@ class PromptBuilder:
         enable_heartbeat: bool = True,
         enable_soul: bool = True,
         enable_tools_guide: bool = True,
-        enable_self_verification: bool = True,
     ) -> str:
-        """Assemble the complete system prompt from modular components.
-
-        Args:
-            identity: Custom identity description
-            workspace_context: Additional context from workspace (AGENTS.md, etc.)
-            active_tools: List of currently enabled tool names for dynamic tool table
-            tool_descriptions: Optional mapping of tool_name -> description for tool table
-            enable_heartbeat: Enable forced iteration mechanism
-            enable_soul: Enable behavioral guidelines
-            enable_tools_guide: Enable tool usage strategy guide
-            enable_self_verification: Enable code validation guidance (lint/test/typecheck)
-
-        Returns:
-            Complete assembled system prompt
-        """
+        """Assemble the complete system prompt from modular components."""
         sections = []
 
-        # 1. Identity section
         if identity:
             sections.append(f"# Identity\n\n{identity}")
 
-        # 2. Soul (core behavioral guidelines + tone)
         if enable_soul:
             sections.append(get_soul_prompt())
 
-        # 3. Tools usage guide (with optional dynamic tool list)
         if enable_tools_guide:
-            sections.append(get_tools_prompt(
-                active_tools=active_tools,
-                tool_descriptions=tool_descriptions,
-            ))
+            sections.append(
+                get_tools_prompt(
+                    active_tools=active_tools,
+                    tool_descriptions=tool_descriptions,
+                )
+            )
 
-        # 4. Heartbeat (iteration control)
         if enable_heartbeat:
             sections.append(get_heartbeat_prompt())
 
-        # 5. Self verification (lint/test/typecheck)
-        if enable_self_verification:
-            sections.append(get_self_verification_prompt())
-
-        # 6. Workspace context (dynamic zone)
         if workspace_context:
             sections.append(f"# Workspace Context\n\n{workspace_context}")
 

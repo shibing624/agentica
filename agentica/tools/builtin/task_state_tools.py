@@ -9,7 +9,6 @@ import re
 from collections import OrderedDict
 from datetime import date, timedelta
 from pathlib import Path
-from textwrap import dedent
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from agentica.tools.base import Tool
@@ -27,26 +26,14 @@ class BuiltinTodoTool(Tool):
     visible to the agent via tool_result and periodic reminders.
 
     Design (mirrors CC TodoWriteTool):
-    - write_todos tool_result contains full todo state + guidance text
+    - write_todos tool_result echoes the full todo state
     - All-completed auto-clear: when every item is completed, list is cleared
     - Verification nudge: when 3+ tasks all completed and none is a verification
       step, tool_result appends a reminder to verify before reporting done
-    - No system prompt injection of todos (avoids token waste / cache busting)
+    - No system prompt injection (usage guidance lives in the docstring only)
     - Periodic reminder injected by Runner when LLM hasn't called write_todos
       for N turns (see Runner._inject_todo_reminder)
     """
-
-    WRITE_TODOS_SYSTEM_PROMPT = dedent("""## `write_todos`
-
-    Use this tool for complex objectives to track each necessary step and give the user visibility into your progress.
-    Writing todos takes time and tokens — only use it for complex many-step problems (3+ distinct steps), not for simple few-step requests.
-
-    Critical rules:
-    - Mark todos as completed as soon as each step is done. Do not batch completions.
-    - The `write_todos` tool should NEVER be called multiple times in parallel.
-    - Revise the todo list as you go — new information may reveal new tasks or make old tasks irrelevant.
-    - The todo list will be shown in your tool results when you update it.
-    - If you haven't updated it in a while, you may receive a reminder with the current state.""")
 
     _VERIFICATION_NUDGE = (
         "\n\nNOTE: You just closed out 3+ tasks and none of them was a verification step. "
@@ -95,10 +82,6 @@ class BuiltinTodoTool(Tool):
         else:
             self._todos = value
 
-    def get_system_prompt(self) -> Optional[str]:
-        """Get the system prompt for todo tool usage guidance."""
-        return self.WRITE_TODOS_SYSTEM_PROMPT
-
     @staticmethod
     def _needs_verification_nudge(todos: List[Dict[str, str]]) -> bool:
         """Check if verification nudge should be appended to tool_result."""
@@ -112,70 +95,17 @@ class BuiltinTodoTool(Tool):
         return True
 
     def write_todos(self, todos: Optional[List[Dict[str, str]]] = None) -> str:
-        """Create and manage a structured task list.
+        """Create and update a structured task list for the current session.
 
-        Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the user.
+        Use it for complex multi-step tasks (3+ distinct steps) to track progress
+        and give the user visibility. Skip it for simple or single-step requests.
 
-        Only use this tool if you think it will be helpful in staying organized. If the user's request is trivial and takes less than 3 steps, it is better to NOT use this tool and just do the task directly.
+        - Update the list as you finish steps; do not batch completions.
+        - Revise it as you go: add newly discovered tasks, drop irrelevant ones.
+        - Never call it multiple times in parallel.
 
-        ## When to Use This Tool
-        Use this tool in these scenarios:
-        1. Complex multi-step tasks - When a task requires 3 or more distinct steps or actions
-        2. Non-trivial and complex tasks - Tasks that require careful planning or multiple operations
-        3. User explicitly requests todo list - When the user directly asks you to use the todo list
-        4. User provides multiple tasks - When users provide a list of things to be done (numbered or comma-separated)
-        5. The plan may need future revisions or updates based on results from the first few steps
-
-        ## How to Use This Tool
-        1. When you start working on a task - Mark it as in_progress BEFORE beginning work.
-        2. After completing a task - Mark it as completed and add any new follow-up tasks discovered during implementation.
-        3. You can also update future tasks, such as deleting them if they are no longer necessary, or adding new tasks that are necessary. Don't change previously completed tasks.
-        4. You can make several updates to the todo list at once. For example, when you complete a task, you can mark the next task you need to start as in_progress.
-
-        ## When NOT to Use This Tool
-        It is important to skip using this tool when:
-        1. There is only a single, straightforward task
-        2. The task is trivial and tracking it provides no benefit
-        3. The task can be completed in less than 3 trivial steps
-        4. The task is purely conversational or informational
-
-        ## Task States and Management
-
-        1. **Task States**: Use these states to track progress:
-        - pending: Task not yet started
-        - in_progress: Currently working on (you can have multiple tasks in_progress at a time if they are not related to each other and can be run in parallel)
-        - completed: Task finished successfully
-
-        2. **Task Management**:
-        - Update task status in real-time as you work
-        - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
-        - Complete current tasks before starting new ones
-        - Remove tasks that are no longer relevant from the list entirely
-        - IMPORTANT: When you write this todo list, you should mark your first task (or tasks) as in_progress immediately!.
-        - IMPORTANT: Unless all tasks are completed, you should always have at least one task in_progress to show the user that you are working on something.
-
-        3. **Task Completion Requirements**:
-        - ONLY mark a task as completed when you have FULLY accomplished it
-        - If you encounter errors, blockers, or cannot finish, keep the task as in_progress
-        - When blocked, create a new task describing what needs to be resolved
-        - Never mark a task as completed if:
-            - There are unresolved issues or errors
-            - Work is partial or incomplete
-            - You encountered blockers that prevent completion
-            - You couldn't find necessary resources or dependencies
-            - Quality standards haven't been met
-
-        4. **Task Breakdown**:
-        - Create specific, actionable items
-        - Break complex tasks into smaller, manageable steps
-        - Use clear, descriptive task names
-
-        Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully
-        Remember: If you only need to make a few tool calls to complete a task, and it is clear what you need to do, it is better to just do the task directly and NOT call this tool at all.
-
-        Each task item should contain:
-        - content: Task description
-        - status: Task status ("pending", "in_progress", "completed")
+        Each item: {"content": task description,
+                    "status": "pending" | "in_progress" | "completed"}.
         """
         if todos is None:
             raise ValueError(
@@ -217,11 +147,7 @@ class BuiltinTodoTool(Tool):
 
         logger.debug(f"Updated todo list: {len(validated_todos)} items, all_done={all_done}")
 
-        result_message = (
-            f"Todos have been modified successfully ({len(validated_todos)} items). "
-            "Ensure that you continue to use the todo list to track your progress. "
-            "Please proceed with the current tasks if applicable."
-        )
+        result_message = f"Todos updated ({len(validated_todos)} items)."
         if nudge_needed:
             result_message += self._VERIFICATION_NUDGE
 

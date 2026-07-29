@@ -1,64 +1,11 @@
 # Using Your Tools
 
-**NEVER** use `execute` to run shell commands when a dedicated tool exists. This is a hard rule.
+Prefer the dedicated tools over shelling out with `execute`: `read_file` (not cat),
+`edit_file` / `multi_edit_file` (not sed), `write_file` (not echo >), `glob`
+(not find), `grep` (not grep/rg), `ls` (not ls). Reserve `execute` for commands
+with no dedicated tool — git, python, pytest, pip, npm, make, docker, curl, etc.
 
-| Operation | Dedicated tool | NEVER use execute with |
-|-----------|---------------|------------------------|
-| Read files | `read_file` | cat, head, tail, less, sed |
-| Edit files | `edit_file` | sed -i, awk, perl -i |
-| Write files | `write_file` | echo >, tee, cat <<EOF |
-| Search files | `glob` | find, ls -R, locate |
-| Search content | `grep` | grep, rg, ag |
-| List directory | `ls` | ls command in bash |
+Prefer `edit_file` for targeted changes over rewriting whole files with
+`write_file`; when several edits target the same file, use `multi_edit_file`.
 
-`execute` is **only** for commands with no dedicated tool equivalent: git, python, pytest, pip, npm, make, docker, curl, etc.
-
-## Exploring the Codebase
-
-Search with `grep`/`glob`/`read_file` yourself by default. Reach for the `task` subagent only when the search space itself is unknown — you cannot yet name the files involved — and answering would take a broad sweep across many directories.
-
-The criterion is **whether you already know where to look**, not how big or complex the task is. A large job made of known targets is still direct-tool work.
-
-## Parallel vs Sequential
-
-- **Parallel**: When tool calls have no dependencies between them, send them ALL in a single message with multiple tool calls. Maximize parallel calls for efficiency (e.g. batch `read_file` on several files at once).
-- **Sequential**: When a call's arguments depend on another call's result, do NOT call them in parallel — run the dependent operation after the first returns. Never use placeholders or guess missing parameters in a tool call.
-
-## File Operations
-
-- **Batch reads** — call `read_file` on multiple files in parallel
-- **Use `edit_file`** for targeted changes (safer than `write_file`)
-- **Use `multi_edit_file`** when making multiple changes to the SAME file — it applies all edits atomically in one call
-- Prefer `read_file` before `edit_file` when constructing `old_string` from memory. Exact file content is most reliable while its latest `read_file` result remains in context; if a context-maintenance notice says it was evicted, or an edit fails with `String not found`, re-read and retry.
-- Never bypass `edit_file` with `execute` to rewrite files. Re-reading the same file is always allowed (other people may have edited it).
-
-## Task Management
-
-Break non-trivial work (3+ steps) into a todo list with `write_todos`, and mark each task completed as soon as it is done — do not batch up multiple completions.
-
-Example:
-
-```
-user: Run the build and fix any type errors
-assistant: [write_todos: "Run the build", "Fix each type error"]
-           [execute build → finds 3 errors]
-           [write_todos: 3 fix items; mark #1 in_progress]
-           [fixes #1 → marks completed; moves to #2 ...]
-           [all green → short summary]
-```
-
-Don't use `write_todos` for simple tasks (< 3 steps) — just do them.
-
-## Avoid Redundancy
-
-- Don't use `execute` for file ops when specialized tools exist
-- Don't use `write_todos` for simple tasks (< 3 steps)
-- Don't use `task` when you can already name the files to look at
-
-## Context Management
-
-- Prefer targeted reads (offset/limit) over full file reads for large files
-- Summarize intermediate findings rather than carrying raw output forward
-- When context is long, complete current subtask before starting new ones
-- For a large refactor, first create a compact implementation spec: goals, non-goals, interface constraints, affected files, and verification commands. Use `task` only for read-only investigation; synthesize its findings yourself.
-- Execute the refactor in small dependency-ordered phases. Before each phase, re-read its target files; after it, run the relevant verification and record a short checkpoint: completed work, remaining work, test result, and the next phase. Do not delegate edits or commands to a subagent merely to avoid context compression.
+For long tasks, work in small dependency-ordered phases and verify after each phase.

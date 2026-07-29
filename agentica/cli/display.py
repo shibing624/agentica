@@ -933,21 +933,22 @@ class StreamDisplayManager:
         """One-word count summary for a deferred read-only tool's result."""
         if not result_content:
             return "no matches" if tool_name == "grep" else ""
-        # read_file appends footer blocks ("[Showing lines ...]" and
-        # "[File metadata: ... range=A-B]"); the range encodes the exact
-        # content span returned, so count from that rather than the whole
-        # wrapped string (which would inflate the number with footer lines).
-        # Anchor to the FINAL line and the "[File metadata:" prefix — a bare
-        # "range=N-M" search can false-match identical text in file content.
+        # read_file appends a "[Showing lines A-B of N total lines]" footer
+        # only when truncated; the span encodes the exact content returned,
+        # so count from that rather than the wrapped string (which would
+        # inflate the number with the footer line). Anchor to the FINAL line
+        # and the "[Showing lines" prefix — a bare "N-M" search can
+        # false-match identical text in file content.
         if tool_name == "read_file":
             tail = str(result_content).rstrip().rsplit("\n", 1)[-1]
-            m = re.match(r"\[File metadata:.*range=(\d+)-(\d+)\]$", tail)
+            m = re.match(r"\[Showing lines (\d+)-(\d+) of \d+ total lines\]$", tail)
             if m:
-                # actual_end reflects the real span: a 100-line file read
-                # with L1-500 yields range=1-100 → 100. Clamp reads past EOF
-                # (range start > end) to 0.
+                # Clamp reads past EOF (range start > end) to 0.
                 n = max(0, int(m.group(2)) - int(m.group(1)) + 1)
                 return f"{n} lines"
+            # Empty file: the result is a system-reminder, not content lines.
+            if result_content.startswith("<system-reminder>"):
+                return "0 lines"
         n = len(str(result_content).splitlines())
         if n == 0:
             return "no matches" if tool_name == "grep" else ""

@@ -261,16 +261,15 @@ agent = Agent(
 )
 ```
 
-注入的四个模块：
+注入的三个模块：
 
 | 模块 | 文件 | 效果 |
 |------|------|------|
 | **Soul** | `soul.md` | 核心行为准则：技术准确性优先、有主见、避免过度工程 |
 | **Tools Guide** | `tools.md` | 工具使用策略：禁用 cat/grep shell 等效命令，强制使用内置工具 |
-| **Heartbeat** | `heartbeat.md` | 迭代控制：必须持续直到问题彻底解决，不半途而废 |
-| **Self Verification** | `self_verification.md` | 代码变更后必须运行 lint/test 验证 |
+| **Heartbeat** | `heartbeat.md` | 迭代控制与验证要求：持续推进直到问题解决，并在结束前完成必要验证 |
 
-**适用场景**：`DeepAgent`（CLI 模式）默认开启；普通 `Agent` 默认关闭。开启后 Agent 更擅长多步骤代码任务，但 prompt token 会增加约 800 tokens。
+**适用场景**：`DeepAgent`（CLI 模式）默认开启；普通 `Agent` 默认关闭。开启后 Agent 更擅长多步骤代码任务，但 prompt token 会增加几百个 tokens。
 
 ### `minimal` 模式
 
@@ -393,7 +392,7 @@ result = await agent.run("""
 **DeepAgent 内置工具**（`ls`, `read_file`, `write_file`, `edit_file`, `multi_edit_file`, `glob`, `grep`, `execute`, `web_search`, `fetch_url`, `write_todos`, `task`, `ask_user_question`, `save_memory`, `search_memory`）
 
 **DeepAgent 默认开启**：
-- `enable_agentic_prompt=True`（Soul + Tools Guide + Heartbeat + Self Verification）
+- `enable_agentic_prompt=True`（Soul + Tools Guide + Heartbeat）
 - `compress_tool_results=True`（大工具结果自动压缩）
 - `context_overflow_threshold=0.8`（上下文 80% 触发压缩）
 - Workspace 长期记忆

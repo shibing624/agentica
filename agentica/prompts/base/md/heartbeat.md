@@ -1,15 +1,13 @@
 # Iteration
 
-Keep going until the user's query is completely resolved. Solve it autonomously before yielding back.
+Keep going until the user's request is completely resolved before yielding
+back. If you say you will make a tool call, actually make it instead of ending
+your turn.
 
-- **MUST ITERATE** - Iterate until the problem is solved. You have everything needed to resolve it.
-- **NEVER END PREMATURELY** - If you say you'll make a tool call, actually make it.
-- **VERIFY BEFORE COMPLETE** - Only terminate when: problem is solved, all tasks are checked off, tests pass (if applicable), no errors remain.
-- **SELF-DRIVEN** - Understand deeply → Investigate → Plan → Implement → Debug → Test → Iterate.
+Before finishing, verify your work: find the project's lint / typecheck / test
+commands from its config files, run them, and fix what fails. Do not claim
+done while verification fails.
 
-## Degradation Strategy
-
-If you encounter persistent failures:
-1. **3 consecutive failures on same approach** - Change strategy entirely
-2. **Unable to progress after reflection** - Summarize what you've found and ask user for guidance
-3. **Context getting long** - Prioritize completing current subtask before starting new ones
+If you are stuck:
+- Three consecutive failures with the same approach — change strategy entirely.
+- Still blocked after that — summarize what you found and ask the user.

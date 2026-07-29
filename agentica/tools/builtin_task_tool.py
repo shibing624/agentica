@@ -42,81 +42,31 @@ class BuiltinTaskTool(Tool):
     ## task Tool (Subagent Spawner)
 
     Launch a READ-ONLY subagent to investigate an open-ended question in its own
-    isolated context window. It returns one summary; you do all edits yourself.
+    context window; it returns one summary and you do all edits yourself.
 
-    When broadly exploring the codebase to gather context for a large task —
-    the search would span directories you cannot enumerate yet — prefer `task`
-    with an exploration type over running the search tools yourself. Outside
-    that case, search yourself.
+    Use it only when you do not yet know where to look — the search would span
+    directories you cannot enumerate. If you already know the target file,
+    definition, or a handful of files, use `read_file` / `grep` / `glob`
+    directly; task size is not the criterion. Do not use `task` for edits or
+    state-changing commands (subagents are refused these), for work that needs
+    this conversation's context, or merely to keep your own context small.
 
-    ### When NOT to use the task tool
-
-    - Reading a specific known file — use `read_file`, it reaches the answer sooner
-    - Finding a specific definition like `class Foo` — use `grep`, it reaches the answer sooner
-    - Anything scoped to one file or a few known files — read them directly, it reaches the answer sooner
-    - Editing files or running state-changing commands — subagents are refused
-      these. Do it YOURSELF; delegate *investigation*, never implementation
-    - A judgement question ("is this correct?", "is this ready?") on an
-      `auxiliary` type — answer it yourself or use a `main` type
-    - Work that depends on this conversation's context, or where you need to see
-      the intermediate steps
-    - No listed subagent type is a good fit — use the direct tools
-
-    The test is **whether you already know where to look**, not how big the job
-    is. A large task made of known targets is still direct-tool work; delegate
-    only when the search space itself is the unknown. Never reach for `task`
-    merely to keep your own context small.
-
-    Examples:
-    - "Where is CompressionManager defined?" → `grep` directly; the target is known
-    - "Read runner.py and tell me what num_input_messages does" → `read_file` directly
-    - "Fix the failing test in test_runner.py" → do it yourself; known file, and it needs edits
-    - "How does compaction interact with session resume?" → `task` with `explore`;
-      open-ended, spans files you cannot name yet
-    - "Does this diff break the retry path?" → `task` with a `main` type, scoped to
-      the changed files; it is a judgement question
-
-    ### Two Model Tiers
-
-    The `Model` column below says which model a type runs on. `auxiliary` is a
-    cheaper, weaker model — reliable at **retrieval** (where is X, which files
-    touch Y, what does the web say). `main` is your own model — for **judgement**,
-    used sparingly and always narrowly scoped.
-
-    **Never send a judgement question to an `auxiliary` type.** A weak model says
-    "looks fine" with total confidence and you will believe it — worse than not
-    delegating at all. Treat an `auxiliary` result as **evidence** you still
-    reason over; a `main` result as an **opinion** you can weigh.
-
-    ### Available Subagent Types
+    The `Model` column below shows which model a type runs on: `auxiliary` is a
+    cheaper model for retrieval — treat its result as evidence you still reason
+    over; `main` is your own model, for judgement questions, used sparingly and
+    narrowly scoped. Never send a judgement question to an `auxiliary` type.
 
     {subagent_table}
 
-    ### Briefing a Subagent
+    Briefing: the subagent cannot see this conversation. State what you want to
+    know and why, the files or functions to start from, and ask for findings as
+    path:line. Never ask it to edit or implement.
 
-    It cannot see this conversation. State what you want to know and why, what
-    you already ruled out, and the exact files or functions to start from. Ask
-    for findings as path:line plus the concrete detail, not general advice.
-
-    Never write "based on your findings, fix the bug" or "then implement it" —
-    that pushes synthesis onto the subagent. **You** synthesize the result.
-
-    After launching one you know nothing until it returns: do not predict its
-    findings, and do not re-read what it examined unless you need to verify a
-    specific claim.
-
-    ### Usage Notes
-
-    1. Launch independent READ-ONLY tasks in a single message to run them in
-       parallel — total time becomes max, not sum. Do not fan out `main`-tier
-       tasks; they are expensive.
-    2. Once delegated, do not duplicate that work yourself.
-    3. On `partial=true` (timeout or max_turns), default to synthesizing the
-       partial output — it usually suffices. Resume at most once, by calling
-       `task` again with the SAME `description` plus `resume_from_run_id` set to
-       the failed `run_id`; the partial output is stitched in automatically.
-    4. Use `system_prompt_override` only when the default subagent prompt is
-       pulling the model off-task.""")
+    - Launch independent tasks in one message to run them in parallel; do not
+      fan out `main`-tier tasks.
+    - Once delegated, do not duplicate that work yourself.
+    - On `partial=true`, default to synthesizing the partial output; resume at
+      most once with the SAME `description` plus `resume_from_run_id`.""")
 
     def __init__(self, auxiliary_model: Optional["Model"] = None):
         """
@@ -192,31 +142,18 @@ class BuiltinTaskTool(Tool):
     ) -> str:
         """Launch a read-only subagent to investigate an open-ended question.
 
-        Use this only when you cannot name the files to look at yet. If you
-        already know the target file, definition, or a handful of files, use
-        `read_file` / `grep` / `glob` directly — they reach the answer sooner.
-        Task size is not the criterion; a big job made of known targets is still
-        direct-tool work.
+        Use it only when you cannot name the files to look at yet; for known
+        files or definitions use `read_file` / `grep` / `glob` directly.
 
         Args:
-            description: Detailed description of the task. Brief the subagent
-                like a colleague who has no prior context.
-            subagent_type: Subagent type id (``explore`` / ``research`` / ``code``
-                / ``review``, default ``explore``), or any custom type registered
-                via ``register_custom_subagent``. All built-in types are READ-ONLY —
-                they cannot edit files or run commands; the main agent does all
-                edits based on the subagent's findings. ``explore`` / ``research``
-                / ``code`` run on the cheap auxiliary model and are for gathering
-                facts; ``review`` runs on the main model and is for judgement
-                questions (correctness, root cause, readiness) that a weak model
-                answers confidently and wrongly.
-            timeout: Optional per-call timeout override (seconds).
-            max_turns: Optional per-call ReAct turn budget override.
-            system_prompt_override: Optional replacement system prompt for this call.
-            resume_from_run_id: Optional ``run_id`` to resume a prior partial run.
-
-        The retry/resume parameters above are only for continuing an
-        interrupted run; see the task tool system prompt for guidance.
+            description: What to investigate. Brief the subagent like a
+                colleague who has no prior context.
+            subagent_type: Type id (default ``explore``); see the task tool
+                system prompt for available types and their model tier.
+            timeout: Per-call timeout override (seconds).
+            max_turns: Per-call ReAct turn budget override.
+            system_prompt_override: Replacement system prompt for this call.
+            resume_from_run_id: ``run_id`` of a prior partial run to resume.
 
         Returns:
             JSON string with the subagent's final result and execution summary.
