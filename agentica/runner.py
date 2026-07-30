@@ -1416,6 +1416,20 @@ class Runner:
             synthesized = Message(role="assistant", content=persisted)
             turn_msgs.append(synthesized)
 
+        # ``get_messages_from_last_n_runs()`` builds the next prompt from
+        # ``AgentRun.response.messages``, not from ``working_memory.messages``.
+        # Keep the interrupted turn in that canonical history source so a
+        # follow-up such as "continue" sees the partial answer it must resume.
+        if loop_state.context_collapsed:
+            run_messages = [m for m in messages_for_model if m.role != "system"]
+            if synthesized is not None:
+                run_messages.append(synthesized)
+        else:
+            run_messages = user_messages + turn_msgs
+        if system_message is not None:
+            run_messages.insert(0, system_message)
+        agent.run_response.messages = run_messages
+
         # working_memory so /history shows this exchange.
         if system_message is not None:
             agent.working_memory.add_system_message(
@@ -1431,12 +1445,6 @@ class Runner:
             # Mirror the success path: the run must carry the whole surviving
             # conversation before the runs it supersedes are dropped, or the
             # cancel would take the entire history down with it.
-            survived = [m for m in messages_for_model if m.role != "system"]
-            if synthesized is not None:
-                survived.append(synthesized)
-            if system_message is not None:
-                survived.insert(0, system_message)
-            agent.run_response.messages = survived
             agent.working_memory.runs.clear()
         agent.working_memory.add_run(agent_run)
 

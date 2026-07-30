@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
+from io import StringIO
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
@@ -695,13 +696,46 @@ class TestCLIHelpers(unittest.TestCase):
                 " (100ms)",
                 "call-1",
             )
-            rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list)
+            rendered = "\n".join(
+                str(call.args[0]) for call in fake.print.call_args_list if call.args
+            )
             syntax = fake.print.call_args_list[-1].args[0]
             diff_text = str(syntax.code)
 
         self.assertIn("Edited 1 file (+1 -1)", rendered)
+        self.assertIn("pkg/sample.py", rendered)
         self.assertIn("diff --git a/pkg/sample.py b/pkg/sample.py", diff_text)
         self.assertNotIn("#1", diff_text)
+
+    def test_write_file_summary_uses_configured_work_dir(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "pkg" / "created.py"
+            target.parent.mkdir()
+            args = {"file_path": str(target), "content": "value = 1\n"}
+            fake = MagicMock()
+            fake.width = 80
+            manager = StreamDisplayManager(fake, work_dir=root)
+            manager.display_tool("write_file", args, tool_call_id="write-1")
+            target.write_text("value = 1\n", encoding="utf-8")
+            manager.display_tool_result(
+                "write_file",
+                f"Created file, absolute path: {target}",
+                elapsed=0.1,
+                tool_args=args,
+                tool_call_id="write-1",
+            )
+
+            rendered = "\n".join(
+                str(call.args[0]) for call in fake.print.call_args_list if call.args
+            )
+            syntax = fake.print.call_args_list[-1].args[0]
+
+        self.assertIn("pkg/created.py", rendered)
+        self.assertNotIn(str(root), rendered)
+        self.assertIn("diff --git a/pkg/created.py b/pkg/created.py", str(syntax.code))
 
     def test_tool_result_sequencer_flushes_parallel_results_in_call_order(self):
         """Out-of-order completions must remain complete, call-ordered blocks."""
@@ -927,7 +961,8 @@ class TestCLIHelpers(unittest.TestCase):
         dm.display_tool("apply_patch", args, tool_call_id="patch-1")
         dm.display_tool_result(
             "apply_patch",
-            "Successfully applied patch to 2 files (+3 -1):\nM app.py\nA test_app.py",
+            "Successfully applied patch to 2 files (+3 -1):\n"
+            "M app.py (+1 -1)\nA test_app.py (+2 -0)",
             elapsed=0.25,
             tool_args=args,
             tool_call_id="patch-1",
@@ -946,7 +981,92 @@ class TestCLIHelpers(unittest.TestCase):
             " ".join(str(arg) for arg in call.args)
             for call in fake.print.call_args_list
         )
-        self.assertIn("M app.py\nA test_app.py", rendered_text)
+        self.assertIn("├ M app.py (+1 -1)", rendered_text)
+        self.assertIn("└ A test_app.py (+2 -0)", rendered_text)
+
+    def test_display_apply_patch_error_keeps_relative_hunk_context(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "pkg" / "app.py"
+            error = "\n".join([
+                "Patch preflight failed for 1 file; no files were changed.",
+                f"- {target}:",
+                "  Hunk 1: context not found from line 1.",
+                "  Expected context:",
+                "    STALE_FIRST = 1",
+                "  Hunk 2: context not found from line 1.",
+                "  Expected context:",
+                "    STALE_SECOND = 2",
+                "Read or re-read each failed region with read_file.",
+            ])
+            fake = MagicMock()
+            fake.width = 100
+            manager = StreamDisplayManager(fake, work_dir=root)
+
+            manager.display_tool_result(
+                "apply_patch",
+                error,
+                is_error=True,
+                elapsed=0.003,
+                tool_call_id="patch-error",
+            )
+
+            rendered = "\n".join(
+                str(call.args[0]) for call in fake.print.call_args_list if call.args
+            )
+
+        self.assertIn("pkg/app.py", rendered)
+        self.assertNotIn(str(root), rendered)
+        self.assertIn("Hunk 1: context not found", rendered)
+        self.assertIn("STALE_FIRST = 1", rendered)
+        self.assertIn("Hunk 2: context not found", rendered)
+        self.assertIn("Ctrl+O 展开", rendered)
+
+    def test_display_apply_patch_error_renders_rich_markup_as_literal_text(self):
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=False, color_system=None)
+        manager = StreamDisplayManager(console)
+
+        manager.display_tool_result(
+            "apply_patch",
+            "Patch preflight failed.\nExpected context: x = [/red] and [bold]",
+            is_error=True,
+            elapsed=0.003,
+            tool_call_id="patch-markup-error",
+        )
+
+        rendered = output.getvalue()
+        self.assertIn("x = [/red] and [bold]", rendered)
+
+    def test_display_path_keeps_lexical_symlink_path(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as outside:
+            root = Path(tmp)
+            link = root / "linked"
+            link.symlink_to(outside, target_is_directory=True)
+            console = MagicMock()
+            console.width = 80
+            manager = StreamDisplayManager(console, work_dir=root)
+
+            self.assertEqual(manager._display_path(str(link / "app.py")), "linked/app.py")
+
+    def test_shorten_workdir_text_respects_path_boundaries(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        console = MagicMock()
+        console.width = 80
+        manager = StreamDisplayManager(console, work_dir=Path("/tmp/foo"))
+
+        self.assertEqual(
+            manager._shorten_workdir_text("/tmp/foobar/app.py /tmp/foo/pkg/app.py"),
+            "/tmp/foobar/app.py pkg/app.py",
+        )
 
     def test_display_write_file_merged_shows_summary_and_diff(self):
         """write_file: one summary line (created/updated + line count) + a diff."""

@@ -128,6 +128,10 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         assistant_msg = next(m for m in wm.messages if m.role == "assistant")
         self.assertIn("[用户中断了回答]", assistant_msg.content)
         self.assertTrue(any(isinstance(r, AgentRun) for r in wm.runs))
+        resumed_history = wm.get_messages_from_last_n_runs()
+        self.assertEqual([m.role for m in resumed_history], ["user", "assistant"])
+        self.assertIn("2 + 2 = ", resumed_history[-1].content)
+        self.assertIn("[用户中断了回答]", resumed_history[-1].content)
 
     def test_persist_interrupted_turn_skips_prebuilt_messages(self):
         """Pre-built ``messages`` runs manage their own history — no persistence."""

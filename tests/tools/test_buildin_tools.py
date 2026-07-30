@@ -386,9 +386,9 @@ class TestBuiltinFileToolApplyPatch:
         result = asyncio.run(file_tool.apply_patch(patch_text))
 
         assert "Successfully applied patch to 3 files" in result
-        assert "M app.py" in result
-        assert "A tests/test_app.py" in result
-        assert "D obsolete.py" in result
+        assert "M app.py (+1 -1)" in result
+        assert "A tests/test_app.py (+2 -0)" in result
+        assert "D obsolete.py (+0 -1)" in result
         assert Path(tmp_dir, "app.py").read_text() == "VALUE = 2\nKEEP = True\n"
         assert Path(tmp_dir, "tests/test_app.py").read_text() == (
             "def test_value():\n    assert True"
@@ -425,10 +425,102 @@ class TestBuiltinFileToolApplyPatch:
 +replace
 *** End Patch"""
 
-        with pytest.raises(FileExistsError):
+        with pytest.raises(FileExistsError, match="existing.py"):
             asyncio.run(file_tool.apply_patch(patch_text))
 
         assert existing.read_text() == "keep\n"
+
+    def test_reports_all_file_and_hunk_preflight_failures(self, file_tool, tmp_dir):
+        first = Path(tmp_dir, "first.py")
+        second = Path(tmp_dir, "second.py")
+        existing = Path(tmp_dir, "existing.py")
+        first.write_text("FIRST = 1\n")
+        second.write_text("SECOND = 2\n")
+        existing.write_text("keep\n")
+        patch_text = """*** Begin Patch
+*** Update File: first.py
+@@
+-STALE_FIRST = 1
++FIRST = 10
+@@
+-STALE_FIRST_AGAIN = 1
++FIRST = 11
+*** Update File: second.py
+@@
+-STALE_SECOND = 2
++SECOND = 20
+*** Add File: existing.py
++replace
+*** End Patch"""
+
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.apply_patch(patch_text))
+
+        message = str(exc.value)
+        assert "Patch preflight failed for 3 files" in message
+        assert "- first.py:" in message
+        assert "Hunk 1: context not found" in message
+        assert "Hunk 2: context not found" in message
+        assert "- second.py:" in message
+        assert "- existing.py:" in message
+        assert "short unique context" in message
+        assert first.read_text() == "FIRST = 1\n"
+        assert second.read_text() == "SECOND = 2\n"
+        assert existing.read_text() == "keep\n"
+
+    def test_absolute_patch_path_is_reported_relative_to_work_dir(self, file_tool, tmp_dir):
+        target = Path(tmp_dir, "pkg", "app.py")
+        target.parent.mkdir()
+        target.write_text("VALUE = 1\n")
+        patch_text = f"""*** Begin Patch
+*** Update File: {target}
+@@
+-VALUE = 1
++VALUE = 2
+*** End Patch"""
+
+        result = asyncio.run(file_tool.apply_patch(patch_text))
+
+        assert "M pkg/app.py (+1 -1)" in result
+        assert tmp_dir not in result
+
+    def test_symlink_patch_path_keeps_lexical_work_dir_path(self, file_tool, tmp_dir):
+        with tempfile.TemporaryDirectory() as outside_dir:
+            outside = Path(outside_dir)
+            target = outside / "app.py"
+            target.write_text("VALUE = 1\n")
+            link = Path(tmp_dir, "linked")
+            link.symlink_to(outside, target_is_directory=True)
+            patch_text = """*** Begin Patch
+*** Update File: linked/app.py
+@@
+-VALUE = 1
++VALUE = 2
+*** End Patch"""
+
+            result = asyncio.run(file_tool.apply_patch(patch_text))
+
+            assert "M linked/app.py (+1 -1)" in result
+            assert outside_dir not in result
+            assert target.read_text() == "VALUE = 2\n"
+
+    @pytest.mark.parametrize(
+        ("patch_path", "exception_type"),
+        (("missing.py", FileNotFoundError), ("directory", IsADirectoryError)),
+    )
+    def test_single_preflight_keeps_filesystem_exception_type(
+            self, file_tool, tmp_dir, patch_path, exception_type
+    ):
+        Path(tmp_dir, "directory").mkdir()
+        patch_text = f"""*** Begin Patch
+*** Update File: {patch_path}
+@@
+-OLD = 1
++NEW = 1
+*** End Patch"""
+
+        with pytest.raises(exception_type, match=patch_path):
+            asyncio.run(file_tool.apply_patch(patch_text))
 
     def test_sandbox_blocks_any_target_before_writing(self, tmp_dir):
         from agentica.agent.config import SandboxConfig

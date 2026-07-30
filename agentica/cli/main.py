@@ -5,11 +5,14 @@
 """
 
 import os
+import time
 from datetime import datetime
 
 from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.interactive import run_interactive
+from agentica.cli.display import format_session_summary
 from agentica.cli.setup import resolve_model_config, run_onboarding
+from agentica.run_response import AgentCancelledError
 from agentica.utils.log import suppress_console_logging
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
@@ -172,6 +175,10 @@ def main():
         "enable_diagnostics": args.enable_diagnostics,
         "diagnostics_servers": args.diagnostics_servers,
     }
+    if getattr(args, "command", None) == "resume":
+        agent_config["session_id"] = args.resume_session_id
+        agent_config["_resume_at_uuid"] = args.resume_at_uuid
+        agent_config["_resume_requested"] = True
     extra_tool_names = list(args.tools) if args.tools else None
 
     # Initialize workspace with default user
@@ -203,14 +210,22 @@ def main():
 
         extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
         agent_instance = create_agent(agent_config, extra_tools, workspace, skills_registry)
+        started_at = time.monotonic()
         try:
             response = agent_instance.run_stream_sync(args.query)
             for chunk in response:
                 if chunk and chunk.content:
                     con.print(chunk.content, end="")
             con.print()  # final newline
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, AgentCancelledError):
             con.print("\n[yellow]Interrupted.[/yellow]")
+            con.print(
+                format_session_summary(
+                    elapsed_seconds=time.monotonic() - started_at,
+                    usage=agent_instance.model.usage,
+                    session_id=agent_instance.session_id,
+                )
+            )
         except Exception as e:
             con.print(f"\n[bold red]Error: {str(e)}[/bold red]")
     else:

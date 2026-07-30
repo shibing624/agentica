@@ -28,7 +28,17 @@ def test_format_session_summary_shows_usage_and_resume_hint():
 
     assert "Worked for 15m 05s" in rendered
     assert "Token usage: total=4,300 input=4,000 (+ 800 cached) output=300 (reasoning 120)" in rendered
-    assert "To continue this session, run /resume session-123" in rendered
+    assert "To continue this session, run agentica resume session-123" in rendered
+
+
+def test_format_session_summary_keeps_zero_usage_visible():
+    rendered = format_session_summary(
+        elapsed_seconds=1,
+        usage=Usage(),
+        session_id="session-zero",
+    ).plain
+
+    assert "Token usage: total=0 input=0 output=0" in rendered
 
 
 def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch):
@@ -53,7 +63,7 @@ def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch
 
     summary = console.print.call_args_list[0].args[0].plain
     assert "Worked for 15m 05s" in summary
-    assert "/resume old-session" in summary
+    assert "agentica resume old-session" in summary
     print_header.assert_called_once()
     assert result["current_agent"] is new_agent
     assert result["session_started_at"] == 1_005.0

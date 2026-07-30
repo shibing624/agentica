@@ -430,9 +430,28 @@ def parse_args():
         "allow-all (no restriction; default — the CLI is a single-user tool)",
     )
     parser.add_argument(
-        "command", nargs="?", choices=["acp"], help="Run in ACP mode for IDE integration (agentica acp)"
+        "command",
+        nargs="?",
+        choices=["acp", "resume"],
+        help="Run in ACP mode or resume a prior CLI session",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "resume_session_id",
+        nargs="?",
+        help="Session id for `agentica resume <session-id>`",
+    )
+    parser.add_argument(
+        "--resume-at",
+        dest="resume_at_uuid",
+        default=None,
+        help="Resume the session at a specific message UUID",
+    )
+    args = parser.parse_args()
+    if args.command == "resume" and not args.resume_session_id:
+        parser.error("agentica resume requires a session id")
+    if args.command != "resume" and args.resume_session_id is not None:
+        parser.error("a session id is only valid with `agentica resume`")
+    return args
 
 
 def configure_tools(tool_names: Optional[List[str]] = None) -> List[Any]:

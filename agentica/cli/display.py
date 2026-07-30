@@ -100,21 +100,20 @@ def format_session_summary(
     text = Text()
     text.append(f"Worked for {duration} ", style="dim")
     text.append("─" * 42, style="dim")
-    if usage.total_tokens > 0:
-        text.append("\n\nToken usage: ", style="dim")
-        text.append(f"total={usage.total_tokens:,} input={usage.input_tokens:,}")
-        cached_tokens = usage.input_tokens_details.cache_read_tokens
-        if cached_tokens <= 0:
-            cached_tokens = usage.input_tokens_details.cached_tokens
-        if cached_tokens > 0:
-            text.append(f" (+ {cached_tokens:,} cached)", style="dim")
-        text.append(f" output={usage.output_tokens:,}")
-        reasoning_tokens = usage.output_tokens_details.reasoning_tokens
-        if reasoning_tokens > 0:
-            text.append(f" (reasoning {reasoning_tokens:,})", style="dim")
+    text.append("\n\nToken usage: ", style="dim")
+    text.append(f"total={usage.total_tokens:,} input={usage.input_tokens:,}")
+    cached_tokens = usage.input_tokens_details.cache_read_tokens
+    if cached_tokens <= 0:
+        cached_tokens = usage.input_tokens_details.cached_tokens
+    if cached_tokens > 0:
+        text.append(f" (+ {cached_tokens:,} cached)", style="dim")
+    text.append(f" output={usage.output_tokens:,}")
+    reasoning_tokens = usage.output_tokens_details.reasoning_tokens
+    if reasoning_tokens > 0:
+        text.append(f" (reasoning {reasoning_tokens:,})", style="dim")
     if session_id:
         text.append("\nTo continue this session, run ", style="dim")
-        text.append(f"/resume {session_id}", style="bold")
+        text.append(f"agentica resume {session_id}", style="bold")
     return text
 
 
@@ -750,7 +749,9 @@ class StreamDisplayManager:
     def __init__(self, console_instance, subagent_verbosity: str = "all",
                  work_dir: Optional[Path] = None):
         self.console = console_instance
-        self._work_dir = (work_dir or Path.cwd()).expanduser().resolve()
+        configured_work_dir = (work_dir or Path.cwd()).expanduser().absolute()
+        self._work_dir_input = configured_work_dir
+        self._work_dir = configured_work_dir.resolve()
         self._raw_console = console_instance
         # Post-redesign: assistant/thinking output is emitted as plain text
         # (no left-side gutter bar). Only the user query keeps a ``▎`` prefix,
@@ -954,6 +955,32 @@ class StreamDisplayManager:
             path = self._work_dir / path
         return path
 
+    def _display_path(self, raw_path: str) -> str:
+        """Return a normalized path relative to the configured work directory."""
+        if not raw_path:
+            return ""
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = self._work_dir_input / path
+        lexical_path = Path(os.path.abspath(path))
+        for work_root in (self._work_dir_input, self._work_dir):
+            try:
+                return lexical_path.relative_to(work_root).as_posix()
+            except ValueError:
+                continue
+        return lexical_path.name
+
+    def _shorten_workdir_text(self, content: str) -> str:
+        """Replace absolute work-dir paths in tool output with relative paths."""
+        roots = {str(self._work_dir_input), str(self._work_dir)}
+        shortened = content
+        for root in sorted(roots, key=len, reverse=True):
+            if shortened == root:
+                shortened = "."
+            else:
+                shortened = shortened.replace(root + os.sep, "")
+        return shortened
+
     @staticmethod
     def _read_diff_path(path: Path) -> Optional[str]:
         """Read a small text file for display-only diffing."""
@@ -1070,33 +1097,27 @@ class StreamDisplayManager:
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         raw_path = str(tool_args.get("file_path", ""))
-        filename = _extract_filename(raw_path)
-        diff_path = Path(raw_path).expanduser()
-        if diff_path.is_absolute():
-            try:
-                diff_name = diff_path.resolve().relative_to(self._work_dir).as_posix()
-            except ValueError:
-                diff_name = filename
-        else:
-            diff_name = diff_path.as_posix()
-        params = filename
+        display_path = self._display_path(raw_path)
 
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
-        if params:
-            line += f" [dim]{params}[/dim]"
+        if display_path:
+            line += f" [dim]{display_path}[/dim]"
         key = tool_call_id or tool_args.get("file_path", "")
         old_content = self._write_old.pop(key, None)
         if is_error:
-            err = str(result_content).replace("\n", " ").strip()
+            err = self._shorten_workdir_text(str(result_content)).replace("\n", " ").strip()
             if len(err) > 80:
                 err = err[:77] + "..."
-                remember_truncated(f"Tool error · {tool_name}", str(result_content))
+                remember_truncated(
+                    f"Tool error · {tool_name}",
+                    self._shorten_workdir_text(str(result_content)),
+                )
             line += f" [red]- error: {err}{elapsed_str}[/red]"
             self._assistant_console.print(line)
             return
 
         new_content = self._read_diff_target(tool_args)
-        diff_text = self._build_file_diff(old_content, new_content, diff_name)
+        diff_text = self._build_file_diff(old_content, new_content, display_path)
         added, removed = self._diff_line_counts(diff_text)
         line += f" [dim]- Edited 1 file (+{added} -{removed}){elapsed_str}[/dim]"
         self._assistant_console.print(line)
@@ -1110,20 +1131,47 @@ class StreamDisplayManager:
         """Render the executor's apply_patch summary without parsing the patch."""
         icon = TOOL_ICONS.get("apply_patch", TOOL_ICONS["default"])
         line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
-        content = str(result_content).strip()
+        content = self._shorten_workdir_text(str(result_content).strip())
         if is_error:
-            error = content.replace("\n", " ")
-            if len(error) > 80:
-                error = error[:77] + "..."
+            self._assistant_console.print(line + f" [red]- error{elapsed_str}[/red]")
+            error_lines = content.splitlines() or ["Unknown patch error"]
+            max_lines = 8
+            truncated = len(error_lines) > max_lines or any(len(item) > 120 for item in error_lines)
+            for index, error_line in enumerate(error_lines[:max_lines]):
+                if len(error_line) > 120:
+                    error_line = error_line[:117] + "..."
+                prefix = "    ⎿ " if index == 0 else "      "
+                self._assistant_console.print(
+                    f"{prefix}{error_line}",
+                    style="dim red",
+                    highlight=False,
+                    markup=False,
+                )
+            remaining = len(error_lines) - max_lines
+            if truncated:
+                detail = f"{remaining} more lines" if remaining > 0 else "full error"
+                self._assistant_console.print(
+                    f"      ... ({detail} · Ctrl+O 展开)", style="dim italic"
+                )
                 remember_truncated("Tool error · apply_patch", content)
-            self._assistant_console.print(line + f" [red]- error: {error}{elapsed_str}[/red]")
             return
 
-        summary, _, paths = content.partition("\n")
+        summary, _, details = content.partition("\n")
         summary = re.sub(r"^Successfully applied patch to ", "Edited ", summary)
         self._assistant_console.print(line + f" [dim]- {summary}{elapsed_str}[/dim]")
-        if paths:
-            self._assistant_console.print(paths, style="dim", highlight=False, markup=False)
+        detail_lines = details.splitlines()
+        file_lines = []
+        while detail_lines and re.match(r"^[MAD] .+ \(\+\d+ -\d+\)$", detail_lines[0]):
+            file_lines.append(detail_lines.pop(0))
+        for index, file_line in enumerate(file_lines):
+            branch = "└" if index == len(file_lines) - 1 else "├"
+            self._assistant_console.print(
+                f"    {branch} {file_line}", style="dim", highlight=False, markup=False
+            )
+        if detail_lines:
+            self._assistant_console.print(
+                "\n".join(detail_lines), style="dim", highlight=False, markup=False
+            )
 
     def _read_diff_target(self, tool_args: dict) -> Optional[str]:
         """Read a write tool's post-call file content for display-only diffing."""
@@ -1170,33 +1218,26 @@ class StreamDisplayManager:
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         raw_path = str(tool_args.get("file_path", ""))
-        filename = _extract_filename(raw_path)
-        diff_path = Path(raw_path).expanduser()
-        if diff_path.is_absolute():
-            try:
-                diff_name = diff_path.resolve().relative_to(self._work_dir).as_posix()
-            except ValueError:
-                diff_name = filename
-        else:
-            diff_name = diff_path.as_posix()
+        display_path = self._display_path(raw_path)
         new_content = str(tool_args.get("content", ""))
         result_str = str(result_content)
         key = tool_call_id or tool_args.get("file_path", "")
         old_content = self._write_old.pop(key, None)
 
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
-        if filename:
-            line += f" [dim]{filename}[/dim]"
+        if display_path:
+            line += f" [dim]{display_path}[/dim]"
         if is_error:
-            err = result_str.replace("\n", " ").strip()
+            shortened_result = self._shorten_workdir_text(result_str)
+            err = shortened_result.replace("\n", " ").strip()
             if len(err) > 80:
                 err = err[:77] + "..."
-                remember_truncated(f"Tool error · {tool_name}", result_str)
+                remember_truncated(f"Tool error · {tool_name}", shortened_result)
             line += f" [red]- error: {err}{elapsed_str}[/red]"
             self._assistant_console.print(line)
             return
 
-        diff_text = self._build_file_diff(old_content, new_content, diff_name)
+        diff_text = self._build_file_diff(old_content, new_content, display_path)
         n_lines = len(new_content.splitlines())
         verb = "created" if "Created" in result_str else "updated"
         unit = "line" if n_lines == 1 else "lines"

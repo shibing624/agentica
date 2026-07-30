@@ -102,6 +102,65 @@ def world():
         result = apply_diff(original, diff, mode="default")
         self.assertIn("print('hello')", result)
 
+    def test_quote_normalization_applies_only_unique_context(self):
+        original = 'title = “keep”\nvalue = ‘old’'
+        diff = """@@
+ title = “keep”
+-value = 'old'
++value = 'new'"""
+
+        result = apply_diff(original, diff, mode="default")
+
+        self.assertEqual(result, 'title = “keep”\nvalue = \'new\'')
+
+    def test_quote_normalization_rejects_ambiguous_context(self):
+        original = "value = ‘old’\nseparator\nvalue = ‘old’"
+        diff = """@@
+-value = 'old'
++value = 'new'"""
+
+        with self.assertRaisesRegex(ValueError, "Hunk 1: context not found"):
+            apply_diff(original, diff, mode="default")
+
+    def test_quote_normalization_preserves_leading_whitespace(self):
+        original = "def update():\n    value = ‘old’"
+        diff = """@@
+-value = 'old'
++value = 'new'"""
+
+        with self.assertRaisesRegex(ValueError, "Hunk 1: context not found"):
+            apply_diff(original, diff, mode="default")
+
+        self.assertEqual(original, "def update():\n    value = ‘old’")
+
+    def test_quote_normalization_tolerates_trailing_whitespace(self):
+        original = "value = ‘old’   "
+        diff = """@@
+-value = 'old'
++value = 'new'"""
+
+        result = apply_diff(original, diff, mode="default")
+
+        self.assertEqual(result, "value = 'new'")
+
+    def test_reports_all_missing_hunks_in_one_file(self):
+        original = "FIRST = 1\nMIDDLE = True\nSECOND = 2"
+        diff = """@@
+-STALE_FIRST = 1
++FIRST = 10
+@@
+-STALE_SECOND = 2
++SECOND = 20"""
+
+        with self.assertRaises(ValueError) as exc:
+            apply_diff(original, diff, mode="default")
+
+        message = str(exc.exception)
+        self.assertIn("Hunk 1: context not found", message)
+        self.assertIn("STALE_FIRST = 1", message)
+        self.assertIn("Hunk 2: context not found", message)
+        self.assertIn("STALE_SECOND = 2", message)
+
 
 class TestParsePatchEnvelope(unittest.TestCase):
     """Tests for strict multi-file patch envelope parsing."""

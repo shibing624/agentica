@@ -62,6 +62,7 @@ from agentica.cli.display import (
     parse_file_mentions,
     inject_file_contents,
     display_user_message,
+    format_session_summary,
     get_file_completions,
     get_truncated_blocks,
 )
@@ -83,6 +84,8 @@ from agentica.cli.commands import (
     IMAGE_EXTENSIONS,
     _run_async_safe,
     _detach_goal_tool,
+    display_resumed_transcript,
+    hydrate_resumed_session,
 )
 from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
 
@@ -1383,11 +1386,25 @@ def _process_stream_response(
         current_agent._running = False
         current_agent._cancelled = False
         con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
+        con.print(
+            format_session_summary(
+                elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
+                usage=current_agent.model.usage,
+                session_id=current_agent.session_id,
+            )
+        )
     except AgentCancelledError:
         _set_phase("idle")
         current_agent._running = False
         current_agent._cancelled = False
         con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
+        con.print(
+            format_session_summary(
+                elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
+                usage=current_agent.model.usage,
+                session_id=current_agent.session_id,
+            )
+        )
     except Exception as e:
         _set_phase("idle")
         msg = str(e)
@@ -2255,6 +2272,20 @@ def run_interactive(
 
     if workspace and workspace.exists():
         con.print(f"  Workspace: [green]{workspace.path}[/green]")
+
+    if agent_config.get("_resume_requested"):
+        if current_agent._session_log is None or not current_agent._session_log.exists():
+            con.print(f"[bold red]No session found: {current_agent.session_id}[/bold red]")
+            return
+        resumed, runs_built = hydrate_resumed_session(
+            current_agent,
+            agent_config.get("_resume_at_uuid"),
+        )
+        display_resumed_transcript(resumed, current_agent.session_id)
+        con.print(
+            f"[green]Resumed session: {current_agent.session_id}"
+            f" — loaded {len(resumed)} messages ({runs_built} runs) into context[/green]"
+        )
 
     # Always scan installed skills for auto-commands
     if skills_registry is None or len(skills_registry) == 0:

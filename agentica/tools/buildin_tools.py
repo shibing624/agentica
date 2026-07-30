@@ -374,6 +374,23 @@ class BuiltinFileTool(Tool):
             return p
         return self.work_dir / p
 
+    def _result_path(self, raw_path: str) -> str:
+        """Return the lexical tool path relative to the configured work directory."""
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = self.work_dir / path
+        lexical_path = Path(os.path.abspath(path))
+        work_roots = (
+            Path(os.path.abspath(self.work_dir.expanduser())),
+            self.work_dir.expanduser().resolve(),
+        )
+        for work_root in work_roots:
+            try:
+                return lexical_path.relative_to(work_root).as_posix()
+            except ValueError:
+                continue
+        return lexical_path.as_posix()
+
     def _get_file_lock(self, path: str) -> asyncio.Lock:
         """Get or create a per-file asyncio.Lock to serialize concurrent edits."""
         return self._file_locks.setdefault(path, asyncio.Lock())
@@ -786,6 +803,12 @@ class BuiltinFileTool(Tool):
         written. This is a JSON function tool, so pass the entire patch as the
         ``patch`` string.
 
+        Keep each ``@@`` hunk's unchanged context short, stable, and unique.
+        Read or re-read the relevant regions immediately before building the
+        patch. A failed preflight reports every file and every context hunk that
+        could be checked, so regenerate those hunks from the exact current text
+        instead of retrying the same patch.
+
         Example:
             *** Begin Patch
             *** Update File: app.py
@@ -834,65 +857,68 @@ class BuiltinFileTool(Tool):
                 await stack.enter_async_context(lock_by_path[path_key])
 
             prepared = []
+            preflight_errors = []
             for operation, path, path_key in resolved:
-                if operation.action == "add":
-                    if path.exists():
-                        raise FileExistsError(
-                            f"Cannot add file that already exists: {operation.path}"
-                        )
-                    old_content = None
-                    try:
+                result_path = self._result_path(operation.path)
+                try:
+                    if operation.action == "add":
+                        if path.exists():
+                            raise FileExistsError("Cannot add a file that already exists.")
+                        old_content = None
                         new_content = apply_diff("", operation.diff, mode="create")
-                    except ValueError as exc:
-                        raise ValueError(
-                            f"Patch content failed for {operation.path!r}: {exc}"
-                        ) from exc
-                else:
-                    if not path.exists():
-                        raise FileNotFoundError(f"File not found: {operation.path}")
-                    if not path.is_file():
-                        raise IsADirectoryError(f"Not a file: {operation.path}")
-                    async with aiofiles.open(path, "r", encoding="utf-8") as handle:
-                        old_content = await handle.read()
-                    if operation.action == "update":
-                        try:
-                            new_content = apply_diff(old_content, operation.diff, mode="default")
-                        except ValueError as exc:
-                            raise ValueError(
-                                f"Patch context failed for {operation.path!r}: {exc}\n\n"
-                                f"{self._edit_read_hint()}"
-                            ) from exc
-                        if new_content == old_content:
-                            raise ValueError(
-                                f"Update for {operation.path!r} does not change the file."
-                            )
                     else:
-                        new_content = None
-                prepared.append((operation, path, path_key, old_content, new_content))
+                        if not path.exists():
+                            raise FileNotFoundError("File not found.")
+                        if not path.is_file():
+                            raise IsADirectoryError("Path is not a file.")
+                        async with aiofiles.open(path, "r", encoding="utf-8") as handle:
+                            old_content = await handle.read()
+                        if operation.action == "update":
+                            new_content = apply_diff(old_content, operation.diff, mode="default")
+                            if new_content == old_content:
+                                raise ValueError("Update does not change the file.")
+                        else:
+                            new_content = None
+                except (FileExistsError, FileNotFoundError, IsADirectoryError, ValueError) as exc:
+                    preflight_errors.append((result_path, exc))
+                    continue
+
+                added, removed = self._content_change_counts(old_content, new_content)
+                prepared.append(
+                    (operation, path, path_key, old_content, new_content, result_path, added, removed)
+                )
+
+            if preflight_errors:
+                file_noun = "file" if len(preflight_errors) == 1 else "files"
+                error_lines = [
+                    f"Patch preflight failed for {len(preflight_errors)} {file_noun}; "
+                    "no files were changed."
+                ]
+                for result_path, error in preflight_errors:
+                    error_lines.append(f"- {result_path}:")
+                    error_lines.extend(f"  {line}" for line in str(error).splitlines())
+                error_lines.extend(("", self._patch_read_hint()))
+                error_message = "\n".join(error_lines)
+                if len(preflight_errors) == 1:
+                    original_error = preflight_errors[0][1]
+                    if isinstance(
+                        original_error,
+                        (FileExistsError, FileNotFoundError, IsADirectoryError),
+                    ):
+                        raise type(original_error)(error_message) from original_error
+                raise ValueError(error_message) from preflight_errors[0][1]
 
             # Diagnostics and undo snapshots are captured only after every file
             # and hunk has passed preflight.
-            for operation, path, path_key, old_content, _ in prepared:
+            for operation, path, path_key, old_content, *_ in prepared:
                 await self._diagnostics_snapshot(path)
                 if old_content is not None:
                     self._file_snapshots.setdefault(path_key, []).append(old_content)
 
             applied = []
-            added_lines = 0
-            removed_lines = 0
             try:
-                for operation, path, _, old_content, new_content in prepared:
-                    old_text = old_content or ""
+                for operation, path, _, _, new_content, result_path, _, _ in prepared:
                     new_text = new_content or ""
-                    diff_lines = difflib.unified_diff(
-                        old_text.splitlines(), new_text.splitlines(), lineterm=""
-                    )
-                    for line in diff_lines:
-                        if line.startswith("+") and not line.startswith("+++"):
-                            added_lines += 1
-                        elif line.startswith("-") and not line.startswith("---"):
-                            removed_lines += 1
-
                     if operation.action == "delete":
                         path.unlink()
                     else:
@@ -909,7 +935,7 @@ class BuiltinFileTool(Tool):
                             except OSError:
                                 pass
                             raise
-                    applied.append(operation.path)
+                    applied.append(result_path)
             except Exception as exc:
                 applied_text = ", ".join(applied) if applied else "none"
                 raise OSError(
@@ -918,19 +944,23 @@ class BuiltinFileTool(Tool):
                 ) from exc
 
         action_codes = {"add": "A", "update": "M", "delete": "D"}
+        added_lines = sum(item[-2] for item in prepared)
+        removed_lines = sum(item[-1] for item in prepared)
         file_noun = "file" if len(prepared) == 1 else "files"
         result_lines = [
             f"Successfully applied patch to {len(prepared)} {file_noun} "
             f"(+{added_lines} -{removed_lines}):",
-            *(f"{action_codes[operation.action]} {operation.path}"
-              for operation, *_ in prepared),
+            *(
+                f"{action_codes[operation.action]} {result_path} (+{added} -{removed})"
+                for operation, _, _, _, _, result_path, added, removed in prepared
+            ),
         ]
         diagnostics = []
-        for operation, path, *_ in prepared:
+        for operation, path, _, _, _, result_path, _, _ in prepared:
             if operation.action != "delete":
                 diag_text = await self._diagnostics_after(path)
                 if diag_text:
-                    diagnostics.append(f"{operation.path}:\n{diag_text}")
+                    diagnostics.append(f"{result_path}:\n{diag_text}")
         if diagnostics:
             result_lines.extend(("", "\n\n".join(diagnostics)))
         return "\n".join(result_lines)
@@ -1180,6 +1210,32 @@ class BuiltinFileTool(Tool):
             "Read or re-read the relevant region with read_file, copy the exact "
             "current text into old_string, then retry the edit."
         )
+
+    @staticmethod
+    def _patch_read_hint() -> str:
+        """Return the recovery action for patch preflight failures."""
+        return (
+            "Read or re-read each failed region with read_file, rebuild those hunks "
+            "from the exact current text with short unique context, then retry the patch."
+        )
+
+    @staticmethod
+    def _content_change_counts(
+            old_content: Optional[str], new_content: Optional[str]
+    ) -> Tuple[int, int]:
+        """Count added and removed content lines for one prepared file change."""
+        old_text = old_content or ""
+        new_text = new_content or ""
+        added = 0
+        removed = 0
+        for line in difflib.unified_diff(
+                old_text.splitlines(), new_text.splitlines(), lineterm=""
+        ):
+            if line.startswith("+") and not line.startswith("+++"):
+                added += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                removed += 1
+        return added, removed
 
     @staticmethod
     def _normalize_quotes(s: str) -> str:

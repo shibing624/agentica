@@ -7,7 +7,7 @@ import os
 import re
 import difflib
 from pathlib import Path
-from typing import Optional, List, Literal
+from typing import Optional, List, Literal, Tuple
 from dataclasses import dataclass
 
 from agentica.tools.base import Tool
@@ -54,6 +54,37 @@ class ContextMatch:
     """Result of finding context in source."""
     new_index: int
     fuzz: int
+
+
+@dataclass(frozen=True)
+class ContextFailure:
+    """One update hunk whose context was not found in the current file."""
+
+    hunk_number: int
+    cursor: int
+    context: Tuple[str, ...]
+    eof: bool = False
+
+    def render(self) -> str:
+        location = "EOF context" if self.eof else "context"
+        lines = [
+            f"Hunk {self.hunk_number}: {location} not found from line {self.cursor + 1}."
+        ]
+        if self.context:
+            lines.append("Expected context:")
+            lines.extend(f"  {line}" for line in self.context[:6])
+            remaining = len(self.context) - 6
+            if remaining > 0:
+                lines.append(f"  ... ({remaining} more context lines)")
+        return "\n".join(lines)
+
+
+class PatchContextError(ValueError):
+    """All context mismatches found while preflighting one file patch."""
+
+    def __init__(self, failures: List[ContextFailure]):
+        self.failures = tuple(failures)
+        super().__init__("\n".join(failure.render() for failure in self.failures))
 
 
 PatchAction = Literal["add", "update", "delete"]
@@ -207,9 +238,12 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
     parser = ParserState(lines=[*lines, END_PATCH])
     input_lines = input_text.split("\n")
     chunks: List[Chunk] = []
+    failures: List[ContextFailure] = []
     cursor = 0
+    hunk_number = 0
 
     while not _is_done(parser, END_SECTION_MARKERS):
+        hunk_number += 1
         anchor = _read_str(parser, "@@ ")
         has_bare_anchor = (
             anchor == "" and parser.index < len(parser.lines) and parser.lines[parser.index] == "@@"
@@ -226,15 +260,20 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
 
         section = _read_section(parser.lines, parser.index)
         find_result = _find_context(input_lines, section.next_context, cursor, section.eof)
+        parser.index = section.end_index
         if find_result.new_index == -1:
-            ctx_text = "\n".join(section.next_context)
-            if section.eof:
-                raise ValueError(f"Invalid EOF Context {cursor}:\n{ctx_text}")
-            raise ValueError(f"Invalid Context {cursor}:\n{ctx_text}")
+            failures.append(
+                ContextFailure(
+                    hunk_number=hunk_number,
+                    cursor=cursor,
+                    context=tuple(section.next_context),
+                    eof=section.eof,
+                )
+            )
+            continue
 
         cursor = find_result.new_index + len(section.next_context)
         parser.fuzz += find_result.fuzz
-        parser.index = section.end_index
 
         for ch in section.section_chunks:
             chunks.append(
@@ -245,6 +284,8 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
                 )
             )
 
+    if failures:
+        raise PatchContextError(failures)
     return ParsedUpdateDiff(chunks=chunks, fuzz=parser.fuzz)
 
 
@@ -381,7 +422,37 @@ def _find_context_core(lines: List[str], context: List[str], start: int) -> Cont
         if _equals_slice(lines, context, i, lambda value: value.strip()):
             return ContextMatch(new_index=i, fuzz=100)
 
+    quote_matches = [
+        i for i in range(start, len(lines))
+        if _equals_slice(lines, context, i, _normalize_quotes)
+    ]
+    if len(quote_matches) == 1:
+        return ContextMatch(new_index=quote_matches[0], fuzz=1000)
+    if quote_matches:
+        return ContextMatch(new_index=-1, fuzz=0)
+
+    quote_rstrip_matches = [
+        i for i in range(start, len(lines))
+        if _equals_slice(
+            lines,
+            context,
+            i,
+            lambda value: _normalize_quotes(value.rstrip()),
+        )
+    ]
+    if len(quote_rstrip_matches) == 1:
+        return ContextMatch(new_index=quote_rstrip_matches[0], fuzz=1001)
+
     return ContextMatch(new_index=-1, fuzz=0)
+
+
+def _normalize_quotes(value: str) -> str:
+    """Normalize typographic quotes for the final unique-match fallback."""
+    return (
+        value.replace('\u201c', '"').replace('\u201d', '"')
+        .replace('\u2018', "'").replace('\u2019', "'")
+        .replace('\u2032', "'").replace('\u2033', '"')
+    )
 
 
 def _equals_slice(

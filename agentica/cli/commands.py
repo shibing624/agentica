@@ -1965,6 +1965,62 @@ def _resume_base_dir(ctx: CommandContext) -> Optional[str]:
     return str(log.base_dir) if log is not None else None
 
 
+def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[dict[str, Any]], int]:
+    """Load a session log into the prompt history used by subsequent runs."""
+    session_log = agent._session_log
+    if session_log is None or not session_log.exists():
+        return [], 0
+    resumed = session_log.load(resume_at=resume_at)
+    agent.working_memory.clear()
+    runs_built = agent.working_memory.hydrate_runs_from_history(resumed) if resumed else 0
+    return resumed, runs_built
+
+
+def display_resumed_transcript(messages: list[dict[str, Any]], session_label: str) -> None:
+    """Replay persisted user, assistant, tool-call, and tool-result content."""
+    if not messages:
+        return
+    con = get_console()
+    con.print(f"\n[bold]Resumed transcript: {session_label}[/bold]")
+    for message in messages:
+        role = message.get("role")
+        if role == "system":
+            continue
+        content = message.get("content")
+        if content is None:
+            content_text = ""
+        elif isinstance(content, str):
+            content_text = content
+        else:
+            content_text = json.dumps(content, ensure_ascii=False, indent=2)
+
+        if role == "user":
+            con.print("\n[bold cyan]You[/bold cyan]")
+            con.print(content_text, markup=False, highlight=False)
+            continue
+
+        if role == "assistant":
+            con.print("\n[bold green]Agent[/bold green]")
+            if content_text:
+                con.print(content_text, markup=False, highlight=False)
+            for tool_call in message.get("tool_calls") or []:
+                function = tool_call.get("function") or {}
+                tool_name = function.get("name") or tool_call.get("name") or "tool"
+                arguments = function.get("arguments") or tool_call.get("arguments") or {}
+                if not isinstance(arguments, str):
+                    arguments = json.dumps(arguments, ensure_ascii=False, indent=2)
+                con.print(f"  [bold magenta]Tool call: {tool_name}[/bold magenta]")
+                if arguments:
+                    con.print(arguments, style="dim", markup=False, highlight=False)
+            continue
+
+        if role == "tool":
+            tool_name = message.get("tool_name") or "tool"
+            con.print(f"\n[bold magenta]Tool result: {tool_name}[/bold magenta]")
+            con.print(content_text, markup=False, highlight=False)
+    con.print()
+
+
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
     """Resume a previous session from JSONL log."""
     con = get_console()
@@ -2050,31 +2106,18 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         # Eagerly load history into working_memory so /status, /context etc.
         # reflect the resumed state immediately (do not wait for the next _run
         # to lazily replay). Applies to both plain resume and `resume ... at <uuid>`.
-        loaded_count = 0
-        runs_built = 0
-        if current_agent._session_log and current_agent._session_log.exists():
-            current_agent.working_memory.clear()
-            resumed = current_agent._session_log.load(resume_at=resume_at_uuid)
-            if resumed:
-                runs_built = current_agent.working_memory.hydrate_runs_from_history(resumed)
-                loaded_count = len(resumed)
+        resumed, runs_built = hydrate_resumed_session(current_agent, resume_at_uuid)
+        loaded_count = len(resumed)
 
-        # Show a preview of recent user queries so the human confirms the right
-        # session was picked (also useful for finding an `at <uuid>` cut point).
+        # Replay the actual transcript, including tool calls and tool results,
+        # so resuming restores the human-visible state as well as model context.
         session_name = chosen.get("name")
         session_label = f"{session_name} ({chosen['session_id']})" if session_name else chosen["session_id"]
-        if resume_at_uuid is None:
-            log = SessionLog(chosen["session_id"], base_dir=base_dir)
-            user_msgs = log.list_user_messages(limit=10)
-            if user_msgs:
-                con.print(f"\n[bold]Session: {session_label}[/bold]")
-                con.print("[dim]Recent user queries in this session:[/dim]\n")
-                for i, m in enumerate(user_msgs, 1):
-                    ts = m.get("timestamp", "")[:19].replace("T", " ") if m.get("timestamp") else ""
-                    con.print(f"  {i}. [dim]{ts}[/dim] {m['content']}")
-                con.print(
-                    f"\n[dim]Tip: fork from an earlier point with `/resume {chosen['session_id']} at <uuid>`[/dim]"
-                )
+        display_resumed_transcript(resumed, session_label)
+        if resume_at_uuid is None and resumed:
+            con.print(
+                f"[dim]Tip: fork from an earlier point with `/resume {chosen['session_id']} at <uuid>`[/dim]"
+            )
 
         con.print(
             f"[green]Resumed session: {session_label}"
