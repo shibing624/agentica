@@ -60,12 +60,7 @@ from agentica.memory.session_log import SessionLog
 from agentica.model.message import Message
 from agentica.run_context import TaskAnchor
 from agentica.run_response import RunResponse, AgentCancelledError
-from agentica.subagent import (
-    CODE_SUBAGENT_CONFIG,
-    EXPLORE_SUBAGENT_CONFIG,
-    RESEARCH_SUBAGENT_CONFIG,
-    get_custom_subagent_configs,
-)
+from agentica.subagent import get_subagent_configs
 from agentica.tools.goal_tool import GoalTool
 from agentica.skills import (
     get_skill_registry,
@@ -345,39 +340,30 @@ def _count_enabled_skills(agent) -> Optional[int]:
 
 
 def _get_subagent_loader():
-    """Return the subagent_loader module, or None if not installed yet.
+    """Import the subagent loader lazily to keep CLI startup lightweight."""
+    import agentica.subagent_loader as loader  # noqa: PLC0415
 
-    The loader is built by a parallel work stream; importing it lazily here
-    keeps commands.py loadable before it exists. An ImportError is the only
-    swallowed case — once the module is present, errors propagate normally.
-    """
-    try:
-        import agentica.subagent_loader as loader  # noqa: PLC0415
-
-        return loader
-    except ImportError:
-        return None
+    return loader
 
 
 def _get_defined_agents_for_display() -> list:
-    """Custom subagent descriptors for /agents listing.
-
-    Prefers the loader's on-disk view (includes file paths); falls back to the
-    in-memory custom registry when the loader is not installed yet.
-    """
+    """Return effective file definitions with paths for ``/agents``."""
     loader = _get_subagent_loader()
     if loader is not None:
         return loader.list_defined_agents()
     return [
         {
-            "name": name,
+            "id": name,
+            "name": cfg.name,
             "description": cfg.description,
             "allowed_tools": cfg.allowed_tools,
             "denied_tools": cfg.denied_tools,
             "tool_call_limit": cfg.tool_call_limit,
-            "path": None,
+            "model_tier": cfg.model_tier,
+            "source": cfg.source,
+            "path": cfg.path,
         }
-        for name, cfg in get_custom_subagent_configs().items()
+        for name, cfg in get_subagent_configs().items()
     ]
 
 
@@ -563,8 +549,12 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     agent = ctx.current_agent
     tools_count = len(agent.tools) if agent and agent.tools else 0
     skills_count = _count_enabled_skills(agent)
-    custom_subagents = len(get_custom_subagent_configs())
-    subagent_total = 3 + custom_subagents
+    subagent_configs = get_subagent_configs()
+    package_subagents = sum(
+        1 for cfg in subagent_configs.values() if cfg.source == "package"
+    )
+    custom_subagents = len(subagent_configs) - package_subagents
+    subagent_total = len(subagent_configs)
 
     perm_mode = agent.tool_config.permission_mode if agent else None
 
@@ -603,7 +593,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"  Auxiliary model: {auxiliary_str}")
     con.print(
         f"  Tools: {tools_count}  |  Skills: {skills_str}  |  "
-        f"Subagents: {subagent_total} (3 builtin + {custom_subagents} custom)"
+        f"Subagents: {subagent_total} ({package_subagents} package + {custom_subagents} override/custom)"
     )
     con.print(f"  Permissions: {perm_str}  |  Context: {ctx_str}  |  Cost: {cost_str}")
 
@@ -611,8 +601,8 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
     """Manage subagents: list, create, reload, remove.
 
-    Built-in types (explore/research/code/review) come from subagent.py defaults;
-    custom types come from .agentica/agents/*.md via the subagent loader.
+    All types come from Markdown definitions. Project and user files override
+    package defaults with the same file stem.
     """
     con = get_console()
     args_str = cmd_args.strip()
@@ -627,9 +617,6 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
             return
         name = sub_args[0]
         loader = _get_subagent_loader()
-        if loader is None:
-            con.print("  [red]Subagent loader not available.[/red]")
-            return
         description = _ask_text_via_tui(ctx, "  Description: ")
         if not description:
             con.print("  [red]Description is required.[/red]")
@@ -656,9 +643,6 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
     # ── /agents reload — rescan disk and re-register ──
     if subcmd == "reload":
         loader = _get_subagent_loader()
-        if loader is None:
-            con.print("  [red]Subagent loader not available.[/red]")
-            return
         count = loader.load_all_agents()
         con.print(f"  [green]Loaded {count} subagent(s) from disk.[/green]")
         return
@@ -670,9 +654,6 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
             return
         name = sub_args[0]
         loader = _get_subagent_loader()
-        if loader is None:
-            con.print("  [red]Subagent loader not available.[/red]")
-            return
         removed = loader.remove_agent_file(name)
         if removed:
             con.print(f"  [green]Removed subagent '{name}'.[/green]")
@@ -686,34 +667,35 @@ def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
         con.print("  [dim]Usage: /agents [list | create <name> | reload | remove <name>][/dim]")
         return
 
-    builtin_configs = [
-        ("explore", EXPLORE_SUBAGENT_CONFIG),
-        ("research", RESEARCH_SUBAGENT_CONFIG),
-        ("code", CODE_SUBAGENT_CONFIG),
-    ]
-    con.print("  [bold]Built-in subagents:[/bold]")
-    for type_name, cfg in builtin_configs:
-        desc_first = cfg.description.split("\n")[0].strip()
-        con.print(f"    [green]●[/green] [bold]{type_name:<12}[/bold] {desc_first}")
-        con.print(f"      [dim]tools: {', '.join(cfg.allowed_tools or [])}[/dim]")
-
-    custom_agents = _get_defined_agents_for_display()
-    con.print()
-    if custom_agents:
-        con.print(f"  [bold]Custom subagents ({len(custom_agents)}):[/bold]")
-        for agent in custom_agents:
-            agent_name = agent.get("name", "?")
+    defined_agents = _get_defined_agents_for_display()
+    if defined_agents:
+        con.print(f"  [bold]Available subagents ({len(defined_agents)}):[/bold]")
+        for agent in defined_agents:
+            agent_id = agent.get("id", "?")
+            display_name = agent.get("name") or agent_id
             desc = agent.get("description") or ""
             desc_first = desc.split("\n")[0].strip()
             tools = agent.get("allowed_tools")
-            tools_str = ", ".join(tools) if tools else "(inherit parent)"
-            con.print(f"    [green]●[/green] [bold]{agent_name:<12}[/bold] {desc_first}")
-            con.print(f"      [dim]tools: {tools_str}[/dim]")
+            if tools is None:
+                tools_str = "(inherit parent)"
+            elif tools:
+                tools_str = ", ".join(tools)
+            else:
+                tools_str = "(none)"
+            source = agent.get("source") or "runtime"
+            model_tier = agent.get("model_tier") or "auxiliary"
+            con.print(
+                f"    [green]●[/green] [bold]{agent_id:<12}[/bold] "
+                f"{display_name} — {desc_first}"
+            )
+            con.print(
+                f"      [dim]source: {source} | model: {model_tier} | tools: {tools_str}[/dim]"
+            )
             path = agent.get("path")
             if path:
                 con.print(f"      [dim]file: {path}[/dim]")
     else:
-        con.print("  [dim]No custom subagents. Create one with /agents create <name>.[/dim]")
+        con.print("  [dim]No subagents found. Create one with /agents create <name>.[/dim]")
     con.print()
     con.print("  [dim]Commands: /agents [list] | create <name> | reload | remove <name>[/dim]")
 

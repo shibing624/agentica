@@ -130,7 +130,6 @@ LAZY_IMPORTS = {
     # Only the helper factory stays lazy (avoids importing all tool modules at startup).
     "get_builtin_tools": "agentica.tools.buildin_tools",
     # subagent system
-    "SubagentType": "agentica.subagent",
     # swarm system
     "Swarm": "agentica.swarm",
     "SwarmResult": "agentica.swarm",
@@ -138,6 +137,7 @@ LAZY_IMPORTS = {
     "SubagentRun": "agentica.subagent",
     "SubagentRegistry": "agentica.subagent",
     "get_subagent_config": "agentica.subagent",
+    "get_subagent_configs": "agentica.subagent",
     "get_available_subagent_types": "agentica.subagent",
     "register_custom_subagent": "agentica.subagent",
     "unregister_custom_subagent": "agentica.subagent",

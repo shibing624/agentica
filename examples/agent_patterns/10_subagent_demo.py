@@ -1,20 +1,18 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Subagent Demo - Demonstrates using different subagent types
+@description: Subagent Demo - Demonstrates file-backed subagent definitions
 
 This example shows how to use the subagent system to:
 1. Spawn explore subagents for codebase exploration (read-only)
-2. Spawn general subagents for complex multi-step tasks
-3. Spawn research subagents for web research
-4. Register custom subagent types
-5. Use parallel subagent execution for independent tasks
+2. Spawn research subagents for web research
+3. Register a runtime-only custom subagent
+4. Use parallel subagent execution for independent tasks
 
 Built-in Subagent Types:
 - explore: Read-only codebase explorer (fast, low context usage)
-- general: Full capabilities for complex tasks
 - research: Web search and document analysis
-- code: Code generation and execution
+- code: Read-only code flow explanation
 
 Custom Subagent Types:
 - Users can register custom subagent types via register_custom_subagent()
@@ -44,8 +42,7 @@ def show_available_subagent_types():
     print("=" * 60)
     
     for st in get_available_subagent_types():
-        custom_flag = " (custom)" if st.get("is_custom") else ""
-        print(f"\n[{st['type']}] {st['name']}{custom_flag}")
+        print(f"\n[{st['type']}] {st['name']} ({st['source']})")
         print(f"  {st['description'][:100]}...")
     print()
 
@@ -57,23 +54,18 @@ def demo_custom_subagent():
     print("=" * 60)
     
     register_custom_subagent(
-        name="code-reviewer",
-        description="Reviews code for quality, bugs, security issues, and best practices",
-        system_prompt="""You are an expert code reviewer. Your job is to:
-1. Analyze code for potential bugs and issues
-2. Check for security vulnerabilities
-3. Suggest improvements for readability and maintainability
-4. Verify adherence to best practices
-
-Provide clear, actionable feedback with specific line references when possible.""",
+        name="data-finder",
+        description="Locates data definitions and reports how they flow through the code",
+        system_prompt="""You are a read-only data flow explorer.
+Locate schemas, transformations, and consumers. Report facts with path:line references.
+Do not edit files or make correctness verdicts.""",
         allowed_tools=["read_file", "ls", "glob", "grep"],
         tool_call_limit=10,
     )
     
     print("\nAfter registration, available subagent types:")
     for st in get_available_subagent_types():
-        custom_flag = " (custom)" if st.get("is_custom") else ""
-        print(f"  - {st['type']}: {st['name']}{custom_flag}")
+        print(f"  - {st['type']}: {st['name']} ({st['source']})")
     
     custom_configs = get_custom_subagent_configs()
     print(f"\nCustom subagent configs registered: {list(custom_configs.keys())}")

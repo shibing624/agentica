@@ -6,8 +6,7 @@
 This module implements a subagent system that allows main agents to:
 - Spawn isolated subagents for complex tasks
 - Track subagent lifecycle and results
-- Support different subagent types with varying tool permissions and model tiers
-  (retrieval types run on the cheap auxiliary model, judgement types on the main one)
+- Support file-defined agents with varying tool permissions and model tiers
 - Enable parallel execution of multiple subagents
 
 Based on the subagent design pattern from modern AI coding assistants.
@@ -22,7 +21,6 @@ import uuid
 
 import dataclasses
 from dataclasses import dataclass
-from enum import Enum
 from collections import OrderedDict
 from typing import (
     Any,
@@ -32,7 +30,6 @@ from typing import (
     Literal,
     Optional,
     TYPE_CHECKING,
-    Union,
 )
 from datetime import datetime
 
@@ -47,31 +44,12 @@ if TYPE_CHECKING:
     from agentica.model.base import Model
 
 
-class SubagentType(str, Enum):
-    """Types of subagents with different capabilities."""
-
-    # Explore agent: read-only, specialized for codebase exploration
-    EXPLORE = "explore"
-
-    # Research agent: web search and document analysis
-    RESEARCH = "research"
-
-    # Code agent: code generation and execution
-    CODE = "code"
-
-    # Review agent: judgement work (correctness review, root cause) on the main model
-    REVIEW = "review"
-
-    # Custom agent: user-defined subagent type
-    CUSTOM = "custom"
-
-
 @dataclass
 class SubagentConfig:
-    """Configuration for a subagent type."""
+    """Runtime configuration loaded from an agent definition."""
 
-    # Subagent type identifier
-    type: SubagentType
+    # Stable string identifier, normally the definition file stem.
+    type: str
 
     # Human-readable name
     name: str
@@ -112,9 +90,8 @@ class SubagentConfig:
     # Which model tier runs this subagent:
     #   "auxiliary" — the cheap/fast model (``Agent.resolve_auxiliary_model("task")``).
     #     Correct for retrieval work: locating code, collecting facts, summarizing.
-    #   "main" — the parent agent's own model. Required for judgement work
-    #     (correctness review, root cause, trade-offs) where a weak model returns a
-    #     confidently wrong verdict that the parent then trusts and acts on.
+    #   "main" — the parent agent's own model for definitions that explicitly
+    #     require the primary model rather than the auxiliary model.
     model_tier: Literal["auxiliary", "main"] = "auxiliary"
 
     # --- Permission isolation ---
@@ -130,6 +107,10 @@ class SubagentConfig:
     # keeps failing" reports — raise it to 30 min and let long tasks finish.
     timeout: int = 1800
 
+    # Definition provenance. Runtime registrations use ``runtime``.
+    source: str = "runtime"
+    path: Optional[str] = None
+
 
 @dataclass
 class SubagentRun:
@@ -139,7 +120,7 @@ class SubagentRun:
     run_id: str
 
     # Subagent type
-    subagent_type: SubagentType
+    subagent_type: str
 
     # Parent agent_id (who spawned this subagent)
     parent_agent_id: str
@@ -164,6 +145,10 @@ class SubagentRun:
     
     # Result from the subagent
     result: Optional[str] = None
+
+    # Completed tool calls retained for a bounded resume handoff. Each entry
+    # contains the tool name, a short display summary, and serialized inputs.
+    tool_calls_summary: Optional[List[Dict[str, Any]]] = None
     
     # Error message if failed
     error: Optional[str] = None
@@ -206,7 +191,7 @@ class SubagentRegistry:
         if len(self._runs) > 100:
             self.cleanup_completed(max_age_seconds=600)
         self._runs[run.run_id] = run
-        logger.debug(f"Registered subagent run: {run.run_id} ({run.subagent_type.value})")
+        logger.debug(f"Registered subagent run: {run.run_id} ({run.subagent_type})")
     
     def get(self, run_id: str) -> Optional[SubagentRun]:
         """Get a subagent run by ID."""
@@ -236,6 +221,7 @@ class SubagentRegistry:
         result: Optional[str] = None,
         error: Optional[str] = None,
         token_usage: Optional[Dict[str, int]] = None,
+        tool_calls_summary: Optional[List[Dict[str, Any]]] = None,
     ) -> None:
         """Update the status of a subagent run."""
         run = self._runs.get(run_id)
@@ -248,6 +234,8 @@ class SubagentRegistry:
             run.ended_at = datetime.now()
         if result is not None:
             run.result = result
+        if tool_calls_summary is not None:
+            run.tool_calls_summary = tool_calls_summary
         if error is not None:
             run.error = error
         if token_usage is not None:
@@ -398,13 +386,16 @@ class SubagentRegistry:
           names in one helper instead of scattering dynamic lookups.
         """
         child_tools: List[Any] = []
+        blocked_tools = self.BLOCKED_TOOLS
+        if config.can_spawn_subagents:
+            blocked_tools = blocked_tools - {"task"}
 
         for tool in parent_tools:
             candidate_names = self._tool_names(tool)
             allowed_names = [
                 name
                 for name in candidate_names
-                if name not in self.BLOCKED_TOOLS
+                if name not in blocked_tools
                 and (config.allowed_tools is None or name in config.allowed_tools)
                 and (config.denied_tools is None or name not in config.denied_tools)
             ]
@@ -561,7 +552,13 @@ class SubagentRegistry:
                         if call_id:
                             seen_started.add(call_id)
                             log_index_by_id[call_id] = len(tool_calls_log)
-                        tool_calls_log.append({"name": tool_name, "info": brief})
+                        tool_calls_log.append({
+                            "name": tool_name,
+                            "info": brief,
+                            "input": json.dumps(
+                                tool_args, ensure_ascii=False, default=str,
+                            )[:1000],
+                        })
                         _mirror_to_sink()
                         if cb is not None:
                             cb({
@@ -612,7 +609,11 @@ class SubagentRegistry:
         return {
             "content": final_content,
             "tool_calls_summary": [
-                {"name": tc["name"], "info": tc.get("info", "")}
+                {
+                    "name": tc["name"],
+                    "info": tc.get("info", ""),
+                    "input": tc.get("input", ""),
+                }
                 for tc in tool_calls_log
             ],
         }
@@ -621,7 +622,7 @@ class SubagentRegistry:
         self,
         parent_agent: "Agent",
         task: str,
-        agent_type: Union[str, SubagentType] = SubagentType.EXPLORE,
+        agent_type: str = "explore",
         context: str = "",
         depth: int = 1,
         model_override: Optional["Model"] = None,
@@ -737,27 +738,39 @@ class SubagentRegistry:
                 return {
                     "status": "error",
                     "error": f"resume_from_run_id={resume_from_run_id!r} not found in registry",
-                    "agent_type": config.type.value,
+                    "agent_type": config.type,
                     "content": "",
                 }
             prev_partial = (prev.result or "").strip()
+            prev_tools = prev.tool_calls_summary or []
             prev_status = prev.status
+            tool_lines = []
+            for tool_call in prev_tools:
+                name = tool_call.get("name", "tool")
+                input_text = tool_call.get("input", "")
+                info = tool_call.get("info", "")
+                detail = f" input={input_text}" if input_text else ""
+                if info:
+                    detail += f" result={info}"
+                tool_lines.append(f"- {name}:{detail}")
+            previous_tools = "\n".join(tool_lines) or "(none recorded)"
             resume_prefix = (
-                f"[RESUME] You are continuing a previous {config.type.value} subagent run "
+                f"[RESUME] You are continuing a previous {config.type} subagent run "
                 f"(run_id={resume_from_run_id}, previous status={prev_status}). "
                 f"Below is the partial output from that run — read it, then finish the task. "
                 f"Do NOT redo work already done; pick up where it stopped.\n\n"
                 f"--- PREVIOUS PARTIAL OUTPUT ---\n{prev_partial or '(empty)'}\n"
                 f"--- END OF PREVIOUS OUTPUT ---\n\n"
+                f"--- COMPLETED TOOL CALLS ---\n{previous_tools}\n"
+                f"--- END OF TOOL CALLS ---\n\n"
+                "The tool-call list records what was attempted, not the underlying file "
+                "contents. Re-run only the reads needed to recover evidence before giving "
+                "a verdict.\n\n"
                 f"[CONTINUATION TASK]\n"
             )
             task = resume_prefix + task
 
-        # Model tier: retrieval subagents run on the cheap auxiliary model,
-        # judgement subagents run on the parent's own model. Routing a
-        # judgement task (review / root cause) to a weak model is worse than
-        # not delegating at all — it returns a confident wrong verdict that the
-        # parent trusts. An explicit ``model_override`` still wins.
+        # Model tier is part of the definition; an explicit override still wins.
         if model_override is not None:
             source_model = model_override
         elif config.model_tier == "main":
@@ -768,7 +781,7 @@ class SubagentRegistry:
             return {
                 "status": "error",
                 "error": "No model available for subagent. Configure a model on the parent agent.",
-                "agent_type": config.type.value,
+                "agent_type": config.type,
                 "content": "",
             }
 
@@ -786,7 +799,7 @@ class SubagentRegistry:
 
         _parent_label = parent_agent.name or parent_agent.agent_id
         logger.chat(
-            f"[spawn] {_parent_label} -> {config.type.value} subagent "
+            f"[spawn] {_parent_label} -> {config.type} subagent "
             f"({config.model_tier} model {source_model.id}): "
             f"{task[:120]}{'...' if len(task) > 120 else ''}"
         )
@@ -884,11 +897,16 @@ class SubagentRegistry:
             content_out = (
                 f"{timeout_note}\n\n{partial_content}" if partial_content else timeout_note
             )
-            self.update_status(run_id=run_id, status="timeout", result=content_out)
+            self.update_status(
+                run_id=run_id,
+                status="timeout",
+                result=content_out,
+                tool_calls_summary=partial_tools,
+            )
             return {
                 "status": "timeout",
                 "error": f"Subagent timed out after {config.timeout} seconds",
-                "agent_type": config.type.value,
+                "agent_type": config.type,
                 "subagent_name": config.name,
                 "run_id": run_id,
                 "content": content_out,
@@ -932,11 +950,16 @@ class SubagentRegistry:
                 content_out = (
                     f"{timeout_note}\n\n{partial_content}" if partial_content else timeout_note
                 )
-                self.update_status(run_id=run_id, status="timeout", result=content_out)
+                self.update_status(
+                    run_id=run_id,
+                    status="timeout",
+                    result=content_out,
+                    tool_calls_summary=partial_tools,
+                )
                 return {
                     "status": "timeout",
                     "error": f"Subagent timed out after {config.timeout} seconds",
-                    "agent_type": config.type.value,
+                    "agent_type": config.type,
                     "subagent_name": config.name,
                     "run_id": run_id,
                     "content": content_out,
@@ -962,7 +985,11 @@ class SubagentRegistry:
                 f"{cancel_note}\n\n{partial_content}" if partial_content else cancel_note
             )
             self.update_status(
-                run_id=run_id, status="cancelled", result=content_out, error="cancelled by user"
+                run_id=run_id,
+                status="cancelled",
+                result=content_out,
+                error="cancelled by user",
+                tool_calls_summary=partial_tools,
             )
             raise
         except Exception as e:
@@ -970,11 +997,17 @@ class SubagentRegistry:
             partial_content = partial_sink.get("content") or ""
             partial_tools = partial_sink.get("tool_calls_summary") or []
             logger.error(f"Subagent execution failed: {e}")
-            self.update_status(run_id=run_id, status="error", error=str(e))
+            self.update_status(
+                run_id=run_id,
+                status="error",
+                result=partial_content or None,
+                error=str(e),
+                tool_calls_summary=partial_tools,
+            )
             return {
                 "status": "error",
                 "error": str(e),
-                "agent_type": config.type.value,
+                "agent_type": config.type,
                 "subagent_name": config.name,
                 "run_id": run_id,
                 "content": partial_content,
@@ -1029,12 +1062,17 @@ class SubagentRegistry:
                 f"tool call(s). Output below is what was produced before the limit.]"
             )
             final_content = f"{note}\n\n{raw_content}" if raw_content else note
-            self.update_status(run_id=run_id, status=status_out, result=final_content)
+            self.update_status(
+                run_id=run_id,
+                status=status_out,
+                result=final_content,
+                tool_calls_summary=tool_calls_summary,
+            )
             return {
                 "status": status_out,
                 "error": f"stopped at {reason_str} limit",
                 "content": final_content,
-                "agent_type": config.type.value,
+                "agent_type": config.type,
                 "subagent_name": config.name,
                 "run_id": run_id,
                 "tool_calls_summary": tool_calls_summary,
@@ -1051,17 +1089,22 @@ class SubagentRegistry:
             }
 
         final_content = raw_content or "Subagent completed but returned no content."
-        self.update_status(run_id=run_id, status="completed", result=final_content)
+        self.update_status(
+            run_id=run_id,
+            status="completed",
+            result=final_content,
+            tool_calls_summary=tool_calls_summary,
+        )
 
         logger.chat(
-            f"[return] {config.type.value} subagent -> {parent_agent.name or parent_agent.agent_id}: "
+            f"[return] {config.type} subagent -> {parent_agent.name or parent_agent.agent_id}: "
             f"{(final_content or '')[:120]}{'...' if len(final_content or '') > 120 else ''}"
         )
 
         return {
             "status": "completed",
             "content": final_content,
-            "agent_type": config.type.value,
+            "agent_type": config.type,
             "subagent_name": config.name,
             "run_id": run_id,
             "tool_calls_summary": stream_result["tool_calls_summary"],
@@ -1081,7 +1124,7 @@ class SubagentRegistry:
             parent_agent: The parent Agent instance.
             tasks: List of task specs, each with keys:
                 - "task" (str, required): Task description
-                - "type" (str/SubagentType, optional): Agent type (default: EXPLORE)
+                - "type" (str, optional): Agent identifier (default: explore)
                 - "context" (str, optional): Additional context
             max_concurrent: Max parallel subagents (default: MAX_CONCURRENT).
 
@@ -1097,7 +1140,7 @@ class SubagentRegistry:
                     return {
                         "status": "error",
                         "error": "Task spec missing required 'task' field",
-                        "agent_type": str(spec.get("type", SubagentType.EXPLORE)),
+                        "agent_type": str(spec.get("type", "explore")),
                         "content": "",
                     }
                 # No broad ``except Exception`` here on purpose: ``spawn()``
@@ -1112,182 +1155,36 @@ class SubagentRegistry:
                 return await self.spawn(
                     parent_agent=parent_agent,
                     task=task,
-                    agent_type=spec.get("type", SubagentType.EXPLORE),
+                    agent_type=spec.get("type", "explore"),
                     context=spec.get("context", ""),
                 )
 
         return list(await asyncio.gather(*[_run_one(t) for t in tasks]))
 
 
-# ============== Default Subagent Configurations ==============
+# ============== File-backed Subagent Configurations ==============
 
-# Explore agent: specialized for codebase exploration (read-only)
-EXPLORE_SUBAGENT_CONFIG = SubagentConfig(
-    type=SubagentType.EXPLORE,
-    name="Explore Agent",
-    description="""Fast agent specialized for exploring codebases and searching for information.
-Use this agent when you need to:
-- Search for files using glob patterns
-- Search file contents with regex
-- Read and analyze source code
-- Understand project structure""",
-    system_prompt="""You are a file search specialist. You excel at thoroughly navigating and exploring codebases.
-
-Your strengths:
-- Rapidly finding files using glob patterns
-- Searching code and text with powerful regex patterns
-- Reading and analyzing file contents
-
-Guidelines:
-- Use glob for broad file pattern matching
-- Use grep for searching file contents with regex
-- Use read_file when you know the specific file path you need to read
-- Use ls to list directory contents and understand project structure
-- Adapt your search approach based on the thoroughness level specified by the caller
-- Return file paths as absolute paths in your final response
-- Stop and synthesize as soon as you have enough evidence to answer the task. Do
-  not keep expanding search coverage merely to inspect every possible file.
-- For clear communication, avoid using emojis
-- Do NOT create or modify any files - you are read-only
-- Do NOT run commands that modify the user's system state
-
-Complete the user's search request efficiently and report your findings clearly.""",
-    allowed_tools=["ls", "read_file", "glob", "grep", "execute"],  # Read-only tools
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],  # No write/spawn
-    execute_policy="read_only",
-    max_turns=200,
-    timeout=1800,
-    can_spawn_subagents=False,
-)
+# File definitions and explicit runtime registrations are kept separate so a
+# disk reload is atomic and does not erase registrations made by SDK users.
+_FILE_SUBAGENT_CONFIGS: Dict[str, SubagentConfig] = {}
+_RUNTIME_SUBAGENT_CONFIGS: Dict[str, SubagentConfig] = {}
+_SUBAGENT_CONFIGS_LOADED = False
 
 
-# Research agent: web search and analysis
-RESEARCH_SUBAGENT_CONFIG = SubagentConfig(
-    type=SubagentType.RESEARCH,
-    name="Research Agent",
-    description="""Research agent specialized for web search and document analysis.
-Use this agent for:
-- Searching the web for information
-- Fetching and analyzing web pages
-- Synthesizing research findings""",
-    system_prompt="""You are a research specialist that excels at finding and analyzing information.
-
-Guidelines:
-1. Use web_search to find relevant information on the web
-2. Use fetch_url to read web page contents
-3. Synthesize your findings into a clear, well-organized summary
-4. Cite your sources when providing information
-5. Be objective and fact-based in your analysis
-
-Complete your research task and provide a comprehensive summary of your findings.""",
-    allowed_tools=["web_search", "fetch_url", "read_file", "ls", "glob", "grep", "execute"],
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],
-    execute_policy="read_only",
-    max_turns=150,
-    timeout=1800,
-    can_spawn_subagents=False,
-)
+def _replace_file_subagent_configs(configs: Dict[str, SubagentConfig]) -> None:
+    """Atomically replace definitions discovered from agent Markdown files."""
+    global _FILE_SUBAGENT_CONFIGS, _SUBAGENT_CONFIGS_LOADED
+    _FILE_SUBAGENT_CONFIGS = dict(configs)
+    _SUBAGENT_CONFIGS_LOADED = True
 
 
-# Code agent: READ-ONLY *descriptive* code analysis on the auxiliary model.
-# It answers "what does this do / where does this flow" — questions a cheap
-# model can answer from the code itself. Anything that requires a verdict
-# ("is this correct", "is this ready to ship") belongs to the review agent
-# below, which runs on the main model. Subagents also cannot edit or execute:
-# letting a cheap model write code was the root cause of "the LLM delegated my
-# query to a task subagent and the aux model wrote garbage code".
-CODE_SUBAGENT_CONFIG = SubagentConfig(
-    type=SubagentType.CODE,
-    name="Code Agent",
-    description="""Read-only code explainer (cheap model). Answers descriptive questions:
-how a module works, what calls what, where data flows. It CANNOT edit files or
-run commands, and it must NOT be asked to judge correctness — use `review` for
-that. Use it for:
-- Summarizing how a module or flow works
-- Tracing call graphs and data flow
-- Locating the code responsible for a behavior""",
-    system_prompt="""You are a read-only code explainer. You describe how code works; you
-do not modify it and you do not pass judgement on it.
+def _ensure_subagent_configs_loaded() -> None:
+    """Lazy-load package, user, and project definitions for SDK callers."""
+    if _SUBAGENT_CONFIGS_LOADED:
+        return
+    from agentica.subagent_loader import load_all_agents
 
-Guidelines:
-1. Read the code and answer the caller's descriptive question.
-2. Trace logic, call graphs, and data flow as needed.
-3. Report findings clearly: file paths, line numbers, relevant snippets.
-4. Stick to what the code demonstrably does. If asked whether something is
-   correct, safe, or production-ready, say that verdict is out of scope and
-   report the facts the caller needs to decide instead.
-5. Do NOT create, edit, or write any file — you are read-only.
-6. You may run read-only commands (`git diff`, `git log`, tests) to gather
-   facts. State-changing commands are rejected — ask the caller to run those.
-7. The MAIN agent does all implementation and edits based on your findings.
-
-Complete your analysis and report your findings clearly.""",
-    allowed_tools=["read_file", "ls", "glob", "grep", "execute"],
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],
-    execute_policy="read_only",
-    max_turns=200,
-    timeout=1800,
-    can_spawn_subagents=False,
-    inherit_context=True,  # Code analysis benefits from parent context
-)
-
-
-# Review agent: the one built-in type that runs on the MAIN model. Judgement
-# work (does this code have a bug, is this the root cause, is this safe to
-# ship) is exactly where a cheap model fails in the most damaging way: it
-# returns "looks good" with confidence and the parent stops looking. Expensive,
-# so its prompt forces narrow scope and evidence-backed findings.
-REVIEW_SUBAGENT_CONFIG = SubagentConfig(
-    type=SubagentType.REVIEW,
-    name="Review Agent",
-    description="""Critical reviewer running on YOUR model (expensive, read-only). Use for
-judgement calls a cheap model gets wrong, always narrowly scoped:
-- Reviewing code you just wrote or changed
-- Root-causing a bug from the evidence
-- Judging whether an approach is correct or ready to ship
-Name the exact files/functions and the one question to answer.""",
-    system_prompt="""You are a senior engineer doing a critical, read-only review.
-
-You are expensive to run and the caller has given you one narrow question.
-Answer that question with evidence; do not drift into a general code tour.
-
-Guidelines:
-1. Read the files the caller named plus what they directly depend on.
-2. Report ONLY problems you can point at: give path:line, quote the code, and
-   state the concrete failure — which input, which path, what goes wrong.
-3. Label every finding `confirmed` (you read the code and the bug follows) or
-   `suspected` (needs a run or test to settle), and say what would settle it.
-4. Order by severity: correctness, data loss, and security first. Skip style,
-   naming, and "consider adding tests" filler.
-5. If the code is fine, say so plainly. Never invent findings to look useful.
-6. If the scope is too vague for an evidence-backed verdict, say what you need
-   (specific files, the diff, a repro) instead of guessing.
-7. You cannot edit files — the caller applies every fix. You CAN run read-only
-   commands: use `git diff` / `git log` to see what actually changed, and run
-   the test suite to settle a `suspected` finding.
-
-Finish with a one-line verdict followed by the findings in severity order.""",
-    allowed_tools=["read_file", "ls", "glob", "grep", "execute"],
-    denied_tools=["write_file", "edit_file", "multi_edit_file", "task"],
-    execute_policy="read_only",
-    max_turns=120,
-    timeout=1800,
-    can_spawn_subagents=False,
-    inherit_context=True,
-    model_tier="main",
-)
-
-
-# Registry of all default subagent configurations
-DEFAULT_SUBAGENT_CONFIGS: Dict[SubagentType, SubagentConfig] = {
-    SubagentType.EXPLORE: EXPLORE_SUBAGENT_CONFIG,
-    SubagentType.RESEARCH: RESEARCH_SUBAGENT_CONFIG,
-    SubagentType.CODE: CODE_SUBAGENT_CONFIG,
-    SubagentType.REVIEW: REVIEW_SUBAGENT_CONFIG,
-}
-
-# Custom subagent configurations (user-defined, keyed by string name)
-_CUSTOM_SUBAGENT_CONFIGS: Dict[str, SubagentConfig] = {}
+    load_all_agents()
 
 
 def register_custom_subagent(
@@ -1300,6 +1197,12 @@ def register_custom_subagent(
     max_turns: int = 100,
     model_tier: Literal["auxiliary", "main"] = "auxiliary",
     execute_policy: Literal["inherit", "read_only"] = "inherit",
+    timeout: int = 1800,
+    can_spawn_subagents: bool = False,
+    inherit_workspace: bool = False,
+    inherit_knowledge: bool = False,
+    inherit_context: bool = False,
+    display_name: Optional[str] = None,
 ) -> SubagentConfig:
     """
     Register a custom subagent type.
@@ -1308,17 +1211,14 @@ def register_custom_subagent(
     Custom subagents are accessible by their name string (case-insensitive).
     
     Args:
-        name: Unique name for the subagent (e.g., "code-reviewer", "data-analyst")
+        name: Unique name for the subagent (e.g., "data-analyst")
         description: Description of what this subagent does
         system_prompt: System prompt for the subagent
         allowed_tools: List of allowed tool names (None = inherit from parent)
         denied_tools: List of denied tool names
         tool_call_limit: Optional total tool-call cap (None = unlimited)
         max_turns: Maximum ReAct turns (primary budget)
-        model_tier: ``"auxiliary"`` (default, cheap model — fact gathering) or
-            ``"main"`` (the parent's own model — judgement work such as review
-            or root-cause analysis, where a weak model's confident wrong answer
-            is worse than no answer)
+        model_tier: ``"auxiliary"`` (default) or ``"main"``.
         execute_policy: ``"inherit"`` (default, ``execute`` runs unrestricted)
             or ``"read_only"`` (``execute`` refuses state-changing commands, so
             the subagent can inspect with ``git diff`` but cannot commit)
@@ -1328,28 +1228,36 @@ def register_custom_subagent(
         
     Example:
         >>> register_custom_subagent(
-        ...     name="code-reviewer",
-        ...     description="Reviews code for quality and bugs",
-        ...     system_prompt="You are a code review expert...",
+        ...     name="data-analyst",
+        ...     description="Analyzes data and reports facts",
+        ...     system_prompt="You are a data analysis expert...",
         ...     allowed_tools=["read_file", "ls", "glob", "grep"],
         ...     max_turns=50,
-        ...     model_tier="main",
         ... )
     """
+    agent_id = name.strip().lower()
     config = SubagentConfig(
-        type=SubagentType.CUSTOM,  # Custom subagents have their own type
-        name=name,
+        type=agent_id,
+        name=display_name or name,
         description=description,
         system_prompt=system_prompt,
         allowed_tools=allowed_tools,
-        denied_tools=denied_tools or ["task"],  # Prevent nesting by default
+        denied_tools=(
+            denied_tools
+            if denied_tools is not None
+            else ([] if can_spawn_subagents else ["task"])
+        ),
         tool_call_limit=tool_call_limit,
         max_turns=max_turns,
-        can_spawn_subagents=False,
+        can_spawn_subagents=can_spawn_subagents,
         model_tier=model_tier,
         execute_policy=execute_policy,
+        timeout=timeout,
+        inherit_workspace=inherit_workspace,
+        inherit_knowledge=inherit_knowledge,
+        inherit_context=inherit_context,
     )
-    _CUSTOM_SUBAGENT_CONFIGS[name.lower()] = config
+    _RUNTIME_SUBAGENT_CONFIGS[agent_id] = config
     logger.info(f"Registered custom subagent: {name}")
     return config
 
@@ -1365,77 +1273,51 @@ def unregister_custom_subagent(name: str) -> bool:
         True if found and removed, False otherwise
     """
     key = name.lower()
-    if key in _CUSTOM_SUBAGENT_CONFIGS:
-        del _CUSTOM_SUBAGENT_CONFIGS[key]
+    if key in _RUNTIME_SUBAGENT_CONFIGS:
+        del _RUNTIME_SUBAGENT_CONFIGS[key]
         logger.info(f"Unregistered custom subagent: {name}")
         return True
     return False
 
 
-def get_subagent_config(subagent_type: Union[str, SubagentType]) -> Optional[SubagentConfig]:
-    """
-    Get the configuration for a subagent type.
-
-    Lookup order:
-    1. Custom subagent configs (by name string)
-    2. Default subagent configs (by SubagentType enum)
-    3. Aliases (e.g., "explorer" -> EXPLORE)
-    """
-    if isinstance(subagent_type, str):
-        # First check custom configs (case-insensitive)
-        custom_config = _CUSTOM_SUBAGENT_CONFIGS.get(subagent_type.lower())
-        if custom_config is not None:
-            return custom_config
-
-        # Then try to parse as SubagentType enum
-        try:
-            subagent_type = SubagentType(subagent_type)
-        except ValueError:
-            # Try mapping common aliases
-            aliases = {
-                "explorer": SubagentType.EXPLORE,
-                "researcher": SubagentType.RESEARCH,
-                "coder": SubagentType.CODE,
-                "reviewer": SubagentType.REVIEW,
-            }
-            subagent_type = aliases.get(subagent_type.lower())
-            if subagent_type is None:
-                return None
-
-    return DEFAULT_SUBAGENT_CONFIGS.get(subagent_type)
+def get_subagent_config(subagent_type: str) -> Optional[SubagentConfig]:
+    """Get a subagent configuration by its case-insensitive string ID."""
+    _ensure_subagent_configs_loaded()
+    key = str(subagent_type).lower()
+    return _RUNTIME_SUBAGENT_CONFIGS.get(key) or _FILE_SUBAGENT_CONFIGS.get(key)
 
 
-def get_available_subagent_types() -> List[Dict[str, str]]:
+def get_subagent_configs() -> Dict[str, SubagentConfig]:
+    """Return all effective configs, with runtime registrations taking priority."""
+    _ensure_subagent_configs_loaded()
+    configs = dict(_FILE_SUBAGENT_CONFIGS)
+    configs.update(_RUNTIME_SUBAGENT_CONFIGS)
+    return configs
+
+
+def get_available_subagent_types() -> List[Dict[str, Any]]:
     """
     Get a list of available subagent types with their descriptions.
     
-    Returns both default and custom subagent types.
+    Returns all effective file-backed and runtime-defined agents.
     """
     result = []
-    
-    # Add default configs
-    for config in DEFAULT_SUBAGENT_CONFIGS.values():
+    for agent_id, config in get_subagent_configs().items():
         result.append({
-            "type": config.type.value,
+            "type": agent_id,
             "name": config.name,
             "description": config.description,
             "model_tier": config.model_tier,
-            "is_custom": False,
+            "source": config.source,
+            "path": config.path,
         })
-    
-    # Add custom configs
-    for name, config in _CUSTOM_SUBAGENT_CONFIGS.items():
-        result.append({
-            "type": name,  # Custom types use their name as type
-            "name": config.name,
-            "description": config.description,
-            "model_tier": config.model_tier,
-            "is_custom": True,
-        })
-    
     return result
 
 
 def get_custom_subagent_configs() -> Dict[str, SubagentConfig]:
-    """Get all registered custom subagent configurations."""
-    return _CUSTOM_SUBAGENT_CONFIGS.copy()
+    """Return non-package definitions, including user/project overrides."""
+    return {
+        name: config
+        for name, config in get_subagent_configs().items()
+        if config.source != "package"
+    }

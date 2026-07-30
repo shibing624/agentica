@@ -12,9 +12,9 @@ import pytest
 from agentica.subagent import (
     SubagentConfig,
     SubagentRegistry,
-    SubagentType,
-    _CUSTOM_SUBAGENT_CONFIGS,
+    _RUNTIME_SUBAGENT_CONFIGS,
     get_subagent_config,
+    get_subagent_configs,
 )
 from agentica.tools.base import Function, Tool
 from agentica.tools.buildin_tools import BuiltinFileTool
@@ -113,20 +113,20 @@ def _make_toolkit():
 @pytest.fixture(autouse=True)
 def reset_subagent_registry():
     SubagentRegistry._instance = None
-    _CUSTOM_SUBAGENT_CONFIGS.clear()
+    _RUNTIME_SUBAGENT_CONFIGS.clear()
     RecordingAgent.last_init_kwargs = None
     RecordingAgent.run_delay = 0.0
     yield
     SubagentRegistry._instance = None
-    _CUSTOM_SUBAGENT_CONFIGS.clear()
+    _RUNTIME_SUBAGENT_CONFIGS.clear()
 
 
 def test_spawn_applies_config_to_child_agent():
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["reviewer"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
-        name="reviewer",
-        description="reviewer",
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker",
+        name="worker",
+        description="worker",
         system_prompt="system prompt",
         allowed_tools=["read_file", "task"],
         denied_tools=["task"],
@@ -144,7 +144,7 @@ def test_spawn_applies_config_to_child_agent():
         "agentica.agent.config.ToolConfig", FakeToolConfig
     ):
         result = asyncio.run(
-            registry.spawn(parent_agent=parent, task="review this", agent_type="reviewer")
+            registry.spawn(parent_agent=parent, task="inspect this", agent_type="worker")
         )
 
     assert result["status"] == "completed"
@@ -161,10 +161,10 @@ def test_spawn_applies_config_to_child_agent():
 
 def test_spawn_filters_toolkit_functions_by_allowed_and_denied_lists():
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["reviewer"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
-        name="reviewer",
-        description="reviewer",
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker",
+        name="worker",
+        description="worker",
         system_prompt="system prompt",
         allowed_tools=["read_file", "task"],
         denied_tools=["task"],
@@ -176,7 +176,7 @@ def test_spawn_filters_toolkit_functions_by_allowed_and_denied_lists():
         "agentica.agent.config.ToolConfig", FakeToolConfig
     ):
         result = asyncio.run(
-            registry.spawn(parent_agent=parent, task="review this", agent_type="reviewer")
+            registry.spawn(parent_agent=parent, task="inspect this", agent_type="worker")
         )
 
     assert result["status"] == "completed"
@@ -190,8 +190,8 @@ def test_spawn_filters_toolkit_functions_by_allowed_and_denied_lists():
 
 def test_spawn_honors_timeout():
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["slow"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["slow"] = SubagentConfig(
+        type="slow",
         name="slow",
         description="slow",
         system_prompt="system prompt",
@@ -256,8 +256,8 @@ def test_spawn_dedupes_subagent_tool_events_by_call_id():
     """Regression: cumulative chunk.tools must not cause duplicate
     subagent.tool_started/completed events or inflate tool_count."""
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["coder"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["coder"] = SubagentConfig(
+        type="coder",
         name="coder",
         description="coder",
         system_prompt="prompt",
@@ -291,10 +291,10 @@ def test_spawn_dedupes_subagent_tool_events_by_call_id():
 
 def test_spawn_batch_returns_error_for_invalid_spec_and_keeps_order():
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["reviewer"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
-        name="reviewer",
-        description="reviewer",
+    _RUNTIME_SUBAGENT_CONFIGS["worker"] = SubagentConfig(
+        type="worker",
+        name="worker",
+        description="worker",
         system_prompt="system prompt",
     )
     parent = _make_parent_agent()
@@ -306,8 +306,8 @@ def test_spawn_batch_returns_error_for_invalid_spec_and_keeps_order():
             registry.spawn_batch(
                 parent_agent=parent,
                 tasks=[
-                    {"type": "reviewer"},
-                    {"task": "valid task", "type": "reviewer"},
+                    {"type": "worker"},
+                    {"task": "valid task", "type": "worker"},
                 ],
             )
         )
@@ -360,8 +360,8 @@ class _PartialThenHangAgent(RecordingAgent):
 def test_spawn_timeout_preserves_partial_content_and_tool_calls():
     """Bug: pre-fix, timeout returned content='' and threw away tool calls."""
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["slowish"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["slowish"] = SubagentConfig(
+        type="slowish",
         name="slowish",
         description="slow",
         system_prompt="s",
@@ -402,8 +402,8 @@ def test_spawn_max_turns_returns_truncated_status_with_content():
     """Bug: pre-fix, max_turns silently returned ``status=completed`` with the
     partial content — indistinguishable from a real answer."""
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["maxturner"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["maxturner"] = SubagentConfig(
+        type="maxturner",
         name="maxturner",
         description="mt",
         system_prompt="s",
@@ -431,8 +431,8 @@ class _ToolCallLimitBreakAgent(RecordingAgent):
 
 def test_spawn_tool_call_limit_returns_dedicated_status():
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["tcl"] = SubagentConfig(
-        type=SubagentType.CUSTOM, name="tcl", description="tcl", system_prompt="s",
+    _RUNTIME_SUBAGENT_CONFIGS["tcl"] = SubagentConfig(
+        type="tcl", name="tcl", description="tcl", system_prompt="s",
     )
     parent = _make_parent_agent()
 
@@ -457,8 +457,8 @@ class _PartialThenRaiseAgent(RecordingAgent):
 def test_spawn_exception_returns_partial_not_empty():
     """Bug: pre-fix, any mid-stream exception returned content=''."""
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["boomer"] = SubagentConfig(
-        type=SubagentType.CUSTOM, name="boomer", description="b", system_prompt="s",
+    _RUNTIME_SUBAGENT_CONFIGS["boomer"] = SubagentConfig(
+        type="boomer", name="boomer", description="b", system_prompt="s",
     )
     parent = _make_parent_agent()
 
@@ -479,7 +479,7 @@ def test_default_timeout_is_generous():
     """Guard against regression: default timeout must be big enough that real
     code/research tasks don't hit it just from network latency + tool loops."""
     cfg = SubagentConfig(
-        type=SubagentType.CUSTOM, name="x", description="x", system_prompt="s",
+        type="x", name="x", description="x", system_prompt="s",
     )
     # 30 min. If someone lowers this again, this test fails loudly.
     assert cfg.timeout >= 1800
@@ -535,8 +535,8 @@ def test_builtin_task_tool_surfaces_partial_on_timeout():
 def test_spawn_timeout_override_wins_over_config_default():
     """Parent Agent must be able to pass ``timeout_override`` to extend the
     budget for a specific retry, without re-registering the subagent type."""
-    _CUSTOM_SUBAGENT_CONFIGS["overridable"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["overridable"] = SubagentConfig(
+        type="overridable",
         name="overridable",
         description="o",
         system_prompt="s",
@@ -578,8 +578,8 @@ def test_spawn_resume_stitches_previous_partial_into_task():
     """Parent Agent passes ``resume_from_run_id`` from a prior partial run;
     spawn() must prepend the previous partial output to the new task so the
     subagent continues instead of restarting."""
-    _CUSTOM_SUBAGENT_CONFIGS["resumable"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["resumable"] = SubagentConfig(
+        type="resumable",
         name="resumable",
         description="r",
         system_prompt="s",
@@ -598,13 +598,18 @@ def test_spawn_resume_stitches_previous_partial_into_task():
     prior_run_id = "prior-run-id-xyz"
     registry._runs[prior_run_id] = SubagentRun(
         run_id=prior_run_id,
-        subagent_type=SubagentType.CUSTOM,
+        subagent_type="resumable",
         parent_agent_id="parent-1",
         task_label="original task",
         task_description="original task",
         started_at=datetime.now(),
         status="timeout",
         result="I already analyzed files A.py and B.py. Findings so far: ...",
+        tool_calls_summary=[{
+            "name": "execute",
+            "info": "git diff HEAD -- A.py B.py",
+            "input": '{"command": "git diff HEAD -- A.py B.py"}',
+        }],
     )
     parent = _make_parent_agent()
 
@@ -625,13 +630,46 @@ def test_spawn_resume_stitches_previous_partial_into_task():
     stitched = seen_task_text["value"]
     assert "[RESUME]" in stitched
     assert "A.py and B.py" in stitched, "previous partial output must be injected"
+    assert "COMPLETED TOOL CALLS" in stitched
+    assert "git diff HEAD -- A.py B.py" in stitched
+    assert "Re-run only the reads needed" in stitched
     assert "Continue: now analyze C.py." in stitched, "new task must still be present"
     assert prior_run_id in stitched
 
 
+def test_update_status_persists_partial_tool_calls_for_resume():
+    registry = SubagentRegistry()
+    from agentica.subagent import SubagentRun
+    from datetime import datetime
+
+    run = SubagentRun(
+        run_id="partial-tools-run",
+        subagent_type="partial-tools",
+        parent_agent_id="parent-1",
+        task_label="inspect",
+        task_description="inspect",
+        started_at=datetime.now(),
+    )
+    registry._runs[run.run_id] = run
+    tools = [{"name": "read_file", "info": "sdk_models.py", "input": "{}"}]
+
+    registry.update_status(
+        run_id=run.run_id,
+        status="max_turns",
+        result="stopped at limit",
+        tool_calls_summary=tools,
+    )
+
+    assert registry.get(run.run_id).tool_calls_summary == tools
+
+
+def test_review_is_not_a_default_subagent():
+    assert get_subagent_config("review") is None
+
+
 def test_spawn_resume_unknown_run_id_returns_error():
-    _CUSTOM_SUBAGENT_CONFIGS["resumable2"] = SubagentConfig(
-        type=SubagentType.CUSTOM, name="resumable2", description="r", system_prompt="s",
+    _RUNTIME_SUBAGENT_CONFIGS["resumable2"] = SubagentConfig(
+        type="resumable2", name="resumable2", description="r", system_prompt="s",
     )
     registry = SubagentRegistry()
     parent = _make_parent_agent()
@@ -650,8 +688,8 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
     """The ``next_action`` string is the single most important field for the
     ReAct loop — it tells the parent Agent literally which arguments to pass
     on retry. Without it, the model has to guess."""
-    _CUSTOM_SUBAGENT_CONFIGS["hinter"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["hinter"] = SubagentConfig(
+        type="hinter",
         name="hinter",
         description="h",
         system_prompt="s",
@@ -695,29 +733,19 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
 
 def test_builtin_subagent_configs_are_read_only():
     """Built-in subagents deny write/edit tools and restrict execute to reads."""
-    from agentica.subagent import (
-        CODE_SUBAGENT_CONFIG,
-        EXPLORE_SUBAGENT_CONFIG,
-        RESEARCH_SUBAGENT_CONFIG,
-        REVIEW_SUBAGENT_CONFIG,
-    )
-
     forbidden = {"write_file", "edit_file", "multi_edit_file"}
-    for cfg in (
-        EXPLORE_SUBAGENT_CONFIG,
-        RESEARCH_SUBAGENT_CONFIG,
-        CODE_SUBAGENT_CONFIG,
-        REVIEW_SUBAGENT_CONFIG,
-    ):
+    configs = get_subagent_configs()
+    assert set(configs) == {"explore", "research", "code"}
+    for cfg in configs.values():
         denied = set(cfg.denied_tools or [])
         missing = forbidden - denied
-        assert not missing, f"{cfg.type.value} config fails to deny {missing}"
+        assert not missing, f"{cfg.type} config fails to deny {missing}"
         allowed = set(cfg.allowed_tools or [])
         assert not (allowed & forbidden), (
-            f"{cfg.type.value} config exposes forbidden tools: {allowed & forbidden}"
+            f"{cfg.type} config exposes forbidden tools: {allowed & forbidden}"
         )
         assert cfg.execute_policy == "read_only", (
-            f"{cfg.type.value} config must restrict execute to read-only commands"
+            f"{cfg.type} config must restrict execute to read-only commands"
         )
 
 
@@ -756,11 +784,66 @@ def test_select_child_tools_strips_edit_tools_for_code_subagent():
     )
 
 
+def test_can_spawn_subagents_exposes_task_when_explicitly_allowed():
+    task_function = Function(name="task", entrypoint=lambda: None)
+    config = SubagentConfig(
+        type="coordinator",
+        name="coordinator",
+        description="coordinates one nested task",
+        system_prompt="s",
+        allowed_tools=["task"],
+        denied_tools=[],
+        can_spawn_subagents=True,
+    )
+
+    child_tools = SubagentRegistry()._select_child_tools([task_function], config)
+
+    assert child_tools == [task_function]
+
+
+def test_nested_spawn_requires_parent_permission_and_advances_depth():
+    registry = SubagentRegistry()
+    _RUNTIME_SUBAGENT_CONFIGS["nested-worker"] = SubagentConfig(
+        type="nested-worker",
+        name="nested-worker",
+        description="nested worker",
+        system_prompt="s",
+    )
+    parent = _make_parent_agent()
+    parent.context = {
+        "_subagent_depth": 1,
+        "_can_spawn_subagents": True,
+    }
+
+    with patch("agentica.agent.Agent", RecordingAgent), patch(
+        "agentica.agent.config.ToolConfig", FakeToolConfig
+    ):
+        result = asyncio.run(
+            registry.spawn(
+                parent_agent=parent,
+                task="inspect",
+                agent_type="nested-worker",
+            )
+        )
+
+    assert result["status"] == "completed"
+    assert RecordingAgent.last_init_kwargs["context"]["_subagent_depth"] == 2
+
+    parent.context["_can_spawn_subagents"] = False
+    denied = asyncio.run(
+        registry.spawn(
+            parent_agent=parent,
+            task="inspect",
+            agent_type="nested-worker",
+        )
+    )
+    assert denied["status"] == "error"
+    assert "Nested subagent spawning is not allowed" in denied["error"]
+
+
 # ---------------------------------------------------------------------------
-# Model tier routing. Retrieval subagents (explore/research/code) run on the
-# cheap auxiliary model; judgement subagents (review) run on the parent's own
-# model. Sending a judgement question to a weak model is worse than not
-# delegating: it returns a confident wrong verdict and the parent stops looking.
+# Model tier routing. Package defaults run on the auxiliary model; a custom
+# definition may explicitly opt into the main model.
 # ---------------------------------------------------------------------------
 
 
@@ -787,17 +870,22 @@ def test_retrieval_subagents_run_on_auxiliary_model():
         )
 
 
-def test_review_subagent_runs_on_main_model_even_with_auxiliary_configured():
-    """The whole point of the review type: a judgement task must not be
-    downgraded to the auxiliary model, whichever way the aux model is supplied."""
+def test_runtime_subagent_can_run_on_main_model():
     aux = _FakeModel("fake-aux-model")
     parent = _make_parent_agent(auxiliary_model=aux)
+    _RUNTIME_SUBAGENT_CONFIGS["specialist"] = SubagentConfig(
+        type="specialist",
+        name="specialist",
+        description="specialist",
+        system_prompt="s",
+        model_tier="main",
+    )
 
-    child_model = _spawn_and_get_child_model(parent, "review")
+    child_model = _spawn_and_get_child_model(parent, "specialist")
     assert child_model.id == "fake-main-model"
 
     child_model = _spawn_and_get_child_model(
-        parent, "review", auxiliary_model_override=_FakeModel("cli-aux-model")
+        parent, "specialist", auxiliary_model_override=_FakeModel("cli-aux-model")
     )
     assert child_model.id == "fake-main-model"
 
@@ -813,24 +901,16 @@ def test_auxiliary_model_override_wins_over_parent_resolution_for_aux_tier():
 def test_explicit_model_override_wins_over_tier():
     """SDK callers who name a model get exactly that model, both tiers."""
     parent = _make_parent_agent(auxiliary_model=_FakeModel("fake-aux-model"))
-    for agent_type in ("explore", "review"):
+    for agent_type in ("explore", "code"):
         child_model = _spawn_and_get_child_model(
             parent, agent_type, model_override=_FakeModel("chosen-model")
         )
         assert child_model.id == "chosen-model"
 
 
-def test_review_config_is_main_tier_and_others_are_auxiliary():
-    from agentica.subagent import (
-        CODE_SUBAGENT_CONFIG,
-        EXPLORE_SUBAGENT_CONFIG,
-        RESEARCH_SUBAGENT_CONFIG,
-        REVIEW_SUBAGENT_CONFIG,
-    )
-
-    assert REVIEW_SUBAGENT_CONFIG.model_tier == "main"
-    for cfg in (EXPLORE_SUBAGENT_CONFIG, RESEARCH_SUBAGENT_CONFIG, CODE_SUBAGENT_CONFIG):
-        assert cfg.model_tier == "auxiliary", f"{cfg.type.value} must stay on the cheap model"
+def test_package_configs_are_auxiliary_tier():
+    for cfg in get_subagent_configs().values():
+        assert cfg.model_tier == "auxiliary", f"{cfg.type} must stay on the auxiliary model"
 
 
 def test_custom_subagent_can_opt_into_main_tier():
@@ -860,9 +940,6 @@ def test_subagent_start_event_reports_the_model_used():
 
 
 def test_task_tool_forwards_auxiliary_model_as_tier_hint_not_hard_override():
-    """The CLI's aux model must not force ``review`` onto the cheap model, so
-    the tool passes it as ``auxiliary_model_override`` rather than
-    ``model_override``."""
     from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
     aux = _FakeModel("cli-aux-model")
@@ -872,10 +949,10 @@ def test_task_tool_forwards_auxiliary_model_as_tier_hint_not_hard_override():
 
     async def fake_spawn(self, **kwargs):
         captured.update(kwargs)
-        return {"status": "completed", "content": "ok", "agent_type": "review"}
+        return {"status": "completed", "content": "ok", "agent_type": "explore"}
 
     with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
-        asyncio.run(tool.task("d", subagent_type="review"))
+        asyncio.run(tool.task("d", subagent_type="explore"))
 
     assert captured["auxiliary_model_override"] is aux
     assert "model_override" not in captured
@@ -886,12 +963,11 @@ def test_task_system_prompt_exposes_model_tier_per_type():
 
     prompt = BuiltinTaskTool().get_system_prompt()
     assert "| Type | Name | Model | Description |" in prompt
-    review_row = next(line for line in prompt.splitlines() if line.startswith("| `review`"))
     explore_row = next(line for line in prompt.splitlines() if line.startswith("| `explore`"))
     # The tier labels must be the literal ``model_tier`` values: users copy them
     # into ``model_tier:`` frontmatter, where anything else is silently rejected.
-    assert "| main |" in review_row
     assert "| auxiliary |" in explore_row
+    assert "| `review`" not in prompt
 
 
 def test_task_system_prompt_is_not_indented():
@@ -921,31 +997,26 @@ def test_task_tool_default_subagent_type_is_explore():
 def test_registry_spawn_defaults_to_explore():
     """Direct SDK callers must not silently create a Code child."""
     sig = inspect.signature(SubagentRegistry.spawn)
-    assert sig.parameters["agent_type"].default is SubagentType.EXPLORE
+    assert sig.parameters["agent_type"].default == "explore"
 
 
 def test_explore_budget_is_max_turns_only():
     """Builtin subagents budget by max_turns; tool_call_limit stays unlimited."""
-    from agentica.subagent import (
-        CODE_SUBAGENT_CONFIG,
-        EXPLORE_SUBAGENT_CONFIG,
-        RESEARCH_SUBAGENT_CONFIG,
-    )
-
-    assert EXPLORE_SUBAGENT_CONFIG.max_turns == 200
-    assert EXPLORE_SUBAGENT_CONFIG.tool_call_limit is None
-    assert CODE_SUBAGENT_CONFIG.max_turns == 200
-    assert CODE_SUBAGENT_CONFIG.tool_call_limit is None
-    assert RESEARCH_SUBAGENT_CONFIG.max_turns == 150
-    assert RESEARCH_SUBAGENT_CONFIG.tool_call_limit is None
-    assert "Stop and synthesize" in EXPLORE_SUBAGENT_CONFIG.system_prompt
+    configs = get_subagent_configs()
+    assert configs["explore"].max_turns == 200
+    assert configs["explore"].tool_call_limit is None
+    assert configs["code"].max_turns == 200
+    assert configs["code"].tool_call_limit is None
+    assert configs["research"].max_turns == 150
+    assert configs["research"].tool_call_limit is None
+    assert "Stop and synthesize" in configs["explore"].system_prompt
 
 
 def test_subagent_max_turns_override_is_applied_without_hard_ceiling():
     """Per-call max_turns overrides pass through as-is for long-running work."""
     registry = SubagentRegistry()
-    _CUSTOM_SUBAGENT_CONFIGS["long_run"] = SubagentConfig(
-        type=SubagentType.CUSTOM,
+    _RUNTIME_SUBAGENT_CONFIGS["long_run"] = SubagentConfig(
+        type="long_run",
         name="long_run",
         description="long_run",
         system_prompt="prompt",
@@ -990,7 +1061,7 @@ def test_spawn_batch_defaults_each_task_to_explore():
             )
         )
 
-    assert captured_types == [SubagentType.EXPLORE]
+    assert captured_types == ["explore"]
 
 
 def test_readonly_subagent_investigation_leaves_edits_to_parent():

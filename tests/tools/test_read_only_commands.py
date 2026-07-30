@@ -13,10 +13,9 @@ import asyncio
 import unittest
 
 from agentica.subagent import (
-    DEFAULT_SUBAGENT_CONFIGS,
     SubagentConfig,
     SubagentRegistry,
-    SubagentType,
+    get_subagent_configs,
 )
 from agentica.tools.buildin_tools import BuiltinExecuteTool
 from agentica.tools.safety import is_read_only_command
@@ -121,7 +120,7 @@ class TestSubagentExecutePolicy(unittest.TestCase):
 
     def _child_execute(self, policy: str):
         config = SubagentConfig(
-            type=SubagentType.CUSTOM,
+            type="test",
             name="t",
             description="d",
             system_prompt="p",
@@ -162,16 +161,12 @@ class TestSubagentExecutePolicy(unittest.TestCase):
         self.assertIn("READ-ONLY", execute_fn.description)
 
     def test_builtin_subagents_expose_read_only_execute(self):
-        for subagent_type in (
-            SubagentType.EXPLORE,
-            SubagentType.RESEARCH,
-            SubagentType.CODE,
-            SubagentType.REVIEW,
-        ):
-            config = DEFAULT_SUBAGENT_CONFIGS[subagent_type]
-            self.assertEqual(config.execute_policy, "read_only", subagent_type)
-            self.assertIn("execute", config.allowed_tools, subagent_type)
-            self.assertNotIn("execute", config.denied_tools, subagent_type)
+        configs = get_subagent_configs()
+        self.assertEqual(set(configs), {"explore", "research", "code"})
+        for agent_id, config in configs.items():
+            self.assertEqual(config.execute_policy, "read_only", agent_id)
+            self.assertIn("execute", config.allowed_tools, agent_id)
+            self.assertNotIn("execute", config.denied_tools, agent_id)
 
 
 class TestSubagentLoaderExecutePolicy(unittest.TestCase):

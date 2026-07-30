@@ -382,16 +382,30 @@ class TestBuiltinFileToolEditFile:
         assert "changed on disk" not in result
         assert Path(fp).read_text() == "final!"
 
-    def test_edit_failure_reports_string_not_found_only(self, file_tool, tmp_dir):
-        """Failure is the natural re-read signal — plain error, no freshness tip."""
+    def test_edit_failure_hints_read_or_reread(self, file_tool, tmp_dir):
+        """A failed exact-string edit gives one stateless recovery action."""
         fp = os.path.join(tmp_dir, "not_found.txt")
         Path(fp).write_text("before")
-        self._read(file_tool, fp)
-        Path(fp).write_text("totally different and longer content")
         with pytest.raises(ValueError) as exc:
-            asyncio.run(file_tool.edit_file(fp, "before", "after"))
-        assert "changed on disk" not in str(exc.value)
-        assert "Tip:" not in str(exc.value)
+            asyncio.run(file_tool.edit_file(fp, "missing", "after"))
+        msg = str(exc.value)
+        assert "String not found" in msg
+        assert "Read or re-read the relevant region" in msg
+        assert "read_file" in msg
+        assert "old_string" in msg
+
+    def test_multi_edit_failure_appends_read_hint(self, file_tool, tmp_dir):
+        """A failing edit inside multi_edit_file surfaces the read hint."""
+        fp = os.path.join(tmp_dir, "multi_fail.txt")
+        Path(fp).write_text("alpha bravo charlie")
+        self._read(file_tool, fp)
+        result = asyncio.run(file_tool.multi_edit_file(fp, [
+            {"old_string": "alpha", "new_string": "ALPHA"},
+            {"old_string": "DOES_NOT_EXIST", "new_string": "x"},
+        ]))
+        assert "Edit 2: FAILED" in result
+        assert "String not found" in result
+        assert "Read or re-read the relevant region" in result
 
     def test_single_edit(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "edit.txt")
@@ -665,9 +679,22 @@ class TestBuiltinFileToolGrep:
         result = asyncio.run(file_tool.grep("zzzzz", tmp_dir))
         assert "No matches" in result
 
-    def test_grep_nonexistent_dir(self, file_tool):
-        with pytest.raises(FileNotFoundError):
+    def test_grep_nonexistent_path(self, file_tool):
+        with pytest.raises(FileNotFoundError, match="Path not found"):
             asyncio.run(file_tool.grep("test", "/nonexistent_xyz"))
+
+    def test_grep_accepts_file_path(self, file_tool, tmp_dir):
+        fp = Path(tmp_dir, "single.py")
+        fp.write_text("gate_passed = True\n")
+        result = asyncio.run(file_tool.grep("gate_passed", str(fp), include="*.py"))
+        assert "gate_passed = True" in result
+
+    def test_grep_fallback_accepts_file_path(self, file_tool, tmp_dir):
+        fp = Path(tmp_dir, "single.py")
+        fp.write_text("commit_pass = True\n")
+        with patch("agentica.tools.buildin_tools.shutil.which", return_value=None):
+            result = asyncio.run(file_tool.grep("commit_pass", str(fp), include="*.py"))
+        assert "commit_pass = True" in result
 
     def test_grep_case_insensitive(self, file_tool, tmp_dir):
         Path(tmp_dir, "mixed.txt").write_text("Hello WORLD\n")

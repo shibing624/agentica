@@ -77,6 +77,7 @@ def test_agentica_dir_does_not_expose_registry_internals():
 
 def test_top_level_lazy_access_returns_symbol():
     import agentica
-    from agentica.subagent import SubagentType
+    from agentica.subagent import SubagentConfig
 
-    assert agentica.SubagentType is SubagentType
+    assert agentica.SubagentConfig is SubagentConfig
+    assert "SubagentType" not in dir(agentica)

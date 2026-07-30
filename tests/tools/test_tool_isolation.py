@@ -157,7 +157,6 @@ class TestSubagentRegistryToolFiltering(unittest.TestCase):
         from agentica.subagent import (
             SubagentConfig,
             SubagentRegistry,
-            SubagentType,
         )
 
         parent_agent = Agent(name="parent", model=_model(), tools=[BuiltinTodoTool()])
@@ -165,7 +164,7 @@ class TestSubagentRegistryToolFiltering(unittest.TestCase):
         self.assertEqual(parent_agent.todos, [])
 
         config = SubagentConfig(
-            type=SubagentType.CUSTOM,
+            type="todo_only",
             name="todo_only",
             description="only allowed to manage its own todos",
             system_prompt="-",

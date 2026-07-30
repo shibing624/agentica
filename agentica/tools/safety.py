@@ -145,7 +145,7 @@ def split_compound_command(command: str) -> List[str]:
 # not dangerous but is not read-only either.
 #
 # BEST-EFFORT, NOT A SANDBOX. Test runners and linters are allowed (see
-# _RUNNER_COMMANDS) because a review subagent that cannot run the test suite is
+# _RUNNER_COMMANDS) because a read-only subagent that cannot run the test suite is
 # largely useless — but they execute arbitrary project code (conftest.py, npm
 # scripts, Makefile targets) and therefore CAN write files. Real enforcement
 # needs OS-level sandboxing. Treat this as a guardrail against the model

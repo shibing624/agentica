@@ -85,7 +85,7 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 07 | [routing.py](agent_patterns/07_routing.py) | 路由模式：分诊 Agent 按语言分发 | Triage Agent, handoff, 路由分发 |
 | 08 | [swarm.py](agent_patterns/08_swarm.py) | Swarm 多 Agent 并行/自治协作 | `Swarm`, parallel 模式, autonomous 模式 |
 | 09 | [runtime_config.py](agent_patterns/09_runtime_config.py) | 运行时配置：动态启停工具/技能 | `RunConfig`, `enable_tool`, `disable_tool` |
-| 10 | [subagent_demo.py](agent_patterns/10_subagent_demo.py) | 子 Agent 委派：explore/general/research/code 四类 | `Subagent`, `register_custom_subagent()` |
+| 10 | [subagent_demo.py](agent_patterns/10_subagent_demo.py) | 文件配置驱动的只读子 Agent 委派 | `SubagentRegistry`, `agents/*.md` |
 | 11 | [model_hooks.py](agent_patterns/11_model_hooks.py) | 模型层钩子：上下文溢出保护（先压缩再驱逐） | `context_overflow_threshold` |
 | 12 | [session_resume.py](agent_patterns/12_session_resume.py) | 会话恢复：JSONL 持久化 + 断点续传 | `SessionLog`, `session_id`, compact boundary |
 | 13 | [actor_critic_refine.py](agent_patterns/13_actor_critic_refine.py) | Actor-Critic 精炼：Schema + Agent 多 critic 并行评审 | `refine()`, `SchemaCritic`, `AgentCritic`, `RefineResult` |

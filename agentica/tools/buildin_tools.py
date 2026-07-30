@@ -776,8 +776,9 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Replace a specific string in a file.
 
-        Prefer read_file before editing when constructing old_string from
-        memory; a String not found failure is the signal to re-read.
+        Read the relevant region with read_file before editing so old_string
+        matches the current content exactly. A String not found failure means
+        the region must be re-read before retrying.
 
         Uses literal string matching (NOT regex). Multi-line strings are supported.
         Prefer this tool over write_file or shell `sed` for targeted changes.
@@ -840,7 +841,7 @@ class BuiltinFileTool(Tool):
             result = self._str_replace(content, old_string, new_string, replace_all)
 
             if not result["success"]:
-                raise ValueError(result["error"])
+                raise ValueError(result["error"] + "\n\n" + self._edit_read_hint())
 
             # Atomic write back
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -871,8 +872,9 @@ class BuiltinFileTool(Tool):
     ) -> str:
         """Apply multiple edits to a single file.
 
-        Prefer read_file before editing when constructing old_string from
-        memory; a String not found failure is the signal to re-read.
+        Read the relevant region with read_file before editing so each edit's
+        old_string matches the current content exactly. A String not found
+        failure means the region must be re-read before retrying.
 
         Edits are applied sequentially on the same in-memory content, then
         the result is written back atomically once.
@@ -951,10 +953,11 @@ class BuiltinFileTool(Tool):
 
                 result = self._str_replace(content, old_string, new_string, replace_all)
                 if not result["success"]:
-                    err = f"Edit {i + 1}/{len(edits)}: {result['error']}"
+                    hint = self._edit_read_hint()
+                    err = f"Edit {i + 1}/{len(edits)}: {result['error']}\n\n{hint}"
                     if continue_on_error:
                         failures.append(err)
-                        results.append(f"Edit {i + 1}: FAILED ({result['error']})")
+                        results.append(f"Edit {i + 1}: FAILED ({result['error']})\n\n{hint}")
                         continue
                     raise ValueError(f"{err}. No changes were made.")
 
@@ -1001,6 +1004,14 @@ class BuiltinFileTool(Tool):
         if diag_text:
             summary += f"\n\n{diag_text}"
         return summary
+
+    @staticmethod
+    def _edit_read_hint() -> str:
+        """Return the recovery action for an exact-string edit failure."""
+        return (
+            "Read or re-read the relevant region with read_file, copy the exact "
+            "current text into old_string, then retry the edit."
+        )
 
     @staticmethod
     def _normalize_quotes(s: str) -> str:
@@ -1216,7 +1227,7 @@ class BuiltinFileTool(Tool):
         - Powered by ripgrep for speed (falls back to pure Python if rg missing)
         - The pattern parameter supports regex by default (e.g., 'class \\w+', 'def \\w+')
         - Use fixed_strings=True to treat pattern as literal text (no regex)
-        - The path parameter specifies the search directory (default: current working directory)
+        - The path parameter specifies the file or directory to search (default: current working directory)
         - The include parameter filters files by glob (e.g., "*.py", "*.{ts,tsx}")
         - output_mode (plain string):
           - "content" (default): matching lines with file path + line numbers
@@ -1226,7 +1237,7 @@ class BuiltinFileTool(Tool):
 
         Args:
             pattern: Text/regex to search for
-            path: Starting directory for search (default: ".")
+            path: File or directory to search (default: ".")
             include: File glob filter, e.g., "*.py", "*.{js,ts}" (maps to rg --glob)
             output_mode: "content" (default), "files_with_matches", or "count". Do NOT pass a dict.
             case_insensitive: Ignore case when matching (default: False)
@@ -1259,7 +1270,7 @@ class BuiltinFileTool(Tool):
         self._validate_path(path)
         base_path = self._resolve_path(path)
         if not base_path.exists():
-            raise FileNotFoundError(f"Directory not found: {path}")
+            raise FileNotFoundError(f"Path not found: {path}")
 
         # Effective timeout: the LLM-provided value is used as-is (no upper
         # cap — the caller decides); default _GREP_TIMEOUT when not provided.
@@ -1422,7 +1433,9 @@ class BuiltinFileTool(Tool):
                 raise ValueError(f"Invalid regex pattern '{pattern}': {e}") from e
 
         # Determine files to search
-        if include:
+        if base_path.is_file():
+            files = [base_path] if not include or base_path.match(include) else []
+        elif include:
             files = list(base_path.glob(f"**/{include}"))
         else:
             files = list(base_path.glob("**/*"))
@@ -1819,8 +1832,8 @@ def get_builtin_tools(
         include_ask_user_question: Whether to include ask_user_question tool for human-in-the-loop (default: False)
         task_model: Optional model for the cheap (``auxiliary``) tier of subagents
             spawned by the ``task`` tool. When ``None`` the parent agent's
-            ``resolve_auxiliary_model("task")`` decides. ``main``-tier types such
-            as ``review`` always run on the parent's own model.
+            ``resolve_auxiliary_model("task")`` decides. Definitions that opt
+            into ``model_tier: main`` run on the parent's own model.
         custom_skill_dirs: Custom skill directories to load (optional)
         ask_user_question_callback: Custom callback for ask_user_question tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)

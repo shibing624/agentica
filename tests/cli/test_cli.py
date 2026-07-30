@@ -2837,7 +2837,7 @@ class TestCLIAwareness(unittest.TestCase):
         self.assertIn("Model: openai/gpt-4o", ctx)
         self.assertIn("Active tools:", ctx)
         self.assertIn("custom_demo_tool", ctx)
-        self.assertIn("Subagent types: explore, research, code", ctx)
+        self.assertIn("Subagent types: code, explore, research", ctx)
         self.assertIn("Auxiliary model: zhipuai/glm-4.7-flash", ctx)
 
     def test_environment_context_omits_auxiliary_when_none(self):

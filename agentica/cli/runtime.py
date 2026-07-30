@@ -673,13 +673,9 @@ def _build_environment_context(agent: Any, agent_config: dict) -> Optional[str]:
     if skill_names:
         lines.append(f"- Active skills: {', '.join(sorted(skill_names))}")
 
-    subagent_types = ["explore", "research", "code", "review"]
-    try:
-        from agentica.subagent import get_custom_subagent_configs
+    from agentica.subagent import get_subagent_configs
 
-        subagent_types.extend(sorted(get_custom_subagent_configs().keys()))
-    except Exception:
-        pass
+    subagent_types = sorted(get_subagent_configs())
     lines.append(f"- Subagent types: {', '.join(subagent_types)}")
     lines.append("- Slash commands: /rename /resume /status /model /tools /skills /agents /config /usage /permissions /help /exit")
     lines.append("- To extend: /skills install <name>, /agents create <name>")

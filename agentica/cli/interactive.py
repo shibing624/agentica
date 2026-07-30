@@ -2175,15 +2175,11 @@ def run_interactive(
         permission_mode=perm_mode,
     )
 
-    # Load custom subagent definitions (.agentica/agents/*.md) before the TUI
-    # starts. load_all_agents is fail-soft internally; the outer guard keeps a
-    # broken agent file from ever blocking the CLI.
-    try:
-        from agentica.subagent_loader import load_all_agents
+    # User/project files fail softly per definition; invalid packaged defaults
+    # surface because they indicate a broken installation.
+    from agentica.subagent_loader import load_all_agents
 
-        load_all_agents()
-    except Exception as e:
-        logger.warning(f"Failed to load custom subagents at startup: {e}")
+    load_all_agents()
 
     con = get_console()
 

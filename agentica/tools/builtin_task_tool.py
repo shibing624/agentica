@@ -30,8 +30,7 @@ class BuiltinTaskTool(Tool):
     this class is intentionally a thin adapter so there is exactly one place to
     fix subagent behavior.
 
-    Supports the built-in subagent types (``explore`` / ``research`` / ``code``)
-    and any custom types registered via ``register_custom_subagent``.
+    Available types come from package, user, and project Markdown definitions.
     """
 
     # Note the leading backslash: without it the first line carries no indent,
@@ -51,10 +50,10 @@ class BuiltinTaskTool(Tool):
     state-changing commands (subagents are refused these), for work that needs
     this conversation's context, or merely to keep your own context small.
 
-    The `Model` column below shows which model a type runs on: `auxiliary` is a
-    cheaper model for retrieval — treat its result as evidence you still reason
-    over; `main` is your own model, for judgement questions, used sparingly and
-    narrowly scoped. Never send a judgement question to an `auxiliary` type.
+    The `Model` column below shows which model a type runs on. Treat every
+    subagent result as evidence that you still reason over. Do not delegate code
+    review, correctness verdicts, root-cause judgement, or release decisions;
+    those belong to the main agent with the full conversation and diff context.
 
     {subagent_table}
 
@@ -62,20 +61,20 @@ class BuiltinTaskTool(Tool):
     know and why, the files or functions to start from, and ask for findings as
     path:line. Never ask it to edit or implement.
 
-    - Launch independent tasks in one message to run them in parallel; do not
-      fan out `main`-tier tasks.
+    - Launch independent tasks in one message to run them in parallel.
     - Once delegated, do not duplicate that work yourself.
-    - On `partial=true`, default to synthesizing the partial output; resume at
-      most once with the SAME `description` plus `resume_from_run_id`.""")
+    - On `partial=true`, default to synthesizing the partial output. If the
+      result contains only a timeout/limit note and no substantive findings,
+      do not resume merely to force a final answer; finish the work yourself.
+      Resume at most once when real partial findings make continuation useful,
+      using the SAME `description` plus `resume_from_run_id`.""")
 
     def __init__(self, auxiliary_model: Optional["Model"] = None):
         """
         Args:
             auxiliary_model: Model used by ``model_tier="auxiliary"`` subagents
                 spawned through this tool. When ``None`` (default) the parent
-                agent's ``resolve_auxiliary_model("task")`` decides. ``main``-tier
-                types (e.g. ``review``) ignore this and always run on the parent's
-                own model — judgement work must not be downgraded to a weak model.
+                agent's ``resolve_auxiliary_model("task")`` decides.
         """
         super().__init__(name="builtin_task_tool")
         self._auxiliary_model = auxiliary_model
