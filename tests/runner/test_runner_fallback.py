@@ -799,6 +799,57 @@ class TestFallbackRecoveryEvent(unittest.TestCase):
         )
 
 
+class TestContextUsageEvent(unittest.TestCase):
+    """Runner exposes actual request context independently from CostTracker."""
+
+    def test_main_request_emits_message_and_tool_context(self):
+        captured = []
+        primary = _fake_model("primary")
+        primary.tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        primary.context_window = 128000
+        agent = _make_agent()
+        agent._event_callback = captured.append
+        messages = [Message(role="user", content="inspect this repository " * 100)]
+
+        asyncio.run(Runner._call_with_retry(primary, messages, LoopState(), agent, stream=False))
+
+        event = next(e for e in captured if e["type"] == "context.usage")
+        self.assertIs(event["is_main_agent"], True)
+        self.assertGreater(event["context_tokens"], 100)
+        self.assertEqual(event["context_window"], 128000)
+
+    def test_subagent_request_is_explicitly_scoped(self):
+        captured = []
+        primary = _fake_model("primary")
+        primary.tools = []
+        primary.context_window = 128000
+        agent = _make_agent()
+        agent._parent_run_id = "parent"
+        agent._event_callback = captured.append
+
+        asyncio.run(
+            Runner._call_with_retry(
+                primary,
+                [Message(role="user", content="child work")],
+                LoopState(),
+                agent,
+                stream=False,
+            )
+        )
+
+        event = next(e for e in captured if e["type"] == "context.usage")
+        self.assertIs(event["is_main_agent"], False)
+
+
 class TestToolHistorySanitizeRecovery(unittest.TestCase):
     """Cross-provider tool-call/tool-result mismatch (e.g. resuming a session
     recorded under Claude with a non-Claude model) -> strip tool artifacts

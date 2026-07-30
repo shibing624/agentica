@@ -9,6 +9,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -151,7 +152,7 @@ class TestCLIHelpers(unittest.TestCase):
             fake_console,
             tracker,
             context_window=128000,
-            session_total_tokens=64000,
+            context_tokens=64000,
             tool_use_count=2,
             elapsed_seconds=5.32,
         )
@@ -173,7 +174,7 @@ class TestCLIHelpers(unittest.TestCase):
             fake_console,
             tracker,
             context_window=128000,
-            session_total_tokens=700,
+            context_tokens=700,
             tool_use_count=1,
             elapsed_seconds=1.0,
         )
@@ -193,7 +194,7 @@ class TestCLIHelpers(unittest.TestCase):
             fake_console,
             tracker,
             context_window=128000,
-            session_total_tokens=150,
+            context_tokens=150,
             tool_use_count=0,
             elapsed_seconds=0.5,
         )
@@ -201,8 +202,8 @@ class TestCLIHelpers(unittest.TestCase):
         rendered = fake_console.print.call_args[0][0]
         self.assertNotIn("tool", rendered)
 
-    def test_display_token_stats_fallback_without_session_tokens(self):
-        """When session_total_tokens is 0, fall back to cost_tracker totals."""
+    def test_display_token_stats_does_not_treat_turn_usage_as_context(self):
+        """API consumption cannot be used as the current context watermark."""
         from agentica.cli.display import display_token_stats
 
         tracker = CostTracker()
@@ -212,7 +213,8 @@ class TestCLIHelpers(unittest.TestCase):
         display_token_stats(fake_console, tracker, context_window=128000)
 
         rendered = fake_console.print.call_args[0][0]
-        self.assertIn("2.5K / 128K", rendered)
+        self.assertIn("0 / 128K", rendered)
+        self.assertNotIn("2.5K / 128K", rendered)
 
     def test_format_tokens_short(self):
         from agentica.cli.display import _format_tokens_short
@@ -272,7 +274,7 @@ class TestCLIHelpers(unittest.TestCase):
             terminal_width=100,
         )
         text = "".join(v for _, v in frags)
-        self.assertIn("64K/128K", text)
+        self.assertIn("ctx 64K/128K", text)
         self.assertIn("50%", text)
         self.assertIn("$0.05", text)
         self.assertIn("⏱ 12.3s", text)
@@ -590,6 +592,58 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("before retrying", output)
         self.assertIn("/new", output)
 
+    def test_multi_edit_diff_uses_configured_work_dir(self):
+        """Relative write paths must resolve against the file tool's work_dir."""
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "pkg" / "sample.py"
+            target.parent.mkdir()
+            target.write_text("value = 1\n", encoding="utf-8")
+
+            fake = MagicMock()
+            fake.width = 80
+            manager = StreamDisplayManager(fake, work_dir=root)
+            manager._capture_file_before_call(
+                "multi_edit_file",
+                {"file_path": "pkg/sample.py", "edits": []},
+                "call-1",
+            )
+            target.write_text("value = 2\n", encoding="utf-8")
+
+            manager._display_edit_merged(
+                "multi_edit_file",
+                {"file_path": "pkg/sample.py", "edits": []},
+                "Successfully applied 1 edit",
+                False,
+                " (100ms)",
+                "call-1",
+            )
+            rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list)
+            syntax = fake.print.call_args_list[-1].args[0]
+            diff_text = str(syntax.code)
+
+        self.assertIn("Edited 1 file (+1 -1)", rendered)
+        self.assertIn("diff --git a/pkg/sample.py b/pkg/sample.py", diff_text)
+        self.assertNotIn("#1", diff_text)
+
+    def test_tool_result_sequencer_flushes_parallel_results_in_call_order(self):
+        """Out-of-order completions must remain complete, call-ordered blocks."""
+        from agentica.cli.interactive import _ToolResultSequencer
+
+        sequencer = _ToolResultSequencer()
+        sequencer.on_start("call-a", "grep")
+        sequencer.on_start("call-b", "execute")
+        sequencer.on_complete("call-b", {"content": "result-b"})
+        self.assertEqual(list(sequencer.drain()), [])
+        sequencer.on_complete("call-a", {"content": "result-a"})
+
+        self.assertEqual(
+            [item["content"] for item in sequencer.drain()],
+            ["result-a", "result-b"],
+        )
+
     def test_display_tool_result_suppresses_write_todos_footer(self):
         """write_todos drops the result footer on success (call line lists tasks)."""
         from agentica.cli.display import StreamDisplayManager
@@ -778,7 +832,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertEqual(code.count("@@"), 4)
         self.assertNotIn("config.py#", code)
 
-    def test_display_apply_patch_aggregates_multiple_files(self):
+    def test_display_apply_patch_uses_executor_summary_without_rendering_patch(self):
         from agentica.cli.display import StreamDisplayManager
 
         patch_text = """*** Begin Patch
@@ -812,9 +866,12 @@ class TestCLIHelpers(unittest.TestCase):
             call.args[0] for call in fake.print.call_args_list
             if call.args and "Syntax" in type(call.args[0]).__name__
         ]
-        self.assertEqual(len(syntax_args), 1)
-        self.assertIn("*** Update File: app.py", syntax_args[0].code)
-        self.assertIn("*** Add File: test_app.py", syntax_args[0].code)
+        self.assertEqual(syntax_args, [])
+        rendered_text = "\n".join(
+            " ".join(str(arg) for arg in call.args)
+            for call in fake.print.call_args_list
+        )
+        self.assertIn("M app.py\nA test_app.py", rendered_text)
 
     def test_display_write_file_merged_shows_summary_and_diff(self):
         """write_file: one summary line (created/updated + line count) + a diff."""

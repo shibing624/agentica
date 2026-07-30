@@ -16,8 +16,9 @@ import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime
+
 from time import perf_counter
 from typing import Any, ClassVar, Dict, List, Optional, Tuple
 
@@ -201,7 +202,6 @@ class SessionState:
     agent_running: bool = False
     current_agent: Any = None
     image_counter: int = 0
-    session_tokens: int = 0
     paste_counter: int = 0
     attached_images: List = field(default_factory=list)
     pasted_files: List = field(default_factory=list)
@@ -981,8 +981,7 @@ def _refresh_live_status(
     active_baseline: float,
     calls_baseline: int,
 ) -> None:
-    """Write the live status-bar fields (tokens / cost / time) from the
-    current run's cost_tracker.
+    """Write live cost and timing fields from the current run's cost tracker.
 
     Idempotent — uses ``baseline + current-run-delta`` math instead of ``+=``,
     so calling it repeatedly mid-turn (from the spinner loop, ~8x/sec) and
@@ -991,9 +990,9 @@ def _refresh_live_status(
     ``cost_tracker.record(...)`` as each call returns), so reading it at any
     point gives the running totals for the in-flight turn.
 
-    Time fields are always updated (they don't need the cost_tracker). Token
-    / cost fields are only written once at least one API call has landed
-    (``ct.turns > 0``), so the bar doesn't flash 0 before the first response.
+    Context occupancy is updated separately from Runner ``context.usage``
+    events. Cost accounting cannot represent it because a turn may contain
+    retries, tool loops, and auxiliary calls.
     """
     elapsed = perf_counter() - request_start
     tui_state["last_turn_seconds"] = elapsed
@@ -1001,10 +1000,6 @@ def _refresh_live_status(
     run_response = agent.run_response if agent is not None else None
     ct = run_response.cost_tracker if run_response is not None else None
     if ct is not None and ct.turns > 0:
-        model = agent.model if agent is not None else None
-        ctx_win = (model.context_window if model is not None else None) or 128000
-        tui_state["context_tokens"] = ct.context_input_tokens
-        tui_state["context_window"] = ctx_win
         tui_state["cost_usd"] = cost_baseline + ct.total_cost_usd
         tui_state["total_api_calls"] = calls_baseline + ct.turns
 
@@ -1057,21 +1052,28 @@ def _record_main_auto_compaction(event: dict, tui_state: dict) -> None:
     event["compaction_count"] = tui_state["compaction_count"]
 
 
+def _record_main_context_usage(event: dict, tui_state: dict) -> None:
+    """Apply one main-agent request's actual context shape to the status bar."""
+    if event.get("type") != "context.usage" or event.get("is_main_agent") is not True:
+        return
+    tui_state["context_tokens"] = event["context_tokens"]
+    if event["context_window"] > 0:
+        tui_state["context_window"] = event["context_window"]
+
+
 def _seed_context_tokens(agent, tui_state: dict) -> None:
     """Show the context the session already carries before any API call lands.
 
-    The bar mirrors the provider-reported prompt size, which does not exist yet
-    at session start, right after ``/clear``, or on a fresh ``/resume``. Reading
-    0 there is simply wrong: the system prompt and the tool definitions are
-    already occupying the window, and a resumed session brings its whole history
-    back on top of them. Count locally what the next request would carry; the
-    first response then replaces the estimate with the provider's own figure.
+    The system prompt and tool definitions already occupy the window before the
+    first API call, and a resumed session brings its history on top of them.
+    Measure the next main request locally; Runner events replace this estimate
+    with the exact in-flight message shape while a turn is running.
 
     Shares ``measure_context`` with ``/usage`` so the headline number and the
     breakdown behind it can never disagree.
 
-    The count is a local tiktoken estimate and will not match the provider's
-    tokenizer exactly; it is a starting figure, not an accounting record.
+    This is context state, not an accounting record. Provider usage remains the
+    source for footer token consumption and cost.
     """
     if agent is None or agent.model is None:
         return
@@ -1088,10 +1090,10 @@ def _seed_context_tokens(agent, tui_state: dict) -> None:
 def _process_stream_response(
     current_agent,
     final_input: str,
-    session_tokens: list,
     tui_state: dict,
     *,
     images: Optional[list] = None,
+    work_dir: Optional[str] = None,
 ) -> None:
     """Process the agent's streaming response and display it."""
     con = get_console()
@@ -1184,7 +1186,11 @@ def _process_stream_response(
         # for every child tool; end users get the tool-first single-line
         # view by default.
         subagent_verbosity = "verbose" if tui_state.get("debug") else "all"
-        display = StreamDisplayManager(con, subagent_verbosity=subagent_verbosity)
+        display = StreamDisplayManager(
+            con,
+            subagent_verbosity=subagent_verbosity,
+            work_dir=work_dir,
+        )
         # Register live-event callback so the subagent's tool calls and
         # compression events render in real time (instead of being a black
         # box until the parent tool result arrives).
@@ -1193,6 +1199,7 @@ def _process_stream_response(
         def _on_agent_event(event: dict) -> None:
             compact_phase(event)
             _record_main_auto_compaction(event, tui_state)
+            _record_main_context_usage(event, tui_state)
             display.handle_event(event)
 
         current_agent._event_callback = _on_agent_event
@@ -1375,6 +1382,9 @@ def _process_stream_response(
             for m in current_agent.working_memory.messages:
                 if m.role == "user" and m.images:
                     m.images = None
+        # The completed/cancelled answer is now persisted. Re-measure what the
+        # next request will carry so the idle bar includes that newest turn.
+        _seed_context_tokens(current_agent, tui_state)
 
 
 # ==================== TUI setup ====================
@@ -2280,7 +2290,6 @@ def run_interactive(
     pending_queue = PendingQueue()
     # Keep a mutable list wrapper for image_counter (needed by _try_attach_clipboard_image)
     _image_counter_ref = [0]
-    session_tokens = [0]
 
     def _build_ctx() -> CommandContext:
         """Build a CommandContext from current session state."""
@@ -2340,7 +2349,6 @@ def run_interactive(
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
-            session_tokens[0] = 0
             tui_state["cost_usd"] = 0.0
             # A fresh agent (/clear, /model) carries a fresh system prompt and
             # tool set — re-measure rather than dropping the bar to zero.
@@ -2576,9 +2584,9 @@ def run_interactive(
             _process_stream_response(
                 state.current_agent,
                 final_input,
-                session_tokens,
                 tui_state,
                 images=turn_images,
+                work_dir=agent_config.get("work_dir"),
             )
             state.agent_running = False
             tui_state["spinner_text"] = ""

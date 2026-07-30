@@ -776,22 +776,12 @@ class Runner:
           Stage 4 - Auto-compact (costly, LLM summarisation)
           Stage 5 (reactive compact) is handled in _call_with_retry on API error.
 
-        Doubles as the chokepoint that clears the CostTracker context watermark:
-        this is the one place every main-loop LLM call passes through, so the
-        watermark ends up holding the prompt size of the *latest* main call
-        rather than a stale pre-compaction peak. Auxiliary calls (memory
-        extraction, summarisation) never come through here, so they can only
-        raise the watermark if they are bigger — which they are not.
-
         Sets ``loop_state.context_collapsed`` whenever a stage drops messages,
         so the caller knows the ``num_input_messages`` prefix boundary is gone.
         """
         cb = agent._event_callback
         agent_name = agent.name or "Agent"
         is_main_agent = agent._parent_run_id is None
-        if model._cost_tracker is not None:
-            model._cost_tracker.invalidate_context_watermark()
-
         # Stage 1: tool result budget (persist oversized results to disk)
         _sid = agent.run_id or "default"
         _uid = agent.workspace.user_id if agent.workspace is not None else None
@@ -904,10 +894,6 @@ class Runner:
         compacted = await cm.auto_compact(messages, model=model, force=True)
         if compacted:
             logger.info("Reactive compact triggered (prompt_too_long) -- retrying")
-            # The retry happens inside _call_with_retry, bypassing the
-            # _maybe_compress_messages chokepoint that normally clears this.
-            if model._cost_tracker is not None:
-                model._cost_tracker.invalidate_context_watermark()
             cb = agent._event_callback
             if cb is not None:
                 cb(
@@ -922,6 +908,29 @@ class Runner:
                 )
             return True
         return False
+
+    @staticmethod
+    def _emit_context_usage(agent: "Agent", model: "Model", messages: List[Message]) -> None:
+        """Expose the context carried by an actual model request.
+
+        Context occupancy is runtime state, not cost accounting. Emitting it at
+        the request boundary keeps summarisation and other auxiliary LLM calls
+        from polluting the main session's status-bar value.
+        """
+        cb = agent._event_callback
+        if cb is None:
+            return
+        tools = model.tools if isinstance(model.tools, list) else []
+        window = model.context_window if isinstance(model.context_window, int) else 0
+        cb(
+            {
+                "type": "context.usage",
+                "agent_name": agent.name or "Agent",
+                "is_main_agent": agent._parent_run_id is None,
+                "context_tokens": count_tokens(messages, tools, model.id),
+                "context_window": window,
+            }
+        )
 
     @staticmethod
     def _persist_assistant_tool_calls(agent: "Agent") -> None:
@@ -1140,12 +1149,14 @@ class Runner:
                         state.last_used_model_idx = model_idx
                         if is_fallback:
                             _emit_fallback_recovery(current.id, model_idx)
+                        Runner._emit_context_usage(agent, current, messages)
                         return ModelCallResult(
                             response=current.response_stream(messages=messages),
                             used_model=current,
                             used_fallback=is_fallback,
                         )
 
+                    Runner._emit_context_usage(agent, current, messages)
                     resp = await current.response(messages=messages)
 
                     # Non-stream: content_filter is a normal-return finish_reason.
@@ -1201,11 +1212,13 @@ class Runner:
                                 state.last_used_model_idx = model_idx
                                 if is_fallback:
                                     _emit_fallback_recovery(current.id, model_idx)
+                                Runner._emit_context_usage(agent, current, messages)
                                 return ModelCallResult(
                                     response=current.response_stream(messages=messages),
                                     used_model=current,
                                     used_fallback=is_fallback,
                                 )
+                            Runner._emit_context_usage(agent, current, messages)
                             resp = await current.response(messages=messages)
                             state.last_used_model_id = current.id
                             state.last_used_model_idx = model_idx

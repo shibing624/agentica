@@ -70,7 +70,6 @@ from agentica.skills import (
     remove_skill,
 )
 from agentica.skills.skill_registry import reset_skill_registry
-from agentica.utils.tokens import count_tokens
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
 
@@ -2450,47 +2449,6 @@ def _model_list_overview(ctx: CommandContext) -> None:
     con.print("To add or edit a profile, run [bold]agentica setup[/bold] outside the session.", style="dim")
 
 
-def _history_tokens(agent) -> int:
-    """Locally measured size of the history the next request will carry.
-
-    Reads the same `runs`-derived list the prompt builder uses, so it tracks
-    compaction. Used only as a delta against the provider-reported figure —
-    never as an absolute context size, since it covers neither the system
-    prompt nor the tool schemas.
-    """
-    history = agent.working_memory.get_messages_from_last_n_runs(last_n=agent.num_history_turns)
-    if not history:
-        return 0
-    model_id = agent.model.id if agent.model is not None else "gpt-4o"
-    return count_tokens(history, None, model_id, None)
-
-
-def _apply_context_shrink(ctx: CommandContext, before_tokens: int, after_tokens: int) -> None:
-    """Lower the status-bar context figure by however much compaction removed.
-
-    The bar normally shows the provider-reported prompt size of the last API
-    call — ground truth, but it only refreshes on the next run, so without this
-    the number would sit stale until then. Subtracting a locally measured delta
-    keeps the fixed overhead (system prompt, tool schemas) and the tokenizer
-    bias out of the arithmetic, since both sides of the subtraction carry them.
-
-    The result is an upper bound, not an estimate of the next prompt: the
-    per-call stages (tool-result budgeting, micro-compact) shrink the real
-    request at send time by an amount no `runs`-based measurement can see. Erring
-    high is the safe direction for a headroom indicator, and the next run
-    replaces it with the provider's own figure. Do not "improve" this into an
-    absolute local count — that reads far below the truth.
-    """
-    ts = ctx.tui_state
-    if not ts:
-        return
-    removed = before_tokens - after_tokens
-    if removed <= 0:
-        return
-    current = ts.get("context_tokens") or 0
-    ts["context_tokens"] = max(after_tokens, current - removed)
-
-
 def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
     agent = ctx.current_agent
@@ -2506,8 +2464,6 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
 
     custom_instructions = cmd_args.strip() if cmd_args else None
     cm = agent.tool_config.compression_manager if agent.tool_config else None
-    tokens_before = _history_tokens(agent)
-
     if cm is not None:
         con.print(f"[dim]Compacting {msg_count} messages with LLM summary...[/dim]")
         model = agent.model
@@ -2532,7 +2488,10 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"[dim]Compacting {msg_count} messages (rule-based)...[/dim]")
         _rule_based_compact(agent, messages, msg_count)
 
-    _apply_context_shrink(ctx, tokens_before, _history_tokens(agent))
+    if ctx.tui_state is not None:
+        breakdown = _run_async_safe(measure_context(agent))
+        ctx.tui_state["context_tokens"] = breakdown.total
+        ctx.tui_state["context_window"] = breakdown.window
     con.print("[dim]Workspace memory preserved.[/dim]")
 
 
@@ -2600,10 +2559,9 @@ def _cmd_reload_skills(ctx: CommandContext, cmd_args: str = ""):
 def _render_context_breakdown(con, agent) -> None:
     """Print what is currently occupying the context window, by origin.
 
-    The provider only ever reports one number for the whole prompt, so the
-    split is measured locally and labelled as an estimate. The live figure from
-    the last request is printed next to it: when the two drift apart, it is the
-    local tokenizer being approximate, not the context having changed.
+    The split is measured locally from the same inputs used to build the next
+    main-agent request. Provider usage is deliberately absent: it describes API
+    consumption for a completed call, not the current session context state.
     """
     try:
         breakdown = _run_async_safe(measure_context(agent))
@@ -2637,13 +2595,6 @@ def _render_context_breakdown(con, agent) -> None:
         )
     con.print(f"  {sep}")
 
-    tracker = agent.run_response.cost_tracker if agent.run_response else None
-    live = tracker.context_input_tokens if tracker else 0
-    if live:
-        con.print(
-            f"  [dim]Last request measured {_fmt_tokens(live)} by the provider "
-            f"— the split above is a local estimate.[/dim]"
-        )
     con.print()
 
 
@@ -2656,7 +2607,7 @@ def _fmt_tokens(n: int) -> str:
 
 
 def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
-    """Show session token usage, cost, and what is filling the context window."""
+    """Show latest-turn API usage and current session context occupancy."""
     con = get_console()
     agent = ctx.current_agent
     tracker = agent.run_response.cost_tracker if agent else None
@@ -2692,12 +2643,11 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
         m, _ = divmod(rem, 60)
         duration_str = f"{h}h {m:02d}m"
 
-    session_cost = ts.get("cost_usd", 0.0) if ts else tracker.total_cost_usd
-    cost_str = f"~${session_cost:.4f}"
+    session_cost = ts.get("cost_usd", tracker.total_cost_usd)
 
     sep = "─" * 42
     con.print()
-    con.print("  [bold cyan]Session Token Usage[/bold cyan]")
+    con.print("  [bold cyan]Latest Turn API Usage[/bold cyan]")
     con.print(f"  {sep}")
     con.print(f"  {'Model:':<30} {model_name}")
     con.print(f"  {'Input tokens:':<30} {tracker.total_input_tokens:>12,}")
@@ -2708,9 +2658,11 @@ def _cmd_usage(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"  {'Output tokens:':<30} {tracker.total_output_tokens:>12,}")
     con.print(f"  {'Prompt tokens (total):':<30} {prompt_total:>12,}")
     con.print(f"  {'Total tokens:':<30} {total_all:>12,}")
-    con.print(f"  {'API calls:':<30} {ts.get('total_api_calls', tracker.turns):>12}")
-    con.print(f"  {'Session duration:':<30} {duration_str:>12}")
-    con.print(f"  {'Total cost:':<30} {cost_str}")
+    con.print(f"  {'API calls this turn:':<30} {tracker.turns:>12}")
+    con.print(f"  {'Turn cost:':<30} ~${tracker.total_cost_usd:.4f}")
+    con.print(f"  {'Session API calls:':<30} {ts.get('total_api_calls', tracker.turns):>12}")
+    con.print(f"  {'Session active time:':<30} {duration_str:>12}")
+    con.print(f"  {'Session cost:':<30} ~${session_cost:.4f}")
     con.print(f"  {sep}")
     con.print(f"  Messages:         {msg_count}")
     _render_context_breakdown(con, agent)

@@ -6,10 +6,10 @@
 One measurement path shared by the status bar and ``/usage`` so the headline
 number and the breakdown can never disagree.
 
-Everything here is a LOCAL tiktoken estimate. The provider tokenises
-differently, so the authoritative figure is still the prompt size it reports
-back (``CostTracker.context_input_tokens``); this exists to answer "what is
-taking up the room", which the provider never tells us.
+Everything here is a LOCAL tiktoken estimate of the context the next main-agent
+request will carry. Provider usage remains authoritative for billing, but it is
+not a session-context state model: one run can contain retries, tool loops, and
+auxiliary LLM calls whose prompt tokens must stay separate from this figure.
 """
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional

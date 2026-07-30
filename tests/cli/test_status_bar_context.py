@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, patch
 from agentica.cli.interactive import (
     _make_compact_phase_handler,
     _record_main_auto_compaction,
+    _record_main_context_usage,
     _render_spinner_text,
     _seed_context_tokens,
 )
@@ -115,6 +116,44 @@ class TestStaticContextSeed(unittest.TestCase):
                           side_effect=OSError("git exploded")):
             _seed_context_tokens(agent, tui_state)
         self.assertEqual(tui_state["context_tokens"], 4321)
+
+
+class TestLiveContextUsage(unittest.TestCase):
+    """Only main-agent request context may update the session status bar."""
+
+    def test_main_request_replaces_context_and_window(self):
+        state = {"context_tokens": 120000, "context_window": 128000}
+
+        _record_main_context_usage(
+            {
+                "type": "context.usage",
+                "is_main_agent": True,
+                "context_tokens": 18000,
+                "context_window": 200000,
+            },
+            state,
+        )
+
+        self.assertEqual(state["context_tokens"], 18000)
+        self.assertEqual(state["context_window"], 200000)
+
+    def test_subagent_and_unrelated_events_do_not_pollute_main_context(self):
+        state = {"context_tokens": 42000, "context_window": 128000}
+        _record_main_context_usage(
+            {
+                "type": "context.usage",
+                "is_main_agent": False,
+                "context_tokens": 900,
+                "context_window": 1000,
+            },
+            state,
+        )
+        _record_main_context_usage(
+            {"type": "compact.auto", "is_main_agent": True},
+            state,
+        )
+
+        self.assertEqual(state, {"context_tokens": 42000, "context_window": 128000})
 
 
 class TestCompactingSpinner(unittest.TestCase):

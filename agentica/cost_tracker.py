@@ -364,7 +364,6 @@ class CostTracker:
         total_cost_usd:      Accumulated USD cost across all API calls.
         total_input_tokens:  Accumulated input tokens.
         total_output_tokens: Accumulated output tokens.
-        context_input_tokens: Largest prompt seen this run — see `record()`.
         turns:               Number of API calls recorded.
         has_unknown_model:   True if any model was not in MODEL_PRICING.
         model_usage:         Per-model breakdown (keyed by normalised model id).
@@ -373,14 +372,9 @@ class CostTracker:
     total_cost_usd: float = 0.0
     total_input_tokens: int = 0
     total_output_tokens: int = 0
-    context_input_tokens: int = 0
     turns: int = 0
     has_unknown_model: bool = False
     model_usage: Dict[str, ModelUsageStat] = field(default_factory=dict)
-
-    # Set by invalidate_context_watermark(): the next recorded prompt replaces
-    # the watermark rather than maxing with it.
-    _context_watermark_stale: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -396,24 +390,15 @@ class CostTracker:
     ) -> float:
         """Record one API call and return its cost in USD.
 
-        `context_input_tokens` tracks the *largest* prompt of the run rather
-        than the most recent one. A run interleaves the user-facing conversation
-        with much smaller auxiliary calls (memory extraction, summarisation,
-        correction judging) that share this tracker whenever the auxiliary model
-        falls back to the main model; taking the maximum keeps those from
-        reporting a near-empty context. The main loop calls
-        `invalidate_context_watermark()` before each of its own requests, so the
-        figure tracks the latest main prompt and can fall after compaction.
-
         The three token counts must be DISJOINT: `input_tokens` is the freshly
         processed prompt only, with any cached prefix reported separately. Both
-        the cost formula and the context watermark add all three, so passing an
+        the cost formula and `total_prompt_tokens` add all three, so passing an
         OpenAI-style `prompt_tokens` (which already contains `cached_tokens`)
         would bill and display the cached prefix twice. Adapters normalise via
         `agentica.model.usage.split_prompt_usage()` before calling this.
 
-        Cached tokens do count toward the prompt: a cache hit is cheaper, not
-        absent from the context window.
+        Cached tokens still count toward total prompt usage: a cache hit is
+        cheaper, not absent from the request.
         """
         normalised = self._normalise(model_id)
         pricing = self._lookup_pricing(normalised)
@@ -437,13 +422,6 @@ class CostTracker:
         self.total_input_tokens  += input_tokens
         self.total_output_tokens += output_tokens
         self.turns               += 1
-
-        prompt_tokens = input_tokens + cache_read_tokens + cache_write_tokens
-        if self._context_watermark_stale:
-            self.context_input_tokens = prompt_tokens
-            self._context_watermark_stale = False
-        else:
-            self.context_input_tokens = max(self.context_input_tokens, prompt_tokens)
 
         return cost
 
@@ -471,22 +449,6 @@ class CostTracker:
             + self.total_cache_read_tokens
             + self.total_cache_write_tokens
         )
-
-    def invalidate_context_watermark(self) -> None:
-        """Let the next recorded prompt set the watermark instead of raising it.
-
-        The watermark is a maximum so that small auxiliary calls sharing this
-        tracker can't report a near-empty context. But the real prompt shrinks
-        whenever the context is compacted, so the peak has to be allowed to fall
-        — hence this escape hatch, called before every main-loop call.
-
-        It deliberately does NOT zero the value. The main loop calls this before
-        an LLM request that can take a minute on a large prompt, and the status
-        bar refreshes on a timer throughout; zeroing would make it read 0 for
-        that whole window. The previous figure stays up as the best available
-        estimate until the new one lands.
-        """
-        self._context_watermark_stale = True
 
     def summary(self) -> str:
         """Return a human-readable cost summary."""

@@ -8,16 +8,16 @@ next request as large as before, so these tests assert on the ``runs``-derived
 list rather than on ``messages``.
 """
 import os
+import asyncio
 import unittest
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 from agentica.cli.commands import (
     CommandContext,
-    _apply_context_shrink,
     _cmd_compact,
-    _history_tokens,
 )
+from agentica.cli.context_usage import measure_context
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
@@ -40,7 +40,10 @@ def _fat_run(turn: int) -> AgentRun:
 def _build_agent(num_runs: int = 5):
     from agentica import Agent
 
-    agent = Agent(model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"))
+    agent = Agent(
+        model=OpenAIChat(id="gpt-4o", api_key="fake_openai_key"),
+        add_history_to_context=True,
+    )
     wm = WorkingMemory()
     for i in range(num_runs):
         run = _fat_run(i)
@@ -99,11 +102,11 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
 
     def test_rule_based_compact_shrinks_runs_history(self):
         agent = _build_agent(num_runs=5)
-        before = _history_tokens(agent)
+        before = asyncio.run(measure_context(agent)).total
 
         self._run_compact(agent)
 
-        self.assertLess(_history_tokens(agent), before)
+        self.assertLess(asyncio.run(measure_context(agent)).total, before)
 
     def test_rule_based_compact_lowers_status_bar_context(self):
         agent = _build_agent(num_runs=5)
@@ -117,35 +120,6 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         agent.working_memory = WorkingMemory()
         ctx = self._run_compact(agent)
         self.assertEqual(ctx.tui_state["context_tokens"], 120000)
-
-
-class TestApplyContextShrink(unittest.TestCase):
-    """The status bar drops by the measured delta, keeping fixed overhead."""
-
-    def _ctx(self, tokens):
-        return CommandContext(agent_config={}, current_agent=None,
-                              tui_state={"context_tokens": tokens})
-
-    def test_subtracts_removed_tokens_not_absolute_estimate(self):
-        """127K with 30K of history removed lands at 97K, not at the 5K estimate."""
-        ctx = self._ctx(127000)
-        _apply_context_shrink(ctx, before_tokens=35000, after_tokens=5000)
-        self.assertEqual(ctx.tui_state["context_tokens"], 97000)
-
-    def test_never_falls_below_remaining_history(self):
-        ctx = self._ctx(6000)
-        _apply_context_shrink(ctx, before_tokens=50000, after_tokens=5000)
-        self.assertEqual(ctx.tui_state["context_tokens"], 5000)
-
-    def test_no_change_when_nothing_was_removed(self):
-        ctx = self._ctx(127000)
-        _apply_context_shrink(ctx, before_tokens=5000, after_tokens=5000)
-        self.assertEqual(ctx.tui_state["context_tokens"], 127000)
-
-    def test_tolerates_missing_tui_state(self):
-        ctx = CommandContext(agent_config={}, current_agent=None, tui_state=None)
-        _apply_context_shrink(ctx, before_tokens=50000, after_tokens=5000)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -716,8 +716,10 @@ class StreamDisplayManager:
     #               at ``subagent.end`` is shown.
     SUBAGENT_VERBOSITIES = ("all", "verbose", "off")
 
-    def __init__(self, console_instance, subagent_verbosity: str = "all"):
+    def __init__(self, console_instance, subagent_verbosity: str = "all",
+                 work_dir: Optional[Path] = None):
         self.console = console_instance
+        self._work_dir = (work_dir or Path.cwd()).expanduser().resolve()
         self._raw_console = console_instance
         # Post-redesign: assistant/thinking output is emitted as plain text
         # (no left-side gutter bar). Only the user query keeps a ``▎`` prefix,
@@ -789,7 +791,7 @@ class StreamDisplayManager:
         # File content captured at write-tool START time (before mutation) so
         # completion can render one real old→new file diff. Keyed by tool call
         # ID when available, otherwise by the raw file_path argument.
-        self._write_old: Dict[str, str] = {}
+        self._write_old: Dict[str, Optional[str]] = {}
         # tool_call_id of the tool block currently at the bottom of the
         # transcript — i.e. the call line (or merged block) printed last. A
         # ``⎿`` result body only reads as "belongs to the line above" while
@@ -905,38 +907,42 @@ class StreamDisplayManager:
         # Count every tool call up front, before any deferred-print early
         # return, so the turn summary's "N tools" matches what the user saw.
         self.tool_count += 1
-        if tool_name in self._DEFERRED_TOOLS:
+        if tool_name in self._DEFERRED_TOOLS or tool_name == "apply_patch":
             return
         if tool_name in self._WRITE_DIFF_TOOLS:
-            self._stash_write_file_old(tool_args, tool_call_id)
+            self._capture_file_before_call(tool_name, tool_args, tool_call_id)
             return
         self.start_tool_section()
         _display_tool_impl(self._assistant_console, tool_name, tool_args, self.tool_count)
         self._open_block_id = tool_call_id
 
-    def _stash_write_file_old(self, tool_args: dict,
-                              tool_call_id: Optional[str] = None) -> None:
-        """Best-effort snapshot of a write tool's target before mutation.
+    def _resolve_diff_path(self, raw_path: str) -> Path:
+        """Resolve display-only paths against the file tool's work directory."""
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = self._work_dir / path
+        return path
 
-        Resolves cwd-relative paths for display-only diffing. Missing files are
-        recorded as empty so ``write_file`` can render an all-additions diff;
-        unreadable or large files are left without a snapshot.
-        """
+    @staticmethod
+    def _read_diff_path(path: Path) -> Optional[str]:
+        """Read a small text file for display-only diffing."""
+        try:
+            if path.is_file() and path.stat().st_size < 512_000:
+                return path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
+        return None
+
+    def _capture_file_before_call(self, tool_name: str, tool_args: dict,
+                                  tool_call_id: Optional[str] = None) -> None:
+        """Capture a write target before execution for a real result diff."""
         fp = tool_args.get("file_path")
         if not fp:
             return
-        try:
-            p = Path(fp).expanduser()
-            if not p.is_absolute():
-                p = Path.cwd() / p
-            key = tool_call_id or fp
-            if not p.exists():
-                self._write_old[key] = ""
-            elif p.is_file() and p.stat().st_size < 512_000:
-                self._write_old[key] = p.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            pass
-    
+        key = tool_call_id or str(fp)
+        path = self._resolve_diff_path(str(fp))
+        self._write_old[key] = self._read_diff_path(path) if path.exists() else ""
+
     @staticmethod
     def _fmt_elapsed(elapsed: Optional[float]) -> str:
         """Format elapsed seconds with ms-precision under 1s.
@@ -1022,10 +1028,6 @@ class StreamDisplayManager:
                 line += f" [dim]{elapsed_str}[/dim]"
         self._assistant_console.print(line)
 
-    # Max diff lines shown inline beneath an edit_file/multi_edit_file summary.
-    # Write tools now render their FULL diff inline (no truncation), so this is
-    # unused; kept only as a named constant for clarity of intent.
-
     def _display_edit_merged(self, tool_name: str, tool_args: dict,
                              result_content: str, is_error: bool,
                              elapsed_str: str,
@@ -1036,7 +1038,16 @@ class StreamDisplayManager:
         by one complete real-file diff. Errors surface a truncated message.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        filename = _extract_filename(tool_args.get("file_path", ""))
+        raw_path = str(tool_args.get("file_path", ""))
+        filename = _extract_filename(raw_path)
+        diff_path = Path(raw_path).expanduser()
+        if diff_path.is_absolute():
+            try:
+                diff_name = diff_path.resolve().relative_to(self._work_dir).as_posix()
+            except ValueError:
+                diff_name = filename
+        else:
+            diff_name = diff_path.as_posix()
         params = filename
 
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
@@ -1054,7 +1065,7 @@ class StreamDisplayManager:
             return
 
         new_content = self._read_diff_target(tool_args)
-        diff_text = self._build_file_diff(old_content, new_content, filename)
+        diff_text = self._build_file_diff(old_content, new_content, diff_name)
         added, removed = self._diff_line_counts(diff_text)
         line += f" [dim]- Edited 1 file (+{added} -{removed}){elapsed_str}[/dim]"
         self._assistant_console.print(line)
@@ -1063,56 +1074,32 @@ class StreamDisplayManager:
         self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
                                   line_numbers=False))
 
-    def _display_patch_merged(self, tool_args: dict, result_content: str,
-                              is_error: bool, elapsed_str: str) -> None:
-        """Render one successful multi-file patch as a single diff block."""
+    def _display_patch_summary(self, result_content: str, is_error: bool,
+                               elapsed_str: str) -> None:
+        """Render the executor's apply_patch summary without parsing the patch."""
         icon = TOOL_ICONS.get("apply_patch", TOOL_ICONS["default"])
-        params = format_tool_display("apply_patch", tool_args)
         line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
-        if params:
-            line += f" [dim]{params}[/dim]"
+        content = str(result_content).strip()
         if is_error:
-            err = str(result_content).replace("\n", " ").strip()
-            if len(err) > 80:
-                err = err[:77] + "..."
-                remember_truncated("Tool error · apply_patch", str(result_content))
-            self._assistant_console.print(line + f" [red]- error: {err}{elapsed_str}[/red]")
+            error = content.replace("\n", " ")
+            if len(error) > 80:
+                error = error[:77] + "..."
+                remember_truncated("Tool error · apply_patch", content)
+            self._assistant_console.print(line + f" [red]- error: {error}{elapsed_str}[/red]")
             return
 
-        summary = re.search(
-            r"applied patch to (\d+) files? \(\+(\d+) -(\d+)\)",
-            str(result_content),
-            re.IGNORECASE,
-        )
-        if summary is None:
-            self._assistant_console.print(line + f" [dim]- applied{elapsed_str}[/dim]")
-            return
-        file_count, added, removed = summary.groups()
-        noun = "file" if file_count == "1" else "files"
-        self._assistant_console.print(
-            line + f" [dim]- Edited {file_count} {noun} (+{added} -{removed}){elapsed_str}[/dim]"
-        )
-        patch = str(tool_args.get("patch", "")).strip()
-        if patch:
-            self._assistant_console.print(
-                Syntax(patch + "\n", "diff", theme="monokai", line_numbers=False)
-            )
+        summary, _, paths = content.partition("\n")
+        summary = re.sub(r"^Successfully applied patch to ", "Edited ", summary)
+        self._assistant_console.print(line + f" [dim]- {summary}{elapsed_str}[/dim]")
+        if paths:
+            self._assistant_console.print(paths, style="dim", highlight=False, markup=False)
 
-    @staticmethod
-    def _read_diff_target(tool_args: dict) -> Optional[str]:
+    def _read_diff_target(self, tool_args: dict) -> Optional[str]:
         """Read a write tool's post-call file content for display-only diffing."""
         fp = tool_args.get("file_path")
         if not fp:
             return None
-        try:
-            path = Path(fp).expanduser()
-            if not path.is_absolute():
-                path = Path.cwd() / path
-            if path.is_file() and path.stat().st_size < 512_000:
-                return path.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            pass
-        return None
+        return self._read_diff_path(self._resolve_diff_path(str(fp)))
 
     @staticmethod
     def _build_file_diff(old_content: Optional[str], new_content: Optional[str],
@@ -1151,7 +1138,16 @@ class StreamDisplayManager:
         old side is empty. Successful diffs are never folded.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        filename = _extract_filename(tool_args.get("file_path", ""))
+        raw_path = str(tool_args.get("file_path", ""))
+        filename = _extract_filename(raw_path)
+        diff_path = Path(raw_path).expanduser()
+        if diff_path.is_absolute():
+            try:
+                diff_name = diff_path.resolve().relative_to(self._work_dir).as_posix()
+            except ValueError:
+                diff_name = filename
+        else:
+            diff_name = diff_path.as_posix()
         new_content = str(tool_args.get("content", ""))
         result_str = str(result_content)
         key = tool_call_id or tool_args.get("file_path", "")
@@ -1169,7 +1165,7 @@ class StreamDisplayManager:
             self._assistant_console.print(line)
             return
 
-        diff_text = self._build_file_diff(old_content, new_content, filename)
+        diff_text = self._build_file_diff(old_content, new_content, diff_name)
         n_lines = len(new_content.splitlines())
         verb = "created" if "Created" in result_str else "updated"
         unit = "line" if n_lines == 1 else "lines"
@@ -1187,14 +1183,10 @@ class StreamDisplayManager:
     # ``  🔎 grep 'pat' in path - 5 lines (13ms)``. No separate result footer.
     _DEFERRED_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "web_search", "fetch_url"})
 
-    # Write tools that edit/create files: call line is deferred to completion
-    # and rendered as one summary line + the FULL unified diff (CC/opencode-style)
-    # so the user always sees the actual code change, not an absolute path or
-    # noise. write_file diffs the pre-write content (stashed at call start)
-    # against the new content arg.
-    _WRITE_DIFF_TOOLS = frozenset({
-        "edit_file", "multi_edit_file", "apply_patch", "write_file",
-    })
+    # Single-file write tools: call line is deferred to completion and rendered
+    # as one summary line plus the real pre/post unified diff. apply_patch is
+    # handled separately from the executor's multi-file result summary.
+    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file", "write_file"})
 
     # Tools whose success result is pure noise on success. The call line itself
     # already tells the user what happened; errors are still surfaced.
@@ -1260,13 +1252,14 @@ class StreamDisplayManager:
             )
             return
 
+        if tool_name == "apply_patch":
+            self.start_tool_section()
+            self._display_patch_summary(result_content, is_error, elapsed_str)
+            return
+
         if tool_name in self._WRITE_DIFF_TOOLS:
             self.start_tool_section()
-            if tool_name == "apply_patch":
-                self._display_patch_merged(
-                    tool_args or {}, result_content, is_error, elapsed_str
-                )
-            elif tool_name == "write_file":
+            if tool_name == "write_file":
                 self._display_write_merged(
                     tool_name, tool_args or {}, result_content, is_error,
                     elapsed_str, tool_call_id
@@ -1747,10 +1740,10 @@ class StreamDisplayManager:
                          (avoid noise for free/local models).
         * ``N tools``  — Tool calls executed this turn. Omitted when 0.
 
-        The design principle: the closing separator carries **per-turn
-        deltas** (immutable historical records that live in scrollback),
-        while the status bar carries **session totals** (live, current-only).
-        Zero overlap between the two.
+        The design principle: the closing separator carries **per-turn API
+        consumption** (immutable history), while the status bar carries the
+        **current session context occupancy** plus session cost/time. Prompt
+        tokens resent within a tool loop belong only to the former.
         """
         parts: list[str] = []
         if self._summary_turn_no is not None:
@@ -1795,9 +1788,9 @@ class StreamDisplayManager:
                 no meaningful ordinal.
             delta_tokens: Tokens consumed by this turn — every prompt token
                 (cached ones included) plus output, summed over the turn's API
-                calls. A tool loop sends the prompt once per call, so this runs
-                well above the context size shown in the status bar; that one is
-                the largest single prompt, not the total.
+                calls. A tool loop sends the prompt once per call, so this can
+                run well above the context size shown in the status bar; that
+                one is the context the next main request will carry.
                 Rendered as ``+Tk`` (``+3.2K`` when ≥ 1000, ``+42`` else).
                 Omitted when ``None`` or ``<= 0``.
             delta_cost_usd: USD cost incurred by this turn. Rendered as
@@ -1937,7 +1930,7 @@ def display_token_stats(
     cost_tracker,
     *,
     context_window: int = 128000,
-    session_total_tokens: int = 0,
+    context_tokens: int = 0,
     tool_use_count: int = 0,
     elapsed_seconds: float = 0.0,
 ) -> None:
@@ -1950,20 +1943,15 @@ def display_token_stats(
     if cost_tracker is None:
         return
 
-    if session_total_tokens <= 0:
-        session_total_tokens = (
-            cost_tracker.total_input_tokens + cost_tracker.total_output_tokens
-        )
-
     used_pct = (
-        session_total_tokens / context_window * 100 if context_window > 0 else 0.0
+        context_tokens / context_window * 100 if context_window > 0 else 0.0
     )
     pct_style = context_pct_style(used_pct)
     bar = build_context_bar(used_pct)
 
     parts = [
         f"[{pct_style}]ctx {used_pct:.1f}%[/{pct_style}] "
-        f"({_format_tokens_short(session_total_tokens)} / "
+        f"({_format_tokens_short(context_tokens)} / "
         f"{_format_tokens_short(context_window)}) "
         f"[{pct_style}]{bar}[/{pct_style}]"
     ]
@@ -2048,8 +2036,8 @@ def build_status_bar_fragments(
 
     Adapts to terminal width:
       <52 cols:  ▸ model · ⏱12.3s
-      <76 cols:  ▸ model · 45% · $0.02 · ⏱12.3s
-      >=76 cols: ▸ model │ 64K/128K │ [████░░] 45% │ $0.02 │ ⏱12.3s Σ1m45s
+      <76 cols:  ▸ model · ctx 45% · $0.02 · ⏱12.3s
+      >=76 cols: ▸ model │ ctx 64K/128K │ [████░░] 45% │ $0.02 │ ⏱12.3s Σ1m45s
 
     The model label is rendered as ``provider/model`` when a provider is
     supplied (e.g. ``openai/gpt-4o``); a non-default profile name is shown
@@ -2100,7 +2088,7 @@ def build_status_bar_fragments(
             ("class:sb", " ▸ "),
             ("class:sb-strong", label),
             sep,
-            (fg, pct_label),
+            (fg, f"ctx {pct_label}"),
             sep,
             ("class:sb-dim", cost_str),
         ]
@@ -2114,7 +2102,7 @@ def build_status_bar_fragments(
             ("class:sb", " ▸ "),
             ("class:sb-strong", label),
             ("class:sb-dim", " │ "),
-            ("class:sb", f"{ctx_used}/{ctx_total}"),
+            ("class:sb", f"ctx {ctx_used}/{ctx_total}"),
             ("class:sb-dim", " │ "),
             (fg, _ctx_bar_ansi(pct)),
             ("class:sb-dim", " "),

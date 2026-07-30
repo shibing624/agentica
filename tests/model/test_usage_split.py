@@ -53,7 +53,7 @@ class TestSplitPromptUsage(unittest.TestCase):
 class TestNoDoubleCounting(unittest.TestCase):
     """The end-to-end effect the split exists to prevent."""
 
-    def test_openai_prompt_is_neither_double_charged_nor_double_sized(self):
+    def test_openai_prompt_is_not_double_charged(self):
         prompt_tokens = 10_000
         details = {"cached_tokens": 8_000}
 
@@ -61,13 +61,12 @@ class TestNoDoubleCounting(unittest.TestCase):
         fresh, read, write = split_prompt_usage(prompt_tokens, details)
         ct.record("gpt-4o", input_tokens=fresh, output_tokens=100,
                   cache_read_tokens=read, cache_write_tokens=write)
-        self.assertEqual(ct.context_input_tokens, prompt_tokens)
         self.assertEqual(ct.total_prompt_tokens, prompt_tokens)
 
         naive = CostTracker()
         naive.record("gpt-4o", input_tokens=prompt_tokens, output_tokens=100,
                      cache_read_tokens=8_000)
-        self.assertEqual(naive.context_input_tokens, 18_000)
+        self.assertEqual(naive.total_prompt_tokens, 18_000)
         self.assertLess(ct.total_cost_usd, naive.total_cost_usd,
                         "the naive path bills the cached prefix twice")
 
@@ -78,7 +77,7 @@ class TestNoDoubleCounting(unittest.TestCase):
         )
         ct.record("claude-sonnet-4", input_tokens=fresh, output_tokens=50,
                   cache_read_tokens=read, cache_write_tokens=write)
-        self.assertEqual(ct.context_input_tokens, 50_420)
+        self.assertEqual(ct.total_prompt_tokens, 50_420)
 
 
 if __name__ == "__main__":
