@@ -849,6 +849,30 @@ class TestContextUsageEvent(unittest.TestCase):
         event = next(e for e in captured if e["type"] == "context.usage")
         self.assertIs(event["is_main_agent"], False)
 
+    def test_callback_failure_does_not_abort_model_request(self):
+        primary = _fake_model("primary")
+        primary.tools = []
+        primary.context_window = 128000
+        agent = _make_agent()
+
+        def fail_callback(_event):
+            raise RuntimeError("event bus is on fire")
+
+        agent._event_callback = fail_callback
+        with self.assertLogs("agentica", level="WARNING") as logs:
+            result = asyncio.run(
+                Runner._call_with_retry(
+                    primary,
+                    [Message(role="user", content="still answer")],
+                    LoopState(),
+                    agent,
+                    stream=False,
+                )
+            )
+
+        self.assertEqual(result.content, "ok")
+        self.assertTrue(any("context.usage" in line for line in logs.output))
+
 
 class TestToolHistorySanitizeRecovery(unittest.TestCase):
     """Cross-provider tool-call/tool-result mismatch (e.g. resuming a session

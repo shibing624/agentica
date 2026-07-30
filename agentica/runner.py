@@ -922,15 +922,18 @@ class Runner:
             return
         tools = model.tools if isinstance(model.tools, list) else []
         window = model.context_window if isinstance(model.context_window, int) else 0
-        cb(
-            {
-                "type": "context.usage",
-                "agent_name": agent.name or "Agent",
-                "is_main_agent": agent._parent_run_id is None,
-                "context_tokens": count_tokens(messages, tools, model.id),
-                "context_window": window,
-            }
-        )
+        try:
+            cb(
+                {
+                    "type": "context.usage",
+                    "agent_name": agent.name or "Agent",
+                    "is_main_agent": agent._parent_run_id is None,
+                    "context_tokens": count_tokens(messages, tools, model.id),
+                    "context_window": window,
+                }
+            )
+        except Exception as e:
+            logger.warning(f"event callback failed for context.usage: {e}")
 
     @staticmethod
     def _persist_assistant_tool_calls(agent: "Agent") -> None:

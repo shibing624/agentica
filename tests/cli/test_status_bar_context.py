@@ -39,8 +39,6 @@ class TestStaticContextSeed(unittest.TestCase):
 
     def test_seed_counts_tool_definitions_on_top_of_the_system_prompt(self):
         """Tool schemas are the larger half of the prefix; missing them under-reports."""
-        from agentica.utils.tokens import count_tokens
-
         def sample_tool(path: str) -> str:
             """Read a file at the given path and return its contents."""
             return path

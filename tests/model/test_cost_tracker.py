@@ -16,7 +16,6 @@ from agentica.cost_tracker import (
     get_model_context_window,
     get_model_supports_images,
     ModelUsageStat,
-    MODEL_PRICING,
 )
 
 
