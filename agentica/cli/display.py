@@ -781,9 +781,9 @@ class StreamDisplayManager:
         self._subagent_index: "OrderedDict[str, int]" = OrderedDict()
         self._subagent_last_tool: Dict[str, tuple] = {}
         self._next_subagent_slot: int = 0
-        # write_file: old file content captured at tool-call START time (before
-        # the overwrite) so the result display can show a real old→new diff.
-        # Keyed by the raw file_path arg; popped when the result is rendered.
+        # File content captured at write-tool START time (before mutation) so
+        # completion can render one real old→new file diff. Keyed by tool call
+        # ID when available, otherwise by the raw file_path argument.
         self._write_old: Dict[str, str] = {}
         # tool_call_id of the tool block currently at the bottom of the
         # transcript — i.e. the call line (or merged block) printed last. A
@@ -903,23 +903,19 @@ class StreamDisplayManager:
         if tool_name in self._DEFERRED_TOOLS:
             return
         if tool_name in self._WRITE_DIFF_TOOLS:
-            # write_file: capture the on-disk content BEFORE the overwrite so
-            # the result display can render a real old→new unified diff. edit
-            # tools don't need this (their old/new come from the args).
-            if tool_name == "write_file":
-                self._stash_write_file_old(tool_args)
+            self._stash_write_file_old(tool_args, tool_call_id)
             return
         self.start_tool_section()
         _display_tool_impl(self._assistant_console, tool_name, tool_args, self.tool_count)
         self._open_block_id = tool_call_id
 
-    def _stash_write_file_old(self, tool_args: dict) -> None:
-        """Best-effort read of a write_file target's current content (pre-write).
+    def _stash_write_file_old(self, tool_args: dict,
+                              tool_call_id: Optional[str] = None) -> None:
+        """Best-effort snapshot of a write tool's target before mutation.
 
-        Resolves the path the same way the user would (cwd-relative; the tool
-        itself resolves against its base dir, but cwd is close enough for a
-        display-only diff). Failures (missing/binary/large file) → empty
-        string, which yields an all-additions "new file" diff.
+        Resolves cwd-relative paths for display-only diffing. Missing files are
+        recorded as empty so ``write_file`` can render an all-additions diff;
+        unreadable or large files are left without a snapshot.
         """
         fp = tool_args.get("file_path")
         if not fp:
@@ -928,8 +924,11 @@ class StreamDisplayManager:
             p = Path(fp).expanduser()
             if not p.is_absolute():
                 p = Path.cwd() / p
-            if p.exists() and p.is_file() and p.stat().st_size < 512_000:
-                self._write_old[fp] = p.read_text(encoding="utf-8", errors="ignore")
+            key = tool_call_id or fp
+            if not p.exists():
+                self._write_old[key] = ""
+            elif p.is_file() and p.stat().st_size < 512_000:
+                self._write_old[key] = p.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             pass
     
@@ -1024,106 +1023,99 @@ class StreamDisplayManager:
 
     def _display_edit_merged(self, tool_name: str, tool_args: dict,
                              result_content: str, is_error: bool,
-                             elapsed_str: str) -> None:
+                             elapsed_str: str,
+                             tool_call_id: Optional[str] = None) -> None:
         """One summary line + the FULL unified diff for edit tools.
 
-        ``  ✎ edit_file config.py - ✓ 1 edit (120ms)`` followed by the complete
-        CC/opencode-style diff so the user always sees the actual code change.
-        Errors surface a truncated message instead.
+        ``  ✎ edit_file config.py - Edited 1 file (+1 -1) (120ms)`` followed
+        by one complete real-file diff. Errors surface a truncated message.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         filename = _extract_filename(tool_args.get("file_path", ""))
         params = filename
 
-        # Count edits from args (multi_edit_file) or treat edit_file as 1.
-        if tool_name == "multi_edit_file":
-            edits = tool_args.get("edits") or []
-            n_edits = len(edits) if isinstance(edits, list) else 0
-        else:
-            n_edits = 1
-
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
         if params:
             line += f" [dim]{params}[/dim]"
+        key = tool_call_id or tool_args.get("file_path", "")
+        old_content = self._write_old.pop(key, None)
         if is_error:
             err = str(result_content).replace("\n", " ").strip()
             if len(err) > 80:
                 err = err[:77] + "..."
                 remember_truncated(f"Tool error · {tool_name}", str(result_content))
             line += f" [red]- error: {err}{elapsed_str}[/red]"
-        else:
-            unit = "edit" if n_edits == 1 else "edits"
-            line += f" [dim]- ✓ {n_edits} {unit}{elapsed_str}[/dim]"
-        self._assistant_console.print(line)
-
-        # Render the FULL unified diff from the edit args (skip on error) so the
-        # user always sees the complete change, never folded behind Ctrl+O.
-        if is_error:
+            self._assistant_console.print(line)
             return
-        diff_text = self._build_edit_diff(tool_name, tool_args, filename)
+
+        new_content = self._read_diff_target(tool_args)
+        diff_text = self._build_file_diff(old_content, new_content, filename)
+        added, removed = self._diff_line_counts(diff_text)
+        line += f" [dim]- Edited 1 file (+{added} -{removed}){elapsed_str}[/dim]"
+        self._assistant_console.print(line)
         if not diff_text:
             return
         self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
                                   line_numbers=False))
 
     @staticmethod
-    def _build_edit_diff(tool_name: str, tool_args: dict, filename: str) -> str:
-        """Build a unified diff string from edit_file/multi_edit_file args."""
-        if tool_name == "multi_edit_file":
-            edits = tool_args.get("edits") or []
-            if not isinstance(edits, list) or not edits:
-                return ""
-            parts = []
-            for i, e in enumerate(edits):
-                if not isinstance(e, dict):
-                    continue
-                old = str(e.get("old_string", ""))
-                new = str(e.get("new_string", ""))
-                # splitlines() WITHOUT keepends + lineterm="" so every diff
-                # line (incl. ---/+++/@@ headers) is uniformly newline-free;
-                # joining with "\n" then guarantees clean line boundaries.
-                # Using keepends=True + "".join() would glue "-old" onto the
-                # next "+new" whenever the edited text lacks a trailing newline.
-                d = list(difflib.unified_diff(
-                    old.splitlines(),
-                    new.splitlines(),
-                    fromfile=f"a/{filename}#{i + 1}",
-                    tofile=f"b/{filename}#{i + 1}",
-                    n=2,
-                    lineterm="",
-                ))
-                if d:
-                    parts.append("\n".join(d))
-            return "\n".join(parts).rstrip("\n")
-        # edit_file
-        old = str(tool_args.get("old_string", ""))
-        new = str(tool_args.get("new_string", ""))
-        d = list(difflib.unified_diff(
-            old.splitlines(),
-            new.splitlines(),
+    def _read_diff_target(tool_args: dict) -> Optional[str]:
+        """Read a write tool's post-call file content for display-only diffing."""
+        fp = tool_args.get("file_path")
+        if not fp:
+            return None
+        try:
+            path = Path(fp).expanduser()
+            if not path.is_absolute():
+                path = Path.cwd() / path
+            if path.is_file() and path.stat().st_size < 512_000:
+                return path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _build_file_diff(old_content: Optional[str], new_content: Optional[str],
+                         filename: str) -> str:
+        """Build one git-style unified diff from real pre/post file contents."""
+        if old_content is None or new_content is None:
+            return ""
+        unified = "\n".join(difflib.unified_diff(
+            old_content.splitlines(),
+            new_content.splitlines(),
             fromfile=f"a/{filename}",
             tofile=f"b/{filename}",
             n=2,
             lineterm="",
-        ))
-        return "\n".join(d).rstrip("\n")
+        )).rstrip("\n")
+        if not unified:
+            return ""
+        return f"diff --git a/{filename} b/{filename}\n{unified}"
+
+    @staticmethod
+    def _diff_line_counts(diff_text: str) -> tuple[int, int]:
+        """Count added/removed content lines, excluding unified-diff headers."""
+        lines = diff_text.splitlines()
+        added = sum(line.startswith("+") and not line.startswith("+++") for line in lines)
+        removed = sum(line.startswith("-") and not line.startswith("---") for line in lines)
+        return added, removed
 
     def _display_write_merged(self, tool_name: str, tool_args: dict,
                               result_content: str, is_error: bool,
-                              elapsed_str: str) -> None:
+                              elapsed_str: str,
+                              tool_call_id: Optional[str] = None) -> None:
         """One summary line + the FULL old→new diff for write_file.
 
-        ``  ✎ write_file config.py - ✓ created 42 lines (120ms)`` followed by
-        the complete unified diff (old content was stashed at call-start; for a
-        brand-new file the "old" side is empty so the diff is all additions).
-        Errors surface a truncated message instead. The diff is always shown in
-        full — no Ctrl+O fold.
+        Keeps the existing created/updated line-count summary and renders the
+        same git-style real-file diff as edit tools. For a brand-new file the
+        old side is empty. Successful diffs are never folded.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
         filename = _extract_filename(tool_args.get("file_path", ""))
         new_content = str(tool_args.get("content", ""))
         result_str = str(result_content)
-        created = "Created" in result_str
+        key = tool_call_id or tool_args.get("file_path", "")
+        old_content = self._write_old.pop(key, None)
 
         line = f"  {icon} [bold magenta]{tool_name}[/bold magenta]"
         if filename:
@@ -1134,26 +1126,15 @@ class StreamDisplayManager:
                 err = err[:77] + "..."
                 remember_truncated(f"Tool error · {tool_name}", result_str)
             line += f" [red]- error: {err}{elapsed_str}[/red]"
-        else:
-            n_lines = len(new_content.splitlines())
-            verb = "created" if created else "updated"
-            unit = "line" if n_lines == 1 else "lines"
-            line += f" [dim]- ✓ {verb} {n_lines} {unit}{elapsed_str}[/dim]"
-        self._assistant_console.print(line)
-
-        if is_error:
+            self._assistant_console.print(line)
             return
 
-        # Old content stashed at call start; pop so the slot is reusable.
-        old_content = self._write_old.pop(tool_args.get("file_path", ""), "")
-        diff_text = "\n".join(difflib.unified_diff(
-            old_content.splitlines(),
-            new_content.splitlines(),
-            fromfile=f"a/{filename}",
-            tofile=f"b/{filename}",
-            n=2,
-            lineterm="",
-        )).rstrip("\n")
+        diff_text = self._build_file_diff(old_content, new_content, filename)
+        n_lines = len(new_content.splitlines())
+        verb = "created" if "Created" in result_str else "updated"
+        unit = "line" if n_lines == 1 else "lines"
+        line += f" [dim]- ✓ {verb} {n_lines} {unit}{elapsed_str}[/dim]"
+        self._assistant_console.print(line)
         if not diff_text:
             return
         # Render the FULL diff so the user always sees the complete file change,
@@ -1241,11 +1222,13 @@ class StreamDisplayManager:
             self.start_tool_section()
             if tool_name == "write_file":
                 self._display_write_merged(
-                    tool_name, tool_args or {}, result_content, is_error, elapsed_str
+                    tool_name, tool_args or {}, result_content, is_error,
+                    elapsed_str, tool_call_id
                 )
             else:
                 self._display_edit_merged(
-                    tool_name, tool_args or {}, result_content, is_error, elapsed_str
+                    tool_name, tool_args or {}, result_content, is_error,
+                    elapsed_str, tool_call_id
                 )
             return
 
