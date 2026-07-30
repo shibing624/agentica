@@ -39,6 +39,7 @@ from agentica.global_config import (
     find_profile_for_provider,
     write_commented_template,
 )
+from agentica.model.anthropic.claude import CLAUDE_OPUS_5_REASONING_EFFORTS, is_claude_opus_5
 
 # Provider presets: provider slug -> metadata used by the wizard.
 # ``env`` is the environment variable each provider factory reads for its key
@@ -254,10 +255,21 @@ def _select_provider(console, current: Optional[str] = None) -> str:
 
 
 _REASONING_EFFORT_CHOICES = ("low", "medium", "high", "max")
+_RESPONSES_REASONING_CHOICES = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+_WIRE_API_CHOICES = ("chat_completions", "responses")
+
+
+def _reasoning_effort_choices(provider: str, model_name: Optional[str]) -> tuple[str, ...]:
+    if provider == "anthropic" and model_name and is_claude_opus_5(model_name):
+        return CLAUDE_OPUS_5_REASONING_EFFORTS
+    return _REASONING_EFFORT_CHOICES
 
 # Profile keys that are optional model-tuning params. Used to carry existing
 # values through a re-run of `agentica setup` when the user declines to edit.
-_TUNING_KEYS = ("reasoning_effort", "max_tokens", "context_window", "temperature", "top_p")
+_TUNING_KEYS = (
+    "wire_api", "reasoning", "reasoning_effort", "max_tokens",
+    "context_window", "temperature", "top_p",
+)
 _CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_session_header", "cache_keepalive")
 # extra_body / extra_headers are raw passthrough dicts for endpoints whose
 # tuning knobs don't map to a standard OpenAI param (e.g. Hunyuan's taiji
@@ -267,6 +279,7 @@ _CACHE_KEYS = ("enable_cache_control", "cache_control_messages", "cache_control_
 # config.yaml and only carried through re-runs of `agentica setup` so the
 # wizard never silently drops them.
 _RAW_PASSTHROUGH_KEYS = ("extra_body", "extra_headers")
+_AUXILIARY_PROTOCOL_KEYS = ("wire_api", "reasoning", "reasoning_effort")
 
 
 def _pick_keys(d: Optional[dict], keys) -> Dict:
@@ -361,8 +374,21 @@ def _validate_profile(data: dict) -> List[str]:
     # api_key is optional (env-var fallback).
 
     eff = data.get("reasoning_effort")
-    if eff is not None and eff not in _REASONING_EFFORT_CHOICES:
-        errors.append(f"reasoning_effort must be one of {list(_REASONING_EFFORT_CHOICES)}, got {eff!r}.")
+    effort_choices = _reasoning_effort_choices(str(provider or ""), data.get("model_name"))
+    if eff is not None and eff not in effort_choices:
+        errors.append(f"reasoning_effort must be one of {list(effort_choices)}, got {eff!r}.")
+    wire_api = data.get("wire_api")
+    if wire_api is not None and wire_api not in _WIRE_API_CHOICES:
+        errors.append(f"wire_api must be one of {list(_WIRE_API_CHOICES)}, got {wire_api!r}.")
+    if wire_api is not None and provider != "openai":
+        errors.append("wire_api requires model_provider: openai.")
+    reasoning = data.get("reasoning")
+    if reasoning is not None and reasoning not in _RESPONSES_REASONING_CHOICES:
+        errors.append(f"reasoning must be one of {list(_RESPONSES_REASONING_CHOICES)}, got {reasoning!r}.")
+    if reasoning is not None and wire_api != "responses":
+        errors.append("reasoning requires wire_api: responses.")
+    if wire_api == "responses" and eff is not None:
+        errors.append("wire_api: responses uses reasoning, not reasoning_effort.")
     mt = data.get("max_tokens")
     if mt is not None and not (isinstance(mt, int) and mt > 0):
         errors.append("max_tokens must be a positive integer.")
@@ -410,6 +436,34 @@ def _validate_profile(data: dict) -> List[str]:
                     errors.append(
                         f"auxiliary_model.{raw_key} must be a mapping (dict), got {type(raw_val).__name__}."
                     )
+            auxiliary_reasoning = auxiliary.get("reasoning")
+            auxiliary_effort = auxiliary.get("reasoning_effort")
+            auxiliary_wire_api = auxiliary.get("wire_api")
+            if auxiliary_wire_api is not None and auxiliary_wire_api not in _WIRE_API_CHOICES:
+                errors.append(
+                    f"auxiliary_model.wire_api must be one of {list(_WIRE_API_CHOICES)}, "
+                    f"got {auxiliary_wire_api!r}."
+                )
+            if auxiliary_wire_api is not None and auxiliary.get("model_provider") != "openai":
+                errors.append("auxiliary_model.wire_api requires model_provider: openai.")
+            if auxiliary_reasoning is not None and auxiliary_reasoning not in _RESPONSES_REASONING_CHOICES:
+                errors.append(
+                    f"auxiliary_model.reasoning must be one of {list(_RESPONSES_REASONING_CHOICES)}, "
+                    f"got {auxiliary_reasoning!r}."
+                )
+            if auxiliary_reasoning is not None and auxiliary_wire_api != "responses":
+                errors.append("auxiliary_model.reasoning requires wire_api: responses.")
+            auxiliary_effort_choices = _reasoning_effort_choices(
+                auxiliary.get("model_provider"),
+                auxiliary.get("model_name"),
+            )
+            if auxiliary_effort is not None and auxiliary_effort not in auxiliary_effort_choices:
+                errors.append(
+                    f"auxiliary_model.reasoning_effort must be one of {list(auxiliary_effort_choices)}, "
+                    f"got {auxiliary_effort!r}."
+                )
+            if auxiliary_wire_api == "responses" and auxiliary_effort is not None:
+                errors.append("auxiliary_model.wire_api: responses uses reasoning, not reasoning_effort.")
     return errors
 
 
@@ -429,7 +483,12 @@ def _prompt_int(label: str) -> Optional[int]:
         print(f"  Value must be positive, got {value}")
 
 
-def _prompt_advanced_params(console, provider: str, current: Optional[dict] = None) -> Dict:
+def _prompt_advanced_params(
+    console,
+    provider: str,
+    current: Optional[dict] = None,
+    model_name: Optional[str] = None,
+) -> Dict:
     """Optionally collect / edit advanced model tuning params during onboarding.
 
     ``current`` carries the active profile's existing tuning values so a re-run
@@ -438,6 +497,8 @@ def _prompt_advanced_params(console, provider: str, current: Optional[dict] = No
     user blanks out are omitted so the model factory keeps its defaults.
     """
     existing = _pick_keys(current, _TUNING_KEYS)
+    if provider == "anthropic" and model_name and is_claude_opus_5(model_name):
+        existing.setdefault("reasoning_effort", "high")
     has_existing = bool(existing)
     prompt_label = "Edit advanced model params (thinking depth, limits)?" if has_existing else "Configure advanced model params (thinking depth, limits)?"
     answer = pt_prompt(f"  {prompt_label} [y/N]: ").strip().lower()
@@ -447,17 +508,50 @@ def _prompt_advanced_params(console, provider: str, current: Optional[dict] = No
     params: Dict = dict(existing)  # start from existing so blank = keep
     console.print("  [dim]Press Enter to keep the current value for any field.[/dim]")
 
-    # Thinking depth / reasoning effort.
-    cur_effort = existing.get("reasoning_effort")
-    eff_label = _label(f"Reasoning effort {list(_REASONING_EFFORT_CHOICES)}", cur_effort)
-    while True:
-        effort = pt_prompt(eff_label).strip().lower()
-        if not effort:
-            break  # keep whatever's already in params (possibly the existing value)
-        if effort in _REASONING_EFFORT_CHOICES:
-            params["reasoning_effort"] = effort
-            break
-        console.print(f"  [red]Invalid choice. Pick one of {list(_REASONING_EFFORT_CHOICES)}.[/red]")
+    # Wire protocol and thinking depth are independent profile fields.
+    effective_wire_api = existing.get("wire_api") or "chat_completions"
+    if provider == "openai":
+        wire_label = _label(f"Wire API {list(_WIRE_API_CHOICES)}", effective_wire_api)
+        while True:
+            wire_api = pt_prompt(wire_label).strip().lower()
+            if not wire_api:
+                break
+            if wire_api in _WIRE_API_CHOICES:
+                effective_wire_api = wire_api
+                params["wire_api"] = wire_api
+                break
+            console.print(f"  [red]Invalid choice. Pick one of {list(_WIRE_API_CHOICES)}.[/red]")
+
+    if effective_wire_api == "responses":
+        params.pop("reasoning_effort", None)
+        cur_reasoning = existing.get("reasoning")
+        reasoning_label = _label(
+            f"Responses reasoning {list(_RESPONSES_REASONING_CHOICES)}",
+            cur_reasoning,
+        )
+        while True:
+            reasoning = pt_prompt(reasoning_label).strip().lower()
+            if not reasoning:
+                break
+            if reasoning in _RESPONSES_REASONING_CHOICES:
+                params["reasoning"] = reasoning
+                break
+            console.print(
+                f"  [red]Invalid choice. Pick one of {list(_RESPONSES_REASONING_CHOICES)}.[/red]"
+            )
+    else:
+        params.pop("reasoning", None)
+        cur_effort = existing.get("reasoning_effort")
+        effort_choices = _reasoning_effort_choices(provider, model_name)
+        eff_label = _label(f"Reasoning effort {list(effort_choices)}", cur_effort)
+        while True:
+            effort = pt_prompt(eff_label).strip().lower()
+            if not effort:
+                break
+            if effort in effort_choices:
+                params["reasoning_effort"] = effort
+                break
+            console.print(f"  [red]Invalid choice. Pick one of {list(effort_choices)}.[/red]")
 
     # Output limit.
     cur_mt = existing.get("max_tokens")
@@ -609,6 +703,7 @@ def _prompt_auxiliary_model(console, main_provider: str, existing_auxiliary: Opt
     # auxiliary model doesn't silently drop them.
     same_provider = provider == (existing_auxiliary.get("model_provider") if existing_auxiliary else None)
     block.update(_pick_keys(existing_auxiliary if same_provider else None, _RAW_PASSTHROUGH_KEYS))
+    block.update(_pick_keys(existing_auxiliary if same_provider else None, _AUXILIARY_PROTOCOL_KEYS))
     if provider == main_provider:
         console.print("  [dim]Same provider as main model — you could also just set model_name.[/dim]")
     return block
@@ -871,7 +966,12 @@ def _configure_one_profile(
         model_name = pt_prompt("  Model name: ").strip()
 
     # Optional advanced tuning — pre-filled; declining keeps existing values.
-    advanced = _prompt_advanced_params(console, provider, current=existing if same_provider else None)
+    advanced = _prompt_advanced_params(
+        console,
+        provider,
+        current=existing if same_provider else None,
+        model_name=model_name,
+    )
 
     # Optional prompt caching (OpenAI-compatible proxies fronting Claude, e.g.
     # Venus). Skipped for anthropic. Pre-filled; declining keeps existing.
@@ -999,7 +1099,9 @@ def _auxiliary_resolution(
     auxiliary_name = auxiliary_block.get("model_name")
     if not auxiliary_name:
         return {"auxiliary_model_provider": None, "auxiliary_model_name": None,
-                "auxiliary_base_url": None, "auxiliary_api_key": None}
+                "auxiliary_base_url": None, "auxiliary_api_key": None,
+                "auxiliary_wire_api": None,
+                "auxiliary_reasoning": None, "auxiliary_reasoning_effort": None}
     auxiliary_provider = auxiliary_block.get("model_provider") or main_provider
     auxiliary_base = auxiliary_block.get("base_url")
     auxiliary_key = auxiliary_block.get("api_key")
@@ -1015,6 +1117,9 @@ def _auxiliary_resolution(
         "auxiliary_model_name": auxiliary_name,
         "auxiliary_base_url": auxiliary_base,
         "auxiliary_api_key": auxiliary_key,
+        "auxiliary_wire_api": auxiliary_block.get("wire_api"),
+        "auxiliary_reasoning": auxiliary_block.get("reasoning"),
+        "auxiliary_reasoning_effort": auxiliary_block.get("reasoning_effort"),
     }
 
 
@@ -1085,7 +1190,7 @@ def resolve_model_config(args, console=None) -> Dict:
         resolved_key = get_profile_api_key(provider, base_url)
 
     # Model tuning params come from the active profile only (no preset
-    # defaults): reasoning_effort / max_tokens / context_window / temperature /
+    # defaults): wire_api / reasoning / reasoning_effort / max_tokens / context_window / temperature /
     # top_p. They are None unless the user set them, so the model factory keeps
     # its own defaults. CLI flags still override these at the call site.
     profile_params = active_profile if use_profile else {}
@@ -1108,6 +1213,9 @@ def resolve_model_config(args, console=None) -> Dict:
     # the same raw params.
     auxiliary_extra_body = auxiliary_block.get("extra_body")
     auxiliary_extra_headers = auxiliary_block.get("extra_headers")
+    auxiliary_wire_api = auxiliary_block.get("wire_api")
+    auxiliary_reasoning = auxiliary_block.get("reasoning")
+    auxiliary_reasoning_effort = auxiliary_block.get("reasoning_effort")
     if auxiliary_name:
         if not auxiliary_base:
             # Same provider as main -> reuse main endpoint; otherwise use the
@@ -1125,15 +1233,20 @@ def resolve_model_config(args, console=None) -> Dict:
     else:
         auxiliary_provider = auxiliary_base = auxiliary_key = None
         auxiliary_extra_body = auxiliary_extra_headers = None
+        auxiliary_wire_api = None
+        auxiliary_reasoning = None
+        auxiliary_reasoning_effort = None
 
     return {
         "model_provider": provider,
         "model_name": model_name,
         "base_url": base_url,
         "api_key": resolved_key,
+        "wire_api": profile_params.get("wire_api"),
         "max_tokens": profile_params.get("max_tokens"),
         "temperature": profile_params.get("temperature"),
         "reasoning_effort": profile_params.get("reasoning_effort"),
+        "reasoning": profile_params.get("reasoning"),
         "top_p": profile_params.get("top_p"),
         "context_window": profile_params.get("context_window"),
         # Raw passthrough dicts for endpoints whose tuning knobs don't map to
@@ -1147,8 +1260,11 @@ def resolve_model_config(args, console=None) -> Dict:
         "auxiliary_model_name": auxiliary_name,
         "auxiliary_base_url": auxiliary_base,
         "auxiliary_api_key": auxiliary_key,
+        "auxiliary_wire_api": auxiliary_wire_api,
         "auxiliary_extra_body": auxiliary_extra_body,
         "auxiliary_extra_headers": auxiliary_extra_headers,
+        "auxiliary_reasoning": auxiliary_reasoning,
+        "auxiliary_reasoning_effort": auxiliary_reasoning_effort,
         # Prompt caching knobs (profile top-level; CLI flags override in main.py).
         "enable_cache_control": profile_params.get("enable_cache_control"),
         "cache_control_messages": profile_params.get("cache_control_messages"),

@@ -102,7 +102,9 @@ class Settings:
     model_name: str = ""
     model_base_url: str = ""
     model_api_key: str = ""
+    model_wire_api: str = ""
     model_thinking: str = ""
+    model_reasoning: str = ""
     model_reasoning_effort: str = ""
     max_tokens: int = 0
     temperature: float = 0.0
@@ -117,6 +119,9 @@ class Settings:
     auxiliary_model_name: str = ""
     auxiliary_base_url: str = ""
     auxiliary_api_key: str = ""
+    auxiliary_wire_api: str = ""
+    auxiliary_reasoning: str = ""
+    auxiliary_reasoning_effort: str = ""
 
     _base_dir: str = ""
 
@@ -160,6 +165,16 @@ class Settings:
         aux_profile = profile.get("auxiliary_model") or {}
         if not isinstance(aux_profile, dict):
             aux_profile = {}
+        model_wire_api = profile.get("wire_api") or os.getenv("AGENTICA_WIRE_API", "")
+        model_reasoning = profile.get("reasoning") or os.getenv("AGENTICA_REASONING", "")
+        model_reasoning_effort = "" if model_wire_api == "responses" else (
+            profile.get("reasoning_effort") or os.getenv("AGENTICA_REASONING_EFFORT", "")
+        )
+        auxiliary_wire_api = aux_profile.get("wire_api") or os.getenv("AGENTICA_AUXILIARY_WIRE_API", "")
+        auxiliary_reasoning = aux_profile.get("reasoning") or os.getenv("AGENTICA_AUXILIARY_REASONING", "")
+        auxiliary_reasoning_effort = "" if auxiliary_wire_api == "responses" else (
+            aux_profile.get("reasoning_effort") or os.getenv("AGENTICA_AUXILIARY_REASONING_EFFORT", "")
+        )
 
         return cls(
             # Server
@@ -262,10 +277,11 @@ class Settings:
                 or os.getenv("AGENTICA_BASE_URL", "")),
             model_api_key=(profile.get("api_key")
                 or os.getenv("AGENTICA_API_KEY", "")),
+            model_wire_api=model_wire_api,
             model_thinking=(profile.get("thinking")
                 or os.getenv("AGENTICA_MODEL_THINKING", "")),
-            model_reasoning_effort=(profile.get("reasoning_effort")
-                or os.getenv("AGENTICA_REASONING_EFFORT", "")),
+            model_reasoning=model_reasoning,
+            model_reasoning_effort=model_reasoning_effort,
             max_tokens=int(profile.get("max_tokens")
                 or os.getenv("AGENTICA_MAX_TOKENS", "0") or 0),
             temperature=float(profile.get("temperature")
@@ -284,6 +300,9 @@ class Settings:
                 or os.getenv("AGENTICA_AUXILIARY_BASE_URL", "")),
             auxiliary_api_key=(aux_profile.get("api_key")
                 or os.getenv("AGENTICA_AUXILIARY_API_KEY", "")),
+            auxiliary_wire_api=auxiliary_wire_api,
+            auxiliary_reasoning=auxiliary_reasoning,
+            auxiliary_reasoning_effort=auxiliary_reasoning_effort,
         )
 
 

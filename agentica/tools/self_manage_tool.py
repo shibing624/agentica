@@ -46,7 +46,8 @@ Actions:
 - action='set_config'           -> edit a config.yaml profile field.
                                    Requires key + value. Optional profile (defaults to active).
                                    Editable keys: model_provider, model_name, base_url, api_key,
-                                   max_tokens, temperature, reasoning_effort, top_p, context_window,
+                                   wire_api, max_tokens, temperature, reasoning,
+                                   reasoning_effort, top_p, context_window,
                                    extra_body, extra_headers (value must be a JSON object string
                                    for these two, e.g. '{{"chat_template_kwargs": {{"reasoning_effort": "high"}}}}').
 - action='set_env'              -> set a .env variable. Requires key + value.

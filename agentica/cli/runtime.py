@@ -13,8 +13,18 @@ from typing import List, Optional, Any
 
 from rich.console import Console
 
-from agentica import Agent, OpenAIChat, MoonshotChat, AzureOpenAIChat, YiChat, ZhipuAIChat, DeepSeekChat, ArkChat
-from agentica.model.anthropic.claude import Claude
+from agentica import (
+    Agent,
+    OpenAIChat,
+    OpenAIResponses,
+    MoonshotChat,
+    AzureOpenAIChat,
+    YiChat,
+    ZhipuAIChat,
+    DeepSeekChat,
+    ArkChat,
+)
+from agentica.model.anthropic.claude import Claude, is_claude_opus_5
 from agentica.agent.config import (
     ExperienceConfig,
     SkillUpgradeConfig,
@@ -458,9 +468,11 @@ def get_model(
     model_name,
     base_url=None,
     api_key=None,
+    wire_api=None,
     max_tokens=None,
     temperature=None,
     reasoning_effort=None,
+    reasoning=None,
     top_p=None,
     context_window=None,
     enable_cache_control=None,
@@ -475,6 +487,17 @@ def get_model(
 
     Uses MODEL_REGISTRY for provider lookup instead of if/elif chains.
     """
+    effective_wire_api = wire_api or "chat_completions"
+    if effective_wire_api not in ("chat_completions", "responses"):
+        raise ValueError("wire_api must be either 'chat_completions' or 'responses'.")
+    if wire_api is not None and model_provider != "openai":
+        raise ValueError("The 'wire_api' config field requires model_provider: openai.")
+    if reasoning is not None and effective_wire_api != "responses":
+        raise ValueError("The 'reasoning' config field requires wire_api: responses.")
+    if effective_wire_api == "responses" and reasoning_effort is not None:
+        raise ValueError(
+            "Responses API uses 'reasoning', not Chat Completions' 'reasoning_effort'."
+        )
     params = {"id": model_name}
     if api_key is not None:
         params["api_key"] = api_key
@@ -502,8 +525,14 @@ def get_model(
     # way to pin sticky routing (e.g. Venus-Sticky-Routing) on the native
     # /v1/messages path, which has no per-request extra_headers mechanism.
     if model_provider == "anthropic":
-        if reasoning_effort is not None:
-            params["reasoning_effort"] = reasoning_effort
+        effective_effort = reasoning_effort
+        if is_claude_opus_5(model_name):
+            if effective_effort is None:
+                effective_effort = "high"
+            elif effective_effort == "off":
+                effective_effort = None
+        if effective_effort is not None:
+            params["reasoning_effort"] = effective_effort
         if default_headers is not None:
             params["default_headers"] = default_headers
     else:
@@ -519,9 +548,15 @@ def get_model(
         if extra_headers is not None:
             params["extra_headers"] = extra_headers
 
-    model_class = MODEL_REGISTRY.get(model_provider)
+    model_class = (
+        OpenAIResponses
+        if model_provider == "openai" and effective_wire_api == "responses"
+        else MODEL_REGISTRY.get(model_provider)
+    )
     if model_class is None:
         raise ValueError(f"Unsupported model provider: {model_provider}. Supported: {', '.join(MODEL_REGISTRY.keys())}")
+    if reasoning is not None:
+        params["reasoning"] = reasoning
     # Prompt caching. ``enable_cache_control`` applies to any model class that
     # declares it (OpenAIChat for OpenAI-compatible proxies fronting Claude,
     # Claude itself for native Anthropic caching) — filling it in CLI/config
@@ -567,9 +602,11 @@ def _build_sibling_model(agent_config: dict, prefix: str):
         model_name=sibling_name,
         base_url=agent_config.get(f"{prefix}_base_url") or (agent_config.get("base_url") if same_provider else None),
         api_key=agent_config.get(f"{prefix}_api_key") or (agent_config.get("api_key") if same_provider else None),
+        wire_api=agent_config.get(f"{prefix}_wire_api"),
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
-        reasoning_effort=agent_config.get("reasoning_effort"),
+        reasoning_effort=agent_config.get(f"{prefix}_reasoning_effort"),
+        reasoning=agent_config.get(f"{prefix}_reasoning"),
         top_p=agent_config.get("top_p"),
         context_window=agent_config.get("context_window"),
         enable_cache_control=agent_config.get("enable_cache_control"),
@@ -718,9 +755,11 @@ def create_agent(
         model_name=agent_config["model_name"],
         base_url=agent_config.get("base_url"),
         api_key=agent_config.get("api_key"),
+        wire_api=agent_config.get("wire_api"),
         max_tokens=agent_config.get("max_tokens"),
         temperature=agent_config.get("temperature"),
         reasoning_effort=agent_config.get("reasoning_effort"),
+        reasoning=agent_config.get("reasoning"),
         top_p=agent_config.get("top_p"),
         context_window=agent_config.get("context_window"),
         enable_cache_control=agent_config.get("enable_cache_control"),

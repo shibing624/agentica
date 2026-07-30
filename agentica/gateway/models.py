@@ -117,6 +117,8 @@ class ProfileUpsertRequest(BaseModel):
     model_name: str
     base_url: str = ""
     api_key: Optional[str] = None
+    wire_api: Optional[str] = None
+    reasoning: Optional[str] = None
     reasoning_effort: Optional[str] = None
     max_tokens: Optional[int] = None
     context_window: Optional[int] = None

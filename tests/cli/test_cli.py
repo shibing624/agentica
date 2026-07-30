@@ -1534,6 +1534,55 @@ class TestCLIModelParams(unittest.TestCase):
         # Adaptive thinking requires temperature=1; it must be forced.
         self.assertEqual(kwargs.get("temperature"), 1)
 
+    def test_claude_opus_5_defaults_to_adaptive_high_thinking(self):
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "anthropic",
+            "anthropic/claude-opus-5",
+            api_key="k",
+        )
+
+        self.assertEqual(model.reasoning_effort, "high")
+        self.assertEqual(model.request_kwargs.get("thinking"), {"type": "adaptive"})
+        self.assertEqual(
+            model.request_kwargs.get("extra_body", {}).get("output_config"),
+            {"effort": "high"},
+        )
+
+    def test_claude_opus_5_can_disable_thinking_explicitly(self):
+        from agentica.cli.runtime import get_model
+
+        model = get_model(
+            "anthropic",
+            "anthropic/claude-opus-5",
+            api_key="k",
+            reasoning_effort="off",
+        )
+
+        self.assertIsNone(model.reasoning_effort)
+        self.assertIsNone(model.thinking)
+        self.assertEqual(model.describe_thinking_mode(), "off")
+
+    def test_claude_opus_5_supports_all_effort_levels(self):
+        from agentica.cli.runtime import get_model
+
+        for effort in ("low", "medium", "high", "extra-high", "max"):
+            with self.subTest(effort=effort):
+                model = get_model(
+                    "anthropic",
+                    "anthropic/claude-opus-5",
+                    api_key="k",
+                    reasoning_effort=effort,
+                )
+
+            self.assertEqual(model.reasoning_effort, effort)
+            self.assertEqual(model.describe_thinking_mode(), f"adaptive(effort={effort})")
+            self.assertEqual(
+                model.request_kwargs.get("extra_body", {}).get("output_config"),
+                {"effort": effort},
+            )
+
     def test_get_model_passes_extra_body_and_extra_headers(self):
         from agentica.cli.runtime import get_model
 
@@ -3330,6 +3379,38 @@ class TestCLIAwareness(unittest.TestCase):
         # get_model (main model rebuild) received the profile's extra_body.
         _args, kw = mock_get_model.call_args
         self.assertEqual(kw["extra_body"], {"chat_template_kwargs": {"reasoning_effort": "high"}})
+
+    def test_apply_profile_switches_wire_api(self):
+        from agentica import global_config as gc
+
+        ctx = self._make_apply_profile_ctx()
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, "config.yaml")
+            with (
+                patch("agentica.global_config.global_config_path", return_value=cfg_path),
+                patch.object(cli_commands, "get_console", return_value=MagicMock()),
+                patch.object(cli_commands, "get_model") as mock_get_model,
+                patch.object(cli_commands, "set_project_profile"),
+            ):
+                gc.upsert_profile(
+                    "a",
+                    {
+                        "model_provider": "openai",
+                        "model_name": "gpt-5.6-sol",
+                        "base_url": "https://example/v1",
+                        "api_key": "sk-main",
+                        "wire_api": "responses",
+                        "reasoning": "high",
+                    },
+                    make_active=True,
+                )
+                cli_commands._apply_profile(ctx, "a")
+
+        self.assertEqual(ctx.agent_config["wire_api"], "responses")
+        self.assertEqual(ctx.agent_config["reasoning"], "high")
+        _args, kwargs = mock_get_model.call_args
+        self.assertEqual(kwargs["wire_api"], "responses")
+        self.assertEqual(kwargs["reasoning"], "high")
 
     def test_apply_profile_without_auxiliary_clears(self):
         """Switching to a profile without an auxiliary_model block clears the auxiliary fields."""

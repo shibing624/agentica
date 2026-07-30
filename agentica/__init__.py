@@ -88,6 +88,7 @@ from agentica.model.message import Message, MessageReferences, UserMessage, Assi
 from agentica.model.content import Media, Video, Audio, Image
 from agentica.model.usage import Usage, RequestUsage, TokenDetails
 from agentica.model.openai.chat import OpenAIChat
+from agentica.model.openai.responses import OpenAIResponses
 
 # ── OpenAI-Compatible provider factories ──
 # Each factory directly constructs OpenAIChat with hardcoded provider metadata.

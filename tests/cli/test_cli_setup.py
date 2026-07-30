@@ -177,14 +177,17 @@ class TestResolveModelConfig(_CliSetupTestBase):
 
     def test_profile_used(self):
         self._write_profile({
-            "model_provider": "openai", "model_name": "gpt-4o",
+            "model_provider": "openai", "model_name": "gpt-5.6-sol",
             "base_url": "https://example/v1", "api_key": "sk-x",
-        })
+            "wire_api": "responses", "reasoning": "high",
+        }, name="a")
         resolved = cli_setup.resolve_model_config(_make_args(), console=None)
         self.assertEqual(resolved["model_provider"], "openai")
-        self.assertEqual(resolved["model_name"], "gpt-4o")
+        self.assertEqual(resolved["model_name"], "gpt-5.6-sol")
         self.assertEqual(resolved["base_url"], "https://example/v1")
         self.assertEqual(resolved["api_key"], "sk-x")
+        self.assertEqual(resolved["wire_api"], "responses")
+        self.assertEqual(resolved["reasoning"], "high")
 
     def test_cli_args_override_profile(self):
         self._write_profile({
@@ -473,9 +476,9 @@ class TestRunOnboarding(_CliSetupTestBase):
         console = MagicMock()
         console.width = 80
         # provider("2"), base_url(""), api_key("sk"), model_name(""), advanced("y"),
-        # reasoning("high"), max_tokens("4096"), context("500000"), temp("0.3"),
+        # wire_api(Enter), reasoning_effort("high"), max_tokens("4096"), context("500000"), temp("0.3"),
         # top_p("0.9"), auxiliary("n")
-        inputs = iter(["2", "", "sk", "", "y", "high", "4096", "500000", "0.3", "0.9", "n", "n"])
+        inputs = iter(["2", "", "sk", "", "y", "", "high", "4096", "500000", "0.3", "0.9", "n", "n"])
         with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
             result = cli_setup.run_onboarding(console)
 
@@ -486,6 +489,20 @@ class TestRunOnboarding(_CliSetupTestBase):
         self.assertEqual(profile["reasoning_effort"], "high")
         self.assertEqual(profile["max_tokens"], 4096)
         self.assertEqual(profile["context_window"], 500000)
+
+    def test_responses_wire_api_saved_to_profile(self):
+        console = MagicMock()
+        console.width = 80
+        inputs = iter([
+            "2", "", "sk", "", "y", "responses", "high",
+            "4096", "500000", "", "", "n", "n",
+        ])
+        with patch.object(cli_setup, "pt_prompt", side_effect=lambda *a, **k: next(inputs)):
+            result = cli_setup.run_onboarding(console)
+
+        self.assertEqual(result["wire_api"], "responses")
+        self.assertEqual(result["reasoning"], "high")
+        self.assertIsNone(result.get("reasoning_effort"))
 
     def test_auxiliary_model_skipped_when_answered_no(self):
         from agentica import global_config as gc
@@ -751,6 +768,57 @@ class TestProfileValidation(_CliSetupTestBase):
             "max_tokens": 4096,
         })
         self.assertEqual(errors, [])
+
+    def test_validate_profile_accepts_claude_opus_5_effort_levels(self):
+        for effort in ("off", "low", "medium", "high", "extra-high", "max"):
+            with self.subTest(effort=effort):
+                errors = cli_setup._validate_profile({
+                    "model_provider": "anthropic",
+                    "model_name": "anthropic/claude-opus-5",
+                    "base_url": "https://api.anthropic.com",
+                    "reasoning_effort": effort,
+                })
+
+            self.assertEqual(errors, [])
+
+    def test_claude_opus_5_defaults_to_high_when_advanced_setup_is_skipped(self):
+        console = MagicMock()
+        with patch.object(cli_setup, "pt_prompt", return_value="n"):
+            params = cli_setup._prompt_advanced_params(
+                console,
+                "anthropic",
+                model_name="anthropic/claude-opus-5",
+            )
+
+        self.assertEqual(params, {"reasoning_effort": "high"})
+
+    def test_claude_opus_5_preserves_explicit_off_when_advanced_setup_is_skipped(self):
+        console = MagicMock()
+        with patch.object(cli_setup, "pt_prompt", return_value="n"):
+            params = cli_setup._prompt_advanced_params(
+                console,
+                "anthropic",
+                current={"reasoning_effort": "off"},
+                model_name="anthropic/claude-opus-5",
+            )
+
+        self.assertEqual(params, {"reasoning_effort": "off"})
+
+    def test_validate_profile_requires_explicit_responses_wire_api(self):
+        profile = {
+            "model_provider": "openai",
+            "model_name": "gpt-5.6-sol",
+            "base_url": "https://example/v1",
+            "wire_api": "responses",
+            "reasoning": "high",
+        }
+        self.assertEqual(cli_setup._validate_profile(profile), [])
+
+        profile.pop("wire_api")
+        self.assertIn(
+            "reasoning requires wire_api: responses.",
+            cli_setup._validate_profile(profile),
+        )
 
     def test_validate_profile_flags_each_invalid_field(self):
         errors = cli_setup._validate_profile({

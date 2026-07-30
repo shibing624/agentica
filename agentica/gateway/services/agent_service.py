@@ -188,6 +188,14 @@ class AgentService:
         return settings.model_api_key
 
     @property
+    def model_wire_api(self) -> str:
+        return settings.model_wire_api
+
+    @property
+    def model_reasoning(self) -> str:
+        return settings.model_reasoning
+
+    @property
     def model_reasoning_effort(self) -> str:
         return settings.model_reasoning_effort
 
@@ -223,6 +231,18 @@ class AgentService:
     def auxiliary_api_key(self) -> str:
         return settings.auxiliary_api_key
 
+    @property
+    def auxiliary_wire_api(self) -> str:
+        return settings.auxiliary_wire_api
+
+    @property
+    def auxiliary_reasoning(self) -> str:
+        return settings.auxiliary_reasoning
+
+    @property
+    def auxiliary_reasoning_effort(self) -> str:
+        return settings.auxiliary_reasoning_effort
+
     def _build_sibling_model(self, prefix: str) -> Optional[Any]:
         """Build a sibling (auxiliary) model if a model name is configured.
 
@@ -241,6 +261,9 @@ class AgentService:
             sibling_name,
             base_url=base_url,
             api_key=api_key,
+            wire_api=getattr(self, f"{prefix}_wire_api"),
+            reasoning=getattr(self, f"{prefix}_reasoning"),
+            reasoning_effort=getattr(self, f"{prefix}_reasoning_effort"),
             thinking=settings.model_thinking,
         )
 
@@ -308,10 +331,12 @@ class AgentService:
                 self.model_name,
                 base_url=self.model_base_url or None,
                 api_key=self.model_api_key or None,
+                wire_api=self.model_wire_api,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
                 top_p=self.top_p,
                 context_window=self.context_window,
+                reasoning=self.model_reasoning,
                 reasoning_effort=self.model_reasoning_effort,
                 thinking=settings.model_thinking,
             )
@@ -1006,7 +1031,9 @@ class AgentService:
                 settings.model_name = profile["model_name"]
             settings.model_base_url = profile.get("base_url") or settings.model_base_url
             settings.model_api_key = profile.get("api_key") or settings.model_api_key
-            settings.model_reasoning_effort = profile.get("reasoning_effort") or settings.model_reasoning_effort
+            settings.model_wire_api = profile.get("wire_api") or ""
+            settings.model_reasoning = profile.get("reasoning") or ""
+            settings.model_reasoning_effort = profile.get("reasoning_effort") or ""
             settings.max_tokens = int(profile.get("max_tokens") or 0)
             settings.temperature = float(profile.get("temperature") or 0)
             settings.top_p = float(profile.get("top_p") or 0)
@@ -1015,6 +1042,9 @@ class AgentService:
             settings.auxiliary_model_name = aux_profile.get("model_name") or ""
             settings.auxiliary_base_url = aux_profile.get("base_url") or ""
             settings.auxiliary_api_key = aux_profile.get("api_key") or ""
+            settings.auxiliary_wire_api = aux_profile.get("wire_api") or ""
+            settings.auxiliary_reasoning = aux_profile.get("reasoning") or ""
+            settings.auxiliary_reasoning_effort = aux_profile.get("reasoning_effort") or ""
             self._initialized = False
             self._cache.clear()
             logger.info(

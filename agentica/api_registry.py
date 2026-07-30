@@ -177,7 +177,7 @@ EAGER_PUBLIC_EXPORTS = [
     "Message", "MessageReferences", "UserMessage", "AssistantMessage",
     "SystemMessage", "ToolMessage", "Media", "Video", "Audio", "Image",
     "Usage", "RequestUsage", "TokenDetails",
-    "OpenAIChat",
+    "OpenAIChat", "OpenAIResponses",
     "BuiltinFileTool", "BuiltinExecuteTool", "BuiltinFetchUrlTool",
     "BuiltinWebSearchTool", "BuiltinTodoTool", "BuiltinTaskTool", "BuiltinMemoryTool",
     "AgentRun", "SessionSummary", "MemorySummarizer", "WorkingMemory",

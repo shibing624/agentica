@@ -144,7 +144,7 @@ def read_config_summary(reveal_secrets: bool = False) -> Dict[str, Any]:
 # masked on read; deleting required identity fields is blocked.
 _EDITABLE_PROFILE_FIELDS = {
     "model_provider", "model_name", "base_url", "api_key",
-    "max_tokens", "temperature", "reasoning_effort", "top_p", "context_window",
+    "wire_api", "max_tokens", "temperature", "reasoning", "reasoning_effort", "top_p", "context_window",
     "extra_body", "extra_headers",
 }
 

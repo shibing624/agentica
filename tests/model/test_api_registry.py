@@ -14,21 +14,28 @@ def test_api_registry_contains_core_lazy_exports():
     assert LAZY_IMPORTS["AskUserQuestionRequired"] == "agentica.tools.ask_user_question_tool"
     assert "UserInputTool" not in LAZY_IMPORTS
     assert "UserInputRequired" not in LAZY_IMPORTS
-    # OpenAIChat + builtin tools are eager (openai is a hard dep, builtin tools have no extra deps)
+    # OpenAI models + builtin tools are eager (openai is a hard dep, builtin tools have no extra deps)
     assert "OpenAIChat" not in LAZY_IMPORTS
+    assert "OpenAIResponses" not in LAZY_IMPORTS
     assert "BuiltinTodoTool" not in LAZY_IMPORTS
     assert "BuiltinFileTool" not in LAZY_IMPORTS
 
 
 def test_eager_top_level_imports_are_directly_accessible():
-    """OpenAIChat and 7 builtin tools must be importable via `from agentica import X`."""
+    """OpenAI models and 7 builtin tools must be importable via `from agentica import X`."""
     from agentica import (
-        OpenAIChat,
-        BuiltinFileTool, BuiltinExecuteTool, BuiltinFetchUrlTool,
-        BuiltinWebSearchTool, BuiltinTodoTool, BuiltinTaskTool,
+        BuiltinExecuteTool,
+        BuiltinFetchUrlTool,
+        BuiltinFileTool,
         BuiltinMemoryTool,
+        BuiltinTaskTool,
+        BuiltinTodoTool,
+        BuiltinWebSearchTool,
+        OpenAIChat,
+        OpenAIResponses,
     )
     assert OpenAIChat is not None
+    assert OpenAIResponses is not None
     assert BuiltinFileTool is not None
     assert BuiltinExecuteTool is not None
     assert BuiltinFetchUrlTool is not None

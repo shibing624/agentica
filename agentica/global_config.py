@@ -51,7 +51,9 @@ Schema (``~/.agentica/config.yaml``)::
         api_key: sk-...
 
         # optional model tuning (omit to use model/factory defaults)
-        # reasoning_effort: max      # low|medium|high|max (OpenAI/DeepSeek)
+        # wire_api: responses        # OpenAI only; omit for Chat Completions
+        # reasoning: high            # Responses API: none|minimal|low|medium|high|xhigh|max
+        # reasoning_effort: max      # Chat Completions: low|medium|high|max
         # max_tokens: 8192           # output token limit
         # context_window: 1000000    # context limit; overrides catalog value
         # temperature: 0.7
@@ -523,7 +525,9 @@ active_profile: default
 #     base_url: https://api.deepseek.com
 #     api_key: sk-...
 #     # optional tuning (omit to use model/factory defaults):
-#     #   reasoning_effort: max      # low|medium|high|max (OpenAI/DeepSeek)
+#     #   wire_api: responses        # OpenAI only; omit for Chat Completions
+#     #   reasoning: high            # OpenAI Responses API
+#     #   reasoning_effort: max      # OpenAI-compatible Chat Completions
 #     #   max_tokens: 8192           # output token limit
 #     #   context_window: 1000000    # context limit; overrides catalog value
 #     #   temperature: 0.7

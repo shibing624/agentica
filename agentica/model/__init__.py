@@ -5,6 +5,7 @@
 
 Core providers:
     - OpenAIChat: OpenAI Chat Completions API
+    - OpenAIResponses: OpenAI Responses API
     - Claude: Anthropic Claude
     - AzureOpenAIChat: Azure OpenAI
     - OllamaChat: Ollama local models

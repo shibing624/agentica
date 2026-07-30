@@ -19,10 +19,12 @@ def create_model(
     *,
     base_url: Optional[str] = None,
     api_key: Optional[str] = None,
+    wire_api: str = "",
     max_tokens: int = 0,
     temperature: float = 0.0,
     top_p: float = 0.0,
     context_window: int = 0,
+    reasoning: str = "",
     reasoning_effort: str = "",
     thinking: str = "",
 ) -> Any:
@@ -38,12 +40,15 @@ def create_model(
         model_name: Model identifier (e.g. "gpt-4o", "glm-4.7-flash").
         base_url: Optional override for the provider's base URL.
         api_key: Optional override for the provider's API key.
+        wire_api: ``responses`` selects OpenAI Responses API; empty or
+            ``chat_completions`` uses the provider's default model class.
         max_tokens: Output token limit (0 = leave model default).
         temperature: Sampling temperature (0 = leave default).
         top_p: Nucleus sampling probability (0 = leave default).
         context_window: Context limit; overrides the catalog auto-detected
             value. NOT sent to the API — set on the instance for budget /
             compression / status display only.
+        reasoning: Responses API effort: none|minimal|low|medium|high|xhigh|max.
         reasoning_effort: low|medium|high|max (OpenAI/DeepSeek); ignored for
             Anthropic-family providers which use a thinking budget instead.
         thinking: enabled|disabled|auto — Anthropic-family providers use a
@@ -56,6 +61,17 @@ def create_model(
         ValueError: If the provider is not recognized or tuning is invalid.
     """
     _ANTHROPIC_PROVIDERS = {"kimi", "anthropic", "claude"}
+    effective_wire_api = wire_api or "chat_completions"
+    if effective_wire_api not in ("chat_completions", "responses"):
+        raise ValueError("wire_api must be either 'chat_completions' or 'responses'")
+    if wire_api and model_provider != "openai":
+        raise ValueError("wire_api requires model_provider='openai'")
+    if reasoning and effective_wire_api != "responses":
+        raise ValueError("reasoning requires wire_api='responses'")
+    if effective_wire_api == "responses" and reasoning_effort:
+        raise ValueError("Responses API uses reasoning, not reasoning_effort")
+    if reasoning and reasoning not in ("none", "minimal", "low", "medium", "high", "xhigh", "max"):
+        raise ValueError(f"Invalid Responses reasoning effort: {reasoning!r}")
 
     params: dict[str, Any] = {"id": model_name, "timeout": 300}
     if base_url:
@@ -68,6 +84,8 @@ def create_model(
         params["temperature"] = temperature
     if top_p:
         params["top_p"] = top_p
+    if reasoning:
+        params["reasoning"] = reasoning
 
     # Thinking mode — Anthropic-family gets a dict, others go via extra_body.
     if thinking and thinking in ("enabled", "disabled", "auto"):
@@ -103,7 +121,11 @@ def create_model(
             f"Unknown model_provider '{model_provider}'. "
             f"Supported providers: {list_providers()}"
         )
-    model = create_provider(model_provider, **params)
+    if effective_wire_api == "responses":
+        from agentica.model.openai import OpenAIResponses
+        model = OpenAIResponses(**params)
+    else:
+        model = create_provider(model_provider, **params)
 
     # context_window is NOT an API param — set on the instance for budget /
     # compression / status display. Overrides the catalog auto-detected value.

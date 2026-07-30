@@ -217,6 +217,27 @@ class TestAgentServiceCronUsesAuxiliaryModel:
 
         assert mock_create.call_args_list[0].args == (svc.model_provider, svc.model_name)
 
+    def test_interactive_session_passes_responses_protocol(self, tmp_path):
+        from agentica.gateway.services.agent_service import AgentService
+        from agentica.gateway.config import settings
+
+        svc = AgentService(workspace_path=str(tmp_path))
+        svc._workspace = None
+        with patch.object(settings, "model_provider", "openai"), \
+             patch.object(settings, "model_name", "gpt-5.6-sol"), \
+             patch.object(settings, "model_wire_api", "responses"), \
+             patch.object(settings, "model_reasoning", "high"), \
+             patch.object(settings, "model_reasoning_effort", ""), \
+             patch.object(settings, "auxiliary_model_name", ""), \
+             patch("agentica.gateway.services.agent_service.create_model") as mock_create:
+            mock_create.return_value = MagicMock()
+            svc._build_agent("chat123")
+
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["wire_api"] == "responses"
+        assert kwargs["reasoning"] == "high"
+        assert kwargs["reasoning_effort"] == ""
+
 
 class TestAgentServiceNumHistoryTurns:
     """_build_agent must read num_history_turns from settings — the same
@@ -351,6 +372,21 @@ class TestSettings:
         assert s.model_name == "gpt-4o"
         assert s.model_thinking == "enabled"
         assert s.model_reasoning_effort == "max"
+
+    def test_from_env_responses_profile_ignores_chat_effort_env(self):
+        from agentica.gateway.config import Settings
+        profile = {
+            "model_provider": "openai",
+            "model_name": "gpt-5.6-sol",
+            "wire_api": "responses",
+            "reasoning": "high",
+        }
+        with patch.dict(os.environ, {"AGENTICA_REASONING_EFFORT": "max"}, clear=False):
+            with patch("agentica.gateway.config.apply_global_config", return_value=profile):
+                s = Settings.from_env()
+        assert s.model_wire_api == "responses"
+        assert s.model_reasoning == "high"
+        assert s.model_reasoning_effort == ""
 
     def test_mutable_model_fields(self):
         """model_provider, model_name, model_thinking should be mutable."""
@@ -767,6 +803,22 @@ class TestModelFactory:
         from agentica.gateway.services.model_factory import create_model
         model = create_model("openai", "gpt-4o-mini")
         assert model.__class__.__name__ == "OpenAIChat"
+
+    def test_openai_responses_wire_api(self):
+        from agentica.gateway.services.model_factory import create_model
+        model = create_model(
+            "openai",
+            "gpt-5.6-sol",
+            wire_api="responses",
+            reasoning="high",
+        )
+        assert model.__class__.__name__ == "OpenAIResponses"
+        assert model.reasoning == "high"
+
+    def test_reasoning_does_not_implicitly_select_responses(self):
+        from agentica.gateway.services.model_factory import create_model
+        with pytest.raises(ValueError, match="requires wire_api='responses'"):
+            create_model("openai", "gpt-5.6-sol", reasoning="high")
 
     def test_kimi_provider(self):
         from agentica.gateway.services.model_factory import create_model

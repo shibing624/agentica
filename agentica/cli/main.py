@@ -121,6 +121,7 @@ def main():
         "model_provider": resolved["model_provider"],
         "model_name": resolved["model_name"],
         "base_url": resolved["base_url"],
+        "wire_api": resolved.get("wire_api"),
         # CLI flag wins; otherwise use the key stored in a config.yaml profile
         # for the resolved provider/base_url. If both are None the model factory
         # falls back to the provider's env var (backwards-compat).
@@ -130,6 +131,10 @@ def main():
         "max_tokens": args.max_tokens if args.max_tokens is not None else resolved.get("max_tokens"),
         "temperature": args.temperature if args.temperature is not None else resolved.get("temperature"),
         "reasoning_effort": args.reasoning_effort or resolved.get("reasoning_effort"),
+        # Responses reasoning maps to reasoning: {effort: ...}. ``wire_api``
+        # selects the protocol independently, so Responses also works without
+        # a reasoning override.
+        "reasoning": resolved.get("reasoning"),
         "top_p": args.top_p if args.top_p is not None else resolved.get("top_p"),
         "context_window": args.context_window if args.context_window is not None else resolved.get("context_window"),
         # Raw passthrough dicts (profile-only, no CLI flag — see cli/setup.py's
@@ -151,8 +156,11 @@ def main():
         "auxiliary_model_name": resolved.get("auxiliary_model_name"),
         "auxiliary_base_url": resolved.get("auxiliary_base_url"),
         "auxiliary_api_key": resolved.get("auxiliary_api_key"),
+        "auxiliary_wire_api": resolved.get("auxiliary_wire_api"),
         "auxiliary_extra_body": resolved.get("auxiliary_extra_body"),
         "auxiliary_extra_headers": resolved.get("auxiliary_extra_headers"),
+        "auxiliary_reasoning": resolved.get("auxiliary_reasoning"),
+        "auxiliary_reasoning_effort": resolved.get("auxiliary_reasoning_effort"),
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
         "enable_experience_capture": not args.no_experience,

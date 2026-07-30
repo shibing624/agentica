@@ -30,6 +30,14 @@ from agentica.tools.base import FunctionCall, get_function_call_for_tool_call
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
 
+CLAUDE_OPUS_5_REASONING_EFFORTS = ("off", "low", "medium", "high", "extra-high", "max")
+
+
+def is_claude_opus_5(model_name: str) -> bool:
+    """Return whether *model_name* identifies a Claude Opus 5 model."""
+    return model_name.rsplit("/", 1)[-1].lower().startswith("claude-opus-5")
+
+
 # Safety margin subtracted from the API-reported ``available_tokens`` when
 # retrying after a "max_tokens too large given prompt" error. Without this,
 # the retry sometimes hits the same boundary again because token counting
@@ -132,7 +140,7 @@ class Claude(Model):
     #     output_config.effort. Set this directly for full control, or use the
     #     ``reasoning_effort`` shortcut below which builds the adaptive form.
     thinking: Optional[Dict[str, Any]] = None
-    # Adaptive-thinking effort shortcut: "low"|"medium"|"high"|"xhigh"|"max".
+    # Adaptive-thinking effort shortcut: "low"|"medium"|"high"|"extra-high"|"max".
     # When set (and ``thinking`` is not already given), prepare_request_kwargs
     # enables adaptive thinking via thinking={"type":"adaptive"} +
     # output_config={"effort": ...}. Adaptive thinking requires temperature=1,

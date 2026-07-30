@@ -374,5 +374,92 @@ class TestRunFunctionCalls:
         ) == ["none", "auto"]
 
 
+# ---------------------------------------------------------------------------
+# TestCloseClient — per-turn async HTTP client teardown
+# ---------------------------------------------------------------------------
+
+
+class TestCloseClient:
+    """close_client() must actually close the cached async SDK client.
+
+    Regression: it only looked for ``aclose()``, but the openai / anthropic
+    async clients expose an async ``close()`` instead, so teardown silently
+    no-op'd and the httpx pool was finalized later on a dead loop
+    ("RuntimeError: Event loop is closed").
+    """
+
+    def _make_model_instance(self):
+        from agentica.model.openai import OpenAIChat
+        return OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+
+    @pytest.mark.asyncio
+    async def test_closes_client_exposing_only_async_close(self):
+        model = self._make_model_instance()
+        client = MagicMock(spec=["close"])
+        client.close = AsyncMock()
+        model.client = client
+
+        await model.close_client()
+
+        client.close.assert_awaited_once()
+        assert model.client is None
+
+    @pytest.mark.asyncio
+    async def test_prefers_aclose_when_available(self):
+        model = self._make_model_instance()
+        client = MagicMock(spec=["aclose"])
+        client.aclose = AsyncMock()
+        model.client = client
+
+        await model.close_client()
+
+        client.aclose.assert_awaited_once()
+        assert model.client is None
+
+    @pytest.mark.asyncio
+    async def test_supports_sync_close(self):
+        """A plain (non-awaitable) close() must still be invoked."""
+        model = self._make_model_instance()
+        client = MagicMock(spec=["close"])
+        model.client = client
+
+        await model.close_client()
+
+        client.close.assert_called_once()
+        assert model.client is None
+
+    @pytest.mark.asyncio
+    async def test_no_client_is_noop(self):
+        model = self._make_model_instance()
+        model.client = None
+        await model.close_client()  # must not raise
+        assert model.client is None
+
+    @pytest.mark.asyncio
+    async def test_real_openai_client_is_closeable(self):
+        """Pin the real SDK surface: the built client must expose a closer.
+
+        This is the check that would have caught the original bug — the mock
+        tests above pass either way.
+        """
+        model = self._make_model_instance()
+        client = model.get_client()
+        assert getattr(client, "aclose", None) or getattr(client, "close", None)
+
+        await model.close_client()
+        assert model.client is None
+
+    @pytest.mark.asyncio
+    async def test_close_failure_does_not_propagate(self):
+        model = self._make_model_instance()
+        client = MagicMock(spec=["close"])
+        client.close = AsyncMock(side_effect=RuntimeError("Event loop is closed"))
+        model.client = client
+
+        await model.close_client()  # teardown is best-effort
+
+        assert model.client is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

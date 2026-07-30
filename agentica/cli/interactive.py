@@ -1078,7 +1078,7 @@ def _read_git_branch(work_dir: str) -> str:
 
 def _status_thinking_mode(agent, agent_config: dict) -> str:
     """Return the concise effective thinking label shown in the status bar."""
-    effort = agent_config.get("reasoning_effort")
+    effort = agent_config.get("reasoning") or agent_config.get("reasoning_effort")
     if effort:
         return str(effort)
     if agent is None or agent.model is None:

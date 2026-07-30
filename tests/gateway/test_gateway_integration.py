@@ -47,6 +47,8 @@ def mock_app():
     mock_svc.max_tokens = 0
     mock_svc.temperature = 0.0
     mock_svc.top_p = 0.0
+    mock_svc.model_wire_api = ""
+    mock_svc.model_reasoning = ""
     mock_svc.model_reasoning_effort = ""
     mock_svc._invalidate_cache = AsyncMock()
     mock_svc.reload_profile = AsyncMock()
@@ -395,9 +397,10 @@ class TestProfileCrudEndpoints:
     def test_get_profile_detail(self, mock_app):
         client, _ = mock_app
         fake = {
-            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
-            "base_url": "https://api.deepseek.com", "api_key": "sk-1234567890abcdef",
-            "reasoning_effort": "max", "max_tokens": 8192, "context_window": 1000000,
+            "model_provider": "openai", "model_name": "gpt-5.6-sol",
+            "base_url": "https://example/v1", "api_key": "sk-1234567890abcdef",
+            "wire_api": "responses", "reasoning": "high",
+            "max_tokens": 8192, "context_window": 1000000,
             "temperature": 0.7, "top_p": 0.95,
             "auxiliary_model": {"model_provider": "zhipuai", "model_name": "glm-4.7-flash",
                                 "base_url": "https://open.bigmodel.cn", "api_key": "sk-aux"},
@@ -407,9 +410,11 @@ class TestProfileCrudEndpoints:
             resp = client.get("/api/profile/default")
         assert resp.status_code == 200
         d = resp.json()
-        assert d["model_provider"] == "deepseek"
+        assert d["model_provider"] == "openai"
         assert d["api_key_masked"].startswith("sk-1") and "****" in d["api_key_masked"]
         assert d["has_api_key"] is True
+        assert d["wire_api"] == "responses"
+        assert d["reasoning"] == "high"
         assert d["env"]["SERPER_API_KEY"] == "xxx"
         assert d["auxiliary_model"]["model_provider"] == "zhipuai"
 
@@ -433,6 +438,22 @@ class TestProfileCrudEndpoints:
         assert args[1]["model_provider"] == "deepseek"
         assert args[1]["api_key"] == "sk-xxx"
         assert kwargs["make_active"] is False
+
+    def test_create_responses_profile(self, mock_app):
+        client, _ = mock_app
+        with patch("agentica.gateway.routes.settings.upsert_profile") as upsert:
+            resp = client.post("/api/profile", json={
+                "name": "a",
+                "model_provider": "openai",
+                "model_name": "gpt-5.6-sol",
+                "base_url": "https://example/v1",
+                "wire_api": "responses",
+                "reasoning": "high",
+            })
+        assert resp.status_code == 200
+        profile = upsert.call_args.args[1]
+        assert profile["wire_api"] == "responses"
+        assert profile["reasoning"] == "high"
 
     def test_create_profile_missing_fields(self, mock_app):
         client, _ = mock_app

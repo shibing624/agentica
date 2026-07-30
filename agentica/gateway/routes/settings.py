@@ -53,6 +53,8 @@ class ProfileFields:
     model_name: str = ""
     base_url: str = ""
     api_key: str = ""
+    wire_api: str = ""
+    reasoning: str = ""
     reasoning_effort: str = ""
     max_tokens: int = 0
     context_window: int = 0
@@ -63,7 +65,10 @@ class ProfileFields:
 
 
 PROFILE_FIELD_NAMES = tuple(f.name for f in fields(ProfileFields))
-TUNING_FIELD_NAMES = ("reasoning_effort", "max_tokens", "temperature", "top_p", "context_window")
+TUNING_FIELD_NAMES = (
+    "wire_api", "reasoning", "reasoning_effort", "max_tokens",
+    "temperature", "top_p", "context_window",
+)
 
 
 # ============== Root + Status ==============
@@ -111,6 +116,8 @@ async def status():
         "active_profile": active_profile,
         "config_path": str(config_path),
         "tuning": {
+            "wire_api": svc.model_wire_api if svc else settings.model_wire_api,
+            "reasoning": svc.model_reasoning if svc else settings.model_reasoning,
             "max_tokens": svc.max_tokens if svc else settings.max_tokens,
             "temperature": svc.temperature if svc else settings.temperature,
             "top_p": svc.top_p if svc else settings.top_p,
@@ -223,6 +230,9 @@ def _profile_summary(name: str, profile: dict) -> dict:
                 "model_provider": aux.get("model_provider", ""),
                 "model_name": aux.get("model_name", ""),
                 "base_url": aux.get("base_url", ""),
+                "wire_api": aux.get("wire_api", ""),
+                "reasoning": aux.get("reasoning", ""),
+                "reasoning_effort": aux.get("reasoning_effort", ""),
                 "has_api_key": bool(aux.get("api_key")),
                 "api_key_masked": _mask_key(aux.get("api_key", "")),
             }
@@ -294,6 +304,9 @@ async def get_profile_detail(name: str):
                 "model_provider": aux.get("model_provider", ""),
                 "model_name": aux.get("model_name", ""),
                 "base_url": aux.get("base_url", ""),
+                "wire_api": aux.get("wire_api", ""),
+                "reasoning": aux.get("reasoning", ""),
+                "reasoning_effort": aux.get("reasoning_effort", ""),
                 "has_api_key": bool(aux.get("api_key")),
                 "api_key_masked": _mask_key(aux.get("api_key", "")),
             }

@@ -1443,9 +1443,11 @@ def _rebuild_live_model(ctx: CommandContext):
         "model_name": ctx.agent_config.get("model_name"),
         "base_url": ctx.agent_config.get("base_url"),
         "api_key": ctx.agent_config.get("api_key"),
+        "wire_api": ctx.agent_config.get("wire_api"),
         "max_tokens": ctx.agent_config.get("max_tokens"),
         "temperature": ctx.agent_config.get("temperature"),
         "reasoning_effort": ctx.agent_config.get("reasoning_effort"),
+        "reasoning": ctx.agent_config.get("reasoning"),
         "top_p": ctx.agent_config.get("top_p"),
         "context_window": ctx.agent_config.get("context_window"),
         "extra_body": ctx.agent_config.get("extra_body"),
@@ -2199,6 +2201,7 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_model = profile.get("model_name") or default_model_name(new_provider)
     new_base_url = profile.get("base_url") or default_base_url(new_provider)
     new_key = profile.get("api_key") or get_profile_api_key(new_provider, new_base_url)
+    new_wire_api = profile.get("wire_api")
 
     # Model tuning params: a profile-switch fully replaces the previous model's
     # tuning, so unset profile fields reset to None (the model factory default)
@@ -2206,6 +2209,7 @@ def _apply_profile(ctx: CommandContext, name: str):
     new_max_tokens = profile.get("max_tokens")
     new_temperature = profile.get("temperature")
     new_reasoning_effort = profile.get("reasoning_effort")
+    new_reasoning = profile.get("reasoning")
     new_top_p = profile.get("top_p")
     new_context_window = profile.get("context_window")
     new_extra_body = profile.get("extra_body")
@@ -2216,9 +2220,11 @@ def _apply_profile(ctx: CommandContext, name: str):
     ctx.agent_config["model_name"] = new_model
     ctx.agent_config["base_url"] = new_base_url
     ctx.agent_config["api_key"] = new_key
+    ctx.agent_config["wire_api"] = new_wire_api
     ctx.agent_config["max_tokens"] = new_max_tokens
     ctx.agent_config["temperature"] = new_temperature
     ctx.agent_config["reasoning_effort"] = new_reasoning_effort
+    ctx.agent_config["reasoning"] = new_reasoning
     ctx.agent_config["top_p"] = new_top_p
     ctx.agent_config["context_window"] = new_context_window
     ctx.agent_config["extra_body"] = new_extra_body
@@ -2238,8 +2244,11 @@ def _apply_profile(ctx: CommandContext, name: str):
         ctx.agent_config["auxiliary_model_name"] = auxiliary_block.get("model_name")
         ctx.agent_config["auxiliary_base_url"] = auxiliary_block.get("base_url")
         ctx.agent_config["auxiliary_api_key"] = auxiliary_block.get("api_key")
+        ctx.agent_config["auxiliary_wire_api"] = auxiliary_block.get("wire_api")
         ctx.agent_config["auxiliary_extra_body"] = auxiliary_block.get("extra_body")
         ctx.agent_config["auxiliary_extra_headers"] = auxiliary_block.get("extra_headers")
+        ctx.agent_config["auxiliary_reasoning"] = auxiliary_block.get("reasoning")
+        ctx.agent_config["auxiliary_reasoning_effort"] = auxiliary_block.get("reasoning_effort")
         try:
             new_auxiliary_model = _build_sibling_model(ctx.agent_config, "auxiliary")
         except Exception as exc:
@@ -2248,16 +2257,22 @@ def _apply_profile(ctx: CommandContext, name: str):
             ctx.agent_config["auxiliary_model_name"] = None
             ctx.agent_config["auxiliary_base_url"] = None
             ctx.agent_config["auxiliary_api_key"] = None
+            ctx.agent_config["auxiliary_wire_api"] = None
             ctx.agent_config["auxiliary_extra_body"] = None
             ctx.agent_config["auxiliary_extra_headers"] = None
+            ctx.agent_config["auxiliary_reasoning"] = None
+            ctx.agent_config["auxiliary_reasoning_effort"] = None
             new_auxiliary_model = None
     else:
         ctx.agent_config["auxiliary_model_provider"] = None
         ctx.agent_config["auxiliary_model_name"] = None
         ctx.agent_config["auxiliary_base_url"] = None
         ctx.agent_config["auxiliary_api_key"] = None
+        ctx.agent_config["auxiliary_wire_api"] = None
         ctx.agent_config["auxiliary_extra_body"] = None
         ctx.agent_config["auxiliary_extra_headers"] = None
+        ctx.agent_config["auxiliary_reasoning"] = None
+        ctx.agent_config["auxiliary_reasoning_effort"] = None
         new_auxiliary_model = None
     ctx.agent_config["auxiliary_model"] = new_auxiliary_model
 
@@ -2278,9 +2293,11 @@ def _apply_profile(ctx: CommandContext, name: str):
         "model_name": new_model,
         "base_url": new_base_url,
         "api_key": new_key,
+        "wire_api": new_wire_api,
         "max_tokens": new_max_tokens,
         "temperature": new_temperature,
         "reasoning_effort": new_reasoning_effort,
+        "reasoning": new_reasoning,
         "top_p": new_top_p,
         "context_window": new_context_window,
         "extra_body": new_extra_body,
@@ -2376,6 +2393,10 @@ def _list_profiles(active_name: Optional[str] = None, active_source: Optional[st
         else:
             con.print("      auxiliary:  [dim]reuse main[/dim]")
         tuning = []
+        if p.get("wire_api"):
+            tuning.append(f"wire_api={p['wire_api']}")
+        if p.get("reasoning"):
+            tuning.append(f"responses_reasoning={p['reasoning']}")
         if p.get("reasoning_effort"):
             tuning.append(f"effort={p['reasoning_effort']}")
         if p.get("max_tokens"):

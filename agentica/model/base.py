@@ -7,6 +7,7 @@ part of the code is from phidata
 import asyncio
 import collections.abc
 import contextvars
+import inspect
 import io
 import json
 import base64
@@ -298,10 +299,19 @@ class Model(ABC):
         (e.g. sync clients, or subclasses without a cached client).
         """
         client = getattr(self, "client", None)
-        if client is None or not hasattr(client, "aclose"):
+        if client is None:
+            return
+        # The openai / anthropic async SDK clients expose an async ``close()``;
+        # ``aclose()`` only exists on the raw httpx client. Accept either so
+        # this teardown actually runs (checking only ``aclose`` made it a
+        # silent no-op, which is what surfaced as "Event loop is closed").
+        closer = getattr(client, "aclose", None) or getattr(client, "close", None)
+        if closer is None:
             return
         try:
-            await client.aclose()
+            result = closer()
+            if inspect.isawaitable(result):
+                await result
         except Exception:
             # Best-effort teardown at an I/O boundary — never let a failed
             # close abort the run's cleanup.
