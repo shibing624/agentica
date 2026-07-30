@@ -681,62 +681,97 @@ class TestCLIHelpers(unittest.TestCase):
             dm.display_tool(name, {"file_path": "/abs/path/to/config.py"})
             fake.print.assert_not_called(), f"{name} call line must be deferred"
 
-    def test_display_edit_file_merged_shows_filename_and_diff(self):
-        """edit_file: one summary line with filename (not abs path) + ✓ + a diff."""
+    def test_display_edit_file_merged_shows_real_file_diff_and_summary(self):
+        """edit_file diffs the real pre/post file and reports changed lines."""
+        import tempfile
         from agentica.cli.display import StreamDisplayManager
 
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
-        dm.display_tool_result(
-            "edit_file",
-            "Successfully applied 1 edit to config.py",
-            is_error=False,
-            elapsed=0.12,
-            tool_args={
-                "file_path": "/apdcephfs_cq11/share_2973545/flemingxu/config.py",
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "config.py")
+            with open(path, "w") as f:
+                f.write("DEBUG = False\nKEEP = 1\n")
+            args = {
+                "file_path": path,
                 "old_string": "DEBUG = False\n",
                 "new_string": "DEBUG = True\n",
-            },
-        )
+            }
+            fake = MagicMock()
+            fake.width = 80
+            dm = StreamDisplayManager(fake)
+            dm.display_tool("edit_file", args, tool_call_id="edit-1")
+            with open(path, "w") as f:
+                f.write("DEBUG = True\nKEEP = 1\n")
+            dm.display_tool_result(
+                "edit_file",
+                "Successfully applied 1 edit to config.py",
+                is_error=False,
+                elapsed=0.12,
+                tool_args=args,
+                tool_call_id="edit-1",
+            )
+
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("edit_file", text)
         self.assertIn("config.py", text)
-        # absolute path must NOT leak
-        self.assertNotIn("/apdcephfs_cq11", text)
-        self.assertIn("✓", text)
+        self.assertNotIn(td, text)
+        self.assertIn("Edited 1 file (+1 -1)", text)
         self.assertIn("(120ms)", text)
-        # diff content surfaces the change (rendered as a Syntax object)
         syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
-        self.assertTrue(syntax_args, "expected a diff Syntax block")
-        self.assertIn("DEBUG", getattr(syntax_args[0], "code", ""))
+        self.assertEqual(len(syntax_args), 1)
+        code = getattr(syntax_args[0], "code", "")
+        self.assertIn("diff --git a/config.py b/config.py", code)
+        self.assertIn("-DEBUG = False", code)
+        self.assertIn("+DEBUG = True", code)
 
-    def test_display_multi_edit_file_shows_filename_and_edit_count(self):
-        """multi_edit_file: filename + edit count, no absolute path."""
+    def test_display_multi_edit_file_aggregates_real_changes_into_one_diff(self):
+        """multi_edit_file renders one real file diff with multiple hunks."""
+        import tempfile
         from agentica.cli.display import StreamDisplayManager
 
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
-        dm.display_tool_result(
-            "multi_edit_file",
-            "Successfully applied 2 edits to config.py",
-            is_error=False,
-            elapsed=0.42,
-            tool_args={
-                "file_path": "/apdcephfs_cq11/share_2973545/flemingxu/config.py",
+        old_lines = [f"line {i}\n" for i in range(20)]
+        new_lines = old_lines.copy()
+        new_lines[1] = "first change\n"
+        new_lines[18] = "second change\n"
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, "config.py")
+            with open(path, "w") as f:
+                f.writelines(old_lines)
+            args = {
+                "file_path": path,
                 "edits": [
-                    {"old_string": "a=1\n", "new_string": "a=2\n"},
-                    {"old_string": "b=3\n", "new_string": "b=4\n"},
+                    {"old_string": "line 1\n", "new_string": "first change\n"},
+                    {"old_string": "line 18\n", "new_string": "second change\n"},
                 ],
-            },
-        )
+            }
+            fake = MagicMock()
+            fake.width = 80
+            dm = StreamDisplayManager(fake)
+            dm.display_tool("multi_edit_file", args, tool_call_id="multi-1")
+            with open(path, "w") as f:
+                f.writelines(new_lines)
+            dm.display_tool_result(
+                "multi_edit_file",
+                "Successfully applied 2 edits to config.py",
+                is_error=False,
+                elapsed=0.42,
+                tool_args=args,
+                tool_call_id="multi-1",
+            )
+
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("multi_edit_file", text)
         self.assertIn("config.py", text)
-        self.assertNotIn("/apdcephfs_cq11", text)
-        self.assertIn("2 edits", text)
+        self.assertNotIn(td, text)
+        self.assertIn("Edited 1 file (+2 -2)", text)
         self.assertIn("(420ms)", text)
+        syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
+        self.assertEqual(len(syntax_args), 1)
+        code = getattr(syntax_args[0], "code", "")
+        self.assertEqual(code.count("diff --git"), 1)
+        self.assertEqual(code.count("--- a/config.py"), 1)
+        self.assertEqual(code.count("+++ b/config.py"), 1)
+        self.assertEqual(code.count("@@"), 4)
+        self.assertNotIn("config.py#", code)
 
     def test_display_write_file_merged_shows_summary_and_diff(self):
         """write_file: one summary line (created/updated + line count) + a diff."""
@@ -835,17 +870,22 @@ class TestCLIHelpers(unittest.TestCase):
     def test_user_message_uses_subtle_background_panel(self):
         """Historical user queries are visually separated from assistant output."""
         from rich.padding import Padding
+        from rich.table import Table
 
         from agentica.cli.display import display_user_message
 
         console = Mock()
         with patch("agentica.cli.display.get_console", return_value=console):
-            display_user_message("hello")
+            display_user_message("hello\nsecond line")
 
         renderable = console.print.call_args.args[0]
         self.assertIsInstance(renderable, Padding)
         self.assertEqual(renderable.style, "on rgb(35,35,35)")
-        self.assertEqual(renderable.renderable.plain, "│  hello")
+        self.assertIsInstance(renderable.renderable, Table)
+        marker_column, content_column = renderable.renderable.columns
+        self.assertEqual(marker_column._cells[0].plain, "❯")
+        self.assertEqual(marker_column._cells[0].style, "bold bright_yellow")
+        self.assertEqual(content_column._cells[0].plain, "hello\nsecond line")
 
     def test_user_message_lists_each_attached_image_once_inside_panel(self):
         """Image attachments are listed once inside the historical input panel."""
@@ -870,10 +910,12 @@ class TestCLIHelpers(unittest.TestCase):
 
         renderable = console.print.call_args.args[0]
         self.assertIsInstance(renderable, Padding)
+        marker_column, content_column = renderable.renderable.columns
+        self.assertEqual(marker_column._cells[0].plain, "❯")
         self.assertEqual(
-            renderable.renderable.plain,
-            "│  compare these\n│  📎 Image #1 attached: clip_1.png (94KB)\n"
-            "│  📎 Image #2 attached: clip_2.png (94KB)",
+            content_column._cells[0].plain,
+            "compare these\n📎 Image #1 attached: clip_1.png (94KB)\n"
+            "📎 Image #2 attached: clip_2.png (94KB)",
         )
 
     def test_image_only_message_has_no_empty_gutter_line(self):
@@ -891,7 +933,9 @@ class TestCLIHelpers(unittest.TestCase):
             display_user_message("", images=[Path("/tmp/clip.png")])
 
         renderable = console.print.call_args.args[0]
-        self.assertEqual(renderable.renderable.plain, "│  📎 Image #1 attached: clip.png (1KB)")
+        marker_column, content_column = renderable.renderable.columns
+        self.assertEqual(marker_column._cells[0].plain, "❯")
+        self.assertEqual(content_column._cells[0].plain, "📎 Image #1 attached: clip.png (1KB)")
 
     def test_deduplicate_image_attachments_preserves_first_path(self):
         """One pasted image represented by two temp paths stays one attachment."""

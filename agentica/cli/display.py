@@ -16,6 +16,7 @@ from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.rule import Rule
 from rich.syntax import Syntax
+from rich.table import Table
 from rich.text import Text
 
 from agentica.cli.runtime import get_console, TOOL_ICONS, BUILTIN_TOOLS
@@ -380,11 +381,9 @@ def display_user_message(
             style="dim",
         )
 
-    has_text = bool(rich_text.plain)
     for index, image in enumerate(images or [], start=1):
         if rich_text.plain:
             rich_text.append("\n")
-        rich_text.append("│  ", style="bold bright_cyan")
         rich_text.append(
             f"📎 Image #{index} attached: {image.name} ({_format_attachment_size(image)})",
             style="dim",
@@ -393,11 +392,14 @@ def display_user_message(
     # Echo historical user queries on a subtle full-width background so they are
     # easy to find while scanning a long conversation. No trailing blank line here:
     # the response section (start_tool_section / _start_response) adds its spacing.
-    if has_text:
-        rich_text = Text.assemble(("│  ", "bold bright_cyan"), rich_text)
+    # A separate content column keeps wrapped and explicit continuation lines aligned.
+    history = Table.grid(padding=(0, 1))
+    history.add_column(no_wrap=True)
+    history.add_column(ratio=1)
+    history.add_row(Text("❯", style="bold bright_yellow"), rich_text)
     console = get_console()
     console.print()
-    console.print(Padding(rich_text, (0, 1), style="on rgb(35,35,35)"))
+    console.print(Padding(history, (0, 1), style="on rgb(35,35,35)"))
 
 
 def get_file_completions(document_text: str) -> List[str]:

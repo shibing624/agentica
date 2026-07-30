@@ -507,6 +507,35 @@ class TestBuiltinFileToolEditFile:
         assert "Successfully" in result
         assert Path(fp).read_text() == "y y y"
 
+    def test_quote_fallback_preserves_unrelated_typographic_quotes(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "quotes.txt")
+        Path(fp).write_text(
+            'title = \u201ckeep\u201d\nvalue = \u2018old\u2019\n',
+            encoding="utf-8",
+        )
+        result = asyncio.run(file_tool.edit_file(fp, "value = 'old'", "value = 'new'"))
+        assert "Successfully" in result
+        assert Path(fp).read_text(encoding="utf-8") == (
+            'title = \u201ckeep\u201d\nvalue = \'new\'\n'
+        )
+
+    def test_quote_fallback_replace_all_preserves_unrelated_content(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "quotes_all.txt")
+        Path(fp).write_text(
+            'title = \u201ckeep\u201d\nvalue = \'old\'\nvalue = \'old\'\n',
+            encoding="utf-8",
+        )
+        result = asyncio.run(file_tool.edit_file(
+            fp,
+            "value = \u2018old\u2019",
+            "value = 'new'",
+            replace_all=True,
+        ))
+        assert "Successfully" in result
+        assert Path(fp).read_text(encoding="utf-8") == (
+            'title = \u201ckeep\u201d\nvalue = \'new\'\nvalue = \'new\'\n'
+        )
+
     def test_edit_string_not_found(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "nf.txt")
         Path(fp).write_text("hello")

@@ -1035,9 +1035,10 @@ class BuiltinFileTool(Tool):
     ) -> dict:
         """Internal string replacement logic.
 
-        Tries exact match first.  If that fails, retries after normalizing
-        curly/typographic quotes in old_string to ASCII equivalents — LLMs
-        sometimes emit curly quotes when the file uses straight ASCII quotes.
+        Tries exact match first. If that fails, retries after normalizing
+        curly/typographic quotes in both strings to ASCII equivalents. The
+        normalized text is used only for locating matches; replacements are
+        always sliced from the original content.
 
         Returns:
             {"success": bool, "new_content": str, "count": int, "error": str}
@@ -1052,16 +1053,12 @@ class BuiltinFileTool(Tool):
             matches.append(idx)
             start = idx + len(old_string)
 
-        # Quote-normalization fallback: if exact match failed, retry with
-        # normalized quotes.  We search the normalized content for the
-        # normalized needle, then map positions back to the original content
-        # so the actual replacement preserves the file's quote style.
+        # Quote-normalization fallback: normalization is length-preserving, so
+        # positions found here map directly back to the original content.
         if not matches:
             norm_content = self._normalize_quotes(content)
             norm_old = self._normalize_quotes(old_string)
-            if norm_old != old_string and norm_old in norm_content:
-                # Find positions in normalized content, then use them on original
-                # (lengths are identical because _normalize_quotes is 1-to-1).
+            if norm_content != content or norm_old != old_string:
                 start = 0
                 while True:
                     idx = norm_content.find(norm_old, start)
@@ -1069,17 +1066,6 @@ class BuiltinFileTool(Tool):
                         break
                     matches.append(idx)
                     start = idx + len(norm_old)
-                if matches:
-                    # Replace using the normalized needle on the original content
-                    # (positions are identical because character counts don't change).
-                    old_string = norm_old
-                    content_for_replace = norm_content
-                else:
-                    content_for_replace = content
-            else:
-                content_for_replace = content
-        else:
-            content_for_replace = content
 
         if not matches:
             display_old = old_string[:100] + "..." if len(old_string) > 100 else old_string
@@ -1094,11 +1080,11 @@ class BuiltinFileTool(Tool):
         if not replace_all and len(matches) > 1:
             contexts = []
             for idx in matches[:3]:  # Show first 3 matches
-                line_num = content_for_replace[:idx].count('\n') + 1
+                line_num = content[:idx].count('\n') + 1
                 # Get surrounding context (up to 50 chars around the match)
                 context_start = max(0, idx - 20)
-                context_end = min(len(content_for_replace), idx + len(old_string) + 30)
-                context = content_for_replace[context_start:context_end].replace('\n', '\\n')
+                context_end = min(len(content), idx + len(old_string) + 30)
+                context = content[context_start:context_end].replace('\n', '\\n')
                 contexts.append(f"  Line {line_num}: ...{context}...")
 
             error_msg = (
@@ -1116,15 +1102,17 @@ class BuiltinFileTool(Tool):
                 "count": len(matches),
             }
 
-        # Perform replacement
-        if replace_all:
-            new_content = content_for_replace.replace(old_string, new_string)
-            count = len(matches)
-        else:
-            # Replace only the first match (leftmost)
-            idx = matches[0]
-            new_content = content_for_replace[:idx] + new_string + content_for_replace[idx + len(old_string):]
-            count = 1
+        # Build the result from original content so normalization cannot alter
+        # unrelated punctuation elsewhere in the file.
+        selected_matches = matches if replace_all else matches[:1]
+        parts = []
+        cursor = 0
+        for idx in selected_matches:
+            parts.extend((content[cursor:idx], new_string))
+            cursor = idx + len(old_string)
+        parts.append(content[cursor:])
+        new_content = ''.join(parts)
+        count = len(selected_matches)
 
         return {
             "success": True,
