@@ -289,7 +289,7 @@ from agentica import DeepAgent
 
 | 工具 | 函数 | 说明 |
 |------|------|------|
-| 文件 | `ls`, `glob`, `grep`, `read_file`, `write_file`, `edit_file`, `multi_edit_file` | 文件系统操作 |
+| 文件 | `ls`, `glob`, `grep`, `read_file`, `write_file`, `edit_file`, `multi_edit_file`, `apply_patch` | 文件系统操作 |
 | 执行 | `execute` | 运行 Shell 命令 |
 | 搜索 | `web_search`, `fetch_url` | 网页搜索和抓取 |
 | 任务 | `task` | 委派子任务给子 Agent |

@@ -36,7 +36,7 @@ class TestToolIcons(unittest.TestCase):
 
     def test_common_icons_exist(self):
         """Test common tool icons exist."""
-        expected_icons = ["read_file", "write_file", "execute", "web_search"]
+        expected_icons = ["read_file", "write_file", "apply_patch", "execute", "web_search"]
         for icon in expected_icons:
             self.assertIn(icon, TOOL_ICONS)
 
@@ -671,14 +671,19 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("FileNotFoundError", text)
 
     def test_display_tool_defers_edit_tools_call_line(self):
-        """edit_file/multi_edit_file defer the start-time call line (merged at completion)."""
+        """Write-diff tools defer the call line until completion."""
         from agentica.cli.display import StreamDisplayManager
 
-        for name in ("edit_file", "multi_edit_file"):
+        for name in ("edit_file", "multi_edit_file", "apply_patch"):
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
-            dm.display_tool(name, {"file_path": "/abs/path/to/config.py"})
+            args = (
+                {"patch": "*** Begin Patch\n*** Delete File: old.py\n*** End Patch"}
+                if name == "apply_patch"
+                else {"file_path": "/abs/path/to/config.py"}
+            )
+            dm.display_tool(name, args)
             fake.print.assert_not_called(), f"{name} call line must be deferred"
 
     def test_display_edit_file_merged_shows_real_file_diff_and_summary(self):
@@ -772,6 +777,44 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertEqual(code.count("+++ b/config.py"), 1)
         self.assertEqual(code.count("@@"), 4)
         self.assertNotIn("config.py#", code)
+
+    def test_display_apply_patch_aggregates_multiple_files(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        patch_text = """*** Begin Patch
+*** Update File: app.py
+@@
+-VALUE = 1
++VALUE = 2
+*** Add File: test_app.py
++def test_value():
++    assert True
+*** End Patch"""
+        args = {"patch": patch_text}
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+
+        dm.display_tool("apply_patch", args, tool_call_id="patch-1")
+        dm.display_tool_result(
+            "apply_patch",
+            "Successfully applied patch to 2 files (+3 -1):\nM app.py\nA test_app.py",
+            elapsed=0.25,
+            tool_args=args,
+            tool_call_id="patch-1",
+        )
+
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("apply_patch", text)
+        self.assertIn("Edited 2 files (+3 -1)", text)
+        self.assertIn("(250ms)", text)
+        syntax_args = [
+            call.args[0] for call in fake.print.call_args_list
+            if call.args and "Syntax" in type(call.args[0]).__name__
+        ]
+        self.assertEqual(len(syntax_args), 1)
+        self.assertIn("*** Update File: app.py", syntax_args[0].code)
+        self.assertIn("*** Add File: test_app.py", syntax_args[0].code)
 
     def test_display_write_file_merged_shows_summary_and_diff(self):
         """write_file: one summary line (created/updated + line count) + a diff."""

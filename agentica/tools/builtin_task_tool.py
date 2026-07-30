@@ -13,6 +13,7 @@ limit, registry tracking, event streaming, usage merge, timeout) lives in
   3. JSON-serializes the registry's structured result for the LLM.
 """
 import json
+import re
 from textwrap import dedent
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
@@ -288,6 +289,12 @@ class BuiltinTaskTool(Tool):
             edits = tool_args.get("edits", [])
             fname = fp.rsplit("/", 1)[-1] if "/" in fp else fp
             return f"{fname} ({len(edits)} edits)"
+        elif tool_name == "apply_patch":
+            patch = str(tool_args.get("patch", ""))
+            count = len(re.findall(
+                r"^\*\*\* (?:Add|Update|Delete) File: ", patch, re.MULTILINE
+            ))
+            return f"{count} {'file' if count == 1 else 'files'}"
         elif tool_name == "web_search":
             queries = tool_args.get("queries", "")
             if isinstance(queries, list):

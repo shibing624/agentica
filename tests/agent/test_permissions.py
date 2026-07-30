@@ -68,11 +68,13 @@ class TestAgentPermissionMode(unittest.TestCase):
         agent = Agent(tool_config=ToolConfig(permission_mode="ask"))
         self.assertTrue(agent._is_tool_enabled("read_file"))
         self.assertFalse(agent._is_tool_enabled("write_file"))
+        self.assertFalse(agent._is_tool_enabled("apply_patch"))
 
     def test_auto_mode_enables_sandbox_and_allows_all_tools(self):
         agent = Agent(tool_config=ToolConfig(permission_mode="auto"))
         self.assertTrue(agent.sandbox_config.enabled)
         self.assertTrue(agent._is_tool_enabled("write_file"))
+        self.assertTrue(agent._is_tool_enabled("apply_patch"))
 
     def test_auto_mode_seeds_writable_dirs_with_work_dir(self):
         """Regression: SandboxConfig only enforces work_dir as a fallback when
@@ -123,6 +125,7 @@ class TestDeepAgentPermissionMode(unittest.TestCase):
         agent = self._build(permission_mode="ask")
         self.assertEqual(agent.tool_config.permission_mode, "ask")
         self.assertFalse(agent._is_tool_enabled("write_file"))
+        self.assertFalse(agent._is_tool_enabled("apply_patch"))
         self.assertTrue(agent._is_tool_enabled("read_file"))
 
     def test_auto_mode_enables_sandbox(self):

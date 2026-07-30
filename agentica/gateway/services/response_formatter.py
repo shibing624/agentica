@@ -9,6 +9,7 @@ making them easy to test and reuse across different response paths
 (SSE streaming, WebSocket, non-streaming chat).
 """
 import json
+import re
 from typing import Any, Dict, Optional
 
 from agentica.run_response import ToolCallInfo
@@ -33,7 +34,7 @@ def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:
 def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
     """Format tool call arguments for frontend display.
 
-    For file-editing tools (edit_file, multi_edit_file, write_file),
+    For file-editing tools (edit_file, multi_edit_file, apply_patch, write_file),
     computes diff metadata (lines added/deleted) instead of sending
     the full content to the frontend. For other tools, truncates long
     string arguments to 100 characters.
@@ -71,6 +72,20 @@ def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
         fp = tool_args.get("file_path") or tool_args.get("file") or tool_args.get("path", "")
         if fp:
             display_args["file_path"] = fp
+
+    elif tool_name == "apply_patch":
+        patch = str(tool_args.get("patch", ""))
+        file_markers = re.findall(
+            r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", patch, re.MULTILINE
+        )
+        display_args["_file_count"] = len(file_markers)
+        display_args["_diff_add"] = sum(
+            line.startswith("+") for line in patch.splitlines()
+        )
+        display_args["_diff_del"] = sum(
+            line.startswith("-") for line in patch.splitlines()
+        )
+        display_args["_files"] = file_markers
 
     elif tool_name == "write_file":
         content = tool_args.get("content", "")

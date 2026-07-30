@@ -56,6 +56,18 @@ class ContextMatch:
     fuzz: int
 
 
+PatchAction = Literal["add", "update", "delete"]
+
+
+@dataclass(frozen=True)
+class FilePatch:
+    """One file operation parsed from an apply_patch envelope."""
+
+    action: PatchAction
+    path: str
+    diff: str = ""
+
+
 # V4A diff markers
 END_PATCH = "*** End Patch"
 END_FILE = "*** End of File"
@@ -66,6 +78,61 @@ SECTION_TERMINATORS = [
     "*** Add File:",
 ]
 END_SECTION_MARKERS = [*SECTION_TERMINATORS, END_FILE]
+
+
+_FILE_MARKER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
+
+
+def parse_patch_envelope(patch: str) -> List[FilePatch]:
+    """Parse a strict multi-file ``*** Begin Patch`` envelope.
+
+    The parser is intentionally format-specific: accepting one unambiguous
+    patch grammar is safer than guessing between V4A and unified diff input.
+    Per-file update bodies are validated later against current file content by
+    ``apply_diff`` before any filesystem mutation occurs.
+    """
+    normalized = patch.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    lines = normalized.split("\n") if normalized else []
+    if len(lines) < 3 or lines[0] != "*** Begin Patch" or lines[-1] != END_PATCH:
+        raise ValueError(
+            "Patch must start with '*** Begin Patch' and end with '*** End Patch'."
+        )
+
+    operations: List[FilePatch] = []
+    seen_paths = set()
+    index = 1
+    while index < len(lines) - 1:
+        marker = _FILE_MARKER_RE.fullmatch(lines[index])
+        if marker is None:
+            raise ValueError(f"Invalid patch line {index + 1}: {lines[index]!r}")
+
+        action = marker.group(1).lower()
+        path = marker.group(2).strip()
+        if not path:
+            raise ValueError(f"Missing file path on patch line {index + 1}.")
+        if path in seen_paths:
+            raise ValueError(f"Duplicate file operation for {path!r}.")
+        seen_paths.add(path)
+
+        index += 1
+        body_start = index
+        while index < len(lines) - 1 and _FILE_MARKER_RE.fullmatch(lines[index]) is None:
+            if lines[index] == "*** Begin Patch":
+                raise ValueError(f"Unexpected nested patch marker on line {index + 1}.")
+            index += 1
+        body = "\n".join(lines[body_start:index])
+
+        if action == "delete":
+            if body:
+                raise ValueError(f"Delete File {path!r} must not contain a diff body.")
+        elif not body:
+            raise ValueError(f"{action.title()} File {path!r} requires a diff body.")
+
+        operations.append(FilePatch(action=action, path=path, diff=body))
+
+    if not operations:
+        raise ValueError("Patch contains no file operations.")
+    return operations
 
 
 def apply_diff(input_text: str, diff: str, mode: ApplyDiffMode = "default") -> str:

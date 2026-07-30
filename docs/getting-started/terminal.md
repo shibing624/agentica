@@ -64,6 +64,7 @@ CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定�
 | `write_file` | 创建或完整覆写文件 |
 | `edit_file` | 精确字符串替换（比 write_file 更安全，适合小改动） |
 | `multi_edit_file` | 批量编辑同一文件（原子操作，避免竞态） |
+| `apply_patch` | 一次补丁新增、更新或删除多个文件 |
 | `ls` | 列出目录内容 |
 | `glob` | 文件模式匹配（`**/*.py`） |
 | `grep` | 内容搜索（基于 ripgrep） |

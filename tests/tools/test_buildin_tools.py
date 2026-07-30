@@ -357,6 +357,99 @@ class TestBuiltinFileToolRequestPathAccess:
         assert "fake-key" in content
 
 
+class TestBuiltinFileToolApplyPatch:
+    def test_registered_as_serial_destructive_raw_string_tool(self, file_tool):
+        function = file_tool.functions["apply_patch"]
+        function.process_entrypoint(strict=False)
+
+        assert function.is_destructive is True
+        assert function.concurrency_safe is False
+        assert function.sanitize_arguments is False
+        assert function.parameters["required"] == ["patch"]
+        assert function.parameters["properties"]["patch"]["type"] == "string"
+
+    def test_applies_update_add_and_delete_in_one_call(self, file_tool, tmp_dir):
+        Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")
+        Path(tmp_dir, "obsolete.py").write_text("remove me\n")
+        patch_text = """*** Begin Patch
+*** Update File: app.py
+@@
+-VALUE = 1
++VALUE = 2
+ KEEP = True
+*** Add File: tests/test_app.py
++def test_value():
++    assert True
+*** Delete File: obsolete.py
+*** End Patch"""
+
+        result = asyncio.run(file_tool.apply_patch(patch_text))
+
+        assert "Successfully applied patch to 3 files" in result
+        assert "M app.py" in result
+        assert "A tests/test_app.py" in result
+        assert "D obsolete.py" in result
+        assert Path(tmp_dir, "app.py").read_text() == "VALUE = 2\nKEEP = True\n"
+        assert Path(tmp_dir, "tests/test_app.py").read_text() == (
+            "def test_value():\n    assert True"
+        )
+        assert not Path(tmp_dir, "obsolete.py").exists()
+
+    def test_failed_later_hunk_writes_nothing(self, file_tool, tmp_dir):
+        first = Path(tmp_dir, "first.py")
+        second = Path(tmp_dir, "second.py")
+        first.write_text("FIRST = 1\n")
+        second.write_text("SECOND = 2\n")
+        patch_text = """*** Begin Patch
+*** Update File: first.py
+@@
+-FIRST = 1
++FIRST = 10
+*** Update File: second.py
+@@
+-STALE = 2
++SECOND = 20
+*** End Patch"""
+
+        with pytest.raises(ValueError, match="second.py"):
+            asyncio.run(file_tool.apply_patch(patch_text))
+
+        assert first.read_text() == "FIRST = 1\n"
+        assert second.read_text() == "SECOND = 2\n"
+
+    def test_add_existing_file_writes_nothing(self, file_tool, tmp_dir):
+        existing = Path(tmp_dir, "existing.py")
+        existing.write_text("keep\n")
+        patch_text = """*** Begin Patch
+*** Add File: existing.py
++replace
+*** End Patch"""
+
+        with pytest.raises(FileExistsError):
+            asyncio.run(file_tool.apply_patch(patch_text))
+
+        assert existing.read_text() == "keep\n"
+
+    def test_sandbox_blocks_any_target_before_writing(self, tmp_dir):
+        from agentica.agent.config import SandboxConfig
+
+        with tempfile.TemporaryDirectory() as outside_dir:
+            tool = BuiltinFileTool(
+                work_dir=tmp_dir,
+                sandbox_config=SandboxConfig(enabled=True, writable_dirs=[tmp_dir]),
+            )
+            outside = Path(outside_dir, "outside.py")
+            patch_text = f"""*** Begin Patch
+*** Add File: {outside}
++blocked = True
+*** End Patch"""
+
+            with pytest.raises(PermissionError, match="not allowed"):
+                asyncio.run(tool.apply_patch(patch_text))
+
+            assert not outside.exists()
+
+
 class TestBuiltinFileToolEditFile:
     @staticmethod
     def _read(file_tool, file_path):
@@ -1407,7 +1500,7 @@ class TestFileToolRegistrationGuard:
     """
 
     EXPECTED_FUNCTIONS = {"ls", "read_file", "write_file", "edit_file",
-                          "multi_edit_file", "glob", "grep"}
+                          "multi_edit_file", "apply_patch", "glob", "grep"}
 
     def test_file_tool_functions_in_tool_dict(self):
         """Tool.functions dict must contain all file operations after init."""

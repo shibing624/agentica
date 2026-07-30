@@ -734,6 +734,24 @@ class TestResponseFormatter:
         assert result["_diff_del"] == 3  # "a\nb" = 2+1, "d" = 0+1
         assert result["_diff_add"] == 4  # "c" = 0+1, "e\nf\ng" = 2+1
 
+    def test_apply_patch(self):
+        from agentica.gateway.services.response_formatter import format_tool_call_args
+        result = format_tool_call_args("apply_patch", {
+            "patch": """*** Begin Patch
+*** Update File: app.py
+@@
+-OLD = 1
++NEW = 1
+*** Add File: test_app.py
++def test_app():
++    pass
+*** End Patch""",
+        })
+        assert result["_file_count"] == 2
+        assert result["_diff_del"] == 1
+        assert result["_diff_add"] == 3
+        assert result["_files"] == ["app.py", "test_app.py"]
+
 
 # ============== TestModelFactory ==============
 

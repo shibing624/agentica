@@ -4,7 +4,7 @@ description: >-
   Read-only code explainer for tracing how modules work, what calls what, and
   where data flows. Correctness reviews and implementation stay with the main agent.
 allowed_tools: [read_file, ls, glob, grep, execute]
-denied_tools: [write_file, edit_file, multi_edit_file, task]
+denied_tools: [write_file, edit_file, multi_edit_file, apply_patch, task]
 execute_policy: read_only
 model_tier: auxiliary
 max_turns: 200

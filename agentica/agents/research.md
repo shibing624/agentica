@@ -4,7 +4,7 @@ description: >-
   Read-only research agent for web search, source collection, document
   analysis, and evidence-backed synthesis.
 allowed_tools: [web_search, fetch_url, read_file, ls, glob, grep, execute]
-denied_tools: [write_file, edit_file, multi_edit_file, task]
+denied_tools: [write_file, edit_file, multi_edit_file, apply_patch, task]
 execute_policy: read_only
 model_tier: auxiliary
 max_turns: 150

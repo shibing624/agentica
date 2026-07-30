@@ -52,7 +52,7 @@ _AGENT_BUILD_TIMEOUT_S = 30
 CRON_SESSION_PREFIX = "scheduled_"
 
 # Web sessions default to "ask" approval mode, which strips write tools
-# (write_file/edit_file/execute) from the schema sent to the model (see
+# (write_file/edit_file/multi_edit_file/apply_patch/execute) from the schema sent to the model (see
 # _run_config_for_session below) — but the agent's static tool instructions
 # still describe the full toolset for prompt-cache reasons. Without this, a
 # model that tries a stripped tool anyway gets back an opaque "Function not
@@ -63,7 +63,7 @@ _APPROVAL_MODE_INSTRUCTION = (
     "This session's approval mode can restrict tool access at runtime: in "
     "\"ask\" mode, only read-only tools are enabled "
     "(ls/read_file/glob/grep/web_search/fetch_url/task) — write_file, "
-    "edit_file, and execute are disabled. In \"auto\" mode, writes are "
+    "edit_file, multi_edit_file, apply_patch, and execute are disabled. In \"auto\" mode, writes are "
     "restricted to the session's work_dir. If a tool call unexpectedly "
     "fails with \"Function ... not found\", it almost certainly means the "
     "current approval mode disabled it — do not retry the call. Instead, "

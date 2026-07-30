@@ -46,7 +46,7 @@ DEFAULT_READ_ONLY_TOOLS = frozenset({
     "read_file", "ls", "glob", "grep", "web_search", "fetch_url",
 })
 DEFAULT_WRITE_TOOLS = frozenset({
-    "write_file", "edit_file", "multi_edit_file", "execute",
+    "write_file", "edit_file", "multi_edit_file", "apply_patch", "execute",
 })
 
 

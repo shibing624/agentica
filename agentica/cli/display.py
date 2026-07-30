@@ -587,6 +587,11 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "multi_edit_file":
         file_path = tool_args.get("file_path", "")
         return _extract_filename(file_path)
+
+    if tool_name == "apply_patch":
+        patch = str(tool_args.get("patch", ""))
+        count = len(re.findall(r"^\*\*\* (?:Add|Update|Delete) File: ", patch, re.MULTILINE))
+        return f"{count} {'file' if count == 1 else 'files'}" if count else ""
     
     # Execute command - shorten absolute paths in command
     if tool_name == "execute":
@@ -1058,6 +1063,41 @@ class StreamDisplayManager:
         self._assistant_console.print(Syntax(diff_text + "\n", "diff", theme="monokai",
                                   line_numbers=False))
 
+    def _display_patch_merged(self, tool_args: dict, result_content: str,
+                              is_error: bool, elapsed_str: str) -> None:
+        """Render one successful multi-file patch as a single diff block."""
+        icon = TOOL_ICONS.get("apply_patch", TOOL_ICONS["default"])
+        params = format_tool_display("apply_patch", tool_args)
+        line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
+        if params:
+            line += f" [dim]{params}[/dim]"
+        if is_error:
+            err = str(result_content).replace("\n", " ").strip()
+            if len(err) > 80:
+                err = err[:77] + "..."
+                remember_truncated("Tool error · apply_patch", str(result_content))
+            self._assistant_console.print(line + f" [red]- error: {err}{elapsed_str}[/red]")
+            return
+
+        summary = re.search(
+            r"applied patch to (\d+) files? \(\+(\d+) -(\d+)\)",
+            str(result_content),
+            re.IGNORECASE,
+        )
+        if summary is None:
+            self._assistant_console.print(line + f" [dim]- applied{elapsed_str}[/dim]")
+            return
+        file_count, added, removed = summary.groups()
+        noun = "file" if file_count == "1" else "files"
+        self._assistant_console.print(
+            line + f" [dim]- Edited {file_count} {noun} (+{added} -{removed}){elapsed_str}[/dim]"
+        )
+        patch = str(tool_args.get("patch", "")).strip()
+        if patch:
+            self._assistant_console.print(
+                Syntax(patch + "\n", "diff", theme="monokai", line_numbers=False)
+            )
+
     @staticmethod
     def _read_diff_target(tool_args: dict) -> Optional[str]:
         """Read a write tool's post-call file content for display-only diffing."""
@@ -1152,7 +1192,9 @@ class StreamDisplayManager:
     # so the user always sees the actual code change, not an absolute path or
     # noise. write_file diffs the pre-write content (stashed at call start)
     # against the new content arg.
-    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file", "write_file"})
+    _WRITE_DIFF_TOOLS = frozenset({
+        "edit_file", "multi_edit_file", "apply_patch", "write_file",
+    })
 
     # Tools whose success result is pure noise on success. The call line itself
     # already tells the user what happened; errors are still surfaced.
@@ -1220,7 +1262,11 @@ class StreamDisplayManager:
 
         if tool_name in self._WRITE_DIFF_TOOLS:
             self.start_tool_section()
-            if tool_name == "write_file":
+            if tool_name == "apply_patch":
+                self._display_patch_merged(
+                    tool_args or {}, result_content, is_error, elapsed_str
+                )
+            elif tool_name == "write_file":
                 self._display_write_merged(
                     tool_name, tool_args or {}, result_content, is_error,
                     elapsed_str, tool_call_id

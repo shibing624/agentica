@@ -10,7 +10,7 @@ import tempfile
 import shutil
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agentica.tools.patch_tool import PatchTool, apply_diff
+from agentica.tools.patch_tool import PatchTool, apply_diff, parse_patch_envelope
 
 
 class TestApplyDiff(unittest.TestCase):
@@ -101,6 +101,48 @@ def world():
 
         result = apply_diff(original, diff, mode="default")
         self.assertIn("print('hello')", result)
+
+
+class TestParsePatchEnvelope(unittest.TestCase):
+    """Tests for strict multi-file patch envelope parsing."""
+
+    def test_parses_multiple_file_operations(self):
+        patch = """*** Begin Patch
+*** Update File: app.py
+@@
+-OLD = 1
++NEW = 1
+*** Add File: test_app.py
++def test_app():
++    pass
+*** Delete File: obsolete.py
+*** End Patch"""
+
+        operations = parse_patch_envelope(patch)
+
+        self.assertEqual(
+            [(op.action, op.path) for op in operations],
+            [("update", "app.py"), ("add", "test_app.py"), ("delete", "obsolete.py")],
+        )
+        self.assertIn("-OLD = 1", operations[0].diff)
+        self.assertIn("+def test_app():", operations[1].diff)
+        self.assertEqual(operations[2].diff, "")
+
+    def test_rejects_duplicate_file_operations(self):
+        patch = """*** Begin Patch
+*** Update File: app.py
+@@
+-a
++b
+*** Delete File: app.py
+*** End Patch"""
+
+        with self.assertRaisesRegex(ValueError, "Duplicate file operation"):
+            parse_patch_envelope(patch)
+
+    def test_rejects_text_outside_envelope(self):
+        with self.assertRaisesRegex(ValueError, "must start"):
+            parse_patch_envelope("prefix\n*** Begin Patch\n*** Delete File: a.py\n*** End Patch")
 
 
 class TestPatchTool(unittest.TestCase):

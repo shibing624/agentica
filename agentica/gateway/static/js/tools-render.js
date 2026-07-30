@@ -2,7 +2,7 @@
 import { esc, shortenFilePath } from './utils.js';
 
 const TOOL_ICONS = {
-  ls: '📁', read_file: '📖', write_file: '✏️', edit_file: '✂️', multi_edit_file: '✂️',
+  ls: '📁', read_file: '📖', write_file: '✏️', edit_file: '✂️', multi_edit_file: '✂️', apply_patch: '✎',
   glob: '🔍', grep: '🔎', execute: '⚡', web_search: '🌐',
   fetch_url: '🔗', write_todos: '📋', read_todos: '📋',
   task: '🤖', save_memory: '💾', default: '🔧',
@@ -47,7 +47,7 @@ export function resultSummary(name, result) {
 }
 
 // Tools that need HTML-rendered args (not just plain text escape)
-const RICH_TOOLS = new Set(['task', 'write_todos', 'read_todos', 'read_file', 'write_file', 'edit_file', 'multi_edit_file']);
+const RICH_TOOLS = new Set(['task', 'write_todos', 'read_todos', 'read_file', 'write_file', 'edit_file', 'multi_edit_file', 'apply_patch']);
 export function isRichTool(name) { return RICH_TOOLS.has(name) }
 
 // Render a single tool row (flat, minimal style)
@@ -107,6 +107,11 @@ export function fmtToolArgs(name, args) {
         const add = args._diff_add || 0, del = args._diff_del || 0;
         const diff = (add || del) ? ` +${add} -${del}` : '';
         return short + diff;
+      }
+      case 'apply_patch': {
+        const count = args._file_count || 0;
+        const add = args._diff_add || 0, del = args._diff_del || 0;
+        return `${count} ${count === 1 ? 'file' : 'files'} +${add} -${del}`;
       }
       case 'execute': {
         return args.command || args.cmd || JSON.stringify(args).slice(0, 200);
@@ -266,6 +271,9 @@ export function fmtToolResultHtml(name, rawArgs, result) {
     });
     return h;
   }
+  if (name === 'apply_patch') {
+    return buildHeadTailHtml(result || '', 12, 8);
+  }
   if (name === 'write_file') {
     const a = rawArgs || {};
     return buildWritePreviewHtml(a.content || '');
@@ -334,6 +342,14 @@ export function fmtToolArgsHtml(name, args, argsStr) {
     const add = args._diff_add || 0, del = args._diff_del || 0, cnt = args._edit_count || 0;
     let h = `<span class="file-path" title="${esc(f)}">${esc(short)}</span>`;
     if (cnt) h += ` <span style="opacity:.6">${cnt} edits</span>`;
+    if (add || del) h += ` <span class="diff-add">+${add}</span> <span class="diff-del">-${del}</span>`;
+    return h;
+  }
+  if (name === 'apply_patch') {
+    const count = args._file_count || 0;
+    const add = args._diff_add || 0, del = args._diff_del || 0;
+    const files = Array.isArray(args._files) ? args._files.join(', ') : '';
+    let h = `<span class="file-path" title="${esc(files)}">${count} ${count === 1 ? 'file' : 'files'}</span>`;
     if (add || del) h += ` <span class="diff-add">+${add}</span> <span class="diff-del">-${del}</span>`;
     return h;
   }

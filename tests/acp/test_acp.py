@@ -249,6 +249,7 @@ class TestACPHandlers:
         
         assert "tools" in result
         assert len(result["tools"]) > 0
+        assert "apply_patch" in {tool["name"] for tool in result["tools"]}
         
         # Check tool structure
         tool = result["tools"][0]

@@ -136,6 +136,17 @@ class ACPHandlers:
                 },
             ),
             ACPTool(
+                name="apply_patch",
+                description="Apply one context patch across multiple files",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "patch": {"type": "string", "description": "Complete patch envelope"},
+                    },
+                    "required": ["patch"],
+                },
+            ),
+            ACPTool(
                 name="ls",
                 description="List directory contents",
                 inputSchema={
@@ -304,7 +315,9 @@ class ACPHandlers:
 
         try:
             # File operations - use singleton instance
-            if tool_name in ("read_file", "write_file", "edit_file", "ls", "glob", "grep"):
+            if tool_name in (
+                "read_file", "write_file", "edit_file", "apply_patch", "ls", "glob", "grep"
+            ):
                 file_tool = self._get_file_tool()
                 method = getattr(file_tool, tool_name)
                 result = await method(**arguments)

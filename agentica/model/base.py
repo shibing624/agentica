@@ -129,7 +129,7 @@ def _maybe_redact_tool_output(text: str) -> str:
 
     Without the toggle, we still scan for and mask unterminated private-key
     blocks (a hard floor — those are never legitimate), but ordinary text
-    flows through verbatim so ``read_file`` -> ``edit_file`` round-trips
+    flows through verbatim so ``read_file`` -> ``edit_file`` / ``apply_patch`` round-trips
     keep working.
     """
     key_begin = _STREAM_PRIVATE_KEY_BEGIN_RE.search(text)

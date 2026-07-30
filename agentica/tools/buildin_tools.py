@@ -9,6 +9,7 @@ Built-in tool set for Agent, including:
 - write_file: Write file content
 - edit_file: Edit file (string replacement)
 - multi_edit_file: Apply multiple edits to a file atomically
+- apply_patch: Apply one patch across multiple files
 - glob: File pattern matching
 - grep: Search file content
 - execute: Execute command
@@ -18,11 +19,13 @@ Built-in tool set for Agent, including:
 - task: Launch subagent to handle complex tasks
 """
 import asyncio
+import difflib
 import json
 import os
 import re
 import shutil
 import tempfile
+from contextlib import AsyncExitStack
 from datetime import datetime
 import time
 import uuid
@@ -36,6 +39,7 @@ from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool, BuiltinTo
 from agentica.tools.builtin.web_tools import BuiltinFetchUrlTool, BuiltinWebSearchTool
 from agentica.tools.base import Tool
 from agentica.tools.builtin_task_tool import BuiltinTaskTool  # re-export after extraction
+from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
 from agentica.security.redact import redact_tool_outputs_enabled
 from agentica.utils.log import logger
@@ -231,7 +235,8 @@ def _check_sensitive_write_path(filepath: str) -> Optional[str]:
 
 class BuiltinFileTool(Tool):
     """
-    Built-in file system tool providing ls, read_file, write_file, edit_file, multi_edit_file, glob, grep functions.
+    Built-in file system tool providing ls, read_file, write_file, edit_file,
+    multi_edit_file, apply_patch, glob, and grep functions.
     """
 
     def __init__(
@@ -279,11 +284,12 @@ class BuiltinFileTool(Tool):
 
         # Register all file operation functions.
         # Read-only tools are concurrency_safe (can run in parallel with each other).
-        # Write tools (write_file, edit_file, multi_edit_file) stay serialised.
+        # Write tools stay serialised.
         self.register(self.ls, concurrency_safe=True, is_read_only=True)
         self.register(self.read_file, concurrency_safe=True, is_read_only=True)
         self.register(self.write_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.edit_file, sanitize_arguments=False, is_destructive=True)
+        self.register(self.apply_patch, sanitize_arguments=False, is_destructive=True)
         self.register(self.request_path_access, is_destructive=False)
         # multi_edit_file: the auto-derived schema from `edits: List[Dict[str, Any]]`
         # collapses each item to a bare {"type": "object"} with no properties,
@@ -766,6 +772,168 @@ class BuiltinFileTool(Tool):
         diag_text = await self._diagnostics_after(path)
         suffix = f"\n\n{diag_text}" if diag_text else ""
         return f"{action} file, absolute path: {absolute_path}{suffix}"
+
+    async def apply_patch(self, patch: str) -> str:
+        """Apply one context patch across one or more text files.
+
+        Use this when a change spans multiple files or needs multiple contextual
+        hunks. Keep using edit_file for one simple literal replacement and
+        multi_edit_file for several literal replacements in the same file.
+
+        The patch must use exactly one envelope with one or more Add, Update, or
+        Delete sections. All paths and hunks are validated against current file
+        contents before any file is changed. If validation fails, no files are
+        written. This is a JSON function tool, so pass the entire patch as the
+        ``patch`` string.
+
+        Example:
+            *** Begin Patch
+            *** Update File: app.py
+            @@
+             DEBUG = False
+            -TIMEOUT = 10
+            +TIMEOUT = 30
+            *** Add File: tests/test_timeout.py
+            +def test_timeout():
+            +    assert True
+            *** End Patch
+
+        Args:
+            patch: Complete multi-file patch envelope.
+
+        Returns:
+            Summary of files and line counts actually changed.
+        """
+        operations = parse_patch_envelope(patch)
+
+        resolved = []
+        seen_paths = set()
+        for operation in operations:
+            self._validate_write_path(operation.path)
+            path = self._resolve_path(operation.path).resolve()
+            path_key = str(path)
+            if path_key in seen_paths:
+                raise ValueError(
+                    f"Patch paths resolve to the same file more than once: {operation.path!r}."
+                )
+            seen_paths.add(path_key)
+
+            sensitive_err = self._sensitive_write_guard(path_key)
+            if sensitive_err:
+                raise PermissionError(sensitive_err)
+            resolved.append((operation, path, path_key))
+
+        # Acquire every target lock in stable order so no same-tool edit can
+        # change a file between preflight and commit.
+        lock_by_path = {
+            path_key: self._get_file_lock(path_key)
+            for _, _, path_key in resolved
+        }
+        async with AsyncExitStack() as stack:
+            for path_key in sorted(lock_by_path):
+                await stack.enter_async_context(lock_by_path[path_key])
+
+            prepared = []
+            for operation, path, path_key in resolved:
+                if operation.action == "add":
+                    if path.exists():
+                        raise FileExistsError(
+                            f"Cannot add file that already exists: {operation.path}"
+                        )
+                    old_content = None
+                    try:
+                        new_content = apply_diff("", operation.diff, mode="create")
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Patch content failed for {operation.path!r}: {exc}"
+                        ) from exc
+                else:
+                    if not path.exists():
+                        raise FileNotFoundError(f"File not found: {operation.path}")
+                    if not path.is_file():
+                        raise IsADirectoryError(f"Not a file: {operation.path}")
+                    async with aiofiles.open(path, "r", encoding="utf-8") as handle:
+                        old_content = await handle.read()
+                    if operation.action == "update":
+                        try:
+                            new_content = apply_diff(old_content, operation.diff, mode="default")
+                        except ValueError as exc:
+                            raise ValueError(
+                                f"Patch context failed for {operation.path!r}: {exc}\n\n"
+                                f"{self._edit_read_hint()}"
+                            ) from exc
+                        if new_content == old_content:
+                            raise ValueError(
+                                f"Update for {operation.path!r} does not change the file."
+                            )
+                    else:
+                        new_content = None
+                prepared.append((operation, path, path_key, old_content, new_content))
+
+            # Diagnostics and undo snapshots are captured only after every file
+            # and hunk has passed preflight.
+            for operation, path, path_key, old_content, _ in prepared:
+                await self._diagnostics_snapshot(path)
+                if old_content is not None:
+                    self._file_snapshots.setdefault(path_key, []).append(old_content)
+
+            applied = []
+            added_lines = 0
+            removed_lines = 0
+            try:
+                for operation, path, _, old_content, new_content in prepared:
+                    old_text = old_content or ""
+                    new_text = new_content or ""
+                    diff_lines = difflib.unified_diff(
+                        old_text.splitlines(), new_text.splitlines(), lineterm=""
+                    )
+                    for line in diff_lines:
+                        if line.startswith("+") and not line.startswith("+++"):
+                            added_lines += 1
+                        elif line.startswith("-") and not line.startswith("---"):
+                            removed_lines += 1
+
+                    if operation.action == "delete":
+                        path.unlink()
+                    else:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+                        try:
+                            os.close(tmp_fd)
+                            async with aiofiles.open(tmp_path, "w", encoding="utf-8") as handle:
+                                await handle.write(new_text)
+                            os.replace(tmp_path, str(path))
+                        except Exception:
+                            try:
+                                os.unlink(tmp_path)
+                            except OSError:
+                                pass
+                            raise
+                    applied.append(operation.path)
+            except Exception as exc:
+                applied_text = ", ".join(applied) if applied else "none"
+                raise OSError(
+                    f"Patch commit failed after changing {len(applied)} file(s) "
+                    f"({applied_text}). The workspace may be partially modified: {exc}"
+                ) from exc
+
+        action_codes = {"add": "A", "update": "M", "delete": "D"}
+        file_noun = "file" if len(prepared) == 1 else "files"
+        result_lines = [
+            f"Successfully applied patch to {len(prepared)} {file_noun} "
+            f"(+{added_lines} -{removed_lines}):",
+            *(f"{action_codes[operation.action]} {operation.path}"
+              for operation, *_ in prepared),
+        ]
+        diagnostics = []
+        for operation, path, *_ in prepared:
+            if operation.action != "delete":
+                diag_text = await self._diagnostics_after(path)
+                if diag_text:
+                    diagnostics.append(f"{operation.path}:\n{diag_text}")
+        if diagnostics:
+            result_lines.extend(("", "\n\n".join(diagnostics)))
+        return "\n".join(result_lines)
 
     async def edit_file(
             self,
@@ -1486,8 +1654,9 @@ class BuiltinFileTool(Tool):
     async def undo_edit(self, file_path: str) -> str:
         """Undo the last edit or write to a file, restoring the previous version.
 
-        Each write_file() and edit_file() call automatically snapshots the file's
-        content before modification. This tool restores the most recent snapshot,
+        Each write_file(), edit_file(), multi_edit_file(), and apply_patch()
+        update/delete automatically snapshots the file's content before modification.
+        This tool restores the most recent snapshot,
         effectively undoing the last change. Can be called multiple times to step
         back through multiple edits.
 
@@ -1810,7 +1979,8 @@ def get_builtin_tools(
 
     Args:
         work_dir: Work directory for file operations
-        include_file_tools: Whether to include file tools (ls, read_file, write_file, edit_file, glob, grep)
+        include_file_tools: Whether to include file tools (ls, read_file, write_file,
+            edit_file, multi_edit_file, apply_patch, glob, grep)
         include_execute: Whether to include code execution tool
         include_web_search: Whether to include web search tool
         include_fetch_url: Whether to include URL fetching tool

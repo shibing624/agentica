@@ -36,12 +36,14 @@ class TestToolPermissionPolicy(unittest.TestCase):
         self.assertEqual(p.decide("read_file"), PermissionDecision.ALLOW)
         self.assertEqual(p.decide("grep"), PermissionDecision.ALLOW)
         self.assertEqual(p.decide("write_file"), PermissionDecision.DENY)
+        self.assertEqual(p.decide("apply_patch"), PermissionDecision.DENY)
         self.assertEqual(p.decide("execute"), PermissionDecision.DENY)
 
     def test_confirm_writes_mode(self):
         p = ToolPermissionPolicy(mode=PermissionMode.CONFIRM_WRITES)
         self.assertEqual(p.decide("read_file"), PermissionDecision.ALLOW)
         self.assertEqual(p.decide("write_file"), PermissionDecision.ASK)
+        self.assertEqual(p.decide("apply_patch"), PermissionDecision.ASK)
 
     def test_deny_all_mode(self):
         p = ToolPermissionPolicy(mode=PermissionMode.DENY_ALL)

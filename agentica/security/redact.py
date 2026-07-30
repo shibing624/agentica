@@ -15,8 +15,8 @@ Two redaction levels:
 - ``strict``: additionally masks env-style ``API_KEY=value`` and key:value
   forms. These are aggressive: ordinary source code (variable names containing
   ``key`` / ``token`` / ``password``, e.g. ``api_key=existing_key``) gets
-  rewritten too, which breaks tools like ``edit_file`` whose ``old_string``
-  must match the file byte-for-byte. Use only for log lines / archives where
+  rewritten too, which breaks tools like ``edit_file`` and ``apply_patch``
+  whose context must match the file byte-for-byte. Use only for log lines / archives where
   no downstream tool ever has to round-trip the text back into source.
 
 Two top-level toggles control whether redaction runs at all in the model
@@ -92,7 +92,7 @@ _JWT_RE = re.compile(
 
 # ---------------------------------------------------------------------------
 # Strict patterns — opt-in. Match ordinary source code, so they break
-# byte-exact round-trips (edit_file old_string, multi_edit_file).
+# byte-exact round-trips (edit_file, multi_edit_file, apply_patch).
 # ---------------------------------------------------------------------------
 
 _ENV_ASSIGN_RE = re.compile(
@@ -119,7 +119,7 @@ def redact_tool_outputs_enabled() -> bool:
     """Whether to redact non-streamed tool result text before sending to the LLM.
 
     OFF by default: redaction rewrites strings the LLM later has to match
-    byte-exactly with ``edit_file`` / ``multi_edit_file``, causing spurious
+    byte-exactly with ``edit_file`` / ``multi_edit_file`` / ``apply_patch``, causing spurious
     "String not found" errors. Operators handling truly sensitive tool
     outputs (production secrets in logs, etc.) can opt in via
     ``AGENTICA_REDACT_TOOL_OUTPUTS=1``. Private-key blocks are always
