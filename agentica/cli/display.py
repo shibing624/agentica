@@ -21,6 +21,7 @@ from rich.text import Text
 
 from agentica.cli.runtime import get_console, TOOL_ICONS, BUILTIN_TOOLS
 from agentica.global_config import get_setting
+from agentica.model.usage import Usage
 from agentica.version import __version__
 
 
@@ -85,6 +86,36 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]@filename[/bright_green]   Type @ to auto-complete files (images auto-attach)")
     get_console().print("  [bright_green]/command[/bright_green]    Type / to see available commands (try /help)")
     get_console().print()
+
+
+def format_session_summary(
+    *, elapsed_seconds: float, usage: Usage, session_id: str | None
+) -> Text:
+    """Build the summary printed before ``/new`` starts a fresh chat."""
+    elapsed = max(0, int(elapsed_seconds))
+    hours, remainder = divmod(elapsed, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    duration = f"{hours}h {minutes:02d}m {seconds:02d}s" if hours else f"{minutes}m {seconds:02d}s"
+
+    text = Text()
+    text.append(f"Worked for {duration} ", style="dim")
+    text.append("─" * 42, style="dim")
+    if usage.total_tokens > 0:
+        text.append("\n\nToken usage: ", style="dim")
+        text.append(f"total={usage.total_tokens:,} input={usage.input_tokens:,}")
+        cached_tokens = usage.input_tokens_details.cache_read_tokens
+        if cached_tokens <= 0:
+            cached_tokens = usage.input_tokens_details.cached_tokens
+        if cached_tokens > 0:
+            text.append(f" (+ {cached_tokens:,} cached)", style="dim")
+        text.append(f" output={usage.output_tokens:,}")
+        reasoning_tokens = usage.output_tokens_details.reasoning_tokens
+        if reasoning_tokens > 0:
+            text.append(f" (reasoning {reasoning_tokens:,})", style="dim")
+    if session_id:
+        text.append("\nTo continue this session, run ", style="dim")
+        text.append(f"/resume {session_id}", style="bold")
+    return text
 
 
 def parse_file_mentions(text: str) -> Tuple[str, List[Path]]:
@@ -2036,8 +2067,8 @@ def build_status_bar_fragments(
 
     Adapts to terminal width:
       <52 cols:  ▸ model · ⏱12.3s
-      <76 cols:  ▸ model · ctx 45% · $0.02 · ⏱12.3s
-      >=76 cols: ▸ model │ ctx 64K/128K │ [████░░] 45% │ $0.02 │ ⏱12.3s Σ1m45s
+      <76 cols:  ▸ model · 45% · $0.02 · ⏱12.3s
+      >=76 cols: ▸ model │ 64K/128K │ [████░░] 45% │ $0.02 │ ⏱12.3s Σ1m45s
 
     The model label is rendered as ``provider/model`` when a provider is
     supplied (e.g. ``openai/gpt-4o``); a non-default profile name is shown
@@ -2088,7 +2119,7 @@ def build_status_bar_fragments(
             ("class:sb", " ▸ "),
             ("class:sb-strong", label),
             sep,
-            (fg, f"ctx {pct_label}"),
+            (fg, pct_label),
             sep,
             ("class:sb-dim", cost_str),
         ]
@@ -2102,7 +2133,7 @@ def build_status_bar_fragments(
             ("class:sb", " ▸ "),
             ("class:sb-strong", label),
             ("class:sb-dim", " │ "),
-            ("class:sb", f"ctx {ctx_used}/{ctx_total}"),
+            ("class:sb", f"{ctx_used}/{ctx_total}"),
             ("class:sb-dim", " │ "),
             (fg, _ctx_bar_ansi(pct)),
             ("class:sb-dim", " "),

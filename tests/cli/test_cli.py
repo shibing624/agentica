@@ -274,7 +274,8 @@ class TestCLIHelpers(unittest.TestCase):
             terminal_width=100,
         )
         text = "".join(v for _, v in frags)
-        self.assertIn("ctx 64K/128K", text)
+        self.assertIn("64K/128K", text)
+        self.assertNotIn("ctx ", text)
         self.assertIn("50%", text)
         self.assertIn("$0.05", text)
         self.assertIn("⏱ 12.3s", text)
@@ -294,6 +295,7 @@ class TestCLIHelpers(unittest.TestCase):
         text = "".join(v for _, v in frags)
         self.assertIn("$0.0020", text)
         self.assertIn("50%", text)
+        self.assertNotIn("ctx ", text)
         self.assertIn("⏱ 5.0s", text)
 
     def test_status_bar_agent_running_uses_active_classes(self):

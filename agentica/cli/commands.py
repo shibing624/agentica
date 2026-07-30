@@ -35,6 +35,7 @@ from agentica.cli.runtime import (
     _build_sibling_model,
 )
 from agentica.cli.display import (
+    format_session_summary,
     print_header,
     show_help,
 )
@@ -1917,6 +1918,16 @@ def _cmd_cron(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
+    old_agent = ctx.current_agent
+    tui_state = ctx.tui_state or {}
+    started_at = tui_state.get("session_started_at", time.monotonic())
+    con.print(
+        format_session_summary(
+            elapsed_seconds=time.monotonic() - started_at,
+            usage=old_agent.model.usage,
+            session_id=old_agent.session_id,
+        )
+    )
     current_agent = create_agent(
         ctx.agent_config,
         ctx.extra_tools,
@@ -1924,10 +1935,19 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
     )
-    con.print("[green]New chat session created.[/green]")
-    con.print("[dim]Conversation history cleared.[/dim]")
+    print_header(
+        ctx.agent_config.get("model_provider", ""),
+        ctx.agent_config.get("model_name", ""),
+        work_dir=ctx.agent_config.get("work_dir"),
+        extra_tools=ctx.extra_tool_names,
+        shell_mode=ctx.shell_mode,
+    )
     # Drop any goal manager — the new session has a new SessionLog.
-    return {"current_agent": current_agent, "goal_manager": None}
+    return {
+        "current_agent": current_agent,
+        "goal_manager": None,
+        "session_started_at": time.monotonic(),
+    }
 
 
 def _resume_base_dir(ctx: CommandContext) -> Optional[str]:

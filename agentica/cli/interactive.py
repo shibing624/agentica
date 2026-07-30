@@ -2259,6 +2259,7 @@ def run_interactive(
         "show_reasoning": True,
         "statusbar_visible": True,
         "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "session_started_at": time.monotonic(),
         "total_api_calls": 0,
         "compaction_count": 0,
         "debug": bool(agent_config.get("debug")),
@@ -2353,6 +2354,10 @@ def run_interactive(
             # A fresh agent (/clear, /model) carries a fresh system prompt and
             # tool set — re-measure rather than dropping the bar to zero.
             _seed_context_tokens(state.current_agent, tui_state)
+        if "session_started_at" in result:
+            tui_state["session_started_at"] = result["session_started_at"]
+            tui_state["active_seconds"] = 0.0
+            tui_state["total_api_calls"] = 0
         if result.get("model_switched"):
             # `/model profile <name>` (or `/model provider/name`) changed the
             # active profile and model — sync every status-bar field that
