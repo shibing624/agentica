@@ -121,6 +121,15 @@ class TestSpinnerRender(unittest.TestCase):
 class TestCLIHelpers(unittest.TestCase):
     """Test cases for CLI helper functions."""
 
+    @staticmethod
+    def _render_compact_event(event):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        StreamDisplayManager(fake).handle_event(event)
+        return "\n".join(str(call) for call in fake.print.call_args_list)
+
     def test_tool_icon_lookup(self):
         """Test looking up tool icons."""
         # Test existing icon
@@ -531,22 +540,55 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertEqual(f(123.456), " (123.5s)")
 
     def test_stream_display_manager_keeps_rule_based_compact_visible(self):
-        from agentica.cli.display import StreamDisplayManager
+        output = self._render_compact_event({
+            "type": "compact.rule_based",
+            "agent_name": "Agent",
+            "is_main_agent": True,
+            "before": 20,
+            "after": 8,
+            "elapsed": 0.25,
+        })
+        self.assertIn("compact", output)
 
-        fake = MagicMock()
-        fake.width = 80
-        dm = StreamDisplayManager(fake)
-        dm.handle_event(
-            {
-                "type": "compact.rule_based",
-                "agent_name": "Agent",
-                "before": 20,
-                "after": 8,
-                "elapsed": 0.25,
-            }
-        )
-        calls = [str(c) for c in fake.print.call_args_list]
-        self.assertTrue(any("compact" in c for c in calls))
+    def test_main_auto_compact_warns_and_points_to_new(self):
+        output = self._render_compact_event({
+            "type": "compact.auto",
+            "is_main_agent": True,
+            "compaction_count": 1,
+        })
+
+        self.assertIn("automatically compacted", output)
+        self.assertIn("/new", output)
+        self.assertNotIn("/resume", output)
+
+    def test_repeated_main_auto_compact_escalates_warning(self):
+        output = self._render_compact_event({
+            "type": "compact.auto",
+            "is_main_agent": True,
+            "compaction_count": 2,
+        })
+
+        self.assertIn("auto-compacted 2 times", output)
+        self.assertIn("summaries accumulate", output)
+
+    def test_subagent_auto_compact_keeps_technical_notice(self):
+        output = self._render_compact_event({
+            "type": "compact.auto",
+            "is_main_agent": False,
+            "before": 20,
+            "after": 4,
+            "elapsed": 1.0,
+        })
+
+        self.assertIn("auto / LLM-summarised", output)
+        self.assertNotIn("/new", output)
+
+    def test_main_reactive_compact_warns_before_retry(self):
+        output = self._render_compact_event({"type": "compact.reactive", "is_main_agent": True})
+
+        self.assertIn("exceeded the model limit", output)
+        self.assertIn("before retrying", output)
+        self.assertIn("/new", output)
 
     def test_display_tool_result_suppresses_write_todos_footer(self):
         """write_todos drops the result footer on success (call line lists tasks)."""
@@ -789,6 +831,80 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("line 0", text2)
         self.assertIn("line 29", text2)
         self.assertNotIn("line 15", text2)
+
+    def test_user_message_uses_subtle_background_panel(self):
+        """Historical user queries are visually separated from assistant output."""
+        from rich.padding import Padding
+
+        from agentica.cli.display import display_user_message
+
+        console = Mock()
+        with patch("agentica.cli.display.get_console", return_value=console):
+            display_user_message("hello")
+
+        renderable = console.print.call_args.args[0]
+        self.assertIsInstance(renderable, Padding)
+        self.assertEqual(renderable.style, "on rgb(35,35,35)")
+        self.assertEqual(renderable.renderable.plain, "│  hello")
+
+    def test_user_message_lists_each_attached_image_once_inside_panel(self):
+        """Image attachments are listed once inside the historical input panel."""
+        from pathlib import Path
+        from rich.padding import Padding
+
+        from agentica.cli.display import display_user_message
+
+        console = Mock()
+        with (
+            patch("agentica.cli.display.get_console", return_value=console),
+            patch("pathlib.Path.stat") as stat,
+        ):
+            stat.return_value.st_size = 94 * 1024
+            display_user_message(
+                "compare these",
+                images=[
+                    Path("/tmp/clip_1.png"),
+                    Path("/tmp/clip_2.png"),
+                ],
+            )
+
+        renderable = console.print.call_args.args[0]
+        self.assertIsInstance(renderable, Padding)
+        self.assertEqual(
+            renderable.renderable.plain,
+            "│  compare these\n│  📎 Image #1 attached: clip_1.png (94KB)\n"
+            "│  📎 Image #2 attached: clip_2.png (94KB)",
+        )
+
+    def test_image_only_message_has_no_empty_gutter_line(self):
+        """An image-only turn starts directly with its attachment label."""
+        from pathlib import Path
+
+        from agentica.cli.display import display_user_message
+
+        console = Mock()
+        with (
+            patch("agentica.cli.display.get_console", return_value=console),
+            patch("pathlib.Path.stat") as stat,
+        ):
+            stat.return_value.st_size = 1024
+            display_user_message("", images=[Path("/tmp/clip.png")])
+
+        renderable = console.print.call_args.args[0]
+        self.assertEqual(renderable.renderable.plain, "│  📎 Image #1 attached: clip.png (1KB)")
+
+    def test_deduplicate_image_attachments_preserves_first_path(self):
+        """One pasted image represented by two temp paths stays one attachment."""
+        from pathlib import Path
+
+        from agentica.cli.interactive import _deduplicate_image_attachments
+
+        paths = [Path("/tmp/clip.png"), Path("/tmp/clipboard.png"), Path("/tmp/other.png")]
+        with patch("agentica.cli.interactive._image_content_key") as content_key:
+            content_key.side_effect = ["same", "same", "other"]
+            result = _deduplicate_image_attachments(paths)
+
+        self.assertEqual(result, [paths[0], paths[2]])
 
     def test_truncated_blocks_are_remembered_for_expand(self):
         """Long execute output is stashed for Ctrl+O; user input is shown in full (not stashed)."""

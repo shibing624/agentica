@@ -20,6 +20,7 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 ## [Unreleased]
 
 ### Changed
+- **CLI now warns after successful main-agent context compaction.** Automatic compaction recommends `/new` when long-session accuracy may degrade, repeated successful auto-compactions escalate the warning with a session-local count, and reactive recovery explains that compaction happened before retrying. Spinner lifecycle events, failed attempts, manual `/compact`, and subagent compactions do not affect the count.
 - **Removed the `read_file` freshness/staleness machinery entirely** (codex-style simplification): `FileReadState`, `_file_read_state`, `_record_file_read`, `mark_read_context_stale`, `mark_all_read_context_stale`, `_edit_freshness_tip`, `Agent.mark_evicted_file_reads`, `Agent.append_evicted_file_read_notice`, and the `[Context maintenance]` eviction notices are gone. Edits return the absolute path + diagnostics only; a failed `edit_file` ("String not found") remains the natural signal to re-read.
 - **Default model `context_window` raised from 128k to 200k** across `Model` base, OpenAIChat, LiteLLM, Ollama, and Claude, reducing premature tool-result compaction that caused repeated `read_file` calls.
 

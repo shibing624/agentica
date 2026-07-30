@@ -302,6 +302,27 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         history = agent.working_memory.get_messages_from_last_n_runs()
         self.assertIn("old answer 0", " ".join(str(m.content) for m in history))
 
+    def test_auto_compact_event_exposes_main_agent_scope(self):
+        agent, cm = self._agent_with_history()
+        events = []
+        agent._event_callback = events.append
+
+        self._run_with_compaction(agent, cm)
+
+        event = next(event for event in events if event["type"] == "compact.auto")
+        self.assertIs(event["is_main_agent"], True)
+
+    def test_auto_compact_event_exposes_subagent_scope(self):
+        agent, cm = self._agent_with_history()
+        events = []
+        agent._parent_run_id = "parent-run"
+        agent._event_callback = events.append
+
+        self._run_with_compaction(agent, cm)
+
+        event = next(event for event in events if event["type"] == "compact.auto")
+        self.assertIs(event["is_main_agent"], False)
+
 
 class TestRunnerStructuredOutputFallback(unittest.TestCase):
     """Structured output parse failure should fallback to text, not crash."""

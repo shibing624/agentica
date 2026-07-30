@@ -635,6 +635,29 @@ def _detect_file_drop(user_input: str) -> Optional[dict]:
     }
 
 
+def _image_content_key(path: Path) -> str:
+    """Return a stable content key used to collapse duplicate temp image files."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    with path.open("rb") as image_file:
+        for chunk in iter(lambda: image_file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _deduplicate_image_attachments(paths: List[Path]) -> List[Path]:
+    """Keep the first path for each distinct pasted image."""
+    unique: List[Path] = []
+    seen = set()
+    for path in paths:
+        key = _image_content_key(path)
+        if key not in seen:
+            seen.add(key)
+            unique.append(path)
+    return unique
+
+
 def _try_attach_clipboard_image(attached_images: list, image_counter: list) -> bool:
     """Check clipboard for an image and attach it if found."""
     from agentica.cli.clipboard import save_clipboard_image
@@ -1026,6 +1049,14 @@ def _make_compact_phase_handler(set_phase, tui_state: dict):
     return handle
 
 
+def _record_main_auto_compaction(event: dict, tui_state: dict) -> None:
+    """Count successful full auto-compactions visible in the active CLI session."""
+    if event.get("type") != "compact.auto" or event.get("is_main_agent") is not True:
+        return
+    tui_state["compaction_count"] += 1
+    event["compaction_count"] = tui_state["compaction_count"]
+
+
 def _seed_context_tokens(agent, tui_state: dict) -> None:
     """Show the context the session already carries before any API call lands.
 
@@ -1161,6 +1192,7 @@ def _process_stream_response(
 
         def _on_agent_event(event: dict) -> None:
             compact_phase(event)
+            _record_main_auto_compaction(event, tui_state)
             display.handle_event(event)
 
         current_agent._event_callback = _on_agent_event
@@ -1597,7 +1629,7 @@ def _setup_tui(
         if not text and not has_images:
             return
 
-        images = list(state.attached_images)
+        images = _deduplicate_image_attachments(list(state.attached_images))
         state.attached_images.clear()
         payload = (text, images) if images else text
 
@@ -1681,10 +1713,6 @@ def _setup_tui(
     def _handle_paste(event):
         pasted = (event.data or "").replace("\r\n", "\n").replace("\r", "\n")
         if _try_attach_clipboard_image(state.attached_images, _image_counter_ref):
-            n = len(state.attached_images)
-            img = state.attached_images[-1]
-            size_kb = img.stat().st_size // 1024 if img.exists() else 0
-            _cprint(f"  📎 Image #{n} attached: {img.name} ({size_kb}KB)")
             event.app.invalidate()
         if pasted:
             line_count = pasted.count("\n")
@@ -1710,17 +1738,11 @@ def _setup_tui(
     @kb.add("c-v")
     def _handle_ctrl_v(event):
         if _try_attach_clipboard_image(state.attached_images, _image_counter_ref):
-            img = state.attached_images[-1]
-            size_kb = img.stat().st_size // 1024 if img.exists() else 0
-            _cprint(f"  📎 Image #{len(state.attached_images)} attached: {img.name} ({size_kb}KB)")
             event.app.invalidate()
 
     @kb.add("escape", "v")
     def _handle_alt_v(event):
         if _try_attach_clipboard_image(state.attached_images, _image_counter_ref):
-            img = state.attached_images[-1]
-            size_kb = img.stat().st_size // 1024 if img.exists() else 0
-            _cprint(f"  📎 Image #{len(state.attached_images)} attached: {img.name} ({size_kb}KB)")
             event.app.invalidate()
 
     @kb.add("c-o")
@@ -2228,6 +2250,7 @@ def run_interactive(
         "statusbar_visible": True,
         "session_start": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "total_api_calls": 0,
+        "compaction_count": 0,
         "debug": bool(agent_config.get("debug")),
     }
     _seed_context_tokens(current_agent, tui_state)
@@ -2306,6 +2329,9 @@ def run_interactive(
         nonlocal skills_registry, extra_tool_names
         if "current_agent" in result:
             state.current_agent = result["current_agent"]
+            # Counts only compactions observed for the currently selected CLI
+            # agent. A new, cleared, or resumed agent starts a fresh count.
+            tui_state["compaction_count"] = 0
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
             tui_state["profile_name"] = resolve_active_profile_name(
@@ -2429,7 +2455,6 @@ def run_interactive(
             if dropped:
                 if dropped["is_image"]:
                     submit_images.append(dropped["path"])
-                    _cprint(f"  📎 Attached image: {dropped['path'].name}")
                     user_input = dropped["remainder"] or f"[User attached image: {dropped['path'].name}]"
                 else:
                     user_input = f"@{dropped['path']} {dropped['remainder']}".strip()
@@ -2528,17 +2553,14 @@ def run_interactive(
                 submit_images.extend(image_mentions)
             final_input = inject_file_contents(prompt_text, mentioned_files)
 
-            if submit_images:
-                n = len(submit_images)
-                label = f"{'Images' if n > 1 else 'Image'}"
-                names = ", ".join(img.name for img in submit_images)
-                _cprint(f"  📎 {label}: {names}")
+            submit_images = _deduplicate_image_attachments(submit_images)
 
             if not is_btw:
                 display_user_message(
                     user_input,
                     pasted_blocks=n_pasted_blocks,
                     pasted_lines=n_pasted_lines,
+                    images=submit_images,
                 )
 
             turn_images = submit_images if submit_images else None

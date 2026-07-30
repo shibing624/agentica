@@ -2801,11 +2801,7 @@ def _cmd_paste(ctx: CommandContext, cmd_args: str = ""):
     from agentica.cli.interactive import _try_attach_clipboard_image
 
     if has_clipboard_image():
-        if _try_attach_clipboard_image(ctx.attached_images, ctx.image_counter):
-            img = ctx.attached_images[-1]
-            size_kb = img.stat().st_size // 1024 if img.exists() else 0
-            con.print(f"  [green]Image #{len(ctx.attached_images)} attached: {img.name} ({size_kb}KB)[/green]")
-        else:
+        if not _try_attach_clipboard_image(ctx.attached_images, ctx.image_counter):
             con.print("  [dim]Clipboard has an image but extraction failed.[/dim]")
     else:
         con.print("  [dim]No image found in clipboard.[/dim]")
@@ -2834,7 +2830,6 @@ def _cmd_image(ctx: CommandContext, cmd_args: str = ""):
 
     ctx.attached_images.append(image_path)
     ctx.image_counter[0] += 1
-    con.print(f"  [green]Attached image: {image_path.name}[/green]")
 
 
 def _extract_queue_text(item) -> str:

@@ -404,6 +404,7 @@ class TestCompressionReport(unittest.TestCase):
         cm = CompressionManager(compress_token_limit=1, truncate_head_chars=20, keep_recent_rounds=1)
         agent = SimpleNamespace(
             _event_callback=None,
+            _parent_run_id=None,
             _run_hooks=None,
             name="Agent",
             run_id="run_1",

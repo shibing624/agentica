@@ -788,6 +788,7 @@ class Runner:
         """
         cb = agent._event_callback
         agent_name = agent.name or "Agent"
+        is_main_agent = agent._parent_run_id is None
         if model._cost_tracker is not None:
             model._cost_tracker.invalidate_context_watermark()
 
@@ -811,6 +812,7 @@ class Runner:
                     {
                         "type": "compact.micro",
                         "agent_name": agent_name,
+                        "is_main_agent": is_main_agent,
                         "cleared": n,
                     }
                 )
@@ -854,6 +856,7 @@ class Runner:
                     {
                         "type": "compact.rule_based",
                         "agent_name": agent_name,
+                        "is_main_agent": is_main_agent,
                         "before": before,
                         "after": len(messages),
                         "elapsed": time.monotonic() - t0,
@@ -876,6 +879,7 @@ class Runner:
                     {
                         "type": "compact.auto",
                         "agent_name": agent_name,
+                        "is_main_agent": is_main_agent,
                         "before": before,
                         "after": len(messages),
                         "elapsed": time.monotonic() - t0,
@@ -910,6 +914,7 @@ class Runner:
                     {
                         "type": "compact.reactive",
                         "agent_name": agent.name or "Agent",
+                        "is_main_agent": agent._parent_run_id is None,
                         "before": before,
                         "after": len(messages),
                         "elapsed": time.monotonic() - t0,

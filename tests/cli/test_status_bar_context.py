@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from agentica.cli.interactive import (
     _make_compact_phase_handler,
+    _record_main_auto_compaction,
     _render_spinner_text,
     _seed_context_tokens,
 )
@@ -212,6 +213,36 @@ class TestAutoCompactEmitsSpinnerEvents(unittest.TestCase):
         msgs = [Message(role="user", content="q1"), Message(role="assistant", content="a1")]
         asyncio.run(cm.auto_compact(msgs, model=model, force=True, working_memory=wm))
         self.assertNotIn("compact.start", [e["type"] for e in events])
+
+
+class TestMainAutoCompactionCount(unittest.TestCase):
+    """Only successful full compactions of the active main agent are counted."""
+
+    def test_ignores_lifecycle_failures_reactive_and_subagent_events(self):
+        state = {"compaction_count": 0}
+        ignored = [
+            {"type": "compact.end", "is_main_agent": True},
+            {"type": "compact.reactive", "is_main_agent": True},
+            {"type": "compact.auto", "is_main_agent": False},
+        ]
+
+        for event in ignored:
+            _record_main_auto_compaction(event, state)
+
+        self.assertEqual(state["compaction_count"], 0)
+        self.assertTrue(all("compaction_count" not in event for event in ignored))
+
+    def test_counts_successful_main_auto_compactions_and_annotates_event(self):
+        state = {"compaction_count": 0}
+        first = {"type": "compact.auto", "is_main_agent": True}
+        second = {"type": "compact.auto", "is_main_agent": True}
+
+        _record_main_auto_compaction(first, state)
+        _record_main_auto_compaction(second, state)
+
+        self.assertEqual(state["compaction_count"], 2)
+        self.assertEqual(first["compaction_count"], 1)
+        self.assertEqual(second["compaction_count"], 2)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from rich.markdown import Markdown
+from rich.padding import Padding
 from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.text import Text
@@ -332,8 +333,24 @@ class _GutteredConsole:
         return getattr(self._console, name)
 
 
-def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int = 0) -> None:
-    """Display the full user message with file mentions colored.
+def _format_attachment_size(path: Path) -> str:
+    """Return a compact file size for an attachment label."""
+    size = path.stat().st_size
+    if size < 1024:
+        return f"{size}B"
+    if size < 1024 * 1024:
+        return f"{round(size / 1024)}KB"
+    return f"{size / (1024 * 1024):.1f}MB"
+
+
+def display_user_message(
+    text: str,
+    *,
+    pasted_blocks: int = 0,
+    pasted_lines: int = 0,
+    images: Optional[List[Path]] = None,
+) -> None:
+    """Display the full user message and image attachments in one input panel.
 
     Long messages are no longer folded behind Ctrl+O — the complete text is
     always rendered inline so the user sees exactly what they sent.
@@ -363,14 +380,24 @@ def display_user_message(text: str, *, pasted_blocks: int = 0, pasted_lines: int
             style="dim",
         )
 
-    # Wrap the echoed user query in a blank line above and render it with a bright
-    # bold gutter so the human turn stands out clearly from the AI response body
-    # above/below it — the bold ``▎`` bar + bright_cyan text are the visual anchor
-    # for "this is what I asked". No trailing blank line here: the response
-    # section (start_tool_section / _start_response) injects its own spacing.
+    has_text = bool(rich_text.plain)
+    for index, image in enumerate(images or [], start=1):
+        if rich_text.plain:
+            rich_text.append("\n")
+        rich_text.append("│  ", style="bold bright_cyan")
+        rich_text.append(
+            f"📎 Image #{index} attached: {image.name} ({_format_attachment_size(image)})",
+            style="dim",
+        )
+
+    # Echo historical user queries on a subtle full-width background so they are
+    # easy to find while scanning a long conversation. No trailing blank line here:
+    # the response section (start_tool_section / _start_response) adds its spacing.
+    if has_text:
+        rich_text = Text.assemble(("│  ", "bold bright_cyan"), rich_text)
     console = get_console()
     console.print()
-    _GutteredConsole(console, "▎", "bold bright_cyan").print(rich_text)
+    console.print(Padding(rich_text, (0, 1), style="on rgb(35,35,35)"))
 
 
 def get_file_completions(document_text: str) -> List[str]:
@@ -1549,10 +1576,8 @@ class StreamDisplayManager:
         if et == "compact.micro":
             return
 
-        agent_name = event.get("agent_name", "Agent")
-        # Subagent compactions get extra indent so they visually nest under
-        # the parent task tool line.
-        prefix = "    " if self._subagent_live_shown > 0 else "  "
+        is_main_agent = event.get("is_main_agent") is True
+        prefix = "  " if is_main_agent else "    "
         if et == "compact.rule_based":
             before = event.get("before", 0)
             after = event.get("after", 0)
@@ -1565,6 +1590,26 @@ class StreamDisplayManager:
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)
+            if is_main_agent:
+                count = event.get("compaction_count")
+                if isinstance(count, int) and count >= 2:
+                    self._assistant_console.print(
+                        f"{prefix}[bold yellow]⚠ Context has been auto-compacted {count} times.[/bold yellow]"
+                    )
+                    self._assistant_console.print(
+                        f"{prefix}[yellow]Accuracy may degrade as summaries accumulate; "
+                        "consider /new for a focused fresh session.[/yellow]"
+                    )
+                else:
+                    self._assistant_console.print(
+                        f"{prefix}[bold yellow]⚠ Context was automatically compacted "
+                        "near the model limit.[/bold yellow]"
+                    )
+                    self._assistant_console.print(
+                        f"{prefix}[yellow]Long sessions may become less accurate; "
+                        "use /new for a focused fresh session.[/yellow]"
+                    )
+                return
             self._assistant_console.print(
                 f"{prefix}[dim yellow]🗜 compact (auto / LLM-summarised)[/dim yellow] "
                 f"[dim]{before} → {after} msgs ({elapsed:.1f}s)[/dim]"
@@ -1573,6 +1618,16 @@ class StreamDisplayManager:
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)
+            if is_main_agent:
+                self._assistant_console.print(
+                    f"{prefix}[bold yellow]⚠ Context exceeded the model limit and was "
+                    "compacted before retrying.[/bold yellow]"
+                )
+                self._assistant_console.print(
+                    f"{prefix}[yellow]Long sessions may become less accurate; "
+                    "use /new for a focused fresh session.[/yellow]"
+                )
+                return
             self._assistant_console.print(
                 f"{prefix}[dim yellow]🗜 compact (reactive · prompt_too_long)[/dim yellow] "
                 f"[dim]{before} → {after} msgs ({elapsed:.1f}s)[/dim]"
