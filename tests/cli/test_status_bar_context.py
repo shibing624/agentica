@@ -10,10 +10,12 @@ from unittest.mock import AsyncMock, patch
 
 from agentica.cli.interactive import (
     _make_compact_phase_handler,
+    _read_git_branch,
     _record_main_auto_compaction,
     _record_main_context_usage,
     _render_spinner_text,
     _seed_context_tokens,
+    _status_thinking_mode,
 )
 from agentica.model.message import Message
 
@@ -152,6 +154,21 @@ class TestLiveContextUsage(unittest.TestCase):
         )
 
         self.assertEqual(state, {"context_tokens": 42000, "context_window": 128000})
+
+
+class TestStatusProjectIdentity(unittest.TestCase):
+    def test_configured_effort_is_the_concise_thinking_label(self):
+        agent = _make_agent()
+        self.assertEqual(
+            _status_thinking_mode(agent, {"reasoning_effort": "high"}),
+            "high",
+        )
+
+    def test_git_branch_is_empty_outside_a_repository(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as work_dir:
+            self.assertEqual(_read_git_branch(work_dir), "")
 
 
 class TestCompactingSpinner(unittest.TestCase):

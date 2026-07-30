@@ -1061,6 +1061,31 @@ def _record_main_context_usage(event: dict, tui_state: dict) -> None:
         tui_state["context_window"] = event["context_window"]
 
 
+def _read_git_branch(work_dir: str) -> str:
+    """Return the current branch for ``work_dir``, or empty outside Git."""
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, UnicodeError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _status_thinking_mode(agent, agent_config: dict) -> str:
+    """Return the concise effective thinking label shown in the status bar."""
+    effort = agent_config.get("reasoning_effort")
+    if effort:
+        return str(effort)
+    if agent is None or agent.model is None:
+        return ""
+    return agent.model.describe_thinking_mode()
+
+
 def _seed_context_tokens(agent, tui_state: dict) -> None:
     """Show the context the session already carries before any API call lands.
 
@@ -1385,6 +1410,7 @@ def _process_stream_response(
         # The completed/cancelled answer is now persisted. Re-measure what the
         # next request will carry so the idle bar includes that newest turn.
         _seed_context_tokens(current_agent, tui_state)
+        tui_state["git_branch"] = _read_git_branch(tui_state["work_dir"])
 
 
 # ==================== TUI setup ====================
@@ -1826,6 +1852,9 @@ def _setup_tui(
             model_name=tui_state.get("model_name", ""),
             model_provider=tui_state.get("model_provider", ""),
             profile_name=tui_state.get("profile_name", ""),
+            thinking_mode=tui_state.get("thinking_mode", ""),
+            work_dir=tui_state.get("work_dir", ""),
+            git_branch=tui_state.get("git_branch", ""),
             context_tokens=tui_state.get("context_tokens", 0),
             context_window=tui_state.get("context_window", 128000),
             cost_usd=tui_state.get("cost_usd", 0.0),
@@ -2246,10 +2275,14 @@ def run_interactive(
     # Session state
     state = SessionState(current_agent=current_agent)
 
+    status_work_dir = agent_config.get("work_dir") or os.getcwd()
     tui_state = {
         "model_name": agent_config.get("model_name", ""),
         "model_provider": agent_config.get("model_provider", ""),
-        "profile_name": resolve_active_profile_name(work_dir=agent_config.get("work_dir") or os.getcwd())[0],
+        "profile_name": resolve_active_profile_name(work_dir=status_work_dir)[0],
+        "thinking_mode": _status_thinking_mode(current_agent, agent_config),
+        "work_dir": status_work_dir,
+        "git_branch": _read_git_branch(status_work_dir),
         "context_tokens": 0,
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
@@ -2347,6 +2380,9 @@ def run_interactive(
             tui_state["profile_name"] = resolve_active_profile_name(
                 work_dir=agent_config.get("work_dir") or os.getcwd()
             )[0]
+            tui_state["thinking_mode"] = _status_thinking_mode(
+                state.current_agent, agent_config
+            )
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
@@ -2369,6 +2405,9 @@ def run_interactive(
             tui_state["profile_name"] = resolve_active_profile_name(
                 work_dir=agent_config.get("work_dir") or os.getcwd()
             )[0]
+            tui_state["thinking_mode"] = _status_thinking_mode(
+                state.current_agent, agent_config
+            )
             tui_state["context_window"] = (
                 state.current_agent.model.context_window if state.current_agent.model else 128000
             )
@@ -2481,6 +2520,8 @@ def run_interactive(
                     pass
                 else:
                     _handle_shell_command(user_input, agent_config.get("work_dir"))
+                    tui_state["git_branch"] = _read_git_branch(tui_state["work_dir"])
+                    app.invalidate()
                     continue
 
             # Slash commands

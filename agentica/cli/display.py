@@ -2016,13 +2016,6 @@ def display_token_stats(
 # Persistent TUI status bar (prompt_toolkit fragments)
 # ---------------------------------------------------------------------------
 
-def _ctx_bar_ansi(pct: float, width: int = 10) -> str:
-    """Build a plain-text context usage bar for the status bar."""
-    safe = max(0.0, min(100.0, pct))
-    filled = round((safe / 100) * width)
-    return f"{'█' * filled}{'░' * max(0, width - filled)}"
-
-
 def _ctx_fg_style(pct: float) -> str:
     """Return a prompt_toolkit style class for context usage percentage."""
     if pct >= 95:
@@ -2045,11 +2038,35 @@ def format_duration_compact(seconds: float) -> str:
     return f"{h}h{m:02d}m"
 
 
+def _format_status_work_dir(work_dir: str) -> str:
+    """Return a home-relative absolute path for the persistent status bar."""
+    if not work_dir:
+        return ""
+    path = os.path.abspath(os.path.expanduser(work_dir))
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
+def _compact_status_work_dir(work_dir: str) -> str:
+    """Keep the project name visible when the full path does not fit."""
+    formatted = _format_status_work_dir(work_dir)
+    if not formatted or formatted == "~":
+        return formatted
+    return Path(formatted).name
+
+
 def build_status_bar_fragments(
     *,
     model_name: str = "",
     model_provider: str = "",
     profile_name: str = "",
+    thinking_mode: str = "",
+    work_dir: str = "",
+    git_branch: str = "",
     context_tokens: int = 0,
     context_window: int = 0,
     cost_usd: float = 0.0,
@@ -2065,14 +2082,13 @@ def build_status_bar_fragments(
     execution durations) rather than session wall-clock, plus the
     most recent turn's latency.
 
-    Adapts to terminal width:
-      <52 cols:  ▸ model · ⏱12.3s
-      <76 cols:  ▸ model · 45% · $0.02 · ⏱12.3s
-      >=76 cols: ▸ model │ 64K/128K │ [████░░] 45% │ $0.02 │ ⏱12.3s Σ1m45s
+    Adapts to terminal width by trying progressively smaller layouts. A wide
+    terminal shows model/effort, project path, Git branch/profile, context,
+    cost, and timing. The narrowest layout retains model/effort and turn time.
 
     The model label is rendered as ``provider/model`` when a provider is
-    supplied (e.g. ``openai/gpt-4o``); a non-default profile name is shown
-    as a ``profile:`` prefix on wider terminals.
+    supplied (e.g. ``openai/gpt-4o``). The active Agentica profile name is
+    shown first; it is independent from the Git branch.
 
     When ``agent_running`` is ``True``:
       - ``spinner_text`` (typically a single spinner glyph like ``⠋``) is
@@ -2092,10 +2108,6 @@ def build_status_bar_fragments(
         label = base
     if len(label) > 26:
         label = label[:23] + "..."
-    # Optional profile prefix (only when not the default profile).
-    profile_prefix = ""
-    if profile_name and profile_name != "default":
-        profile_prefix = f"profile:{profile_name} "
     pct = (context_tokens / context_window * 100) if context_window > 0 else 0.0
     pct_label = f"{pct:.0f}%"
     fg = _ctx_fg_style(pct)
@@ -2104,56 +2116,89 @@ def build_status_bar_fragments(
     turn_str = f"⏱ {last_turn_seconds:.1f}s" if last_turn_seconds > 0 else ""
     total_str = f"Σ {format_duration_compact(active_seconds)}" if active_seconds > 0 else ""
 
-    sep = ("class:sb-dim", " · ")
+    full_work_dir = _format_status_work_dir(work_dir)
+    compact_work_dir = _compact_status_work_dir(work_dir)
+    ctx_used = _format_tokens_short(context_tokens) if context_tokens else "0"
+    ctx_total = _format_tokens_short(context_window) if context_window else "?"
 
-    if terminal_width < 52:
-        frags = [
-            ("class:sb", " ▸ "),
-            ("class:sb-strong", label),
-        ]
-        if turn_str:
-            frags.append(sep)
-            frags.append(("class:sb", turn_str))
-    elif terminal_width < 76:
-        frags = [
-            ("class:sb", " ▸ "),
-            ("class:sb-strong", label),
-            sep,
-            (fg, pct_label),
-            sep,
-            ("class:sb-dim", cost_str),
-        ]
-        if turn_str:
-            frags.append(sep)
-            frags.append(("class:sb", turn_str))
-    else:
-        ctx_used = _format_tokens_short(context_tokens) if context_tokens else "0"
-        ctx_total = _format_tokens_short(context_window) if context_window else "?"
-        frags = [
-            ("class:sb", " ▸ "),
-            ("class:sb-strong", label),
-            ("class:sb-dim", " │ "),
-            ("class:sb", f"{ctx_used}/{ctx_total}"),
-            ("class:sb-dim", " │ "),
-            (fg, _ctx_bar_ansi(pct)),
-            ("class:sb-dim", " "),
-            (fg, pct_label),
-            ("class:sb-dim", " │ "),
-            ("class:sb", cost_str),
-        ]
-        if turn_str:
+    def compose(
+        *,
+        project: str = "",
+        branch: str = "",
+        profile: str = "",
+        context_detail: bool = True,
+        show_context: bool = True,
+        show_cost: bool = True,
+    ):
+        frags = [("class:sb", " ▸ ")]
+        if profile:
+            frags.append(("class:sb-dim", f"{profile} "))
+        frags.append(("class:sb-strong", label))
+        if thinking_mode:
+            frags.append(("class:sb-dim", f" {thinking_mode}"))
+        if project:
+            frags.extend([
+                ("class:sb-dim", " │ "),
+                ("class:sb", project),
+            ])
+        if branch:
+            separator = " · " if project else " │ "
+            frags.extend([
+                ("class:sb-dim", separator),
+                ("class:sb", branch),
+            ])
+        if show_context:
             frags.append(("class:sb-dim", " │ "))
-            frags.append(("class:sb", turn_str))
+            if context_detail:
+                frags.append(("class:sb", f"{ctx_used}/{ctx_total} "))
+            frags.append((fg, pct_label))
+        if show_cost:
+            frags.extend([
+                ("class:sb-dim", " │ "),
+                ("class:sb", cost_str),
+            ])
+        if turn_str:
+            frags.extend([
+                ("class:sb-dim", " │ "),
+                ("class:sb", turn_str),
+            ])
         if total_str:
             frags.append(("class:sb-dim", "  "))
             frags.append(("class:sb-dim", total_str))
+        frags.append(("class:sb", " "))
+        return frags
 
-    # Non-default profile prefix (dim), shown on medium/wide terminals only
-    # right after the leading marker to keep the narrow layout intact.
-    if profile_prefix and terminal_width >= 52:
-        frags.insert(1, ("class:sb-dim", profile_prefix))
-
-    frags.append(("class:sb", " "))
+    candidates = [
+        compose(project=full_work_dir, branch=git_branch, profile=profile_name),
+        compose(
+            project=full_work_dir, branch=git_branch, profile=profile_name,
+            show_cost=False,
+        ),
+        compose(
+            project=compact_work_dir, branch=git_branch, profile=profile_name,
+            show_cost=False,
+        ),
+        compose(
+            project=compact_work_dir, branch=git_branch, profile=profile_name,
+            context_detail=False, show_cost=False,
+        ),
+        compose(
+            profile=profile_name, context_detail=False, show_cost=False,
+        ),
+        compose(profile=profile_name, show_context=False, show_cost=False),
+        compose(show_context=False, show_cost=False),
+    ]
+    if terminal_width < 52:
+        candidates.insert(
+            0,
+            compose(show_context=False, show_cost=False),
+        )
+    spinner_width = len(spinner_text) + 2 if agent_running and spinner_text else 0
+    available_width = max(1, terminal_width - spinner_width)
+    frags = next(
+        (candidate for candidate in candidates if sum(len(text) for _, text in candidate) <= available_width),
+        candidates[-1],
+    )
 
     # ── Agent-running visual downshift ─────────────────────────────────
     # Two things happen when the agent is actively producing output:

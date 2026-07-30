@@ -280,6 +280,76 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("$0.05", text)
         self.assertIn("⏱ 12.3s", text)
         self.assertIn("Σ 1m45s", text)
+        self.assertNotIn("░", text)
+        self.assertNotIn("█", text)
+
+    def test_build_status_bar_fragments_shows_project_identity(self):
+        from pathlib import Path
+
+        from agentica.cli.display import build_status_bar_fragments
+
+        work_dir = str(Path.home() / "Documents" / "Codes" / "dual-mem")
+        frags = build_status_bar_fragments(
+            model_name="gpt-5.6-sol",
+            thinking_mode="high",
+            work_dir=work_dir,
+            git_branch="main",
+            profile_name="default",
+            context_tokens=24_200,
+            context_window=1_100_000,
+            terminal_width=180,
+        )
+        text = "".join(v for _, v in frags)
+
+        self.assertIn("gpt-5.6-sol high", text)
+        self.assertIn("~/Documents/Codes/dual-mem", text)
+        self.assertIn("default gpt-5.6-sol high", text)
+        self.assertNotIn("profile:", text)
+        self.assertIn("~/Documents/Codes/dual-mem · main", text)
+        self.assertNotIn("main [default]", text)
+        self.assertIn("24.2K/1.1M 2%", text)
+        self.assertNotIn("░", text)
+
+    def test_build_status_bar_fragments_compacts_project_to_fit(self):
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-5.6-sol",
+            thinking_mode="high",
+            work_dir="/very/long/path/to/dual-mem",
+            git_branch="main",
+            profile_name="default",
+            context_tokens=24_200,
+            context_window=1_100_000,
+            terminal_width=80,
+        )
+        text = "".join(v for _, v in frags)
+
+        self.assertLessEqual(len(text), 80)
+        self.assertIn("gpt-5.6-sol high", text)
+        self.assertIn("2%", text)
+
+    def test_build_status_bar_fragments_preserves_timing_on_the_right(self):
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-5.6-sol",
+            model_provider="openai",
+            thinking_mode="high",
+            work_dir="/very/long/path/to/dual-mem",
+            git_branch="main",
+            profile_name="venus-gpt-5.6-sol",
+            context_tokens=24_200,
+            context_window=1_100_000,
+            cost_usd=0.64,
+            last_turn_seconds=239.0,
+            active_seconds=238.0,
+            terminal_width=100,
+        )
+        text = "".join(v for _, v in frags)
+
+        self.assertLessEqual(len(text), 100)
+        self.assertTrue(text.rstrip().endswith("│ ⏱ 239.0s  Σ 3m58s"))
 
     def test_build_status_bar_fragments_cost_in_medium(self):
         from agentica.cli.display import build_status_bar_fragments
@@ -377,9 +447,9 @@ class TestCLIHelpers(unittest.TestCase):
                 f"idle bar emitted active class: {cls!r}",
             )
 
-    def test_build_status_bar_fragments_shows_profile_prefix(self):
+    def test_build_status_bar_fragments_shows_profile(self):
         """After `/model profile <name>` the status bar must show the new
-        profile prefix and provider/model label — driven entirely by the
+        profile and provider/model label — driven entirely by the
         ``profile_name`` / ``model_provider`` / ``model_name`` args the
         interactive loop syncs via ``_apply_command_result``."""
         from agentica.cli.display import build_status_bar_fragments
@@ -394,8 +464,11 @@ class TestCLIHelpers(unittest.TestCase):
             terminal_width=120,
         )
         text = "".join(v for _, v in frags)
-        self.assertIn("profile:work", text)
+        self.assertIn("work deepseek/deepseek-v4-flash", text)
+        self.assertNotIn("profile:", text)
+        self.assertNotIn("[work]", text)
         self.assertIn("deepseek/deepseek-v4-flash", text)
+        self.assertLess(text.index("work"), text.index("deepseek/deepseek-v4-flash"))
 
     def test_stream_display_manager_no_gutter_and_short_separator(self):
         """Assistant turn should render as plain text (no left-side gutter
