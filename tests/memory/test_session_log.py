@@ -183,6 +183,7 @@ class TestSessionLogBasic:
                 Message(
                     role="assistant",
                     tool_calls=[{"id": "A", "type": "function", "function": {"name": "read_file", "arguments": "{}"}}],
+                    provider_data={"object": "response", "output": [{"type": "function_call"}]},
                 ),
                 Message(role="tool", tool_call_id="A", content="file content", tool_name="read_file"),
                 Message(
@@ -204,6 +205,7 @@ class TestSessionLogBasic:
         roles = [m["role"] for m in messages]
         assert roles == ["assistant", "tool", "assistant", "tool"], roles
         assert messages[0]["tool_calls"][0]["id"] == "A"
+        assert messages[0]["provider_data"]["object"] == "response"
         assert messages[1].get("tool_call_id") == "A"
         assert messages[2]["tool_calls"][0]["id"] == "B"
         assert messages[3].get("tool_call_id") == "B"
@@ -216,6 +218,26 @@ class TestSessionLogBasic:
             prev = messages[i - 1]
             assert prev["role"] == "assistant"
             assert m["tool_call_id"] in [t["id"] for t in prev.get("tool_calls", [])]
+
+    def test_provider_checkpoint_round_trip_and_out_of_band_attachment(self, tmp_dir):
+        checkpoint = {
+            "type": "openai_responses_compaction",
+            "provider": "OpenAI",
+            "model": "gpt-5.6-sol",
+            "base_url": "https://api.openai.com/v1",
+            "output": [{"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}],
+        }
+        log = SessionLog("provider-checkpoint", base_dir=tmp_dir)
+        log.append("user", "first", provider_checkpoint=checkpoint)
+        log.append("assistant", "answer")
+
+        loaded = log.load()
+        assert loaded[0]["provider_checkpoint"] == checkpoint
+
+        log.append_provider_checkpoint(checkpoint)
+        loaded = log.load()
+        assert loaded[-1]["role"] == "assistant"
+        assert loaded[-1]["provider_checkpoint"] == checkpoint
 
     def test_sidecar_name_and_archived_coexist(self, tmp_dir):
         log = SessionLog("meta", base_dir=tmp_dir)

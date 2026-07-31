@@ -11,6 +11,7 @@ Mirrors CC's sessionStorage.ts:
 - timestamp uses ISO string format (CC convention)
 - Default storage: <AGENTICA_PROJECT_DIR>/<cwd-name>/<session_id>.jsonl
 - load() replays from the last compact_boundary
+- provider_checkpoint entries attach opaque same-provider state without changing visible history
 - Large file optimization: only parse bytes after the last boundary
 
 JSONL format (CC-aligned):
@@ -180,6 +181,23 @@ class SessionLog:
         })
         self._last_uuid = entry_uuid
         self._write_search_index_entry("compact_boundary", summary)
+        return entry_uuid
+
+    def append_provider_checkpoint(self, checkpoint: Dict[str, Any]) -> str:
+        """Persist opaque provider state without changing the visible transcript."""
+        entry_uuid = str(uuid4())
+        self._append({
+            "type": "provider_checkpoint",
+            "uuid": entry_uuid,
+            "parent_uuid": self._last_uuid,
+            "session_id": self.session_id,
+            "cwd": self._cwd,
+            "timestamp": _iso_now(),
+            "version": self._version,
+            "git_branch": self._git_branch,
+            "checkpoint": checkpoint,
+        })
+        self._last_uuid = entry_uuid
         return entry_uuid
 
     # ------------------------------------------------------------------
@@ -392,7 +410,7 @@ class SessionLog:
 
         replay_fields = (
             "tool_call_id", "tool_calls", "tool_name", "tool_args", "is_error",
-            "reasoning_content", "finish_reason", "provider_data", "metrics",
+            "reasoning_content", "finish_reason", "provider_data", "provider_checkpoint", "metrics",
             "model", "usage",
         )
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
@@ -407,6 +425,10 @@ class SessionLog:
                     if key in entry and entry[key] is not None:
                         msg[key] = entry[key]
                 messages.append(msg)
+            elif entry_type == "provider_checkpoint" and messages:
+                checkpoint = entry.get("checkpoint")
+                if isinstance(checkpoint, dict):
+                    messages[-1]["provider_checkpoint"] = checkpoint
 
         logger.debug(
             f"SessionLog.load({self.session_id}): "

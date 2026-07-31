@@ -37,13 +37,18 @@ def split_prompt_usage(
     exactly once.
     """
     details = prompt_details or {}
-    cache_write = details.get("cache_creation_tokens") or 0
+    cache_creation = details.get("cache_creation_tokens") or 0
     exclusive_read = details.get("cache_read_tokens") or 0
-    if exclusive_read or cache_write:
-        return prompt_tokens, exclusive_read, cache_write
+    if exclusive_read or cache_creation:
+        return prompt_tokens, exclusive_read, cache_creation
 
     inclusive_read = details.get("cached_tokens") or 0
-    return max(prompt_tokens - inclusive_read, 0), inclusive_read, 0
+    inclusive_write = details.get("cache_write_tokens") or 0
+    return (
+        max(prompt_tokens - inclusive_read - inclusive_write, 0),
+        inclusive_read,
+        inclusive_write,
+    )
 
 
 class TokenDetails(BaseModel):

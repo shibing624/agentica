@@ -10,6 +10,7 @@ list rather than on ``messages``.
 import os
 import asyncio
 import unittest
+from unittest.mock import AsyncMock
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -21,6 +22,7 @@ from agentica.cli.context_usage import measure_context
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
 from agentica.model.message import Message
+from agentica.model.base import NativeCompactionResult
 from agentica.model.openai import OpenAIChat
 from agentica.run_response import RunResponse
 
@@ -120,6 +122,40 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         agent.working_memory = WorkingMemory()
         ctx = self._run_compact(agent)
         self.assertEqual(ctx.tui_state["context_tokens"], 120000)
+
+    def test_responses_compact_uses_native_checkpoint_before_local_summary(self):
+        from agentica.model.openai import OpenAIResponses
+
+        agent = _build_agent(num_runs=2)
+        model = OpenAIResponses(id="gpt-5.6-sol", api_key="fake_openai_key")
+        checkpoint = {
+            "type": "openai_responses_compaction",
+            "provider": "OpenAI",
+            "model": model.id,
+            "base_url": "https://api.openai.com/v1",
+            "output": [{"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}],
+        }
+        model.compact_context = AsyncMock(
+            return_value=NativeCompactionResult(
+                checkpoint=checkpoint,
+                usage={"total_tokens": 100},
+            )
+        )
+        agent.model = model
+        ctx = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": model.id},
+            current_agent=agent,
+            tui_state={"context_tokens": 120000, "context_window": 200000},
+        )
+
+        _cmd_compact(ctx, "Keep decisions")
+
+        model.compact_context.assert_awaited_once_with(
+            agent.working_memory.messages,
+            instructions="Keep decisions",
+        )
+        assert agent.working_memory.messages[-1].provider_checkpoint == checkpoint
+        assert agent.working_memory.get_messages_from_last_n_runs()[-1].provider_checkpoint == checkpoint
 
 if __name__ == "__main__":
     unittest.main()

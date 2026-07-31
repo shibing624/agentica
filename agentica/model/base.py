@@ -72,6 +72,14 @@ class ModelRunState:
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
 
 
+@dataclass
+class NativeCompactionResult:
+    """Provider-native compacted context plus accounting metadata."""
+
+    checkpoint: Dict[str, Any]
+    usage: Dict[str, Any]
+
+
 _MODEL_RUN_STATE: contextvars.ContextVar[Optional[ModelRunState]] = contextvars.ContextVar(
     "agentica_model_run_state",
     default=None,
@@ -196,6 +204,7 @@ class Model(ABC):
     # -*- Model capability limits (not sent to the API) -*-
     context_window: int = 200000
     supports_images: Optional[bool] = None
+    supports_native_compaction: bool = False
 
     # Extra retryable error substrings, merged on top of the SDK's default
     # protocol-level transients (see ``LoopState.RETRYABLE_SUBSTRINGS``).
@@ -408,6 +417,32 @@ class Model(ABC):
         ``extra_body.thinking``, ``extra_body.enable_thinking``, Anthropic ``thinking``).
         """
         return "off"
+
+    def native_compaction_token_limit(self) -> int:
+        """Largest estimated input that should be sent to native compaction."""
+        return max(1, self.context_window - 13_000)
+
+    def estimate_native_compaction_tokens(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Any]] = None,
+    ) -> int:
+        """Estimate the provider input size used to decide when to compact."""
+        from agentica.utils.tokens import count_tokens
+
+        return count_tokens(messages, tools, self.id, self.response_format)
+
+    def has_compatible_native_checkpoint(self, messages: List[Message]) -> bool:
+        """Return whether this model can consume a checkpoint in ``messages``."""
+        return False
+
+    async def compact_context(
+        self,
+        messages: List[Message],
+        instructions: Optional[str] = None,
+    ) -> Optional[NativeCompactionResult]:
+        """Return a provider-native checkpoint, or ``None`` when unsupported."""
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         _dict = {"name": self.name, "id": self.id, "provider": self.provider, "metrics": self.metrics}
@@ -1316,7 +1351,10 @@ class Model(ABC):
                                 "cache_read_tokens",
                                 metrics.prompt_tokens_details.get("cached_tokens", 0),
                             ),
-                            cache_creation_tokens=metrics.prompt_tokens_details.get("cache_creation_tokens", 0),
+                            cache_creation_tokens=metrics.prompt_tokens_details.get(
+                                "cache_creation_tokens",
+                                metrics.prompt_tokens_details.get("cache_write_tokens", 0),
+                            ),
                         )
                         if "prompt_tokens_details" not in self.metrics:
                             self.metrics["prompt_tokens_details"] = {}
@@ -1401,7 +1439,10 @@ class Model(ABC):
                     "cache_read_tokens",
                     metrics.prompt_tokens_details.get("cached_tokens", 0),
                 ),
-                cache_creation_tokens=metrics.prompt_tokens_details.get("cache_creation_tokens", 0),
+                cache_creation_tokens=metrics.prompt_tokens_details.get(
+                    "cache_creation_tokens",
+                    metrics.prompt_tokens_details.get("cache_write_tokens", 0),
+                ),
             )
             if "prompt_tokens_details" not in self.metrics:
                 self.metrics["prompt_tokens_details"] = {}

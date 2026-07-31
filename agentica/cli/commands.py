@@ -2547,11 +2547,34 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         return
 
     custom_instructions = cmd_args.strip() if cmd_args else None
+    model = agent.model
+    wm = agent.working_memory
+    native_compacted = False
+    if model.supports_native_compaction:
+        con.print(f"[dim]Compacting {msg_count} messages with the provider-native endpoint...[/dim]")
+        try:
+            result = _run_async_safe(
+                model.compact_context(messages, instructions=custom_instructions)
+            )
+            if result is None:
+                raise RuntimeError("model advertised native compaction but returned no checkpoint")
+        except Exception as error:
+            con.print(
+                f"[yellow]Native compaction failed ({error}). Falling back to local compaction.[/yellow]"
+            )
+        else:
+            messages[-1].provider_checkpoint = result.checkpoint
+            wm.collapse_runs(messages)
+            if agent._session_log is not None:
+                agent._session_log.append_provider_checkpoint(result.checkpoint)
+            native_compacted = True
+            con.print(
+                f"[green]Context compacted with {model.id}; portable history remains available.[/green]"
+            )
+
     cm = agent.tool_config.compression_manager if agent.tool_config else None
-    if cm is not None:
+    if not native_compacted and cm is not None:
         con.print(f"[dim]Compacting {msg_count} messages with LLM summary...[/dim]")
-        model = agent.model
-        wm = agent.working_memory
 
         compacted = _run_async_safe(
             cm.auto_compact(
@@ -2568,7 +2591,7 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
         else:
             con.print("[yellow]Compaction failed. Falling back to rule-based.[/yellow]")
             _rule_based_compact(agent, messages, msg_count)
-    else:
+    elif not native_compacted:
         con.print(f"[dim]Compacting {msg_count} messages (rule-based)...[/dim]")
         _rule_based_compact(agent, messages, msg_count)
 

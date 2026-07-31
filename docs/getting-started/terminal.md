@@ -245,6 +245,8 @@ mcp, skill, ...
 !!! tip "自动压缩"
     上下文接近模型 context window 80% 时，CLI 会自动触发压缩，无需手动执行。
 
+使用 `OpenAIResponses` 且 endpoint 支持 `/responses/compact` 时，`/compact` 会优先生成 provider-native checkpoint，并保留可跨 provider 的普通 transcript。原生请求失败时才回退到本地 LLM summary 和 rule-based 压缩。
+
 ### `/newchat`
 开启全新会话（清除消息历史，保留模型和工具配置）：
 ```

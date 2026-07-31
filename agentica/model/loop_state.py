@@ -41,6 +41,10 @@ class LoopState:
     # Reactive compact (one-shot per loop invocation)
     reactive_compact_done: bool = False
 
+    # A provider-native checkpoint is not portable across fallback providers.
+    # Compact the transcript locally at most once before switching providers.
+    portable_fallback_compacted: bool = False
+
     # Set when a compression stage *removed* messages from the in-flight list.
     # That invalidates the `num_input_messages` prefix boundary the runner uses
     # to slice out "this turn's new messages", so persistence must switch to

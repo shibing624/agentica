@@ -178,6 +178,29 @@ class CompressionManager:
 
         return False
 
+    def should_native_compact(
+        self,
+        messages: List["Message"],
+        model: Any,
+        tools: Optional[List] = None,
+    ) -> bool:
+        """Trigger provider compaction before local destructive stages."""
+        if not model.supports_native_compaction:
+            return False
+        self._resolve_limits(model)
+        provider_limit = model.native_compaction_token_limit()
+        threshold = provider_limit
+        if self.compress_token_limit is not None:
+            threshold = min(threshold, self.compress_token_limit)
+        tokens = model.estimate_native_compaction_tokens(messages, tools)
+        if tokens < threshold:
+            return False
+        logger.debug(
+            f"Native compact threshold hit: {tokens:,} >= {threshold:,} "
+            f"(provider_limit={provider_limit:,})"
+        )
+        return True
+
     def _shrink_assistant_tool_call_arguments(self, messages: List["Message"]) -> int:
         """Shrink large assistant tool-call argument strings without invalidating JSON."""
         shrunk = 0

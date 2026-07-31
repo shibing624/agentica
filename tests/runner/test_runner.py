@@ -328,6 +328,127 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         self.assertIs(event["is_main_agent"], False)
 
 
+class TestRunnerNativeCompaction(unittest.TestCase):
+    def _agent(self):
+        from agentica.agent import Agent
+        from agentica.compression.manager import CompressionManager
+        from agentica.model.openai import OpenAIResponses
+
+        model = OpenAIResponses(id="gpt-5.6-sol", api_key="fake_openai_key")
+        agent = Agent(model=model)
+        cm = CompressionManager()
+        agent.tool_config.compress_tool_results = True
+        agent.tool_config.compression_manager = cm
+        return agent, model, cm
+
+    def test_native_success_skips_destructive_local_stages(self):
+        from agentica.model.base import NativeCompactionResult
+        from agentica.runner import Runner
+
+        agent, model, cm = self._agent()
+        messages = [Message(role="user", content="long context")]
+        result = NativeCompactionResult(
+            checkpoint={
+                "type": "openai_responses_compaction",
+                "provider": "OpenAI",
+                "model": model.id,
+                "base_url": "https://api.openai.com/v1",
+                "output": [{"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}],
+            },
+            usage={"total_tokens": 123},
+        )
+        model.estimate_native_compaction_tokens = MagicMock(return_value=160_000)
+        model.compact_context = AsyncMock(return_value=result)
+
+        with patch.object(cm, "should_native_compact", return_value=True), \
+             patch("agentica.runner.micro_compact") as micro, \
+             patch.object(cm, "should_compress") as local_rule, \
+             patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+
+        self.assertEqual(messages[-1].provider_checkpoint, result.checkpoint)
+        micro.assert_not_called()
+        local_rule.assert_not_called()
+        local_auto.assert_not_called()
+
+    def test_native_failure_falls_back_to_local_pipeline(self):
+        from agentica.runner import Runner
+
+        agent, model, cm = self._agent()
+        messages = [Message(role="user", content="long context")]
+        model.estimate_native_compaction_tokens = MagicMock(return_value=160_000)
+        model.compact_context = AsyncMock(side_effect=RuntimeError("404 compact unsupported"))
+
+        with patch.object(cm, "should_native_compact", return_value=True), \
+             patch("agentica.runner.micro_compact", return_value=0) as micro, \
+             patch.object(cm, "should_compress", return_value=False), \
+             patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as local_auto:
+            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+
+        micro.assert_called_once_with(messages)
+        local_auto.assert_awaited_once()
+        self.assertIsNone(messages[-1].provider_checkpoint)
+
+    def test_cross_provider_fallback_compacts_portable_transcript(self):
+        from agentica.model.openai import OpenAIChat
+        from agentica.runner import Runner
+
+        agent, primary, cm = self._agent()
+        fallback = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+        primary.response = AsyncMock(side_effect=RuntimeError("503 service unavailable"))
+        fallback.response = AsyncMock(return_value=ModelResponse(content="fallback answer"))
+        agent._run_fallback_models = [fallback]
+        cm.auto_compact = AsyncMock(return_value=True)
+        messages = [
+            Message(
+                role="user",
+                content="portable transcript",
+                provider_checkpoint={"type": "openai_responses_compaction"},
+            )
+        ]
+        state = LoopState(max_api_retry=1)
+
+        result = asyncio.run(Runner._call_with_retry(primary, messages, state, agent))
+
+        self.assertIs(result.used_model, fallback)
+        self.assertTrue(result.used_fallback)
+        self.assertTrue(state.context_collapsed)
+        cm.auto_compact.assert_awaited_once_with(messages, model=fallback, force=True)
+
+    def test_same_responses_identity_reuses_native_checkpoint_on_fallback(self):
+        from agentica.model.openai import OpenAIResponses
+        from agentica.runner import Runner
+
+        agent, primary, cm = self._agent()
+        fallback = OpenAIResponses(id=primary.id, api_key="second-key")
+        primary.response = AsyncMock(side_effect=RuntimeError("503 service unavailable"))
+        fallback.response = AsyncMock(return_value=ModelResponse(content="fallback answer"))
+        agent._run_fallback_models = [fallback]
+        cm.auto_compact = AsyncMock(return_value=True)
+        messages = [
+            Message(
+                role="user",
+                content="portable transcript",
+                provider_checkpoint={
+                    "type": "openai_responses_compaction",
+                    "provider": "OpenAI",
+                    "model": primary.id,
+                    "base_url": fallback._checkpoint_identity()["base_url"],
+                    "output": [
+                        {"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}
+                    ],
+                },
+            )
+        ]
+
+        result = asyncio.run(
+            Runner._call_with_retry(primary, messages, LoopState(max_api_retry=1), agent)
+        )
+
+        self.assertIs(result.used_model, fallback)
+        cm.auto_compact.assert_not_awaited()
+
+
 class TestRunnerStructuredOutputFallback(unittest.TestCase):
     """Structured output parse failure should fallback to text, not crash."""
 

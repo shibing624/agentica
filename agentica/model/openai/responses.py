@@ -4,18 +4,21 @@
 @description: OpenAI Responses API model adapter with reasoning and function tools.
 """
 
+import json
+import os
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from pydantic import BaseModel
 
-from agentica.model.base import Model
+from agentica.model.base import Model, NativeCompactionResult
 from agentica.model.message import Message
 from agentica.model.metrics import Metrics
 from agentica.model.openai.chat import OpenAIChat
 from agentica.model.response import ModelResponse
 from agentica.model.stream_retry import stream_with_retry
+from agentica.utils.tokens import count_schema_tokens, count_text_tokens, count_tool_tokens
 
 
 @dataclass
@@ -29,6 +32,7 @@ class OpenAIResponses(OpenAIChat):
     id: str = "gpt-5.6-sol"
     name: str = "OpenAIResponses"
     provider: str = "OpenAI"
+    supports_native_compaction: bool = True
 
     reasoning: Optional[str] = None
     max_output_tokens: Optional[int] = None
@@ -195,31 +199,140 @@ class OpenAIResponses(OpenAIChat):
             )
         return items
 
+    def _checkpoint_identity(self) -> Dict[str, str]:
+        base_url = self.base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        return {
+            "provider": self.provider,
+            "model": self.id,
+            "base_url": str(base_url).rstrip("/"),
+        }
+
+    def _compatible_checkpoint(self, message: Message) -> Optional[Dict[str, Any]]:
+        checkpoint = message.provider_checkpoint
+        if not isinstance(checkpoint, dict):
+            return None
+        if checkpoint.get("type") != "openai_responses_compaction":
+            return None
+        identity = self._checkpoint_identity()
+        if any(checkpoint.get(key) != value for key, value in identity.items()):
+            return None
+        output = checkpoint.get("output")
+        return checkpoint if isinstance(output, list) else None
+
+    def has_compatible_native_checkpoint(self, messages: List[Message]) -> bool:
+        return any(self._compatible_checkpoint(message) is not None for message in messages)
+
+    def _append_formatted_message(self, formatted: List[Dict[str, Any]], message: Message) -> None:
+        if message.role == "assistant":
+            formatted.extend(self._assistant_items(message))
+        elif message.role == "tool":
+            if not message.tool_call_id:
+                raise ValueError("Tool result must be a response to a preceding message with a tool call id.")
+            formatted.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": message.tool_call_id,
+                    "output": message.get_content_string(),
+                }
+            )
+        else:
+            if message.role == "user" and message.images is not None:
+                message = self.add_images_to_message(message=message, images=message.images)
+            formatted.append(
+                {
+                    "role": message.role,
+                    "content": self._content_for_responses(message.content),
+                }
+            )
+
     def format_messages(self, messages: List[Message]) -> List[Dict[str, Any]]:
         formatted: List[Dict[str, Any]] = []
+        checkpoint_index = -1
+        checkpoint: Optional[Dict[str, Any]] = None
+        for index in range(len(messages) - 1, -1, -1):
+            checkpoint = self._compatible_checkpoint(messages[index])
+            if checkpoint is not None:
+                checkpoint_index = index
+                break
+
+        if checkpoint is not None:
+            # Standalone compact output is the canonical next context window.
+            # System instructions are re-applied separately because compacted
+            # output contains retained user items plus the opaque checkpoint.
+            for message in messages:
+                if message.role == "system":
+                    self._append_formatted_message(formatted, message)
+            formatted.extend(dict(item) for item in checkpoint["output"])
+            for message in messages[checkpoint_index + 1:]:
+                if message.role != "system":
+                    self._append_formatted_message(formatted, message)
+            return formatted
+
         for message in messages:
-            if message.role == "assistant":
-                formatted.extend(self._assistant_items(message))
-            elif message.role == "tool":
-                if not message.tool_call_id:
-                    raise ValueError("Tool result must be a response to a preceding message with a tool call id.")
-                formatted.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": message.tool_call_id,
-                        "output": message.get_content_string(),
-                    }
-                )
-            else:
-                if message.role == "user" and message.images is not None:
-                    message = self.add_images_to_message(message=message, images=message.images)
-                formatted.append(
-                    {
-                        "role": message.role,
-                        "content": self._content_for_responses(message.content),
-                    }
-                )
+            self._append_formatted_message(formatted, message)
         return formatted
+
+    def native_compaction_token_limit(self) -> int:
+        output_limit = self.max_output_tokens if self.max_output_tokens is not None else self.max_tokens
+        if output_limit is None:
+            output_limit = 16_384
+        return max(1, self.context_window - output_limit - 8_192)
+
+    def estimate_native_compaction_tokens(
+        self,
+        messages: List[Message],
+        tools: Optional[List[Any]] = None,
+    ) -> int:
+        formatted = self.format_messages(messages)
+        total = count_text_tokens(json.dumps(formatted, ensure_ascii=False), self.id)
+        if tools:
+            total += count_tool_tokens(tools, self.id)
+        if self.response_format is not None:
+            total += count_schema_tokens(self.response_format, self.id)
+        return total
+
+    async def compact_context(
+        self,
+        messages: List[Message],
+        instructions: Optional[str] = None,
+    ) -> NativeCompactionResult:
+        """Create an opaque Responses checkpoint for subsequent requests."""
+        request: Dict[str, Any] = {
+            "model": self.id,
+            "input": self.format_messages(messages),
+        }
+        if instructions is not None:
+            request["instructions"] = instructions
+        for name, value in (
+            ("extra_headers", self.extra_headers),
+            ("extra_query", self.extra_query),
+            ("extra_body", self.extra_body),
+        ):
+            if value is not None:
+                request[name] = value
+
+        metrics = Metrics()
+        metrics.response_timer.start()
+        try:
+            response = await self.get_client().responses.compact(**request)
+        finally:
+            metrics.response_timer.stop()
+
+        if response.object != "response.compaction":
+            raise RuntimeError(f"Responses compact returned unexpected object: {response.object!r}")
+
+        usage = response.usage.model_dump(exclude_none=True)
+        accounting_message = Message(role="assistant")
+        self.update_usage_metrics(accounting_message, metrics, self._completion_usage(response.usage))
+        checkpoint = {
+            "type": "openai_responses_compaction",
+            **self._checkpoint_identity(),
+            "id": response.id,
+            "created_at": response.created_at,
+            "output": [self._dump(item) for item in response.output],
+            "usage": usage,
+        }
+        return NativeCompactionResult(checkpoint=checkpoint, usage=usage)
 
     @property
     def request_kwargs(self) -> Dict[str, Any]:

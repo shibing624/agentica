@@ -30,7 +30,7 @@ classifiers = [
 # ─────────────────────────────────────────────────────────
 dependencies = [
     # ── 真核心（Agent / Model / Tool 运行时）──
-    "openai>=1.0",                # OpenAI 协议，DeepSeek/Zhipu/Qwen/Moonshot 都用它
+    "openai>=2.51.0",             # Responses compact + OpenAI-compatible providers
     "anthropic>=0.40",            # Claude 直接默认装（agentica 主推 provider）
     "pydantic>=2.0",
     "httpx>=0.24",

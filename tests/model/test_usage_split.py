@@ -20,6 +20,14 @@ class TestSplitPromptUsage(unittest.TestCase):
         self.assertEqual((fresh, read, write), (2_000, 8_000, 0))
         self.assertEqual(fresh + read + write, 10_000, "parts must sum to the prompt")
 
+    def test_openai_cache_write_tokens_are_carved_out_of_prompt_tokens(self):
+        fresh, read, write = split_prompt_usage(
+            10_000,
+            {"cached_tokens": 2_000, "cache_write_tokens": 3_000},
+        )
+        self.assertEqual((fresh, read, write), (5_000, 2_000, 3_000))
+        self.assertEqual(fresh + read + write, 10_000, "parts must sum to the prompt")
+
     def test_anthropic_style_keys_are_already_disjoint(self):
         fresh, read, write = split_prompt_usage(
             120, {"cache_read_tokens": 50_000, "cache_creation_tokens": 300}

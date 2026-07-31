@@ -1,7 +1,7 @@
 aiofiles
 httpx
 beautifulsoup4
-openai>=1.52.0
+openai>=2.51.0
 python-dotenv
 pydantic
 requests

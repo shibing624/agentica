@@ -769,12 +769,13 @@ class Runner:
     ) -> None:
         """Run the multi-stage compression pipeline before each LLM call.
 
-        Stages ordered cheapest-first (mirrors CC's queryLoop pre-processing):
+        Stages ordered to preserve provider-native state when available:
           Stage 1 - Tool result budget (free, O(n))
-          Stage 2 - Micro-compact (free, O(n))
-          Stage 3 - Rule-based compress (free, O(n))
-          Stage 4 - Auto-compact (costly, LLM summarisation)
-          Stage 5 (reactive compact) is handled in _call_with_retry on API error.
+          Stage 2 - Provider-native compact (Responses API)
+          Stage 3 - Micro-compact (free, O(n))
+          Stage 4 - Rule-based compress (free, O(n))
+          Stage 5 - Auto-compact (costly, portable LLM summarisation)
+          Stage 6 (reactive compact) is handled in _call_with_retry on API error.
 
         Sets ``loop_state.context_collapsed`` whenever a stage drops messages,
         so the caller knows the ``num_input_messages`` prefix boundary is gone.
@@ -793,10 +794,73 @@ class Runner:
                 user_id=_uid,
             )
 
-        # Stage 2: micro-compact (clear old tool results, free)
+        compression_enabled = agent.tool_config.compress_tool_results
+        cm = agent.tool_config.compression_manager
+
+        async def _fire_compact_hooks(event: str) -> None:
+            if agent._run_hooks is not None:
+                fn = getattr(agent._run_hooks, event, None)
+                if fn is not None:
+                    await fn(agent=agent, messages=messages)
+
+        # Stage 2: provider-native compact. A successful checkpoint leaves the
+        # portable transcript untouched, so cross-provider fallback remains
+        # possible while subsequent Responses calls use the smaller context.
+        if compression_enabled and cm is not None and cm.should_native_compact(
+            messages, model, tools=model.tools
+        ):
+            before_tokens = model.estimate_native_compaction_tokens(messages, model.tools)
+            t0 = time.monotonic()
+            await _fire_compact_hooks("on_pre_compact")
+            try:
+                result = await model.compact_context(messages)
+                if result is None:
+                    raise RuntimeError("model advertised native compaction but returned no checkpoint")
+            except Exception as error:
+                logger.warning(
+                    f"Native compact failed for {model.id}; falling back to local compression: {error}"
+                )
+                if cb is not None:
+                    cb(
+                        {
+                            "type": "compact.native_failed",
+                            "agent_name": agent_name,
+                            "is_main_agent": is_main_agent,
+                            "model": model.id,
+                            "error": str(error),
+                            "elapsed": time.monotonic() - t0,
+                        }
+                    )
+            else:
+                messages[-1].provider_checkpoint = result.checkpoint
+                logger.info(f"Native compact complete for {model.id}")
+                if agent.run_response is not None:
+                    agent.run_response.metrics = agent.run_response.metrics or {}
+                    compression_metrics = agent.run_response.metrics.setdefault("compression", {})
+                    compression_metrics["native"] = {
+                        "model": model.id,
+                        "input_tokens_before": before_tokens,
+                        "usage": result.usage,
+                    }
+                await _fire_compact_hooks("on_post_compact")
+                if cb is not None:
+                    cb(
+                        {
+                            "type": "compact.native",
+                            "agent_name": agent_name,
+                            "is_main_agent": is_main_agent,
+                            "model": model.id,
+                            "input_tokens_before": before_tokens,
+                            "usage": result.usage,
+                            "elapsed": time.monotonic() - t0,
+                        }
+                    )
+                return
+
+        # Stage 3: micro-compact (clear old tool results, free)
         n = micro_compact(messages)
         if n:
-            logger.debug(f"Stage 2 (micro-compact): cleared {n} old tool result(s)")
+            logger.debug(f"Stage 3 (micro-compact): cleared {n} old tool result(s)")
             if cb is not None:
                 cb(
                     {
@@ -807,23 +871,16 @@ class Runner:
                     }
                 )
 
-        # Stage 3 & 4 require CompressionManager
-        if not agent.tool_config.compress_tool_results:
+        # Remaining stages require CompressionManager.
+        if not compression_enabled:
             return
-        cm = agent.tool_config.compression_manager
         if cm is None:
             return
 
-        async def _fire_compact_hooks(event: str) -> None:
-            if agent._run_hooks is not None:
-                fn = getattr(agent._run_hooks, event, None)
-                if fn is not None:
-                    await fn(agent=agent, messages=messages)
-
-        # Stage 3: rule-based compress (truncate + drop old rounds, free)
+        # Stage 4: rule-based compress (truncate + drop old rounds, free)
         if cm.should_compress(messages, tools=model.tools, model=model):
             await _fire_compact_hooks("on_pre_compact")
-            logger.debug("Stage 3 (rule-based compress): truncating + dropping old messages")
+            logger.debug("Stage 4 (rule-based compress): truncating + dropping old messages")
             before = len(messages)
             t0 = time.monotonic()
             await cm.compress(
@@ -854,7 +911,7 @@ class Runner:
                     }
                 )
 
-        # Stage 4: auto-compact via LLM summarisation.
+        # Stage 5: auto-compact via LLM summarisation.
         # auto_compact() returns False fast when threshold not met; only fire
         # events when it actually compresses (avoids per-turn spam).
         before = len(messages)
@@ -862,7 +919,7 @@ class Runner:
         compacted = await cm.auto_compact(messages, model=model)
         if compacted:
             loop_state.context_collapsed = True
-            logger.debug("Stage 4 (auto-compact): conversation summarised by LLM")
+            logger.debug("Stage 5 (auto-compact): conversation summarised by LLM")
             await _fire_compact_hooks("on_post_compact")
             if cb is not None:
                 cb(
@@ -936,6 +993,22 @@ class Runner:
             logger.warning(f"event callback failed for context.usage: {e}")
 
     @staticmethod
+    def _provider_replay_meta(message: Message) -> Dict[str, Any]:
+        """Return provider state required for faithful same-provider replay."""
+        meta: Dict[str, Any] = {}
+        if message.provider_data is not None:
+            meta["provider_data"] = message.provider_data
+        if message.provider_checkpoint is not None:
+            meta["provider_checkpoint"] = message.provider_checkpoint
+        if message.reasoning_content is not None:
+            meta["reasoning_content"] = message.reasoning_content
+        if message.finish_reason is not None:
+            meta["finish_reason"] = message.finish_reason
+        if message.metrics:
+            meta["metrics"] = message.metrics
+        return meta
+
+    @staticmethod
     def _persist_assistant_tool_calls(agent: "Agent") -> None:
         """Persist the turn's assistant tool-call messages to the session log.
 
@@ -984,6 +1057,7 @@ class Runner:
                     "assistant",
                     _text,
                     tool_calls=msg.tool_calls,
+                    **Runner._provider_replay_meta(msg),
                 )
             elif msg.role == "tool":
                 _tc = tool_by_id.get(msg.tool_call_id)
@@ -1010,6 +1084,7 @@ class Runner:
                         fallback_compacted=_tc.get("fallback_compacted", False),
                         fallback_model=_tc.get("fallback_model"),
                         replay=_tc.get("replay", True),
+                        **Runner._provider_replay_meta(msg),
                         **_origin_meta,
                     )
                 else:
@@ -1019,6 +1094,7 @@ class Runner:
                         "tool",
                         msg.content if isinstance(msg.content, str) else "",
                         tool_call_id=msg.tool_call_id or "",
+                        **Runner._provider_replay_meta(msg),
                     )
 
     @staticmethod
@@ -1139,8 +1215,33 @@ class Runner:
                 )
 
             for attempt in range(state.max_api_retry):
-                message_checkpoint = len(messages)
                 Runner._prepare_model_for_runner_call(current, model)
+                if (
+                    is_fallback
+                    and not state.portable_fallback_compacted
+                    and any(message.provider_checkpoint is not None for message in messages)
+                    and not current.has_compatible_native_checkpoint(messages)
+                ):
+                    state.portable_fallback_compacted = True
+                    cm = agent.tool_config.compression_manager
+                    if cm is not None:
+                        compacted = await cm.auto_compact(messages, model=current, force=True)
+                        if compacted:
+                            state.context_collapsed = True
+                            logger.info(
+                                f"Compacted portable transcript before cross-provider fallback to {current.id}"
+                            )
+                            cb = agent._event_callback
+                            if cb is not None:
+                                cb(
+                                    {
+                                        "type": "compact.fallback_portable",
+                                        "agent_name": agent.name or "Agent",
+                                        "is_main_agent": agent._parent_run_id is None,
+                                        "model": current.id,
+                                    }
+                                )
+                message_checkpoint = len(messages)
                 try:
                     if stream:
                         # Stream: defer content_filter detection to the consumer.
@@ -1456,12 +1557,15 @@ class Runner:
             elif isinstance(message, Message):
                 _user_text = message.content if isinstance(message.content, str) else str(message.content)
             if _user_text:
-                agent._session_log.append("user", _user_text)
+                _user_meta = Runner._provider_replay_meta(user_messages[-1]) if user_messages else {}
+                agent._session_log.append("user", _user_text, **_user_meta)
             # Log assistant tool-call messages AND their tool results in the
             # exact interleaved order so /resume rebuilds a valid
             # assistant(tool_calls)->tool sequence instead of orphaned tools.
             self._persist_assistant_tool_calls(agent)
-            agent._session_log.append("assistant", persisted, finish_reason="cancelled")
+            _assistant_meta = Runner._provider_replay_meta(last_asst) if last_asst is not None else {}
+            _assistant_meta["finish_reason"] = "cancelled"
+            agent._session_log.append("assistant", persisted, **_assistant_meta)
 
     # =========================================================================
     # Core execution engine (async-only, single-round)
@@ -2427,7 +2531,8 @@ class Runner:
                     elif isinstance(message, Message):
                         _user_text = message.content if isinstance(message.content, str) else str(message.content)
                     if _user_text:
-                        agent._session_log.append("user", _user_text)
+                        _user_meta = self._provider_replay_meta(user_messages[-1]) if user_messages else {}
+                        agent._session_log.append("user", _user_text, **_user_meta)
 
                     # 2. Log assistant tool-call messages AND their tool results in
                     #    the exact interleaved order, so /resume rebuilds a valid
@@ -2455,6 +2560,15 @@ class Runner:
                                 "input_tokens": _last_usage.input_tokens,
                                 "output_tokens": _last_usage.output_tokens,
                             }
+                        _final_assistant = next(
+                            (
+                                item for item in reversed(agent.run_response.messages or [])
+                                if isinstance(item, Message) and item.role == "assistant" and not item.tool_calls
+                            ),
+                            None,
+                        )
+                        if _final_assistant is not None:
+                            _model_meta.update(self._provider_replay_meta(_final_assistant))
                         agent._session_log.append("assistant", _assistant_text, **_model_meta)
 
                 # Run reached natural completion -- mark + emit terminal event.

@@ -63,7 +63,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | [ACP](advanced/acp.md) | Agent Client Protocol |
 | **参考** | |
 | [模型提供商](guides/models.md) | 全部模型配置指南 |
-| [OpenAI Responses API](guides/openai-responses.md) | reasoning、工具调用及 CLI/Gateway 配置 |
+| [OpenAI Responses API](guides/openai-responses.md) | reasoning、工具调用、原生 compact 及 CLI/Gateway 配置 |
 | [最佳实践](guides/best_practices.md) | 设计原则与生产部署 |
 | [Agent API](api/agent.md) | 完整 API 参考 |
 | [依赖分层 RFC](rfcs/dependency-layering.md) | `agentica-core` / extras 的延后方案 |

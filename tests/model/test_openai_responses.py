@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 from openai.types.responses.response import Response
+from openai.types.responses.compacted_response import CompactedResponse
 
 from agentica.cli.runtime import get_model
 from agentica.cli.setup import _validate_profile
@@ -52,7 +53,7 @@ def _response(output, *, status="completed", usage=True, incomplete_reason=None)
             "usage": (
                 {
                     "input_tokens": 10,
-                    "input_tokens_details": {"cached_tokens": 2},
+                    "input_tokens_details": {"cached_tokens": 2, "cache_write_tokens": 0},
                     "output_tokens": 5,
                     "output_tokens_details": {"reasoning_tokens": 3},
                     "total_tokens": 15,
@@ -81,10 +82,12 @@ class _AsyncEvents:
 
 
 class _FakeResponses:
-    def __init__(self, response, stream_events=None):
+    def __init__(self, response, stream_events=None, compacted_response=None):
         self.response = response
         self.stream_events = stream_events
+        self.compacted_response = compacted_response
         self.calls = []
+        self.compact_calls = []
 
     async def create(self, **kwargs):
         self.calls.append(kwargs)
@@ -92,10 +95,14 @@ class _FakeResponses:
             return _AsyncEvents(self.stream_events or [])
         return self.response
 
+    async def compact(self, **kwargs):
+        self.compact_calls.append(kwargs)
+        return self.compacted_response
+
 
 class _FakeClient:
-    def __init__(self, response, stream_events=None):
-        self.responses = _FakeResponses(response, stream_events)
+    def __init__(self, response, stream_events=None, compacted_response=None):
+        self.responses = _FakeResponses(response, stream_events, compacted_response)
 
 
 def _tool_response():
@@ -117,6 +124,30 @@ def _tool_response():
                 "status": "completed",
             },
         ]
+    )
+
+
+def _compacted_response():
+    return CompactedResponse.model_validate(
+        {
+            "id": "resp_compact_test",
+            "created_at": 3,
+            "object": "response.compaction",
+            "output": [
+                {
+                    "id": "cmp_1",
+                    "type": "compaction",
+                    "encrypted_content": "opaque-compacted-state",
+                }
+            ],
+            "usage": {
+                "input_tokens": 100,
+                "input_tokens_details": {"cached_tokens": 10, "cache_write_tokens": 7},
+                "output_tokens": 20,
+                "output_tokens_details": {"reasoning_tokens": 5},
+                "total_tokens": 120,
+            },
+        }
     )
 
 
@@ -247,6 +278,80 @@ def test_stream_maps_text_reasoning_and_usage():
     assert messages[-1].reasoning_content == "Short plan"
     assert model.last_finish_reason == "stop"
     assert model.usage.requests == 1
+
+
+def test_native_compact_request_and_canonical_checkpoint_replay():
+    fake_client = _FakeClient(_response([]), compacted_response=_compacted_response())
+    model = OpenAIResponses(
+        id="gpt-5.6-sol",
+        api_key="test",
+        base_url="https://v2.open.venus.woa.com/llmproxy/v1",
+        client=fake_client,
+    )
+    messages = [
+        Message(role="system", content="You are precise."),
+        Message(role="user", content="old question"),
+        Message(role="assistant", content="old answer"),
+    ]
+
+    result = asyncio.run(model.compact_context(messages, instructions="Keep file paths."))
+
+    request = fake_client.responses.compact_calls[0]
+    assert request == {
+        "model": "gpt-5.6-sol",
+        "input": [
+            {"role": "system", "content": "You are precise."},
+            {"role": "user", "content": "old question"},
+            {"role": "assistant", "content": "old answer"},
+        ],
+        "instructions": "Keep file paths.",
+    }
+    assert result.checkpoint["type"] == "openai_responses_compaction"
+    assert result.checkpoint["base_url"] == "https://v2.open.venus.woa.com/llmproxy/v1"
+    assert result.checkpoint["output"][0]["encrypted_content"] == "opaque-compacted-state"
+    assert result.usage["total_tokens"] == 120
+    assert model.usage.requests == 1
+    assert model.usage.total_tokens == 120
+    assert model.usage.input_tokens_details.cache_creation_tokens == 7
+
+    messages[-1].provider_checkpoint = result.checkpoint
+    messages.append(Message(role="user", content="new question"))
+    replay = model.format_messages(messages)
+    assert replay == [
+        {"role": "system", "content": "You are precise."},
+        {
+            "id": "cmp_1",
+            "encrypted_content": "opaque-compacted-state",
+            "type": "compaction",
+        },
+        {"role": "user", "content": "new question"},
+    ]
+
+
+def test_native_checkpoint_is_ignored_by_other_endpoint_identity():
+    checkpoint = {
+        "type": "openai_responses_compaction",
+        "provider": "OpenAI",
+        "model": "gpt-5.6-sol",
+        "base_url": "https://api.openai.com/v1",
+        "output": [{"id": "cmp_1", "type": "compaction", "encrypted_content": "opaque"}],
+    }
+    model = OpenAIResponses(
+        id="gpt-5.6-sol",
+        api_key="test",
+        base_url="https://v2.open.venus.woa.com/llmproxy/v1",
+    )
+    messages = [
+        Message(role="user", content="portable question"),
+        Message(role="assistant", content="portable answer", provider_checkpoint=checkpoint),
+        Message(role="user", content="next"),
+    ]
+
+    assert model.format_messages(messages) == [
+        {"role": "user", "content": "portable question"},
+        {"role": "assistant", "content": "portable answer"},
+        {"role": "user", "content": "next"},
+    ]
 
 
 def test_runtime_selects_responses_only_for_wire_api():

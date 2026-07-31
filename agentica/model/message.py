@@ -83,6 +83,10 @@ class Message(BaseModel):
     # Data from the provider we might need on subsequent messages
     provider_data: Optional[Dict[str, Any]] = None
 
+    # Opaque provider-native compacted context. Other providers must ignore it
+    # and continue from the portable role/content transcript.
+    provider_checkpoint: Optional[Dict[str, Any]] = None
+
     # --- Provider fields that may be sent back to compatible Model APIs ---
     # OpenAI-compatible reasoning traces. DeepSeek requires this on later turns
     # when an assistant message with tool calls is replayed.
@@ -160,6 +164,7 @@ class Message(BaseModel):
             include={
                 "role", "content", "audio", "name", "tool_call_id", "tool_calls",
                 "reasoning_content", "finish_reason", "provider_data", "metrics",
+                "provider_checkpoint",
                 "thinking", "redacted_thinking",
             },
         )

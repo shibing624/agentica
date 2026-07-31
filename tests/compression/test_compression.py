@@ -413,7 +413,13 @@ class TestCompressionReport(unittest.TestCase):
             task_anchor=None,
             workspace=None,
         )
-        model = SimpleNamespace(id="gpt-4o", tools=[], context_window=None, _cost_tracker=None)
+        model = SimpleNamespace(
+            id="gpt-4o",
+            tools=[],
+            context_window=None,
+            supports_native_compaction=False,
+            _cost_tracker=None,
+        )
 
         from agentica.model.loop_state import LoopState
 
