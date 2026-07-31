@@ -50,7 +50,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | [选择编排模式](multi-agent/choosing.md) | as_tool、Workflow、Subagent、Swarm 决策树 |
 | [Workflow](multi-agent/workflow.md) | 确定性工作流编排 |
 | [Swarm](multi-agent/swarm.md) | 自主多智能体协作 |
-| [Subagent](multi-agent/subagent.md) | 子任务委派 |
+| [Subagent](multi-agent/subagent.md) | Markdown 定义、项目级/用户级自定义与子任务委派 |
 | **高级功能** | |
 | [Hooks](advanced/hooks.md) | 生命周期钩子 |
 | [RunConfig](advanced/run-config.md) | 运行时配置（超时、成本、白名单） |
@@ -63,6 +63,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | [ACP](advanced/acp.md) | Agent Client Protocol |
 | **参考** | |
 | [模型提供商](guides/models.md) | 全部模型配置指南 |
+| [OpenAI Responses API](guides/openai-responses.md) | reasoning、工具调用及 CLI/Gateway 配置 |
 | [最佳实践](guides/best_practices.md) | 设计原则与生产部署 |
 | [Agent API](api/agent.md) | 完整 API 参考 |
 | [依赖分层 RFC](rfcs/dependency-layering.md) | `agentica-core` / extras 的延后方案 |

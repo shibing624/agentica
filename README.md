@@ -44,6 +44,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 
 ## 🔥 News
 
+- [Unreleased] **下一版本**：新增 OpenAI Responses API；Subagent 改为 Markdown 定义，支持项目级和用户级自定义、覆盖内置定义及 CLI 热重载；`apply_patch` 支持一次修改多个文件，并完善 CLI resume、上下文显示和工具结果反馈。详见 [Changelog](CHANGELOG.md#unreleased)
 - [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
@@ -98,10 +99,10 @@ agent.run_sync("帮我搜 Python 3.13 新特性，写到 features.md")
 ## 功能特性
 
 - **Async-First** — 原生 async API，`asyncio.gather()` 并行工具执行，同步适配器兼容
-- **20+ 模型** — OpenAI / DeepSeek / Claude / ZhipuAI / Qwen / Moonshot / Ollama / LiteLLM 等
+- **20+ 模型** — OpenAI Chat Completions / [Responses API](https://shibing624.github.io/agentica/guides/openai-responses)、DeepSeek、Claude、ZhipuAI、Qwen、Moonshot、Ollama、LiteLLM 等
 - **40+ 内置工具** — 搜索、代码执行、文件操作、浏览器、OCR、图像生成
 - **RAG** — 知识库管理、混合检索、Rerank，集成 LangChain / LlamaIndex
-- **多智能体** — `Agent.as_tool()`（轻量组合）、Swarm（并行/自治）和 Workflow（确定性编排）
+- **多智能体** — `Agent.as_tool()`、Workflow、Swarm，以及可通过项目级/用户级 [Markdown 自定义的 Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)
 - **Actor-Critic 精炼** — `refine()` + 多 Critic 并行评审，`SchemaCritic` 程序级零成本验证 / `AgentCritic` 异构强模型把关，循环检测自动早停
 - **`/goal` 长任务循环** — `await agent.run_goal("xxx")` 持续推进，自动判断完成、续跑、暂停；支持 token / wall-clock / turn 三种 hard cap；CLI `/goal /subgoal` 即开即用，详见 [文档](https://shibing624.github.io/agentica/advanced/goals)
 - **安全守卫** — 输入/输出/工具级 Guardrails，流式实时检测

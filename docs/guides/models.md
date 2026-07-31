@@ -7,6 +7,7 @@ Agentica 支持 20+ 模型提供商，所有模型类遵循统一接口，可即
 | 类名 | 提供商 | 默认模型 | 环境变量 |
 |------|--------|---------|----------|
 | `OpenAIChat` | OpenAI | gpt-4o-mini | `OPENAI_API_KEY` |
+| `OpenAIResponses` | OpenAI Responses API | gpt-5.6-sol | `OPENAI_API_KEY` |
 | `DeepSeek` | DeepSeek | deepseek-chat | `DEEPSEEK_API_KEY` |
 | `ZhipuAI` | 智谱 AI | glm-4.7-flash | `ZAI_API_KEY` (or `ZHIPUAI_API_KEY`) |
 | `Claude` | Anthropic | claude-sonnet-4-20250514 | `ANTHROPIC_API_KEY` |
@@ -54,6 +55,22 @@ agent = Agent(model=OpenAIChat(id="gpt-4o"))
 result = agent.run_sync("Hello!")
 print(result.content)
 ```
+
+OpenAI 提供两种 wire API：`OpenAIChat` 使用 Chat Completions，`OpenAIResponses` 使用 Responses API。需要 reasoning 状态回放、Responses 原生工具协议或新模型能力时，可使用：
+
+```python
+from agentica import Agent, OpenAIResponses
+
+agent = Agent(
+    model=OpenAIResponses(
+        id="gpt-5.6-sol",
+        reasoning="high",
+        max_output_tokens=4096,
+    )
+)
+```
+
+参数差异、CLI/Gateway 配置和辅助模型示例见 [OpenAI Responses API](openai-responses.md)。
 
 ### DeepSeek
 

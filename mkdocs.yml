@@ -40,6 +40,7 @@ nav:
       - Memory & Workspace: concepts/memory.md
       - Knowledge (RAG): concepts/rag.md
   - Multi-Agent:
+      - Choosing: multi-agent/choosing.md
       - Workflow: multi-agent/workflow.md
       - Swarm: multi-agent/swarm.md
       - Subagent: multi-agent/subagent.md
@@ -53,7 +54,9 @@ nav:
       - MCP Integration: advanced/mcp.md
       - ACP Integration: advanced/acp.md
       - Gateway (IM Bots & HTTP): advanced/gateway.md
-  - Model Providers: guides/models.md
+  - Model Providers:
+      - Overview: guides/models.md
+      - OpenAI Responses API: guides/openai-responses.md
   - Scheduled Tasks (Cron): guides/cron_scheduler.md
   - Best Practices: guides/best_practices.md
   - API Reference:

@@ -54,6 +54,25 @@ agentica --model_provider ark       --model_name doubao-1.5-pro-32k
 agentica --model_provider ollama    --model_name llama3.1          # 本地，无需 API Key
 ```
 
+### OpenAI Responses API
+
+Responses API 通过配置文件选择，不需要改变 CLI 的启动方式：
+
+```yaml
+# ~/.agentica/config.yaml
+active_profile: responses
+
+profiles:
+  responses:
+    model_provider: openai
+    model_name: gpt-5.6-sol
+    wire_api: responses
+    reasoning: high
+    max_tokens: 4096
+```
+
+`wire_api: responses` 只能与 `model_provider: openai` 配合，推理强度使用 `reasoning`，不能使用 Chat Completions 的 `reasoning_effort`。完整参数和辅助模型配置见 [OpenAI Responses API](../guides/openai-responses.md)。
+
 ## 内置工具
 
 CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定）：
@@ -167,6 +186,19 @@ mcp, skill, ...
     paper-digest - Paper digest skill
     ...
 ```
+
+### `/agents`
+
+查看和管理 Markdown 定义的 Subagent：
+
+```text
+> /agents
+> /agents create data-analyst
+> /agents reload
+> /agents remove data-analyst
+```
+
+`create` 会生成项目级 `.agentica/agents/<name>.md`。编辑其中的 system prompt、工具权限、模型层级和预算后，执行 `/agents reload` 热重载。用户级 `~/.agentica/agents/*.md`、覆盖顺序及完整示例见 [Subagent 文档](../multi-agent/subagent.md)。
 
 ### `/memory`
 显示当前会话的消息历史（含工具调用摘要）：
