@@ -1478,7 +1478,7 @@ class Runner:
 
         Mirrors the success-path memory + session-log persistence: the user
         question and the partial assistant answer (up to the interruption
-        point) are kept as a completed Q&A turn, with an ``[用户中断了回答]``
+        point) are kept as a completed Q&A turn, with a ``[User interrupted the response]``
         marker appended. Only applies to message-based runs (``messages`` is
         None) — the CLI path; pre-built ``messages`` runs manage their own
         history and are left untouched.
@@ -1489,7 +1489,7 @@ class Runner:
         if model_response.content:
             agent.run_response.content = model_response.content
         partial = agent.run_response.content or ""
-        marker = "[用户中断了回答]"
+        marker = "[User interrupted the response]"
         persisted = (f"{partial}\n\n{marker}") if partial else marker
         agent.run_response.content = persisted
 

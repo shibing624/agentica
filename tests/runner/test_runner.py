@@ -118,7 +118,7 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
 
         # run_response carries the partial answer + interruption marker
         self.assertIn("2 + 2 = ", agent.run_response.content)
-        self.assertIn("[用户中断了回答]", agent.run_response.content)
+        self.assertIn("[User interrupted the response]", agent.run_response.content)
 
         # working_memory has the user question and the assistant (with marker)
         wm = agent.working_memory
@@ -126,12 +126,12 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         self.assertIn("user", roles)
         self.assertIn("assistant", roles)
         assistant_msg = next(m for m in wm.messages if m.role == "assistant")
-        self.assertIn("[用户中断了回答]", assistant_msg.content)
+        self.assertIn("[User interrupted the response]", assistant_msg.content)
         self.assertTrue(any(isinstance(r, AgentRun) for r in wm.runs))
         resumed_history = wm.get_messages_from_last_n_runs()
         self.assertEqual([m.role for m in resumed_history], ["user", "assistant"])
         self.assertIn("2 + 2 = ", resumed_history[-1].content)
-        self.assertIn("[用户中断了回答]", resumed_history[-1].content)
+        self.assertIn("[User interrupted the response]", resumed_history[-1].content)
 
     def test_persist_interrupted_turn_skips_prebuilt_messages(self):
         """Pre-built ``messages`` runs manage their own history — no persistence."""
@@ -211,7 +211,7 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         self.assertEqual(len(users), 1, "user message double-added on post-completion cancel")
         self.assertEqual(len(assistants), 1, "assistant double-added on post-completion cancel")
         self.assertNotIn(
-            "[用户中断了回答]", assistants[0].content or "",
+            "[User interrupted the response]", assistants[0].content or "",
             "interruption marker must not stamp a finished answer",
         )
         self.assertIn("The answer is 4.", assistants[0].content or "")

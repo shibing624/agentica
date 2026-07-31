@@ -1151,7 +1151,7 @@ class StreamDisplayManager:
             if truncated:
                 detail = f"{remaining} more lines" if remaining > 0 else "full error"
                 self._assistant_console.print(
-                    f"      ... ({detail} · Ctrl+O 展开)", style="dim italic"
+                    f"      ... ({detail} · Ctrl+O to expand)", style="dim italic"
                 )
                 remember_truncated("Tool error · apply_patch", content)
             return
@@ -1403,7 +1403,7 @@ class StreamDisplayManager:
         remaining = len(lines) - max_lines
         if remaining > 0:
             self._assistant_console.print(
-                f"{cont_prefix}... ({remaining} more lines · Ctrl+O 展开)", style="dim italic"
+                f"{cont_prefix}... ({remaining} more lines · Ctrl+O to expand)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
         if elapsed_str:
@@ -1418,7 +1418,7 @@ class StreamDisplayManager:
         """Render a head/tail window with the middle hidden.
 
         Shows the first ``head`` lines and the last ``tail`` lines; anything in
-        between is collapsed into a single dim ``(N hidden lines · Ctrl+O 展开)``
+        between is collapsed into a single dim ``(N hidden lines · Ctrl+O to expand)``
         hint line. The full content is still remembered for on-demand Ctrl+O
         expansion. Used for execute output where the tail carries the command's
         final status.
@@ -1442,7 +1442,7 @@ class StreamDisplayManager:
             # Single dim hint line between head and tail (no blank/.../blank
             # separator). The full content is still stashed for Ctrl+O expansion.
             self._assistant_console.print(
-                f"{cont_prefix}({hidden} hidden lines · Ctrl+O 展开)",
+                f"{cont_prefix}({hidden} hidden lines · Ctrl+O to expand)",
                 style="dim italic",
             )
             remember_truncated(truncated_title, full_content)

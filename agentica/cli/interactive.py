@@ -422,13 +422,13 @@ def _open_in_pager(title: str, content: str) -> None:
 
     if lesskey_ok:
         return_hint = "Ctrl+O/q to return"
-        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+O/q 返回"
+        prompt_line = "↑↓/d/u scroll · / search · g/G first/last · Ctrl+O/q return"
     elif pager is not None and "less" in pager and _compile_lesskey(lesskey_src):
         return_hint = "Ctrl+O/q to return"
-        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · Ctrl+O/q 返回"
+        prompt_line = "↑↓/d/u scroll · / search · g/G first/last · Ctrl+O/q return"
     else:
         return_hint = "q to return"
-        prompt_line = "↑↓/d/u 翻页 · / 搜索 · g/G 头尾 · q 返回"
+        prompt_line = "↑↓/d/u scroll · / search · g/G first/last · q return"
 
     header = (
         f"=== {title} · {len(content.splitlines())} lines "
@@ -1385,7 +1385,7 @@ def _process_stream_response(
             time.sleep(0.05)
         current_agent._running = False
         current_agent._cancelled = False
-        con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
+        con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][User interrupted the response][/dim]")
         con.print(
             format_session_summary(
                 elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
@@ -1397,7 +1397,7 @@ def _process_stream_response(
         _set_phase("idle")
         current_agent._running = False
         current_agent._cancelled = False
-        con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][用户中断了回答][/dim]")
+        con.print("\n[yellow]⚡ Agent cancelled.[/yellow] [dim][User interrupted the response][/dim]")
         con.print(
             format_session_summary(
                 elapsed_seconds=time.monotonic() - tui_state["session_started_at"],

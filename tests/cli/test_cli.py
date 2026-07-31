@@ -1022,7 +1022,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("Hunk 1: context not found", rendered)
         self.assertIn("STALE_FIRST = 1", rendered)
         self.assertIn("Hunk 2: context not found", rendered)
-        self.assertIn("Ctrl+O 展开", rendered)
+        self.assertIn("Ctrl+O to expand", rendered)
 
     def test_display_apply_patch_error_renders_rich_markup_as_literal_text(self):
         from rich.console import Console

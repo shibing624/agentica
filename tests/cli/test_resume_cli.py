@@ -24,7 +24,7 @@ def test_parse_shell_resume_command():
 def test_hydrate_resumed_session_builds_prompt_runs(tmp_path):
     log = SessionLog("session-123", base_dir=str(tmp_path))
     log.append("user", "inspect the file")
-    log.append("assistant", "partial answer\n\n[用户中断了回答]", finish_reason="cancelled")
+    log.append("assistant", "partial answer\n\n[User interrupted the response]", finish_reason="cancelled")
     agent = SimpleNamespace(_session_log=log, working_memory=WorkingMemory())
 
     messages, runs_built = hydrate_resumed_session(agent)
