@@ -1790,10 +1790,7 @@ class BuiltinExecuteTool(Tool):
         # Override timeout from sandbox config if set
         if sandbox_config and sandbox_config.enabled and sandbox_config.max_execution_time:
             self._timeout = sandbox_config.max_execution_time
-        # Import ShellTool for its syntax-fix helpers
-        from agentica.tools.shell_tool import ShellTool
-        self._shell = ShellTool(work_dir=work_dir, timeout=timeout)
-        self.register(self.execute, is_destructive=True)
+        self.register(self.execute, sanitize_arguments=False, is_destructive=True)
         # Large bash outputs are persisted to disk (context gets preview only).
         # read_file keeps max_result_size_chars=None (never persist — avoids
         # reading its own persisted output file in a loop).
@@ -1822,13 +1819,19 @@ class BuiltinExecuteTool(Tool):
         3. Use absolute paths; avoid cd when possible
 
         Usage notes:
+        - The command string is passed unchanged to the system shell after
+          safety validation. Safety policies may block a command, but never
+          rewrite it. Quotes, escapes, newlines, and source code remain exact.
         - Commands timeout after 120 seconds by default
         - You may specify a custom ``timeout`` (in seconds) for long-running
           commands; there is no upper cap — the caller decides.
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
-        - For Python code, the tool auto-converts `python3 -c "..."` to heredoc format
         - When issuing multiple independent commands, make multiple execute calls in parallel
+        - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
+          Large output is explicitly marked as truncated. When output redaction
+          is enabled, detected secrets are replaced before the result reaches
+          you. Unterminated PEM private-key blocks are always redacted.
 
         Git safety:
         - Prefer creating new commits over amending existing ones
@@ -1850,7 +1853,7 @@ class BuiltinExecuteTool(Tool):
             - execute(command="sed -i 's/old/new/' f")  → use edit_file(...)
 
         Args:
-            command: shell command to execute
+            command: Exact shell command to execute without normalization or repair
             timeout: optional timeout in seconds (default 120, no upper cap)
 
         Returns:
@@ -1859,9 +1862,6 @@ class BuiltinExecuteTool(Tool):
         # Apply timeout: use per-call override if provided, else the tool default.
         # No upper cap — the caller decides.
         effective_timeout = self._timeout if timeout is None else max(1, timeout)
-
-        # Use ShellTool's syntax fixers (python -c → heredoc conversion, null/true/false fix)
-        command = self._shell._convert_python_c_to_heredoc(command)
 
         # Sandbox: check blocked commands (best-effort, not a true security sandbox)
         if self._sandbox_config and self._sandbox_config.enabled:

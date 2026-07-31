@@ -727,6 +727,10 @@ def get_function_call(
         _arguments = coerce_tool_args(_arguments, function_to_call)
 
         try:
+            if not function_to_call.sanitize_arguments:
+                function_call.arguments = _arguments
+                return function_call
+
             clean_arguments: Dict[str, Any] = {}
             for k, v in _arguments.items():
                 if isinstance(v, str):

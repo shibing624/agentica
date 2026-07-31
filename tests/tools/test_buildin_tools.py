@@ -11,6 +11,7 @@ import pytest
 import asyncio
 import json
 import os
+import shlex
 import tempfile
 import shutil
 from pathlib import Path
@@ -42,6 +43,7 @@ from agentica.tools.builtin.task_state_tools import (
     BuiltinTodoTool as CanonicalBuiltinTodoTool,
 )
 from agentica.model.message import Message
+from agentica.tools.shell_tool import ShellTool
 
 
 # ---------------------------------------------------------------------------
@@ -986,6 +988,13 @@ class TestBuiltinFileToolGrep:
 # ===========================================================================
 
 class TestBuiltinExecuteTool:
+    def test_execute_registered_as_raw_string_tool(self, execute_tool):
+        function = execute_tool.functions["execute"]
+        function.process_entrypoint(strict=False)
+
+        assert function.sanitize_arguments is False
+        assert "passed unchanged" in function.description
+
     def test_execute_simple_command(self, execute_tool):
         result = asyncio.run(execute_tool.execute("echo hello"))
         assert "hello" in result
@@ -1007,6 +1016,41 @@ class TestBuiltinExecuteTool:
         result = asyncio.run(execute_tool.execute("python3 -c 'print(2+3)'"))
         assert "5" in result
 
+    def test_execute_preserves_python_single_quotes(self, execute_tool):
+        python = shlex.quote(sys.executable)
+        command = f'{python} -c "from pathlib import Path; print(Path(\'.\').resolve().name)"'
+
+        result = asyncio.run(execute_tool.execute(command))
+
+        assert result == Path(execute_tool._work_dir).name
+
+    def test_execute_preserves_literal_backslash_n(self, execute_tool):
+        python = shlex.quote(sys.executable)
+        command = f'''{python} -c 'print("\\n".join(["a", "b"]))' '''.strip()
+
+        result = asyncio.run(execute_tool.execute(command))
+
+        assert result == "a\nb"
+
+    def test_execute_call_arguments_remain_exact(self, execute_tool):
+        from agentica.tools.base import get_function_call
+
+        execute_tool.functions["execute"].process_entrypoint(strict=False)
+        commands = [
+            "true",
+            "  printf preserved  ",
+            'python3 -c "print(True, False, None)"',
+        ]
+        for command in commands:
+            function_call = get_function_call(
+                "execute",
+                json.dumps({"command": command, "timeout": "5"}),
+                functions=execute_tool.functions,
+            )
+            assert function_call.error is None
+            assert function_call.arguments["command"] == command
+            assert function_call.arguments["timeout"] == 5
+
     def test_execute_multiline_python(self, execute_tool):
         cmd = '''python3 -c "def f(n):
     return n * 2
@@ -1018,6 +1062,18 @@ print(f(21))"'''
         tool = BuiltinExecuteTool(work_dir=tmp_dir)
         result = asyncio.run(tool.execute("pwd"))
         assert tmp_dir in result
+
+
+class TestShellTool:
+    def test_execute_preserves_command(self, tmp_dir):
+        tool = ShellTool(work_dir=tmp_dir)
+        python = shlex.quote(sys.executable)
+        command = f'''{python} -c 'print("\\n".join(["a", "b"]))' '''.strip()
+
+        result = asyncio.run(tool.execute(command))
+
+        assert tool.functions["execute"].sanitize_arguments is False
+        assert result == "a\nb"
 
 
 # ===========================================================================
