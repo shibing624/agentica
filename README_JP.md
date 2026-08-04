@@ -44,6 +44,7 @@ Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI
 
 ## 🔥 News
 
+- [2026/08/04] **v1.4.11**：OpenAI Responses API（ネイティブ compaction 含む）、Markdown 設定可能なサブエージェント、複数ファイル `apply_patch` を追加；CLI の resume/ステータス/圧縮フィードバックを改善；prompt と grep/glob schema のコストを削減；Learned Experiences の汚染と `write_todos` の全リストエコーを修正。詳細は [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：カタログ駆動のモデル能力判定によるネイティブ画像入力を追加；`/rename` と名前指定の `/resume` を追加；Pillow コア依存関係のメタデータを修正。詳細は [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：SDK/CLI/Web の権限を 3 階層（`ask`/`auto`/`allow-all`、yolo/full/strict 廃止）に統一；内蔵サブエージェントは読み取り専用化（`task` のデフォルトを `explore` に、edit/execute を禁止し aux モデルの低品質コード生成を修正）；`OpenAIChat` が OpenAI 互換プロキシから漏れた Claude `<invoke>` テキストツール呼び出しを解析；`edit_file` を硬拒否から tip 提示に変更；`ask_user_question` の CLI フリーズを修正。詳細は [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**：CLI に統一 braille スピナー（thinking/tool/answering 全フェーズで回転し、稼働中とハングを目視で判別可能）を追加；`ask_user_input` の入力フリーズと `/btw` が主モデルを汚染するバグを修正；cron ランタイム（`/cron` コマンド + デーモン）、自己管理（`/upgrade`、`/config set|env`）を追加；設定を `~/.agentica/config.yaml` に統一（main + aux model、`cli_config.json`/`task_model` を削除、コメントを保持）；`/resume` が完全/プレフィックス/省略 session id に対応。stream upload の OOM と `/api/upload` のパストラバーサル（CWE-22）も修正。詳細は [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)

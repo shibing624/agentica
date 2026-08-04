@@ -19,6 +19,8 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+## [1.4.11] - 2026-08-04
+
 ### Added
 - **OpenAI Responses API support.** The new top-level `OpenAIResponses` model supports sync and streaming text, reasoning summaries and encrypted reasoning-state replay, image input, function tools, parallel tool calls, and structured output. CLI and Gateway profiles select it with OpenAI-only `wire_api: responses`; profile `max_tokens` maps to `max_output_tokens`, and Responses reasoning uses `reasoning` instead of `reasoning_effort`.
 - **Provider-native Responses compaction.** `OpenAIResponses` now calls `/responses/compact` before destructive local compression, replays the returned canonical window unchanged, persists opaque checkpoints across session resume, and retains a portable transcript for cross-provider fallback. Endpoint failures and `prompt_too_long` recovery use the existing local summary/rule-based pipeline; manual `/compact [instructions]` follows the same priority.
@@ -30,6 +32,8 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 - **CLI now warns after successful main-agent context compaction.** Automatic compaction recommends `/new` when long-session accuracy may degrade, repeated successful auto-compactions escalate the warning with a session-local count, and reactive recovery explains that compaction happened before retrying. Spinner lifecycle events, failed attempts, manual `/compact`, and subagent compactions do not affect the count.
 - **Removed the `read_file` freshness/staleness machinery entirely** (codex-style simplification): `FileReadState`, `_file_read_state`, `_record_file_read`, `mark_read_context_stale`, `mark_all_read_context_stale`, `_edit_freshness_tip`, `Agent.mark_evicted_file_reads`, `Agent.append_evicted_file_read_notice`, and the `[Context maintenance]` eviction notices are gone. Edits return the absolute path + diagnostics only; a failed `edit_file` ("String not found") remains the natural signal to re-read.
 - **Default model `context_window` raised from 128k to 200k** across `Model` base, OpenAIChat, LiteLLM, Ollama, and Claude, reducing premature tool-result compaction that caused repeated `read_file` calls.
+- **Prompt and tool-schema token cost reduced.** File-tool guidance is gated on registered file tools (no phantom tool names); dead `# Available Tools` table generation is removed; parallel/batch call guidance is restored; `grep`/`glob` docstrings are slimmed; `task` policy lives only in the tool system prompt; `write_todos` clarifies steps vs tool calls and returns a short status ack instead of echoing the full list.
+- **`write_todos` keeps per-step progress updates.** Completions are still not batched (one sync per finished step) so the CLI progress bar stays live; only the tool-result payload shrank.
 
 ### Fixed
 - **CLI resume restores both model context and the visible transcript.** Resumed JSONL history is hydrated into canonical run-response messages used by later prompts, while user, assistant, tool-call, and tool-result entries are replayed in the terminal. Session summaries now print the executable `agentica resume <id>` command, and patch failures retain actionable multi-line details instead of collapsing the error to one short line.
@@ -38,6 +42,7 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 - **Stale `model_pricing_cache.json` is no longer discarded.** Catalog loading previously treated TTL expiry as "no cache" and, when the network refresh failed, silently fell back to the hardcoded pricing table — so new models (e.g. `claude-opus-5`, 1M context) never resolved. Refresh failures now fall back to the stale-but-valid cache file.
 - **CLI resize no longer leaves repeated `Enter to send` ghost lines.** The `_resize_collapsed` flag (meant to shrink the bottom frame to a single row during a terminal resize) was set but never read by the layout, so the full multi-row frame redrew on every `SIGWINCH` and multiplied ghost copies in scrollback. The collapse is now actually wired across the input prompt, queue bar, status bar, and input height, and the post-resize restore does a clean erase + absolute-cursor redraw instead of a diff `invalidate()`.
 - **File tools now expose clearer recovery signals.** `edit_file` / `multi_edit_file` append one stateless "read or re-read the relevant region" action after `String not found`, without tracking session read state or blocking edits. `grep` now documents that `path` accepts either a file or directory, supports file paths in its Python fallback, and reports missing inputs as `Path not found`.
+- **Learned Experiences no longer accumulate frontmatter debris.** `strip_frontmatter` parses line-based `---` delimiters (values containing `---` no longer truncate the body); bumping a card refreshes its body from the new content; injected card bodies are capped; captured tool errors keep head+tail within a fixed budget instead of parking whole tracebacks in the system prompt.
 
 ## [1.4.10] - 2026-07-24
 
