@@ -5,12 +5,20 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from agentica.cli.commands import display_resumed_transcript, hydrate_resumed_session
+from agentica.cli.commands import (
+    CommandContext,
+    _cmd_history,
+    display_resumed_transcript,
+    hydrate_resumed_session,
+)
 from agentica.cli.main import main
 from agentica.cli.runtime import parse_args
+from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
 from agentica.memory.working import WorkingMemory
+from agentica.model.message import Message
 from agentica.model.usage import Usage
+from agentica.run_response import RunResponse
 
 
 def test_parse_shell_resume_command():
@@ -36,34 +44,148 @@ def test_hydrate_resumed_session_builds_prompt_runs(tmp_path):
     assert "partial answer" in history[-1].content
 
 
-def test_display_resumed_transcript_includes_full_tool_result():
+def _history_run(messages):
+    return AgentRun(response=RunResponse(messages=messages))
+
+
+def test_display_resumed_transcript_collapses_tool_results():
     console = MagicMock()
-    tool_output = "line 1\nline 2\nline 3"
-    messages = [
-        {"role": "user", "content": "read it"},
-        {
-            "role": "assistant",
-            "content": "I will inspect it.",
-            "tool_calls": [
-                {
-                    "function": {
-                        "name": "read_file",
-                        "arguments": json.dumps({"file_path": "README.md"}),
-                    }
-                }
-            ],
-        },
-        {"role": "tool", "tool_name": "read_file", "content": tool_output},
-        {"role": "assistant", "content": "Done."},
-    ]
+    run = _history_run(
+        [
+            Message(role="user", content="read it"),
+            Message(
+                role="assistant",
+                content="I will inspect it.",
+                tool_calls=[
+                    {
+                        "id": "call-read",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"file_path": "README.md"}),
+                        },
+                    },
+                    {
+                        "id": "call-execute",
+                        "function": {
+                            "name": "execute",
+                            "arguments": json.dumps({"command": "false"}),
+                        },
+                    },
+                ],
+            ),
+            Message(
+                role="tool",
+                tool_name="read_file",
+                tool_call_id="call-read",
+                content="success output must stay hidden",
+                tool_call_error=False,
+            ),
+            Message(
+                role="tool",
+                tool_name="execute",
+                tool_call_id="call-execute",
+                content="command failed with exit code 1",
+                tool_call_error=True,
+            ),
+            Message(role="assistant", content="Done."),
+        ]
+    )
 
     with patch("agentica.cli.commands.get_console", return_value=console):
-        display_resumed_transcript(messages, "session-123")
+        stats = display_resumed_transcript([run], "session-123")
 
     rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
-    assert "Tool call: read_file" in rendered
-    assert "Tool result: read_file" in rendered
-    assert tool_output in rendered
+    assert "You - run 1" in rendered
+    assert "I will inspect it." in rendered
+    assert "Agent - run 1" in rendered
+    assert "Done." in rendered
+    assert "read_filex1, executex1" in rendered
+    assert "2 results hidden" in rendered
+    assert "execute: command failed with exit code 1" in rendered
+    assert "success output must stay hidden" not in rendered
+    assert "Tool result:" not in rendered
+    assert stats.run_count == 1
+    assert stats.tool_call_count == 2
+    assert stats.tool_result_count == 2
+    assert stats.tool_error_count == 1
+
+
+def test_history_reads_canonical_runs_and_opens_full_tools_in_pager():
+    run = _history_run(
+        [
+            Message(role="user", content="inspect"),
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": json.dumps({"file_path": "README.md"}),
+                        },
+                    }
+                ],
+            ),
+            Message(
+                role="tool",
+                tool_name="read_file",
+                tool_call_id="call-1",
+                content="the complete persisted tool result",
+                tool_call_error=False,
+            ),
+            Message(role="assistant", content="Done."),
+        ]
+    )
+    agent = SimpleNamespace(working_memory=WorkingMemory(runs=[run], messages=[]))
+    pager = MagicMock()
+    ctx = CommandContext(
+        agent_config={},
+        current_agent=agent,
+        open_pager_callback=pager,
+    )
+    console = MagicMock()
+
+    with patch("agentica.cli.commands.get_console", return_value=console):
+        _cmd_history(ctx, "")
+        compact = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+        assert "inspect" in compact
+        assert "Done." in compact
+        assert "the complete persisted tool result" not in compact
+
+        _cmd_history(ctx, "tools 1")
+
+    pager.assert_called_once()
+    title, full_content = pager.call_args.args
+    assert title == "Tool history - run 1"
+    assert "Tool call: read_file" in full_content
+    assert '"file_path": "README.md"' in full_content
+    assert "Tool result: read_file [ok]" in full_content
+    assert "the complete persisted tool result" in full_content
+
+
+def test_resumed_transcript_limits_error_previews_per_run():
+    messages = [Message(role="user", content="run checks")]
+    for index in range(4):
+        messages.append(
+            Message(
+                role="tool",
+                tool_name=f"tool_{index}",
+                content=f"error {index}",
+                tool_call_error=True,
+            )
+        )
+    console = MagicMock()
+
+    with patch("agentica.cli.commands.get_console", return_value=console):
+        display_resumed_transcript([_history_run(messages)], "session-123")
+
+    rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+    assert "tool_0: error 0" in rendered
+    assert "tool_1: error 1" in rendered
+    assert "tool_2: error 2" in rendered
+    assert "tool_3: error 3" not in rendered
+    assert "1 more errors hidden" in rendered
 
 
 def test_noninteractive_interrupt_prints_resume_summary():

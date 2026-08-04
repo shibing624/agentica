@@ -480,7 +480,7 @@ def show_help(skills_registry=None):
             "/clear, /reset":   "Clear screen and reset conversation",
             "/rename <name>":   "Name current session for easy resume",
             "/resume [target]": "Resume by number, name, or id prefix",
-            "/history":         "Show conversation history",
+            "/history":         "Show conversation history or full tool details",
             "/save, /export":   "Save conversation to JSON (no system prompts)",
             "/retry":           "Retry the last message (resend to agent)",
             "/undo":            "Remove the last user/assistant exchange",

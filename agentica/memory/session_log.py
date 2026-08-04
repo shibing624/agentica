@@ -409,9 +409,18 @@ class SessionLog:
             })
 
         replay_fields = (
-            "tool_call_id", "tool_calls", "tool_name", "tool_args", "is_error",
-            "reasoning_content", "finish_reason", "provider_data", "provider_checkpoint", "metrics",
-            "model", "usage",
+            "tool_call_id",
+            "tool_calls",
+            "tool_name",
+            "tool_args",
+            "tool_call_error",
+            "reasoning_content",
+            "finish_reason",
+            "provider_data",
+            "provider_checkpoint",
+            "metrics",
+            "model",
+            "usage",
         )
         start_from = last_boundary_idx + 1 if last_boundary_idx >= 0 else 0
         for entry in entries[start_from:]:
@@ -424,6 +433,10 @@ class SessionLog:
                 for key in replay_fields:
                     if key in entry and entry[key] is not None:
                         msg[key] = entry[key]
+                if entry_type == "tool":
+                    msg["tool_call_error"] = bool(
+                        entry.get("is_error", entry.get("tool_call_error", False))
+                    )
                 messages.append(msg)
             elif entry_type == "provider_checkpoint" and messages:
                 checkpoint = entry.get("checkpoint")

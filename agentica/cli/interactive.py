@@ -2277,14 +2277,18 @@ def run_interactive(
         if current_agent._session_log is None or not current_agent._session_log.exists():
             con.print(f"[bold red]No session found: {current_agent.session_id}[/bold red]")
             return
-        resumed, runs_built = hydrate_resumed_session(
+        _, runs_built = hydrate_resumed_session(
             current_agent,
             agent_config.get("_resume_at_uuid"),
         )
-        display_resumed_transcript(resumed, current_agent.session_id)
+        display_stats = display_resumed_transcript(
+            current_agent.working_memory.runs,
+            current_agent.session_id,
+        )
         con.print(
             f"[green]Resumed session: {current_agent.session_id}"
-            f" — loaded {len(resumed)} messages ({runs_built} runs) into context[/green]"
+            f" — restored {runs_built} runs into context; showing conversation only "
+            f"({display_stats.tool_result_count} tool results collapsed)[/green]"
         )
 
     # Always scan installed skills for auto-commands
@@ -2356,6 +2360,19 @@ def run_interactive(
     # Keep a mutable list wrapper for image_counter (needed by _try_attach_clipboard_image)
     _image_counter_ref = [0]
 
+    def _open_history_pager(title: str, content: str) -> None:
+        """Schedule a blocking pager on prompt_toolkit's terminal owner."""
+
+        def _paged():
+            with _tty_write_lock:
+                _open_in_pager(title, content)
+
+        def _schedule():
+            run_in_terminal(_paged)
+
+        if app.loop is not None:
+            app.loop.call_soon_threadsafe(_schedule)
+
     def _build_ctx() -> CommandContext:
         """Build a CommandContext from current session state."""
         return CommandContext(
@@ -2376,6 +2393,7 @@ def run_interactive(
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
             ask_user_question_callback=_cli_ask_user_question_callback,
+            open_pager_callback=_open_history_pager,
         )
 
     def _dispatch_concurrent_cmd(cmd: str, cmd_args: str):

@@ -105,6 +105,8 @@ class TestSessionLogBasic:
         messages = log.load()
         assert len(messages) == 3
         assert messages[1]["role"] == "tool"
+        assert messages[1]["tool_call_error"] is False
+        assert "is_error" not in messages[1]
         assert "file1.py" in messages[1]["content"]
 
     def test_load_preserves_assistant_replay_metadata(self, tmp_dir):
@@ -519,6 +521,15 @@ class TestToolResultLogging:
         messages = log.load()
         assert len(messages) == 3
         assert messages[1]["role"] == "tool"
+
+    def test_tool_error_metadata_maps_to_replay_field(self, tmp_dir):
+        log = SessionLog("tool-error-test", base_dir=tmp_dir)
+        log.append("user", "run checks")
+        log.append("tool", "command failed", tool_name="execute", is_error=True)
+
+        messages = log.load()
+
+        assert messages[1]["tool_call_error"] is True
 
 
 class TestSessionIndexDualWrite:

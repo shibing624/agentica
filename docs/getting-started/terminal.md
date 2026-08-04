@@ -272,8 +272,28 @@ mcp, skill, ...
        修复登录超时
 
 > /resume 前端视觉问题排查
-  Resumed session: 前端视觉问题排查 (a8c3f217...)
+  Resumed transcript: 前端视觉问题排查 (a8c3f217...)
+  Conversation view - 48 tool results (62.4K chars) collapsed - /history tools [run] for details
+  ...
+  Resumed session: 前端视觉问题排查 (a8c3f217...) - restored 6 runs into context;
+  showing conversation only (48 tool results collapsed)
 ```
+
+恢复时，完整 Session Log 仍会重建到模型上下文中；终端默认只回放用户消息、Agent
+正文和每轮工具统计，成功的 tool result 不再写入 scrollback。失败结果最多显示 3 条
+单行摘要。
+
+### `/history [tools [run-number]]`
+
+`/history` 使用与 `/resume` 相同的紧凑对话视图。需要检查完整工具参数和结果时，
+使用 `/history tools` 在 pager 中查看整个 session，或指定从 1 开始的 run 序号：
+
+```text
+> /history tools 3
+  # 在 pager 中打开第 3 轮的完整 tool calls / tool results
+```
+
+完整工具记录只在 pager 中显示，不会重新灌入终端 scrollback。
 
 ### `/clear` / `/reset`
 清屏并重置当前会话（等同于 `/newchat` + 清除屏幕）。

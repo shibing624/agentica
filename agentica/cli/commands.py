@@ -109,6 +109,10 @@ class CommandContext:
     # instead of a blocking input(). Must be preserved across agent rebuilds
     # (/model, /newchat, /reload, …) or those paths reintroduce the deadlock.
     ask_user_question_callback: Any = None
+    # TUI-owned callback for opening large, read-only content outside terminal
+    # scrollback. Commands return compact inline output and send full history
+    # through this callback when the interactive application is available.
+    open_pager_callback: Any = None
 
 
 # ==================== PendingQueue ====================
@@ -1243,72 +1247,286 @@ def _cmd_skills(ctx: CommandContext, cmd_args: str = ""):
     )
 
 
+@dataclass(frozen=True)
+class HistoryRenderStats:
+    """Counts shared by resume output and the history command."""
+
+    run_count: int = 0
+    message_count: int = 0
+    tool_call_count: int = 0
+    tool_result_count: int = 0
+    tool_result_chars: int = 0
+    tool_error_count: int = 0
+
+
+def _canonical_history_runs(agent) -> list[AgentRun]:
+    """Return the run history that the next model request actually consumes."""
+    working_memory = agent.working_memory
+    if working_memory.runs:
+        return list(working_memory.runs)
+    if working_memory.messages:
+        return [
+            AgentRun(
+                response=RunResponse(
+                    messages=[message.model_copy(deep=True) for message in working_memory.messages]
+                )
+            )
+        ]
+    return []
+
+
+def _messages_for_run(run: AgentRun) -> list[Message]:
+    if run.response is not None and run.response.messages:
+        return list(run.response.messages)
+    if run.messages:
+        return list(run.messages)
+    if run.message is not None:
+        return [run.message]
+    return []
+
+
+def _tool_call_name(tool_call: dict[str, Any]) -> str:
+    function = tool_call.get("function") or {}
+    return function.get("name") or tool_call.get("name") or "tool"
+
+
+def _history_stats(runs: list[AgentRun]) -> HistoryRenderStats:
+    message_count = 0
+    tool_call_count = 0
+    tool_result_count = 0
+    tool_result_chars = 0
+    tool_error_count = 0
+    visible_runs = 0
+
+    for run in runs:
+        messages = _messages_for_run(run)
+        if not messages:
+            continue
+        visible_runs += 1
+        message_count += len(messages)
+        for message in messages:
+            if message.role == "assistant":
+                tool_call_count += len(message.tool_calls or [])
+            elif message.role == "tool":
+                tool_result_count += 1
+                tool_result_chars += len(message.get_content_string())
+                if message.tool_call_error is True:
+                    tool_error_count += 1
+
+    return HistoryRenderStats(
+        run_count=visible_runs,
+        message_count=message_count,
+        tool_call_count=tool_call_count,
+        tool_result_count=tool_result_count,
+        tool_result_chars=tool_result_chars,
+        tool_error_count=tool_error_count,
+    )
+
+
+def _format_char_count(char_count: int) -> str:
+    if char_count < 1000:
+        return f"{char_count} chars"
+    return f"{char_count / 1000:.1f}K chars"
+
+
+def _run_tool_activity(
+    messages: list[Message],
+) -> tuple[collections.Counter, list[Message], int]:
+    call_names: list[str] = []
+    tool_results: list[Message] = []
+    for message in messages:
+        if message.role == "assistant":
+            call_names.extend(_tool_call_name(call) for call in (message.tool_calls or []))
+        elif message.role == "tool":
+            tool_results.append(message)
+
+    result_names = [message.tool_name or "tool" for message in tool_results]
+    names = call_names if call_names else result_names
+    return collections.Counter(names), tool_results, len(call_names)
+
+
+def _display_run_tool_summary(con, run_number: int, messages: list[Message]) -> None:
+    tool_names, tool_results, tool_call_count = _run_tool_activity(messages)
+    if not tool_names and not tool_results:
+        return
+
+    name_summary = ", ".join(
+        f"{name}x{count}" for name, count in tool_names.most_common()
+    )
+    call_count = tool_call_count or sum(tool_names.values())
+    errors = [message for message in tool_results if message.tool_call_error is True]
+    summary = f"[Tools - run {run_number}] {call_count} calls"
+    if name_summary:
+        summary += f": {name_summary}"
+    summary += f" - {len(tool_results)} results hidden"
+    if errors:
+        summary += f" - {len(errors)} errors"
+    con.print(f"\n  {summary}", style="dim", markup=False, highlight=False)
+
+    for message in errors[:3]:
+        preview = " ".join(message.get_content_string().split()) or "(empty result)"
+        if len(preview) > 160:
+            preview = preview[:157] + "..."
+        con.print(
+            f"    ! {message.tool_name or 'tool'}: {preview}",
+            style="yellow",
+            markup=False,
+            highlight=False,
+        )
+    if len(errors) > 3:
+        con.print(f"    ... {len(errors) - 3} more errors hidden", style="dim")
+
+
+def display_conversation_history(runs: list[AgentRun], title: str) -> HistoryRenderStats:
+    """Render conversation text while collapsing persisted tool activity by run."""
+    stats = _history_stats(runs)
+    if stats.message_count == 0:
+        return stats
+
+    con = get_console()
+    con.print(f"\n[bold cyan]{title}[/bold cyan]")
+    if stats.tool_result_count:
+        summary = (
+            f"Conversation view - {stats.tool_result_count} tool results "
+            f"({_format_char_count(stats.tool_result_chars)}) collapsed"
+        )
+        if stats.tool_error_count:
+            summary += f" - {stats.tool_error_count} errors"
+        summary += " - /history tools [run] for details"
+        con.print(summary, style="dim", markup=False, highlight=False)
+
+    for run_number, run in enumerate(runs, start=1):
+        messages = _messages_for_run(run)
+        if not messages:
+            continue
+        has_tool_activity = any(
+            message.role == "tool" or bool(message.tool_calls)
+            for message in messages
+        )
+        tool_activity_seen = False
+        tool_summary_shown = False
+
+        for message in messages:
+            if message.role == "system":
+                continue
+            if message.role == "tool":
+                tool_activity_seen = True
+                continue
+
+            content_text = message.get_content_string()
+            if message.role == "user":
+                con.print(f"\n[bold cyan]You - run {run_number}[/bold cyan]")
+                con.print(content_text, markup=False, highlight=False)
+                continue
+
+            if message.role == "assistant":
+                if content_text:
+                    if tool_activity_seen and not tool_summary_shown:
+                        _display_run_tool_summary(con, run_number, messages)
+                        tool_summary_shown = True
+                    con.print(f"\n[bold green]Agent - run {run_number}[/bold green]")
+                    con.print(content_text, markup=False, highlight=False)
+                if message.tool_calls:
+                    tool_activity_seen = True
+
+        if has_tool_activity and not tool_summary_shown:
+            _display_run_tool_summary(con, run_number, messages)
+
+    con.print()
+    return stats
+
+
+def _format_tool_arguments(arguments: Any) -> str:
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except json.JSONDecodeError:
+            return arguments
+    return json.dumps(arguments, ensure_ascii=False, indent=2)
+
+
+def format_tool_history(runs: list[AgentRun], run_number: int | None = None) -> str:
+    """Build full persisted tool-call and tool-result text for pager display."""
+    if run_number is not None:
+        selected = [(run_number, runs[run_number - 1])]
+    else:
+        selected = list(enumerate(runs, start=1))
+
+    sections: list[str] = []
+    for current_run, run in selected:
+        lines = [f"=== Run {current_run} ==="]
+        tool_entries = 0
+        for message in _messages_for_run(run):
+            if message.role == "assistant":
+                for tool_call in message.tool_calls or []:
+                    tool_entries += 1
+                    function = tool_call.get("function") or {}
+                    arguments = function.get("arguments", tool_call.get("arguments", {}))
+                    call_id = tool_call.get("id") or tool_call.get("tool_call_id") or ""
+                    lines.append(f"\nTool call: {_tool_call_name(tool_call)}")
+                    if call_id:
+                        lines.append(f"Call ID: {call_id}")
+                    if arguments not in (None, "", {}):
+                        lines.append("Arguments:")
+                        lines.append(_format_tool_arguments(arguments))
+            elif message.role == "tool":
+                tool_entries += 1
+                status = "error" if message.tool_call_error is True else "ok"
+                lines.append(f"\nTool result: {message.tool_name or 'tool'} [{status}]")
+                if message.tool_call_id:
+                    lines.append(f"Call ID: {message.tool_call_id}")
+                lines.append(message.get_content_string())
+        if tool_entries:
+            sections.append("\n".join(lines))
+
+    return "\n\n".join(sections)
+
+
 def _cmd_history(ctx: CommandContext, cmd_args: str = ""):
-    """Display conversation history in compact format."""
+    """Display conversation history or open full tool history in a pager."""
     con = get_console()
     agent = ctx.current_agent
     if not agent:
         con.print("[yellow]No conversation history yet.[/yellow]")
         return
-    messages = agent.working_memory.messages
-    if not messages:
+    runs = _canonical_history_runs(agent)
+    if not runs:
         con.print("[yellow]No conversation history yet.[/yellow]")
         return
 
-    preview_limit = 400
-    visible_index = 0
-    hidden_tool_msgs = 0
+    args = shlex.split(cmd_args)
+    if not args:
+        display_conversation_history(runs, "Conversation History")
+        return
+    if args[0].lower() != "tools" or len(args) > 2:
+        con.print("[red]Usage: /history [tools [run-number]][/red]")
+        return
 
-    def _flush_tools():
-        nonlocal hidden_tool_msgs
-        if hidden_tool_msgs == 0:
+    run_number = None
+    if len(args) == 2:
+        try:
+            run_number = int(args[1])
+        except ValueError:
+            con.print("[red]Run number must be an integer.[/red]")
             return
-        noun = "message" if hidden_tool_msgs == 1 else "messages"
-        con.print(f"\n  [dim]\\[Tools] ({hidden_tool_msgs} tool {noun} hidden)[/dim]")
-        hidden_tool_msgs = 0
+        if run_number < 1 or run_number > len(runs):
+            con.print(f"[red]Run number must be between 1 and {len(runs)}.[/red]")
+            return
 
-    con.print()
-    con.print("  [bold cyan]Conversation History[/bold cyan]")
-
-    for msg in messages:
-        role = msg.role
-        if role == "system":
-            continue
-        if role == "tool":
-            hidden_tool_msgs += 1
-            continue
-
-        _flush_tools()
-        visible_index += 1
-
-        content = msg.content or ""
-        if isinstance(content, list):
-            content = str(content)
-        content_text = content if isinstance(content, str) else str(content)
-
-        if role == "user":
-            preview = content_text[:preview_limit]
-            suffix = "..." if len(content_text) > preview_limit else ""
-            con.print(f"\n  [cyan]\\[You #{visible_index}][/cyan]")
-            con.print(f"    {preview}{suffix}")
-            continue
-
-        tool_calls = msg.tool_calls or []
-        if content_text:
-            preview = content_text[:preview_limit]
-            suffix = "..." if len(content_text) > preview_limit else ""
-        elif tool_calls:
-            n = len(tool_calls)
-            preview = f"(requested {n} tool call{'s' if n > 1 else ''})"
-            suffix = ""
-        else:
-            preview = "(no text response)"
-            suffix = ""
-        con.print(f"\n  [green]\\[Agent #{visible_index}][/green]")
-        con.print(f"    {preview}{suffix}")
-
-    _flush_tools()
-    con.print()
+    content = format_tool_history(runs, run_number)
+    if not content:
+        target = f"run {run_number}" if run_number is not None else "this session"
+        con.print(f"[yellow]No tool activity in {target}.[/yellow]")
+        return
+    if ctx.open_pager_callback is None:
+        con.print("[yellow]Tool history pager is only available in interactive mode.[/yellow]")
+        return
+    title = (
+        f"Tool history - run {run_number}"
+        if run_number is not None
+        else "Tool history"
+    )
+    ctx.open_pager_callback(title, content)
 
 
 def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
@@ -1976,49 +2194,9 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
     return resumed, runs_built
 
 
-def display_resumed_transcript(messages: list[dict[str, Any]], session_label: str) -> None:
-    """Replay persisted user, assistant, tool-call, and tool-result content."""
-    if not messages:
-        return
-    con = get_console()
-    con.print(f"\n[bold]Resumed transcript: {session_label}[/bold]")
-    for message in messages:
-        role = message.get("role")
-        if role == "system":
-            continue
-        content = message.get("content")
-        if content is None:
-            content_text = ""
-        elif isinstance(content, str):
-            content_text = content
-        else:
-            content_text = json.dumps(content, ensure_ascii=False, indent=2)
-
-        if role == "user":
-            con.print("\n[bold cyan]You[/bold cyan]")
-            con.print(content_text, markup=False, highlight=False)
-            continue
-
-        if role == "assistant":
-            con.print("\n[bold green]Agent[/bold green]")
-            if content_text:
-                con.print(content_text, markup=False, highlight=False)
-            for tool_call in message.get("tool_calls") or []:
-                function = tool_call.get("function") or {}
-                tool_name = function.get("name") or tool_call.get("name") or "tool"
-                arguments = function.get("arguments") or tool_call.get("arguments") or {}
-                if not isinstance(arguments, str):
-                    arguments = json.dumps(arguments, ensure_ascii=False, indent=2)
-                con.print(f"  [bold magenta]Tool call: {tool_name}[/bold magenta]")
-                if arguments:
-                    con.print(arguments, style="dim", markup=False, highlight=False)
-            continue
-
-        if role == "tool":
-            tool_name = message.get("tool_name") or "tool"
-            con.print(f"\n[bold magenta]Tool result: {tool_name}[/bold magenta]")
-            con.print(content_text, markup=False, highlight=False)
-    con.print()
+def display_resumed_transcript(runs: list[AgentRun], session_label: str) -> HistoryRenderStats:
+    """Display resumed conversation text with tool activity collapsed by run."""
+    return display_conversation_history(runs, f"Resumed transcript: {session_label}")
 
 
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
@@ -2107,13 +2285,11 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         # reflect the resumed state immediately (do not wait for the next _run
         # to lazily replay). Applies to both plain resume and `resume ... at <uuid>`.
         resumed, runs_built = hydrate_resumed_session(current_agent, resume_at_uuid)
-        loaded_count = len(resumed)
-
-        # Replay the actual transcript, including tool calls and tool results,
-        # so resuming restores the human-visible state as well as model context.
+        # Keep the model-visible context complete, but render a conversation
+        # view so persisted tool payloads do not flood terminal scrollback.
         session_name = chosen.get("name")
         session_label = f"{session_name} ({chosen['session_id']})" if session_name else chosen["session_id"]
-        display_resumed_transcript(resumed, session_label)
+        display_stats = display_resumed_transcript(current_agent.working_memory.runs, session_label)
         if resume_at_uuid is None and resumed:
             con.print(
                 f"[dim]Tip: fork from an earlier point with `/resume {chosen['session_id']} at <uuid>`[/dim]"
@@ -2122,7 +2298,8 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         con.print(
             f"[green]Resumed session: {session_label}"
             f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}"
-            f" — loaded {loaded_count} messages ({runs_built} runs) into context[/green]"
+            f" — restored {runs_built} runs into context; showing conversation only "
+            f"({display_stats.tool_result_count} tool results collapsed)[/green]"
         )
 
         # If the resumed session had an active goal, demote to paused for
@@ -3616,7 +3793,7 @@ COMMAND_REGISTRY = {
     "/new": (_cmd_newchat, "Start a new chat session"),
     "/clear": (_cmd_clear, "Clear screen and reset"),
     "/reset": (_cmd_clear, "Clear screen and reset (alias)"),
-    "/history": (_cmd_history, "Show conversation history"),
+    "/history": (_cmd_history, "Show conversation history or full tool details"),
     "/export": (_cmd_export, "Save conversation to JSON"),
     "/save": (_cmd_export, "Save conversation to JSON (alias)"),
     "/retry": (_cmd_retry, "Retry the last message (resend to agent)"),
