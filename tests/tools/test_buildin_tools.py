@@ -1161,11 +1161,29 @@ class TestBuiltinTodoTool:
             {"content": "Task A", "status": "pending"},
             {"content": "Task B", "status": "in_progress"},
         ])
-        parsed = json.loads(result)
-        assert "2 items" in parsed["message"]
-        assert len(parsed["todos"]) == 2
-        assert parsed["all_completed"] is False
-        assert parsed["verification_nudge"] is False
+        assert result == "Todos updated (2 items: 1 in progress, 1 pending)."
+        assert len(todo_tool.todos) == 2
+
+    def test_write_todos_result_does_not_echo_the_list(self, todo_tool):
+        """The model just sent this list; echoing it back is pure context cost,
+        and at one update per finished step that cost repeats all session."""
+        result = todo_tool.write_todos([
+            {"content": "Review the model layer", "status": "completed"},
+            {"content": "Review the runner", "status": "in_progress"},
+            {"content": "Summarise findings", "status": "pending"},
+        ])
+        assert "Review the model layer" not in result
+        assert len(result) < 120
+
+    def test_write_todos_description_disambiguates_steps_from_tool_calls(self, todo_tool):
+        """"3+ steps" alone reads as "3+ tool calls", which opens a todo list for
+        almost every request. The description must draw that distinction and must
+        not carry a bias toward calling the tool when unsure."""
+        description = todo_tool.functions["write_todos"].description or ""
+
+        assert "not 3 tool calls" in description
+        assert "in_progress" in description
+        assert "when in doubt" not in description.lower()
 
     def test_write_todos_invalid_status(self, todo_tool):
         with pytest.raises(ValueError):
@@ -1233,12 +1251,8 @@ class TestBuiltinTodoTool:
             {"content": "Task A", "status": "completed"},
             {"content": "Task B", "status": "completed"},
         ])
-        parsed = json.loads(result)
-        assert parsed["all_completed"] is True
-        # Internal list should be cleared
+        assert result == "All 2 todos completed; list cleared."
         assert len(todo_tool.todos) == 0
-        # But the returned todos should still show what was submitted
-        assert len(parsed["todos"]) == 2
 
     def test_no_auto_clear_when_not_all_completed(self, todo_tool):
         """Partial completion should NOT clear the list."""
@@ -1246,8 +1260,7 @@ class TestBuiltinTodoTool:
             {"content": "Task A", "status": "completed"},
             {"content": "Task B", "status": "in_progress"},
         ])
-        parsed = json.loads(result)
-        assert parsed["all_completed"] is False
+        assert result == "Todos updated (2 items: 1 done, 1 in progress)."
         assert len(todo_tool.todos) == 2
 
     # ---- Verification nudge tests (mirrors CC structural nudge) ----
@@ -1259,9 +1272,7 @@ class TestBuiltinTodoTool:
             {"content": "Implement feature B", "status": "completed"},
             {"content": "Implement feature C", "status": "completed"},
         ])
-        parsed = json.loads(result)
-        assert parsed["verification_nudge"] is True
-        assert "NOTE:" in parsed["message"]
+        assert "NOTE:" in result
 
     def test_no_nudge_when_less_than_3_tasks(self, todo_tool):
         """< 3 tasks all completed -> no nudge."""
@@ -1269,8 +1280,7 @@ class TestBuiltinTodoTool:
             {"content": "Task A", "status": "completed"},
             {"content": "Task B", "status": "completed"},
         ])
-        parsed = json.loads(result)
-        assert parsed["verification_nudge"] is False
+        assert "NOTE:" not in result
 
     def test_no_nudge_when_not_all_completed(self, todo_tool):
         """3+ tasks but not all completed -> no nudge."""
@@ -1279,8 +1289,7 @@ class TestBuiltinTodoTool:
             {"content": "Task B", "status": "completed"},
             {"content": "Task C", "status": "in_progress"},
         ])
-        parsed = json.loads(result)
-        assert parsed["verification_nudge"] is False
+        assert "NOTE:" not in result
 
     def test_no_nudge_when_verification_keyword_present(self, todo_tool):
         """3+ all completed but one mentions 'verify' -> no nudge."""
@@ -1289,8 +1298,7 @@ class TestBuiltinTodoTool:
             {"content": "Verify implementation", "status": "completed"},
             {"content": "Deploy to staging", "status": "completed"},
         ])
-        parsed = json.loads(result)
-        assert parsed["verification_nudge"] is False
+        assert "NOTE:" not in result
 
     def test_no_nudge_when_test_keyword_present(self, todo_tool):
         """3+ all completed but one mentions 'test' -> no nudge."""
@@ -1299,8 +1307,7 @@ class TestBuiltinTodoTool:
             {"content": "Write unit tests", "status": "completed"},
             {"content": "Update docs", "status": "completed"},
         ])
-        parsed = json.loads(result)
-        assert parsed["verification_nudge"] is False
+        assert "NOTE:" not in result
 
     def test_no_nudge_when_lint_keyword_present(self, todo_tool):
         """3+ all completed but one mentions 'lint' -> no nudge."""
@@ -1309,8 +1316,7 @@ class TestBuiltinTodoTool:
             {"content": "Run linting", "status": "completed"},
             {"content": "Deploy", "status": "completed"},
         ])
-        parsed = json.loads(result)
-        assert parsed["verification_nudge"] is False
+        assert "NOTE:" not in result
 
     # ---- _needs_verification_nudge static method tests ----
 
@@ -1350,8 +1356,7 @@ class TestBuiltinTodoTool:
         result = todo_tool.write_todos([
             {"content": "Task A", "status": "pending"},
         ])
-        parsed = json.loads(result)
-        assert parsed["message"] == "Todos updated (1 items)."
+        assert result == "Todos updated (1 items: 1 pending)."
 
 
 # ===========================================================================

@@ -6,7 +6,7 @@
 
 import json
 import re
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from datetime import date, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -26,7 +26,11 @@ class BuiltinTodoTool(Tool):
     visible to the agent via tool_result and periodic reminders.
 
     Design (mirrors CC TodoWriteTool):
-    - write_todos tool_result echoes the full todo state
+    - write_todos tool_result is a one-line ack, not the list. The model just
+      sent the list; echoing it back adds no information and every step advance
+      would then cost a full list round-trip that stays in context forever.
+      The CLI and the web UI both render the list from ``tool_args``, and the
+      Runner's periodic reminder re-injects the state when it goes stale.
     - All-completed auto-clear: when every item is completed, list is cleared
     - Verification nudge: when 3+ tasks all completed and none is a verification
       step, tool_result appends a reminder to verify before reporting done
@@ -97,11 +101,18 @@ class BuiltinTodoTool(Tool):
     def write_todos(self, todos: Optional[List[Dict[str, str]]] = None) -> str:
         """Create and update a structured task list for the current session.
 
-        Use it for complex multi-step tasks (3+ distinct steps) to track progress
-        and give the user visibility. Skip it for simple or single-step requests.
+        Use it when the work has 3+ distinct steps — distinct means separate
+        pieces of work, not 3 tool calls serving one step. Reading four files to
+        answer one question is one step, not four.
 
-        - Update the list as you finish steps; do not batch completions.
-        - Revise it as you go: add newly discovered tasks, drop irrelevant ones.
+        Skip it for a question you can just answer, a single edit, or one command.
+
+        - Exactly one item is `in_progress` while work remains.
+        - Update as you go; do not batch completions. Add tasks you discover,
+          drop ones that turned out to be irrelevant.
+        - Mark `completed` only once the work is actually done and verified,
+          never on intent. If blocked, keep it `in_progress` and add a
+          follow-up item describing the blocker.
         - Never call it multiple times in parallel.
 
         Each item: {"content": task description,
@@ -147,16 +158,25 @@ class BuiltinTodoTool(Tool):
 
         logger.debug(f"Updated todo list: {len(validated_todos)} items, all_done={all_done}")
 
-        result_message = f"Todos updated ({len(validated_todos)} items)."
+        total = len(validated_todos)
+        if all_done:
+            result_message = f"All {total} todos completed; list cleared."
+        else:
+            counts = Counter(t["status"] for t in validated_todos)
+            breakdown = ", ".join(
+                f"{counts[status]} {label}"
+                for status, label in (
+                    ("completed", "done"),
+                    ("in_progress", "in progress"),
+                    ("pending", "pending"),
+                )
+                if counts[status]
+            )
+            result_message = f"Todos updated ({total} items: {breakdown})."
         if nudge_needed:
             result_message += self._VERIFICATION_NUDGE
 
-        return json.dumps({
-            "message": result_message,
-            "todos": validated_todos,
-            "all_completed": all_done,
-            "verification_nudge": nudge_needed,
-        }, ensure_ascii=False, indent=2)
+        return result_message
 
 
 class BuiltinMemoryTool(Tool):

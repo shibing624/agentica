@@ -140,23 +140,17 @@ class BuiltinTaskTool(Tool):
         system_prompt_override: Optional[str] = None,
         resume_from_run_id: Optional[str] = None,
     ) -> str:
-        """Launch a read-only subagent to investigate an open-ended question.
-
-        Use it only when you cannot name the files to look at yet; for known
-        files or definitions use `read_file` / `grep` / `glob` directly.
+        """Spawn a subagent. See the "task Tool" section for when this applies.
 
         Args:
             description: What to investigate. Brief the subagent like a
                 colleague who has no prior context.
-            subagent_type: Type id (default ``explore``); see the task tool
-                system prompt for available types and their model tier.
+            subagent_type: One of the type ids listed in that section
+                (default ``explore``).
             timeout: Per-call timeout override (seconds).
             max_turns: Per-call ReAct turn budget override.
             system_prompt_override: Replacement system prompt for this call.
             resume_from_run_id: ``run_id`` of a prior partial run to resume.
-
-        Returns:
-            JSON string with the subagent's final result and execution summary.
         """
         if self._parent_agent is None:
             return json.dumps({

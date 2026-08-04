@@ -971,6 +971,20 @@ def test_task_system_prompt_exposes_model_tier_per_type():
     assert "| `review`" not in prompt
 
 
+def test_task_policy_lives_only_in_the_system_prompt():
+    """The when-to-use policy is stated once. Repeating it in the docstring
+    ships it twice on every request and lets the two copies drift apart."""
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    tool = BuiltinTaskTool()
+    docstring = tool.functions["task"].description or ""
+    prompt = tool.get_system_prompt()
+
+    assert "read_file" in prompt
+    assert "read_file" not in docstring
+    assert "task Tool" in docstring, "docstring must point at the policy section"
+
+
 def test_task_system_prompt_is_not_indented():
     """``dedent`` silently no-ops when the first line carries no indent, which
     ships the whole prompt as a markdown code block and splits the subagent
