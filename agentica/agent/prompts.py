@@ -17,8 +17,18 @@ from agentica.prompts.base.soul import get_soul_prompt
 from agentica.prompts.builder import PromptBuilder
 from agentica.run_input import build_user_message_from_sequence
 from agentica.run_response import RunResponseExtraData
+from agentica.tools.base import Tool
 from agentica.utils.log import logger
 from agentica.utils.timer import Timer
+
+# Tools that `tools.md` gives guidance about. The section is only worth its
+# tokens when the agent actually has them; an agent with, say, only a weather
+# tool would otherwise be told to prefer `read_file` / `apply_patch` over
+# `execute` — naming eight tools it cannot call.
+_FILE_TOOL_NAMES = frozenset({
+    "read_file", "write_file", "edit_file", "multi_edit_file",
+    "apply_patch", "glob", "grep", "ls",
+})
 
 
 class PromptsMixin:
@@ -130,6 +140,13 @@ class PromptsMixin:
         elif isinstance(_instructions, list):
             return list(_instructions)
         return []
+
+    def _has_file_tools(self) -> bool:
+        """Whether any tool `tools.md` talks about is actually registered."""
+        for tool in self.tools or []:
+            if isinstance(tool, Tool) and _FILE_TOOL_NAMES & set(tool.functions):
+                return True
+        return False
 
     def _get_tool_policy_prompts(self) -> List[str]:
         """Return static tool-usage policy prompts collected from tools."""
@@ -410,21 +427,12 @@ class PromptsMixin:
 
         workspace_context = await self.get_workspace_context_prompt()
 
-        # Dynamic tool list + descriptions are not derived from the agent here;
-        # PromptBuilder.build_system_prompt defaults them to None (plain Agent).
-        active_tools = None
-        tool_descriptions = None
-
-        has_tools = self.tools is not None and len(self.tools) > 0
-
         base_prompt = PromptBuilder.build_system_prompt(
             identity=identity,
             workspace_context=None,
-            active_tools=active_tools,
-            tool_descriptions=tool_descriptions,
             enable_heartbeat=True,
             enable_soul=True,
-            enable_tools_guide=has_tools,
+            enable_tools_guide=self._has_file_tools(),
         )
 
         system_message_lines: List[str] = [base_prompt]

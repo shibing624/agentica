@@ -1346,35 +1346,22 @@ class BuiltinFileTool(Tool):
         }
 
     async def glob(self, pattern: str, path: str = ".", timeout: Optional[int] = None) -> str:
-        """Find files matching a glob pattern (supports recursive search with `**`).
+        """Find files by name pattern, anywhere in a tree.
 
-        Usage:
-        - This tool searches for files by matching standard glob wildcards, returns JSON formatted absolute file paths
-        - Core glob wildcards (key differences):
-        1. `*`: Matches any files in the **current specified single directory** (non-recursive, no deep subdirectories)
-        2. `**`: Matches any directories recursively (penetrates all deep subdirectories for cross-level search)
-        3. `?`: Matches any single character (e.g., "file?.txt" matches "file1.txt", "filea.txt")
-        - Patterns can be absolute (starting with `/`, e.g., "/home/user/*.py") or relative (e.g., "docs/*.md")
-        - Automatically excludes common useless directories (.git, __pycache__, etc.) to filter valid files
-        - Returns empty JSON list if no matching files are found
-
-        Examples (clear parameter correspondence and function explanation):
-        - pattern: `*.py`, path: "." - Find all Python files in the current working directory (non-recursive)
-        - pattern: `*.txt`, path: "." - Find all text files in the current working directory (non-recursive)
-        - pattern: `**/*.md`, path: "/path/to/subdir/" - Find all markdown files in all levels under /path/to/subdir/ (recursive)
-        - pattern: `subdir/*.md`, path: "." - Find all markdown files directly in the "subdir" folder (non-recursive, no deep subdirs)
+        `*` matches within one directory only; `**` recurses through every level,
+        so "*.py" and "**/*.py" give very different results. Noise directories
+        (.git, __pycache__, node_modules, .venv, ...) are always excluded.
 
         Args:
-            pattern: Valid glob search pattern, e.g., "*.py", "**/*.md", "src/?*.js"
-            path: Starting search directory (relative or absolute), defaults to current working directory (".").
-            timeout: Search timeout in seconds (default 10, no upper cap). glob must
-                always be bounded: a bare ``**/pattern`` walk from ``$HOME`` or over a
-                stuck network mount can otherwise hang for the full outer executor
-                limit (120s). Raise this only when you know a legitimately huge tree
-                needs more time.
+            pattern: Glob pattern, e.g. "*.py", "**/*.md", "src/?*.js". May be
+                absolute ("/home/user/*.py") or relative to `path`.
+            path: Directory to search from (default: ".")
+            timeout: Search timeout in seconds (default 10, no upper cap). Raise it
+                only for a legitimately huge tree; a bare `**/...` walk from a home
+                directory or a stuck network mount can otherwise run for minutes.
 
         Returns:
-            JSON formatted string of sorted absolute file paths (filtered to exclude ignored directories).
+            JSON list of sorted absolute file paths, empty when nothing matches.
         """
         self._validate_path(path)
         base_path = self._resolve_path(path)
@@ -1428,55 +1415,32 @@ class BuiltinFileTool(Tool):
             fixed_strings: bool = False,
             timeout: Optional[int] = None,
     ) -> str:
-        """Search file contents for a pattern using ripgrep (rg).
+        """Search file contents for a regex pattern across a whole tree.
 
-        Default output is matching lines with `file:line_number:content`.
-        Switch to "files_with_matches" only when you just need a path list,
-        or "count" when you only need totals — both modes drop the actual code,
-        which usually forces a follow-up read_file.
-
-        Usage:
-        - Powered by ripgrep for speed (falls back to pure Python if rg missing)
-        - The pattern parameter supports regex by default (e.g., 'class \\w+', 'def \\w+')
-        - Use fixed_strings=True to treat pattern as literal text (no regex)
-        - The path parameter specifies the file or directory to search (default: current working directory)
-        - The include parameter filters files by glob (e.g., "*.py", "*.{ts,tsx}")
-        - output_mode (plain string):
-          - "content" (default): matching lines with file path + line numbers
-          - "files_with_matches": list of matching file paths only
-          - "count": match count per file
-        - Add context lines in "content" mode via context_lines / before_context / after_context.
+        Default output is matching lines as `file:line_number:content`. Switch to
+        "files_with_matches" only when a path list is enough, or "count" when only
+        totals matter — both drop the code itself and usually force a follow-up
+        read_file.
 
         Args:
             pattern: Text/regex to search for
             path: File or directory to search (default: ".")
-            include: File glob filter, e.g., "*.py", "*.{js,ts}" (maps to rg --glob)
-            output_mode: "content" (default), "files_with_matches", or "count". Do NOT pass a dict.
+            include: File glob filter, e.g. "*.py", "*.{js,ts}"
+            output_mode: "content" (default), "files_with_matches", or "count".
+                Pass a plain string, never a dict.
             case_insensitive: Ignore case when matching (default: False)
-            multiline: Enable multiline matching where . matches newlines (default: False)
-            context_lines: Show N lines before and after each match (default: 0, content mode only)
-            before_context: Show N lines before each match (default: 0, content mode only)
-            after_context: Show N lines after each match (default: 0, content mode only)
+            multiline: Let `.` match newlines so a pattern can span lines (default: False)
+            context_lines: Lines to show before and after each match ("content" mode only)
+            before_context: Lines to show before each match ("content" mode only)
+            after_context: Lines to show after each match ("content" mode only)
             limit: Maximum results to return (default: 100)
             fixed_strings: Treat pattern as literal text, not regex (default: False)
-            timeout: Search timeout in seconds (default 10, no upper cap). grep
-                must always be bounded: on a bad disk / network mount, or with a
-                backtracking regex (e.g. nested .*.*) over a large file, it can
-                hang or go exponential. Raise this only when you know a
-                whole-tree grep on a large repo legitimately needs more time.
+            timeout: Search timeout in seconds (default 10, no upper cap). Raise it
+                only for a legitimately huge tree; a backtracking pattern such as
+                nested `.*.*` can otherwise run for an unbounded time.
 
         Returns:
             Search results as formatted string
-
-        Examples:
-            grep(pattern="def _close_box")                     # show matches with line numbers
-            grep(pattern="TODO", include="*.py", context_lines=2)
-            grep(pattern="class \\w+", include="*.py")
-            grep(pattern="enable_agentic_prompt", context_lines=3)
-            grep(pattern="exact phrase", fixed_strings=True)
-            grep(pattern="import", include="*.py", output_mode="count")
-            grep(pattern="Foo", output_mode="files_with_matches")  # only when paths suffice
-            grep(pattern="big_table", include="*.sql", timeout=30)  # large repo, allow more time
         """
         # Resolve and validate path
         self._validate_path(path)

@@ -91,31 +91,12 @@ class TestPromptModules:
         assert isinstance(content, str)
         assert len(content) > 0
 
-    def test_tools_module_with_active_tools(self):
+    def test_tools_module_keeps_call_batching_guidance(self):
+        """Batching independent calls has no tool-docstring equivalent."""
         from agentica.prompts.base.tools import get_tools_prompt
-        content = get_tools_prompt(active_tools=["read_file", "edit_file", "execute"])
-        assert isinstance(content, str)
-        assert "read_file" in content
-        assert "execute" in content
-
-    def test_tools_module_with_descriptions(self):
-        from agentica.prompts.base.tools import get_tools_prompt
-        descs = {"read_file": "Read a file from disk", "execute": "Run shell commands"}
-        content = get_tools_prompt(
-            active_tools=["read_file", "execute"],
-            tool_descriptions=descs,
-        )
-        assert "Read a file from disk" in content
-        assert "Run shell commands" in content
-
-    def test_builder_with_tool_descriptions(self):
-        from agentica.prompts.builder import PromptBuilder
-        descs = {"read_file": "Read file content"}
-        result = PromptBuilder.build_system_prompt(
-            active_tools=["read_file"],
-            tool_descriptions=descs,
-        )
-        assert "Read file content" in result
+        content = get_tools_prompt()
+        assert "one message" in content
+        assert "run them in order" in content
 
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt
@@ -202,6 +183,52 @@ class TestGetSystemMessage:
         assert msg is not None
         # Agentic prompt adds more content from PromptBuilder
         assert len(msg.content) > 100
+
+    @pytest.mark.asyncio
+    async def test_tools_guide_skipped_without_file_tools(self):
+        """An agent with unrelated tools must not be told to prefer read_file."""
+        class WeatherLikeTool(Tool):
+            def __init__(self):
+                super().__init__(name="weather")
+                self.register(self.get_weather)
+
+            def get_weather(self, city: str) -> str:
+                """Get the weather."""
+                return "sunny"
+
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            tools=[WeatherLikeTool()],
+            prompt_config=PromptConfig(enable_agentic_prompt=True),
+        )
+        msg = await agent.get_system_message()
+
+        assert msg is not None
+        for phantom in ("read_file", "edit_file", "apply_patch", "glob"):
+            assert phantom not in msg.content
+
+    @pytest.mark.asyncio
+    async def test_tools_guide_present_with_file_tools(self):
+        class FileLikeTool(Tool):
+            def __init__(self):
+                super().__init__(name="files")
+                self.register(self.read_file)
+
+            def read_file(self, file_path: str) -> str:
+                """Read a file."""
+                return ""
+
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            tools=[FileLikeTool()],
+            prompt_config=PromptConfig(enable_agentic_prompt=True),
+        )
+        msg = await agent.get_system_message()
+
+        assert msg is not None
+        assert "# Using Your Tools" in msg.content
 
     @pytest.mark.asyncio
     async def test_system_message_separates_tool_policy_and_session_guidance(self):

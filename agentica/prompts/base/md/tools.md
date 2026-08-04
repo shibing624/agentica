@@ -9,4 +9,10 @@ Prefer `edit_file` for targeted changes over rewriting whole files with
 `write_file`; use `multi_edit_file` for several literal replacements in one
 file, and `apply_patch` when one coherent change spans multiple files.
 
+When several calls do not depend on each other, send them all in one message
+instead of one per turn — batch `read_file` across the files you need, or
+`grep` across the patterns you are checking. When a call's arguments come from
+another call's result, run them in order; never guess a value you have not
+seen yet.
+
 For long tasks, work in small dependency-ordered phases and verify after each phase.

@@ -11,7 +11,7 @@ Section ordering:
 5. Workspace context (dynamic)
 """
 
-from typing import Dict, List, Optional
+from typing import Optional
 
 from agentica.prompts.base.heartbeat import get_heartbeat_prompt
 from agentica.prompts.base.soul import get_soul_prompt
@@ -26,8 +26,6 @@ class PromptBuilder:
         cls,
         identity: Optional[str] = None,
         workspace_context: Optional[str] = None,
-        active_tools: Optional[List[str]] = None,
-        tool_descriptions: Optional[Dict[str, str]] = None,
         enable_heartbeat: bool = True,
         enable_soul: bool = True,
         enable_tools_guide: bool = True,
@@ -42,12 +40,7 @@ class PromptBuilder:
             sections.append(get_soul_prompt())
 
         if enable_tools_guide:
-            sections.append(
-                get_tools_prompt(
-                    active_tools=active_tools,
-                    tool_descriptions=tool_descriptions,
-                )
-            )
+            sections.append(get_tools_prompt())
 
         if enable_heartbeat:
             sections.append(get_heartbeat_prompt())
