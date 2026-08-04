@@ -171,8 +171,11 @@ class CompiledExperienceStore:
                 last_seen=today,
                 source_tasks=merged_tasks,
             )
-            body = strip_frontmatter(existing) or card.content
-            await async_write_text(filepath, frontmatter + body)
+            # Rewrite the body from the incoming card rather than carrying the
+            # stored one forward. A bump is a fresh occurrence of the same
+            # experience, so the newest content is the accurate one, and the
+            # card can never accumulate whatever a past parse left behind.
+            await async_write_text(filepath, frontmatter + card.content)
         else:
             initial_tasks = [new_task] if new_task else []
             frontmatter = self._build_frontmatter(
@@ -305,6 +308,7 @@ class CompiledExperienceStore:
         for entry in top:
             body = strip_frontmatter(entry["_raw"])
             body = _compress_repeated_lines(body)
+            body = _truncate_body(body)
             tier_badge = f"[{entry['_tier'].upper()}]" if entry["_tier"] != "hot" else ""
             count_badge = f"(seen {entry['_repeat_count']}x)" if entry["_repeat_count"] > 1 else ""
             header = f"### {entry['title']} {tier_badge} {count_badge}".strip()
@@ -495,6 +499,26 @@ class CompiledExperienceStore:
 
 
 # ── Module-level helpers (experience-specific, not shared) ────────────────
+
+# Cap on how much of one card's body reaches the system prompt. Bodies embed
+# raw tool output (stderr, tracebacks) whose middle carries no signal, and the
+# whole section is re-sent on every request.
+_MAX_BODY_CHARS = 700
+
+
+def _truncate_body(body: str) -> str:
+    """Keep the head and tail of an over-long card body.
+
+    Both ends matter: the head names the tool and the failing arguments, the
+    tail carries the exception that was actually raised. Cutting either end
+    alone drops the part that identifies the failure.
+    """
+    if len(body) <= _MAX_BODY_CHARS:
+        return body
+    head = _MAX_BODY_CHARS * 2 // 3
+    tail = _MAX_BODY_CHARS - head
+    return f"{body[:head].rstrip()}\n...\n{body[-tail:].lstrip()}"
+
 
 def _compress_repeated_lines(text: str) -> str:
     """Collapse consecutive duplicate lines into ``<line> xN`` form.

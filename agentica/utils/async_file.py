@@ -38,9 +38,23 @@ def extract_frontmatter_int(content: str, key: str, default: int = 0) -> int:
 
 
 def strip_frontmatter(content: str) -> str:
-    """Remove YAML frontmatter block (---...---) from content."""
-    stripped = re.sub(r"^---[\s\S]*?---\s*", "", content, flags=re.MULTILINE).strip()
-    return stripped
+    """Remove a leading YAML frontmatter block from ``content``.
+
+    The block must open on the very first line and close on a line that is
+    exactly ``---``. Scanning for the next ``---`` anywhere instead cuts inside
+    a value: ``source_tasks`` stores raw user queries, which routinely contain
+    ``---``, and the tail of the frontmatter then gets spliced into the body.
+    Because the body is carried forward on every rewrite, that tail accumulates
+    and eventually lands in the system prompt.
+    """
+    lines = content.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return content.strip()
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            return "\n".join(lines[i + 1:]).strip()
+    # Unterminated block: treat the whole file as body rather than dropping it.
+    return content.strip()
 
 
 def extract_frontmatter_list(content: str, key: str) -> List[str]:

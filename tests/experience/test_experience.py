@@ -174,6 +174,28 @@ class TestExperienceCaptureHooks(unittest.TestCase):
         self.assertEqual(errors[0]["tool"], "execute")
         self.assertIn("No such file", errors[0]["error"])
 
+    def test_tool_error_capture_keeps_the_tail_of_a_long_traceback(self):
+        """The exception line at the end is the signal; a head-only cut loses it."""
+        hooks = self._make_hooks()
+        agent = self._mock_agent()
+        asyncio.run(hooks.on_agent_start(agent))
+
+        traceback = (
+            "Traceback (most recent call last):\n"
+            + "\n".join(f'  File "mod{i}.py", line {i}, in fn' for i in range(300))
+            + "\nPermissionError: [Errno 13] Permission denied: '/etc/hosts'"
+        )
+        asyncio.run(hooks.on_tool_end(
+            agent, tool_name="execute", tool_call_id="tc_1",
+            tool_args={"command": "python run.py"},
+            result=traceback, is_error=True, elapsed=0.5,
+        ))
+
+        stored = hooks._tool_errors[agent.agent_id][0]["error"]
+        self.assertIn("Traceback (most recent call last):", stored)
+        self.assertIn("PermissionError: [Errno 13]", stored)
+        self.assertLess(len(stored), len(traceback) // 4)
+
     def test_tool_error_disabled(self):
         """When capture_tool_errors=False, tool errors should not be captured."""
         hooks = self._make_hooks(capture_tool_errors=False)
@@ -1096,6 +1118,29 @@ class TestExperienceCompiler(unittest.TestCase):
         cards = ExperienceCompiler.compile_tool_errors([])
         self.assertEqual(cards, [])
 
+    def test_truncate_error_text_keeps_both_ends(self):
+        from agentica.experience.compiler import truncate_error_text, _ERROR_LEN
+
+        error = (
+            "Traceback (most recent call last):\n"
+            + "\n".join(f'  File "mod{i}.py", line {i}, in fn' for i in range(400))
+            + "\nAssertionError: fix1 marker not found"
+        )
+        out = truncate_error_text(error)
+
+        self.assertTrue(out.startswith("Traceback (most recent call last):"))
+        self.assertTrue(out.endswith("AssertionError: fix1 marker not found"))
+        self.assertIn("chars omitted", out)
+        self.assertLess(len(out), _ERROR_LEN + 40)
+
+    def test_truncate_error_text_keeps_short_error_verbatim(self):
+        from agentica.experience.compiler import truncate_error_text
+
+        self.assertEqual(
+            truncate_error_text("File not found: /a/b.md"),
+            "File not found: /a/b.md",
+        )
+
     def test_compile_success_pattern_enough(self):
         from agentica.experience.compiler import ExperienceCompiler
         successes = [{"tool": f"t{i}", "elapsed": 0.1} for i in range(4)]
@@ -1322,6 +1367,59 @@ class TestCompiledExperienceStore(unittest.TestCase):
         with open(path) as f:
             content = f.read()
         self.assertIn("repeat_count: 2", content)
+
+    def test_source_task_with_dashes_does_not_leak_into_body(self):
+        """A `---` inside a source task must not splice frontmatter into the body.
+
+        source_tasks stores raw user queries; markdown rules are common in them.
+        A frontmatter parser that scans for the next `---` anywhere cuts inside
+        the JSON array and the tail ends up in the body, which is then carried
+        forward on every bump until it reaches the system prompt.
+        """
+        from agentica.experience.compiler import CompiledCard
+        store = self._store()
+        card = CompiledCard(
+            title="dash_error",
+            content="Tool `execute` failed.",
+            experience_type="tool_error",
+            source_task="rewrite the doc\n---\nand keep the header",
+        )
+        asyncio.run(store.write(card))
+        for _ in range(3):
+            asyncio.run(store.write(card))
+
+        rendered = asyncio.run(store.get_relevant(query="rewrite the doc"))
+        self.assertIn("Tool `execute` failed.", rendered)
+        self.assertNotIn("source_tasks", rendered)
+        self.assertNotIn("and keep the header", rendered)
+        self.assertNotIn('"]', rendered)
+
+    def test_bump_refreshes_body_from_new_card(self):
+        """A repeat is a fresh occurrence — the newest content wins."""
+        from agentica.experience.compiler import CompiledCard
+        store = self._store()
+        asyncio.run(store.write(CompiledCard(
+            title="stale", content="first error text", experience_type="tool_error",
+        )))
+        path = asyncio.run(store.write(CompiledCard(
+            title="stale", content="latest error text", experience_type="tool_error",
+        )))
+        content = open(path).read()
+        self.assertIn("latest error text", content)
+        self.assertNotIn("first error text", content)
+
+    def test_long_body_is_truncated_for_the_prompt(self):
+        from agentica.experience.compiled_store import _MAX_BODY_CHARS
+        from agentica.experience.compiler import CompiledCard
+        store = self._store()
+        body = "HEAD-MARKER\n" + ("x" * 5000) + "\nTAIL-MARKER"
+        asyncio.run(store.write(CompiledCard(
+            title="huge", content=body, experience_type="tool_error",
+        )))
+        rendered = asyncio.run(store.get_relevant(query="huge"))
+        self.assertIn("HEAD-MARKER", rendered)
+        self.assertIn("TAIL-MARKER", rendered)
+        self.assertLess(len(rendered), _MAX_BODY_CHARS + 200)
 
     def test_get_relevant_empty(self):
         store = self._store()

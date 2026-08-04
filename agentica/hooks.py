@@ -15,6 +15,7 @@ import re
 from typing import Any, Optional, List, Dict, Tuple
 
 from agentica.experience import extract_state
+from agentica.experience.compiler import truncate_error_text
 from agentica.experience.skill_upgrade import SkillEvolutionManager
 from agentica.learning_report import (
     LearningReport,
@@ -729,7 +730,7 @@ class ExperienceCaptureHooks(RunHooks):
         aid = agent.agent_id
 
         if is_error and self._config.capture_tool_errors:
-            result_str = str(result)[:500] if result else ""
+            result_str = truncate_error_text(str(result)) if result else ""
             self._tool_errors.setdefault(aid, []).append({
                 "tool": tool_name,
                 "args": tool_args or {},

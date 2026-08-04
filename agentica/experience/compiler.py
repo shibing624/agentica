@@ -45,6 +45,33 @@ _RULE_STOPWORDS = frozenset({
 # common verb-object kernel survives noisy paraphrasing.
 _TITLE_TOKEN_CAP = 4
 
+# Cap on captured error text. Tool errors carry whole tracebacks and stderr
+# dumps; the card they compile into is re-read into the system prompt on every
+# later request, so an uncapped one is paid for indefinitely. Applied once, by
+# the capture hook — this is not idempotent (the marker itself adds length),
+# so downstream compilers must treat the text as already bounded.
+_ERROR_LEN = 600
+
+
+def truncate_error_text(error_msg: str) -> str:
+    """Keep the head and tail of an over-long error message.
+
+    Both ends carry signal and neither survives alone: the head has the
+    exception class and the failing call, the tail has the assertion or errno
+    that actually stopped the run. Mirrors the head+tail split that
+    ``compression.tool_result_storage`` applies to oversized tool output.
+    """
+    if len(error_msg) <= _ERROR_LEN:
+        return error_msg
+    head = _ERROR_LEN * 2 // 5
+    tail = _ERROR_LEN - head
+    omitted = len(error_msg) - head - tail
+    return (
+        f"{error_msg[:head].rstrip()}\n"
+        f"... [{omitted} chars omitted] ...\n"
+        f"{error_msg[-tail:].lstrip()}"
+    )
+
 
 def _summarize_error_for_title(error_msg: str) -> str:
     """Derive a short, readable identifier for a tool_error title.
