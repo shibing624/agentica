@@ -3136,6 +3136,39 @@ class TestLessLesskeyDetection(unittest.TestCase):
             self.assertFalse(it._less_supports_lesskey("/usr/bin/less"))
 
 
+class TestOpenInPager(unittest.TestCase):
+    """Ctrl+O pager must not stop at less's binary-file confirmation."""
+
+    def test_less_forces_opening_control_character_output(self):
+        from agentica.cli import interactive as it
+
+        run = MagicMock()
+        with (
+            patch("agentica.cli.interactive.shutil.which", side_effect=["/usr/bin/less"]),
+            patch("agentica.cli.interactive._less_supports_lesskey", return_value=True),
+            patch("agentica.cli.interactive.subprocess.run", run),
+        ):
+            it._open_in_pager("execute output", "result\x00with-control-byte")
+
+        args = run.call_args.args[0]
+        self.assertIn("-f", args)
+
+    def test_legacy_less_also_forces_opening_control_character_output(self):
+        from agentica.cli import interactive as it
+
+        run = MagicMock()
+        with (
+            patch("agentica.cli.interactive.shutil.which", side_effect=["/usr/bin/less"]),
+            patch("agentica.cli.interactive._less_supports_lesskey", return_value=False),
+            patch("agentica.cli.interactive._compile_lesskey", return_value="/tmp/lesskey"),
+            patch("agentica.cli.interactive.subprocess.run", run),
+        ):
+            it._open_in_pager("execute output", "result\x00with-control-byte")
+
+        args = run.call_args.args[0]
+        self.assertIn("-f", args)
+
+
 class TestCompileLesskey(unittest.TestCase):
     """Old-less fallback: compile a lesskey file to bind Ctrl+O to quit when
     --lesskey-content is unavailable. Esc is not bound (escape-sequence

@@ -448,17 +448,17 @@ def _open_in_pager(title: str, content: str) -> None:
     try:
         if lesskey_ok:
             subprocess.run(
-                [pager, "-R", f"--lesskey-content={lesskey_src}", "-P", prompt_line, path],
+                [pager, "-R", "-f", f"--lesskey-content={lesskey_src}", "-P", prompt_line, path],
             )
         elif "less" in pager:
             compiled_lesskey = _compile_lesskey(lesskey_src)
             if compiled_lesskey:
                 env = dict(os.environ, LESSKEY=compiled_lesskey)
                 subprocess.run(
-                    [pager, "-R", "-P", prompt_line, path], env=env,
+                    [pager, "-R", "-f", "-P", prompt_line, path], env=env,
                 )
             else:
-                subprocess.run([pager, "-R", "-P", prompt_line, path])
+                subprocess.run([pager, "-R", "-f", "-P", prompt_line, path])
         else:
             subprocess.run([pager, "-P", prompt_line, path])
     except KeyboardInterrupt:
