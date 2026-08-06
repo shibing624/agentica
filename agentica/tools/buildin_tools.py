@@ -793,6 +793,11 @@ class BuiltinFileTool(Tool):
     async def apply_patch(self, patch: str) -> str:
         """Apply one context patch across one or more text files.
 
+        You MUST call read_file before every Update or Delete in the patch.
+        Read the relevant current regions immediately before constructing the
+        patch; never guess context from memory or stale output. Add File
+        operations do not require a prior read.
+
         Use this when a change spans multiple files or needs multiple contextual
         hunks. Keep using edit_file for one simple literal replacement and
         multi_edit_file for several literal replacements in the same file.

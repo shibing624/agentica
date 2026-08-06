@@ -247,12 +247,19 @@ mcp, skill, ...
 
 使用 `OpenAIResponses` 且 endpoint 支持 `/responses/compact` 时，`/compact` 会优先生成 provider-native checkpoint，并保留可跨 provider 的普通 transcript。原生请求失败时才回退到本地 LLM summary 和 rule-based 压缩。
 
-### `/newchat`
-开启全新会话（清除消息历史，保留模型和工具配置）：
+### `/new` / `/newchat`
+开启全新会话（清除消息历史，保留模型和工具配置）。切换前会显示当前会话的
+运行时间、Token 用量和可直接执行的恢复命令：
+
+```text
+> /new
+Worked for 15m 05s
+
+Token usage: total=4,300 input=4,000 (+ 800 cached) output=300
+To continue this session, run agentica resume c1392649-f07d-4f05-808b-f852c3190236
 ```
-> /newchat
-  Started new chat session.
-```
+
+`/newchat` 是 `/new` 的别名。
 
 ### `/rename <name>`
 为当前会话设置易识别的名称。名称会持久化，进程异常退出后仍会显示在 `/resume` 列表中：
@@ -282,6 +289,18 @@ mcp, skill, ...
 恢复时，完整 Session Log 仍会重建到模型上下文中；终端默认只回放用户消息、Agent
 正文和每轮工具统计，成功的 tool result 不再写入 scrollback。失败结果最多显示 3 条
 单行摘要。
+
+也可以退出 CLI 后直接从 shell 恢复完整 session ID：
+
+```bash
+agentica resume c1392649-f07d-4f05-808b-f852c3190236
+```
+
+Session Log 按项目目录隔离，因此应在原项目目录执行。若当前目录不同，可以显式指定：
+
+```bash
+agentica --work_dir /path/to/original-project resume c1392649-f07d-4f05-808b-f852c3190236
+```
 
 ### `/history [tools [run-number]]`
 

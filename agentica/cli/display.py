@@ -19,11 +19,11 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from agentica.cli.runtime import get_console, TOOL_ICONS, BUILTIN_TOOLS
+from agentica.cli.runtime import BUILTIN_TOOLS, TOOL_ICONS, get_console
 from agentica.global_config import get_setting
 from agentica.model.usage import Usage
+from agentica.tools.patch_tool import parse_patch_envelope
 from agentica.version import __version__
-
 
 # Rich console color scheme (unified - no separate ANSI codes)
 COLORS = {
@@ -824,6 +824,9 @@ class StreamDisplayManager:
         # completion can render one real old→new file diff. Keyed by tool call
         # ID when available, otherwise by the raw file_path argument.
         self._write_old: Dict[str, Optional[str]] = {}
+        # apply_patch can mutate several files atomically, so retain every
+        # target's action and pre-call content for one combined real diff.
+        self._patch_old: Dict[str, List[Tuple[str, str, Optional[str]]]] = {}
         # tool_call_id of the tool block currently at the bottom of the
         # transcript — i.e. the call line (or merged block) printed last. A
         # ``⎿`` result body only reads as "belongs to the line above" while
@@ -939,7 +942,10 @@ class StreamDisplayManager:
         # Count every tool call up front, before any deferred-print early
         # return, so the turn summary's "N tools" matches what the user saw.
         self.tool_count += 1
-        if tool_name in self._DEFERRED_TOOLS or tool_name == "apply_patch":
+        if tool_name in self._DEFERRED_TOOLS:
+            return
+        if tool_name == "apply_patch":
+            self._capture_patch_before_call(tool_args, tool_call_id)
             return
         if tool_name in self._WRITE_DIFF_TOOLS:
             self._capture_file_before_call(tool_name, tool_args, tool_call_id)
@@ -1000,6 +1006,28 @@ class StreamDisplayManager:
         key = tool_call_id or str(fp)
         path = self._resolve_diff_path(str(fp))
         self._write_old[key] = self._read_diff_path(path) if path.exists() else ""
+
+    def _capture_patch_before_call(self, tool_args: dict,
+                                   tool_call_id: Optional[str] = None) -> None:
+        """Capture every apply_patch target before its atomic mutation."""
+        patch = tool_args.get("patch")
+        if not isinstance(patch, str):
+            return
+        try:
+            operations = parse_patch_envelope(patch)
+        except ValueError:
+            return
+        key = tool_call_id or patch
+        self._patch_old[key] = [
+            (
+                operation.path,
+                operation.action,
+                None if operation.action == "add" else self._read_diff_path(
+                    self._resolve_diff_path(operation.path)
+                ),
+            )
+            for operation in operations
+        ]
 
     @staticmethod
     def _fmt_elapsed(elapsed: Optional[float]) -> str:
@@ -1127,11 +1155,14 @@ class StreamDisplayManager:
                                   line_numbers=False))
 
     def _display_patch_summary(self, result_content: str, is_error: bool,
-                               elapsed_str: str) -> None:
-        """Render the executor's apply_patch summary without parsing the patch."""
+                               elapsed_str: str, tool_args: dict,
+                               tool_call_id: Optional[str] = None) -> None:
+        """Render apply_patch as one summary plus its real multi-file diff."""
         icon = TOOL_ICONS.get("apply_patch", TOOL_ICONS["default"])
         line = f"  {icon} [bold magenta]apply_patch[/bold magenta]"
         content = self._shorten_workdir_text(str(result_content).strip())
+        key = tool_call_id or tool_args.get("patch", "")
+        old_files = self._patch_old.pop(key, [])
         if is_error:
             self._assistant_console.print(line + f" [red]- error{elapsed_str}[/red]")
             error_lines = content.splitlines() or ["Unknown patch error"]
@@ -1159,6 +1190,26 @@ class StreamDisplayManager:
         summary, _, details = content.partition("\n")
         summary = re.sub(r"^Successfully applied patch to ", "Edited ", summary)
         self._assistant_console.print(line + f" [dim]- {summary}{elapsed_str}[/dim]")
+        diffs = []
+        for raw_path, action, old_content in old_files:
+            new_content = "" if action == "delete" else self._read_diff_path(
+                self._resolve_diff_path(raw_path)
+            )
+            if action == "add":
+                old_content = ""
+            diff_text = self._build_file_diff(
+                old_content,
+                new_content,
+                self._display_path(raw_path),
+            )
+            if diff_text:
+                diffs.append(diff_text)
+        if diffs:
+            self._assistant_console.print(
+                Syntax("\n".join(diffs) + "\n", "diff", theme="monokai", line_numbers=False)
+            )
+            return
+
         detail_lines = details.splitlines()
         file_lines = []
         while detail_lines and re.match(r"^[MAD] .+ \(\+\d+ -\d+\)$", detail_lines[0]):
@@ -1186,17 +1237,18 @@ class StreamDisplayManager:
         """Build one git-style unified diff from real pre/post file contents."""
         if old_content is None or new_content is None:
             return ""
-        unified = "\n".join(difflib.unified_diff(
+        unified_lines = list(difflib.unified_diff(
             old_content.splitlines(),
             new_content.splitlines(),
-            fromfile=f"a/{filename}",
-            tofile=f"b/{filename}",
+            fromfile=filename,
+            tofile=filename,
             n=2,
             lineterm="",
-        )).rstrip("\n")
-        if not unified:
+        ))
+        if not unified_lines:
             return ""
-        return f"diff --git a/{filename} b/{filename}\n{unified}"
+        hunks = "\n".join(unified_lines[2:]).rstrip("\n")
+        return f"diff -- {filename}\n{hunks}"
 
     @staticmethod
     def _diff_line_counts(diff_text: str) -> tuple[int, int]:
@@ -1326,7 +1378,9 @@ class StreamDisplayManager:
 
         if tool_name == "apply_patch":
             self.start_tool_section()
-            self._display_patch_summary(result_content, is_error, elapsed_str)
+            self._display_patch_summary(
+                result_content, is_error, elapsed_str, tool_args or {}, tool_call_id
+            )
             return
 
         if tool_name in self._WRITE_DIFF_TOOLS:

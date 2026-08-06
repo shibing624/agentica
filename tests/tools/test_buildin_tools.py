@@ -370,6 +370,12 @@ class TestBuiltinFileToolApplyPatch:
         assert function.parameters["required"] == ["patch"]
         assert function.parameters["properties"]["patch"]["type"] == "string"
 
+    def test_description_requires_read_file_before_updates_and_deletes(self, file_tool):
+        function = file_tool.functions["apply_patch"]
+        function.process_entrypoint(strict=False)
+
+        assert "MUST call read_file before every Update or Delete" in function.description
+
     def test_applies_update_add_and_delete_in_one_call(self, file_tool, tmp_dir):
         Path(tmp_dir, "app.py").write_text("VALUE = 1\nKEEP = True\n")
         Path(tmp_dir, "obsolete.py").write_text("remove me\n")

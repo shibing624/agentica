@@ -704,7 +704,8 @@ class TestCLIHelpers(unittest.TestCase):
 
         self.assertIn("Edited 1 file (+1 -1)", rendered)
         self.assertIn("pkg/sample.py", rendered)
-        self.assertIn("diff --git a/pkg/sample.py b/pkg/sample.py", diff_text)
+        self.assertIn("diff -- pkg/sample.py", diff_text)
+        self.assertEqual(diff_text.count("pkg/sample.py"), 1)
         self.assertNotIn("#1", diff_text)
 
     def test_write_file_summary_uses_configured_work_dir(self):
@@ -735,7 +736,8 @@ class TestCLIHelpers(unittest.TestCase):
 
         self.assertIn("pkg/created.py", rendered)
         self.assertNotIn(str(root), rendered)
-        self.assertIn("diff --git a/pkg/created.py b/pkg/created.py", str(syntax.code))
+        self.assertIn("diff -- pkg/created.py", str(syntax.code))
+        self.assertEqual(str(syntax.code).count("pkg/created.py"), 1)
 
     def test_tool_result_sequencer_flushes_parallel_results_in_call_order(self):
         """Out-of-order completions must remain complete, call-ordered blocks."""
@@ -887,7 +889,10 @@ class TestCLIHelpers(unittest.TestCase):
         syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertEqual(len(syntax_args), 1)
         code = getattr(syntax_args[0], "code", "")
-        self.assertIn("diff --git a/config.py b/config.py", code)
+        self.assertIn("diff -- config.py", code)
+        self.assertEqual(code.count("config.py"), 1)
+        self.assertNotIn("--- a/", code)
+        self.assertNotIn("+++ b/", code)
         self.assertIn("-DEBUG = False", code)
         self.assertIn("+DEBUG = True", code)
 
@@ -935,38 +940,48 @@ class TestCLIHelpers(unittest.TestCase):
         syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
         self.assertEqual(len(syntax_args), 1)
         code = getattr(syntax_args[0], "code", "")
-        self.assertEqual(code.count("diff --git"), 1)
-        self.assertEqual(code.count("--- a/config.py"), 1)
-        self.assertEqual(code.count("+++ b/config.py"), 1)
+        self.assertEqual(code.count("diff -- config.py"), 1)
+        self.assertEqual(code.count("config.py"), 1)
+        self.assertNotIn("--- a/", code)
+        self.assertNotIn("+++ b/", code)
         self.assertEqual(code.count("@@"), 4)
         self.assertNotIn("config.py#", code)
 
-    def test_display_apply_patch_uses_executor_summary_without_rendering_patch(self):
+    def test_display_apply_patch_renders_real_multi_file_diff_with_relative_paths(self):
         from agentica.cli.display import StreamDisplayManager
 
         patch_text = """*** Begin Patch
-*** Update File: app.py
+*** Update File: pkg/app.py
 @@
 -VALUE = 1
 +VALUE = 2
-*** Add File: test_app.py
+*** Add File: tests/test_app.py
 +def test_value():
 +    assert True
 *** End Patch"""
         args = {"patch": patch_text}
         fake = MagicMock()
         fake.width = 80
-        dm = StreamDisplayManager(fake)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            app = root / "pkg" / "app.py"
+            app.parent.mkdir()
+            app.write_text("VALUE = 1\n")
+            dm = StreamDisplayManager(fake, work_dir=root)
 
-        dm.display_tool("apply_patch", args, tool_call_id="patch-1")
-        dm.display_tool_result(
-            "apply_patch",
-            "Successfully applied patch to 2 files (+3 -1):\n"
-            "M app.py (+1 -1)\nA test_app.py (+2 -0)",
-            elapsed=0.25,
-            tool_args=args,
-            tool_call_id="patch-1",
-        )
+            dm.display_tool("apply_patch", args, tool_call_id="patch-1")
+            app.write_text("VALUE = 2\n")
+            test_app = root / "tests" / "test_app.py"
+            test_app.parent.mkdir()
+            test_app.write_text("def test_value():\n    assert True")
+            dm.display_tool_result(
+                "apply_patch",
+                "Successfully applied patch to 2 files (+3 -1):\n"
+                "M pkg/app.py (+1 -1)\nA tests/test_app.py (+2 -0)",
+                elapsed=0.25,
+                tool_args=args,
+                tool_call_id="patch-1",
+            )
 
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("apply_patch", text)
@@ -976,13 +991,16 @@ class TestCLIHelpers(unittest.TestCase):
             call.args[0] for call in fake.print.call_args_list
             if call.args and "Syntax" in type(call.args[0]).__name__
         ]
-        self.assertEqual(syntax_args, [])
-        rendered_text = "\n".join(
-            " ".join(str(arg) for arg in call.args)
-            for call in fake.print.call_args_list
-        )
-        self.assertIn("├ M app.py (+1 -1)", rendered_text)
-        self.assertIn("└ A test_app.py (+2 -0)", rendered_text)
+        self.assertEqual(len(syntax_args), 1)
+        code = getattr(syntax_args[0], "code", "")
+        self.assertIn("diff -- pkg/app.py", code)
+        self.assertEqual(code.count("pkg/app.py"), 1)
+        self.assertIn("-VALUE = 1", code)
+        self.assertIn("+VALUE = 2", code)
+        self.assertIn("diff -- tests/test_app.py", code)
+        self.assertEqual(code.count("tests/test_app.py"), 1)
+        self.assertIn("+def test_value():", code)
+        self.assertNotIn(tmp, code)
 
     def test_display_apply_patch_error_keeps_relative_hunk_context(self):
         from agentica.cli.display import StreamDisplayManager

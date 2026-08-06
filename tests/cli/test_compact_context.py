@@ -10,7 +10,7 @@ list rather than on ``messages``.
 import os
 import asyncio
 import unittest
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
@@ -156,6 +156,33 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         )
         assert agent.working_memory.messages[-1].provider_checkpoint == checkpoint
         assert agent.working_memory.get_messages_from_last_n_runs()[-1].provider_checkpoint == checkpoint
+
+    def test_native_failure_logs_warning_without_printing_fallback_error(self):
+        from agentica.model.openai import OpenAIResponses
+
+        agent = _build_agent(num_runs=5)
+        model = OpenAIResponses(id="missing-compact-model", api_key="fake_openai_key")
+        model.compact_context = AsyncMock(side_effect=RuntimeError("503 model_not_found"))
+        agent.model = model
+        ctx = CommandContext(
+            agent_config={"model_provider": "openai", "model_name": model.id},
+            current_agent=agent,
+            tui_state={"context_tokens": 120000, "context_window": 200000},
+        )
+        console = MagicMock()
+
+        with (
+            patch("agentica.cli.commands.get_console", return_value=console),
+            patch("agentica.cli.commands.logger") as logger,
+        ):
+            _cmd_compact(ctx)
+
+        rendered = "\n".join(str(call) for call in console.print.call_args_list)
+        self.assertNotIn("Native compaction failed", rendered)
+        self.assertNotIn("Falling back to local compaction", rendered)
+        logger.warning.assert_called_once()
+        self.assertIn("Native compaction failed", logger.warning.call_args.args[0])
+        self.assertLess(ctx.tui_state["context_tokens"], 120000)
 
 if __name__ == "__main__":
     unittest.main()

@@ -63,6 +63,7 @@ from agentica.run_context import TaskAnchor
 from agentica.run_response import RunResponse, AgentCancelledError
 from agentica.subagent import get_subagent_configs
 from agentica.tools.goal_tool import GoalTool
+from agentica.utils.log import logger
 from agentica.skills import (
     get_skill_registry,
     install_skills,
@@ -2736,8 +2737,8 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
             if result is None:
                 raise RuntimeError("model advertised native compaction but returned no checkpoint")
         except Exception as error:
-            con.print(
-                f"[yellow]Native compaction failed ({error}). Falling back to local compaction.[/yellow]"
+            logger.warning(
+                "Native compaction failed (%s); falling back to local compaction", error
             )
         else:
             messages[-1].provider_checkpoint = result.checkpoint
