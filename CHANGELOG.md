@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI execute 工具调用行支持宽度感知预览：普通长命令和 heredoc 统一最多展示 3 行正文，Ctrl+O 可分别展开完整 command 和折叠 output
 
 #### fixes
+- `execute(background=True)` 完成后，CLI 现在会主动异步显示成功或失败、退出码、尾部输出和完整日志路径；通知由 registry 的完成事件驱动，不会唤醒 LLM。`/stop` 和 CLI 退出触发的终止不会再重复显示为任务失败，等待 `ask_user_question` 输入期间的完成事件会保留到安全时机再展示
 - 修复后台 terminal registry 接线导致 CLI 启动失败：`SessionState` 现在先于首次 `create_agent()` 初始化，再将同一份 `BackgroundProcessRegistry` 注入 execute 工具、`/ps`、`/stop` 和状态栏
 - 修复工具取消时子进程清理不彻底：新增 `terminate_subprocess()`，在活跃 event loop 上终止并完全回收 asyncio 子进程（`communicate()` 排空管道，支持进程组 SIGTERM→SIGKILL 宽限升级），应用于 execute/grep、shell 及 goal verify 等工具，消除取消后管道传输回调泄漏到已关闭 event loop 的问题
 - CLI 顶层 agent 执行错误改为结构化展示：429/限流等 provider 异常显示红色摘要、可操作 `/retry` 提示和 code/spanId 诊断字段，完整原始异常保留到 Ctrl+O 展开

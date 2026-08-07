@@ -4097,6 +4097,81 @@ class TestInputRequestCancel(unittest.TestCase):
         self.assertEqual(request.result.get_nowait(), "final answer")
 
 
+class TestBackgroundCompletionNotice(unittest.TestCase):
+    def test_background_log_tail_skips_command_header(self):
+        import agentica.cli.interactive as it
+
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "term.log"
+            log_path.write_text(
+                "$ python -c 'print(1)'\n\n"
+                "line1\nline2\nline3\nline4\nline5\nline6\n",
+                encoding="utf-8",
+            )
+
+            tail = it._read_background_log_tail(str(log_path), max_lines=5)
+
+        self.assertEqual(tail.splitlines(), ["line2", "line3", "line4", "line5", "line6"])
+
+    def test_print_background_completion_notice(self):
+        import agentica.cli.interactive as it
+        from agentica.tools.background_processes import BackgroundProcessCompleted
+
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "term.log"
+            log_path.write_text("$ echo done\n\ndone\n", encoding="utf-8")
+            event = BackgroundProcessCompleted(
+                id="term_2",
+                num=2,
+                pid=123,
+                command="echo done",
+                cwd=td,
+                log_path=str(log_path),
+                started_at=1.0,
+                completed_at=4.0,
+                returncode=0,
+            )
+            fake_console = MagicMock()
+
+            with patch.object(it, "get_console", return_value=fake_console):
+                it._print_background_completion(event)
+
+        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        self.assertIn("Background terminal #2 finished", rendered)
+        self.assertIn("exit 0", rendered)
+        self.assertIn("echo done", rendered)
+        self.assertIn("done", rendered)
+        self.assertIn("log:", rendered)
+
+    def test_print_background_failure_notice(self):
+        import agentica.cli.interactive as it
+        from agentica.tools.background_processes import BackgroundProcessCompleted
+
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "term.log"
+            log_path.write_text("$ false\n\ncommand failed\n", encoding="utf-8")
+            event = BackgroundProcessCompleted(
+                id="term_3",
+                num=3,
+                pid=456,
+                command="false",
+                cwd=td,
+                log_path=str(log_path),
+                started_at=1.0,
+                completed_at=2.0,
+                returncode=1,
+            )
+            fake_console = MagicMock()
+
+            with patch.object(it, "get_console", return_value=fake_console):
+                it._print_background_completion(event)
+
+        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        self.assertIn("Background terminal #3 failed", rendered)
+        self.assertIn("exit 1", rendered)
+        self.assertIn("command failed", rendered)
+
+
 class TestAskActiveFreeze(unittest.TestCase):
     """While a ask_user_question prompt is armed, ``_cprint`` must drop output
     so background ``run_in_terminal`` writes can't starve the main

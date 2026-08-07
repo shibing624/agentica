@@ -41,6 +41,7 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style as PTStyle
 from prompt_toolkit.widgets import TextArea
 from rich.console import Console as RichConsole
+from rich.markup import escape as rich_escape
 
 try:
     from imgocr import ImgOcr
@@ -71,7 +72,7 @@ from agentica.cli.display import (
 from agentica.cli.context_usage import measure_context
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
-from agentica.tools.background_processes import BackgroundProcessRegistry
+from agentica.tools.background_processes import BackgroundProcessCompleted, BackgroundProcessRegistry
 from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger, suppress_console_logging
 from agentica.workspace import Workspace
@@ -274,6 +275,7 @@ _tty_write_lock = threading.RLock()
 # pending — the agent itself is blocked so there is normally nothing to print,
 # and anything else (/btw, cron) would only corrupt the answer prompt anyway.
 _ask_active = [False]
+_ask_state_lock = threading.RLock()
 _output_pause_lock = threading.RLock()
 _output_paused = False
 _paused_output: List[str] = []
@@ -805,6 +807,44 @@ def _print_boxed_result(label: str, question: str, result_text: str, color: str 
     else:
         con.print("  (no output)")
     con.print(f"[{color}]╰{'─' * (tw - 2)}╯[/{color}]")
+
+
+def _read_background_log_tail(log_path: str, max_lines: int = 5, max_chars: int = 2000) -> str:
+    path = Path(log_path)
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_chars * 4:
+                f.seek(max(0, size - max_chars * 4))
+            data = f.read()
+    except OSError:
+        return ""
+
+    text = data.decode("utf-8", errors="replace")
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    if lines and lines[0].startswith("$ "):
+        lines = lines[1:]
+    tail = "\n".join(lines[-max_lines:])
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
+
+
+def _print_background_completion(event: BackgroundProcessCompleted) -> None:
+    con = get_console()
+    ok = event.returncode == 0
+    marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
+    status = "finished" if ok else "failed"
+    con.print()
+    con.print(
+        f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
+        f"(exit {event.returncode}): {rich_escape(event.preview)}"
+    )
+    tail = _read_background_log_tail(event.log_path)
+    if tail:
+        for line in tail.splitlines():
+            con.print(f"  {rich_escape(line)}")
+    con.print(f"  [dim]log: {rich_escape(event.log_path)}[/dim]")
 
 
 def _run_btw_concurrent(agent, question: str, tui_state: dict):
@@ -2229,8 +2269,9 @@ def run_interactive(
         # where it was — the user can Ctrl+U / backspace it out if they want a
         # clean answer field. Deciding that for them would silently change the
         # meaning of their keystrokes.
-        state_ref.input_request = req
-        _ask_active[0] = True
+        with _ask_state_lock:
+            state_ref.input_request = req
+            _ask_active[0] = True
         app_ref.invalidate()
 
         # Block the agent thread until the user submits a line, or Ctrl+C
@@ -2258,9 +2299,10 @@ def run_interactive(
                         app_ref.invalidate()
                     continue
         finally:
-            _ask_active[0] = False
-            if state_ref.input_request is req:
-                state_ref.input_request = None
+            with _ask_state_lock:
+                _ask_active[0] = False
+                if state_ref.input_request is req:
+                    state_ref.input_request = None
 
         if answer is _InputRequest.CANCELLED:
             # Propagate as AgentCancelledError so the agent runtime unwinds
@@ -2793,6 +2835,35 @@ def run_interactive(
 
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()
+
+    def background_completion_loop():
+        pending_events: List[BackgroundProcessCompleted] = []
+        while not state.should_exit:
+            try:
+                pending_events.append(state.background_processes.wait_completed(timeout=0.2))
+            except queue.Empty:
+                pass
+
+            with _ask_state_lock:
+                if _ask_active[0] or state.input_request is not None:
+                    continue
+
+                printed = False
+                while pending_events:
+                    event = pending_events.pop(0)
+                    if event.stop_requested:
+                        continue
+                    _print_background_completion(event)
+                    printed = True
+            if printed and app.is_running:
+                app.invalidate()
+
+    background_completion_thread = threading.Thread(
+        target=background_completion_loop,
+        daemon=True,
+        name="background_completion_notifier",
+    )
+    background_completion_thread.start()
 
     # ── Run the TUI ──
     # Install a SIGQUIT hard-escape. When the main prompt_toolkit event loop is

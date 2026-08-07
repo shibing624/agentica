@@ -11,6 +11,7 @@ import pytest
 import asyncio
 import json
 import os
+import queue
 import shlex
 import tempfile
 import shutil
@@ -1076,6 +1077,42 @@ class TestBuiltinExecuteTool:
         finally:
             registry.stop()
         assert registry.running_count() == 0
+
+    def test_execute_background_emits_completion_event(self, tmp_dir, monkeypatch):
+        agentica_home = Path(tmp_dir) / "agentica-home"
+        monkeypatch.setenv("AGENTICA_HOME", str(agentica_home))
+        registry = BackgroundProcessRegistry(user_id="alice@example.com")
+        tool = BuiltinExecuteTool(
+            work_dir=tmp_dir,
+            background_process_registry=registry,
+        )
+        script = 'print("done")'
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+        result = asyncio.run(tool.execute(command, background=True))
+        event = registry.wait_completed(timeout=5)
+
+        assert "Started background command #1" in result
+        assert event.id == "term_1"
+        assert event.num == 1
+        assert event.returncode == 0
+        assert event.stop_requested is False
+        assert "done" in Path(event.log_path).read_text(encoding="utf-8")
+        assert registry.running_count() == 0
+
+    def test_background_stop_marks_completion_event_as_stop_requested(self, tmp_dir):
+        registry = BackgroundProcessRegistry()
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+        item = registry.start(command, cwd=tmp_dir)
+
+        stopped = registry.stop(item.id)
+        event = registry.wait_completed(timeout=5)
+
+        assert stopped == [item]
+        assert event.id == item.id
+        assert event.stop_requested is True
+        with pytest.raises(queue.Empty):
+            registry.wait_completed(timeout=0.01)
 
     def test_background_stop_tolerates_wait_after_sigkill_timeout(self):
         registry = BackgroundProcessRegistry()

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import signal
 import subprocess
 import threading
@@ -53,6 +54,7 @@ class BackgroundProcess:
     cwd: Optional[str]
     log_path: str
     started_at: float
+    stop_requested: bool = False
 
     @property
     def pid(self) -> int:
@@ -75,6 +77,30 @@ class BackgroundProcess:
         return _shorten_command(self.command)
 
 
+@dataclass(frozen=True)
+class BackgroundProcessCompleted:
+    """Completion event emitted exactly once for a detached shell command."""
+
+    id: str
+    num: int
+    pid: int
+    command: str
+    cwd: Optional[str]
+    log_path: str
+    started_at: float
+    completed_at: float
+    returncode: int
+    stop_requested: bool = False
+
+    @property
+    def elapsed(self) -> str:
+        return _format_elapsed(self.completed_at - self.started_at)
+
+    @property
+    def preview(self) -> str:
+        return _shorten_command(self.command)
+
+
 class BackgroundProcessRegistry:
     """Thread-safe registry shared by execute(), /ps, /stop and the status bar."""
 
@@ -82,6 +108,7 @@ class BackgroundProcessRegistry:
         self._lock = threading.RLock()
         self._counter = 0
         self._items: dict[str, BackgroundProcess] = {}
+        self._completed: queue.Queue[BackgroundProcessCompleted] = queue.Queue()
         self._user_id = user_id
 
     def set_user_id(self, user_id: Optional[str]) -> None:
@@ -137,7 +164,35 @@ class BackgroundProcessRegistry:
         )
         with self._lock:
             self._items[proc_id] = item
+        threading.Thread(
+            target=self._watch_process,
+            args=(item,),
+            daemon=True,
+            name=f"{proc_id}_watcher",
+        ).start()
         return item
+
+    def _watch_process(self, item: BackgroundProcess) -> None:
+        returncode = item.process.wait()
+        completed_at = time.time()
+        with self._lock:
+            event = BackgroundProcessCompleted(
+                id=item.id,
+                num=item.num,
+                pid=item.pid,
+                command=item.command,
+                cwd=item.cwd,
+                log_path=item.log_path,
+                started_at=item.started_at,
+                completed_at=completed_at,
+                returncode=int(returncode),
+                stop_requested=item.stop_requested,
+            )
+        self._completed.put(event)
+
+    def wait_completed(self, timeout: Optional[float] = None) -> BackgroundProcessCompleted:
+        """Wait for the next completed command emitted by a watcher."""
+        return self._completed.get(timeout=timeout)
 
     def list(self, *, include_finished: bool = False) -> List[BackgroundProcess]:
         with self._lock:
@@ -162,8 +217,14 @@ class BackgroundProcessRegistry:
             items = [item for item in items if self._matches(item, target)]
         stopped: List[BackgroundProcess] = []
         for item in items:
-            if not item.running:
-                continue
+            with self._lock:
+                if not item.running:
+                    continue
+                # Mark the stop intent while holding the same lock the watcher
+                # uses to snapshot its completion event. If the process exits
+                # after this point, the event is reliably classified as an
+                # explicit stop rather than a command failure.
+                item.stop_requested = True
             if os.name != "nt":
                 try:
                     os.killpg(item.pid, signal.SIGTERM)
