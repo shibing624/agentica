@@ -37,6 +37,21 @@ COLORS = {
 }
 
 
+_INTERNAL_REPEAT_FAILURE_NOTICE_RE = re.compile(
+    r"\n?\[Notice: This exact call has failed \d+ times this run with the same error\. "
+    r"Consider a different approach\.\]\s*"
+)
+
+
+def _strip_internal_tool_notices(text: str) -> str:
+    """Remove model-facing retry nudges from the user-facing transcript."""
+    return _INTERNAL_REPEAT_FAILURE_NOTICE_RE.sub("", text).rstrip()
+
+
+def _is_diagnostic_execute_result(text: str) -> bool:
+    return "(Note: Diagnostics found)" in text
+
+
 def print_header(model_provider: str, model_name: str, work_dir: Optional[str] = None,
                  extra_tools: Optional[List[str]] = None, shell_mode: bool = False):
     """Print the application header with version and model information"""
@@ -1514,6 +1529,8 @@ class StreamDisplayManager:
     # output, which is usually what the user needs at a glance.
     _EXECUTE_HEAD_LINES = 10
     _EXECUTE_TAIL_LINES = 10
+    _EXECUTE_DIAGNOSTIC_HEAD_LINES = 6
+    _EXECUTE_DIAGNOSTIC_TAIL_LINES = 4
 
     def _print_result_anchor(self, tool_name: str, tool_args: dict) -> None:
         """Re-state the call a detached ``⎿`` result body belongs to.
@@ -1604,7 +1621,7 @@ class StreamDisplayManager:
         if detached:
             self._print_result_anchor(tool_name, tool_args or {})
 
-        result_str = str(result_content)
+        result_str = _strip_internal_tool_notices(str(result_content))
 
         if tool_name in ("grep", "glob", "execute", "ls", "read_file"):
             cwd = str(Path.cwd())
@@ -1617,11 +1634,14 @@ class StreamDisplayManager:
         # the command's final status/output, which is usually what the user
         # needs to see at a glance.
         if tool_name == "execute":
+            is_diagnostics = _is_diagnostic_execute_result(result_str)
             self._display_head_tail(
-                lines, self._EXECUTE_HEAD_LINES, self._EXECUTE_TAIL_LINES,
+                lines,
+                self._EXECUTE_DIAGNOSTIC_HEAD_LINES if is_diagnostics else self._EXECUTE_HEAD_LINES,
+                self._EXECUTE_DIAGNOSTIC_TAIL_LINES if is_diagnostics else self._EXECUTE_TAIL_LINES,
                 prefix="    ⎿ ", cont_prefix="      ",
-                style="dim red" if is_error else "dim",
-                error_prefix="    ⎿ ⚠ " if is_error else None,
+                style="dim red" if is_error else "dim yellow" if is_diagnostics else "dim",
+                error_prefix="    ⎿ ⚠ " if (is_error or is_diagnostics) else None,
                 truncated_title=f"Tool output · {tool_name}",
                 full_content=result_str,
                 elapsed_str=elapsed_str,

@@ -106,6 +106,7 @@ class TestPromptModules:
         assert "does not ground sibling files" in content
         assert "call `ls` or `glob` on the parent" in content
         assert "common filenames like `base.py`" in content
+        assert "empty `ls`/`glob` result is" in content
 
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt

@@ -1046,6 +1046,27 @@ class TestBuiltinExecuteTool:
         with pytest.raises(RuntimeError, match="exit(ed)? (with )?code 42"):
             asyncio.run(execute_tool.execute("exit 42"))
 
+    def test_execute_treats_python_module_linter_exit_one_as_diagnostics(self, execute_tool, tmp_dir):
+        Path(tmp_dir, "ruff.py").write_text(
+            "import sys\n"
+            "print('UP009 UTF-8 encoding declaration is unnecessary')\n"
+            "sys.exit(1)\n"
+        )
+
+        result = asyncio.run(
+            execute_tool.execute(
+                f"PYTHONPATH={shlex.quote(tmp_dir)} python3 -m ruff check sample.py"
+            )
+        )
+
+        assert "UP009" in result
+        assert "[Exit code: 1]" in result
+        assert "Diagnostics found" in result
+
+    def test_execute_still_raises_for_plain_python3_exit_one(self, execute_tool):
+        with pytest.raises(RuntimeError, match="Command exited with code 1"):
+            asyncio.run(execute_tool.execute("python3 -c 'import sys; sys.exit(1)'"))
+
     def test_execute_captures_stderr(self, execute_tool):
         result = asyncio.run(execute_tool.execute("echo error_msg >&2"))
         assert "error_msg" in result

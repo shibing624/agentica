@@ -79,15 +79,24 @@ def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
     segments = re.split(r'\s*(?:\|\||&&|[|;])\s*', command)
     last_segment = (segments[-1] if segments else command).strip()
 
-    # Get base command name (first word), stripping env var assignments
-    # like VAR=val cmd ...
+    # Get the command whose exit code should be interpreted. Strip env var
+    # assignments like VAR=val cmd ..., and treat ``python -m ruff`` as the
+    # module command (``ruff``), not a generic Python script failure.
     words = last_segment.split()
     base_cmd = ""
-    for w in words:
+    cmd_index = -1
+    for i, w in enumerate(words):
         if "=" in w and not w.startswith("-"):
-            continue  # skip VAR=val
-        base_cmd = w.split("/")[-1]  # handle /usr/bin/grep -> grep
+            continue
+        if w == "env":
+            continue
+        base_cmd = w.split("/")[-1]
+        cmd_index = i
         break
+
+    if base_cmd in {"python", "python3"} and cmd_index >= 0:
+        if len(words) > cmd_index + 2 and words[cmd_index + 1] == "-m":
+            base_cmd = words[cmd_index + 2].split(".")[0].split("/")[-1]
 
     if not base_cmd:
         return None
@@ -120,6 +129,16 @@ def _interpret_exit_code(command: str, exit_code: int) -> Optional[str]:
         "git": {1: "Non-zero exit (often normal — e.g. 'git diff' returns 1 when files differ)"},
         # pytest
         "pytest": {1: "Tests failed", 5: "No tests collected"},
+        # linters/typecheckers: exit 1 means diagnostics were found. The command
+        # ran correctly; callers still need to inspect and fix the reported issues.
+        "ruff": {1: "Diagnostics found"},
+        "mypy": {1: "Diagnostics found"},
+        "pyright": {1: "Diagnostics found"},
+        "basedpyright": {1: "Diagnostics found"},
+        "flake8": {1: "Diagnostics found"},
+        "pylint": {1: "Diagnostics found"},
+        "eslint": {1: "Diagnostics found"},
+        "tsc": {1: "Diagnostics found"},
         "python": {1: "Script exited with error"},
     }
 

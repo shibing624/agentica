@@ -1179,6 +1179,42 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("line 29", text2)
         self.assertNotIn("line 15", text2)
 
+    def test_display_execute_diagnostics_uses_short_warning_window(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        output = "\n".join(f"diag {i}" for i in range(18))
+        output += "\n\n[Exit code: 1]\n(Note: Diagnostics found)"
+
+        dm.display_tool_result("execute", output, is_error=False, elapsed=0.1)
+
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("⚠", text)
+        self.assertIn("diag 0", text)
+        self.assertIn("diag 17", text)
+        self.assertNotIn("diag 9", text)
+        self.assertIn("hidden", text)
+
+    def test_display_execute_filters_internal_repeat_failure_notice(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        output = (
+            "real error\n\n"
+            "[Notice: This exact call has failed 2 times this run with the same error. "
+            "Consider a different approach.]"
+        )
+
+        dm.display_tool_result("execute", output, is_error=True, elapsed=0.1)
+
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn("real error", text)
+        self.assertNotIn("This exact call has failed", text)
+
     def test_display_execute_wraps_long_command_and_retains_full_command(self):
         """Long commands use a width-aware preview and remain expandable."""
         from io import StringIO

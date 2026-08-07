@@ -27,9 +27,10 @@ conventions, imports, module names, and common filenames like `base.py`,
 module/class/function name, first search from `.` or a known existing directory
 with `glob`, `grep`, or `ls`, then reuse the returned path exactly. Before
 reading a sibling file next to a known file, call `ls` or `glob` on the parent
-directory and reuse the exact returned path. Do not construct long absolute
-paths from memory, module names, or stale summaries. If a path is missing,
-restart from the nearest existing parent with `ls`/`glob`/`grep` instead of
-retrying speculative absolute paths.
+directory and reuse the exact returned path; an empty `ls`/`glob` result is
+valid information, not a tool failure. Do not construct long absolute paths from
+memory, module names, or stale summaries. If a path is missing, restart from the
+nearest existing parent with `ls`/`glob`/`grep` instead of retrying speculative
+absolute paths.
 
 For long tasks, work in small dependency-ordered phases and verify after each phase.
