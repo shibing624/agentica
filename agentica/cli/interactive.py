@@ -260,6 +260,25 @@ _output_paused = False
 _paused_output: List[str] = []
 
 
+# Rich emits OSC 8 terminal hyperlinks for Markdown links. prompt_toolkit's
+# ANSI parser does not understand OSC sequences and renders their payload as
+# visible text (for example ``8;id=...;/path/to/file.py:42...8;;``). Strip only
+# the unsupported hyperlink wrapper; the styled link label remains intact.
+_OSC8_PATTERN = re.compile(
+    r"(?:\x1b\]|\x9d)8;[^\x07\x1b\x9c]*(?:\x07|\x1b\\|\x9c)"
+)
+
+
+def _strip_unsupported_osc8(text: str) -> str:
+    """Remove OSC 8 wrappers before prompt_toolkit parses Rich ANSI output."""
+    return _OSC8_PATTERN.sub("", text)
+
+
+def _print_prompt_toolkit_ansi(text: str) -> None:
+    """Render ANSI supported by prompt_toolkit without leaking OSC payloads."""
+    print_formatted_text(ANSI(_strip_unsupported_osc8(text)))
+
+
 def _install_sigquit_escape(handler):
     """Install a temporary SIGQUIT handler when the platform supports it."""
     if os.name == "nt":
@@ -297,7 +316,7 @@ def _cprint(text: str):
             _paused_output.append(text)
             return
         with _tty_write_lock:
-            print_formatted_text(ANSI(text))
+            _print_prompt_toolkit_ansi(text)
 
 
 def _toggle_output_pause() -> Tuple[bool, int]:
@@ -312,7 +331,7 @@ def _toggle_output_pause() -> Tuple[bool, int]:
         _paused_output.clear()
         with _tty_write_lock:
             for line in buffered:
-                print_formatted_text(ANSI(line))
+                _print_prompt_toolkit_ansi(line)
         return False, len(buffered)
 
 

@@ -591,6 +591,36 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIsInstance(gutter_con.gutter_prefix_ansi, str)
         self.assertIn("▎", gutter_con.gutter_prefix_ansi)
 
+    def test_chatconsole_markdown_link_does_not_leak_osc8_payload(self):
+        """Rich hyperlinks must not become visible ``8;id=...`` garbage.
+
+        Rich renders Markdown links as OSC 8 terminal sequences, but
+        prompt_toolkit's ANSI parser treats the OSC payload as ordinary text.
+        The CLI adapter must remove the wrapper while preserving the label and
+        regular ANSI styling.
+        """
+        from rich.markdown import Markdown
+        from agentica.cli.interactive import ChatConsole
+
+        rendered = []
+
+        def capture(formatted_text):
+            rendered.extend(formatted_text.__pt_formatted_text__())
+
+        console = ChatConsole()
+        with patch("agentica.cli.interactive.print_formatted_text", side_effect=capture):
+            console.print(
+                Markdown(
+                    "入口位于 "
+                    "[`reader.py:42`](/apdcephfs/share/dual_mem/retrieval/reader.py:42)"
+                )
+            )
+
+        visible = "".join(fragment[1] for fragment in rendered)
+        self.assertIn("入口位于 reader.py:42", visible)
+        self.assertNotIn("8;id=", visible)
+        self.assertNotIn("/apdcephfs/", visible)
+
     def test_fmt_elapsed_uses_ms_under_one_second(self):
         """Sub-second tools must surface ms-precision rather than being hidden.
         Every tool call has a real cost — silent <0.1s suppression made fast
