@@ -37,6 +37,7 @@ from agentica.cli.runtime import (
 from agentica.cli.display import (
     format_session_summary,
     print_header,
+    resumable_session_id,
     show_help,
 )
 from agentica.cli.setup import (
@@ -604,6 +605,10 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
         f"Subagents: {subagent_total} ({package_subagents} package + {custom_subagents} override/custom)"
     )
     con.print(f"  Permissions: {perm_str}  |  Context: {ctx_str}  |  Cost: {cost_str}")
+    if agent is not None and agent.session_id:
+        session_name = agent._session_log.get_name() if agent._session_log is not None else None
+        session_label = f"{session_name} ({agent.session_id})" if session_name else agent.session_id
+        con.print(f"  Session:    [cyan]{session_label}[/cyan]")
 
 
 def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
@@ -2149,7 +2154,7 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         format_session_summary(
             elapsed_seconds=time.monotonic() - started_at,
             usage=old_agent.model.usage,
-            session_id=old_agent.session_id,
+            session_id=resumable_session_id(old_agent),
         )
     )
     current_agent = create_agent(
@@ -2363,7 +2368,12 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             else:
                 summary = "(empty session)"
                 subline = None
-            con.print(f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  ({size_kb:.0f}KB, {turns} turns)")
+            is_current = ctx.current_agent is not None and sid == ctx.current_agent.session_id
+            current_marker = "  [green](current)[/green]" if is_current else ""
+            con.print(
+                f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
+                f"({size_kb:.0f}KB, {turns} turns){current_marker}"
+            )
             if user_name:
                 con.print(f"     [bold]{summary}[/bold]")
                 if subline:
@@ -2379,14 +2389,17 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
 def _cmd_rename(ctx: CommandContext, cmd_args: str = ""):
     """Rename the active session so it is easy to identify in `/resume`."""
     con = get_console()
-    new_name = (cmd_args or "").strip()
-    if not new_name:
-        con.print("  [dim]Usage: /rename <name>[/dim]")
-        return
-
     agent = ctx.current_agent
     if agent is None or not agent.session_id or agent._session_log is None:
         con.print("[yellow]No active session to rename.[/yellow]")
+        return
+
+    new_name = (cmd_args or "").strip()
+    if not new_name:
+        current_name = agent._session_log.get_name()
+        session_label = f"{current_name} ({agent.session_id})" if current_name else agent.session_id
+        con.print(f"  Current session: [cyan]{session_label}[/cyan]")
+        con.print("  [dim]Usage: /rename <name>[/dim]")
         return
 
     try:
@@ -2394,7 +2407,10 @@ def _cmd_rename(ctx: CommandContext, cmd_args: str = ""):
     except OSError as error:
         con.print(f"  [red]Failed to rename session: {error}[/red]")
         return
-    con.print(f"  [green]Renamed current session to[/green] [cyan]{new_name}[/cyan]")
+    con.print(
+        f"  [green]Renamed session[/green] [dim]{agent.session_id}[/dim] "
+        f"[green]to[/green] [cyan]{new_name}[/cyan]"
+    )
 
 
 def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):

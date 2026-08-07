@@ -3,10 +3,20 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from agentica.cli.commands import CommandContext, _cmd_newchat
 from agentica.cli.display import format_session_summary
-from agentica.cli.interactive import SessionState, _print_interactive_exit_summary
+from agentica.cli.interactive import SessionState, _print_interactive_exit_summary, run_interactive
 from agentica.model.usage import RequestUsage, TokenDetails, Usage
+
+
+class _FakeSessionLog:
+    def __init__(self, exists: bool) -> None:
+        self._exists = exists
+
+    def exists(self) -> bool:
+        return self._exists
 
 
 def test_format_session_summary_shows_usage_and_resume_hint():
@@ -45,7 +55,12 @@ def test_format_session_summary_keeps_zero_usage_visible():
 def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch):
     usage = Usage(input_tokens=10, output_tokens=2, total_tokens=12)
     model = SimpleNamespace(usage=usage)
-    agent = SimpleNamespace(model=model, memory=SimpleNamespace(messages=[]), session_id="old-session")
+    agent = SimpleNamespace(
+        model=model,
+        memory=SimpleNamespace(messages=[]),
+        session_id="old-session",
+        _session_log=_FakeSessionLog(True),
+    )
     new_agent = SimpleNamespace(model=SimpleNamespace(usage=Usage()), session_id="new-session")
     console = MagicMock()
     print_header = MagicMock()
@@ -72,7 +87,11 @@ def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch
 
 def test_interactive_exit_prints_resume_summary(monkeypatch):
     usage = Usage(input_tokens=10, output_tokens=2, total_tokens=12)
-    agent = SimpleNamespace(model=SimpleNamespace(usage=usage), session_id="exit-session")
+    agent = SimpleNamespace(
+        model=SimpleNamespace(usage=usage),
+        session_id="exit-session",
+        _session_log=_FakeSessionLog(True),
+    )
     console = MagicMock()
 
     monkeypatch.setattr("agentica.cli.interactive.time.monotonic", lambda: 130.0)
@@ -87,3 +106,49 @@ def test_interactive_exit_prints_resume_summary(monkeypatch):
     assert "Worked for 0m 30s" in rendered
     assert "Token usage: total=12 input=10 output=2" in rendered
     assert "agentica resume exit-session" in rendered
+
+
+def test_interactive_exit_omits_resume_hint_for_unwritten_session(monkeypatch):
+    agent = SimpleNamespace(
+        model=SimpleNamespace(usage=Usage()),
+        session_id="empty-session",
+        _session_log=_FakeSessionLog(False),
+    )
+    console = MagicMock()
+
+    monkeypatch.setattr("agentica.cli.interactive.time.monotonic", lambda: 130.0)
+    monkeypatch.setattr("agentica.cli.interactive.get_console", lambda: console)
+
+    _print_interactive_exit_summary(
+        SessionState(current_agent=agent),
+        {"session_started_at": 100.0},
+    )
+
+    rendered = console.print.call_args.args[0].plain
+    assert "Token usage: total=0 input=0 output=0" in rendered
+    assert "agentica resume empty-session" not in rendered
+
+
+def test_interactive_creates_session_state_before_agent(monkeypatch):
+    class StopAfterCreate(Exception):
+        pass
+
+    def create_agent(*args, **kwargs):
+        registry = kwargs["background_process_registry"]
+        assert registry is not None
+        StopAfterCreate.registry = registry
+        raise StopAfterCreate
+
+    monkeypatch.setattr("agentica.cli.interactive.create_agent", create_agent)
+
+    with pytest.raises(StopAfterCreate):
+        run_interactive(
+            {
+                "debug": True,
+                "permissions": "allow-all",
+                "model_provider": "openai",
+                "model_name": "smoke-model",
+            }
+        )
+
+    assert StopAfterCreate.registry is not None

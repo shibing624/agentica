@@ -93,7 +93,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Enter[/bright_green]       Submit your message")
     get_console().print("  [bright_green]Ctrl+X[/bright_green]      Toggle Agent/Shell mode")
     get_console().print("  [bright_green]Ctrl+J[/bright_green]      Insert newline (Alt+Enter also works)")
-    get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit and show resume command")
+    get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit and show session summary")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation (press twice to exit)")
     get_console().print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
     get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool commands and output in pager (Ctrl+O or Esc to return)")
@@ -132,6 +132,14 @@ def format_session_summary(
         text.append("\nTo continue this session, run ", style="dim")
         text.append(f"agentica resume {session_id}", style="bold")
     return text
+
+
+def resumable_session_id(agent: Any) -> str | None:
+    """Return the session id only when its JSONL log exists on disk."""
+    session_log = agent._session_log
+    if session_log is None or not session_log.exists():
+        return None
+    return agent.session_id
 
 
 def parse_file_mentions(text: str) -> Tuple[str, List[Path]]:
@@ -660,7 +668,7 @@ def show_help(skills_registry=None):
         },
         "Other": {
             "/help":            "Show this help message",
-            "/exit, /quit":     "Exit and show the resume command",
+            "/exit, /quit":     "Exit and show session summary",
         },
     }
 
@@ -690,7 +698,7 @@ def show_help(skills_registry=None):
         "Enter":             "Submit your message",
         "Ctrl+X":            "Toggle Agent/Shell mode ($ = shell, > = agent)",
         "Ctrl+J, Alt+Enter": "Insert newline for multi-line input",
-        "Ctrl+D":            "Exit and show resume command",
+        "Ctrl+D":            "Exit and show session summary",
         "Ctrl+C":            "Interrupt current operation; press twice to exit",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Ctrl+V":            "Paste image from clipboard",

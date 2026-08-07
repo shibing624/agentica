@@ -214,6 +214,7 @@ def test_noninteractive_interrupt_prints_resume_summary():
         run_stream_sync=interrupted_stream,
         model=SimpleNamespace(usage=Usage()),
         session_id="session-interrupted",
+        _session_log=SimpleNamespace(exists=lambda: True),
     )
     console = MagicMock()
     resolved = {

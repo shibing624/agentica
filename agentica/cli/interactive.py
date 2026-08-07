@@ -64,6 +64,7 @@ from agentica.cli.display import (
     display_user_message,
     display_agent_execution_error,
     format_session_summary,
+    resumable_session_id,
     get_file_completions,
     get_truncated_blocks,
 )
@@ -234,7 +235,7 @@ class SessionState:
 
 
 def _print_interactive_exit_summary(state: SessionState, tui_state: dict) -> None:
-    """Print the copyable resume command when the interactive TUI exits."""
+    """Print the final session summary when the interactive TUI exits."""
     agent = state.current_agent
     if agent is None:
         return
@@ -243,7 +244,7 @@ def _print_interactive_exit_summary(state: SessionState, tui_state: dict) -> Non
         format_session_summary(
             elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
             usage=agent.model.usage,
-            session_id=agent.session_id,
+            session_id=resumable_session_id(agent),
         )
     )
 
@@ -1427,7 +1428,7 @@ def _process_stream_response(
             format_session_summary(
                 elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
                 usage=current_agent.model.usage,
-                session_id=current_agent.session_id,
+                session_id=resumable_session_id(current_agent),
             )
         )
     except AgentCancelledError:
@@ -1439,7 +1440,7 @@ def _process_stream_response(
             format_session_summary(
                 elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
                 usage=current_agent.model.usage,
-                session_id=current_agent.session_id,
+                session_id=resumable_session_id(current_agent),
             )
         )
     except Exception as e:
@@ -1663,7 +1664,7 @@ def _setup_tui(
                 event.app.exit()
             else:
                 state.last_ctrl_c = now
-                tui_state["spinner_text"] = "Press Ctrl+C again to exit; resume command appears below"
+                tui_state["spinner_text"] = "Press Ctrl+C again to exit; summary appears below"
                 event.app.invalidate()
 
     @kb.add("c-x")
@@ -2280,12 +2281,17 @@ def run_interactive(
                 pass
         return answer
 
+    # The process registry belongs to the CLI session and must exist before
+    # the first agent is built because ExecuteTool receives this shared
+    # instance during create_agent().
+    state = SessionState()
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
         ask_user_question_callback=_cli_ask_user_question_callback,
         background_process_registry=state.background_processes,
         permission_mode=perm_mode,
     )
+    state.current_agent = current_agent
 
     # User/project files fail softly per definition; invalid packaged defaults
     # surface because they indicate a broken installation.
@@ -2340,9 +2346,6 @@ def run_interactive(
     if perm_mode != "allow-all":
         con.print(f"  Permissions: [yellow]{perm_mode}[/yellow]")
     con.print()
-
-    # Session state
-    state = SessionState(current_agent=current_agent)
 
     status_work_dir = agent_config.get("work_dir") or os.getcwd()
     tui_state = {

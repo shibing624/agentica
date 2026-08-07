@@ -3019,9 +3019,27 @@ class TestRenameCommand(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             context, session_log = self._ctx_with_agent(directory)
 
-            cli_commands._cmd_rename(context, "   ")
+            console = MagicMock()
+            with patch("agentica.cli.commands.get_console", return_value=console):
+                cli_commands._cmd_rename(context, "   ")
 
             self.assertIsNone(session_log.get_name())
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("Current session:", printed)
+            self.assertIn("sess-cli", printed)
+            self.assertIn("Usage: /rename <name>", printed)
+
+    def test_rename_without_name_shows_current_name_and_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            context, session_log = self._ctx_with_agent(directory)
+            session_log.set_name("Release investigation")
+            console = MagicMock()
+
+            with patch("agentica.cli.commands.get_console", return_value=console):
+                cli_commands._cmd_rename(context, "")
+
+            printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+            self.assertIn("Release investigation (sess-cli)", printed)
 
     def test_rename_requires_active_session(self):
         context = cli_commands.CommandContext(agent_config={}, current_agent=None)
@@ -3051,6 +3069,35 @@ class TestRenameCommand(unittest.TestCase):
             cli_commands._cmd_rename,
         )
         self.assertNotIn("/session", cli_commands.COMMAND_REGISTRY)
+
+
+class TestStatusSessionIdentity(unittest.TestCase):
+    def test_status_shows_current_session_name_and_id(self):
+        session_log = MagicMock()
+        session_log.get_name.return_value = "Release investigation"
+        agent = MagicMock()
+        agent.session_id = "sess-current-1234"
+        agent._session_log = session_log
+        agent.tools = []
+        agent.tool_config.permission_mode = "allow-all"
+        agent.run_response.cost_tracker = None
+        context = cli_commands.CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
+            current_agent=agent,
+            tui_state={},
+        )
+        console = MagicMock()
+
+        with (
+            patch("agentica.cli.commands.get_console", return_value=console),
+            patch("agentica.cli.commands.resolve_active_profile_name", return_value=("default", "default")),
+            patch("agentica.cli.commands.get_subagent_configs", return_value={}),
+        ):
+            cli_commands._cmd_status(context)
+
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
+        self.assertIn("Session:", printed)
+        self.assertIn("Release investigation (sess-current-1234)", printed)
 
 
 class TestResumeArchivedFilter(unittest.TestCase):
@@ -3129,6 +3176,27 @@ class TestResumeArchivedFilter(unittest.TestCase):
         self.assertIn("Release investigation", printed)
         self.assertIn("/resume <number|name|id-prefix>", printed)
         self.assertNotIn("sess-arc", printed)
+
+    def test_picker_marks_current_session(self):
+        current_agent = MagicMock()
+        current_agent.session_id = "sess-active-3333"
+        current_agent._session_log = None
+        ctx = cli_commands.CommandContext(agent_config={}, current_agent=current_agent)
+        with (
+            patch("agentica.memory.session_log.SessionLog.list_sessions", return_value=self._sessions()),
+            patch(
+                "agentica.memory.session_log.SessionLog.session_preview",
+                return_value={"user_count": 0, "first_user": None},
+            ),
+            patch("agentica.cli.commands.get_console") as mock_console,
+        ):
+            console = MagicMock()
+            mock_console.return_value = console
+            cli_commands._cmd_resume(ctx, "")
+
+        printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
+        current_line = next(line for line in printed.splitlines() if "sess-act" in line and "current" in line)
+        self.assertIn("(current)", current_line)
 
     def test_resume_by_name(self):
         create_agent, result = self._resume("release investigation")

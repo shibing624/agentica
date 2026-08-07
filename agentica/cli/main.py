@@ -10,7 +10,7 @@ from datetime import datetime
 
 from agentica.cli.runtime import get_console, parse_args, configure_tools, create_agent
 from agentica.cli.interactive import run_interactive
-from agentica.cli.display import display_agent_execution_error, format_session_summary
+from agentica.cli.display import display_agent_execution_error, format_session_summary, resumable_session_id
 from agentica.cli.setup import resolve_model_config, run_onboarding
 from agentica.run_response import AgentCancelledError
 from agentica.utils.log import suppress_console_logging
@@ -223,7 +223,7 @@ def main():
                 format_session_summary(
                     elapsed_seconds=time.monotonic() - started_at,
                     usage=agent_instance.model.usage,
-                    session_id=agent_instance.session_id,
+                    session_id=resumable_session_id(agent_instance),
                 )
             )
         except Exception as e:
