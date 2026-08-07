@@ -36,7 +36,7 @@ import aiofiles
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool, BuiltinTodoTool
 from agentica.tools.builtin.web_tools import BuiltinFetchUrlTool, BuiltinWebSearchTool
 from agentica.tools.base import Tool
-from agentica.tools.background_processes import BackgroundProcessRegistry
+from agentica.tools.background_processes import BackgroundProcessRegistry, read_log_tail
 from agentica.tools.builtin_task_tool import BuiltinTaskTool  # re-export after extraction
 from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
@@ -1616,6 +1616,34 @@ class BuiltinFileTool(Tool):
         )
 
 
+# A trailing `&` forks the real work off the shell this tool holds. Under
+# background=True that is broken rather than merely untracked: the registry
+# would watch a shell that exits at once and announce a completion while the
+# work runs on, so it is refused there. In the foreground it still runs — it is
+# a standard idiom and callers may genuinely want a raw orphan — but the result
+# says what was lost, because the forked child stays in the shell's process
+# group and a cancelled or timed-out turn kills it along with the group.
+#
+# A long leading `sleep` is not work at all, it is a poll that re-blocks the
+# very turn backgrounding just freed. The threshold matches the default
+# foreground timeout: a shorter sleep is a plausible wait-for-boot retry
+# (`sleep 2 && curl ...`), while reaching this one means the caller also had to
+# raise `timeout`, which only a deliberate poll does. Matching only a leading
+# `sleep` is deliberate: waiting on an external condition belongs in a loop that
+# exits on success (`until curl -sf ...; do sleep 5; done`), which is both the
+# better form and not a match.
+_SELF_DETACHING_COMMAND = re.compile(r"(?<!&)&\s*$")
+_LEADING_SLEEP = re.compile(r"^\s*sleep\s+(\d+(?:\.\d+)?)\b")
+_MAX_FOREGROUND_SLEEP_SECONDS = 120
+
+# Upper bound on a single `wait` call. The wait returns the instant the command
+# exits, so this only caps how long one tool call may hold the turn: the caller
+# comes back through the model loop periodically, which is what lets the user
+# interrupt and lets the caller reconsider a job that is taking too long.
+_MAX_WAIT_SECONDS = 300
+_WAIT_POLL_INTERVAL = 0.2
+
+
 class BuiltinExecuteTool(Tool):
     """
     Built-in command execution tool using async subprocess.
@@ -1654,6 +1682,10 @@ class BuiltinExecuteTool(Tool):
         # Execute tool manages its own timeout internally via asyncio.wait_for
         # on the subprocess. Skip the outer timeout wrapper in Model.run_function_calls.
         self.functions["execute"].manages_own_timeout = True
+        self.register(self.wait, concurrency_safe=True, is_read_only=True, is_destructive=False)
+        # `wait` may block up to _MAX_WAIT_SECONDS, past the outer 120s executor
+        # wrapper that would otherwise cancel it mid-wait.
+        self.functions["wait"].manages_own_timeout = True
 
     async def execute(
             self,
@@ -1686,13 +1718,18 @@ class BuiltinExecuteTool(Tool):
         - Foreground commands timeout after 120 seconds by default
         - You may specify a custom ``timeout`` (in seconds) for long-running
           commands; there is no upper cap — the caller decides.
-        - For long-running commands whose result can be inspected later, pass
-          ``background=True``. The command starts immediately, logs to
-          the project-scoped ``~/.agentica/projects/.../background/`` directory,
-          and returns the PID plus /ps and /stop instructions without blocking
-          the current agent turn.
-          Prefer this for benchmarks, servers/watchers, long test suites, and
-          other commands likely to outlive the current turn.
+        - ``background=True`` detaches the command. Use it when you do not need
+          the output to continue this turn, or when the command may outlive one
+          tool call: a foreground command killed by ``timeout`` or a cancelled
+          turn loses everything it printed, while a background one keeps its
+          log. Something you need right now that fits in one call belongs in the
+          foreground with a raised ``timeout`` instead. A background command's
+          exit is reported to the user, not to you; ``wait`` with the returned
+          id is what brings it back to you. Never improvise a wait with
+          ``sleep``, polling, or a blocking ``tail``; a 120s+ leading ``sleep``
+          is refused. A trailing ``&`` detaches into an untracked orphan that
+          ``wait``, ``/ps`` and ``/stop`` cannot see, so prefer
+          ``background=True``.
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
         - When issuing multiple independent commands, make multiple execute calls in parallel
@@ -1713,6 +1750,7 @@ class BuiltinExecuteTool(Tool):
             - execute(command="pytest /path/to/tests/ -v --tb=short")
             - execute(command="git status")
             - execute(command="npm install && npm test", timeout=300)
+            - execute(command="pytest tests -q", background=True)
 
         Bad examples (use dedicated tools instead):
             - execute(command="find . -name '*.py'")   → use glob(pattern="**/*.py")
@@ -1723,8 +1761,9 @@ class BuiltinExecuteTool(Tool):
         Args:
             command: Exact shell command to execute without normalization or repair
             timeout: optional timeout in seconds (default 120, no upper cap)
-            background: start the command in the background and return immediately;
-                timeout does not apply after the command has been detached
+            background: detach and return immediately; ``timeout`` no longer
+                applies and the exit reaches the user, not this conversation —
+                use ``wait`` to bring it back into this conversation
 
         Returns:
             str: The output of the command (stdout + stderr) with exit code
@@ -1777,17 +1816,42 @@ class BuiltinExecuteTool(Tool):
 
         logger.debug(f"Executing command: {command}")
         cwd = str(self._work_dir) if self._work_dir else None
+        self_detaching = bool(_SELF_DETACHING_COMMAND.search(command))
 
         if background:
+            if self_detaching:
+                raise ValueError(
+                    "Remove the trailing '&': with background=True the shell would "
+                    "fork the work away and exit at once, reporting a completion "
+                    "while the command is still running. Pass the plain command."
+                )
             item = self._background_process_registry.start(command, cwd=cwd)
+            # This text is the only guidance the model sees at the moment it has
+            # to decide what to do next, so it states the contract instead of
+            # describing the process: the exit goes to the user, so the only way
+            # back into this conversation is `wait`, and any hand-rolled wait
+            # (sleep, poll, blocking tail) is strictly worse than calling it.
             return (
-                f"Started background command #{item.num} (PID {item.pid}).\n"
-                f"id: {item.id}\n"
-                f"Status: running\n"
+                f"Started background command #{item.num} (PID {item.pid}, id: {item.id}).\n"
                 f"Log: {item.log_path}\n"
-                f"Inspect progress by reading the log. In Agentica CLI, the user can "
-                f"also use /ps and /stop {item.id}. If you must stop it yourself on "
-                f"POSIX, run execute(command=\"kill -- -{item.pid}\")."
+                f"It is detached: its exit is reported to the user, not to you. If a "
+                f"later step needs its result, call wait(id=\"{item.id}\") — it returns "
+                f"the moment the command exits. Otherwise say it started and continue "
+                f"with other work or end your turn. Do not improvise a wait — no sleep, "
+                f"no polling, no blocking tail.\n"
+                f"To stop it: the user runs /stop {item.id}; you run "
+                f"execute(command=\"kill -- -{item.pid}\")."
+            )
+
+        slept = _LEADING_SLEEP.match(command)
+        if slept and float(slept.group(1)) >= _MAX_FOREGROUND_SLEEP_SECONDS:
+            raise ValueError(
+                f"Refusing to hold this turn for {slept.group(1)}s. To wait for a "
+                "background command, call wait(id=...): it returns the moment the "
+                "command exits and reports its exit code, so it never overshoots. To "
+                "wait on an external condition that has no completion event, retry "
+                "until it succeeds instead of sleeping through the whole wait, e.g. "
+                "`until curl -sf http://host/health; do sleep 5; done`."
             )
 
         proc = None
@@ -1868,6 +1932,14 @@ class BuiltinExecuteTool(Tool):
         if redact_tool_outputs_enabled():
             output = redact_sensitive_text(output)
 
+        if self_detaching:
+            output = (
+                f"{output}\n\n[Note: the trailing '&' detached this work from the "
+                "shell. It is untracked — /ps and /stop cannot see it, its exit is "
+                "never reported, and a cancelled or timed-out turn kills it with the "
+                "process group. Use background=True for anything worth reporting.]"
+            )
+
         # A non-zero exit code that is NOT covered by _interpret_exit_code
         # (i.e. no benign-hint returned) is a real failure — raise so the
         # runtime records it via function_call.error, keeping a single source
@@ -1882,6 +1954,67 @@ class BuiltinExecuteTool(Tool):
             )
 
         return output
+
+    async def wait(self, id: str, timeout: int = _MAX_WAIT_SECONDS) -> str:
+        """Blocks until a background command finishes, then reports how it went.
+
+        Returns the instant the command exits, so a generous timeout costs no
+        more than the command itself. Use it when a later step of your plan needs
+        the result of something already backgrounded: a background command's exit
+        is reported to the user and never to you, so this is the only way to
+        reach that later step.
+
+        It is not the default. Something you need the result of, that fits in one
+        tool call, should just run in the foreground with a raised ``timeout``.
+        And do not loop on it: if the command is still running after a wait or
+        two, it is long enough that holding the turn is worse than ending it —
+        say what is running and stop, and the completion notice the user gets
+        drives the next step.
+
+        Never guess a duration with ``sleep``: a fixed wait keeps waiting after
+        the command has already failed, and cannot tell you its exit code.
+
+        Args:
+            id: Background command id from execute(background=True), e.g. "term_4"
+            timeout: Seconds this one call may wait (default 300, capped at 300).
+                Reaching it does not stop the command: the result reports the
+                progress so far and you may wait again.
+
+        Returns:
+            str: Exit code and log tail once it finishes, or its output so far
+        """
+        item = self._background_process_registry.get(id)
+        if item is None:
+            known = [p.id for p in self._background_process_registry.list(include_finished=True)]
+            raise ValueError(
+                f"No background command {id!r}. "
+                + (f"Started so far: {', '.join(known)}." if known
+                   else "None have been started in this session.")
+            )
+
+        effective_timeout = max(1, min(timeout, _MAX_WAIT_SECONDS))
+        deadline = time.monotonic() + effective_timeout
+        while not item.finished.is_set() and time.monotonic() < deadline:
+            await asyncio.sleep(_WAIT_POLL_INTERVAL)
+
+        tail = read_log_tail(item.log_path, max_lines=40, max_chars=4000)
+        if item.finished.is_set():
+            header = (
+                f"Background command #{item.num} ({item.id}) exited with code "
+                f"{item.returncode} after {item.elapsed}."
+            )
+        else:
+            header = (
+                f"Background command #{item.num} ({item.id}) is still running after "
+                f"{item.elapsed}; this wait timed out but the command was not stopped. "
+                f"If it has already outlasted a wait or two, stop waiting: end your "
+                f"turn and let the completion notice the user gets drive the next step."
+            )
+        lines = [header, f"Log: {item.log_path}"]
+        if tail:
+            lines.append("")
+            lines.append(tail)
+        return "\n".join(lines)
 
 
 # BuiltinWebSearchTool / BuiltinFetchUrlTool now live in

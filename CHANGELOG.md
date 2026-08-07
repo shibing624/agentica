@@ -12,11 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### features
 - `execute(background=True)`：长命令可立即返回，由共享 `BackgroundProcessRegistry` 托管进程组；stdout/stderr 写入 `~/.agentica/projects/<user>/.../background/` 日志。CLI 新增 `/ps` 列出后台 terminal 与 background agent，`/stop <id|pid|#n>` 可按目标停止（空参停全部）；状态栏显示正在运行的 background terminal 数量。registry 经 `create_agent` / session rebuild 路径注入，与 `/background` agent 任务共用同一套 `/ps`/`/stop` 入口
+- `wait(id=...)`：等待 `execute(background=True)` 启动的后台命令，命令一退出立即返回并给出退出码、耗时和日志尾部；未结束则在超时后返回当前进度且不停止命令，单次上限 300 秒，让调用回到模型循环以便用户打断。后台命令的退出状态只报给用户，`wait` 是它回到对话里的唯一途径。它补的是「命令可能活得比一次工具调用久」这个断层：前台命令被 timeout 或被取消的一轮杀掉会丢掉全部输出，而这类任务此前只能退回 `sleep N && tail log` 的盲等。一次调用跑得完、当下就要结果的命令仍应留在前台并调高 `timeout`；真正跑几小时以上的任务则不该 `wait`，等一两次仍未结束就结束轮次，由用户收到的完成通知驱动后续
 - CLI 渲染 `apply_patch` 的真实多文件 unified diff：在原子写入前解析 patch envelope 并捕获每个目标文件的原始内容，完成后展示一份合并的 old→new diff，替代 executor 的文本摘要
 - CLI execute 工具调用行支持宽度感知预览：普通长命令和 heredoc 统一最多展示 3 行正文，Ctrl+O 可分别展开完整 command 和折叠 output
 
 #### fixes
 - `execute(background=True)` 完成后，CLI 现在会主动异步显示成功或失败、退出码、尾部输出和完整日志路径；通知由 registry 的完成事件驱动，不会唤醒 LLM。`/stop` 和 CLI 退出触发的终止不会再重复显示为任务失败，等待 `ask_user_question` 输入期间的完成事件会保留到安全时机再展示
+- 修复 `execute(background=True)` 遇到以 `&` 结尾的命令时误报完成：shell 会 fork 掉真正的工作并立刻退出，registry 追踪到的是那个空壳，于是任务还在跑就宣布结束。该组合现在直接拒绝；前台的 `nohup ... &` 仍照常执行，只在结果末尾注明它未被追踪（`/ps`、`/stop` 和完成通知都看不见它，且取消或超时的一轮会连同进程组把它杀掉），并建议改用 `background=True`
+- `execute` 拒绝 120 秒以上的前台起始 `sleep`：观察到的轮询写法 `sleep 330 && tail log` 会把刚被后台化释放的这一轮重新堵死。阈值对齐前台默认 timeout，短重试 `sleep 2 && curl ...` 不受影响。拒绝信息同时给出两条正路：等后台命令用 `wait(id=...)`，等没有完成事件的外部条件用 `until curl -sf ...; do sleep 5; done` 这类成功即返回的重试循环
+- `execute(background=True)` 的返回值和 docstring 改为直接声明契约：退出状态报给用户而非模型，后续步骤需要它的结果就调 `wait(id=...)`，不要自行用 sleep/轮询/阻塞 tail 模拟等待。旧的「读日志查看进度」措辞正是诱导模型接前台轮询的来源
 - 修复后台 terminal registry 接线导致 CLI 启动失败：`SessionState` 现在先于首次 `create_agent()` 初始化，再将同一份 `BackgroundProcessRegistry` 注入 execute 工具、`/ps`、`/stop` 和状态栏
 - 修复工具取消时子进程清理不彻底：新增 `terminate_subprocess()`，在活跃 event loop 上终止并完全回收 asyncio 子进程（`communicate()` 排空管道，支持进程组 SIGTERM→SIGKILL 宽限升级），应用于 execute/grep、shell 及 goal verify 等工具，消除取消后管道传输回调泄漏到已关闭 event loop 的问题
 - CLI 顶层 agent 执行错误改为结构化展示：429/限流等 provider 异常显示红色摘要、可操作 `/retry` 提示和 code/spanId 诊断字段，完整原始异常保留到 Ctrl+O 展开

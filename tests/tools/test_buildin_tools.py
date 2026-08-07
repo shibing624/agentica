@@ -16,6 +16,7 @@ import shlex
 import tempfile
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1077,6 +1078,195 @@ class TestBuiltinExecuteTool:
         finally:
             registry.stop()
         assert registry.running_count() == 0
+
+    def test_execute_background_result_tells_the_model_not_to_wait(self, tmp_dir):
+        """The model followed the old "inspect progress by reading the log" text
+        with `execute("sleep 70; tail ...")`, which re-blocked the very turn
+        backgrounding had just freed. The result must state that the exit goes
+        to the user and that waiting is wrong."""
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+
+        try:
+            result = asyncio.run(tool.execute(command, background=True))
+        finally:
+            registry.stop()
+
+        assert "reported to the user, not to you" in result
+        assert "no sleep, no polling, no blocking tail" in result
+        assert "Inspect progress" not in result
+        # The only sanctioned way back into this conversation.
+        assert 'wait(id="term_1")' in result
+
+    def test_execute_runs_self_detaching_command_but_flags_it(self, execute_tool):
+        """`nohup ... &` stays allowed — it is a standard idiom and a caller may
+        want a raw orphan — but the result has to say what it costs, since /ps,
+        /stop and the completion notice all miss an untracked child."""
+        result = asyncio.run(execute_tool.execute("nohup echo started > /dev/null 2>&1 &"))
+
+        assert "It is untracked" in result
+        assert "background=True" in result
+
+    def test_execute_refuses_self_detaching_command_in_background_mode(self, execute_tool):
+        """Here the '&' is not merely untracked but wrong: the registry would
+        watch a shell that exits at once and announce a completion while the
+        command is still running."""
+        with pytest.raises(ValueError, match="Remove the trailing '&'"):
+            asyncio.run(execute_tool.execute("python3 run.py &", background=True))
+
+    def test_execute_leaves_plain_commands_unflagged(self, execute_tool):
+        """`2>&1` contains an ampersand without detaching anything."""
+        result = asyncio.run(execute_tool.execute("echo ok 2>&1"))
+
+        assert "ok" in result
+        assert "untracked" not in result
+
+    def test_execute_refuses_long_foreground_sleep(self, execute_tool):
+        """The observed poll: background the job, then `sleep 330 && tail log`,
+        which re-blocks the turn backgrounding had just freed."""
+        with pytest.raises(ValueError, match="Refusing to hold this turn") as excinfo:
+            asyncio.run(execute_tool.execute("sleep 330 && tail -2 /tmp/run.log"))
+
+        # A caller waiting on something Agentica does not track needs the correct
+        # form, not just a refusal.
+        assert "until curl -sf" in str(excinfo.value)
+        # The refusal must name the primitive that replaces the blind sleep.
+        assert "wait(id=...)" in str(excinfo.value)
+
+    def test_execute_allows_retry_loop_waiting_on_external_condition(self, execute_tool):
+        """The recommended form exits on success, so it must not be refused."""
+        result = asyncio.run(
+            execute_tool.execute("until echo ready; do sleep 5; done")
+        )
+        assert "ready" in result
+
+    def test_execute_allows_short_sleep_for_service_startup(self, execute_tool):
+        result = asyncio.run(execute_tool.execute("sleep 1 && echo up"))
+        assert "up" in result
+
+    def test_wait_returns_as_soon_as_the_command_exits(self, tmp_dir):
+        """The point of `wait` over `sleep N`: a generous timeout costs only as
+        much wall time as the command itself."""
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        script = 'import time; time.sleep(1); print("summary ready")'
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+        async def scenario():
+            started = await tool.execute(command, background=True)
+            item_id = registry.list(include_finished=True)[0].id
+            assert f'wait(id="{item_id}")' in started
+            return await tool.wait(item_id, timeout=120)
+
+        began = time.monotonic()
+        try:
+            result = asyncio.run(scenario())
+        finally:
+            registry.stop()
+        elapsed = time.monotonic() - began
+
+        assert "exited with code 0" in result
+        assert "summary ready" in result
+        assert elapsed < 30
+
+    def test_wait_reports_progress_without_stopping_the_command(self, tmp_dir):
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        script = 'import time; print("phase 1", flush=True); time.sleep(30)'
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+        async def scenario():
+            await tool.execute(command, background=True)
+            item_id = registry.list()[0].id
+            return await tool.wait(item_id, timeout=1)
+
+        try:
+            result = asyncio.run(scenario())
+            assert "still running" in result
+            assert "phase 1" in result
+            assert registry.running_count() == 1
+            # A job on the scale of hours must not be waited on in a loop; the
+            # user's completion notice is what should drive the next step.
+            assert "stop waiting: end your turn" in result
+        finally:
+            registry.stop()
+
+    def test_wait_on_finished_command_returns_immediately(self, tmp_dir):
+        """A command that finished while the agent did something else must still
+        be reportable — otherwise the result is lost to the conversation."""
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        script = 'print("early")'
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+        async def scenario():
+            await tool.execute(command, background=True)
+            item = registry.list(include_finished=True)[0]
+            assert item.finished.wait(timeout=30)
+            return await tool.wait(item.id, timeout=300)
+
+        try:
+            result = asyncio.run(scenario())
+        finally:
+            registry.stop()
+
+        assert "exited with code 0" in result
+        assert "early" in result
+
+    def test_wait_reports_a_failing_command_exit_code(self, tmp_dir):
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('raise SystemExit(3)')}"
+
+        async def scenario():
+            await tool.execute(command, background=True)
+            return await tool.wait(registry.list(include_finished=True)[0].id, timeout=60)
+
+        try:
+            result = asyncio.run(scenario())
+        finally:
+            registry.stop()
+
+        assert "exited with code 3" in result
+
+    def test_wait_on_unknown_id_lists_known_ids(self, tmp_dir):
+        registry = BackgroundProcessRegistry()
+        tool = BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')}"
+
+        async def scenario():
+            await tool.execute(command, background=True)
+            await tool.wait("term_99", timeout=1)
+
+        try:
+            with pytest.raises(ValueError, match="No background command 'term_99'") as excinfo:
+                asyncio.run(scenario())
+        finally:
+            registry.stop()
+
+        assert "term_1" in str(excinfo.value)
+
+    def test_wait_caps_a_single_call(self, execute_tool):
+        """One call must not hold the turn indefinitely: the caller returns
+        through the model loop, which is where the user can interrupt."""
+        assert execute_tool.functions["wait"].manages_own_timeout is True
+
+        registry = execute_tool._background_process_registry
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+
+        async def scenario():
+            await execute_tool.execute(command, background=True)
+            item_id = registry.list()[0].id
+            with patch("agentica.tools.buildin_tools._MAX_WAIT_SECONDS", 1):
+                return await execute_tool.wait(item_id, timeout=300)
+
+        try:
+            result = asyncio.run(scenario())
+        finally:
+            registry.stop()
+
+        assert "still running" in result
 
     def test_execute_background_emits_completion_event(self, tmp_dir, monkeypatch):
         agentica_home = Path(tmp_dir) / "agentica-home"

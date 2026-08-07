@@ -12,7 +12,7 @@ import signal
 import subprocess
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
@@ -32,6 +32,28 @@ def _shorten_command(command: str, limit: int = 90) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3] + "..."
+
+
+def read_log_tail(log_path: str, max_lines: int = 5, max_chars: int = 2000) -> str:
+    """Return the tail of a background command log, without the ``$ cmd`` header."""
+    path = Path(log_path)
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as f:
+            if size > max_chars * 4:
+                f.seek(max(0, size - max_chars * 4))
+            data = f.read()
+    except OSError:
+        return ""
+
+    text = data.decode("utf-8", errors="replace")
+    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
+    if lines and lines[0].startswith("$ "):
+        lines = lines[1:]
+    tail = "\n".join(lines[-max_lines:])
+    if len(tail) > max_chars:
+        tail = tail[-max_chars:]
+    return tail
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -55,6 +77,10 @@ class BackgroundProcess:
     log_path: str
     started_at: float
     stop_requested: bool = False
+    # Set by the watcher thread once the process is reaped. Callers that need to
+    # block until the command is done wait on this instead of racing the watcher
+    # for the same waitpid.
+    finished: threading.Event = field(default_factory=threading.Event)
 
     @property
     def pid(self) -> int:
@@ -188,6 +214,7 @@ class BackgroundProcessRegistry:
                 returncode=int(returncode),
                 stop_requested=item.stop_requested,
             )
+        item.finished.set()
         self._completed.put(event)
 
     def wait_completed(self, timeout: Optional[float] = None) -> BackgroundProcessCompleted:
@@ -209,6 +236,15 @@ class BackgroundProcessRegistry:
         if not target:
             return False
         return target in {item.id, str(item.num), f"#{item.num}", str(item.pid)}
+
+    def get(self, target: str) -> Optional[BackgroundProcess]:
+        """Look up one command by id, number or pid. Finished ones stay findable."""
+        with self._lock:
+            items = list(self._items.values())
+        for item in items:
+            if self._matches(item, target):
+                return item
+        return None
 
     def stop(self, target: Optional[str] = None) -> List[BackgroundProcess]:
         with self._lock:

@@ -72,7 +72,11 @@ from agentica.cli.display import (
 from agentica.cli.context_usage import measure_context
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
-from agentica.tools.background_processes import BackgroundProcessCompleted, BackgroundProcessRegistry
+from agentica.tools.background_processes import (
+    BackgroundProcessCompleted,
+    BackgroundProcessRegistry,
+    read_log_tail,
+)
 from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger, suppress_console_logging
 from agentica.workspace import Workspace
@@ -809,27 +813,6 @@ def _print_boxed_result(label: str, question: str, result_text: str, color: str 
     con.print(f"[{color}]╰{'─' * (tw - 2)}╯[/{color}]")
 
 
-def _read_background_log_tail(log_path: str, max_lines: int = 5, max_chars: int = 2000) -> str:
-    path = Path(log_path)
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as f:
-            if size > max_chars * 4:
-                f.seek(max(0, size - max_chars * 4))
-            data = f.read()
-    except OSError:
-        return ""
-
-    text = data.decode("utf-8", errors="replace")
-    lines = [line.rstrip() for line in text.splitlines() if line.strip()]
-    if lines and lines[0].startswith("$ "):
-        lines = lines[1:]
-    tail = "\n".join(lines[-max_lines:])
-    if len(tail) > max_chars:
-        tail = tail[-max_chars:]
-    return tail
-
-
 def _print_background_completion(event: BackgroundProcessCompleted) -> None:
     con = get_console()
     ok = event.returncode == 0
@@ -840,7 +823,7 @@ def _print_background_completion(event: BackgroundProcessCompleted) -> None:
         f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
         f"(exit {event.returncode}): {rich_escape(event.preview)}"
     )
-    tail = _read_background_log_tail(event.log_path)
+    tail = read_log_tail(event.log_path)
     if tail:
         for line in tail.splitlines():
             con.print(f"  {rich_escape(line)}")

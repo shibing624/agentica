@@ -4109,7 +4109,7 @@ class TestBackgroundCompletionNotice(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            tail = it._read_background_log_tail(str(log_path), max_lines=5)
+            tail = it.read_log_tail(str(log_path), max_lines=5)
 
         self.assertEqual(tail.splitlines(), ["line2", "line3", "line4", "line5", "line6"])
 
