@@ -5,15 +5,6 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Versioning Policy
-
-| Change type | Version bump | Example |
-|-------------|-------------|---------|
-| New public class, function, or protocol | **minor** | `1.3.x` → `1.4.0` |
-| Bug fix, internal refactor (no API change) | **patch** | `1.3.2` → `1.3.3` |
-| Breaking change to public API | **major** | `1.x.y` → `2.0.0` |
-
-A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ---
 
