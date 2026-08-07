@@ -62,6 +62,7 @@ from agentica.cli.display import (
     parse_file_mentions,
     inject_file_contents,
     display_user_message,
+    display_agent_execution_error,
     format_session_summary,
     get_file_completions,
     get_truncated_blocks,
@@ -1426,12 +1427,7 @@ def _process_stream_response(
         )
     except Exception as e:
         _set_phase("idle")
-        msg = str(e)
-        con.print(f"\n[bold red]Error during agent execution: {msg}[/bold red]")
-        # Transient connection / gateway failures are usually worth a retry.
-        low = msg.lower()
-        if any(h in low for h in ("connection", "timeout", "502", "503", "504", "gateway", "remote disconnected")):
-            con.print("[dim]  Transient network error — type /retry to resend the last message.[/dim]")
+        display_agent_execution_error(con, e)
     finally:
         # Clear the live-event callback so it doesn't outlive this run.
         current_agent._event_callback = None

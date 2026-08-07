@@ -19,6 +19,22 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 
 ## [Unreleased]
 
+#### features
+- CLI 渲染 `apply_patch` 的真实多文件 unified diff：在原子写入前解析 patch envelope 并捕获每个目标文件的原始内容，完成后展示一份合并的 old→new diff，替代 executor 的文本摘要
+- CLI execute 工具调用行支持宽度感知预览：普通长命令和 heredoc 统一最多展示 3 行正文，Ctrl+O 可分别展开完整 command 和折叠 output
+
+#### fixes
+- 修复工具取消时子进程清理不彻底：新增 `terminate_subprocess()`，在活跃 event loop 上终止并完全回收 asyncio 子进程（`communicate()` 排空管道，支持进程组 SIGTERM→SIGKILL 宽限升级），应用于 execute/grep、shell 及 goal verify 等工具，消除取消后管道传输回调泄漏到已关闭 event loop 的问题
+- CLI 顶层 agent 执行错误改为结构化展示：429/限流等 provider 异常显示红色摘要、可操作 `/retry` 提示和 code/spanId 诊断字段，完整原始异常保留到 Ctrl+O 展开
+- 修复 CLI 输出 OSC 8 超链接泄漏：Rich 为 Markdown 链接生成 OSC 8 终端超链接，prompt_toolkit 的 ANSI 解析器不识别 OSC 序列会把 payload 渲染成可见文本，渲染前剥离不支持的 OSC 8 包装（保留链接样式文本）
+- 修复 Ctrl+O 分页器在输出含控制字符时停在 less 的 binary-file 确认提示：less 调用统一加 `-f` 强制打开
+- `/compact` 原生压缩失败的回退提示改为 `logger.warning`，不再向终端打印打断对话流
+
+#### docs
+- `apply_patch` docstring 明确要求 Update/Delete 操作前必须先 `read_file`，禁止凭记忆构造上下文
+- README News 区重构：旧版本条目折叠进 `<details>` 区块
+- 终端文档更新 `/new` 命令别名说明及退出 CLI 后按 session ID 恢复的用法
+
 ## [1.4.11] - 2026-08-04
 
 ### Added

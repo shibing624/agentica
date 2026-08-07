@@ -3,14 +3,16 @@
 @author:XuMing(xuming624@qq.com)
 @description: CLI display utilities - colors, formatting, stream display manager
 """
+import ast
 import difflib
 import json
 import os
 import re
+import textwrap
 import time
 from collections import OrderedDict
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from rich.markdown import Markdown
 from rich.padding import Padding
@@ -79,7 +81,7 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
     get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
     get_console().print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
-    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool output (e.g. long execute results) in pager (Ctrl+O or Esc to return)")
+    get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool commands and output in pager (Ctrl+O or Esc to return)")
     get_console().print("  [bright_green]Alt+P[/bright_green]       Pause/resume live output while browsing terminal history")
     get_console().print()
     # Input features
@@ -162,12 +164,11 @@ def inject_file_contents(prompt_text: str, mentioned_files: List[Path]) -> str:
 _PASTE_PATH_RE = re.compile(r"@\S*[\\/]pastes[\\/]paste_\S+\.txt")
 
 
-# Tool output blocks truncated in the CLI display during the current run
-# (currently only execute output that exceeds the inline budget). Remembered
-# so the user can expand them on demand: Ctrl+O opens EVERY folded block in
-# one pager (CC-style "expand all"). User input and write-tool diffs are
-# always shown in full, so they are never stashed here. Cleared at the start
-# of each run.
+# Tool command/output blocks truncated in the CLI display during the current
+# run. Remembered so the user can expand them on demand: Ctrl+O opens EVERY
+# folded block in one pager (CC-style "expand all"). User input and write-tool
+# diffs are always shown in full, so they are never stashed here. Cleared at
+# the start of each run.
 _truncated_blocks: List[Dict[str, str]] = []
 
 
@@ -193,6 +194,137 @@ def get_truncated_blocks() -> List[Dict[str, str]]:
 def clear_truncated_blocks() -> None:
     """Drop all remembered truncated blocks (called at run start)."""
     _truncated_blocks.clear()
+
+
+def _parse_provider_error_payload(message: str) -> Dict[str, Any]:
+    """Extract common provider error fields from SDK exception text."""
+    details: Dict[str, Any] = {"raw": message}
+
+    def find_first_key(value: Any, target: str) -> Optional[Any]:
+        if isinstance(value, dict):
+            if target in value:
+                return value[target]
+            for item in value.values():
+                found = find_first_key(item, target)
+                if found is not None:
+                    return found
+        elif isinstance(value, list):
+            for item in value:
+                found = find_first_key(item, target)
+                if found is not None:
+                    return found
+        return None
+
+    status_match = re.search(r"Error code:\s*(\d+)", message, re.IGNORECASE)
+    if status_match:
+        details["status"] = status_match.group(1)
+
+    payload_match = re.search(r"Error code:\s*\d+\s*-\s*(.+)\s*$", message, re.DOTALL | re.IGNORECASE)
+    if not payload_match:
+        return details
+
+    payload_text = payload_match.group(1).strip()
+    if not payload_text.startswith("{"):
+        return details
+    try:
+        payload = ast.literal_eval(payload_text)
+    except (ValueError, SyntaxError):
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            return details
+    if not isinstance(payload, dict):
+        return details
+
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    provider_message = error.get("message") if isinstance(error.get("message"), str) else find_first_key(payload, "message")
+    if isinstance(provider_message, str):
+        details["message"] = provider_message
+    code = error.get("code") if error.get("code") is not None else find_first_key(payload, "code")
+    if code is not None:
+        details["code"] = str(code)
+    error_type = error.get("type") if isinstance(error.get("type"), str) else find_first_key(payload, "type")
+    if isinstance(error_type, str):
+        details["type"] = error_type
+    span_id = find_first_key(payload, "spanId")
+    if isinstance(span_id, str):
+        details["span_id"] = span_id
+    return details
+
+
+def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
+    """Build a concise CLI-facing error view while retaining raw details."""
+    raw = str(error)
+    details = _parse_provider_error_payload(raw)
+    low = raw.lower()
+    status = details.get("status")
+    provider_message = details.get("message")
+
+    is_rate_limited = (
+        status == "429"
+        or "rate_limit" in low
+        or "rate limit" in low
+        or "限流" in raw
+        or "tpm" in low
+    )
+    is_transient = is_rate_limited or any(
+        hint in low
+        for hint in ("connection", "timeout", "502", "503", "504", "gateway", "remote disconnected")
+    )
+
+    if is_rate_limited:
+        summary = f"LLM rate limited ({status})" if status else "LLM rate limited"
+        detail = provider_message or raw
+        hint = "Type /retry after a short wait, or switch model/profile."
+    elif is_transient:
+        summary = f"Transient LLM/API error ({status})" if status else "Transient LLM/API error"
+        detail = provider_message or raw
+        hint = "Type /retry to resend the last message."
+    else:
+        summary = f"Agent execution failed ({status})" if status else "Agent execution failed"
+        detail = provider_message or raw
+        hint = None
+
+    if len(detail) > 500:
+        detail = detail[:497] + "..."
+
+    diagnostics = []
+    for key, label in (
+        ("code", "code"),
+        ("type", "type"),
+        ("span_id", "spanId"),
+    ):
+        value = details.get(key)
+        if value:
+            diagnostics.append(f"{label}={value}")
+
+    return {
+        "summary": summary,
+        "detail": detail,
+        "diagnostics": " ".join(diagnostics),
+        "hint": hint,
+        "raw": raw,
+    }
+
+
+def display_agent_execution_error(console_instance, error: BaseException) -> Dict[str, Any]:
+    """Render a structured agent error and retain raw details for Ctrl+O."""
+    view = _format_agent_execution_error(error)
+    if view["raw"]:
+        remember_truncated("Agent error · raw", view["raw"])
+
+    headline = Text("● Error: ", style="bold red")
+    headline.append(view["summary"], style="bold red")
+    console_instance.print()
+    console_instance.print(headline)
+    if view["detail"]:
+        console_instance.print(Text(f"  {view['detail']}", style="red"))
+    if view["diagnostics"]:
+        console_instance.print(Text(f"  {view['diagnostics']}", style="dim"))
+    if view["hint"]:
+        console_instance.print(Text(f"  {view['hint']}", style="dim"))
+    console_instance.print(Text("  Ctrl+O shows raw provider error.", style="dim"))
+    return view
 
 
 class _GutteredConsole:
@@ -546,7 +678,7 @@ def show_help(skills_registry=None):
         "Ctrl+C":            "Interrupt current operation",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Ctrl+V":            "Paste image from clipboard",
-        "Ctrl+O":            "Expand truncated tool output (e.g. long execute results) in pager",
+        "Ctrl+O":            "Expand truncated tool commands and output in pager",
     }
     for key, desc in shortcuts.items():
         get_console().print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
@@ -592,6 +724,61 @@ def _shorten_paths_in_command(command: str) -> str:
     return command
 
 
+def _wrap_command_lines(command: str, width: int) -> List[str]:
+    """Wrap a shell command for display while preserving explicit newlines.
+
+    Long indivisible tokens (URLs, IDs, paths) stay intact instead of being
+    split into misleading fragments. The full command is retained separately
+    for Ctrl+O whenever the inline preview is folded.
+    """
+    wrapped: List[str] = []
+    logical_lines = command.splitlines() or [""]
+    for line in logical_lines:
+        if not line:
+            wrapped.append("")
+            continue
+        wrapped.extend(textwrap.wrap(
+            line,
+            width=max(1, width),
+            replace_whitespace=False,
+            drop_whitespace=True,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""])
+    return wrapped
+
+
+def _display_execute_command(console_instance, command: str) -> None:
+    """Render an execute command as one header plus two continuation rows."""
+    raw_command = str(command or "")
+    display_command = _shorten_paths_in_command(raw_command)
+    icon = TOOL_ICONS.get("execute", TOOL_ICONS["default"])
+    header = f" {icon} execute "
+    continuation = "   │ "
+    width = max(1, int(getattr(console_instance, "width", 80) or 80) - len(header))
+    command_lines = _wrap_command_lines(display_command, width)
+    visible_lines = command_lines[:3]
+    omitted = len(command_lines) - len(visible_lines)
+
+    for index, line in enumerate(visible_lines):
+        rendered = Text()
+        if index == 0:
+            rendered.append(f" {icon} ")
+            rendered.append("execute", style="bold magenta")
+            rendered.append(" ")
+        else:
+            rendered.append(continuation, style="dim")
+        rendered.append(line, style="dim")
+        console_instance.print(rendered)
+
+    if omitted > 0:
+        hint = Text()
+        hint.append(continuation, style="dim")
+        hint.append(f"… +{omitted} lines (Ctrl+O to expand)", style="dim italic")
+        console_instance.print(hint)
+        remember_truncated("Command · execute", raw_command)
+
+
 def format_tool_display(tool_name: str, tool_args: dict) -> str:
     """Format tool call for user-friendly display."""
     # File reading tools - show filename and line range
@@ -626,10 +813,7 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     # Execute command - shorten absolute paths in command
     if tool_name == "execute":
         command = tool_args.get("command", "")
-        command = _shorten_paths_in_command(command)
-        if len(command) > 300:
-            return command[:297] + "..."
-        return command
+        return _shorten_paths_in_command(command)
     
     # Todo tools - list the todo items (show ALL todos, no truncation)
     if tool_name == "write_todos":
@@ -718,10 +902,12 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     if tool_count > 1:
         console_instance.print()
 
+    if tool_name == "execute":
+        _display_execute_command(console_instance, tool_args.get("command", ""))
     # Special handling for write_todos - multi-line display.
     # Note: in this repo "task" is the dedicated subagent-spawn tool, so we
     # avoid using "tasks" as the label here to prevent confusion.
-    if tool_name == "write_todos" and "\n" in display_str:
+    elif tool_name == "write_todos" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
         console_instance.print(f"    {display_str}", style="dim")
     elif display_str:

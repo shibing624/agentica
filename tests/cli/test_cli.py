@@ -1210,6 +1210,162 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("line 29", text2)
         self.assertNotIn("line 15", text2)
 
+    def test_display_execute_wraps_long_command_and_retains_full_command(self):
+        """Long commands use a width-aware preview and remain expandable."""
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        command = "python3 -m personamem.run " + " ".join(
+            f"--question-id value-{index}" for index in range(12)
+        )
+        output = StringIO()
+        console = Console(file=output, width=60, force_terminal=False, no_color=True)
+        manager = StreamDisplayManager(console)
+        disp.clear_truncated_blocks()
+
+        manager.display_tool("execute", {"command": command}, tool_call_id="exec-long")
+
+        rendered = output.getvalue()
+        self.assertIn("execute python3 -m personamem.run", rendered)
+        self.assertEqual(rendered.count("│"), 3)
+        self.assertRegex(rendered, r"… \+\d+ lines \(Ctrl\+O to expand\)")
+        self.assertNotIn("value-11", rendered)
+        self.assertEqual(disp.get_truncated_blocks(), [{
+            "title": "Command · execute",
+            "content": command,
+        }])
+
+    def test_display_execute_heredoc_uses_same_multiline_preview(self):
+        """Heredoc scripts show their leading lines without Python-specific parsing."""
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        command = "\n".join([
+            "python3 - <<'PY'",
+            "import csv, json, pathlib",
+            "base = pathlib.Path('exp/dual_mem_exp/benchmarks')",
+            "rows = list(csv.DictReader(open(base / 'questions.csv')))",
+            "print(json.dumps(rows[0]))",
+            "PY",
+        ])
+        output = StringIO()
+        console = Console(file=output, width=100, force_terminal=False, no_color=True)
+        manager = StreamDisplayManager(console)
+        disp.clear_truncated_blocks()
+
+        manager.display_tool("execute", {"command": command}, tool_call_id="exec-heredoc")
+
+        rendered = output.getvalue()
+        self.assertIn("execute python3 - <<'PY'", rendered)
+        self.assertIn("│ import csv, json, pathlib", rendered)
+        self.assertIn("│ base = pathlib.Path", rendered)
+        self.assertIn("… +3 lines (Ctrl+O to expand)", rendered)
+        self.assertNotIn("print(json.dumps", rendered)
+        self.assertEqual(disp.get_last_truncated()["content"], command)
+
+    def test_execute_command_and_output_are_separate_expandable_blocks(self):
+        """Ctrl+O retains both a folded command and its folded output."""
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        command = "python3 -m benchmark " + " ".join(
+            f"--case case-{index}" for index in range(16)
+        )
+        long_output = "\n".join(f"output {index}" for index in range(30))
+        output = StringIO()
+        console = Console(file=output, width=60, force_terminal=False, no_color=True)
+        manager = StreamDisplayManager(console)
+        disp.clear_truncated_blocks()
+
+        manager.display_tool("execute", {"command": command}, tool_call_id="exec-both")
+        manager.display_tool_result(
+            "execute",
+            long_output,
+            elapsed=0.5,
+            tool_args={"command": command},
+            tool_call_id="exec-both",
+        )
+
+        self.assertEqual(disp.get_truncated_blocks(), [
+            {"title": "Command · execute", "content": command},
+            {"title": "Tool output · execute", "content": long_output},
+        ])
+
+    def test_display_agent_execution_error_formats_rate_limit_payload(self):
+        """Provider rate limits render as a concise error with raw details expandable."""
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli import display as disp
+
+        raw = (
+            "Error code: 429 - {'error': {'message': 'TPM 限流：当前 token 余量已耗尽，"
+            "限流为 500000 tokens/min，请稍后重试', 'type': 'gateway_error', "
+            "'code': '4029'}, 'trace': {'spanId': '3a69ffde9353db3f'}}"
+        )
+        output = StringIO()
+        console = Console(file=output, width=100, force_terminal=False, no_color=True)
+        disp.clear_truncated_blocks()
+
+        view = disp.display_agent_execution_error(console, RuntimeError(raw))
+
+        rendered = output.getvalue()
+        self.assertEqual(view["summary"], "LLM rate limited (429)")
+        self.assertIn("● Error: LLM rate limited (429)", rendered)
+        self.assertIn("TPM 限流", rendered)
+        self.assertIn("code=4029", rendered)
+        self.assertIn("spanId=3a69ffde9353db3f", rendered)
+        self.assertIn("Type /retry after a short wait", rendered)
+        self.assertIn("Ctrl+O shows raw provider error", rendered)
+        self.assertNotIn("'trace'", rendered)
+        self.assertEqual(disp.get_truncated_blocks(), [{
+            "title": "Agent error · raw",
+            "content": raw,
+        }])
+
+    def test_display_agent_execution_error_keeps_retry_hint_for_429_without_payload(self):
+        """A bare 429 still gets the same actionable retry treatment."""
+        from agentica.cli import display as disp
+
+        raw = "Error code: 429 - rate limit exceeded by upstream proxy"
+        view = disp._format_agent_execution_error(RuntimeError(raw))
+
+        self.assertEqual(view["summary"], "LLM rate limited (429)")
+        self.assertEqual(view["detail"], raw)
+        self.assertIn("/retry", view["hint"])
+
+    def test_display_agent_execution_error_accepts_top_level_message_payload(self):
+        """Provider payloads do not need an OpenAI-style error.message shape."""
+        from agentica.cli import display as disp
+
+        raw = "Error code: 503 - {'message': 'upstream queue full', 'code': 'busy'}"
+        view = disp._format_agent_execution_error(RuntimeError(raw))
+
+        self.assertEqual(view["summary"], "Transient LLM/API error (503)")
+        self.assertEqual(view["detail"], "upstream queue full")
+        self.assertIn("code=busy", view["diagnostics"])
+        self.assertIn("/retry", view["hint"])
+
+    def test_display_agent_execution_error_prints_non_json_message(self):
+        """Plain-text proxy failures still show their actual error message."""
+        from agentica.cli import display as disp
+
+        raw = "Proxy temporarily unavailable: upstream timeout while dialing model"
+        view = disp._format_agent_execution_error(RuntimeError(raw))
+
+        self.assertEqual(view["summary"], "Transient LLM/API error")
+        self.assertEqual(view["detail"], raw)
+        self.assertIn("/retry", view["hint"])
+
     def test_user_message_uses_subtle_background_panel(self):
         """Historical user queries are visually separated from assistant output."""
         from rich.padding import Padding
