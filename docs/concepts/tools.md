@@ -297,7 +297,6 @@ tools = get_builtin_tools(work_dir="./")
 | `read_file` | `BuiltinFileTool` | 读文件（支持 offset/limit 分页，大文件保护） |
 | `write_file` | `BuiltinFileTool` | 创建/覆写文件 |
 | `edit_file` | `BuiltinFileTool` | 精确字符串替换（比 write_file 安全） |
-| `multi_edit_file` | `BuiltinFileTool` | 同一文件多处编辑（原子操作） |
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件 |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep，支持 regex） |

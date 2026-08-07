@@ -90,7 +90,7 @@ class TestBuiltinFileToolDescriptions:
         assert "read_file" in tool.functions
         assert "write_file" in tool.functions
         assert "edit_file" in tool.functions
-        assert "multi_edit_file" in tool.functions
+        assert "multi_edit_file" not in tool.functions
         assert "apply_patch" in tool.functions
         assert "glob" in tool.functions
         assert "grep" in tool.functions

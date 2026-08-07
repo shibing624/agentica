@@ -7,7 +7,7 @@ Shared by the SDK (Agent/DeepAgent), the CLI, and the Gateway so all three
 surfaces expose the exact same vocabulary and behavior:
 
   - "ask"       : only read-only tools are exposed to the LLM (write_file,
-                  edit_file, multi_edit_file, apply_patch, and execute are hidden).
+                  edit_file, apply_patch, and execute are hidden).
   - "auto"      : every tool is exposed. File writes are
                   restricted to the agent's work_dir via SandboxConfig; reads
                   outside work_dir are also blocked for sensitive path

@@ -1,6 +1,9 @@
 // ============ TOOL RESULT RENDERING (icons, arg formatting, diff tiers) ============
 import { esc, shortenFilePath } from './utils.js';
 
+// multi_edit_file was removed from the built-in tools; its entries here are
+// kept only so historical session logs containing it still render correctly
+// (same rationale as response_formatter.py).
 const TOOL_ICONS = {
   ls: '📁', read_file: '📖', write_file: '✏️', edit_file: '✂️', multi_edit_file: '✂️', apply_patch: '✎',
   glob: '🔍', grep: '🔎', execute: '⚡', web_search: '🌐',

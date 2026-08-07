@@ -8,7 +8,6 @@ Built-in tool set for Agent, including:
 - read_file: Read file content
 - write_file: Write file content
 - edit_file: Edit file (string replacement)
-- multi_edit_file: Apply multiple edits to a file atomically
 - apply_patch: Apply one patch across multiple files
 - glob: File pattern matching
 - grep: Search file content
@@ -26,7 +25,6 @@ import re
 import shutil
 import tempfile
 from contextlib import AsyncExitStack
-from datetime import datetime
 import time
 import uuid
 from pathlib import Path
@@ -237,7 +235,7 @@ def _check_sensitive_write_path(filepath: str) -> Optional[str]:
 class BuiltinFileTool(Tool):
     """
     Built-in file system tool providing ls, read_file, write_file, edit_file,
-    multi_edit_file, apply_patch, glob, and grep functions.
+    apply_patch, glob, and grep functions.
     """
 
     def __init__(
@@ -292,63 +290,6 @@ class BuiltinFileTool(Tool):
         self.register(self.edit_file, sanitize_arguments=False, is_destructive=True)
         self.register(self.apply_patch, sanitize_arguments=False, is_destructive=True)
         self.register(self.request_path_access, is_destructive=False)
-        # multi_edit_file: the auto-derived schema from `edits: List[Dict[str, Any]]`
-        # collapses each item to a bare {"type": "object"} with no properties,
-        # leaving the LLM zero structural guidance. Models then frequently
-        # stringify the whole `edits` array, which fails validation with
-        # "edits: Input should be a valid list". We pin the LLM-facing schema
-        # here so every code path (CLI + SDK) exposes the same rich shape.
-        self.register(
-            self.multi_edit_file,
-            sanitize_arguments=False,
-            is_destructive=True,
-            parameters_override={
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path to the file to edit.",
-                    },
-                    "edits": {
-                        "type": "array",
-                        "description": (
-                            "Edit operations applied sequentially to the file. "
-                            "MUST be a JSON array of objects, NOT a stringified array."
-                        ),
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "old_string": {
-                                    "type": "string",
-                                    "description": "Exact existing text to find and replace.",
-                                },
-                                "new_string": {
-                                    "type": "string",
-                                    "description": "Replacement text.",
-                                },
-                                "replace_all": {
-                                    "type": "boolean",
-                                    "description": (
-                                        "Replace all occurrences instead of requiring a "
-                                        "unique match. Default false."
-                                    ),
-                                },
-                            },
-                            "required": ["old_string", "new_string"],
-                        },
-                    },
-                    "continue_on_error": {
-                        "type": "boolean",
-                        "description": (
-                            "When true (default), apply the edits that succeed and report "
-                            "failures per-item so you can retry only the failing ones. "
-                            "Set false for all-or-nothing atomic edits."
-                        ),
-                    },
-                },
-                "required": ["file_path", "edits"],
-            },
-        )
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
         # glob and grep enforce their own timeouts on both fast (rg / native
@@ -374,6 +315,111 @@ class BuiltinFileTool(Tool):
         if p.is_absolute():
             return p
         return self.work_dir / p
+
+    def _lexical_abs_path(self, path: Path) -> Path:
+        """Return an absolute path without requiring the target to exist."""
+        return Path(os.path.abspath(path.expanduser()))
+
+    def _nearest_existing_parent(self, path: Path) -> Optional[Path]:
+        """Find the nearest existing parent for a possibly missing path."""
+        current = self._lexical_abs_path(path)
+        if current.exists():
+            return current if current.is_dir() else current.parent
+        for parent in current.parents:
+            if parent.exists():
+                return parent
+        return None
+
+    def _missing_path_error(self, kind: str, raw_path: str, path: Path) -> str:
+        """Build a missing-path error that exposes real path state."""
+        resolved = self._lexical_abs_path(path)
+        nearest_parent = self._nearest_existing_parent(path)
+
+        lines = [
+            f"{kind} not found: {raw_path}",
+            f"Resolved path: {resolved}",
+        ]
+        if nearest_parent is not None:
+            lines.append(f"Nearest existing parent: {nearest_parent}")
+        else:
+            lines.append("Nearest existing parent: <none>")
+
+        suggestions, more = self._suggest_workspace_matches(path)
+        if suggestions:
+            lines.append("Did you mean:")
+            lines.extend(f"  - {suggestion}" for suggestion in suggestions)
+            if more:
+                lines.append(
+                    f"  (more files named '{path.name}' exist; run glob '**/{path.name}' to see all)"
+                )
+
+        lines.append(
+            "Next step: use ls/glob/grep from the nearest existing parent; "
+            "do not retry speculative absolute paths."
+        )
+        return "\n".join(lines)
+
+    _SUGGEST_IGNORED_DIRS = frozenset(
+        {
+            ".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv",
+            ".idea", ".vscode", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+            "dist", "build", ".next", ".turbo", ".tox", "htmlcov", "site-packages",
+        }
+    )
+    _SUGGEST_WALK_BUDGET = 100_000  # max directory entries scanned per lookup
+
+    def _suggest_workspace_matches(
+            self, path: Path, cap: int = 3
+    ) -> Tuple[List[str], bool]:
+        """Find workspace entries sharing path's basename, ranked by trailing-path overlap.
+
+        Returns (relative suggestions capped at `cap`, more_available). Only runs on
+        the missing-path error path, so a bounded os.walk over work_dir is acceptable.
+        """
+        name = path.name
+        if not name:
+            return [], False
+        root = Path(self.work_dir)
+        if not root.is_dir():
+            return [], False
+        root_str = str(root)
+        target_parts = path.parts
+
+        matches: List[Path] = []
+        visited = 0
+        truncated = False
+        for dirpath, dirnames, filenames in os.walk(root_str):
+            dirnames[:] = [d for d in dirnames if d not in self._SUGGEST_IGNORED_DIRS]
+            visited += len(dirnames) + len(filenames)
+            if visited > self._SUGGEST_WALK_BUDGET:
+                truncated = True
+                break
+            if name in filenames:
+                matches.append(Path(dirpath) / name)
+            if name in dirnames:
+                matches.append(Path(dirpath) / name)
+
+        if not matches:
+            return [], False
+        more = truncated or len(matches) > cap
+
+        def trailing_overlap(candidate: Path) -> int:
+            parts = candidate.parts
+            score = 0
+            for a, b in zip(reversed(target_parts), reversed(parts)):
+                if a != b:
+                    break
+                score += 1
+            return score
+
+        matches.sort(key=lambda p: (-trailing_overlap(p), len(p.parts)))
+        suggestions = []
+        for match in matches[:cap]:
+            try:
+                suggestions.append(str(match.relative_to(root)))
+            except ValueError:
+                suggestions.append(str(match))
+        return suggestions, more
 
     def _result_path(self, raw_path: str) -> str:
         """Return the lexical tool path relative to the configured work directory."""
@@ -647,6 +693,10 @@ class BuiltinFileTool(Tool):
 
         Usage:
         - file_path may be absolute, relative to the working directory, or `~`-prefixed
+        - Before calling, ground file_path in the user's exact input or a prior
+          ls/glob/grep/write_file/apply_patch result. If you only know a module,
+          class, or function name, locate the file first; do not use speculative
+          absolute paths from memory or stale summaries.
         - Reads up to `limit` lines (default 500) starting from `offset` (0-based); use offset+limit to page through large files
         - Any line longer than 2000 characters is truncated
         - Results are returned with line-number prefixes (metadata only)
@@ -672,7 +722,7 @@ class BuiltinFileTool(Tool):
             )
 
         if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise FileNotFoundError(self._missing_path_error("File", file_path, path))
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
@@ -731,7 +781,7 @@ class BuiltinFileTool(Tool):
         Usage:
         - If this is an existing file, you MUST use read_file first to read the file's contents.
           This tool will create a new file or OVERWRITE the existing file entirely.
-        - Prefer edit_file for modifying existing files — it only sends the diff.
+        - Prefer apply_patch for modifying existing files with context.
           Only use write_file to create NEW files or for complete rewrites.
         - The file_path can be relative (e.g., "tmp/script.py", "./outputs/data.txt") or absolute path.
           Relative paths are resolved relative to the base working directory.
@@ -799,9 +849,13 @@ class BuiltinFileTool(Tool):
         patch; never guess context from memory or stale output. Add File
         operations do not require a prior read.
 
+        Every Update/Delete path must be grounded in the user's exact input or a
+        prior tool result, preferably the read_file call you just used for that
+        file. Do not construct long absolute paths from module names or stale
+        summaries or speculative absolute paths.
+
         Use this when a change spans multiple files or needs multiple contextual
-        hunks. Keep using edit_file for one simple literal replacement and
-        multi_edit_file for several literal replacements in the same file.
+        hunks. Keep using edit_file only for one simple literal replacement.
 
         The patch must use exactly one envelope with one or more Add, Update, or
         Delete sections. All paths and hunks are validated against current file
@@ -812,7 +866,8 @@ class BuiltinFileTool(Tool):
         Keep each ``@@`` hunk's unchanged context short, stable, and unique.
         Read or re-read the relevant regions immediately before building the
         patch. A failed preflight reports every file and every context hunk that
-        could be checked, so regenerate those hunks from the exact current text
+        could be checked, showing the expected context and the actual current
+        content, so regenerate those hunks from the exact current text
         instead of retrying the same patch.
 
         Example:
@@ -984,8 +1039,14 @@ class BuiltinFileTool(Tool):
         matches the current content exactly. A String not found failure means
         the region must be re-read before retrying.
 
-        Uses literal string matching (NOT regex). Multi-line strings are supported.
-        Prefer this tool over write_file or shell `sed` for targeted changes.
+        file_path and old_string must both be grounded in recent context: use a
+        path returned by ls/glob/grep/read_file/write_file/apply_patch, and copy
+        old_string from the latest read_file output for that exact file. Do not
+        use speculative absolute paths.
+
+        Uses literal string matching (NOT regex). Prefer apply_patch for code
+        edits, multi-hunk edits, and anything that needs surrounding context;
+        use this tool only for one short, unique literal replacement.
 
         When editing text from read_file output, ensure you preserve the exact indentation
         (tabs/spaces) as it appears in the file. The line number prefix in read_file output
@@ -995,9 +1056,12 @@ class BuiltinFileTool(Tool):
         larger string with more surrounding context to make it unique, or use
         replace_all=True to change every instance.
 
-        For multiple edits to the SAME file, prefer `multi_edit_file` to apply them
-        atomically in one call. If you call `edit_file` multiple times on the same file
-        in parallel, they will be serialized automatically to avoid race conditions.
+        A String not found error includes the actual current content of the most
+        similar region when one can be located unambiguously — copy that exact
+        text into old_string and retry directly.
+
+        If you call `edit_file` multiple times on the same file in parallel,
+        they will be serialized automatically to avoid race conditions.
         File paths may be absolute, relative to the working directory, or `~`-prefixed.
 
         Args:
@@ -1021,7 +1085,7 @@ class BuiltinFileTool(Tool):
         path_key = str(path)
 
         if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise FileNotFoundError(self._missing_path_error("File", file_path, path))
         if not path.is_file():
             raise IsADirectoryError(f"Not a file: {file_path}")
 
@@ -1045,7 +1109,9 @@ class BuiltinFileTool(Tool):
             result = self._str_replace(content, old_string, new_string, replace_all)
 
             if not result["success"]:
-                raise ValueError(result["error"] + "\n\n" + self._edit_read_hint())
+                raise ValueError(
+                    self._build_edit_not_found_error(result["error"], content, old_string)
+                )
 
             # Atomic write back
             tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -1068,147 +1134,6 @@ class BuiltinFileTool(Tool):
             parts.append(diag_text)
         return "\n\n".join(parts)
 
-    async def multi_edit_file(
-            self,
-            file_path: str,
-            edits: List[Dict[str, Any]],
-            continue_on_error: bool = True,
-    ) -> str:
-        """Apply multiple edits to a single file.
-
-        Read the relevant region with read_file before editing so each edit's
-        old_string matches the current content exactly. A String not found
-        failure means the region must be re-read before retrying.
-
-        Edits are applied sequentially on the same in-memory content, then
-        the result is written back atomically once.
-
-        This is preferred over multiple parallel `edit_file` calls when you need
-        to make several changes to the same file — it is faster, uses fewer tokens,
-        and the write-back step is atomic.
-
-        Failure semantics — controlled by ``continue_on_error``:
-
-        - ``True`` (default, recommended): each edit is independent. Successful
-          edits are written, failed edits are reported back per-item so the
-          model can retry just the failing ones. This avoids the "1-failure
-          poisons all 7 edits" footgun where a slightly wrong ``old_string``
-          forces the model to redo every edit from scratch.
-        - ``False``: classic atomic mode. If ANY edit fails, NO edits are
-          applied. Use only when the edits genuinely depend on each other
-          (e.g. an earlier edit introduces text the next edit references).
-
-        Args:
-            file_path: Path to the file to edit.
-            edits: List of edit operations. Each dict must contain:
-                - old_string (str): The existing text to find
-                - new_string (str): The replacement text
-                - replace_all (bool, optional): Replace all occurrences. Default: False
-            continue_on_error: Apply successful edits even when some fail.
-                Default: True.
-
-        Returns:
-            Summary listing which edits applied and which failed.
-        """
-        self._validate_write_path(file_path)
-        path = self._resolve_path(file_path)
-        path_key = str(path)
-
-        if not path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
-        if not path.is_file():
-            raise IsADirectoryError(f"Not a file: {file_path}")
-
-        sensitive_err = self._sensitive_write_guard(str(path))
-        if sensitive_err:
-            raise PermissionError(sensitive_err)
-
-        abs_path = str(path.resolve())
-
-        if not edits:
-            raise ValueError("'edits' list cannot be empty.")
-
-        await self._diagnostics_snapshot(path)
-
-        lock = self._get_file_lock(path_key)
-        async with lock:
-            async with aiofiles.open(path, 'r', encoding='utf-8') as f:
-                content = await f.read()
-
-            # ── Snapshot for rollback before edits ────────────────
-            self._file_snapshots.setdefault(abs_path, []).append(content)
-
-            # Apply edits sequentially on in-memory content
-            results: List[str] = []
-            failures: List[str] = []
-            applied_count = 0
-            for i, edit in enumerate(edits):
-                old_string = edit.get("old_string", "")
-                new_string = edit.get("new_string", "")
-                replace_all = edit.get("replace_all", False)
-
-                if not old_string:
-                    err = f"Edit {i + 1}/{len(edits)}: empty old_string"
-                    if continue_on_error:
-                        failures.append(err)
-                        results.append(f"Edit {i + 1}: SKIPPED ({err})")
-                        continue
-                    raise ValueError(f"{err}. No changes were made.")
-
-                result = self._str_replace(content, old_string, new_string, replace_all)
-                if not result["success"]:
-                    hint = self._edit_read_hint()
-                    err = f"Edit {i + 1}/{len(edits)}: {result['error']}\n\n{hint}"
-                    if continue_on_error:
-                        failures.append(err)
-                        results.append(f"Edit {i + 1}: FAILED ({result['error']})\n\n{hint}")
-                        continue
-                    raise ValueError(f"{err}. No changes were made.")
-
-                content = result["new_content"]
-                applied_count += 1
-                results.append(f"Edit {i + 1}: replaced {result['count']} occurrence(s)")
-
-            # If nothing applied (all failed in best-effort mode), don't touch the file —
-            # surface the failures so the LLM can retry without producing an empty diff.
-            if applied_count == 0:
-                summary_lines = [
-                    f"No edits applied to '{file_path}' ({len(failures)}/{len(edits)} failed):",
-                    *results,
-                ]
-                return "\n".join(summary_lines)
-
-            # Atomic write (once)
-            tmp_fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-            try:
-                os.close(tmp_fd)
-                async with aiofiles.open(tmp_path, 'w', encoding='utf-8') as f:
-                    await f.write(content)
-                os.replace(tmp_path, str(path))
-            except Exception:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
-
-        if failures:
-            header = (
-                f"Partially applied edits to '{file_path}' "
-                f"({applied_count}/{len(edits)} succeeded, {len(failures)} failed). "
-                "Successful edits have been written. "
-                "Re-issue ONLY the failing edits (likely with adjusted old_string) — "
-                "do not resend the successful ones:"
-            )
-        else:
-            header = f"Successfully applied {len(edits)} edits to '{file_path}':"
-        summary = header + "\n" + "\n".join(results)
-        logger.debug(summary)
-        diag_text = await self._diagnostics_after(path)
-        if diag_text:
-            summary += f"\n\n{diag_text}"
-        return summary
-
     @staticmethod
     def _edit_read_hint() -> str:
         """Return the recovery action for an exact-string edit failure."""
@@ -1216,6 +1141,101 @@ class BuiltinFileTool(Tool):
             "Read or re-read the relevant region with read_file, copy the exact "
             "current text into old_string, then retry the edit."
         )
+
+    @classmethod
+    def _build_edit_not_found_error(cls, error: str, content: str, old_string: str) -> str:
+        """Assemble a String-not-found error, showing the actual current text of
+        the most similar region when one can be located unambiguously."""
+        similar = cls._find_similar_region(content.split("\n"), old_string.split("\n"))
+        if similar is None:
+            return error + "\n\n" + cls._edit_read_hint()
+        start, ratio = similar
+        old_lines = old_string.split("\n")
+        actual_lines = content.split("\n")[start : start + len(old_lines)]
+        shown = actual_lines[:40]
+        block = "\n".join(shown)
+        if len(actual_lines) > len(shown):
+            block += f"\n... ({len(actual_lines) - len(shown)} more lines)"
+        pct = int(round(ratio * 100))
+        return (
+            f"{error}\n\n"
+            f"Most similar region (lines {start + 1}-{start + len(old_lines)}, {pct}% match); "
+            f"actual current content:\n{block}\n\n"
+            "Copy the exact text above into old_string (or re-read the region with "
+            "read_file), then retry the edit."
+        )
+
+    @staticmethod
+    def _find_similar_region(
+            content_lines: List[str], old_lines: List[str]
+    ) -> Optional[Tuple[int, float]]:
+        """Locate the single best-matching region for a failed old_string.
+
+        Returns (0-based start line, similarity ratio) when exactly one region is
+        a clear match (ratio >= 0.75 and no distinct region scores nearly as
+        well), else None. Line comparison is whitespace-insensitive.
+        """
+        window = len(old_lines)
+        if not (1 <= window <= 80) or len(content_lines) < window:
+            return None
+        norm_old = [" ".join(line.split()) for line in old_lines]
+        if not any(norm_old):
+            return None
+        norm_content = [" ".join(line.split()) for line in content_lines]
+
+        # Fast path: exactly one region matches after whitespace normalization.
+        hits = [
+            i
+            for i in range(len(norm_content) - window + 1)
+            if norm_content[i : i + window] == norm_old
+        ]
+        if len(hits) == 1:
+            return hits[0], 1.0
+        if len(hits) > 1:
+            return None
+        if window > 40:
+            return None
+
+        # Anchor on the most distinctive old_string line, then char-compare the
+        # joined text of windows where that anchor aligns (+-1 line drift for
+        # blank-line differences). Char-level comparison keeps a one-token
+        # guess (e.g. a stale string literal) close enough to surface.
+        anchor_index, anchor = max(enumerate(norm_old), key=lambda item: len(item[1]))
+        if len(anchor) < 8:
+            return None
+        close = difflib.get_close_matches(anchor, norm_content, n=3, cutoff=0.6)
+        if not close:
+            return None
+        old_text = "\n".join(norm_old)
+        max_start = len(norm_content) - window
+        scored: List[Tuple[float, int]] = []
+        for candidate in close:
+            seen = 0
+            for i, line in enumerate(norm_content):
+                if line != candidate:
+                    continue
+                seen += 1
+                if seen > 20:
+                    break
+                for start in {i - anchor_index + d for d in (-1, 0, 1)}:
+                    if 0 <= start <= max_start:
+                        window_text = "\n".join(norm_content[start : start + window])
+                        matcher = difflib.SequenceMatcher(None, old_text, window_text)
+                        if matcher.real_quick_ratio() >= 0.7:
+                            scored.append((matcher.ratio(), start))
+        if not scored:
+            return None
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        best_ratio, best_start = scored[0]
+        if best_ratio < 0.75:
+            return None
+        for ratio, start in scored[1:]:
+            if abs(start - best_start) >= window:
+                # A genuinely different region scores nearly as well: ambiguous.
+                if best_ratio - ratio < 0.05:
+                    return None
+                break
+        return best_start, best_ratio
 
     @staticmethod
     def _patch_read_hint() -> str:
@@ -1358,6 +1378,10 @@ class BuiltinFileTool(Tool):
         so "*.py" and "**/*.py" give very different results. Noise directories
         (.git, __pycache__, node_modules, .venv, ...) are always excluded.
 
+        Use this to ground later read_file/grep/apply_patch calls. If you are
+        unsure where a file lives, search from "." or another known existing
+        directory; do not pass a speculative absolute path as `path`.
+
         Args:
             pattern: Glob pattern, e.g. "*.py", "**/*.md", "src/?*.js". May be
                 absolute ("/home/user/*.py") or relative to `path`.
@@ -1373,7 +1397,7 @@ class BuiltinFileTool(Tool):
         base_path = self._resolve_path(path)
 
         if not base_path.exists():
-            raise FileNotFoundError(f"Directory not found: {path}")
+            raise FileNotFoundError(self._missing_path_error("Directory", path, base_path))
 
         effective_timeout = timeout if timeout is not None else _GLOB_TIMEOUT
 
@@ -1428,6 +1452,11 @@ class BuiltinFileTool(Tool):
         totals matter — both drop the code itself and usually force a follow-up
         read_file.
 
+        Ground the `path` argument before calling. If you only know a module,
+        class, function, or filename fragment, search from "." or a known existing
+        directory and let grep find the path; do not pass a speculative absolute
+        path from memory or stale summaries.
+
         Args:
             pattern: Text/regex to search for
             path: File or directory to search (default: ".")
@@ -1452,7 +1481,7 @@ class BuiltinFileTool(Tool):
         self._validate_path(path)
         base_path = self._resolve_path(path)
         if not base_path.exists():
-            raise FileNotFoundError(f"Path not found: {path}")
+            raise FileNotFoundError(self._missing_path_error("Path", path, base_path))
 
         # Effective timeout: the LLM-provided value is used as-is (no upper
         # cap — the caller decides); default _GREP_TIMEOUT when not provided.
@@ -1677,7 +1706,7 @@ class BuiltinFileTool(Tool):
     async def undo_edit(self, file_path: str) -> str:
         """Undo the last edit or write to a file, restoring the previous version.
 
-        Each write_file(), edit_file(), multi_edit_file(), and apply_patch()
+        Each write_file(), edit_file(), and apply_patch()
         update/delete automatically snapshots the file's content before modification.
         This tool restores the most recent snapshot,
         effectively undoing the last change. Can be called multiple times to step
@@ -2004,7 +2033,7 @@ def get_builtin_tools(
     Args:
         work_dir: Work directory for file operations
         include_file_tools: Whether to include file tools (ls, read_file, write_file,
-            edit_file, multi_edit_file, apply_patch, glob, grep)
+            edit_file, apply_patch, glob, grep)
         include_execute: Whether to include code execution tool
         include_web_search: Whether to include web search tool
         include_fetch_url: Whether to include URL fetching tool

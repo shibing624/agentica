@@ -64,6 +64,8 @@ class ContextFailure:
     cursor: int
     context: Tuple[str, ...]
     eof: bool = False
+    actual: Tuple[str, ...] = ()
+    actual_start: int = 0  # 0-based line index of actual[0]
 
     def render(self) -> str:
         location = "EOF context" if self.eof else "context"
@@ -76,6 +78,12 @@ class ContextFailure:
             remaining = len(self.context) - 6
             if remaining > 0:
                 lines.append(f"  ... ({remaining} more context lines)")
+        if self.actual:
+            lines.append(f"Actual from line {self.actual_start + 1}:")
+            lines.extend(f"  {line}" for line in self.actual[:6])
+            remaining = len(self.actual) - 6
+            if remaining > 0:
+                lines.append(f"  ... ({remaining} more lines)")
         return "\n".join(lines)
 
 
@@ -262,12 +270,21 @@ def _parse_update_diff(lines: List[str], input_text: str) -> ParsedUpdateDiff:
         find_result = _find_context(input_lines, section.next_context, cursor, section.eof)
         parser.index = section.end_index
         if find_result.new_index == -1:
+            context_len = len(section.next_context)
+            if section.eof:
+                actual_start = max(0, len(input_lines) - context_len)
+                actual = input_lines[actual_start:]
+            else:
+                actual_start = min(cursor, len(input_lines))
+                actual = input_lines[actual_start : actual_start + max(context_len, 1)]
             failures.append(
                 ContextFailure(
                     hunk_number=hunk_number,
                     cursor=cursor,
                     context=tuple(section.next_context),
                     eof=section.eof,
+                    actual=tuple(actual),
+                    actual_start=actual_start,
                 )
             )
             continue

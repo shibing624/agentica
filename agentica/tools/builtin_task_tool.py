@@ -278,11 +278,6 @@ class BuiltinTaskTool(Tool):
         elif tool_name == "edit_file":
             fp = tool_args.get("file_path", "")
             return fp.rsplit("/", 1)[-1] if "/" in fp else fp
-        elif tool_name == "multi_edit_file":
-            fp = tool_args.get("file_path", "")
-            edits = tool_args.get("edits", [])
-            fname = fp.rsplit("/", 1)[-1] if "/" in fp else fp
-            return f"{fname} ({len(edits)} edits)"
         elif tool_name == "apply_patch":
             patch = str(tool_args.get("patch", ""))
             count = len(re.findall(

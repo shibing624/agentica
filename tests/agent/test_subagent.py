@@ -733,7 +733,7 @@ def test_partial_payload_carries_next_action_hint_and_run_id():
 
 def test_builtin_subagent_configs_are_read_only():
     """Built-in subagents deny write/edit tools and restrict execute to reads."""
-    forbidden = {"write_file", "edit_file", "multi_edit_file", "apply_patch"}
+    forbidden = {"write_file", "edit_file", "apply_patch"}
     configs = get_subagent_configs()
     assert set(configs) == {"explore", "research", "code"}
     for cfg in configs.values():
@@ -763,7 +763,6 @@ def test_select_child_tools_strips_edit_tools_for_code_subagent():
             Function(name="read_file", entrypoint=lambda: None),
             Function(name="write_file", entrypoint=lambda: None),
             Function(name="edit_file", entrypoint=lambda: None),
-            Function(name="multi_edit_file", entrypoint=lambda: None),
             Function(name="apply_patch", entrypoint=lambda: None),
             Function(name="execute", entrypoint=lambda: None),
             Function(name="ls", entrypoint=lambda: None),

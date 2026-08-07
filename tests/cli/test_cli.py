@@ -698,7 +698,7 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertIn("before retrying", output)
         self.assertIn("/new", output)
 
-    def test_multi_edit_diff_uses_configured_work_dir(self):
+    def test_edit_diff_uses_configured_work_dir(self):
         """Relative write paths must resolve against the file tool's work_dir."""
         from agentica.cli.display import StreamDisplayManager
 
@@ -712,15 +712,15 @@ class TestCLIHelpers(unittest.TestCase):
             fake.width = 80
             manager = StreamDisplayManager(fake, work_dir=root)
             manager._capture_file_before_call(
-                "multi_edit_file",
-                {"file_path": "pkg/sample.py", "edits": []},
+                "edit_file",
+                {"file_path": "pkg/sample.py", "old_string": "value = 1\n", "new_string": "value = 2\n"},
                 "call-1",
             )
             target.write_text("value = 2\n", encoding="utf-8")
 
             manager._display_edit_merged(
-                "multi_edit_file",
-                {"file_path": "pkg/sample.py", "edits": []},
+                "edit_file",
+                {"file_path": "pkg/sample.py", "old_string": "value = 1\n", "new_string": "value = 2\n"},
                 "Successfully applied 1 edit",
                 False,
                 " (100ms)",
@@ -865,11 +865,31 @@ class TestCLIHelpers(unittest.TestCase):
         text = "\n".join(str(c) for c in fake.print.call_args_list)
         self.assertIn("FileNotFoundError", text)
 
+    def test_read_file_error_keeps_external_absolute_path_visible(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        path = "/apdcephfs_qy3/share_7435715/flemingxu/nlp/dual-mem/dual_mem/memory_extractor.py"
+
+        dm.display_tool_result(
+            "read_file",
+            "File not found: " + path,
+            is_error=True,
+            elapsed=0.01,
+            tool_args={"file_path": path, "offset": 0, "limit": 300},
+        )
+
+        text = "\n".join(str(c) for c in fake.print.call_args_list)
+        self.assertIn(path, text)
+        self.assertIn("memory_extractor.py", text)
+
     def test_display_tool_defers_edit_tools_call_line(self):
         """Write-diff tools defer the call line until completion."""
         from agentica.cli.display import StreamDisplayManager
 
-        for name in ("edit_file", "multi_edit_file", "apply_patch"):
+        for name in ("edit_file", "apply_patch"):
             fake = MagicMock()
             fake.width = 80
             dm = StreamDisplayManager(fake)
@@ -925,57 +945,6 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertNotIn("+++ b/", code)
         self.assertIn("-DEBUG = False", code)
         self.assertIn("+DEBUG = True", code)
-
-    def test_display_multi_edit_file_aggregates_real_changes_into_one_diff(self):
-        """multi_edit_file renders one real file diff with multiple hunks."""
-        import tempfile
-        from agentica.cli.display import StreamDisplayManager
-
-        old_lines = [f"line {i}\n" for i in range(20)]
-        new_lines = old_lines.copy()
-        new_lines[1] = "first change\n"
-        new_lines[18] = "second change\n"
-        with tempfile.TemporaryDirectory() as td:
-            path = os.path.join(td, "config.py")
-            with open(path, "w") as f:
-                f.writelines(old_lines)
-            args = {
-                "file_path": path,
-                "edits": [
-                    {"old_string": "line 1\n", "new_string": "first change\n"},
-                    {"old_string": "line 18\n", "new_string": "second change\n"},
-                ],
-            }
-            fake = MagicMock()
-            fake.width = 80
-            dm = StreamDisplayManager(fake)
-            dm.display_tool("multi_edit_file", args, tool_call_id="multi-1")
-            with open(path, "w") as f:
-                f.writelines(new_lines)
-            dm.display_tool_result(
-                "multi_edit_file",
-                "Successfully applied 2 edits to config.py",
-                is_error=False,
-                elapsed=0.42,
-                tool_args=args,
-                tool_call_id="multi-1",
-            )
-
-        text = "\n".join(str(c) for c in fake.print.call_args_list)
-        self.assertIn("multi_edit_file", text)
-        self.assertIn("config.py", text)
-        self.assertNotIn(td, text)
-        self.assertIn("Edited 1 file (+2 -2)", text)
-        self.assertIn("(420ms)", text)
-        syntax_args = [c.args[0] for c in fake.print.call_args_list if c.args and "Syntax" in type(c.args[0]).__name__]
-        self.assertEqual(len(syntax_args), 1)
-        code = getattr(syntax_args[0], "code", "")
-        self.assertEqual(code.count("diff -- config.py"), 1)
-        self.assertEqual(code.count("config.py"), 1)
-        self.assertNotIn("--- a/", code)
-        self.assertNotIn("+++ b/", code)
-        self.assertEqual(code.count("@@"), 4)
-        self.assertNotIn("config.py#", code)
 
     def test_display_apply_patch_renders_real_multi_file_diff_with_relative_paths(self):
         from agentica.cli.display import StreamDisplayManager
@@ -4106,6 +4075,18 @@ class TestReadFileCountSummary(unittest.TestCase):
     def test_fallback_when_no_footer(self):
         from agentica.cli.display import StreamDisplayManager
         self.assertEqual(StreamDisplayManager._result_count_summary("read_file", "a\nb\nc"), "3 lines")
+
+    def test_file_metadata_footer_not_counted(self):
+        from agentica.cli.display import StreamDisplayManager
+        res = "     1\ta\n     2\tb\n\n[File metadata: path=/tmp/a.py, size=4 bytes, mtime=2026-08-07T12:00:00]"
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "2 lines")
+
+    def test_truncated_read_with_metadata_footer_counts_content_span(self):
+        from agentica.cli.display import StreamDisplayManager
+        body = [f"{i:6d}\tline {i}" for i in range(1, 501)]
+        res = self._read_result(body, total=504)
+        res += "\n\n[File metadata: path=/tmp/a.py, size=1 bytes, mtime=2026-08-07T12:00:00]"
+        self.assertEqual(StreamDisplayManager._result_count_summary("read_file", res), "500 lines")
 
     def test_grep_count_unchanged(self):
         from agentica.cli.display import StreamDisplayManager

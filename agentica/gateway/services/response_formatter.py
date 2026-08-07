@@ -34,7 +34,8 @@ def extract_metrics(agent: Optional[Any]) -> Optional[Dict[str, Any]]:
 def format_tool_call_args(tool_name: str, tool_args: dict) -> dict:
     """Format tool call arguments for frontend display.
 
-    For file-editing tools (edit_file, multi_edit_file, apply_patch, write_file),
+    For file-editing tools (edit_file, apply_patch, write_file, plus historical
+    multi_edit_file logs),
     computes diff metadata (lines added/deleted) instead of sending
     the full content to the frontend. For other tools, truncates long
     string arguments to 100 characters.

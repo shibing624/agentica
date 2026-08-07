@@ -124,6 +124,18 @@ class TestBuiltinFileToolLs:
 
 
 class TestBuiltinFileToolReadFile:
+    def test_path_tool_descriptions_require_grounded_paths(self):
+        for fn in (
+            BuiltinFileTool.read_file,
+            BuiltinFileTool.grep,
+            BuiltinFileTool.glob,
+            BuiltinFileTool.edit_file,
+            BuiltinFileTool.apply_patch,
+        ):
+            description = " ".join((fn.__doc__ or "").split()).lower()
+            assert "ground" in description
+            assert "speculative absolute path" in description
+
     def test_empty_file_returns_reminder(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "empty.txt")
         Path(fp).touch()
@@ -138,6 +150,7 @@ class TestBuiltinFileToolReadFile:
         assert "line1" in result
         assert "line2" in result
         assert "line3" in result
+        assert "[File metadata:" not in result
 
     def test_read_file_with_offset_limit(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "lines.txt")
@@ -149,9 +162,22 @@ class TestBuiltinFileToolReadFile:
         # line1 should not be present since offset skips it
         assert "line1\t" not in result  # Use tab to avoid matching "line10"
 
-    def test_read_nonexistent_file(self, file_tool):
-        with pytest.raises(FileNotFoundError):
-            asyncio.run(file_tool.read_file("/nonexistent/file.txt"))
+    def test_read_nonexistent_file_returns_path_state(self, file_tool, tmp_dir):
+        existing = Path(tmp_dir, "src")
+        existing.mkdir()
+        candidate = existing / "usage.py"
+        candidate.write_text("x = 1\n")
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.read_file(str(existing / "usage_tracking.py")))
+
+        msg = str(exc.value)
+        assert "File not found:" in msg
+        assert "Resolved path:" in msg
+        assert f"Nearest existing parent: {existing}" in msg
+        assert "Candidate paths:" not in msg
+        assert str(candidate) not in msg
+        assert "do not retry speculative absolute paths" in msg
 
     def test_read_long_lines_truncated(self, file_tool, tmp_dir):
         p = Path(tmp_dir, "long.txt")
@@ -166,6 +192,96 @@ class TestBuiltinFileToolReadFile:
         result = asyncio.run(file_tool.read_file(str(p)))
         # Should contain line numbers (cat -n format)
         assert "\t" in result  # tab separator between line number and content
+
+
+class TestMissingPathSuggestions:
+    """Missing-path errors suggest same-basename workspace entries."""
+
+    def test_read_file_suggests_same_basename_match(self, file_tool, tmp_dir):
+        real = Path(tmp_dir, "pkg", "providers", "config.py")
+        real.parent.mkdir(parents=True)
+        real.write_text("X = 1\n")
+        missing = str(Path(tmp_dir, "dual-mem", "dual_mem", "providers", "config.py"))
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.read_file(missing))
+
+        msg = str(exc.value)
+        assert "Did you mean:" in msg
+        assert "pkg/providers/config.py" in msg
+
+    def test_suggestion_prefers_longest_trailing_overlap(self, file_tool, tmp_dir):
+        generic = Path(tmp_dir, "scratch", "config.py")
+        specific = Path(tmp_dir, "dual_mem", "providers", "config.py")
+        for p in (generic, specific):
+            p.parent.mkdir(parents=True)
+            p.write_text("X = 1\n")
+        missing = str(Path(tmp_dir, "foreign", "dual_mem", "providers", "config.py"))
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.read_file(missing))
+
+        suggestions = str(exc.value).split("Did you mean:")[1]
+        assert suggestions.index("dual_mem/providers/config.py") < suggestions.index(
+            "scratch/config.py"
+        )
+
+    def test_grep_suggests_same_basename_match(self, file_tool, tmp_dir):
+        real = Path(tmp_dir, "src", "config.py")
+        real.parent.mkdir()
+        real.write_text("X = 1\n")
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.grep("class .*Config", path="missing-dir/config.py"))
+        assert "Did you mean:" in str(exc.value)
+        assert "src/config.py" in str(exc.value)
+
+    def test_glob_suggests_same_basename_match(self, file_tool, tmp_dir):
+        real = Path(tmp_dir, "src", "config.py")
+        real.parent.mkdir()
+        real.write_text("X = 1\n")
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.glob("*.py", path="missing-dir/config.py"))
+        assert "Did you mean:" in str(exc.value)
+        assert "src/config.py" in str(exc.value)
+
+    def test_edit_file_suggests_same_basename_match(self, file_tool, tmp_dir):
+        real = Path(tmp_dir, "src", "config.py")
+        real.parent.mkdir()
+        real.write_text("X = 1\n")
+        missing = str(Path(tmp_dir, "elsewhere", "config.py"))
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.edit_file(missing, "a", "b"))
+        assert "Did you mean:" in str(exc.value)
+        assert "src/config.py" in str(exc.value)
+
+    def test_no_suggestion_when_basename_absent(self, file_tool, tmp_dir):
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.grep("x", path="missing/totally_unique_name.py"))
+        msg = str(exc.value)
+        assert "Did you mean:" not in msg
+        assert "Nearest existing parent:" in msg
+
+    def test_ignored_dirs_are_not_suggested(self, file_tool, tmp_dir):
+        noisy = Path(tmp_dir, "node_modules", "config.py")
+        noisy.parent.mkdir()
+        noisy.write_text("X = 1\n")
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.grep("X", path="missing/config.py"))
+        assert "Did you mean:" not in str(exc.value)
+
+    def test_many_matches_add_glob_hint(self, file_tool, tmp_dir):
+        for i in range(5):
+            d = Path(tmp_dir, f"pkg{i}")
+            d.mkdir()
+            (d / "config.py").write_text("X = 1\n")
+
+        with pytest.raises(FileNotFoundError) as exc:
+            asyncio.run(file_tool.grep("X", path="missing/config.py"))
+        assert "run glob '**/config.py' to see all" in str(exc.value)
 
 
 class TestBuiltinFileToolReadCorrectness:
@@ -487,6 +603,28 @@ class TestBuiltinFileToolApplyPatch:
         assert second.read_text() == "SECOND = 2\n"
         assert existing.read_text() == "keep\n"
 
+    def test_context_failure_shows_actual_content(self, file_tool, tmp_dir):
+        """Stale-context hunks show the actual current lines next to the expected ones."""
+        target = Path(tmp_dir, "hello.txt")
+        target.write_text("alpha\nbeta-current\ngamma\n")
+        patch_text = """*** Begin Patch
+*** Update File: hello.txt
+@@
+ alpha
+-beta
+ gamma
+*** End Patch"""
+
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(file_tool.apply_patch(patch_text))
+
+        message = str(exc.value)
+        assert "Expected context:" in message
+        assert "Actual from line 1:" in message
+        assert "  beta-current" in message
+        assert "Read or re-read" in message
+        assert "read_file" in message
+
     def test_absolute_patch_path_is_reported_relative_to_work_dir(self, file_tool, tmp_dir):
         target = Path(tmp_dir, "pkg", "app.py")
         target.parent.mkdir()
@@ -594,22 +732,57 @@ class TestBuiltinFileToolEditFile:
             asyncio.run(file_tool.edit_file(fp, "missing", "after"))
         msg = str(exc.value)
         assert "String not found" in msg
+        assert "Current file state:" not in msg
         assert "Read or re-read the relevant region" in msg
         assert "read_file" in msg
         assert "old_string" in msg
 
-    def test_multi_edit_failure_appends_read_hint(self, file_tool, tmp_dir):
-        """A failing edit inside multi_edit_file surfaces the read hint."""
-        fp = os.path.join(tmp_dir, "multi_fail.txt")
-        Path(fp).write_text("alpha bravo charlie")
-        self._read(file_tool, fp)
-        result = asyncio.run(file_tool.multi_edit_file(fp, [
-            {"old_string": "alpha", "new_string": "ALPHA"},
-            {"old_string": "DOES_NOT_EXIST", "new_string": "x"},
-        ]))
-        assert "Edit 2: FAILED" in result
-        assert "String not found" in result
-        assert "Read or re-read the relevant region" in result
+    def test_edit_string_not_found_shows_similar_region(self, file_tool, tmp_dir):
+        """A stale-guess old_string gets the actual text of the closest region."""
+        fp = os.path.join(tmp_dir, "test_writer.py")
+        Path(fp).write_text(
+            "def test_writer():\n"
+            '    assert search_calls == ["saved preference"]\n'
+            "    assert documents == []\n"
+        )
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(
+                file_tool.edit_file(
+                    fp,
+                    'assert search_calls == ["new preference"]\nassert documents == []',
+                    'assert search_calls == ["x"]\nassert documents == []',
+                )
+            )
+        msg = str(exc.value)
+        assert "String not found" in msg
+        assert "Most similar region" in msg
+        assert 'assert search_calls == ["saved preference"]' in msg
+        assert "Copy the exact text above into old_string" in msg
+
+    def test_edit_similar_region_whitespace_only_mismatch(self, file_tool, tmp_dir):
+        """Indentation drift is reported with the actual lines."""
+        fp = os.path.join(tmp_dir, "mod.py")
+        Path(fp).write_text("def f():\n    value = compute()\n    return value\n")
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(
+                file_tool.edit_file(fp, "value = compute()\nreturn value", "x = 1\nreturn x")
+            )
+        msg = str(exc.value)
+        assert "Most similar region" in msg
+        assert "    value = compute()" in msg
+
+    def test_edit_ambiguous_similar_regions_fall_back_to_read_hint(self, file_tool, tmp_dir):
+        """Repeated boilerplate must not produce a misleading suggestion."""
+        fp = os.path.join(tmp_dir, "repeated.py")
+        block = "def handler():\n    result = run_task()\n    return result\n\n"
+        Path(fp).write_text(block * 3)
+        with pytest.raises(ValueError) as exc:
+            asyncio.run(
+                file_tool.edit_file(fp, "result = run_task()\nreturn result", "x = 1\nreturn x")
+            )
+        msg = str(exc.value)
+        assert "Most similar region" not in msg
+        assert "Read or re-read the relevant region" in msg
 
     def test_single_edit(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "edit.txt")
@@ -628,37 +801,6 @@ class TestBuiltinFileToolEditFile:
         result2 = asyncio.run(file_tool.edit_file(fp, "ccc", "333"))
         assert "Successfully" in result2
         assert Path(fp).read_text() == "111 bbb 333"
-
-    def test_multi_edit_best_effort_partial_success(self, file_tool, tmp_dir):
-        """Default best-effort: successful edits land, failing ones are reported."""
-        fp = os.path.join(tmp_dir, "be.txt")
-        Path(fp).write_text("alpha bravo charlie")
-        self._read(file_tool, fp)
-        # First edit succeeds, second fails (string absent), third succeeds.
-        result = asyncio.run(file_tool.multi_edit_file(fp, [
-            {"old_string": "alpha", "new_string": "ALPHA"},
-            {"old_string": "DOES_NOT_EXIST", "new_string": "x"},
-            {"old_string": "charlie", "new_string": "CHARLIE"},
-        ]))
-        # Successful edits MUST be persisted.
-        assert Path(fp).read_text() == "ALPHA bravo CHARLIE"
-        # Output names which edits failed so the LLM can retry only those.
-        assert "Partially applied" in result
-        assert "Edit 2: FAILED" in result
-        assert "2/3 succeeded" in result
-
-    def test_multi_edit_best_effort_all_fail_no_write(self, file_tool, tmp_dir):
-        """If every edit fails in best-effort mode the file is left untouched."""
-        fp = os.path.join(tmp_dir, "be_all.txt")
-        Path(fp).write_text("untouched")
-        self._read(file_tool, fp)
-        result = asyncio.run(file_tool.multi_edit_file(fp, [
-            {"old_string": "nope1", "new_string": "x"},
-            {"old_string": "nope2", "new_string": "y"},
-        ]))
-        assert Path(fp).read_text() == "untouched"
-        assert "No edits applied" in result
-        assert "2/2 failed" in result
 
     def test_python_error_hint_null_literal(self):
         """NameError on JSON `null`/`true`/`false` gets a structured hint
@@ -689,19 +831,6 @@ class TestBuiltinFileToolEditFile:
         assert _detect_python_error_hint("") is None
         assert _detect_python_error_hint("Hello world") is None
         assert _detect_python_error_hint("AssertionError: 1 != 2") is None  # genuine logic bug
-
-    def test_multi_edit_atomic_mode_rolls_back_on_failure(self, file_tool, tmp_dir):
-        """continue_on_error=False keeps the historical atomic semantics."""
-        fp = os.path.join(tmp_dir, "atomic.txt")
-        Path(fp).write_text("alpha bravo")
-        self._read(file_tool, fp)
-        with pytest.raises(ValueError):
-            asyncio.run(file_tool.multi_edit_file(fp, [
-                {"old_string": "alpha", "new_string": "ALPHA"},
-                {"old_string": "MISSING", "new_string": "x"},
-            ], continue_on_error=False))
-        # Atomic mode: alpha edit MUST be rolled back too.
-        assert Path(fp).read_text() == "alpha bravo"
 
     def test_edit_replace_all(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "replall.txt")
@@ -773,69 +902,12 @@ class TestBuiltinFileToolEditFile:
         assert Path(fp).read_text() == "aaa bbb"
 
 
-class TestMultiEditFileSchema:
-    """Guard the LLM-facing tool schema for multi_edit_file.
+class TestRemovedMultiEditFileTool:
+    """multi_edit_file is no longer exposed; use apply_patch for multi-hunk edits."""
 
-    Regression: the auto-derived schema from `edits: List[Dict[str, Any]]`
-    collapses each item to a bare `{"type": "object"}` with no properties,
-    which caused frequent tool-call failures (LLM stringified the whole array).
-    We now pin a rich schema via `register(..., parameters_override=...)` and
-    that override must survive `Function.process_entrypoint()`.
-    """
-
-    def _mefn(self):
-        """Return the multi_edit_file Function after process_entrypoint,
-        matching what model.add_tool ultimately exposes to the LLM."""
+    def test_not_registered(self):
         tk = BuiltinFileTool()
-        fn = tk.functions["multi_edit_file"]
-        fn.process_entrypoint(strict=False)
-        return fn
-
-    def test_override_is_set_at_construction(self):
-        tk = BuiltinFileTool()
-        fn = tk.functions["multi_edit_file"]
-        assert fn.parameters_override is not None, (
-            "BuiltinFileTool must register multi_edit_file with a schema override"
-        )
-
-    def test_process_entrypoint_preserves_override(self):
-        """The core regression: process_entrypoint MUST NOT clobber the override."""
-        fn = self._mefn()
-        items = fn.parameters["properties"]["edits"]["items"]
-        assert items.get("type") == "object"
-        assert "properties" in items, (
-            "items schema was clobbered back to a bare object — override lost"
-        )
-        assert set(items["properties"].keys()) == {"old_string", "new_string", "replace_all"}
-        assert items["required"] == ["old_string", "new_string"]
-
-    def test_wire_schema_has_continue_on_error(self):
-        fn = self._mefn()
-        assert "continue_on_error" in fn.parameters["properties"]
-        assert fn.parameters["properties"]["continue_on_error"]["type"] == "boolean"
-
-    def test_wire_schema_required_fields(self):
-        fn = self._mefn()
-        assert fn.parameters["required"] == ["file_path", "edits"]
-
-    def test_edits_description_warns_against_stringifying(self):
-        """The most common LLM failure mode is emitting `edits` as a JSON
-        string. Description must call this out explicitly."""
-        fn = self._mefn()
-        desc = fn.parameters["properties"]["edits"].get("description", "")
-        assert "stringified" in desc.lower(), (
-            f"edits description missing anti-stringify hint: {desc!r}"
-        )
-
-    def test_to_dict_wire_format_is_rich(self):
-        """Final wire format sent to the LLM (via Function.to_dict) must
-        carry the rich items schema — not the bare {'type': 'object'} stub."""
-        fn = self._mefn()
-        wire = fn.to_dict()
-        items = wire["parameters"]["properties"]["edits"]["items"]
-        assert "properties" in items and items["properties"], (
-            "wire schema still shows bare object items — LLM will guess wrong"
-        )
+        assert "multi_edit_file" not in tk.functions
 
     def test_other_tools_still_use_auto_schema(self):
         """Sanity: parameters_override is opt-in. Tools that don't set it
@@ -1761,7 +1833,7 @@ class TestFileToolRegistrationGuard:
     """
 
     EXPECTED_FUNCTIONS = {"ls", "read_file", "write_file", "edit_file",
-                          "multi_edit_file", "apply_patch", "glob", "grep"}
+                          "apply_patch", "glob", "grep"}
 
     def test_file_tool_functions_in_tool_dict(self):
         """Tool.functions dict must contain all file operations after init."""

@@ -706,14 +706,14 @@ def _format_line_range(offset: int, limit: int) -> str:
 
 
 def _shorten_path(file_path: str) -> str:
-    """Shorten a file path for display: prefer relative path, fallback to filename."""
+    """Shorten a file path for display: prefer relative path, keep outside paths intact."""
     if not file_path or file_path == ".":
         return "."
     p = Path(file_path)
     try:
         return str(p.relative_to(Path.cwd()))
     except ValueError:
-        return p.name
+        return str(p)
 
 
 def _shorten_paths_in_command(command: str) -> str:
@@ -784,7 +784,7 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     # File reading tools - show filename and line range
     if tool_name == "read_file":
         file_path = tool_args.get("file_path", "")
-        filename = _extract_filename(file_path)
+        filename = _shorten_path(file_path)
         offset = tool_args.get("offset", 0)
         limit = tool_args.get("limit", 500)
         line_range = _format_line_range(offset, limit)
@@ -797,11 +797,6 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     
     # File editing tools - show filename only
     if tool_name == "edit_file":
-        file_path = tool_args.get("file_path", "")
-        return _extract_filename(file_path)
-
-    # Multi-edit: filename only (edit count goes in the completion summary)
-    if tool_name == "multi_edit_file":
         file_path = tool_args.get("file_path", "")
         return _extract_filename(file_path)
 
@@ -1251,7 +1246,12 @@ class StreamDisplayManager:
         # and the "[Showing lines" prefix — a bare "N-M" search can
         # false-match identical text in file content.
         if tool_name == "read_file":
-            tail = str(result_content).rstrip().rsplit("\n", 1)[-1]
+            lines = str(result_content).rstrip().splitlines()
+            if lines and re.match(r"\[File metadata: .+\]$", lines[-1]):
+                lines = lines[:-1]
+                while lines and lines[-1] == "":
+                    lines = lines[:-1]
+            tail = lines[-1] if lines else ""
             m = re.match(r"\[Showing lines (\d+)-(\d+) of \d+ total lines\]$", tail)
             if m:
                 # Clamp reads past EOF (range start > end) to 0.
@@ -1260,6 +1260,8 @@ class StreamDisplayManager:
             # Empty file: the result is a system-reminder, not content lines.
             if result_content.startswith("<system-reminder>"):
                 return "0 lines"
+            n = len(lines)
+            return f"{n} lines" if n else ""
         n = len(str(result_content).splitlines())
         if n == 0:
             return "no matches" if tool_name == "grep" else ""
@@ -1496,7 +1498,7 @@ class StreamDisplayManager:
     # Single-file write tools: call line is deferred to completion and rendered
     # as one summary line plus the real pre/post unified diff. apply_patch is
     # handled separately from the executor's multi-file result summary.
-    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "multi_edit_file", "write_file"})
+    _WRITE_DIFF_TOOLS = frozenset({"edit_file", "write_file"})
 
     # Tools whose success result is pure noise on success. The call line itself
     # already tells the user what happened; errors are still surfaced.

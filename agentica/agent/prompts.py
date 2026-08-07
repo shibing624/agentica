@@ -26,7 +26,7 @@ from agentica.utils.timer import Timer
 # tool would otherwise be told to prefer `read_file` / `apply_patch` over
 # `execute` — naming eight tools it cannot call.
 _FILE_TOOL_NAMES = frozenset({
-    "read_file", "write_file", "edit_file", "multi_edit_file",
+    "read_file", "write_file", "edit_file",
     "apply_patch", "glob", "grep", "ls",
 })
 
@@ -745,5 +745,4 @@ class PromptsMixin:
         messages_for_model.extend(user_messages)
         self.run_response.messages = messages_for_model
         return system_message, user_messages, messages_for_model
-
 

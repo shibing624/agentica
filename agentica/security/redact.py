@@ -92,7 +92,7 @@ _JWT_RE = re.compile(
 
 # ---------------------------------------------------------------------------
 # Strict patterns — opt-in. Match ordinary source code, so they break
-# byte-exact round-trips (edit_file, multi_edit_file, apply_patch).
+# byte-exact round-trips (edit_file, apply_patch).
 # ---------------------------------------------------------------------------
 
 _ENV_ASSIGN_RE = re.compile(
@@ -119,7 +119,7 @@ def redact_tool_outputs_enabled() -> bool:
     """Whether to redact non-streamed tool result text before sending to the LLM.
 
     OFF by default: redaction rewrites strings the LLM later has to match
-    byte-exactly with ``edit_file`` / ``multi_edit_file`` / ``apply_patch``, causing spurious
+    byte-exactly with ``edit_file`` / ``apply_patch``, causing spurious
     "String not found" errors. Operators handling truly sensitive tool
     outputs (production secrets in logs, etc.) can opt in via
     ``AGENTICA_REDACT_TOOL_OUTPUTS=1``. Private-key blocks are always
