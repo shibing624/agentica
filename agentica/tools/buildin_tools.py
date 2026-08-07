@@ -42,6 +42,7 @@ from agentica.tools.builtin_task_tool import BuiltinTaskTool  # re-export after 
 from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
 from agentica.security.redact import redact_tool_outputs_enabled
+from agentica.utils.async_utils import terminate_subprocess
 from agentica.utils.log import logger
 from agentica.utils.string import truncate_if_too_long
 
@@ -1524,17 +1525,14 @@ class BuiltinFileTool(Tool):
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=effective_timeout)
         except asyncio.TimeoutError:
             if proc is not None:
-                # SIGKILL (rg can ignore SIGTERM); then reap the corpse so the
-                # process is reliably collected instead of leaking.
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=5)
-                except (asyncio.TimeoutError, ProcessLookupError):
-                    pass
-            raise TimeoutError(f"grep timed out after {effective_timeout} seconds")
+                await terminate_subprocess(proc)
+            raise TimeoutError(
+                f"grep timed out after {effective_timeout} seconds"
+            ) from None
+        except asyncio.CancelledError:
+            if proc is not None:
+                await terminate_subprocess(proc)
+            raise
         except FileNotFoundError:
             return await self._run_grep_fallback(
                 pattern, path, include, output_mode, limit, fixed_strings,
@@ -1884,25 +1882,26 @@ class BuiltinExecuteTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
+                start_new_session=os.name != "nt",
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=effective_timeout,
             )
         except asyncio.TimeoutError:
-            # Graceful termination: SIGTERM first, then SIGKILL
             if proc is not None:
-                try:
-                    proc.terminate()
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=5)
-                    except asyncio.TimeoutError:
-                        proc.kill()
-                except ProcessLookupError:
-                    pass
+                await terminate_subprocess(
+                    proc,
+                    process_group=True,
+                    grace_period=5,
+                )
             logger.warning(f"Command timed out after {effective_timeout}s: {command}")
             raise TimeoutError(
                 f"Command timed out after {effective_timeout} seconds"
-            )
+            ) from None
+        except asyncio.CancelledError:
+            if proc is not None:
+                await terminate_subprocess(proc, process_group=True)
+            raise
 
         # Combine stdout and stderr
         output_parts = []

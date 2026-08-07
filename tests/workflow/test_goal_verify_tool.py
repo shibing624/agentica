@@ -8,7 +8,7 @@ judge model); test mode runs real short shell commands.
 
 import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -69,6 +69,40 @@ def test_verify_test_requires_command(tmp_path):
     out = _run(tool.verify_completion(mode="test", verify_command=""))
     assert "requires verify_command" in out
     assert log.load_goal()["status"] == "active"
+
+
+def test_verify_test_cancellation_cleans_up_subprocess(tmp_path):
+    async def cancel_running_verification():
+        class BlockingSubprocess:
+            def __init__(self):
+                self.started = asyncio.Event()
+
+            async def communicate(self):
+                self.started.set()
+                await asyncio.Future()
+
+        process = BlockingSubprocess()
+        cleanup = AsyncMock()
+        with patch(
+            "agentica.tools.goal_tool.asyncio.create_subprocess_shell",
+            new=AsyncMock(return_value=process),
+        ), patch(
+            "agentica.tools.goal_tool.terminate_subprocess",
+            cleanup,
+        ):
+            log = _make_session_log(tmp_path)
+            tool = GoalTool(log)
+            task = asyncio.create_task(
+                tool._verify_test({}, "sleep 60", summary="", final_answer="")
+            )
+            await process.started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        cleanup.assert_awaited_once_with(process, process_group=True)
+
+    asyncio.run(cancel_running_verification())
 
 
 def test_verify_test_captures_final_answer(tmp_path):

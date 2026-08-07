@@ -8,10 +8,54 @@ to synchronous callers.
 """
 
 import asyncio
+import os
+import signal
 import threading
-from typing import TypeVar, Coroutine
+from collections.abc import Coroutine
+from typing import TypeVar
 
 T = TypeVar("T")
+
+
+async def terminate_subprocess(
+    process: asyncio.subprocess.Process,
+    *,
+    process_group: bool = False,
+    grace_period: float = 0.0,
+) -> None:
+    """Terminate and fully reap an asyncio subprocess on its live event loop.
+
+    ``Process.wait()`` only observes the exit code. ``communicate()`` also
+    drains and closes stdout/stderr pipe transports, which prevents their
+    destructors from calling back into an event loop after ``asyncio.run()``
+    has closed it.
+    """
+
+    def stop(*, force: bool) -> None:
+        if process.returncode is not None:
+            return
+        try:
+            if process_group and os.name != "nt":
+                sig = signal.SIGKILL if force else signal.SIGTERM
+                os.killpg(process.pid, sig)
+            elif force:
+                process.kill()
+            else:
+                process.terminate()
+        except ProcessLookupError:
+            pass
+
+    if grace_period > 0:
+        stop(force=False)
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=grace_period)
+            return
+        except asyncio.TimeoutError:
+            stop(force=True)
+    else:
+        stop(force=True)
+
+    await process.communicate()
 
 
 def run_sync(coro: Coroutine[None, None, T]) -> T:
@@ -46,4 +90,3 @@ def run_sync(coro: Coroutine[None, None, T]) -> T:
     if exception is not None:
         raise exception
     return result
-

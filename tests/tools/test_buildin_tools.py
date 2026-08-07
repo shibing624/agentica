@@ -46,6 +46,17 @@ from agentica.model.message import Message
 from agentica.tools.shell_tool import ShellTool
 
 
+class BlockingSubprocess:
+    """Minimal subprocess double whose first communicate call blocks."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+
+    async def communicate(self):
+        self.started.set()
+        await asyncio.Future()
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -988,6 +999,31 @@ class TestBuiltinFileToolGrep:
             with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
 
+    def test_grep_cancellation_cleans_up_subprocess(self, tmp_dir):
+        async def cancel_running_grep():
+            process = BlockingSubprocess()
+            cleanup = AsyncMock()
+            with patch(
+                "agentica.tools.buildin_tools.asyncio.create_subprocess_exec",
+                new=AsyncMock(return_value=process),
+            ), patch(
+                "agentica.tools.buildin_tools.terminate_subprocess",
+                cleanup,
+            ), patch(
+                "agentica.tools.buildin_tools.shutil.which",
+                return_value="/usr/bin/rg",
+            ):
+                tool = BuiltinFileTool(work_dir=tmp_dir)
+                task = asyncio.create_task(tool.grep("needle", str(tmp_dir)))
+                await process.started.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+            cleanup.assert_awaited_once_with(process)
+
+        asyncio.run(cancel_running_grep())
+
 
 # ===========================================================================
 # BuiltinExecuteTool tests
@@ -1017,6 +1053,50 @@ class TestBuiltinExecuteTool:
         tool = BuiltinExecuteTool(timeout=1)
         with pytest.raises(TimeoutError, match="timed out"):
             asyncio.run(tool.execute("sleep 30"))
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX process-group cleanup")
+    def test_execute_cancellation_reaps_subprocess_group(self, tmp_dir):
+        pid_file = Path(tmp_dir, "child.pid")
+        script = (
+            "import os, time; "
+            f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); "
+            "time.sleep(60)"
+        )
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+        tool = BuiltinExecuteTool(work_dir=tmp_dir)
+        child_pid = None
+
+        async def cancel_running_command():
+            task = asyncio.create_task(tool.execute(command))
+            for _ in range(200):
+                if pid_file.exists():
+                    break
+                await asyncio.sleep(0.01)
+            assert pid_file.exists(), "child process did not start"
+
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            pid = int(pid_file.read_text())
+            for _ in range(200):
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    return pid
+                await asyncio.sleep(0.01)
+            return pid
+
+        try:
+            child_pid = asyncio.run(cancel_running_command())
+            with pytest.raises(ProcessLookupError):
+                os.kill(child_pid, 0)
+        finally:
+            if child_pid is not None:
+                try:
+                    os.kill(child_pid, 9)
+                except ProcessLookupError:
+                    pass
 
     def test_execute_python_code(self, execute_tool):
         result = asyncio.run(execute_tool.execute("python3 -c 'print(2+3)'"))
@@ -1080,6 +1160,28 @@ class TestShellTool:
 
         assert tool.functions["execute"].sanitize_arguments is False
         assert result == "a\nb"
+
+    def test_execute_cancellation_cleans_up_subprocess(self, tmp_dir):
+        async def cancel_running_command():
+            process = BlockingSubprocess()
+            cleanup = AsyncMock()
+            with patch(
+                "agentica.tools.shell_tool.asyncio.create_subprocess_shell",
+                new=AsyncMock(return_value=process),
+            ), patch(
+                "agentica.tools.shell_tool.terminate_subprocess",
+                cleanup,
+            ):
+                tool = ShellTool(work_dir=tmp_dir)
+                task = asyncio.create_task(tool.execute("sleep 60"))
+                await process.started.wait()
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+            cleanup.assert_awaited_once_with(process, process_group=True)
+
+        asyncio.run(cancel_running_command())
 
 
 # ===========================================================================

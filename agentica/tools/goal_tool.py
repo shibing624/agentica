@@ -40,11 +40,13 @@ and respects the tool's decision (skipping the judge).
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from typing import TYPE_CHECKING, Optional
 
 from agentica.goals import GoalState, judge_goal
 from agentica.tools.base import Tool
+from agentica.utils.async_utils import terminate_subprocess
 from agentica.utils.log import logger
 
 if TYPE_CHECKING:
@@ -185,19 +187,22 @@ class GoalTool(Tool):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=self._work_dir,
+                start_new_session=os.name != "nt",
             )
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(
                     proc.communicate(), timeout=_DEFAULT_VERIFY_TIMEOUT_SEC
                 )
             except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+                await terminate_subprocess(proc, process_group=True)
                 return (
                     f"Verification command timed out after {_DEFAULT_VERIFY_TIMEOUT_SEC:.0f}s: "
                     f"`{verify_command}`. Goal stays active — make the check terminate faster "
                     f"or narrow it, then verify again."
                 )
+            except asyncio.CancelledError:
+                await terminate_subprocess(proc, process_group=True)
+                raise
         except Exception as exc:
             logger.warning("verify_completion(test) failed to run command: %s", exc)
             return (
