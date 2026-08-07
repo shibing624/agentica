@@ -231,6 +231,21 @@ class SessionState:
     cron_stop_event: Optional[threading.Event] = None
 
 
+def _print_interactive_exit_summary(state: SessionState, tui_state: dict) -> None:
+    """Print the copyable resume command when the interactive TUI exits."""
+    agent = state.current_agent
+    if agent is None:
+        return
+
+    get_console().print(
+        format_session_summary(
+            elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
+            usage=agent.model.usage,
+            session_id=agent.session_id,
+        )
+    )
+
+
 # ==================== Output bridge for patch_stdout ====================
 
 
@@ -1601,7 +1616,7 @@ def _setup_tui(
         now = time.time()
         if state.agent_running:
             if now - state.last_ctrl_c < 2.0:
-                _cprint("\n⚡ Force exiting...")
+                _cprint("\n⚡ Force exiting... session summary will be shown below.")
                 state.should_exit = True
                 event.app.exit()
                 return
@@ -1646,7 +1661,7 @@ def _setup_tui(
                 event.app.exit()
             else:
                 state.last_ctrl_c = now
-                tui_state["spinner_text"] = "Press Ctrl+C again to exit (or Ctrl+D)"
+                tui_state["spinner_text"] = "Press Ctrl+C again to exit; resume command appears below"
                 event.app.invalidate()
 
     @kb.add("c-x")
@@ -2802,4 +2817,5 @@ def run_interactive(
         _restore_sigquit_escape(sigquit_installation)
         _clear_output_pause()
 
+    _print_interactive_exit_summary(state, tui_state)
     get_console().print("\nThank you for using Agentica CLI. Goodbye!", style="bold green")

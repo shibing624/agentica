@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 from agentica.cli.commands import CommandContext, _cmd_newchat
 from agentica.cli.display import format_session_summary
+from agentica.cli.interactive import SessionState, _print_interactive_exit_summary
 from agentica.model.usage import RequestUsage, TokenDetails, Usage
 
 
@@ -67,3 +68,22 @@ def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch
     print_header.assert_called_once()
     assert result["current_agent"] is new_agent
     assert result["session_started_at"] == 1_005.0
+
+
+def test_interactive_exit_prints_resume_summary(monkeypatch):
+    usage = Usage(input_tokens=10, output_tokens=2, total_tokens=12)
+    agent = SimpleNamespace(model=SimpleNamespace(usage=usage), session_id="exit-session")
+    console = MagicMock()
+
+    monkeypatch.setattr("agentica.cli.interactive.time.monotonic", lambda: 130.0)
+    monkeypatch.setattr("agentica.cli.interactive.get_console", lambda: console)
+
+    _print_interactive_exit_summary(
+        SessionState(current_agent=agent),
+        {"session_started_at": 100.0},
+    )
+
+    rendered = console.print.call_args.args[0].plain
+    assert "Worked for 0m 30s" in rendered
+    assert "Token usage: total=12 input=10 output=2" in rendered
+    assert "agentica resume exit-session" in rendered

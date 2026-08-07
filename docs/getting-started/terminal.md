@@ -327,14 +327,14 @@ agentica --work_dir /path/to/original-project resume c1392649-f07d-4f05-808b-f85
 ```
 
 ### `/exit` / `/quit`
-退出 CLI。等同于 `Ctrl+D`。
+退出 CLI。等同于 `Ctrl+D`，退出前会打印当前 session 的运行时间、Token 用量和可复制的 `agentica resume <session-id>` 恢复命令。
 
 ## 快捷键
 
 | 快捷键 | 功能 |
 |--------|------|
-| `Ctrl+C` | 中止当前响应（不退出 CLI） |
-| `Ctrl+D` | 退出 CLI |
+| `Ctrl+C` | 中止当前响应；空输入时连续按两次退出 |
+| `Ctrl+D` | 退出 CLI，并显示恢复命令 |
 | `Tab` | 补全 `@filename` 路径 |
 | `↑` / `↓` | 历史命令浏览 |
 | `Ctrl+R` | 搜索历史命令 |

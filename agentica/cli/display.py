@@ -78,8 +78,8 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     get_console().print("  [bright_green]Enter[/bright_green]       Submit your message")
     get_console().print("  [bright_green]Ctrl+X[/bright_green]      Toggle Agent/Shell mode")
     get_console().print("  [bright_green]Ctrl+J[/bright_green]      Insert newline (Alt+Enter also works)")
-    get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit")
-    get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation")
+    get_console().print("  [bright_green]Ctrl+D[/bright_green]      Exit and show resume command")
+    get_console().print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation (press twice to exit)")
     get_console().print("  [bright_green]Ctrl+V[/bright_green]      Paste image from clipboard (or just paste directly)")
     get_console().print("  [bright_green]Ctrl+O[/bright_green]      Expand truncated tool commands and output in pager (Ctrl+O or Esc to return)")
     get_console().print("  [bright_green]Alt+P[/bright_green]       Pause/resume live output while browsing terminal history")
@@ -644,7 +644,7 @@ def show_help(skills_registry=None):
         },
         "Other": {
             "/help":            "Show this help message",
-            "/exit, /quit":     "Exit the CLI",
+            "/exit, /quit":     "Exit and show the resume command",
         },
     }
 
@@ -674,8 +674,8 @@ def show_help(skills_registry=None):
         "Enter":             "Submit your message",
         "Ctrl+X":            "Toggle Agent/Shell mode ($ = shell, > = agent)",
         "Ctrl+J, Alt+Enter": "Insert newline for multi-line input",
-        "Ctrl+D":            "Exit",
-        "Ctrl+C":            "Interrupt current operation",
+        "Ctrl+D":            "Exit and show resume command",
+        "Ctrl+C":            "Interrupt current operation; press twice to exit",
         "Tab, Right Arrow":  "Accept completion / auto-suggestion",
         "Ctrl+V":            "Paste image from clipboard",
         "Ctrl+O":            "Expand truncated tool commands and output in pager",

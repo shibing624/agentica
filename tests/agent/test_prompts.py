@@ -98,6 +98,15 @@ class TestPromptModules:
         assert "one message" in content
         assert "run them in order" in content
 
+    def test_tools_module_requires_exact_path_grounding(self):
+        from agentica.prompts.base.tools import get_tools_prompt
+        content = get_tools_prompt()
+        assert "exact path string" in content
+        assert "read_file` grounds only that exact" in content
+        assert "does not ground sibling files" in content
+        assert "call `ls` or `glob` on the parent" in content
+        assert "common filenames like `base.py`" in content
+
     def test_heartbeat_module_content(self):
         from agentica.prompts.base.heartbeat import get_heartbeat_prompt
         content = get_heartbeat_prompt()
