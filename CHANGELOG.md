@@ -26,8 +26,8 @@ A "public API" is anything importable from `agentica` top-level `__init__.py`.
 #### fixes
 - 修复工具取消时子进程清理不彻底：新增 `terminate_subprocess()`，在活跃 event loop 上终止并完全回收 asyncio 子进程（`communicate()` 排空管道，支持进程组 SIGTERM→SIGKILL 宽限升级），应用于 execute/grep、shell 及 goal verify 等工具，消除取消后管道传输回调泄漏到已关闭 event loop 的问题
 - CLI 顶层 agent 执行错误改为结构化展示：429/限流等 provider 异常显示红色摘要、可操作 `/retry` 提示和 code/spanId 诊断字段，完整原始异常保留到 Ctrl+O 展开
-- 文件工具缺失路径错误只暴露真实路径状态：`read_file`/`glob`/`grep` 缺失路径时返回 resolved path 和 nearest existing parent，并提示从 `ls`/`glob`/`grep` 重新定位；不再猜测候选路径或在 `read_file` 内容尾部追加 metadata。同 basename 的工作区条目会作为 "Did you mean" 建议返回（按尾部路径重合度排序，上限 3 条，超出时提示用 glob 确认），覆盖跨环境绝对路径场景
-- 文件编辑默认收敛到 `apply_patch`：`multi_edit_file` 不再注册为内置工具，复杂/多 hunk 编辑走上下文 patch；`edit_file` 保留为单个短且唯一的 literal 替换工具。编辑失败错误可行动化：`edit_file` 的 `String not found` 在能唯一定位相似区域时直接附上该区域的真实当前内容（whitespace 不敏感锚定 + 字符级相似度，歧义时回退到重读指引）；`apply_patch` 的 context mismatch 同时展示 expected context 和 actual 当前行，两条编辑路径对齐为一次重试即可恢复
+- 文件工具缺失路径错误只暴露真实路径状态：`read_file`/`edit_file`/`glob`/`grep` 缺失路径时返回 resolved path 和 nearest existing parent，并提示从 `ls`/`glob`/`grep` 重新定位；不再猜测候选路径或在 `read_file` 内容尾部追加 metadata
+- 文件编辑默认收敛到 `apply_patch`：`multi_edit_file` 不再注册为内置工具，复杂/多 hunk 编辑走上下文 patch；`edit_file` 保留为单个短且唯一的 literal 替换工具。`edit_file` 的 `String not found` 保持无状态重读指引；`apply_patch` 的 context mismatch 同时展示 expected context 和 actual 当前行，便于用真实当前内容重建 patch
 - 修复 CLI 输出 OSC 8 超链接泄漏：Rich 为 Markdown 链接生成 OSC 8 终端超链接，prompt_toolkit 的 ANSI 解析器不识别 OSC 序列会把 payload 渲染成可见文本，渲染前剥离不支持的 OSC 8 包装（保留链接样式文本）
 - 修复 Ctrl+O 分页器在输出含控制字符时停在 less 的 binary-file 确认提示：less 调用统一加 `-f` 强制打开
 - `/compact` 原生压缩失败的回退提示改为 `logger.warning`，不再向终端打印打断对话流

@@ -344,82 +344,11 @@ class BuiltinFileTool(Tool):
         else:
             lines.append("Nearest existing parent: <none>")
 
-        suggestions, more = self._suggest_workspace_matches(path)
-        if suggestions:
-            lines.append("Did you mean:")
-            lines.extend(f"  - {suggestion}" for suggestion in suggestions)
-            if more:
-                lines.append(
-                    f"  (more files named '{path.name}' exist; run glob '**/{path.name}' to see all)"
-                )
-
         lines.append(
             "Next step: use ls/glob/grep from the nearest existing parent; "
             "do not retry speculative absolute paths."
         )
         return "\n".join(lines)
-
-    _SUGGEST_IGNORED_DIRS = frozenset(
-        {
-            ".git", ".hg", ".svn", "__pycache__", "node_modules", ".venv", "venv",
-            ".idea", ".vscode", ".pytest_cache", ".mypy_cache", ".ruff_cache",
-            "dist", "build", ".next", ".turbo", ".tox", "htmlcov", "site-packages",
-        }
-    )
-    _SUGGEST_WALK_BUDGET = 100_000  # max directory entries scanned per lookup
-
-    def _suggest_workspace_matches(
-            self, path: Path, cap: int = 3
-    ) -> Tuple[List[str], bool]:
-        """Find workspace entries sharing path's basename, ranked by trailing-path overlap.
-
-        Returns (relative suggestions capped at `cap`, more_available). Only runs on
-        the missing-path error path, so a bounded os.walk over work_dir is acceptable.
-        """
-        name = path.name
-        if not name:
-            return [], False
-        root = Path(self.work_dir)
-        if not root.is_dir():
-            return [], False
-        root_str = str(root)
-        target_parts = path.parts
-
-        matches: List[Path] = []
-        visited = 0
-        truncated = False
-        for dirpath, dirnames, filenames in os.walk(root_str):
-            dirnames[:] = [d for d in dirnames if d not in self._SUGGEST_IGNORED_DIRS]
-            visited += len(dirnames) + len(filenames)
-            if visited > self._SUGGEST_WALK_BUDGET:
-                truncated = True
-                break
-            if name in filenames:
-                matches.append(Path(dirpath) / name)
-            if name in dirnames:
-                matches.append(Path(dirpath) / name)
-
-        if not matches:
-            return [], False
-        more = truncated or len(matches) > cap
-
-        def trailing_overlap(candidate: Path) -> int:
-            parts = candidate.parts
-            score = 0
-            for a, b in zip(reversed(target_parts), reversed(parts)):
-                if a != b:
-                    break
-                score += 1
-            return score
-
-        matches.sort(key=lambda p: (-trailing_overlap(p), len(p.parts)))
-        suggestions = []
-        for match in matches[:cap]:
-            try:
-                suggestions.append(str(match.relative_to(root)))
-            except ValueError:
-                suggestions.append(str(match))
-        return suggestions, more
 
     def _result_path(self, raw_path: str) -> str:
         """Return the lexical tool path relative to the configured work directory."""
@@ -1056,10 +985,6 @@ class BuiltinFileTool(Tool):
         larger string with more surrounding context to make it unique, or use
         replace_all=True to change every instance.
 
-        A String not found error includes the actual current content of the most
-        similar region when one can be located unambiguously — copy that exact
-        text into old_string and retry directly.
-
         If you call `edit_file` multiple times on the same file in parallel,
         they will be serialized automatically to avoid race conditions.
         File paths may be absolute, relative to the working directory, or `~`-prefixed.
@@ -1143,99 +1068,11 @@ class BuiltinFileTool(Tool):
         )
 
     @classmethod
-    def _build_edit_not_found_error(cls, error: str, content: str, old_string: str) -> str:
-        """Assemble a String-not-found error, showing the actual current text of
-        the most similar region when one can be located unambiguously."""
-        similar = cls._find_similar_region(content.split("\n"), old_string.split("\n"))
-        if similar is None:
-            return error + "\n\n" + cls._edit_read_hint()
-        start, ratio = similar
-        old_lines = old_string.split("\n")
-        actual_lines = content.split("\n")[start : start + len(old_lines)]
-        shown = actual_lines[:40]
-        block = "\n".join(shown)
-        if len(actual_lines) > len(shown):
-            block += f"\n... ({len(actual_lines) - len(shown)} more lines)"
-        pct = int(round(ratio * 100))
-        return (
-            f"{error}\n\n"
-            f"Most similar region (lines {start + 1}-{start + len(old_lines)}, {pct}% match); "
-            f"actual current content:\n{block}\n\n"
-            "Copy the exact text above into old_string (or re-read the region with "
-            "read_file), then retry the edit."
-        )
-
-    @staticmethod
-    def _find_similar_region(
-            content_lines: List[str], old_lines: List[str]
-    ) -> Optional[Tuple[int, float]]:
-        """Locate the single best-matching region for a failed old_string.
-
-        Returns (0-based start line, similarity ratio) when exactly one region is
-        a clear match (ratio >= 0.75 and no distinct region scores nearly as
-        well), else None. Line comparison is whitespace-insensitive.
-        """
-        window = len(old_lines)
-        if not (1 <= window <= 80) or len(content_lines) < window:
-            return None
-        norm_old = [" ".join(line.split()) for line in old_lines]
-        if not any(norm_old):
-            return None
-        norm_content = [" ".join(line.split()) for line in content_lines]
-
-        # Fast path: exactly one region matches after whitespace normalization.
-        hits = [
-            i
-            for i in range(len(norm_content) - window + 1)
-            if norm_content[i : i + window] == norm_old
-        ]
-        if len(hits) == 1:
-            return hits[0], 1.0
-        if len(hits) > 1:
-            return None
-        if window > 40:
-            return None
-
-        # Anchor on the most distinctive old_string line, then char-compare the
-        # joined text of windows where that anchor aligns (+-1 line drift for
-        # blank-line differences). Char-level comparison keeps a one-token
-        # guess (e.g. a stale string literal) close enough to surface.
-        anchor_index, anchor = max(enumerate(norm_old), key=lambda item: len(item[1]))
-        if len(anchor) < 8:
-            return None
-        close = difflib.get_close_matches(anchor, norm_content, n=3, cutoff=0.6)
-        if not close:
-            return None
-        old_text = "\n".join(norm_old)
-        max_start = len(norm_content) - window
-        scored: List[Tuple[float, int]] = []
-        for candidate in close:
-            seen = 0
-            for i, line in enumerate(norm_content):
-                if line != candidate:
-                    continue
-                seen += 1
-                if seen > 20:
-                    break
-                for start in {i - anchor_index + d for d in (-1, 0, 1)}:
-                    if 0 <= start <= max_start:
-                        window_text = "\n".join(norm_content[start : start + window])
-                        matcher = difflib.SequenceMatcher(None, old_text, window_text)
-                        if matcher.real_quick_ratio() >= 0.7:
-                            scored.append((matcher.ratio(), start))
-        if not scored:
-            return None
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        best_ratio, best_start = scored[0]
-        if best_ratio < 0.75:
-            return None
-        for ratio, start in scored[1:]:
-            if abs(start - best_start) >= window:
-                # A genuinely different region scores nearly as well: ambiguous.
-                if best_ratio - ratio < 0.05:
-                    return None
-                break
-        return best_start, best_ratio
+    def _build_edit_not_found_error(
+            cls, error: str, _content: str, _old_string: str
+    ) -> str:
+        """Assemble a stateless exact-string edit failure."""
+        return error + "\n\n" + cls._edit_read_hint()
 
     @staticmethod
     def _patch_read_hint() -> str:

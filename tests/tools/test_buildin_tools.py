@@ -194,94 +194,48 @@ class TestBuiltinFileToolReadFile:
         assert "\t" in result  # tab separator between line number and content
 
 
-class TestMissingPathSuggestions:
-    """Missing-path errors suggest same-basename workspace entries."""
+class TestMissingPathErrors:
+    """Missing-path errors expose path state without guessing candidates."""
 
-    def test_read_file_suggests_same_basename_match(self, file_tool, tmp_dir):
-        real = Path(tmp_dir, "pkg", "providers", "config.py")
-        real.parent.mkdir(parents=True)
-        real.write_text("X = 1\n")
-        missing = str(Path(tmp_dir, "dual-mem", "dual_mem", "providers", "config.py"))
-
-        with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.read_file(missing))
-
-        msg = str(exc.value)
-        assert "Did you mean:" in msg
-        assert "pkg/providers/config.py" in msg
-
-    def test_suggestion_prefers_longest_trailing_overlap(self, file_tool, tmp_dir):
-        generic = Path(tmp_dir, "scratch", "config.py")
-        specific = Path(tmp_dir, "dual_mem", "providers", "config.py")
-        for p in (generic, specific):
-            p.parent.mkdir(parents=True)
-            p.write_text("X = 1\n")
-        missing = str(Path(tmp_dir, "foreign", "dual_mem", "providers", "config.py"))
-
-        with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.read_file(missing))
-
-        suggestions = str(exc.value).split("Did you mean:")[1]
-        assert suggestions.index("dual_mem/providers/config.py") < suggestions.index(
-            "scratch/config.py"
-        )
-
-    def test_grep_suggests_same_basename_match(self, file_tool, tmp_dir):
-        real = Path(tmp_dir, "src", "config.py")
-        real.parent.mkdir()
-        real.write_text("X = 1\n")
+    def test_grep_missing_path_does_not_suggest_candidates(self, file_tool, tmp_dir):
+        existing = Path(tmp_dir, "src")
+        existing.mkdir()
+        (existing / "config.py").write_text("X = 1\n")
 
         with pytest.raises(FileNotFoundError) as exc:
             asyncio.run(file_tool.grep("class .*Config", path="missing-dir/config.py"))
-        assert "Did you mean:" in str(exc.value)
-        assert "src/config.py" in str(exc.value)
 
-    def test_glob_suggests_same_basename_match(self, file_tool, tmp_dir):
-        real = Path(tmp_dir, "src", "config.py")
-        real.parent.mkdir()
-        real.write_text("X = 1\n")
+        msg = str(exc.value)
+        assert "Path not found:" in msg
+        assert "Resolved path:" in msg
+        assert "Nearest existing parent:" in msg
+        assert "Did you mean:" not in msg
+        assert "src/config.py" not in msg
+        assert "do not retry speculative absolute paths" in msg
+
+    def test_glob_missing_path_does_not_suggest_candidates(self, file_tool, tmp_dir):
+        Path(tmp_dir, "src").mkdir()
+        Path(tmp_dir, "src", "config.py").write_text("X = 1\n")
 
         with pytest.raises(FileNotFoundError) as exc:
             asyncio.run(file_tool.glob("*.py", path="missing-dir/config.py"))
-        assert "Did you mean:" in str(exc.value)
-        assert "src/config.py" in str(exc.value)
 
-    def test_edit_file_suggests_same_basename_match(self, file_tool, tmp_dir):
-        real = Path(tmp_dir, "src", "config.py")
-        real.parent.mkdir()
-        real.write_text("X = 1\n")
-        missing = str(Path(tmp_dir, "elsewhere", "config.py"))
-
-        with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.edit_file(missing, "a", "b"))
-        assert "Did you mean:" in str(exc.value)
-        assert "src/config.py" in str(exc.value)
-
-    def test_no_suggestion_when_basename_absent(self, file_tool, tmp_dir):
-        with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.grep("x", path="missing/totally_unique_name.py"))
         msg = str(exc.value)
+        assert "Directory not found:" in msg
         assert "Did you mean:" not in msg
-        assert "Nearest existing parent:" in msg
+        assert "run glob '**/config.py'" not in msg
 
-    def test_ignored_dirs_are_not_suggested(self, file_tool, tmp_dir):
-        noisy = Path(tmp_dir, "node_modules", "config.py")
-        noisy.parent.mkdir()
-        noisy.write_text("X = 1\n")
-
-        with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.grep("X", path="missing/config.py"))
-        assert "Did you mean:" not in str(exc.value)
-
-    def test_many_matches_add_glob_hint(self, file_tool, tmp_dir):
-        for i in range(5):
-            d = Path(tmp_dir, f"pkg{i}")
-            d.mkdir()
-            (d / "config.py").write_text("X = 1\n")
+    def test_edit_file_missing_path_does_not_suggest_candidates(self, file_tool, tmp_dir):
+        Path(tmp_dir, "src").mkdir()
+        Path(tmp_dir, "src", "config.py").write_text("X = 1\n")
 
         with pytest.raises(FileNotFoundError) as exc:
-            asyncio.run(file_tool.grep("X", path="missing/config.py"))
-        assert "run glob '**/config.py' to see all" in str(exc.value)
+            asyncio.run(file_tool.edit_file("missing-dir/config.py", "a", "b"))
+
+        msg = str(exc.value)
+        assert "File not found:" in msg
+        assert "Did you mean:" not in msg
+        assert "src/config.py" not in msg
 
 
 class TestBuiltinFileToolReadCorrectness:
@@ -737,8 +691,8 @@ class TestBuiltinFileToolEditFile:
         assert "read_file" in msg
         assert "old_string" in msg
 
-    def test_edit_string_not_found_shows_similar_region(self, file_tool, tmp_dir):
-        """A stale-guess old_string gets the actual text of the closest region."""
+    def test_edit_string_not_found_does_not_show_fuzzy_region(self, file_tool, tmp_dir):
+        """A stale-guess old_string stays a stateless exact-match failure."""
         fp = os.path.join(tmp_dir, "test_writer.py")
         Path(fp).write_text(
             "def test_writer():\n"
@@ -755,33 +709,8 @@ class TestBuiltinFileToolEditFile:
             )
         msg = str(exc.value)
         assert "String not found" in msg
-        assert "Most similar region" in msg
-        assert 'assert search_calls == ["saved preference"]' in msg
-        assert "Copy the exact text above into old_string" in msg
-
-    def test_edit_similar_region_whitespace_only_mismatch(self, file_tool, tmp_dir):
-        """Indentation drift is reported with the actual lines."""
-        fp = os.path.join(tmp_dir, "mod.py")
-        Path(fp).write_text("def f():\n    value = compute()\n    return value\n")
-        with pytest.raises(ValueError) as exc:
-            asyncio.run(
-                file_tool.edit_file(fp, "value = compute()\nreturn value", "x = 1\nreturn x")
-            )
-        msg = str(exc.value)
-        assert "Most similar region" in msg
-        assert "    value = compute()" in msg
-
-    def test_edit_ambiguous_similar_regions_fall_back_to_read_hint(self, file_tool, tmp_dir):
-        """Repeated boilerplate must not produce a misleading suggestion."""
-        fp = os.path.join(tmp_dir, "repeated.py")
-        block = "def handler():\n    result = run_task()\n    return result\n\n"
-        Path(fp).write_text(block * 3)
-        with pytest.raises(ValueError) as exc:
-            asyncio.run(
-                file_tool.edit_file(fp, "result = run_task()\nreturn result", "x = 1\nreturn x")
-            )
-        msg = str(exc.value)
         assert "Most similar region" not in msg
+        assert 'assert search_calls == ["saved preference"]' not in msg
         assert "Read or re-read the relevant region" in msg
 
     def test_single_edit(self, file_tool, tmp_dir):
