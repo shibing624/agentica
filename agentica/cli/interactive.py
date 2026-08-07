@@ -70,6 +70,7 @@ from agentica.cli.display import (
 from agentica.cli.context_usage import measure_context
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
+from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger, suppress_console_logging
 from agentica.workspace import Workspace
@@ -213,6 +214,7 @@ class SessionState:
     # Background tasks — owned by session, not module-global
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
+    background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
     # Standing-goal loop (see agentica/goals.py).
     goal_manager: Optional[GoalManager] = None
     goal_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -1910,6 +1912,7 @@ def _setup_tui(
             spinner_text=spinner,
             terminal_width=tw,
             agent_running=bool(spinner),
+            background_terminal_count=state.background_processes.running_count(),
         )
 
     history_dir = os.path.dirname(history_file)
@@ -2280,6 +2283,7 @@ def run_interactive(
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
         ask_user_question_callback=_cli_ask_user_question_callback,
+        background_process_registry=state.background_processes,
         permission_mode=perm_mode,
     )
 
@@ -2420,6 +2424,7 @@ def run_interactive(
             image_counter=_image_counter_ref,
             bg_tasks=state.bg_tasks,
             bg_task_counter=state.bg_task_counter,
+            background_processes=state.background_processes,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
             ask_user_question_callback=_cli_ask_user_question_callback,
@@ -2812,6 +2817,7 @@ def run_interactive(
     finally:
         state.should_exit = True
         _stop_cron(state)
+        state.background_processes.stop()
         set_active_console(None)
         set_default_ask_user_question_callback(None)
         _restore_sigquit_escape(sigquit_installation)

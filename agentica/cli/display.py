@@ -637,7 +637,8 @@ def show_help(skills_registry=None):
             "/steer <text>":    "Guide the running agent mid-task (no interrupt)",
             "/checkpoint":      "Durable file snapshots: list | create | diff | restore",
             "/background":      "Run prompt in background (/bg alias)",
-            "/stop":            "Kill all running background tasks",
+            "/ps":              "List background agents and terminals",
+            "/stop":            "Stop background agents and terminals",
         },
         "Configure": {
             "/model [p/m]":     "Show or switch model",
@@ -2378,6 +2379,7 @@ def build_status_bar_fragments(
     spinner_text: str = "",
     terminal_width: int = 80,
     agent_running: bool = False,
+    background_terminal_count: int = 0,
 ):
     """Build prompt_toolkit formatted-text fragments for the persistent status bar.
 
@@ -2418,6 +2420,15 @@ def build_status_bar_fragments(
 
     turn_str = f"⏱ {last_turn_seconds:.1f}s" if last_turn_seconds > 0 else ""
     total_str = f"Σ {format_duration_compact(active_seconds)}" if active_seconds > 0 else ""
+    bg_full = ""
+    bg_short = ""
+    if background_terminal_count > 0:
+        noun = "terminal" if background_terminal_count == 1 else "terminals"
+        bg_full = (
+            f"{background_terminal_count} background {noun} running"
+            " · /ps to view · /stop to close"
+        )
+        bg_short = f"{background_terminal_count} bg · /ps · /stop"
 
     full_work_dir = _format_status_work_dir(work_dir)
     compact_work_dir = _compact_status_work_dir(work_dir)
@@ -2432,6 +2443,7 @@ def build_status_bar_fragments(
         context_detail: bool = True,
         show_context: bool = True,
         show_cost: bool = True,
+        background_detail: bool = True,
     ):
         frags = [("class:sb", " ▸ ")]
         if profile:
@@ -2468,6 +2480,12 @@ def build_status_bar_fragments(
         if total_str:
             frags.append(("class:sb-dim", "  "))
             frags.append(("class:sb-dim", total_str))
+        bg_text = bg_full if background_detail else bg_short
+        if bg_text:
+            frags.extend([
+                ("class:sb-dim", " │ "),
+                ("class:sb", bg_text),
+            ])
         frags.append(("class:sb", " "))
         return frags
 
@@ -2483,18 +2501,19 @@ def build_status_bar_fragments(
         ),
         compose(
             project=compact_work_dir, branch=git_branch, profile=profile_name,
-            context_detail=False, show_cost=False,
+            context_detail=False, show_cost=False, background_detail=False,
         ),
         compose(
             profile=profile_name, context_detail=False, show_cost=False,
+            background_detail=False,
         ),
-        compose(profile=profile_name, show_context=False, show_cost=False),
-        compose(show_context=False, show_cost=False),
+        compose(profile=profile_name, show_context=False, show_cost=False, background_detail=False),
+        compose(show_context=False, show_cost=False, background_detail=False),
     ]
     if terminal_width < 52:
         candidates.insert(
             0,
-            compose(show_context=False, show_cost=False),
+            compose(show_context=False, show_cost=False, background_detail=False),
         )
     spinner_width = len(spinner_text) + 2 if agent_running and spinner_text else 0
     available_width = max(1, terminal_width - spinner_width)

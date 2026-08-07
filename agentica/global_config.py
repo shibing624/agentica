@@ -281,11 +281,11 @@ def _project_profile_path(work_dir: str) -> str:
     # keeps this override live-testable while still mirroring the exact same
     # <projects_dir>/<user>/<sanitized-cwd>/ layout (user segment "default"
     # for the single-user CLI, same as tool_result_storage's default).
-    from agentica.compression.tool_result_storage import _safe_user_segment, _sanitize_path
+    from agentica.compression.tool_result_storage import safe_user_segment, sanitize_path
     home = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
     projects_dir = os.getenv("AGENTICA_PROJECTS_DIR", os.path.join(home, "projects"))
     real = os.path.realpath(os.path.expanduser(work_dir))
-    return os.path.join(projects_dir, _safe_user_segment(None), _sanitize_path(real), "profile")
+    return os.path.join(projects_dir, safe_user_segment(None), sanitize_path(real), "profile")
 
 
 def get_project_profile(work_dir: Optional[str]) -> Optional[str]:

@@ -102,6 +102,7 @@ class CommandContext:
     # Background tasks — instance-level, not module-global
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
+    background_processes: Any = None
     # Persistent goal loop (see agentica/goals.py). Same instance is shared
     # between the post-turn hook and /goal handlers, guarded by goal_lock.
     goal_manager: Any = None  # Optional[GoalManager]
@@ -214,6 +215,7 @@ CONCURRENT_CMDS = frozenset(
     {
         "/bg",
         "/background",
+        "/ps",
         "/stop",
         "/q",
         "/queue",
@@ -294,6 +296,7 @@ def _refresh_skills_session(ctx: CommandContext):
         ctx.workspace,
         new_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
+        background_process_registry=ctx.background_processes,
     )
     return {
         "skills_registry": new_registry,
@@ -2155,6 +2158,7 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ctx.workspace,
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
+        background_process_registry=ctx.background_processes,
     )
     print_header(
         ctx.agent_config.get("model_provider", ""),
@@ -2280,7 +2284,14 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         agent_config = dict(ctx.agent_config)
         agent_config["session_id"] = chosen["session_id"]
         agent_config["_resume_at_uuid"] = resume_at_uuid
-        current_agent = create_agent(agent_config, ctx.extra_tools, ctx.workspace, ctx.skills_registry)
+        current_agent = create_agent(
+            agent_config,
+            ctx.extra_tools,
+            ctx.workspace,
+            ctx.skills_registry,
+            ask_user_question_callback=ctx.ask_user_question_callback,
+            background_process_registry=ctx.background_processes,
+        )
 
         # Eagerly load history into working_memory so /status, /context etc.
         # reflect the resumed state immediately (do not wait for the next _run
@@ -2395,6 +2406,7 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
         ctx.workspace,
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
+        background_process_registry=ctx.background_processes,
     )
     print_header(
         ctx.agent_config["model_provider"],
@@ -2553,6 +2565,7 @@ def _apply_profile(ctx: CommandContext, name: str):
         ctx.workspace,
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
+        background_process_registry=ctx.background_processes,
     )
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
     return {"current_agent": current_agent}
@@ -3402,18 +3415,43 @@ def _cmd_statusbar(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"  [green]Status bar: {state}[/green]")
 
 
+def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
+    """List background agent tasks and background terminal commands."""
+    con = get_console()
+    active_agents = list(ctx.bg_tasks.items())
+    terminals = []
+    if ctx.background_processes is not None:
+        terminals = ctx.background_processes.list(include_finished=False)
+
+    if not active_agents and not terminals:
+        con.print("  [dim]No active background tasks.[/dim]")
+        con.print("  [dim]Use /background <prompt> or execute(background=True).[/dim]")
+        return
+
+    if terminals:
+        con.print(f"  [cyan]Background terminals ({len(terminals)}):[/cyan]")
+        for item in terminals:
+            con.print(
+                f"    #{item.num} [dim]{item.id}[/dim] pid={item.pid} "
+                f"elapsed={item.elapsed}  {item.preview}"
+            )
+            con.print(f"      [dim]log: {item.log_path}[/dim]")
+
+    if active_agents:
+        con.print(f"  [cyan]Background agents ({len(active_agents)}):[/cyan]")
+        for tid, info in active_agents:
+            con.print(f"    #{info['num']} [dim]{tid}[/dim] {info['prompt'][:60]}")
+
+    con.print("  [dim]Use /stop <id|pid|#n> or /stop to stop all.[/dim]")
+
+
 def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
     """Run a prompt in the background (independent agent with context snapshot)."""
     con = get_console()
     prompt = cmd_args.strip()
     if not prompt:
-        if ctx.bg_tasks:
-            con.print(f"  [cyan]Active background tasks ({len(ctx.bg_tasks)}):[/cyan]")
-            for tid, info in ctx.bg_tasks.items():
-                con.print(f"    #{info['num']} [dim]{tid}[/dim] {info['prompt'][:60]}")
-        else:
-            con.print("  [dim]No active background tasks.[/dim]")
-        con.print("  [dim]Usage: /background <prompt>  |  /stop to kill all[/dim]")
+        _cmd_ps(ctx, "")
+        con.print("  [dim]Usage: /background <prompt>[/dim]")
         con.print("  [dim]See also: /queue (next turn, same session) · /btw (quick aside, not persisted)[/dim]")
         return
 
@@ -3449,7 +3487,13 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
         bg_config = dict(agent_config)
         bg_config["session_id"] = _generate_session_id()
         bg_config["debug"] = False
-        bg_agent = create_agent(bg_config, extra_tools, workspace, skills_registry)
+        bg_agent = create_agent(
+            bg_config,
+            extra_tools,
+            workspace,
+            skills_registry,
+            background_process_registry=ctx.background_processes,
+        )
         bg_tasks[task_id]["agent"] = bg_agent
 
         # Inject context snapshot as a synthetic AgentRun so the runner
@@ -3491,15 +3535,38 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
 
 def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
     con = get_console()
-    if not ctx.bg_tasks:
-        con.print("  [dim]No running background tasks.[/dim]")
-        return
-    count = len(ctx.bg_tasks)
+    target = cmd_args.strip()
+    stopped_agents = 0
+    stopped_terms = 0
+
+    def _matches_agent(tid: str, info: dict) -> bool:
+        if not target or target.lower() in {"all", "*"}:
+            return True
+        return target in {tid, str(info.get("num")), f"#{info.get('num')}"}
+
     for tid, info in list(ctx.bg_tasks.items()):
+        if not _matches_agent(tid, info):
+            continue
         agent = info.get("agent")
         if agent is not None:
             agent.cancel()
-    con.print(f"  [green]Stopped {count} background task(s).[/green]")
+            stopped_agents += 1
+
+    if ctx.background_processes is not None:
+        stopped_terms = len(ctx.background_processes.stop(target or None))
+
+    if stopped_agents == 0 and stopped_terms == 0:
+        if target:
+            con.print(f"  [dim]No running background task matched '{target}'.[/dim]")
+        else:
+            con.print("  [dim]No running background tasks.[/dim]")
+        return
+    parts = []
+    if stopped_terms:
+        parts.append(f"{stopped_terms} terminal(s)")
+    if stopped_agents:
+        parts.append(f"{stopped_agents} agent task(s)")
+    con.print(f"  [green]Stopped {', '.join(parts)}.[/green]")
 
 
 # ==================== /goal & /subgoal ====================
@@ -3812,7 +3879,8 @@ COMMAND_REGISTRY = {
     "/q": (_cmd_queue, "Run as the next turn after current run (alias)"),
     "/background": (_cmd_background, "Run NOW in a parallel independent agent (own session)"),
     "/bg": (_cmd_background, "Run now in a parallel independent agent (alias)"),
-    "/stop": (_cmd_stop, "Kill all running background tasks"),
+    "/ps": (_cmd_ps, "List background agents and terminal commands"),
+    "/stop": (_cmd_stop, "Stop background agents and terminal commands"),
     "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (injected between tool batches)"),
     "/checkpoint": (
         _cmd_checkpoint,

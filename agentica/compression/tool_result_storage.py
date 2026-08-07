@@ -56,7 +56,7 @@ MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 200_000
 _MAX_SANITIZED_LENGTH = 200
 
 
-def _sanitize_path(raw: str) -> str:
+def sanitize_path(raw: str) -> str:
     """Convert a filesystem path into a readable, safe, collision-free directory name.
 
     Non-alphanumeric characters become ``-``, which is lossy: structurally
@@ -71,7 +71,7 @@ def _sanitize_path(raw: str) -> str:
     return f"{sanitized[:_MAX_SANITIZED_LENGTH]}-{hash_suffix}"
 
 
-def _safe_user_segment(user_id: Optional[str]) -> str:
+def safe_user_segment(user_id: Optional[str]) -> str:
     """Path segment for the per-user spill directory.
 
     Delegates to ``Workspace.sanitize_user_id`` so persisted tool-result
@@ -91,7 +91,7 @@ def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) ->
     directory and read each other's persisted tool outputs.
     """
     cwd = cwd or os.getcwd()
-    return os.path.join(AGENTICA_PROJECTS_DIR, _safe_user_segment(user_id), _sanitize_path(cwd))
+    return os.path.join(AGENTICA_PROJECTS_DIR, safe_user_segment(user_id), sanitize_path(cwd))
 
 
 def get_tool_results_dir(

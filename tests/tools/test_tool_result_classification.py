@@ -63,7 +63,7 @@ class TestStorageIntegration(unittest.TestCase):
         big_image = "data:image/png;base64," + base64.b64encode(b"x" * 8000).decode()
         self.assertGreater(len(big_image), PREVIEW_CHARS)
         with tempfile.TemporaryDirectory() as tmp:
-            # cwd=tmp only sandboxes the leaf directory name (_sanitize_path(cwd));
+            # cwd=tmp only sandboxes the leaf directory name (sanitize_path(cwd));
             # AGENTICA_PROJECTS_DIR is the actual storage root and must also be
             # patched, or this persists for real under ~/.agentica/projects/.
             with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmp):

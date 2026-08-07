@@ -36,6 +36,7 @@ import aiofiles
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool, BuiltinTodoTool
 from agentica.tools.builtin.web_tools import BuiltinFetchUrlTool, BuiltinWebSearchTool
 from agentica.tools.base import Tool
+from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.builtin_task_tool import BuiltinTaskTool  # re-export after extraction
 from agentica.tools.patch_tool import apply_diff, parse_patch_envelope
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
@@ -1622,7 +1623,8 @@ class BuiltinExecuteTool(Tool):
     """
 
     def __init__(self, work_dir: Optional[str] = None, timeout: int = 120,
-                 max_output_length: int = 20000, sandbox_config=None):
+                 max_output_length: int = 20000, sandbox_config=None,
+                 background_process_registry: Optional[BackgroundProcessRegistry] = None):
         """
         Initialize BuiltinExecuteTool.
 
@@ -1633,12 +1635,14 @@ class BuiltinExecuteTool(Tool):
                 are applied as-is with no upper cap — the caller decides.
             max_output_length: Maximum length of output to return
             sandbox_config: SandboxConfig instance for command restriction enforcement
+            background_process_registry: optional shared registry for background commands
         """
         super().__init__(name="builtin_execute_tool")
         self._work_dir: Optional[Path] = Path(work_dir) if work_dir else None
         self._timeout = timeout
         self._max_output_length = max_output_length
         self._sandbox_config = sandbox_config
+        self._background_process_registry = background_process_registry or BackgroundProcessRegistry()
         # Override timeout from sandbox config if set
         if sandbox_config and sandbox_config.enabled and sandbox_config.max_execution_time:
             self._timeout = sandbox_config.max_execution_time
@@ -1651,7 +1655,12 @@ class BuiltinExecuteTool(Tool):
         # on the subprocess. Skip the outer timeout wrapper in Model.run_function_calls.
         self.functions["execute"].manages_own_timeout = True
 
-    async def execute(self, command: str, timeout: Optional[int] = None) -> str:
+    async def execute(
+            self,
+            command: str,
+            timeout: Optional[int] = None,
+            background: bool = False,
+    ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
         IMPORTANT — Use dedicated tools instead of bash equivalents:
@@ -1674,9 +1683,16 @@ class BuiltinExecuteTool(Tool):
         - The command string is passed unchanged to the system shell after
           safety validation. Safety policies may block a command, but never
           rewrite it. Quotes, escapes, newlines, and source code remain exact.
-        - Commands timeout after 120 seconds by default
+        - Foreground commands timeout after 120 seconds by default
         - You may specify a custom ``timeout`` (in seconds) for long-running
           commands; there is no upper cap — the caller decides.
+        - For long-running commands whose result can be inspected later, pass
+          ``background=True``. The command starts immediately, logs to
+          the project-scoped ``~/.agentica/projects/.../background/`` directory,
+          and returns the PID plus /ps and /stop instructions without blocking
+          the current agent turn.
+          Prefer this for benchmarks, servers/watchers, long test suites, and
+          other commands likely to outlive the current turn.
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
         - When issuing multiple independent commands, make multiple execute calls in parallel
@@ -1707,6 +1723,8 @@ class BuiltinExecuteTool(Tool):
         Args:
             command: Exact shell command to execute without normalization or repair
             timeout: optional timeout in seconds (default 120, no upper cap)
+            background: start the command in the background and return immediately;
+                timeout does not apply after the command has been detached
 
         Returns:
             str: The output of the command (stdout + stderr) with exit code
@@ -1759,6 +1777,19 @@ class BuiltinExecuteTool(Tool):
 
         logger.debug(f"Executing command: {command}")
         cwd = str(self._work_dir) if self._work_dir else None
+
+        if background:
+            item = self._background_process_registry.start(command, cwd=cwd)
+            return (
+                f"Started background command #{item.num} (PID {item.pid}).\n"
+                f"id: {item.id}\n"
+                f"Status: running\n"
+                f"Log: {item.log_path}\n"
+                f"Inspect progress by reading the log. In Agentica CLI, the user can "
+                f"also use /ps and /stop {item.id}. If you must stop it yourself on "
+                f"POSIX, run execute(command=\"kill -- -{item.pid}\")."
+            )
+
         proc = None
 
         try:
@@ -1879,6 +1910,7 @@ def get_builtin_tools(
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback=None,
         sandbox_config=None,
+        background_process_registry: Optional[BackgroundProcessRegistry] = None,
         enable_diagnostics: bool = False,
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
@@ -1904,6 +1936,7 @@ def get_builtin_tools(
         custom_skill_dirs: Custom skill directories to load (optional)
         ask_user_question_callback: Custom callback for ask_user_question tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
+        background_process_registry: Shared registry for execute(background=True) (optional)
         enable_diagnostics: When True, start an LSP diagnostics checker and attach
             it to the file tool so write/edit results report newly-introduced
             type/import/syntax errors. Requires a language server (e.g. pyright)
@@ -1936,7 +1969,11 @@ def get_builtin_tools(
         ))
 
     if include_execute:
-        tools.append(BuiltinExecuteTool(work_dir=work_dir, sandbox_config=sandbox_config))
+        tools.append(BuiltinExecuteTool(
+            work_dir=work_dir,
+            sandbox_config=sandbox_config,
+            background_process_registry=background_process_registry,
+        ))
 
     if include_web_search:
         tools.append(BuiltinWebSearchTool())

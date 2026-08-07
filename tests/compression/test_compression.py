@@ -148,23 +148,23 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
 
 
 class TestSanitizePath(unittest.TestCase):
-    """Tests for _sanitize_path."""
+    """Tests for sanitize_path."""
 
     def test_basic_path(self):
-        from agentica.compression.tool_result_storage import _sanitize_path
-        result = _sanitize_path("/Users/test/project")
+        from agentica.compression.tool_result_storage import sanitize_path
+        result = sanitize_path("/Users/test/project")
         self.assertRegex(result, r'^[a-zA-Z0-9\-]+$')
 
     def test_long_path_truncated_with_hash(self):
-        from agentica.compression.tool_result_storage import _sanitize_path, _MAX_SANITIZED_LENGTH
+        from agentica.compression.tool_result_storage import sanitize_path, _MAX_SANITIZED_LENGTH
         long_path = "/a/b/c/" + "x" * 300
-        result = _sanitize_path(long_path)
+        result = sanitize_path(long_path)
         self.assertLessEqual(len(result), _MAX_SANITIZED_LENGTH + 10)  # +hash suffix
         self.assertIn("-", result)  # hash appended
 
     def test_special_chars_replaced(self):
-        from agentica.compression.tool_result_storage import _sanitize_path
-        result = _sanitize_path("/path/to/my project (2)/test.txt")
+        from agentica.compression.tool_result_storage import sanitize_path
+        result = sanitize_path("/path/to/my project (2)/test.txt")
         self.assertNotIn(" ", result)
         self.assertNotIn("(", result)
 

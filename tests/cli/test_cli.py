@@ -426,6 +426,24 @@ class TestCLIHelpers(unittest.TestCase):
         # No leading spinner segment when text is empty
         self.assertNotEqual(without_spinner[0][0], "class:sb-spin-active")
 
+    def test_status_bar_shows_background_terminal_count(self):
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-4o",
+            context_tokens=64000,
+            context_window=128000,
+            spinner_text="⠋",
+            terminal_width=140,
+            agent_running=True,
+            background_terminal_count=1,
+        )
+        text = "".join(v for _, v in frags)
+
+        self.assertIn("1 background terminal running", text)
+        self.assertIn("/ps to view", text)
+        self.assertIn("/stop to close", text)
+
     def test_status_bar_idle_keeps_base_classes(self):
         """When ``agent_running=False`` (default), fragments must keep their
         base ``class:sb`` / ``class:sb-dim`` / etc. names — no ``-active``
@@ -2649,6 +2667,41 @@ class TestCLIConfiguration(unittest.TestCase):
 
         self.assertTrue(captured["long_term_memory_config"].sync_memories_to_global_agent_md)
 
+    def test_create_agent_sets_background_registry_user_id(self):
+        """Background command logs should use the current workspace user segment."""
+        from agentica.cli.runtime import create_agent
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        class FakeDeepAgent:
+            def __init__(self, **kwargs):
+                self.tools = []
+
+        registry = BackgroundProcessRegistry()
+        workspace = MagicMock()
+        workspace.user_id = "alice@example.com"
+
+        with (
+            patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
+            patch(
+                "agentica.agent.deep.DeepAgent",
+                FakeDeepAgent,
+            ),
+        ):
+            create_agent(
+                {
+                    "model_provider": "zhipuai",
+                    "model_name": "glm-5",
+                    "debug": False,
+                    "work_dir": None,
+                },
+                extra_tools=[],
+                workspace=workspace,
+                skills_registry=None,
+                background_process_registry=registry,
+            )
+
+        self.assertEqual(registry.user_id, "alice@example.com")
+
 
 class TestToolRegistryIntegrity(unittest.TestCase):
     """Test cases for tool registry integrity."""
@@ -3621,6 +3674,44 @@ class TestCLIAwareness(unittest.TestCase):
         self.assertIn("/agent", cli_commands.COMMAND_REGISTRY)
         self.assertIs(cli_commands.COMMAND_REGISTRY["/agents"][0], cli_commands._cmd_agents)
         self.assertIs(cli_commands.COMMAND_REGISTRY["/agent"][0], cli_commands._cmd_agents)
+
+    def test_cmd_ps_registered(self):
+        self.assertIn("/ps", cli_commands.COMMAND_REGISTRY)
+        self.assertIs(cli_commands.COMMAND_REGISTRY["/ps"][0], cli_commands._cmd_ps)
+
+    def test_cmd_ps_and_stop_control_background_terminals(self):
+        import shlex
+
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        with tempfile.TemporaryDirectory() as td:
+            agentica_home = Path(td) / "agentica-home"
+            with patch.dict(os.environ, {"AGENTICA_HOME": str(agentica_home)}, clear=False):
+                registry = BackgroundProcessRegistry(user_id="alice@example.com")
+                command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+                item = registry.start(command, cwd=td)
+                ctx = cli_commands.CommandContext(
+                    agent_config={},
+                    current_agent=None,
+                    background_processes=registry,
+                )
+                fake_console = MagicMock()
+                try:
+                    self.assertNotIn(str(Path(td) / ".agentica"), item.log_path)
+                    self.assertIn(str(agentica_home / "projects" / "alice@example.com"), item.log_path)
+                    self.assertNotIn(str(agentica_home / "projects" / "default"), item.log_path)
+                    with patch.object(cli_commands, "get_console", return_value=fake_console):
+                        cli_commands._cmd_ps(ctx, "")
+                        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list)
+                        self.assertIn("Background terminals (1)", rendered)
+                        self.assertIn(f"pid={item.pid}", rendered)
+
+                        cli_commands._cmd_stop(ctx, str(item.pid))
+                        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list)
+                        self.assertIn("Stopped 1 terminal(s).", rendered)
+                    self.assertEqual(registry.running_count(), 0)
+                finally:
+                    registry.stop()
 
     def _make_apply_profile_ctx(self):
         """Build a CommandContext whose mock agent survives a profile switch.

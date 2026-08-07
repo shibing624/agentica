@@ -14,6 +14,7 @@ import os
 import shlex
 import tempfile
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,6 +36,7 @@ from agentica.tools.buildin_tools import (
     BuiltinTaskTool,
     get_builtin_tools,
 )
+from agentica.tools.background_processes import BackgroundProcess, BackgroundProcessRegistry
 from agentica.tools.builtin.web_tools import (
     BuiltinFetchUrlTool as CanonicalBuiltinFetchUrlTool,
     BuiltinWebSearchTool as CanonicalBuiltinWebSearchTool,
@@ -1038,9 +1040,80 @@ class TestBuiltinExecuteTool:
         assert function.sanitize_arguments is False
         assert "passed unchanged" in function.description
 
+    def test_background_command_management_tools_not_registered(self, execute_tool):
+        assert "list_background_commands" not in execute_tool.functions
+        assert "stop_background_command" not in execute_tool.functions
+
     def test_execute_simple_command(self, execute_tool):
         result = asyncio.run(execute_tool.execute("echo hello"))
         assert "hello" in result
+
+    def test_execute_background_registers_process(self, tmp_dir, monkeypatch):
+        agentica_home = Path(tmp_dir) / "agentica-home"
+        monkeypatch.setenv("AGENTICA_HOME", str(agentica_home))
+        registry = BackgroundProcessRegistry(user_id="alice@example.com")
+        tool = BuiltinExecuteTool(
+            work_dir=tmp_dir,
+            background_process_registry=registry,
+        )
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+
+        result = asyncio.run(tool.execute(command, background=True))
+
+        try:
+            running = registry.list()
+            assert len(running) == 1
+            item = running[0]
+            assert f"PID {item.pid}" in result
+            assert f"id: {item.id}" in result
+            assert f"/stop {item.id}" in result
+            assert f"kill -- -{item.pid}" in result
+            assert "/stop" in result
+            assert Path(item.log_path).exists()
+            assert str(Path(tmp_dir) / ".agentica") not in item.log_path
+            assert str(agentica_home / "projects" / "alice@example.com") in item.log_path
+            assert str(agentica_home / "projects" / "default") not in item.log_path
+        finally:
+            registry.stop()
+        assert registry.running_count() == 0
+
+    def test_background_stop_tolerates_wait_after_sigkill_timeout(self):
+        registry = BackgroundProcessRegistry()
+        process = MagicMock(pid=12345)
+        process.poll.return_value = None
+        process.wait.side_effect = [
+            subprocess.TimeoutExpired("command", 2),
+            subprocess.TimeoutExpired("command", 2),
+        ]
+        item = BackgroundProcess(
+            id="term_1",
+            num=1,
+            process=process,
+            command="command",
+            cwd=None,
+            log_path="/tmp/term_1.log",
+            started_at=0,
+        )
+        registry._items[item.id] = item
+
+        with patch("agentica.tools.background_processes.os.killpg") as killpg:
+            stopped = registry.stop(item.id)
+
+        assert stopped == [item]
+        assert killpg.call_count == 2
+
+    def test_background_start_removes_log_when_popen_fails(self, tmp_dir, monkeypatch):
+        agentica_home = Path(tmp_dir) / "agentica-home"
+        monkeypatch.setenv("AGENTICA_HOME", str(agentica_home))
+        registry = BackgroundProcessRegistry()
+
+        with patch(
+            "agentica.tools.background_processes.subprocess.Popen",
+            side_effect=OSError("cannot start"),
+        ), pytest.raises(OSError, match="cannot start"):
+            registry.start("command", cwd=str(tmp_dir))
+
+        assert list(agentica_home.rglob("*.log")) == []
 
     def test_execute_returns_exit_code_on_failure(self, execute_tool):
         with pytest.raises(RuntimeError, match="exit(ed)? (with )?code 42"):

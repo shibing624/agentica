@@ -747,6 +747,7 @@ def create_agent(
     workspace: Optional[Workspace] = None,
     skills_registry=None,
     ask_user_question_callback=None,
+    background_process_registry=None,
     enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
 ):
@@ -757,6 +758,8 @@ def create_agent(
         callback so the tool reads via the TUI input box instead of a bare
         ``input()`` (which deadlocks against prompt_toolkit's stdin ownership in
         the background agent thread).
+    background_process_registry: optional shared registry used by
+        execute(background=True), /ps, /stop, and the status bar.
     enable_cron_immediate_run: when True (interactive CLI) the ``cronjob`` tool's
         ``action='run'`` executes a job once immediately and returns its output.
         Set False for cron-spawned agents so a scheduled job cannot recursively
@@ -815,6 +818,8 @@ def create_agent(
         cli_user_id = workspace.user_id
     if cli_user_id is None:
         cli_user_id = _Workspace.DEFAULT_USER_ID
+    if background_process_registry is not None:
+        background_process_registry.set_user_id(cli_user_id)
 
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
@@ -867,6 +872,7 @@ def create_agent(
         long_term_memory_config=long_term_memory_config,
         include_ask_user_question=True,  # CLI is interactive, always enable human-in-the-loop
         ask_user_question_callback=ask_user_question_callback,
+        background_process_registry=background_process_registry,
         enable_diagnostics=bool(agent_config.get("enable_diagnostics")),
         diagnostics_servers=agent_config.get("diagnostics_servers"),
         permission_mode=permission_mode,
