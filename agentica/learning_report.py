@@ -3,7 +3,7 @@
 @author:XuMing(xuming624@qq.com)
 @description: LearningReport — first-class observability of self-evolution.
 
-arch_v5.md §"Experience & Self-Evolution Governance" requires every run that
+§"Experience & Self-Evolution Governance" requires every run that
 touches the experience / skill subsystem to emit a structured report so the
 operator can answer "did this run actually learn something, and if not why?"
 without grepping logs.
