@@ -33,7 +33,7 @@ from typing import (
 )
 
 if TYPE_CHECKING:
-    from agentica.goals import GoalRunResult
+    from agentica.goals import GoalRunResult, GoalStepResult
 import copy
 import json
 import os
