@@ -2,7 +2,7 @@
 
 让 Agent **持续向一个用户目标推进**，每轮结束自动判断是否完成，没完成就续跑——直到 judge 判 done、预算耗尽、或用户主动停下。CLI 用户用 `/goal xxx`，SDK 用户一行 `await agent.run_goal(...)`。
 
-> **主成本闸是 `token_budget` / `wall_clock_budget_sec`；`turn_budget`（默认 100，不可关）只是防 runaway 的安全网，不是成本预算。** 便宜工具在 100 轮内就能烧掉大量 token，别指望 `turn_budget` 控成本——生产 / 长任务务必显式设 `token_budget`。
+> **主成本闸是 `token_budget`（默认 `DEFAULT_TOKEN_BUDGET = 500_000`，CLI 与 SDK 一致）。`turn_budget` 默认 `None`（不限轮数），仅在显式传入时生效。`wall_clock_budget_sec` 仍为可选 SLA 闸。**
 
 > 本特性已包含 P0 基础环 + P1 S/A 档（Runner 锚点、token/wall-clock 预算、`update_goal` 受限工具、`goal.*` 事件）。设计文档：`docs/learn_cc/goal.md`（内部）。
 
@@ -26,7 +26,7 @@ agent = Agent(
     ),
 )
 
-# 最简：不传任何 budget，只靠默认 100 turns 安全网兜底
+# 最简：默认 token_budget=500_000，turn_budget=None
 result = await agent.run_goal("compute 17+9+16 and state the integer answer")
 
 print(result.status)            # "complete" / "paused" / "budget_limited"
@@ -56,15 +56,15 @@ print(result.response_content)  # == result.run_response.content or ""
 
 ### 预算（hard caps）
 
-三个预算**互相独立、任一触发即停**（取最严的那个先停）。`None` = 不限。
+三个预算**互相独立、任一触发即停**（取最严的那个先停）。
 
 | 参数 | 默认 | 不传时 | 含义 |
 |---|---|---|---|
-| `turn_budget` | `DEFAULT_TURN_BUDGET = 100` | **fallback 到 100**（防 runaway 的安全网） | LLM 循环总轮数上限 |
-| `token_budget` | `None` | **不限**（不计 token） | 累计输入+输出 token 上限 |
+| `token_budget` | `DEFAULT_TOKEN_BUDGET = 500_000` | **fallback 到 500_000**（主成本闸） | 累计输入+输出 token 上限 |
+| `turn_budget` | `None` | **不限**（不计轮数） | LLM 循环总轮数上限（可选） |
 | `wall_clock_budget_sec` | `None` | **不限**（不计时） | agent wall-clock 秒数上限 |
 
-> 注意：`turn_budget` 即便传 `None` 也会回落到 `DEFAULT_TURN_BUDGET = 100`，因为它的角色是"防 runaway 的最后一道闸"——不能真正去掉。想要更大的"实际无限"就传一个大数，例如 `turn_budget=10_000`。
+> 注意：`token_budget` 即便传 `None` 也会回落到 `DEFAULT_TOKEN_BUDGET`（`GoalManager.set` / `run_goal` 路径）。想要更大预算就显式传更大的数，例如 `token_budget=2_000_000`。`turn_budget` 只有显式传入正整数时才生效。
 
 **判定优先级**（在 `evaluate_after_turn` 里固定为）：
 
@@ -76,24 +76,30 @@ turn accounting → budget check → tool short-circuit → judge
 
 预算耗尽时 status 是独立的 `budget_limited`（不是 `paused`），语义"用户必须决定加额度或接受部分结果"。用 `mgr.resume()` 或 `/goal resume` 可从 `budget_limited` / `paused` 两种状态恢复。
 
+CLI `/goal status` 用一行 `Budget:` 汇总三个预算（未设上限的只显示已用量）；状态栏在 goal 执行期间实时显示 `goal 12.3K/500K`：
+
+```
+Goal [active]: 实现 xxx 功能并跑通 pytest
+  Budget: tokens 42,100/500,000 · turns 6 · wall 310s/1800s
+```
+
 ### Best Practices：怎么设预算
 
-| 场景 | `turn_budget` | `token_budget` | `wall_clock_budget_sec` |
+| 场景 | `token_budget` | `turn_budget` | `wall_clock_budget_sec` |
 |---|---|---|---|
-| 试玩 / 调试 | `5` | 不传 | 不传 |
-| 一次性短任务（算个数、写一句话） | 不传 (默认 100) | 不传 | 不传 |
-| 修个 bug | 不传 | `50_000` | `600` (10 分钟) |
-| 实现完整功能 + 测试 | 不传 | `200_000` | `1800` (30 分钟) |
-| 长 refactor / migration | 不传 | `500_000` | `3600` (1 小时) |
-| 完全放飞（仅安全网兜底） | `10_000` | 不传 | 不传 |
-| 严控成本，定额执行 | 三个都传 | 按预算算 | 按 SLA 算 |
+| 试玩 / 调试 | `50_000` | `5` | 不传 |
+| 一次性短任务（算个数、写一句话） | 不传 (默认 500k) | 不传 | 不传 |
+| 修个 bug | `50_000`–`100_000` | 不传 | `600` (10 分钟) |
+| 实现完整功能 + 测试 | 不传 (默认 500k) | 不传 | `1800` (30 分钟) |
+| 长 refactor / migration | `1_000_000`+ | 不传 | `3600` (1 小时) |
+| 严控成本，定额执行 | 三个都传 | 按轮数兜底 | 按 SLA 算 |
 
 经验法则：
 
-- **小任务不传 token/wall-clock**——多花一行参数没必要，turn_budget 的 100 已经兜得很松
-- **生产 / 长任务一定传 `token_budget`**——一旦模型陷入死循环（比如反复 read 同一个大文件），按 turn 数算可能要烧很久才触发；按 token 算几秒钟就阻断
-- **`wall_clock_budget_sec` 主要给 SLA 用**——例如"30 分钟内出个结果"，不在乎期间用了多少 token
-- **`token_budget` 怎么估**：粗略按 `≈ avg_turn_tokens × 期望最大 turns`。DeepSeek 一个工具调用 turn 大约 1k–5k token，编码任务 30 turns 估 `100_000` 比较稳
+- **默认就有 token 闸**——CLI `/goal xxx` 与 SDK `run_goal()` 未传时都是 500k
+- **需要更紧/更松就显式传 `token_budget`**——例如 `/goal --tokens 80000 ...`
+- **`turn_budget` 可选**——只在你想额外限制轮数时用 `--turns N`
+- **`wall_clock_budget_sec` 主要给 SLA 用**——例如"30 分钟内出个结果"
 
 示例：
 
@@ -136,9 +142,9 @@ agent = Agent(
 需要更细粒度控制（例如自己写循环、自定义 logging、与 streaming 配合）时：
 
 ```python
-mgr = agent.get_goal_manager(default_turn_budget=5)
+mgr = agent.get_goal_manager(default_token_budget=50_000)
 agent.enable_goal_tool()
-mgr.set("xxx", token_budget=1000)
+mgr.set("xxx", token_budget=1000)  # override for this goal
 
 while True:
     resp = await agent.run(mgr.next_continuation_prompt())

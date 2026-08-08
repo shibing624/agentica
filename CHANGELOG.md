@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- Goal 主成本闸改为默认开启的 `token_budget=500_000`（CLI `/goal` 与 SDK `run_goal` 一致）；`turn_budget` 默认 `None`（仅 `--turns` / 显式参数时生效）。`/goal status` 与状态栏在执行中显示 `tokens used/budget`（如 `goal 12.3K/500K`）
 - `execute(background=True)`：长命令可立即返回，由共享 `BackgroundProcessRegistry` 托管进程组；stdout/stderr 写入 `~/.agentica/projects/<user>/.../background/` 日志。CLI 新增 `/ps` 列出后台 terminal 与 background agent，`/stop <id|pid|#n>` 可按目标停止（空参停全部）；状态栏显示正在运行的 background terminal 数量。registry 经 `create_agent` / session rebuild 路径注入，与 `/background` agent 任务共用同一套 `/ps`/`/stop` 入口
 - `wait(id=...)`：等待 `execute(background=True)` 启动的后台命令，命令一退出立即返回并给出退出码、耗时和日志尾部；未结束则在超时后返回当前进度且不停止命令，单次上限 300 秒，让调用回到模型循环以便用户打断。后台命令的退出状态只报给用户，`wait` 是它回到对话里的唯一途径。它补的是「命令可能活得比一次工具调用久」这个断层：前台命令被 timeout 或被取消的一轮杀掉会丢掉全部输出，而这类任务此前只能退回 `sleep N && tail log` 的盲等。一次调用跑得完、当下就要结果的命令仍应留在前台并调高 `timeout`；真正跑几小时以上的任务则不该 `wait`，等一两次仍未结束就结束轮次，由用户收到的完成通知驱动后续
 - CLI 渲染 `apply_patch` 的真实多文件 unified diff：在原子写入前解析 patch envelope 并捕获每个目标文件的原始内容，完成后展示一份合并的 old→new diff，替代 executor 的文本摘要

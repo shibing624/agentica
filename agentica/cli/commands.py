@@ -3612,6 +3612,24 @@ def _detach_goal_tool(agent: Any) -> None:
     agent.tools = [t for t in agent.tools if not isinstance(t, GoalTool)]
 
 
+def _sync_goal_budget_tui(tui_state: Optional[dict], mgr: Optional[GoalManager]) -> None:
+    """Point the status bar's goal segment at the persisted GoalState.
+
+    ``GoalState`` is the single source of truth for goal token spend; these
+    two fields are only a display mirror. Passing ``mgr=None`` (or a manager
+    with no live goal) hides the segment.
+    """
+    if tui_state is None:
+        return
+    state = mgr.load() if mgr is not None else None
+    if state is None or state.status == "cleared":
+        tui_state["goal_token_budget"] = None
+        tui_state["goal_tokens_used"] = 0
+        return
+    tui_state["goal_token_budget"] = state.token_budget
+    tui_state["goal_tokens_used"] = state.tokens_used
+
+
 def _ensure_goal_manager(ctx: CommandContext) -> Optional[GoalManager]:
     """Return existing manager, or build one bound to the current agent's
     SessionLog. Returns None if the agent has no session_log (impossible in
@@ -3807,12 +3825,15 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     # verify completion with evidence and break the loop when actually done.
     _attach_goal_tool(agent)
 
-    budget_bits = [f"{state.turn_budget} turns"]
+    budget_bits = []
     if state.token_budget is not None:
         budget_bits.append(f"{state.token_budget:,} tokens")
+    if state.turn_budget is not None:
+        budget_bits.append(f"{state.turn_budget} turns")
     if state.wall_clock_budget_sec is not None:
         budget_bits.append(f"{state.wall_clock_budget_sec:.0f}s wall")
-    con.print(f"  ⊙ Goal set ({', '.join(budget_bits)}): {state.objective}")
+    budget_label = ", ".join(budget_bits) if budget_bits else "no caps"
+    con.print(f"  ⊙ Goal set ({budget_label}): {state.objective}")
 
     # Kick off the first turn so the user doesn't need to send a follow-up.
     if ctx.pending_queue is not None:

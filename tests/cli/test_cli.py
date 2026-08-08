@@ -284,6 +284,20 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertNotIn("░", text)
         self.assertNotIn("█", text)
 
+    def test_build_status_bar_fragments_shows_goal_tokens(self):
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-4o",
+            context_tokens=1000,
+            context_window=128000,
+            goal_tokens_used=12_300,
+            goal_token_budget=500_000,
+            terminal_width=120,
+        )
+        text = "".join(v for _, v in frags)
+        self.assertIn("goal 12.3K/500K", text)
+
     def test_build_status_bar_fragments_shows_project_identity(self):
         from pathlib import Path
 

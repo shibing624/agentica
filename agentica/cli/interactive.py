@@ -94,6 +94,7 @@ from agentica.cli.commands import (
     IMAGE_EXTENSIONS,
     _run_async_safe,
     _detach_goal_tool,
+    _sync_goal_budget_tui,
     display_resumed_transcript,
     hydrate_resumed_session,
 )
@@ -1049,6 +1050,10 @@ def _maybe_continue_goal(
             _cprint(f"  [goal] evaluator failed: {exc}")
             return
 
+    # Replace the live mid-turn estimate with the charged total the manager
+    # just persisted, so the status bar settles on the authoritative number.
+    _sync_goal_budget_tui(tui_state, mgr)
+
     if decision.message:
         _cprint(f"  {decision.message}")
 
@@ -1056,6 +1061,8 @@ def _maybe_continue_goal(
     # tool — otherwise it lingers on a goal that no longer auto-continues.
     if decision.status in ("complete", "paused", "budget_limited"):
         _detach_goal_tool(agent)
+        if decision.status == "complete":
+            _sync_goal_budget_tui(tui_state, None)
 
     if decision.should_continue and decision.continuation_prompt:
         pending_queue.put(decision.continuation_prompt)
@@ -1071,6 +1078,7 @@ def _refresh_live_status(
     cost_baseline: float,
     active_baseline: float,
     calls_baseline: int,
+    goal_tokens_baseline: int,
 ) -> None:
     """Write live cost and timing fields from the current run's cost tracker.
 
@@ -1084,15 +1092,24 @@ def _refresh_live_status(
     Context occupancy is updated separately from Runner ``context.usage``
     events. Cost accounting cannot represent it because a turn may contain
     retries, tool loops, and auxiliary calls.
+
+    ``goal_tokens_used`` follows the same baseline+delta rule so a standing
+    goal's spend ticks during the turn; ``_maybe_continue_goal`` overwrites it
+    with the manager's charged total once the turn is accounted for.
     """
     elapsed = perf_counter() - request_start
     tui_state["last_turn_seconds"] = elapsed
     tui_state["active_seconds"] = active_baseline + elapsed
     run_response = agent.run_response if agent is not None else None
     ct = run_response.cost_tracker if run_response is not None else None
-    if ct is not None and ct.turns > 0:
+    if ct is None:
+        return
+    if ct.turns > 0:
         tui_state["cost_usd"] = cost_baseline + ct.total_cost_usd
         tui_state["total_api_calls"] = calls_baseline + ct.turns
+    if tui_state.get("goal_token_budget") is not None:
+        turn_tokens = max(0, ct.total_input_tokens + ct.total_output_tokens)
+        tui_state["goal_tokens_used"] = goal_tokens_baseline + turn_tokens
 
 
 def _make_compact_phase_handler(set_phase, tui_state: dict):
@@ -1251,10 +1268,12 @@ def _process_stream_response(
     _cost_baseline = tui_state.get("cost_usd", 0.0)
     _active_baseline = tui_state.get("active_seconds", 0.0)
     _calls_baseline = tui_state.get("total_api_calls", 0)
+    _goal_tokens_baseline = tui_state.get("goal_tokens_used", 0)
     tui_state["_turn_request_start"] = request_start
     tui_state["_turn_cost_baseline"] = _cost_baseline
     tui_state["_turn_active_baseline"] = _active_baseline
     tui_state["_turn_calls_baseline"] = _calls_baseline
+    tui_state["_turn_goal_tokens_baseline"] = _goal_tokens_baseline
 
     try:
         from agentica.run_config import RunConfig
@@ -1453,6 +1472,7 @@ def _process_stream_response(
         _refresh_live_status(
             tui_state, current_agent, request_start,
             _cost_baseline, _active_baseline, _calls_baseline,
+            _goal_tokens_baseline,
         )
         # Clear the stashed turn baselines so a stale value can't bleed into
         # the next turn (or into the spinner loop after the agent stops).
@@ -1460,6 +1480,7 @@ def _process_stream_response(
         tui_state.pop("_turn_cost_baseline", None)
         tui_state.pop("_turn_active_baseline", None)
         tui_state.pop("_turn_calls_baseline", None)
+        tui_state.pop("_turn_goal_tokens_baseline", None)
 
         if not display.has_content_output and display.tool_count == 0 and not display.thinking_shown:
             _set_phase("idle")
@@ -1964,6 +1985,8 @@ def _setup_tui(
             terminal_width=tw,
             agent_running=bool(spinner),
             background_terminal_count=state.background_processes.running_count(),
+            goal_tokens_used=tui_state.get("goal_tokens_used"),
+            goal_token_budget=tui_state.get("goal_token_budget"),
         )
 
     history_dir = os.path.dirname(history_file)
@@ -2420,6 +2443,8 @@ def run_interactive(
         "total_api_calls": 0,
         "compaction_count": 0,
         "debug": bool(agent_config.get("debug")),
+        "goal_token_budget": None,
+        "goal_tokens_used": 0,
     }
     _seed_context_tokens(current_agent, tui_state)
 
@@ -2559,7 +2584,12 @@ def run_interactive(
             # Reset per-turn token baseline whenever the manager changes
             # (new session, cleared goal, resumed session). Avoids carrying
             # the previous session's cumulative counts into a fresh goal.
-            state.goal_tokens_baseline = 0
+            # Prefer GoalState.tokens_used when a goal is already loaded
+            # (e.g. /goal set just wrote a fresh zeroed state, or /resume
+            # restored a paused goal with prior spend).
+            gs = state.goal_manager.load() if state.goal_manager is not None else None
+            state.goal_tokens_baseline = gs.tokens_used if gs is not None and gs.status != "cleared" else 0
+            _sync_goal_budget_tui(tui_state, state.goal_manager)
 
     app = _setup_tui(
         state,
@@ -2838,6 +2868,7 @@ def run_interactive(
                     tui_state.get("_turn_cost_baseline", 0.0),
                     tui_state.get("_turn_active_baseline", 0.0),
                     tui_state.get("_turn_calls_baseline", 0),
+                    tui_state.get("_turn_goal_tokens_baseline", 0),
                 )
             _frame_idx[0] = (_frame_idx[0] + 1) % len(_BRAILLE_SPINNER)
             app.invalidate()

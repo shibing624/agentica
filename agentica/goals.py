@@ -60,19 +60,14 @@ if TYPE_CHECKING:
 # Constants
 # ---------------------------------------------------------------------------
 
-# Default turn cap for a standing goal. NOTE: this is the safety-net cap
-# against runaway loops, NOT the primary cost budget — ``token_budget`` and
-# ``wall_clock_budget_sec`` (when set) are the real hard caps and take
-# precedence in ``evaluate_after_turn``. Empirically:
-#   - one-shot tasks (compute X, draft a line): 1–3 turns
-#   - bug fixes (search → edit → test → verify):  5–15 turns
-#   - feature + tests: 20–50 turns
-#   - multi-step refactor / migration: 50–100 turns
-# A default of 100 keeps the safety net loose enough that almost no real
-# workflow trips it accidentally — runaway loops are still caught by
-# token / wall-clock budgets (the real cost gate) or by the
-# consecutive-parse-failure pause.
-DEFAULT_TURN_BUDGET = 100
+# Primary cost gate for a standing goal (CLI + SDK). Token spend tracks
+# real work far better than turn count: one turn may be 100 tokens or
+# 50_000. Callers override via ``token_budget=`` / ``/goal --tokens N``.
+DEFAULT_TOKEN_BUDGET = 500_000
+# Optional turn cap — default None (disabled). Pass ``turn_budget=N`` or
+# ``/goal --turns N`` only when you want a hard turn ceiling on top of
+# the token budget.
+DEFAULT_TURN_BUDGET: Optional[int] = None
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 # Auto-pause after N consecutive turns where every tool call failed. Guards
 # against the agent getting stuck repeating the same broken tool invocation
@@ -101,13 +96,14 @@ class GoalState:
     user/assistant/system/tool).
 
     Budgets (P1 S2):
-        ``turn_budget``       hard cap on continuation turns
-        ``token_budget``      hard cap on accumulated input+output tokens
+        ``token_budget``      primary hard cap on accumulated input+output
+                              tokens (default ``DEFAULT_TOKEN_BUDGET``)
+        ``turn_budget``       optional hard cap on continuation turns
                               (None = unlimited)
-        ``wall_clock_budget_sec``  hard cap on agent wall-clock seconds
-                              (None = unlimited)
+        ``wall_clock_budget_sec``  optional hard cap on agent wall-clock
+                              seconds (None = unlimited)
 
-    When ANY budget is exhausted the state goes to ``budget_limited``
+    When ANY set budget is exhausted the state goes to ``budget_limited``
     (semantically distinct from ``paused``: budget-limited means the
     user must decide to extend the cap or accept the partial result).
     """
@@ -115,9 +111,9 @@ class GoalState:
     session_id: str
     objective: str
     status: str = "active"  # active | paused | complete | cleared | budget_limited
-    turn_budget: int = DEFAULT_TURN_BUDGET
+    turn_budget: Optional[int] = None
     turns_used: int = 0
-    token_budget: Optional[int] = None
+    token_budget: Optional[int] = DEFAULT_TOKEN_BUDGET
     tokens_used: int = 0
     wall_clock_budget_sec: Optional[float] = None
     wall_clock_used_sec: float = 0.0
@@ -545,7 +541,8 @@ class GoalManager:
         self,
         session_log: "SessionLog",
         *,
-        default_turn_budget: int = DEFAULT_TURN_BUDGET,
+        default_turn_budget: Optional[int] = None,
+        default_token_budget: int = DEFAULT_TOKEN_BUDGET,
         judge_model: Optional["Model"] = None,
         event_callback: Optional[Callable[[RunEventType, Dict[str, Any]], None]] = None,
         verifier: Optional[GoalVerifier] = None,
@@ -553,6 +550,7 @@ class GoalManager:
     ):
         self.session_log = session_log
         self.default_turn_budget = default_turn_budget
+        self.default_token_budget = default_token_budget
         self.judge_model = judge_model
         # When False (default), the loop does NOT run an LLM judge every turn.
         # Completion is decided by the agent actively calling the
@@ -647,7 +645,7 @@ class GoalManager:
             status="active",
             turn_budget=turn_budget if turn_budget is not None else self.default_turn_budget,
             turns_used=0,
-            token_budget=token_budget,
+            token_budget=token_budget if token_budget is not None else self.default_token_budget,
             tokens_used=0,
             wall_clock_budget_sec=wall_clock_budget_sec,
             wall_clock_used_sec=0.0,
@@ -677,16 +675,42 @@ class GoalManager:
     def _check_budget_exhausted(self) -> Optional[str]:
         """Return a human-readable reason if any hard budget is exhausted,
         else None. ``turn_budget`` is checked separately AFTER the judge so
-        we don't waste a judge call when token/time budget already blew.
+        a final-turn ``done`` verdict can still complete; token/time caps
+        are hard stops and skip the judge entirely.
         """
         s = self._state
         if s is None:
             return None
         if s.token_budget is not None and s.tokens_used >= s.token_budget:
-            return f"token budget exhausted ({s.tokens_used}/{s.token_budget})"
+            return f"token budget exhausted ({s.tokens_used:,}/{s.token_budget:,})"
         if s.wall_clock_budget_sec is not None and s.wall_clock_used_sec >= s.wall_clock_budget_sec:
             return f"wall-clock budget exhausted ({s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s)"
         return None
+
+    def _turn_budget_exhausted(self) -> bool:
+        """True when an optional turn cap is set and has been reached."""
+        s = self._state
+        return s is not None and s.turn_budget is not None and s.turns_used >= s.turn_budget
+
+    def _progress_label(self) -> str:
+        """Single budget-progress format shared by status output and loop
+        messages. Tokens lead because they are the primary cost gate; the
+        optional turn / wall caps only render as a fraction when set.
+        """
+        s = self._state
+        if s is None:
+            return ""
+        if s.token_budget is not None:
+            parts = [f"tokens {s.tokens_used:,}/{s.token_budget:,}"]
+        else:
+            parts = [f"tokens {s.tokens_used:,}"]
+        if s.turn_budget is not None:
+            parts.append(f"turns {s.turns_used}/{s.turn_budget}")
+        else:
+            parts.append(f"turns {s.turns_used}")
+        if s.wall_clock_budget_sec is not None:
+            parts.append(f"wall {s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s")
+        return " · ".join(parts)
 
     def _reload_from_disk(self) -> None:
         """Refresh in-memory cache from SessionLog.
@@ -803,19 +827,8 @@ class GoalManager:
         if self._state is None:
             return "No active goal."
         s = self._state
-        head = f"Goal [{s.status}] ({s.turns_used}/{s.turn_budget} turns): {s.objective}"
-        extras = []
-        budget_bits = []
-        if s.token_budget is not None:
-            budget_bits.append(f"tokens {s.tokens_used:,}/{s.token_budget:,}")
-        elif s.tokens_used:
-            budget_bits.append(f"tokens {s.tokens_used:,}")
-        if s.wall_clock_budget_sec is not None:
-            budget_bits.append(f"wall {s.wall_clock_used_sec:.0f}s/{s.wall_clock_budget_sec:.0f}s")
-        elif s.wall_clock_used_sec:
-            budget_bits.append(f"wall {s.wall_clock_used_sec:.0f}s")
-        if budget_bits:
-            extras.append("  Budget: " + " | ".join(budget_bits))
+        head = f"Goal [{s.status}]: {s.objective}"
+        extras = [f"  Budget: {self._progress_label()}"]
         if s.subgoals:
             extras.append(f"  Subgoals ({len(s.subgoals)}):")
             for i, sg in enumerate(s.subgoals, 1):
@@ -1112,19 +1125,20 @@ class GoalManager:
                         message=f"⊙ Goal {label} (verifier): {self._state.last_reason}",
                     )
                 # done=False, no override status → continue, but still
-                # respect turn budget.
-                if self._state.turns_used >= self._state.turn_budget:
+                # respect an optional turn budget.
+                if self._turn_budget_exhausted():
                     self._state.status = "budget_limited"
                     self._state.paused_reason = "budget"
                     self._persist()
+                    budget_msg = (
+                        f"turn budget exhausted "
+                        f"({self._state.turns_used}/{self._state.turn_budget})"
+                    )
                     self._emit(
                         RunEventType.goal_paused,
                         paused_reason="budget",
-                        budget_message="turn budget exhausted",
-                        message=(
-                            f"⊙ Goal budget-limited: turn budget exhausted "
-                            f"({self._state.turns_used}/{self._state.turn_budget})."
-                        ),
+                        budget_message=budget_msg,
+                        message=f"⊙ Goal budget-limited: {budget_msg}.",
                     )
                     return GoalDecision(
                         status="budget_limited",
@@ -1132,20 +1146,15 @@ class GoalManager:
                         continuation_prompt=None,
                         verdict="verifier",
                         reason=self._state.last_reason,
-                        message=(
-                            f"⊙ Goal budget-limited: turn budget exhausted "
-                            f"({self._state.turns_used}/{self._state.turn_budget})."
-                        ),
+                        message=f"⊙ Goal budget-limited: {budget_msg}.",
                     )
                 self._persist()
+                progress = self._progress_label()
                 self._emit(
                     RunEventType.goal_continuing,
                     verdict="verifier",
                     reason=self._state.last_reason,
-                    message=(
-                        f"↻ Goal continuing ({self._state.turns_used}/"
-                        f"{self._state.turn_budget}): {self._state.last_reason}"
-                    ),
+                    message=f"↻ Goal continuing ({progress}): {self._state.last_reason}",
                 )
                 return GoalDecision(
                     status="active",
@@ -1153,10 +1162,7 @@ class GoalManager:
                     continuation_prompt=self.next_continuation_prompt(),
                     verdict="verifier",
                     reason=self._state.last_reason,
-                    message=(
-                        f"↻ Goal continuing ({self._state.turns_used}/"
-                        f"{self._state.turn_budget}): {self._state.last_reason}"
-                    ),
+                    message=f"↻ Goal continuing ({progress}): {self._state.last_reason}",
                 )
             # v_result is None → fall through to LLM judge.
 
@@ -1166,21 +1172,27 @@ class GoalManager:
             # short-circuit) or from an explicit verifier. Neither fired this
             # turn, so keep working until a hard budget cap — this is what
             # makes the loop actually persist ("誓不罢休") instead of an
-            # optimistic judge ending it early. Only the turn budget stops us
-            # here (token / wall-clock caps are enforced earlier).
-            if self._state.turns_used >= self._state.turn_budget:
+            # optimistic judge ending it early. Optional turn_budget (when
+            # set) is the only remaining gate here; token / wall-clock caps
+            # are enforced earlier.
+            if self._turn_budget_exhausted():
                 self._state.status = "budget_limited"
                 self._state.paused_reason = "budget"
                 self._state.last_verdict = "continue"
-                self._state.last_reason = "turn budget exhausted; no completion signal from verify_completion"
+                self._state.last_reason = (
+                    "turn budget exhausted; no completion signal from verify_completion"
+                )
                 self._persist()
+                budget_msg = (
+                    f"turn budget exhausted "
+                    f"({self._state.turns_used}/{self._state.turn_budget})"
+                )
                 self._emit(
                     RunEventType.goal_paused,
                     paused_reason="budget",
-                    budget_message="turn budget exhausted",
+                    budget_message=budget_msg,
                     message=(
-                        f"⊙ Goal budget-limited: turn budget exhausted "
-                        f"({self._state.turns_used}/{self._state.turn_budget}). "
+                        f"⊙ Goal budget-limited: {budget_msg}. "
                         f"The agent never confirmed completion via verify_completion. "
                         f"Use /goal resume to continue."
                     ),
@@ -1192,21 +1204,23 @@ class GoalManager:
                     verdict="continue",
                     reason=self._state.last_reason,
                     message=(
-                        f"⊙ Goal budget-limited: turn budget exhausted "
-                        f"({self._state.turns_used}/{self._state.turn_budget}). "
+                        f"⊙ Goal budget-limited: {budget_msg}. "
                         f"Use /goal resume to continue."
                     ),
                 )
             self._state.last_verdict = "continue"
-            self._state.last_reason = "no completion signal yet; keep working (call verify_completion when done)"
+            self._state.last_reason = (
+                "no completion signal yet; keep working (call verify_completion when done)"
+            )
             self._persist()
+            progress = self._progress_label()
             self._emit(
                 RunEventType.goal_continuing,
                 verdict="continue",
                 reason=self._state.last_reason,
                 message=(
-                    f"↻ Goal continuing ({self._state.turns_used}/"
-                    f"{self._state.turn_budget}): keep working; call verify_completion when you believe it's done."
+                    f"↻ Goal continuing ({progress}): keep working; "
+                    f"call verify_completion when you believe it's done."
                 ),
             )
             return GoalDecision(
@@ -1216,8 +1230,8 @@ class GoalManager:
                 verdict="continue",
                 reason=self._state.last_reason,
                 message=(
-                    f"↻ Goal continuing ({self._state.turns_used}/"
-                    f"{self._state.turn_budget}): keep working; call verify_completion when done."
+                    f"↻ Goal continuing ({progress}): keep working; "
+                    f"call verify_completion when done."
                 ),
             )
 
@@ -1290,17 +1304,20 @@ class GoalManager:
                 message=f"✓ Goal complete: {reason}",
             )
 
-        if self._state.turns_used >= self._state.turn_budget:
+        if self._turn_budget_exhausted():
             self._state.status = "budget_limited"
             self._state.paused_reason = "budget"
             self._persist()
+            budget_msg = (
+                f"turn budget exhausted "
+                f"({self._state.turns_used}/{self._state.turn_budget})"
+            )
             self._emit(
                 RunEventType.goal_paused,
                 paused_reason="budget",
-                budget_message="turn budget exhausted",
+                budget_message=budget_msg,
                 message=(
-                    f"⊙ Goal budget-limited: turn budget exhausted "
-                    f"({self._state.turns_used}/{self._state.turn_budget}). "
+                    f"⊙ Goal budget-limited: {budget_msg}. "
                     f"Use /goal resume to continue."
                 ),
             )
@@ -1311,18 +1328,18 @@ class GoalManager:
                 verdict="continue",
                 reason=reason,
                 message=(
-                    f"⊙ Goal budget-limited: turn budget exhausted "
-                    f"({self._state.turns_used}/{self._state.turn_budget}). "
+                    f"⊙ Goal budget-limited: {budget_msg}. "
                     f"Use /goal resume to continue."
                 ),
             )
 
         self._persist()
+        progress = self._progress_label()
         self._emit(
             RunEventType.goal_continuing,
             verdict="continue",
             reason=reason,
-            message=f"↻ Goal continuing ({self._state.turns_used}/{self._state.turn_budget}): {reason}",
+            message=f"↻ Goal continuing ({progress}): {reason}",
         )
         return GoalDecision(
             status="active",
@@ -1330,5 +1347,5 @@ class GoalManager:
             continuation_prompt=self.next_continuation_prompt(),
             verdict="continue",
             reason=reason,
-            message=f"↻ Goal continuing ({self._state.turns_used}/{self._state.turn_budget}): {reason}",
+            message=f"↻ Goal continuing ({progress}): {reason}",
         )

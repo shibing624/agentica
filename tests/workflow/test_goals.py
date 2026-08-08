@@ -17,6 +17,7 @@ import pytest
 
 from agentica.goals import (
     CONTINUATION_PROMPT_PREFIX,
+    DEFAULT_TOKEN_BUDGET,
     DEFAULT_TURN_BUDGET,
     MAX_CONSECUTIVE_PARSE_FAILURES,
     GoalDecision,
@@ -50,6 +51,21 @@ def _fake_model(content: str = '{"done": false, "reason": "keep going"}'):
 # ---------------------------------------------------------------------------
 # GoalState (de)serialization
 # ---------------------------------------------------------------------------
+
+
+def test_goalstate_defaults_token_budget_not_turn():
+    """CLI+SDK contract: token_budget defaults on; turn_budget defaults off."""
+    s = GoalState(session_id="s", objective="o")
+    assert s.token_budget == DEFAULT_TOKEN_BUDGET == 500_000
+    assert s.turn_budget is None
+    assert DEFAULT_TURN_BUDGET is None
+
+
+def test_goal_manager_set_applies_default_token_budget(tmp_path: Path):
+    mgr = GoalManager(_make_session_log(tmp_path))
+    state = mgr.set("ship it")
+    assert state.token_budget == DEFAULT_TOKEN_BUDGET
+    assert state.turn_budget is None
 
 
 def test_goalstate_roundtrip():
@@ -489,24 +505,32 @@ def test_tool_mark_paused_via_disk(tmp_path: Path):
 
 def test_status_line_with_subgoals(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path))
-    mgr.set("ship", turn_budget=10)
+    mgr.set("ship", turn_budget=10, token_budget=10000)
     mgr.add_subgoal("tests pass")
     line = mgr.status_line()
-    assert "[active]" in line
-    assert "0/10" in line
+    assert "Goal [active]: ship" in line
+    assert "Budget: tokens 0/10,000 · turns 0/10" in line
     assert "tests pass" in line
 
 
-def test_status_line_shows_token_budget(tmp_path: Path):
+def test_status_line_shows_token_and_wall_budget(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path))
     mgr.set("x", token_budget=10000, wall_clock_budget_sec=300)
-    asyncio.run(mgr.evaluate_after_turn.__wrapped__(mgr, "r")) if False else None  # noqa
-    # Simulate without calling judge:
+    # Simulate spend without running a turn.
     mgr.load().tokens_used = 4200
     mgr.load().wall_clock_used_sec = 92
     line = mgr.status_line()
-    assert "tokens" in line and "4,200" in line and "10,000" in line
+    assert "tokens 4,200/10,000" in line
     assert "wall 92s/300s" in line
+
+
+def test_status_line_default_shows_token_cap_and_uncapped_turns(tmp_path: Path):
+    mgr = GoalManager(_make_session_log(tmp_path))
+    mgr.set("x")
+    line = mgr.status_line()
+    assert f"Budget: tokens 0/{DEFAULT_TOKEN_BUDGET:,} · turns 0" in line
+    assert "turns 0/" not in line  # no turn cap → plain count, not a fraction
+    assert "wall" not in line  # no wall budget → segment omitted
 
 
 # ---------------------------------------------------------------------------

@@ -2388,6 +2388,8 @@ def build_status_bar_fragments(
     terminal_width: int = 80,
     agent_running: bool = False,
     background_terminal_count: int = 0,
+    goal_tokens_used: Optional[int] = None,
+    goal_token_budget: Optional[int] = None,
 ):
     """Build prompt_toolkit formatted-text fragments for the persistent status bar.
 
@@ -2402,6 +2404,10 @@ def build_status_bar_fragments(
     The model label is rendered as ``provider/model`` when a provider is
     supplied (e.g. ``openai/gpt-4o``). The active Agentica profile name is
     shown first; it is independent from the Git branch.
+
+    When a standing ``/goal`` is active and ``goal_token_budget`` is set, a
+    compact ``goal used/budget`` segment is shown so users can watch token
+    spend during long goal runs.
 
     When ``agent_running`` is ``True``:
       - ``spinner_text`` (typically a single spinner glyph like ``⠋``) is
@@ -2437,6 +2443,11 @@ def build_status_bar_fragments(
             " · /ps to view · /stop to close"
         )
         bg_short = f"{background_terminal_count} bg · /ps · /stop"
+    goal_text = ""
+    if goal_token_budget is not None:
+        used_s = _format_tokens_short(int(goal_tokens_used or 0))
+        budget_s = _format_tokens_short(int(goal_token_budget))
+        goal_text = f"goal {used_s}/{budget_s}"
 
     full_work_dir = _format_status_work_dir(work_dir)
     compact_work_dir = _compact_status_work_dir(work_dir)
@@ -2452,6 +2463,7 @@ def build_status_bar_fragments(
         show_context: bool = True,
         show_cost: bool = True,
         background_detail: bool = True,
+        show_goal: bool = True,
     ):
         frags = [("class:sb", " ▸ ")]
         if profile:
@@ -2475,6 +2487,11 @@ def build_status_bar_fragments(
             if context_detail:
                 frags.append(("class:sb", f"{ctx_used}/{ctx_total} "))
             frags.append((fg, pct_label))
+        if show_goal and goal_text:
+            frags.extend([
+                ("class:sb-dim", " │ "),
+                ("class:sb", goal_text),
+            ])
         if show_cost:
             frags.extend([
                 ("class:sb-dim", " │ "),
@@ -2515,8 +2532,14 @@ def build_status_bar_fragments(
             profile=profile_name, context_detail=False, show_cost=False,
             background_detail=False,
         ),
-        compose(profile=profile_name, show_context=False, show_cost=False, background_detail=False),
-        compose(show_context=False, show_cost=False, background_detail=False),
+        compose(
+            profile=profile_name, show_context=False, show_cost=False,
+            background_detail=False,
+        ),
+        compose(
+            show_context=False, show_cost=False, background_detail=False,
+            show_goal=False,
+        ),
     ]
     if terminal_width < 52:
         candidates.insert(

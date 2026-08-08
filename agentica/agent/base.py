@@ -1677,6 +1677,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self,
         *,
         default_turn_budget: Optional[int] = None,
+        default_token_budget: Optional[int] = None,
         event_callback: Optional[Callable[..., None]] = None,
         verifier: Optional[Callable[..., Any]] = None,
         auto_judge: bool = False,
@@ -1688,10 +1689,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         manager so any persisted GoalState stays consistent.
 
         Args:
-            default_turn_budget: Overrides the safety-net turn cap (see
-                ``agentica.goals.DEFAULT_TURN_BUDGET``; ``token_budget`` /
-                ``wall_clock_budget_sec`` are the real hard caps). Ignored
-                if a manager already exists.
+            default_turn_budget: Optional turn cap for newly set goals
+                (``None`` = no turn limit). Ignored if a manager already exists.
+            default_token_budget: Default token cap for newly set goals
+                (see ``agentica.goals.DEFAULT_TOKEN_BUDGET``). Ignored if a
+                manager already exists.
             event_callback: ``(RunEventType, dict) -> None`` hook for
                 ``goal.set / continuing / completed / paused`` events.
 
@@ -1700,7 +1702,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         """
         # Local import keeps module import graph cheap for users that
         # never touch the goal loop.
-        from agentica.goals import GoalManager, DEFAULT_TURN_BUDGET
+        from agentica.goals import GoalManager, DEFAULT_TOKEN_BUDGET
 
         if self._session_log is None:
             if self.session_id is None:
@@ -1714,7 +1716,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         if self.goal_manager is None:
             self.goal_manager = GoalManager(
                 self._session_log,
-                default_turn_budget=(default_turn_budget if default_turn_budget is not None else DEFAULT_TURN_BUDGET),
+                default_turn_budget=default_turn_budget,
+                default_token_budget=(
+                    default_token_budget if default_token_budget is not None else DEFAULT_TOKEN_BUDGET
+                ),
                 judge_model=self.resolve_auxiliary_model("goal_judge"),
                 event_callback=event_callback,
                 verifier=verifier,
@@ -1777,12 +1782,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
     ) -> "GoalRunResult":
         """Drive the standing-goal loop until completion / pause / budget.
 
-        Budget model: ``token_budget`` / ``wall_clock_budget_sec`` are the
-        primary cost gates — set at least one for any production / long task.
-        ``turn_budget`` (default 100, cannot be fully disabled) is only a
-        runaway safety net, NOT a cost budget: with cheap tools a task can
-        burn a lot of tokens well within 100 turns, so do not rely on it to
-        cap spend.
+        Budget model: ``token_budget`` is the primary cost gate (default
+        ``DEFAULT_TOKEN_BUDGET = 500_000`` for both CLI and SDK).
+        ``turn_budget`` defaults to ``None`` (no turn cap); pass an int only
+        when you want an extra hard turn ceiling. ``wall_clock_budget_sec``
+        remains optional for SLA-style limits.
 
         Ergonomic entry point: callers do NOT touch ``SessionLog``,
         ``GoalManager``, or ``GoalTool`` directly. The loop:
@@ -1799,12 +1803,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 
         Args:
             objective: The standing goal text. Used as the first prompt.
-            turn_budget: Max LLM turns. ``None`` falls back to
-                ``DEFAULT_TURN_BUDGET = 100`` (runaway safety net — cannot be
-                fully disabled; pass a large number like ``10_000`` instead).
-            token_budget: Max cumulative input+output tokens. ``None`` =
-                unlimited. Recommended for production: ``50_000``–``200_000``
-                for coding tasks.
+            turn_budget: Optional max LLM turns. ``None`` = no turn limit.
+            token_budget: Max cumulative input+output tokens. ``None`` falls
+                back to ``DEFAULT_TOKEN_BUDGET`` (500_000). Pass an explicit
+                int to override.
             wall_clock_budget_sec: Max agent wall-clock seconds. ``None`` =
                 unlimited. Recommended ``1800``–``3600`` for long tasks.
 
