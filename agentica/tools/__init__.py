@@ -15,7 +15,7 @@ from agentica.tools.builtin.web_tools import BuiltinFetchUrlTool, BuiltinWebSear
 from agentica.tools.builtin_task_tool import BuiltinTaskTool
 from agentica.tools.decorators import tool
 from agentica.tools.registry import register_tool, get_tool, list_tools, unregister_tool, clear_registry
-from agentica.tools.buildin_tools import (
+from agentica.tools.builtin import (
     BuiltinFileTool,
     BuiltinExecuteTool,
 )

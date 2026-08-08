@@ -22,7 +22,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica import Agent, OpenAIChat, ZhipuAIChat, Message, PromptConfig
 from agentica import ArkChat
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 from prompt import JUDGE_PROMPT_GAIA, JUDGE_PROMPT_BC, JUDGE_PROMPT_QA, SYSTEM_PROMPT_MULTI
 
 pwd_path = os.path.abspath(os.path.dirname(__file__))

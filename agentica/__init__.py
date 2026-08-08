@@ -380,15 +380,16 @@ from agentica.tools.base import Tool, ModelTool, Function, FunctionCall
 from agentica.tools.decorators import tool  # @tool decorator for defining tool functions
 
 # ── Builtin tools (eager: lightweight, used by 90% of custom Agent setups) ──
-from agentica.tools.buildin_tools import (
+from agentica.tools.builtin import (
     BuiltinFileTool,
     BuiltinExecuteTool,
     BuiltinFetchUrlTool,
     BuiltinWebSearchTool,
     BuiltinTodoTool,
     BuiltinMemoryTool,
+    BuiltinTaskTool,
+    get_builtin_tools,
 )
-from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
 # ── Compression ──
 from agentica.compression import CompressionManager

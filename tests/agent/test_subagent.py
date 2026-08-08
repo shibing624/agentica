@@ -17,7 +17,7 @@ from agentica.subagent import (
     get_subagent_configs,
 )
 from agentica.tools.base import Function, Tool
-from agentica.tools.buildin_tools import BuiltinFileTool
+from agentica.tools.builtin import BuiltinFileTool
 
 
 class FakeToolConfig:

@@ -150,7 +150,7 @@ class TestDeepAgentPermissionMode(unittest.TestCase):
         the SAME object as agent.sandbox_config, so runtime mode switches
         propagate to already-built tools without rebuilding the Agent."""
         agent = self._build(permission_mode="allow-all", include_execute=False)
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         file_tool = next(t for t in agent.tools if isinstance(t, BuiltinFileTool))
         self.assertIs(file_tool._sandbox_config, agent.sandbox_config)

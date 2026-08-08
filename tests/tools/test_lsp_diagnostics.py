@@ -13,7 +13,7 @@ from unittest.mock import patch
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.lsp_diagnostics import Diagnostic, format_diagnostics, _parse, LspDiagnosticsChecker
-from agentica.tools.buildin_tools import BuiltinFileTool
+from agentica.tools.builtin import BuiltinFileTool
 
 
 class TestDiagnosticParsing(unittest.TestCase):

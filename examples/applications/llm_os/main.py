@@ -40,7 +40,7 @@ from agentica.agent.config import PromptConfig, ToolConfig
 from agentica.document import Document
 from agentica.embedding.zhipuai import ZhipuAIEmbedding
 from agentica.knowledge.base import Knowledge
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 from agentica.utils.log import logger
 from agentica.vectordb.lancedb_vectordb import LanceDb
 

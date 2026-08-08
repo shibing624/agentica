@@ -39,10 +39,10 @@ class TestDottedModuleFromPath(unittest.TestCase):
 
     def test_resolves_deep_subpackage(self):
         path = os.path.join(
-            self.repo_root, "agentica", "tools", "buildin_tools.py"
+            self.repo_root, "agentica", "tools", "builtin", "file_tool.py"
         )
         self.assertEqual(
-            _dotted_module_from_path(path), "agentica.tools.buildin_tools"
+            _dotted_module_from_path(path), "agentica.tools.builtin.file_tool"
         )
 
     def test_falls_back_to_stem_for_non_package_files(self):
@@ -125,12 +125,12 @@ class TestPlainLoguruStyleFormatter(unittest.TestCase):
         self.formatter = _PlainLoguruStyleFormatter()
 
     def test_no_ansi_in_file_output(self):
-        path = os.path.join(self.repo_root, "agentica", "tools", "buildin_tools.py")
+        path = os.path.join(self.repo_root, "agentica", "tools", "builtin", "file_tool.py")
         rec = _RecordFactory.make(path, funcName="ls", lineno=380,
                                   message="Listed 37 items")
         out = self.formatter.format(rec)
         self.assertNotIn("\x1b[", out, "file formatter must not write ANSI codes")
-        self.assertIn("agentica.tools.buildin_tools:ls:380", out)
+        self.assertIn("agentica.tools.builtin.file_tool:ls:380", out)
         self.assertIn("Listed 37 items", out)
 
     def test_levelname_padded(self):

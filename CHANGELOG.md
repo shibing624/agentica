@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 修复 Ctrl+O 分页器在输出含控制字符时停在 less 的 binary-file 确认提示：less 调用统一加 `-f` 强制打开
 - `/compact` 原生压缩失败的回退提示改为 `logger.warning`，不再向终端打印打断对话流
 - 拆包后清理机械复制遗留的死 import：`runner/`（compress/core/loop/persist/retry_fallback/steer/stream）与 `cli/commands/`（context/cron_cmd/goal/helpers/model_config/runtime/session/tools_skills）各文件只保留本地真实引用，删掉约 680 行从原单文件带过来的未用 import；`tests/cli/test_cli_configuration.py` 的 4 个 patch（`reset_skill_registry`/`load_skills`/`get_skill_registry`/`create_agent`）从 `cli_tools_skills` 改到 `cli_helpers`——拆包后实际调用点在 `helpers._refresh_skills_session`，原 patch 打在错模块是无副作用的 no-op，autoflake 删掉未用 import 后才暴露
+- `tools/buildin_tools.py`（2154 行）拆成 `tools/builtin/` 包：`file_tool.py`（`BuiltinFileTool`+path guards+`_GLOB/_GREP_TIMEOUT`）、`execute_tool.py`（`BuiltinExecuteTool`+exit-code helpers+`_MAX_WAIT_SECONDS`）、`__init__.py`（`get_builtin_tools`+re-export 7 个工具类）；原 `task_state_tools.py`/`web_tools.py` 已在包内。`agentica/__init__.py` 与 `tools/__init__.py` 改从 `agentica.tools.builtin` 取，所有直接引用者（tests/examples/docs/agent/acp/gateway/evaluation）改到新路径，测试 patch 字符串（`_GREP_TIMEOUT`/`shutil.which`/`asyncio.create_subprocess_exec`/`terminate_subprocess`→`file_tool`；`_MAX_WAIT_SECONDS`→`execute_tool`；`_detect_python_error_hint`/`_interpret_exit_code`/`_is_blocked_device`/`_check_sensitive_write_path`→对应子模块）同步更新
+- `agent/base.py`（2091 行）抽出 goal 闭环到 `agent/goal_mixin.py`（`GoalMixin`：`get_goal_manager`/`enable_goal_tool`/`run_goal`/`run_goal_step`），`Agent` 继承链加 `GoalMixin`；`base.py` 降到 1794 行，只留公开 run API 面与薄委托，不再内嵌 goal 闭环。MRO 透明，所有 `agent.run_goal()` 调用无需改动
 
 #### docs
 - `apply_patch` docstring 明确要求 Update/Delete 操作前必须先 `read_file`，禁止凭记忆构造上下文

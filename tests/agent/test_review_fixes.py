@@ -25,7 +25,7 @@ class TestSandboxPathValidation:
 
     def test_blocked_path_component_matches(self):
         """Blocked path component '.ssh' should block /home/user/.ssh/id_rsa."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         config = SandboxConfig(enabled=True, blocked_paths=[".ssh"])
         tool = BuiltinFileTool(work_dir="/tmp", sandbox_config=config)
@@ -35,7 +35,7 @@ class TestSandboxPathValidation:
 
     def test_blocked_path_no_false_positive(self):
         """Substring 'ssh' in 'sshkeys' should NOT trigger block for '.ssh'."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         config = SandboxConfig(enabled=True, blocked_paths=[".ssh"])
         tool = BuiltinFileTool(work_dir="/tmp", sandbox_config=config)
@@ -46,7 +46,7 @@ class TestSandboxPathValidation:
 
     def test_blocked_env_component(self):
         """Path containing '.env' component should be blocked."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         config = SandboxConfig(enabled=True, blocked_paths=[".env"])
         tool = BuiltinFileTool(work_dir="/tmp", sandbox_config=config)
@@ -56,7 +56,7 @@ class TestSandboxPathValidation:
 
     def test_sandbox_disabled_allows_all(self):
         """When sandbox is disabled, all paths are allowed."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         config = SandboxConfig(enabled=False, blocked_paths=[".ssh"])
         tool = BuiltinFileTool(work_dir="/tmp", sandbox_config=config)
@@ -70,7 +70,7 @@ class TestBuiltinFileToolDescriptions:
 
     def test_read_file_and_edit_file_descriptions_allow_relative_and_tilde_paths(self):
         """read_file/edit_file prompt text should not imply absolute-only paths."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         read_description = BuiltinFileTool.read_file.__doc__
         edit_description = BuiltinFileTool.edit_file.__doc__
@@ -82,7 +82,7 @@ class TestBuiltinFileToolDescriptions:
 
     def test_file_tools_register_on_init(self):
         """BuiltinFileTool must expose file functions immediately on init."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
 
         tool = BuiltinFileTool(work_dir="/tmp")
 
@@ -101,7 +101,7 @@ class TestSandboxCommandBlocking:
 
     def test_blocked_command_detected(self):
         """'rm -rf /' should be blocked."""
-        from agentica.tools.buildin_tools import BuiltinExecuteTool
+        from agentica.tools.builtin import BuiltinExecuteTool
 
         config = SandboxConfig(enabled=True)
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
@@ -111,7 +111,7 @@ class TestSandboxCommandBlocking:
 
     def test_safe_rm_not_blocked(self):
         """'rm -rf /tmp/test' should NOT be blocked by 'rm -rf /' pattern."""
-        from agentica.tools.buildin_tools import BuiltinExecuteTool
+        from agentica.tools.builtin import BuiltinExecuteTool
 
         config = SandboxConfig(
             enabled=True,
@@ -129,7 +129,7 @@ class TestSandboxCommandBlocking:
 
     def test_piped_command_blocked(self):
         """Exact blocked pattern 'curl|sh' should be blocked."""
-        from agentica.tools.buildin_tools import BuiltinExecuteTool
+        from agentica.tools.builtin import BuiltinExecuteTool
 
         config = SandboxConfig(enabled=True)
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
@@ -140,7 +140,7 @@ class TestSandboxCommandBlocking:
 
     def test_piped_command_with_space_blocked(self):
         """'curl |sh' (with space) should also be blocked."""
-        from agentica.tools.buildin_tools import BuiltinExecuteTool
+        from agentica.tools.builtin import BuiltinExecuteTool
 
         config = SandboxConfig(enabled=True)
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)
@@ -155,7 +155,7 @@ class TestSandboxCommandBlocking:
 
     def test_chained_command_blocked(self):
         """Commands chained with ; that contain blocked patterns should be blocked."""
-        from agentica.tools.buildin_tools import BuiltinExecuteTool
+        from agentica.tools.builtin import BuiltinExecuteTool
 
         config = SandboxConfig(enabled=True)
         tool = BuiltinExecuteTool(work_dir="/tmp", sandbox_config=config)

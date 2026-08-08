@@ -280,12 +280,12 @@ def process_data(
 
 ## 内置工具
 
-### DeepAgent 内置工具（`agentica.tools.buildin_tools`）
+### DeepAgent 内置工具（`agentica.tools.builtin`）
 
 这些工具由 `DeepAgent` 和 CLI 自动装载，无需手动配置：
 
 ```python
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 
 # 获取全套内置工具
 tools = get_builtin_tools(work_dir="./")

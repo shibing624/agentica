@@ -6,7 +6,7 @@ Plugins routes: /api/tools (read-only introspection of built-in code tools),
 /api/mcp/servers (CRUD over MCP tool servers), and /api/skills (full CRUD
 over markdown SKILL.md files).
 
-Built-in tools are Python-code tools wired up in agentica.tools.buildin_tools —
+Built-in tools are Python-code tools wired up in agentica.tools.builtin —
 they cannot be created or edited from the web UI, only listed for visibility.
 MCP servers are stored in ~/.agentica/mcp_config.json (the same file/schema
 DeepAgent auto-loads on construction — see agentica.mcp.config.MCPConfig), so
@@ -24,7 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from agentica.config import AGENTICA_HOME, AGENTICA_SKILL_DIR
 from agentica.skills.skill_loader import SkillLoader
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 
 from .. import deps
 from ..models import McpServerRequest, SkillCreateRequest, SkillUpdateRequest

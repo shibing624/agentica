@@ -29,7 +29,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-from agentica.tools.buildin_tools import (
+from agentica.tools.builtin import (
     BuiltinFileTool,
     BuiltinExecuteTool,
     BuiltinWebSearchTool,
@@ -738,7 +738,7 @@ class TestBuiltinFileToolEditFile:
     def test_python_error_hint_null_literal(self):
         """NameError on JSON `null`/`true`/`false` gets a structured hint
         pointing the LLM at the source rather than retrying blindly."""
-        from agentica.tools.buildin_tools import _detect_python_error_hint
+        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
         sample = "Traceback ...\n  File ...\nNameError: name 'null' is not defined"
         hint = _detect_python_error_hint(sample)
         assert hint is not None
@@ -746,21 +746,21 @@ class TestBuiltinFileToolEditFile:
         assert "None" in hint
 
     def test_python_error_hint_syntax_error(self):
-        from agentica.tools.buildin_tools import _detect_python_error_hint
+        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
         sample = "  File 'x.py', line 5\n    if x = 1\nSyntaxError: invalid syntax"
         hint = _detect_python_error_hint(sample)
         assert hint is not None
         assert "SyntaxError" in hint
 
     def test_python_error_hint_module_not_found(self):
-        from agentica.tools.buildin_tools import _detect_python_error_hint
+        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
         sample = "ModuleNotFoundError: No module named 'foobar_widget'"
         hint = _detect_python_error_hint(sample)
         assert hint is not None
         assert "dependency" in hint or "pip install" in hint
 
     def test_python_error_hint_returns_none_for_normal_output(self):
-        from agentica.tools.buildin_tools import _detect_python_error_hint
+        from agentica.tools.builtin.execute_tool import _detect_python_error_hint
         assert _detect_python_error_hint("") is None
         assert _detect_python_error_hint("Hello world") is None
         assert _detect_python_error_hint("AssertionError: 1 != 2") is None  # genuine logic bug
@@ -930,7 +930,7 @@ class TestBuiltinFileToolGrep:
     def test_grep_fallback_accepts_file_path(self, file_tool, tmp_dir):
         fp = Path(tmp_dir, "single.py")
         fp.write_text("commit_pass = True\n")
-        with patch("agentica.tools.buildin_tools.shutil.which", return_value=None):
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
             result = asyncio.run(file_tool.grep("commit_pass", str(fp), include="*.py"))
         assert "commit_pass = True" in result
 
@@ -954,7 +954,6 @@ class TestBuiltinFileToolGrep:
         """When rg is unavailable, the pure-Python fallback still hard-times-out
         instead of running up to the outer 120s executor limit."""
         import time as _time
-        from agentica.tools import buildin_tools
         tool = BuiltinFileTool(work_dir=tmp_dir)
 
         # Slow sync fallback worker; the real _run_grep_fallback wraps it with
@@ -964,8 +963,8 @@ class TestBuiltinFileToolGrep:
             return "should not reach"
         tool._grep_fallback = slow_worker
 
-        with patch("agentica.tools.buildin_tools.shutil.which", return_value=None), \
-             patch("agentica.tools.buildin_tools._GREP_TIMEOUT", 0.1):
+        with patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None), \
+             patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 0.1):
             with pytest.raises(TimeoutError, match=r"grep timed out"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
 
@@ -983,8 +982,8 @@ class TestBuiltinFileToolGrep:
         # Patch the default _GREP_TIMEOUT up to 100s; passing timeout=1 must
         # still fire at 1s, proving the caller's value wins and is not clamped
         # back toward the default.
-        with patch("agentica.tools.buildin_tools._GREP_TIMEOUT", 100), \
-             patch("agentica.tools.buildin_tools.shutil.which", return_value=None):
+        with patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 100), \
+             patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
             with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
                 asyncio.run(tool.grep("x", str(tmp_dir), timeout=1))
 
@@ -999,8 +998,8 @@ class TestBuiltinFileToolGrep:
             return "should not reach"
         tool._grep_fallback = slow_worker
 
-        with patch("agentica.tools.buildin_tools._GREP_TIMEOUT", 1), \
-             patch("agentica.tools.buildin_tools.shutil.which", return_value=None):
+        with patch("agentica.tools.builtin.file_tool._GREP_TIMEOUT", 1), \
+             patch("agentica.tools.builtin.file_tool.shutil.which", return_value=None):
             with pytest.raises(TimeoutError, match=r"grep timed out after 1 seconds"):
                 asyncio.run(tool.grep("x", str(tmp_dir)))
 
@@ -1009,13 +1008,13 @@ class TestBuiltinFileToolGrep:
             process = BlockingSubprocess()
             cleanup = AsyncMock()
             with patch(
-                "agentica.tools.buildin_tools.asyncio.create_subprocess_exec",
+                "agentica.tools.builtin.file_tool.asyncio.create_subprocess_exec",
                 new=AsyncMock(return_value=process),
             ), patch(
-                "agentica.tools.buildin_tools.terminate_subprocess",
+                "agentica.tools.builtin.file_tool.terminate_subprocess",
                 cleanup,
             ), patch(
-                "agentica.tools.buildin_tools.shutil.which",
+                "agentica.tools.builtin.file_tool.shutil.which",
                 return_value="/usr/bin/rg",
             ):
                 tool = BuiltinFileTool(work_dir=tmp_dir)
@@ -1258,7 +1257,7 @@ class TestBuiltinExecuteTool:
         async def scenario():
             await execute_tool.execute(command, background=True)
             item_id = registry.list()[0].id
-            with patch("agentica.tools.buildin_tools._MAX_WAIT_SECONDS", 1):
+            with patch("agentica.tools.builtin.execute_tool._MAX_WAIT_SECONDS", 1):
                 return await execute_tool.wait(item_id, timeout=300)
 
         try:

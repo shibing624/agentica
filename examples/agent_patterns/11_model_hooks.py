@@ -127,7 +127,7 @@ def demo_full_agent():
     print()
     print("  New pattern (ToolConfig fields on Agent):")
     print("    from agentica import Agent")
-    print("    from agentica.tools.buildin_tools import get_builtin_tools")
+    print("    from agentica.tools.builtin import get_builtin_tools")
     print("    agent = Agent(")
     print("        model=model,")
     print("        tools=get_builtin_tools(work_dir='/path'),")

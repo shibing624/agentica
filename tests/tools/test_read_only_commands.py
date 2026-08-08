@@ -17,7 +17,7 @@ from agentica.subagent import (
     SubagentRegistry,
     get_subagent_configs,
 )
-from agentica.tools.buildin_tools import BuiltinExecuteTool
+from agentica.tools.builtin import BuiltinExecuteTool
 from agentica.tools.safety import is_read_only_command
 
 

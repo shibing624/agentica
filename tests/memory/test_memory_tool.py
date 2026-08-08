@@ -17,7 +17,7 @@ import pytest
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.workspace import Workspace
-from agentica.tools.buildin_tools import BuiltinMemoryTool
+from agentica.tools.builtin import BuiltinMemoryTool
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool as CanonicalBuiltinMemoryTool
 from agentica.hooks import MemoryExtractHooks, ConversationArchiveHooks
 

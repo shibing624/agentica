@@ -111,7 +111,7 @@ class TestOutputTruncation:
 
     def test_short_output_not_truncated(self):
         """Output under limit should not be truncated."""
-        from agentica.tools.buildin_tools import BuiltinExecuteTool
+        from agentica.tools.builtin import BuiltinExecuteTool
         tool = BuiltinExecuteTool()
         # _max_output_length defaults to 50000
         output = "x" * 100
@@ -146,60 +146,60 @@ class TestExitCodeInterpretation:
     """Test exit code semantic interpretation."""
 
     def test_grep_no_matches(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("grep 'pattern' file.txt", 1)
         assert result is not None
         assert "No matches" in result
 
     def test_diff_files_differ(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("diff a.txt b.txt", 1)
         assert result is not None
         assert "differ" in result
 
     def test_curl_dns_failure(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("curl https://example.com", 6)
         assert result is not None
         assert "resolve" in result.lower()
 
     def test_git_normal(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("git diff", 1)
         assert result is not None
         assert "normal" in result.lower() or "differ" in result.lower()
 
     def test_pipeline_extraction(self):
         """Should extract last command from pipeline."""
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("cat file.txt | grep pattern", 1)
         assert result is not None
         assert "No matches" in result
 
     def test_env_var_stripping(self):
         """Should strip VAR=val prefix."""
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("LANG=C grep 'x' file", 1)
         assert result is not None
         assert "No matches" in result
 
     def test_zero_exit_returns_none(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         assert _interpret_exit_code("grep 'pattern' file", 0) is None
 
     def test_unknown_command_returns_none(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         assert _interpret_exit_code("my_custom_tool", 42) is None
 
     def test_pytest_failures(self):
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("pytest tests/", 1)
         assert result is not None
         assert "failed" in result.lower()
 
     def test_full_path_command(self):
         """Should handle /usr/bin/grep -> grep."""
-        from agentica.tools.buildin_tools import _interpret_exit_code
+        from agentica.tools.builtin.execute_tool import _interpret_exit_code
         result = _interpret_exit_code("/usr/bin/grep 'x' file", 1)
         assert result is not None
         assert "No matches" in result
@@ -211,19 +211,19 @@ class TestFileReadSafety:
     """Test file read safety guards."""
 
     def test_blocked_device_paths(self):
-        from agentica.tools.buildin_tools import _is_blocked_device
+        from agentica.tools.builtin.file_tool import _is_blocked_device
         assert _is_blocked_device("/dev/random") is True
         assert _is_blocked_device("/dev/zero") is True
         assert _is_blocked_device("/dev/stdin") is True
         assert _is_blocked_device("/dev/fd/0") is True
 
     def test_proc_fd_blocked(self):
-        from agentica.tools.buildin_tools import _is_blocked_device
+        from agentica.tools.builtin.file_tool import _is_blocked_device
         assert _is_blocked_device("/proc/self/fd/0") is True
         assert _is_blocked_device("/proc/123/fd/1") is True
 
     def test_normal_paths_not_blocked(self):
-        from agentica.tools.buildin_tools import _is_blocked_device
+        from agentica.tools.builtin.file_tool import _is_blocked_device
         assert _is_blocked_device("/tmp/test.txt") is False
         assert _is_blocked_device("/home/user/file.py") is False
         assert _is_blocked_device("/dev/sda1") is False  # not in block list
@@ -235,19 +235,19 @@ class TestFileWriteSafety:
     """Test file write safety guards."""
 
     def test_sensitive_system_paths(self):
-        from agentica.tools.buildin_tools import _check_sensitive_write_path
+        from agentica.tools.builtin.file_tool import _check_sensitive_write_path
         assert _check_sensitive_write_path("/etc/passwd") is not None
         assert _check_sensitive_write_path("/boot/grub/grub.cfg") is not None
         assert _check_sensitive_write_path("/usr/lib/systemd/system/test.service") is not None
 
     def test_sensitive_home_paths(self):
-        from agentica.tools.buildin_tools import _check_sensitive_write_path
+        from agentica.tools.builtin.file_tool import _check_sensitive_write_path
         home = os.path.expanduser("~")
         assert _check_sensitive_write_path(f"{home}/.ssh/authorized_keys") is not None
         assert _check_sensitive_write_path(f"{home}/.gnupg/pubring.kbx") is not None
 
     def test_normal_paths_allowed(self):
-        from agentica.tools.buildin_tools import _check_sensitive_write_path
+        from agentica.tools.builtin.file_tool import _check_sensitive_write_path
         assert _check_sensitive_write_path("/tmp/test.txt") is None
         assert _check_sensitive_write_path("/home/user/project/main.py") is None
 
@@ -525,7 +525,7 @@ class TestFileUndoEdit:
     """Test file snapshot and undo_edit functionality."""
 
     def test_snapshot_created_on_write(self):
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
         import asyncio
 
         tool = BuiltinFileTool(work_dir=tempfile.mkdtemp())
@@ -540,7 +540,7 @@ class TestFileUndoEdit:
         assert tool._file_snapshots[abs_path][-1] == "original content"
 
     def test_undo_restores_previous(self):
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
         import asyncio
 
         tool = BuiltinFileTool(work_dir=tempfile.mkdtemp())
@@ -558,7 +558,7 @@ class TestFileUndoEdit:
         assert path.read_text() == "v1"
 
     def test_undo_empty_returns_error(self):
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
         import asyncio
 
         tool = BuiltinFileTool(work_dir=tempfile.mkdtemp())

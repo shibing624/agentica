@@ -16,7 +16,7 @@ import asyncio
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from agentica import Agent, OpenAIChat
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 
 
 async def code_execution_demo():

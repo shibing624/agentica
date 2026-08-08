@@ -143,7 +143,7 @@ class TestPostToolHook(unittest.TestCase):
 
     def test_post_tool_hook_is_none_when_reminder_disabled(self):
         """With todo_reminder_interval=0, _build_post_tool_hook should return None."""
-        from agentica.tools.buildin_tools import BuiltinTodoTool
+        from agentica.tools.builtin import BuiltinTodoTool
         from agentica.agent.config import PromptConfig
         from agentica.agent import Agent
         from agentica.model.openai import OpenAIChat
@@ -242,7 +242,7 @@ def _make_agent_with_todo_tool(reminder_interval=10):
     """Helper: create agent with BuiltinTodoTool registered."""
     from agentica.agent import Agent
     from agentica.model.openai import OpenAIChat
-    from agentica.tools.buildin_tools import BuiltinTodoTool
+    from agentica.tools.builtin import BuiltinTodoTool
     from agentica.agent.config import PromptConfig
     return Agent(
         model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),

@@ -36,13 +36,17 @@ Agentica 采用分层架构，将 Agent 的**身份定义**与**执行引擎**�
 ```python
 # agentica/agent/base.py（简化）
 @dataclass(init=False)
-class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
+class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     def __init__(self, ...):
         self._runner = Runner(self)   # Runner 持有 Agent 弱引用
 
     async def run(self, message, **kw) -> RunResponse:
         return await self._runner.run(message, **kw)
 ```
+
+`GoalMixin`（`agent/goal_mixin.py`）持有 standing-goal 闭环（`get_goal_manager` /
+`enable_goal_tool` / `run_goal` / `run_goal_step`），使 `base.py` 只留公开 run API
+面与薄委托，不再内嵌 goal 闭环。
 
 ### 模块布局（诚实拆包）
 
@@ -54,6 +58,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
 | `agentica/cli/commands/` | `CommandContext`, `PendingQueue`, `COMMAND_REGISTRY` / `COMMAND_HANDLERS` | `session.py`, `model_config.py`, `runtime.py`, `goal.py`, `registry.py` |
 | `agentica/cli/display/` | TUI 公共渲染 API | `stream.py`, `console.py`, `messages.py`, `status_bar.py` |
 | `agentica/cli/interactive/` | `run_interactive` | `app.py`, `console_io.py`, `stream_loop.py`, `attachments.py` |
+| `agentica/tools/builtin/` | `get_builtin_tools` + 7 个工具类 | `file_tool.py`, `execute_tool.py`, `task_state_tools.py`, `web_tools.py` |
 
 示例：
 

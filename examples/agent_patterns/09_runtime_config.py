@@ -8,7 +8,7 @@ Demonstrates three levels of tool/skill control:
 3. Query-level: run(config=RunConfig(enabled_tools=[...]))
 """
 from agentica import Agent, RunConfig
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 
 
 def demo_agent_level_control():

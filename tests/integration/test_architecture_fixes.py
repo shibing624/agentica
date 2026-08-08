@@ -312,7 +312,7 @@ class TestFileLockSetdefault(unittest.TestCase):
 
     def test_get_file_lock_returns_same_lock(self):
         """Same path should return the same Lock object."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
         tool = BuiltinFileTool()
         lock1 = tool._get_file_lock("/tmp/test.txt")
         lock2 = tool._get_file_lock("/tmp/test.txt")
@@ -320,7 +320,7 @@ class TestFileLockSetdefault(unittest.TestCase):
 
     def test_get_file_lock_different_paths(self):
         """Different paths should return different Lock objects."""
-        from agentica.tools.buildin_tools import BuiltinFileTool
+        from agentica.tools.builtin import BuiltinFileTool
         tool = BuiltinFileTool()
         lock1 = tool._get_file_lock("/tmp/a.txt")
         lock2 = tool._get_file_lock("/tmp/b.txt")
@@ -411,7 +411,7 @@ class TestBuiltinTaskToolExtraction(unittest.TestCase):
         self.assertIsNotNone(BuiltinTaskTool)
 
     def test_import_from_buildin_tools(self):
-        from agentica.tools.buildin_tools import BuiltinTaskTool
+        from agentica.tools.builtin import BuiltinTaskTool
         self.assertIsNotNone(BuiltinTaskTool)
 
     def test_import_from_tools_package(self):
@@ -425,7 +425,7 @@ class TestBuiltinTaskToolExtraction(unittest.TestCase):
     def test_same_class(self):
         """All import paths should resolve to the same class."""
         from agentica.tools.builtin_task_tool import BuiltinTaskTool as A
-        from agentica.tools.buildin_tools import BuiltinTaskTool as B
+        from agentica.tools.builtin import BuiltinTaskTool as B
         self.assertIs(A, B)
 
 

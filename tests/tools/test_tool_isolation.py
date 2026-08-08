@@ -10,7 +10,7 @@ import unittest
 from agentica.agent import Agent
 from agentica.model.openai import OpenAIChat
 from agentica.tools.builtin_task_tool import BuiltinTaskTool
-from agentica.tools.buildin_tools import (
+from agentica.tools.builtin import (
     BuiltinFileTool,
     BuiltinMemoryTool,
     BuiltinTodoTool,

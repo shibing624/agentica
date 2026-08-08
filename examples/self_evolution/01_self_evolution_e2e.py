@@ -73,7 +73,7 @@ from agentica.hooks import (
     MemoryExtractHooks,
     _CompositeRunHooks,
 )
-from agentica.tools.buildin_tools import get_builtin_tools
+from agentica.tools.builtin import get_builtin_tools
 from agentica.tools.skill_tool import SkillTool
 
 
