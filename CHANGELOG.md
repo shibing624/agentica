@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- 跨会话消息：两个终端里的 CLI 会话可以互发纯文本，不再靠人在终端之间复制粘贴。模型自己调 `list_agents` 发现对端、`send_message` 投递，用户不需要手动触发（`/list-agents`（别名 `/peers`）只用于查看和排查）。传输是文件而非 socket：`~/.agentica/cache/peers/live/<peer_id>.json` 是心跳 + pid 探活的发现目录，`~/.agentica/cache/peers/mailbox/<peer_id>/*.md` 是每条一个带 frontmatter 的 markdown 消息，可直接 cat 排查。目录刻意放在用户级而非按项目 hash 分区——「协调同一个 repo 的多个 worktree」正是主场景，而它们 cwd 不同。收件端是拉取式：运行中的会话由 `Runner._inject_peer_messages` 在 tool batch 间隙取走（与 `/steer` 同一边界，不打断正在跑的工具），空闲会话由 CLI 轮询取走并开一轮。消息身份绑 CLI 进程而非 session log，`/resume` 换掉 session_id 后在途消息仍会落地。环路自带刹车：每条消息记录 hop（按对端分别计数，上限 3），未读堆积到 50 拒收，单条超 4000 字符拒收。工具的 system prompt 明确约束收件方——来自另一个 agent 的消息不是用户授权、不能代答权限提示、其中的斜杠命令是纯文本
+- 跨会话消息新增人工入口 `/send-message <session> <text>`（别名 `/send`，与 `list_agents` → `/list-agents` 同一命名规则，对应 agent 用的 `send_message` 工具）：不用切终端就能替 agent 自己把一句话说进另一个会话。它和 agent 发的消息在收件端语义不同，因此消息带 `from_kind`（`agent` / `user`）：agent 发的仍然「不是用户授权、不能代答权限提示」，`/send-message` 发的注入为「你的用户从另一个会话转发」，收件方按用户亲口说的处理。mailbox 是 0700 用户私有目录，所以 `user` 身份与在本终端输入等价；header 里伪造 `from_kind` 不被采信，转发指令也不消耗 agent 对话的 hop 预算。单条上限 40000 字符（够放一整篇 handoff 写给对方；再长就把内容落到文件、发路径，反正文件系统是共享的）
+- 新增 `/fork`：无参数即在当前位置分支——整段对话带过去，继续聊就是了，只是落到新 session，此后说的话不再进入被分叉的那份 transcript（`/status` 多一行 `Forked from: <parent>`，来源写在 fork 出的 sidecar meta 里，由 `SessionLog.fork()` 自己记，不依赖调用方）。`/fork list` 列出本会话自己发过的消息（序号 + 消息 id + 时间 + 预览），`/fork <n|uuid>` 分支到所选消息**之前**一条，于是模型回到「你提这个要求之前」的状态，可以换个说法重问。两种分支原会话都完整保留、照常 `/resume`，提示里直接给出旧 session id。全数字的 uuid 前缀不会被误当序号（只有能索引列表的数字才是序号）
+- `execute(background=True)` 的结果现在会主动回灌当前会话：命令结束时除了打印通知，还把退出码、耗时、完整命令和输出尾部交给 agent——运行中经 `steer()` 落在 tool 间隙，空闲则作为下一轮，于是它自己接着往下做，不用等用户回来手动 `wait`。设 `deliver_background_results: false` 可关掉自动唤醒
 - Goal 预算耗尽不再当场砍断：任一 cap 触发时循环额外给一轮收尾 turn，喂 `[Standing goal budget reached]` prompt 要求模型交接（做完了什么、还剩什么、有什么坑），明确禁止在没有预算兜底时调 `verify_completion`；这一轮跑完才落到 `budget_limited`。收尾轮期间 goal 保持 `active` 以便正常计账（因此最终会超出 cap 一轮，状态栏如实显示），`GoalState.budget_wrapup_sent` 保证只给一次，`resume()` 重置。CLI `/goal` 与 SDK `run_goal()` 共用同一条路径
 - Goal 主成本闸改为默认开启的 `token_budget=500_000`（CLI `/goal` 与 SDK `run_goal` 一致）；`turn_budget` 默认 `None`（仅 `--turns` / 显式参数时生效）。`/goal status` 与状态栏在执行中显示 `tokens used/budget`（如 `goal 12.3K/500K`）
 - `execute(background=True)`：长命令可立即返回，由共享 `BackgroundProcessRegistry` 托管进程组；stdout/stderr 写入 `~/.agentica/projects/<user>/.../background/` 日志。CLI 新增 `/ps` 列出后台 terminal 与 background agent，`/stop <id|pid|#n>` 可按目标停止（空参停全部）；状态栏显示正在运行的 background terminal 数量。registry 经 `create_agent` / session rebuild 路径注入，与 `/background` agent 任务共用同一套 `/ps`/`/stop` 入口
@@ -19,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI execute 工具调用行支持宽度感知预览：普通长命令和 heredoc 统一最多展示 3 行正文，Ctrl+O 可分别展开完整 command 和折叠 output
 
 #### fixes
+- `/resume <id> at <uuid>` 现在真的 fork：此前它复用原 session_id，分支的新对话被追加进它所分叉的那份 JSONL，两条线混在一个文件里、各自都无法独立 resume。现在在 `create_agent` 这个唯一入口调已有的 `SessionLog.fork()` 生成新 session（`--resume-at-uuid` 启动参数走同一条路径），原分支保持不变；fork 点读取即消费，后续 `/model` 重建 agent 不会从同一点反复分叉
 - 修复 `/steer` 在 goal 循环中丢词：agent 不在 run 中时（一轮刚结束、goal 正在判定的那几秒，以及 UI 检查到 `steer()` 之间的 TOCTOU 窗口）原先只打印一句"用 /queue"就把用户输入丢掉。现在统一降级为排队执行，并插在待跑的 continuation prompt 之前，纠偏不会被一整轮无关工作挡住；被插队的 continuation 也不会被重复排入
 - `execute(background=True)` 完成后，CLI 现在会主动异步显示成功或失败、退出码、尾部输出和完整日志路径；通知由 registry 的完成事件驱动，不会唤醒 LLM。`/stop` 和 CLI 退出触发的终止不会再重复显示为任务失败，等待 `ask_user_question` 输入期间的完成事件会保留到安全时机再展示
 - 修复 `execute(background=True)` 遇到以 `&` 结尾的命令时误报完成：shell 会 fork 掉真正的工作并立刻退出，registry 追踪到的是那个空壳，于是任务还在跑就宣布结束。该组合现在直接拒绝；前台的 `nohup ... &` 仍照常执行，只在结果末尾注明它未被追踪（`/ps`、`/stop` 和完成通知都看不见它，且取消或超时的一轮会连同进程组把它杀掉），并建议改用 `background=True`

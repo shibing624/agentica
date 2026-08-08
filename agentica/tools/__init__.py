@@ -24,6 +24,7 @@ from agentica.tools.e2b_tool import E2BExecuteTool
 from agentica.tools.lsp_tool import LspTool
 from agentica.tools.patch_tool import PatchTool
 from agentica.tools.cron_tool import CronTool
+from agentica.tools.peer_tool import PeerMessagingTool
 from agentica.tools.helpers import tool_error, tool_result
 from agentica.tools.safety import check_command_safety, redact_sensitive_text
 from agentica.tools.interrupt import set_interrupt, is_interrupted
@@ -63,4 +64,5 @@ __all__ = [
     "LspTool",         # LSP-based code navigation
     "PatchTool",       # Apply diff/patch files
     "CronTool",        # Cron job management
+    "PeerMessagingTool",  # Message the user's other live CLI sessions
 ]

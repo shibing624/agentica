@@ -506,6 +506,39 @@ class Runner:
             logger.debug("Injected steering guidance as a user message")
 
     @staticmethod
+    def _inject_peer_messages(messages: List[Message], agent: "Agent") -> None:
+        """Flush messages from the user's other sessions before an inference.
+
+        Same boundary and same folding rules as ``_inject_steering`` (see there
+        for why a trailing tool result is preferred over a second user turn):
+        draining only between tool batches is what guarantees a running tool is
+        never interrupted mid-call.
+
+        The mailbox is a shared directory, so a failure to read it is an I/O
+        edge we absorb — a peer message is never worth killing the user's turn.
+        """
+        peers = agent.peer_session
+        if peers is None:
+            return
+        try:
+            drained = peers.drain()
+        except OSError:
+            logger.warning("draining the peer mailbox failed", exc_info=True)
+            return
+        if not drained:
+            return
+        from agentica.peers import format_for_model
+
+        marker = format_for_model(drained)
+        last = messages[-1] if messages else None
+        if last is not None and last.role == "tool":
+            existing = (last.content or "").rstrip()
+            last.content = f"{existing}\n\n{marker}" if existing else marker
+        else:
+            messages.append(Message(role="user", content=marker))
+        logger.debug(f"Injected {len(drained)} peer message(s) into the run")
+
+    @staticmethod
     def _tool_records_from_messages(
         messages: List[Message],
         *,
@@ -2079,6 +2112,7 @@ class Runner:
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
                         self._inject_steering(messages_for_model, agent)
+                        self._inject_peer_messages(messages_for_model, agent)
 
                         active_model = fallback_transaction_model or agent.model
 
@@ -2306,6 +2340,7 @@ class Runner:
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
                         self._inject_steering(messages_for_model, agent)
+                        self._inject_peer_messages(messages_for_model, agent)
 
                         active_model = fallback_transaction_model or agent.model
 

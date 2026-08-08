@@ -59,6 +59,7 @@ from agentica.global_config import (
 from agentica.goals import GoalManager, is_goal_generated_prompt
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
+from agentica.peers import PeerMessageRefused, mailbox_dir
 from agentica.model.message import Message
 from agentica.run_context import TaskAnchor
 from agentica.run_response import RunResponse, AgentCancelledError
@@ -104,6 +105,10 @@ class CommandContext:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: Any = None
+    # Cross-session peer channel (agentica.peers.PeerSession). Shared with every
+    # rebuilt agent so /resume, /model and friends keep the messaging tools and
+    # this terminal's mailbox identity.
+    peer_session: Any = None
     # Persistent goal loop (see agentica/goals.py). Same instance is shared
     # between the post-turn hook and /goal handlers, guarded by goal_lock.
     goal_manager: Any = None  # Optional[GoalManager]
@@ -298,6 +303,7 @@ def _refresh_skills_session(ctx: CommandContext):
         new_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
+        peer_session=ctx.peer_session,
     )
     return {
         "skills_registry": new_registry,
@@ -609,6 +615,9 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
         session_name = agent._session_log.get_name() if agent._session_log is not None else None
         session_label = f"{session_name} ({agent.session_id})" if session_name else agent.session_id
         con.print(f"  Session:    [cyan]{session_label}[/cyan]")
+        forked_from = agent._session_log.get_forked_from() if agent._session_log is not None else None
+        if forked_from:
+            con.print(f"  Forked from: [dim]{forked_from}[/dim]")
 
 
 def _cmd_agents(ctx: CommandContext, cmd_args: str = ""):
@@ -2164,6 +2173,7 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
+        peer_session=ctx.peer_session,
     )
     print_header(
         ctx.agent_config.get("model_provider", ""),
@@ -2296,6 +2306,7 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
             ctx.skills_registry,
             ask_user_question_callback=ctx.ask_user_question_callback,
             background_process_registry=ctx.background_processes,
+            peer_session=ctx.peer_session,
         )
 
         # Eagerly load history into working_memory so /status, /context etc.
@@ -2309,15 +2320,25 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
         display_stats = display_resumed_transcript(current_agent.working_memory.runs, session_label)
         if resume_at_uuid is None and resumed:
             con.print(
-                f"[dim]Tip: fork from an earlier point with `/resume {chosen['session_id']} at <uuid>`[/dim]"
+                "[dim]Tip: `/fork` branches this conversation into a new session; "
+                "`/fork list` shows the message ids to branch at.[/dim]"
             )
 
-        con.print(
-            f"[green]Resumed session: {session_label}"
-            f"{f' at {resume_at_uuid[:8]}...' if resume_at_uuid else ''}"
-            f" — restored {runs_built} runs into context; showing conversation only "
-            f"({display_stats.tool_result_count} tool results collapsed)[/green]"
-        )
+        if resume_at_uuid:
+            # create_agent turned `at <uuid>` into a real fork, so the work
+            # continues in a new session and the original branch stays intact.
+            con.print(
+                f"[green]Forked {session_label} at {resume_at_uuid[:8]} → new session "
+                f"{current_agent.session_id} — restored {runs_built} runs into context; "
+                f"showing conversation only "
+                f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+            )
+        else:
+            con.print(
+                f"[green]Resumed session: {session_label}"
+                f" — restored {runs_built} runs into context; showing conversation only "
+                f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+            )
 
         # If the resumed session had an active goal, demote to paused for
         # safety — automatic continuation on resume is too surprising
@@ -2423,6 +2444,7 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
+        peer_session=ctx.peer_session,
     )
     print_header(
         ctx.agent_config["model_provider"],
@@ -2582,6 +2604,7 @@ def _apply_profile(ctx: CommandContext, name: str):
         ctx.skills_registry,
         ask_user_question_callback=ctx.ask_user_question_callback,
         background_process_registry=ctx.background_processes,
+        peer_session=ctx.peer_session,
     )
     con.print(f"[green]Switched to profile '{name}': {new_provider}/{new_model}[/green]")
     return {"current_agent": current_agent}
@@ -3246,6 +3269,207 @@ def _cmd_steer(ctx: CommandContext, cmd_args: str = ""):
         return
     _queue_ahead_of_goal_continuation(ctx.pending_queue, guidance)
     con.print("  [green]Agent isn't mid-run — queued as the next turn.[/green]")
+
+
+def _print_fork_points(con, session_log, session_id: str) -> None:
+    """List the current session's user messages as branchable points."""
+    messages = session_log.list_user_messages(limit=20)
+    if not messages:
+        con.print("  [dim]This session has no messages yet — nothing to fork.[/dim]")
+        return
+    con.print(f"  [bold]Fork points in {session_id}[/bold] [dim](newest first)[/dim]\n")
+    for i, message in enumerate(messages, 1):
+        stamp = (message.get("timestamp") or "")[:16].replace("T", " ")
+        preview = " ".join((message.get("content") or "").split())[:76]
+        con.print(f"    [cyan]{i:>2}[/cyan]  [dim]{message['uuid'][:8]}[/dim]  {stamp}")
+        con.print(f"        {preview}")
+    con.print(
+        "\n  [dim]/fork <n>       branch off just BEFORE that message, so you can ask it "
+        "differently[/dim]"
+    )
+    con.print("  [dim]/fork <uuid>    same, addressed by the id shown above[/dim]")
+    con.print(
+        f"  [dim]/resume {session_id[:8]} at <uuid>   re-enter this session from a point "
+        "(the uuid is KEPT)[/dim]"
+    )
+
+
+def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
+    """Branch the current conversation into a new session.
+
+    ``/fork`` branches here and now: the whole conversation carries over and you
+    keep talking, only in a new session, so whatever you do next does not land in
+    the transcript you branched from. ``/fork list`` shows this session's messages
+    with the ids to branch at, and ``/fork <n|uuid>`` branches just before one of
+    them, putting the model back where it was when you asked — free to answer
+    differently. The original session is untouched and stays resumable either way.
+    """
+    con = get_console()
+    agent = ctx.current_agent
+    session_log = agent._session_log if agent is not None else None
+    if session_log is None or not session_log.exists():
+        con.print("  [yellow]This session has nothing on disk yet — nothing to fork.[/yellow]")
+        return
+
+    target = (cmd_args or "").strip()
+    if target == "list":
+        _print_fork_points(con, session_log, agent.session_id)
+        return
+
+    chosen = None
+    fork_at = None
+    if target:
+        messages = session_log.list_user_messages(limit=20)
+        # A uuid prefix can be all digits, so "is it a number" is not enough to
+        # tell the two forms apart — only a number that indexes the list is one.
+        if target.isdecimal() and 1 <= int(target) <= len(messages):
+            chosen = messages[int(target) - 1]
+        else:
+            matching = [m for m in messages if m["uuid"].startswith(target)]
+            if len(matching) != 1:
+                con.print(
+                    f"  [red]'{target}' matches {len(matching)} fork points. "
+                    "Run /fork list to see them.[/red]"
+                )
+                return
+            chosen = matching[0]
+
+        # `at <uuid>` truncates inclusively, so branching off *before* the chosen
+        # question means forking at the entry in front of it — otherwise the
+        # branch would end on an unanswered user turn.
+        fork_at = session_log.uuid_before(chosen["uuid"])
+        if fork_at is None:
+            con.print(
+                "  [yellow]That is the first message in the session — a branch before it would "
+                "be empty. Use /new for a fresh session.[/yellow]"
+            )
+            return
+
+    source_session_id = agent.session_id
+    agent_config = dict(ctx.agent_config)
+    agent_config["session_id"] = source_session_id
+    # No fork point means "branch at the tip": copy the whole log, which is what
+    # `SessionLog.fork(at_uuid=None)` does.
+    if fork_at is None:
+        agent_config["_fork_session"] = True
+    else:
+        agent_config["_resume_at_uuid"] = fork_at
+    current_agent = create_agent(
+        agent_config,
+        ctx.extra_tools,
+        ctx.workspace,
+        ctx.skills_registry,
+        ask_user_question_callback=ctx.ask_user_question_callback,
+        background_process_registry=ctx.background_processes,
+        peer_session=ctx.peer_session,
+    )
+    if current_agent.session_id == source_session_id:
+        con.print("  [red]Fork failed — the session log could not be branched.[/red]")
+        return
+
+    _, runs_built = hydrate_resumed_session(current_agent)
+    display_stats = display_resumed_transcript(
+        current_agent.working_memory.runs, current_agent.session_id
+    )
+    if chosen is None:
+        con.print(
+            f"[green]Forked into {current_agent.session_id} — carried over the whole "
+            f"conversation ({runs_built} runs, {display_stats.tool_result_count} tool results "
+            f"collapsed). Keep going; nothing you say now touches the original.[/green]"
+        )
+    else:
+        dropped = " ".join((chosen.get("content") or "").split())[:60]
+        con.print(
+            f"[green]Forked into {current_agent.session_id} — dropped '{dropped}' and "
+            f"everything after it; restored {runs_built} runs into context "
+            f"({display_stats.tool_result_count} tool results collapsed)[/green]"
+        )
+    con.print(f"  [dim]Forked from {source_session_id} — resume it any time with "
+              f"/resume {source_session_id}[/dim]")
+
+    goal_manager = None
+    if current_agent._session_log is not None:
+        judge_model = current_agent.auxiliary_model or current_agent.model
+        goal_manager = GoalManager(current_agent._session_log, judge_model=judge_model)
+        state = goal_manager.load()
+        if state is not None and state.status == "active":
+            # Same reasoning as /resume: continuing a standing goal by itself on
+            # a branch the user just created is too surprising.
+            goal_manager.force_pause_on_resume()
+            con.print(f"  [yellow]⊙ Standing goal paused on the branch:[/yellow] {state.objective}")
+    return {"current_agent": current_agent, "goal_manager": goal_manager}
+
+
+def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
+    """Send a message from you to one of your other live sessions.
+
+    Named after the ``send_message`` tool the agent calls, the way
+    ``/list-agents`` is named after ``list_agents``: same channel, different
+    sender. This is for when you want to say something yourself without typing
+    it into that terminal. It arrives marked as coming from you, so the
+    receiving agent treats it as your instruction rather than another agent's
+    information.
+    """
+    con = get_console()
+    peers = ctx.peer_session
+    if peers is None:
+        con.print("  [yellow]Cross-session messaging is not active in this session.[/yellow]")
+        return
+
+    target, _, text = (cmd_args or "").strip().partition(" ")
+    text = text.strip()
+    if not target or not text:
+        con.print("  [dim]Usage: /send-message <session> <text>   (see /list-agents for names)[/dim]")
+        con.print(
+            "  [dim]e.g. /send-message benchmarks-b read tmp/handoff.md and take over from there[/dim]"
+        )
+        return
+
+    try:
+        peers.send(target, text, from_kind="user")
+    except PeerMessageRefused as exc:
+        con.print(f"  [red]Not sent: {exc}[/red]")
+        return
+    con.print(
+        f"  [green]Sent to {target}.[/green] [dim]It arrives between that session's tool "
+        f"calls, or starts its next turn if it is idle.[/dim]"
+    )
+
+
+def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
+    """Show the live CLI sessions this one can exchange messages with.
+
+    Purely for the user to inspect: the agent finds its own targets through the
+    ``list_agents`` tool, so nothing has to be run before asking it to send.
+    """
+    con = get_console()
+    peers = ctx.peer_session
+    if peers is None:
+        con.print("  [yellow]Cross-session messaging is not active in this session.[/yellow]")
+        return
+
+    con.print(f"  This session: [cyan]{peers.name}[/cyan] [dim]({peers.peer_id})[/dim]")
+    con.print(f"  [dim]mailbox: {mailbox_dir(peers.peer_id)}[/dim]")
+    pending = peers.unread_count()
+    if pending:
+        con.print(f"  [yellow]{pending} message(s) waiting to be read[/yellow]")
+
+    live = peers.list_peers()
+    if not live:
+        con.print("  [dim]No other live sessions. Start agentica in another terminal to message it.[/dim]")
+        return
+    con.print(f"\n  [cyan]Other live sessions ({len(live)}):[/cyan]")
+    for info in live:
+        con.print(f"    [bold]{info.name}[/bold] [dim]{info.peer_id}[/dim]  pid={info.pid}")
+        con.print(f"      [dim]cwd: {info.cwd}[/dim]")
+        if info.git_branch:
+            con.print(f"      [dim]branch: {info.git_branch}[/dim]")
+        if info.task:
+            con.print(f"      working on: {info.task}")
+    con.print(
+        "  [dim]Ask the agent to message one by name (it calls send_message itself), "
+        "or say it yourself with /send-message <name> <text>.[/dim]"
+    )
 
 
 def _checkpoint_manager(ctx: CommandContext):
@@ -3953,6 +4177,11 @@ COMMAND_REGISTRY = {
     "/ps": (_cmd_ps, "List background agents and terminal commands"),
     "/stop": (_cmd_stop, "Stop background agents and terminal commands"),
     "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (injected between tool batches)"),
+    "/list-agents": (_cmd_list_agents, "List your other live CLI sessions this one can message"),
+    "/peers": (_cmd_list_agents, "List messageable live sessions (alias for /list-agents)"),
+    "/send-message": (_cmd_send_message, "Send a message yourself: /send-message <session> <text>"),
+    "/send": (_cmd_send_message, "Send a message to a session (alias for /send-message)"),
+    "/fork": (_cmd_fork, "Branch into a new session: /fork [list|n|uuid]"),
     "/checkpoint": (
         _cmd_checkpoint,
         "Durable file snapshots: list | create <label> <path...> | diff <id> | restore <id>",

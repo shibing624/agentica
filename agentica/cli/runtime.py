@@ -32,6 +32,7 @@ from agentica.agent.config import (
 )
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.tools.base import Tool
+from agentica.utils.log import logger
 from agentica.version import __version__
 from agentica.workspace import Workspace
 
@@ -750,6 +751,7 @@ def create_agent(
     background_process_registry=None,
     enable_cron_immediate_run: bool = True,
     permission_mode: Optional[str] = None,
+    peer_session=None,
 ):
     """Helper to create or recreate an Agent with built-in tools and current config.
 
@@ -767,6 +769,9 @@ def create_agent(
     permission_mode: unified 3-tier tool permission ("ask"/"auto"/"allow-all",
         see agentica.agent.permissions). Falls back to ``agent_config["permissions"]``,
         then "allow-all" (the CLI's actual --permissions default; see parse_args()).
+    peer_session: optional ``agentica.peers.PeerSession`` for cross-session
+        messaging. When given, the agent gets the ``list_agents`` /
+        ``send_message`` tools and its inbox is drained between tool batches.
     """
     if permission_mode is None:
         permission_mode = agent_config.get("permissions", "allow-all")
@@ -821,6 +826,27 @@ def create_agent(
     if background_process_registry is not None:
         background_process_registry.set_user_id(cli_user_id)
 
+    # Branching must not append the new line of work to the transcript it came
+    # from, or the two branches share one file and neither can be resumed on its
+    # own. Both entry points land here: `/fork` (whole log) and `/fork <n>` /
+    # `resume <id> at <uuid>` (truncated). Popped rather than read so rebuilding
+    # the agent later (a `/model` switch) does not fork again from the same point.
+    session_id = agent_config.get("session_id") or _generate_session_id()
+    fork_at_uuid = agent_config.pop("_resume_at_uuid", None)
+    fork_whole_log = agent_config.pop("_fork_session", False)
+    if fork_at_uuid or fork_whole_log:
+        from agentica.memory.session_log import SessionLog
+
+        source = SessionLog(session_id, work_dir=work_dir, user_id=cli_user_id)
+        if source.exists():
+            forked = source.fork(_generate_session_id(), at_uuid=fork_at_uuid)
+            logger.info(
+                f"Forked session {session_id} -> {forked.session_id}"
+                f"{f' at {fork_at_uuid}' if fork_at_uuid else ' (whole log)'}"
+            )
+            session_id = forked.session_id
+            agent_config["session_id"] = session_id
+
     # Use DeepAgent for full-featured CLI experience.
     from agentica.agent.deep import DeepAgent
     from agentica.tools.skill_tool import SkillTool
@@ -851,6 +877,11 @@ def create_agent(
         CronTool(job_runner=cron_job_runner, daemon_hint=CLI_DAEMON_HINT),
     ] + list(extra_tools or [])
 
+    if peer_session is not None:
+        from agentica.tools.peer_tool import PeerMessagingTool
+
+        cli_tools.insert(0, PeerMessagingTool(peer_session))
+
     new_agent = DeepAgent(
         model=model,
         auxiliary_model=auxiliary_model,
@@ -865,7 +896,7 @@ def create_agent(
         work_dir=work_dir,
         workspace=workspace,
         user_id=cli_user_id,
-        session_id=agent_config.get("session_id") or _generate_session_id(),
+        session_id=session_id,
         debug=agent_config["debug"],
         enable_experience_capture=agent_config.get("enable_experience_capture", True),
         experience_config=experience_config,
@@ -890,4 +921,5 @@ def create_agent(
     # the live agent + agent_config so _apply_profile can refresh it after a
     # model/profile switch by calling _build_environment_context again.
     new_agent.environment_context = _build_environment_context(new_agent, agent_config)
+    new_agent.peer_session = peer_session
     return new_agent

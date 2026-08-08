@@ -620,6 +620,10 @@ class SessionLog:
         name = name.strip()
         self._write_meta({"name": name})
 
+    def get_forked_from(self) -> Optional[str]:
+        """Return the session this one was branched from, if it was a fork."""
+        return self._read_meta(self.meta_path).get("forked_from")
+
     def set_archived(self, archived: bool = True) -> None:
         """Set the archived flag in sidecar metadata."""
         self._write_meta({"archived": bool(archived)})
@@ -737,6 +741,10 @@ class SessionLog:
             if at_uuid and entry.get("uuid") == at_uuid:
                 break
 
+        # Recorded here rather than by the caller so provenance cannot drift
+        # from the copy: /status reads it back to show what this branch came from.
+        new_log._write_meta({"forked_from": self.session_id, "forked_at_uuid": at_uuid})
+
         logger.debug(f"Forked session {self.session_id} → {new_session_id}"
                     f"{f' at {at_uuid}' if at_uuid else ''}")
         return new_log
@@ -774,6 +782,29 @@ class SessionLog:
 
         # Most recent first, limited
         return list(reversed(user_msgs[-limit:]))
+
+    def uuid_before(self, target_uuid: str) -> Optional[str]:
+        """Return the uuid of the entry immediately preceding ``target_uuid``.
+
+        ``fork``/``load`` truncate *inclusive* of the uuid they are given, so
+        branching off "just before I asked this" needs the entry in front of the
+        chosen message. Returns None when the target is the first entry (there
+        is nothing to keep) or is not in this log.
+        """
+        if not self.path.exists():
+            return None
+        previous: Optional[str] = None
+        for line in self.path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if entry.get("uuid") == target_uuid:
+                return previous
+            previous = entry.get("uuid")
+        return None
 
     # ------------------------------------------------------------------
     # Utilities

@@ -142,6 +142,13 @@ LAZY_IMPORTS = {
     "register_custom_subagent": "agentica.subagent",
     "unregister_custom_subagent": "agentica.subagent",
     "get_custom_subagent_configs": "agentica.subagent",
+    # cross-session peer messaging
+    "PeerSession": "agentica.peers",
+    "PeerInfo": "agentica.peers",
+    "PeerMessage": "agentica.peers",
+    "PeerMessageRefused": "agentica.peers",
+    "list_live_peers": "agentica.peers",
+    "PeerMessagingTool": "agentica.tools.peer_tool",
     # acp system
     "ACPServer": "agentica.acp",
     "ACPTool": "agentica.acp",

@@ -74,6 +74,7 @@ from agentica.cli.display import (
 from agentica.cli.context_usage import measure_context
 from agentica.run_display import RunDisplayEventKind, classify_run_response
 from agentica.run_response import AgentCancelledError
+from agentica.peers import PeerSession, format_for_model
 from agentica.tools.background_processes import (
     BackgroundProcessCompleted,
     BackgroundProcessRegistry,
@@ -83,7 +84,7 @@ from agentica.utils.async_utils import run_sync
 from agentica.utils.log import logger, suppress_console_logging
 from agentica.workspace import Workspace
 from agentica.skills import load_skills, get_skill_registry
-from agentica.global_config import resolve_active_profile_name
+from agentica.global_config import get_setting, resolve_active_profile_name
 
 from agentica.cli.commands import (
     CommandContext,
@@ -224,6 +225,8 @@ class SessionState:
     bg_tasks: Dict[str, dict] = field(default_factory=dict)
     bg_task_counter: int = 0
     background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
+    # This terminal's end of the cross-session peer channel (agentica/peers.py).
+    peer_session: Any = None
     # Standing-goal loop (see agentica/goals.py).
     goal_manager: Optional[GoalManager] = None
     goal_lock: threading.Lock = field(default_factory=threading.Lock)
@@ -814,6 +817,44 @@ def _print_boxed_result(label: str, question: str, result_text: str, color: str 
     else:
         con.print("  (no output)")
     con.print(f"[{color}]╰{'─' * (tw - 2)}╯[/{color}]")
+
+
+def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
+    """Give the agent text nobody typed, without interrupting its work.
+
+    A running agent takes it through ``steer()``, which lands at the next
+    tool-batch boundary. An idle one gets it as a queued turn. ``steer()``
+    returning False means the run ended between the check and the call — the
+    TOCTOU window ``Agent.steer`` documents — so the text falls through to the
+    queue instead of being dropped.
+    """
+    agent = state.current_agent
+    if state.agent_running and agent is not None and agent.steer(text):
+        return
+    pending_queue.put(text)
+
+
+def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
+    """Render a finished background command as a report for the agent."""
+    status = "finished" if event.returncode == 0 else "failed"
+    lines = [
+        f"[Background terminal #{event.num} ({event.id}) {status}: "
+        f"exit {event.returncode} after {event.elapsed}]",
+        f"Command: {event.command}",
+        f"Log: {event.log_path}",
+    ]
+    tail = read_log_tail(event.log_path, max_lines=20, max_chars=4000)
+    if tail:
+        lines.extend(["", "Output tail:", tail])
+    lines.extend(
+        [
+            "",
+            "This is an automatic report of a command you started in the background. "
+            "Pick the work back up where that command left off, or report the outcome "
+            "to the user if nothing is left to do.",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _print_background_completion(event: BackgroundProcessCompleted) -> None:
@@ -2366,11 +2407,21 @@ def run_interactive(
     # the first agent is built because ExecuteTool receives this shared
     # instance during create_agent().
     state = SessionState()
+    # Publish this terminal in the peer directory before the first agent exists:
+    # the messaging tools are built from this object, and the identity must
+    # survive agent rebuilds (/resume, /model) so in-flight messages still land.
+    peer_cwd = agent_config.get("work_dir") or os.getcwd()
+    state.peer_session = PeerSession(
+        cwd=peer_cwd,
+        git_branch=_read_git_branch(peer_cwd),
+    )
+    state.peer_session.publish()
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
         ask_user_question_callback=_cli_ask_user_question_callback,
         background_process_registry=state.background_processes,
         permission_mode=perm_mode,
+        peer_session=state.peer_session,
     )
     state.current_agent = current_agent
 
@@ -2511,6 +2562,7 @@ def run_interactive(
             bg_tasks=state.bg_tasks,
             bg_task_counter=state.bg_task_counter,
             background_processes=state.background_processes,
+            peer_session=state.peer_session,
             goal_manager=state.goal_manager,
             goal_lock=state.goal_lock,
             ask_user_question_callback=_cli_ask_user_question_callback,
@@ -2801,6 +2853,10 @@ def run_interactive(
 
             # Run agent
             state.agent_running = True
+            # Publish what this terminal is working on so another session's
+            # agent can pick it as a message target without guessing.
+            if state.peer_session is not None:
+                state.peer_session.publish(task=" ".join(user_input.split())[:120])
             app.invalidate()
             _process_stream_response(
                 state.current_agent,
@@ -2883,6 +2939,14 @@ def run_interactive(
     spinner_thread = threading.Thread(target=spinner_loop, daemon=True)
     spinner_thread.start()
 
+    def _hand_to_agent(text: str) -> None:
+        hand_to_agent(state, pending_queue, text)
+
+    # A background command's result is the agent's own pending work, so it is
+    # delivered by default; set `deliver_background_results: false` in
+    # config.yaml for a session that must never wake up on its own.
+    deliver_results = bool(get_setting("deliver_background_results", True))
+
     def background_completion_loop():
         pending_events: List[BackgroundProcessCompleted] = []
         while not state.should_exit:
@@ -2901,6 +2965,8 @@ def run_interactive(
                     if event.stop_requested:
                         continue
                     _print_background_completion(event)
+                    if deliver_results:
+                        _hand_to_agent(_background_result_for_agent(event))
                     printed = True
             if printed and app.is_running:
                 app.invalidate()
@@ -2911,6 +2977,48 @@ def run_interactive(
         name="background_completion_notifier",
     )
     background_completion_thread.start()
+
+    def peer_message_loop():
+        """Keep this terminal discoverable and take messages while idle.
+
+        While a run is active the Runner drains the same mailbox between tool
+        batches, so the message reaches the agent mid-task; this loop must not
+        race it for those messages, hence the ``agent_running`` skip.
+        """
+        peers = state.peer_session
+        if peers is None:
+            return
+        while not state.should_exit:
+            time.sleep(1.0)
+            agent = state.current_agent
+            try:
+                peers.heartbeat(session_id=agent.session_id if agent is not None else None)
+            except OSError:
+                logger.warning("peer heartbeat failed", exc_info=True)
+            if state.agent_running:
+                continue
+            try:
+                messages = peers.drain()
+            except OSError:
+                logger.warning("draining the peer mailbox failed", exc_info=True)
+                continue
+            if not messages:
+                continue
+            for message in messages:
+                _cprint(
+                    f"\n✉ Message from {message.from_name} "
+                    f"[{message.from_peer_id}] — starting a turn to handle it"
+                )
+            _hand_to_agent(format_for_model(messages))
+            if app.is_running:
+                app.invalidate()
+
+    peer_message_thread = threading.Thread(
+        target=peer_message_loop,
+        daemon=True,
+        name="peer_message_notifier",
+    )
+    peer_message_thread.start()
 
     # ── Run the TUI ──
     # Install a SIGQUIT hard-escape. When the main prompt_toolkit event loop is
@@ -2939,6 +3047,8 @@ def run_interactive(
         state.should_exit = True
         _stop_cron(state)
         state.background_processes.stop()
+        if state.peer_session is not None:
+            state.peer_session.unpublish()
         set_active_console(None)
         set_default_ask_user_question_callback(None)
         _restore_sigquit_escape(sigquit_installation)

@@ -641,7 +641,8 @@ def show_help(skills_registry=None):
             "/new":             "Start a new chat session",
             "/clear, /reset":   "Clear screen and reset conversation",
             "/rename <name>":   "Name current session for easy resume",
-            "/resume [target]": "Resume by number, name, or id prefix",
+            "/resume [target]": "Resume by number, name, or id prefix ('at <uuid>' forks)",
+            "/fork [n|uuid]":   "Branch into a new session ('list' shows earlier points)",
             "/history":         "Show conversation history or full tool details",
             "/save, /export":   "Save conversation to JSON (no system prompts)",
             "/retry":           "Retry the last message (resend to agent)",
@@ -654,6 +655,8 @@ def show_help(skills_registry=None):
             "/background":      "Run prompt in background (/bg alias)",
             "/ps":              "List background agents and terminals",
             "/stop":            "Stop background agents and terminals",
+            "/list-agents":     "List your other live sessions (/peers alias)",
+            "/send-message":    "Message another session yourself (/send alias)",
         },
         "Configure": {
             "/model [p/m]":     "Show or switch model",

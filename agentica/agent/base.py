@@ -582,6 +582,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         self._pending_steer: List[str] = []
         self._steer_lock = threading.Lock()
 
+        # Cross-session peer channel (``agentica.peers.PeerSession``), set by the
+        # CLI when this agent belongs to an interactive session. Messages from
+        # the user's other sessions are pulled from it between tool batches, on
+        # the same "never interrupt a running tool" boundary as steering.
+        self.peer_session: Optional[Any] = None
+
         # Session-level set of memory filenames already surfaced (dedup across turns).
         # Prevents the same memory entry from occupying system prompt slots every turn.
         self._surfaced_memories: set = set()
