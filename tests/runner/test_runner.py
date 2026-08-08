@@ -4,6 +4,7 @@ Tests for Runner — core execution engine.
 All tests mock LLM API keys and model calls — no real API usage.
 """
 import asyncio
+import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -103,7 +104,7 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         messages_for_model = [user_msg, partial_assistant]
         model_response = ModelResponse(content="2 + 2 = ")
 
-        agent._runner._persist_interrupted_turn(
+        agent._runner._persist_incomplete_turn(
             agent,
             message="What is 2+2?",
             messages=None,
@@ -114,6 +115,8 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
             model_response=model_response,
             loop_state=LoopState(),
             input_message_ids={id(user_msg)},
+            marker="[User interrupted the response]",
+            finish_reason="cancelled",
         )
 
         # run_response carries the partial answer + interruption marker
@@ -137,7 +140,7 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         """Pre-built ``messages`` runs manage their own history — no persistence."""
         agent = _make_agent()
         before = list(agent.working_memory.messages)
-        agent._runner._persist_interrupted_turn(
+        agent._runner._persist_incomplete_turn(
             agent,
             message=None,
             messages=[Message(role="user", content="hi")],
@@ -148,6 +151,8 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
             model_response=ModelResponse(content="x"),
             loop_state=LoopState(),
             input_message_ids=set(),
+            marker="[User interrupted the response]",
+            finish_reason="cancelled",
         )
         self.assertEqual(agent.working_memory.messages, before)
 
@@ -215,6 +220,136 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
             "interruption marker must not stamp a finished answer",
         )
         self.assertIn("The answer is 4.", assistants[0].content or "")
+
+
+class TestRunnerFailedTurnPersistence(unittest.TestCase):
+    """A run killed by an infrastructure error must not take the user's
+    instruction down with it.
+
+    The reported symptom: a malformed SSE chunk from the gateway aborted the
+    turn, the turn was discarded whole, and the next "continue" was answered
+    from the *previous* turn's context — so the agent redid work the lost
+    instruction had explicitly forbidden.
+    """
+
+    def _agent_failing_mid_stream(self, exc):
+        from agentica.model.response import ModelResponseEvent
+
+        agent = _make_agent()
+
+        async def failing_stream(messages=None, **_kw):
+            chunk = ModelResponse()
+            chunk.event = ModelResponseEvent.assistant_response.value
+            chunk.content = "Reading the results"
+            yield chunk
+            raise exc
+
+        agent.model.response_stream = failing_stream
+        return agent
+
+    @staticmethod
+    def _history(agent):
+        return [
+            m for m in agent.working_memory.get_messages_from_last_n_runs()
+            if m.role != "system"
+        ]
+
+    def test_failed_turn_keeps_question_and_partial(self):
+        agent = self._agent_failing_mid_stream(
+            json.JSONDecodeError("Extra data", '{"a": 1}{"b": 2}', 259)
+        )
+        prompt = "Plan A already ran and lost — fix the code instead."
+
+        async def consume():
+            async for _ in agent.run_stream(prompt):
+                pass
+
+        with self.assertRaises(json.JSONDecodeError):
+            asyncio.run(consume())
+
+        # The next turn's prompt is built from runs, so the instruction must
+        # be there or "continue" resumes the wrong plan.
+        history = self._history(agent)
+        self.assertEqual([m.role for m in history], ["user", "assistant"])
+        self.assertEqual(history[0].content, prompt)
+        self.assertIn("Reading the results", history[-1].content)
+        self.assertIn("Run failed", history[-1].content)
+        self.assertIn("JSONDecodeError", history[-1].content)
+
+        # /retry resends the last user message from the flat archive.
+        self.assertTrue(
+            any(m.role == "user" and m.content == prompt
+                for m in agent.working_memory.messages),
+            "/retry cannot find the failed turn's user message",
+        )
+
+    def test_failed_turn_drops_orphan_tool_calls(self):
+        """A turn that died between the tool request and its result must not
+        persist the request: every later request would then 400 on an
+        assistant ``tool_calls`` with no matching ``tool`` message."""
+        agent = _make_agent()
+        user_msg = Message(role="user", content="check the log")
+        asked = Message(
+            role="assistant",
+            content="",
+            tool_calls=[{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": "{}"},
+            }],
+        )
+        messages_for_model = [user_msg, asked]
+
+        agent._runner._persist_incomplete_turn(
+            agent,
+            message="check the log",
+            messages=None,
+            user_messages=[user_msg],
+            system_message=None,
+            messages_for_model=messages_for_model,
+            num_input_messages=1,
+            model_response=ModelResponse(content=""),
+            loop_state=LoopState(),
+            input_message_ids={id(user_msg)},
+            marker="[Run failed: RuntimeError: boom]",
+            finish_reason="error",
+        )
+
+        history = self._history(agent)
+        self.assertEqual([m.role for m in history], ["user", "assistant"])
+        self.assertFalse(
+            any(m.tool_calls for m in history),
+            "unanswered tool_calls persisted — replay will be rejected",
+        )
+        self.assertIn("Run failed", history[-1].content)
+
+    def test_blocked_output_guardrail_is_still_not_persisted(self):
+        """Failure persistence must not undo the output-guardrail invariant:
+        rejected content never reaches history."""
+        from agentica.agent import Agent
+        from agentica.guardrails import GuardrailOutput, OutputGuardrailTripwireTriggered, output_guardrail
+        from agentica.model.openai import OpenAIChat
+
+        @output_guardrail
+        def reject_all(ctx, agent, output):
+            return GuardrailOutput(output_info="blocked", tripwire_triggered=True)
+
+        agent = Agent(
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            output_guardrails=[reject_all],
+        )
+
+        async def fake_response(messages=None, **_kw):
+            messages.append(Message(role="assistant", content="leaky"))
+            return ModelResponse(content="leaky")
+
+        agent.model.response = fake_response
+
+        with self.assertRaises(OutputGuardrailTripwireTriggered):
+            asyncio.run(agent.run("any prompt"))
+
+        self.assertEqual(list(agent.working_memory.runs), [])
+        self.assertEqual(list(agent.working_memory.messages), [])
 
 
 class TestRunnerPersistsCompactedContext(unittest.TestCase):

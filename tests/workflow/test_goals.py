@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agentica.goals import (
+    BUDGET_WRAPUP_PROMPT_PREFIX,
     CONTINUATION_PROMPT_PREFIX,
     DEFAULT_TOKEN_BUDGET,
     DEFAULT_TURN_BUDGET,
@@ -329,7 +330,11 @@ def test_evaluate_turn_budget_exhaustion_is_budget_limited(tmp_path: Path):
     mgr = GoalManager(_make_session_log(tmp_path), judge_model=model, auto_judge=True)
     mgr.set("x", turn_budget=2)
     asyncio.run(mgr.evaluate_after_turn("r1"))
-    decision = asyncio.run(mgr.evaluate_after_turn("r2"))
+    # Hitting the cap buys one wrap-up turn, not an immediate stop.
+    wrapup = asyncio.run(mgr.evaluate_after_turn("r2"))
+    assert wrapup.should_continue is True
+    assert BUDGET_WRAPUP_PROMPT_PREFIX in wrapup.continuation_prompt
+    decision = asyncio.run(mgr.evaluate_after_turn("handoff summary"))
     assert decision.status == "budget_limited"
     assert decision.should_continue is False
     assert mgr.load().paused_reason == "budget"
@@ -349,9 +354,13 @@ def test_evaluate_token_budget_exhaustion(tmp_path: Path):
     assert mgr.load().tokens_used == 60
     # Spend 50 more — hits cap; judge should NOT run this turn.
     d2 = asyncio.run(mgr.evaluate_after_turn("r2", token_delta=50))
-    assert d2.status == "budget_limited"
+    assert d2.should_continue is True  # wrap-up turn
     assert mgr.load().tokens_used == 110
     assert "token budget" in d2.reason
+    # The wrap-up turn is charged too, then the loop terminates.
+    d3 = asyncio.run(mgr.evaluate_after_turn("handoff summary", token_delta=20))
+    assert d3.status == "budget_limited"
+    assert mgr.load().tokens_used == 130
 
 
 def test_evaluate_wall_clock_budget_exhaustion(tmp_path: Path):
@@ -361,8 +370,48 @@ def test_evaluate_wall_clock_budget_exhaustion(tmp_path: Path):
     asyncio.run(mgr.evaluate_after_turn("r1", elapsed_sec=6.0))
     assert mgr.load().wall_clock_used_sec == pytest.approx(6.0)
     d2 = asyncio.run(mgr.evaluate_after_turn("r2", elapsed_sec=5.0))
-    assert d2.status == "budget_limited"
+    assert d2.should_continue is True  # wrap-up turn
     assert "wall-clock" in d2.reason
+    d3 = asyncio.run(mgr.evaluate_after_turn("handoff summary", elapsed_sec=1.0))
+    assert d3.status == "budget_limited"
+
+
+def test_budget_wrapup_prompt_asks_for_handoff_not_work(tmp_path: Path):
+    mgr = GoalManager(_make_session_log(tmp_path))
+    mgr.set("ship the parser fix", token_budget=100)
+    wrapup = asyncio.run(mgr.evaluate_after_turn("r1", token_delta=150))
+
+    prompt = wrapup.continuation_prompt
+    assert wrapup.status == "active"  # loop still owns the turn -> stays accounted
+    assert "ship the parser fix" in prompt
+    assert "tokens 150/100" in prompt  # spend is shown to the model
+    assert "verify_completion" in prompt  # explicitly told not to call it
+    assert mgr.load().budget_wrapup_sent is True
+
+
+def test_budget_wrapup_granted_only_once(tmp_path: Path):
+    """The wrap-up turn costs tokens too — it must not buy another wrap-up."""
+    mgr = GoalManager(_make_session_log(tmp_path))
+    mgr.set("x", token_budget=100)
+    asyncio.run(mgr.evaluate_after_turn("r1", token_delta=150))
+    for _ in range(3):
+        decision = asyncio.run(mgr.evaluate_after_turn("still summarising", token_delta=10))
+        assert decision.should_continue is False
+        assert decision.status == "budget_limited"
+
+
+def test_resume_rearms_budget_wrapup(tmp_path: Path):
+    """Raising the cap and blowing it again earns a fresh wrap-up turn."""
+    mgr = GoalManager(_make_session_log(tmp_path))
+    mgr.set("x", token_budget=100)
+    asyncio.run(mgr.evaluate_after_turn("r1", token_delta=150))
+    asyncio.run(mgr.evaluate_after_turn("summary", token_delta=10))
+
+    mgr.resume()
+    assert mgr.load().budget_wrapup_sent is False
+    again = asyncio.run(mgr.evaluate_after_turn("r2", token_delta=10))
+    assert again.should_continue is True
+    assert BUDGET_WRAPUP_PROMPT_PREFIX in again.continuation_prompt
 
 
 def test_evaluate_three_parse_failures_pause(tmp_path: Path):
@@ -419,10 +468,14 @@ def test_default_no_judge_continues_until_budget(tmp_path: Path):
     assert d1.verdict == "continue"
     d2 = asyncio.run(mgr.evaluate_after_turn("r2"))
     assert d2.status == "active"
-    # Third turn hits the budget cap.
+    # Third turn hits the budget cap. This is the CLI's default path, so it
+    # must earn the same wrap-up turn the token / wall-clock caps grant.
     d3 = asyncio.run(mgr.evaluate_after_turn("r3"))
-    assert d3.status == "budget_limited"
-    assert d3.should_continue is False
+    assert d3.should_continue is True
+    assert BUDGET_WRAPUP_PROMPT_PREFIX in d3.continuation_prompt
+    d4 = asyncio.run(mgr.evaluate_after_turn("handoff summary"))
+    assert d4.status == "budget_limited"
+    assert d4.should_continue is False
     assert mgr.load().paused_reason == "budget"
 
 
@@ -1150,8 +1203,12 @@ def test_verifier_runs_after_budget_and_tool_signals(tmp_path: Path):
         verifier=lambda ctx: VerifierResult(done=True, reason="ignored"),
     )
     mgr.set("x", turn_budget=1, token_budget=10)
-    # Push tokens past budget on the first turn.
-    decision = asyncio.run(mgr.evaluate_after_turn("r1", token_delta=1000, tool_calls=None))
+    # Push tokens past budget on the first turn. The cap buys a wrap-up turn,
+    # but the verifier's "done" is still not consulted.
+    wrapup = asyncio.run(mgr.evaluate_after_turn("r1", token_delta=1000, tool_calls=None))
+    assert BUDGET_WRAPUP_PROMPT_PREFIX in wrapup.continuation_prompt
+    assert wrapup.verdict != "verifier"
+    decision = asyncio.run(mgr.evaluate_after_turn("summary", tool_calls=None))
     assert decision.status == "budget_limited"
     # Budget message wins; verifier verdict was never recorded.
     state = mgr.load()

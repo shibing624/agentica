@@ -813,11 +813,11 @@ class OpenAIChat(Model):
     async def invoke_stream(self, messages: List[Message]) -> AsyncIterator[ChatCompletionChunk]:
         """Send a streaming chat completion request to the OpenAI API (async-only).
 
-        Wraps the open+iterate cycle in ``stream_with_retry``. Same-stream
-        retries are disabled by default; callers can opt in with
-        ``OpenAIChat(max_retries=...)`` when a provider integration needs it.
-        Once the first chunk has been yielded, any subsequent error propagates verbatim
-        because retrying would duplicate output.
+        Wraps the open+iterate cycle in ``stream_with_retry``, which reopens the
+        stream on a transient failure up to ``max_retries`` times (2 by default;
+        set ``OpenAIChat(max_retries=0)`` to disable). Once the first chunk has
+        been yielded, any subsequent error propagates verbatim because retrying
+        would duplicate output.
         """
         langfuse_params = self._get_langfuse_extra_params()
         formatted = [self.format_message(m) for m in messages]

@@ -45,6 +45,7 @@ from typing import (
 
 from agentica.prompts.base.goal import (
     GOAL_JUDGE_SYSTEM_PROMPT,
+    render_goal_budget_wrapup_prompt,
     render_goal_continuation_prompt,
 )
 from agentica.run_events import RunEventType
@@ -80,6 +81,19 @@ MAX_CONSECUTIVE_TOOL_FAILURES = 3
 # in cli/interactive.py to distinguish auto-fed continuation prompts from
 # real user messages (real ones preempt the goal loop).
 CONTINUATION_PROMPT_PREFIX = "[Continuing toward your standing goal]"
+# The budget wrap-up prompt is the other prompt the loop feeds itself. It is
+# NOT a continuation (no more work is wanted), so it carries its own prefix.
+BUDGET_WRAPUP_PROMPT_PREFIX = "[Standing goal budget reached]"
+
+
+def is_goal_generated_prompt(text: str) -> bool:
+    """True for prompts the goal loop feeds itself rather than user input.
+
+    The CLI queue holds both, and everything that reasons about "is a real
+    user message waiting" must treat the loop's own prompts as machine
+    traffic.
+    """
+    return text.startswith((CONTINUATION_PROMPT_PREFIX, BUDGET_WRAPUP_PROMPT_PREFIX))
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +117,10 @@ class GoalState:
         ``wall_clock_budget_sec``  optional hard cap on agent wall-clock
                               seconds (None = unlimited)
 
-    When ANY set budget is exhausted the state goes to ``budget_limited``
-    (semantically distinct from ``paused``: budget-limited means the
-    user must decide to extend the cap or accept the partial result).
+    When ANY set budget is exhausted the loop spends one final turn asking
+    the agent to hand off (see ``_budget_wrapup_decision``) and then settles
+    on ``budget_limited`` — semantically distinct from ``paused``: the user
+    must decide to extend the cap or accept the partial result.
     """
 
     session_id: str
@@ -126,6 +141,12 @@ class GoalState:
     # tool call. Tripping ``MAX_CONSECUTIVE_TOOL_FAILURES`` auto-pauses
     # the loop with ``paused_reason="tool-stuck"``.
     consecutive_tool_failures: int = 0
+    # True once the loop has spent its one final "wrap up and hand off" turn
+    # for the current budget. Persisted so the wrap-up is granted exactly
+    # once — the wrap-up turn itself costs tokens, so without this the
+    # budget check would hand out another one forever. Reset by ``resume()``
+    # so raising the cap and blowing it again earns a fresh wrap-up.
+    budget_wrapup_sent: bool = False
     last_verdict: Optional[str] = None  # "done" | "continue" | "parse_failed" | "tool_signal"
     last_reason: Optional[str] = None
     # The substantive deliverable the agent produced, captured explicitly via
@@ -652,6 +673,7 @@ class GoalManager:
             subgoals=[],
             consecutive_parse_failures=0,
             consecutive_tool_failures=0,
+            budget_wrapup_sent=False,
             last_verdict=None,
             last_reason=None,
             paused_reason=None,
@@ -738,6 +760,9 @@ class GoalManager:
         self._state.paused_reason = None
         self._state.consecutive_parse_failures = 0
         self._state.consecutive_tool_failures = 0
+        # Resuming means the user accepted the spend (usually after raising a
+        # cap). If they blow the budget again they get a fresh wrap-up turn.
+        self._state.budget_wrapup_sent = False
         self._persist()
         return self._state
 
@@ -840,6 +865,45 @@ class GoalManager:
         return "\n".join([head] + extras)
 
     # --- per-turn loop ------------------------------------------------------
+    def _budget_wrapup_decision(self, budget_msg: str) -> GoalDecision:
+        """Grant the one final turn a blown budget earns: a handoff, not work.
+
+        Stopping dead the moment a cap trips throws away the only thing the
+        user can act on — what got done, what is left, what blocks it. So the
+        loop spends one more turn asking for that summary, then terminates on
+        the next evaluation (``budget_wrapup_sent`` makes it one-shot).
+
+        The goal stays ``active`` for this turn on purpose: the CLI hook and
+        ``run_goal()`` both gate on ``is_active()``, so flipping to
+        ``budget_limited`` here would run the wrap-up turn unaccounted — its
+        tokens never charged, its turn never counted. That final turn does
+        push the goal slightly past its cap, which is the honest trade and is
+        visible in the status line.
+        """
+        self._state.budget_wrapup_sent = True
+        self._state.last_verdict = "continue"
+        self._state.last_reason = budget_msg
+        self._persist()
+        message = f"⊙ Goal budget reached ({budget_msg}) — asking the agent to wrap up (final turn)."
+        self._emit(
+            RunEventType.goal_continuing,
+            verdict="continue",
+            reason=budget_msg,
+            budget_message=budget_msg,
+            message=message,
+        )
+        return GoalDecision(
+            status="active",
+            should_continue=True,
+            continuation_prompt=render_goal_budget_wrapup_prompt(
+                objective=self._state.objective,
+                progress=self._progress_label(),
+            ),
+            verdict="continue",
+            reason=budget_msg,
+            message=message,
+        )
+
     def next_continuation_prompt(self) -> str:
         self._ensure_loaded()
         if self._state is None:
@@ -979,6 +1043,8 @@ class GoalManager:
         # model claimed via update_goal.
         budget_msg = self._check_budget_exhausted()
         if budget_msg is not None:
+            if not self._state.budget_wrapup_sent:
+                return self._budget_wrapup_decision(budget_msg)
             self._state.status = "budget_limited"
             self._state.paused_reason = "budget"
             self._persist()
@@ -1176,6 +1242,12 @@ class GoalManager:
             # set) is the only remaining gate here; token / wall-clock caps
             # are enforced earlier.
             if self._turn_budget_exhausted():
+                budget_msg = (
+                    f"turn budget exhausted "
+                    f"({self._state.turns_used}/{self._state.turn_budget})"
+                )
+                if not self._state.budget_wrapup_sent:
+                    return self._budget_wrapup_decision(budget_msg)
                 self._state.status = "budget_limited"
                 self._state.paused_reason = "budget"
                 self._state.last_verdict = "continue"
@@ -1183,10 +1255,6 @@ class GoalManager:
                     "turn budget exhausted; no completion signal from verify_completion"
                 )
                 self._persist()
-                budget_msg = (
-                    f"turn budget exhausted "
-                    f"({self._state.turns_used}/{self._state.turn_budget})"
-                )
                 self._emit(
                     RunEventType.goal_paused,
                     paused_reason="budget",
@@ -1305,13 +1373,15 @@ class GoalManager:
             )
 
         if self._turn_budget_exhausted():
-            self._state.status = "budget_limited"
-            self._state.paused_reason = "budget"
-            self._persist()
             budget_msg = (
                 f"turn budget exhausted "
                 f"({self._state.turns_used}/{self._state.turn_budget})"
             )
+            if not self._state.budget_wrapup_sent:
+                return self._budget_wrapup_decision(budget_msg)
+            self._state.status = "budget_limited"
+            self._state.paused_reason = "budget"
+            self._persist()
             self._emit(
                 RunEventType.goal_paused,
                 paused_reason="budget",

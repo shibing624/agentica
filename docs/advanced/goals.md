@@ -76,6 +76,17 @@ turn accounting → budget check → tool short-circuit → judge
 
 预算耗尽时 status 是独立的 `budget_limited`（不是 `paused`），语义"用户必须决定加额度或接受部分结果"。用 `mgr.resume()` 或 `/goal resume` 可从 `budget_limited` / `paused` 两种状态恢复。
 
+### 预算耗尽的收尾轮（wrap-up turn）
+
+超预算不是当场砍断。任一 cap 触发时，循环会**再给一轮**，喂一条 `[Standing goal budget reached]` 开头的收尾 prompt，要求模型交接而不是继续干活：做完了什么（点名文件 / 命令 / 结果）、还剩什么（按下一步的顺序）、有什么坑或阻塞。prompt 里明确禁止 `verify_completion`——已经没有预算去处理一次失败的校验了。
+
+这一轮跑完，下一次 `evaluate_after_turn` 才落到 `budget_limited` 终态。几个刻意的设计点：
+
+- **只给一次。** 收尾轮自己也烧 token，所以 `GoalState.budget_wrapup_sent` 持久化标记，避免"每轮都超预算 → 每轮都发收尾"变成死循环。
+- **收尾轮期间 status 仍是 `active`。** CLI hook 和 `run_goal()` 都以 `is_active()` 为闸；提前翻成 `budget_limited` 会让这一轮完全不计账（token 不扣、轮数不加）。
+- **因此最终会略微超出 cap**（多一轮）。这是诚实的代价，`Budget:` 那一行会如实显示，比如 `turns 6/5`。
+- **`resume()` 会重置这个标记**，所以加大额度后再次超预算能拿到新的收尾轮。
+
 CLI `/goal status` 用一行 `Budget:` 汇总三个预算（未设上限的只显示已用量）；状态栏在 goal 执行期间实时显示 `goal 12.3K/500K`：
 
 ```
@@ -179,7 +190,22 @@ while True:
 /subgoal list                       # 列出 subgoals
 /subgoal clear                      # 清空 subgoals
 /subgoal remove 2                   # 按编号删除
+
+/steer 别动公开 API                  # 中途纠偏当前这一轮
 ```
+
+### 循环跑起来之后怎么干预
+
+| 想做的事 | 用什么 | 生效范围 |
+|---|---|---|
+| 立刻纠偏正在跑的这一轮 | `/steer <指引>` | 当前 run，在下一次推理前注入 |
+| 加一条长期约束 / 验收条件 | `/subgoal <文本>` | 持久化到 `GoalState`，每轮 continuation prompt 都带上 |
+| 插一个完整的新任务 | 直接打字（普通消息） | 排到队列，抢在续跑之前执行 |
+| 停下来 | `/goal pause` 或 Ctrl+C | 停止自动续跑，`/goal resume` 恢复 |
+
+`/steer` 只影响当前这一轮：它以 user 消息的形式进入对话历史，后续轮次靠上下文延续。要让约束在整个循环里都成立，用 `/subgoal`——它会渲染进每一轮的 continuation prompt。
+
+`/steer` 不会丢词。agent 不在 run 中时（典型场景：一轮刚结束、goal 正在跑 judge 的那几秒），它会自动降级成"下一轮消息"，并插在待执行的 continuation prompt **之前**，这样纠偏不会被一整轮无关工作挡在后面。
 
 CLI 行为：
 
@@ -247,8 +273,8 @@ result = await agent.run_goal("xxx", attach_goal_tool=False)
 | `/resume <sid>` 拾回 active goal | `paused` | `resume-safety` | `/goal resume` |
 | Judge 连续 3 次 JSON 解析失败 | `paused` | `judge-broken` | `/goal resume`（先排查 judge） |
 | 连续 3 轮所有 tool call 都失败 | `paused` | `tool-stuck` | 看最后几轮 tool 报错 → 修 → `/goal resume` |
-| `turn_budget` 超 | `budget_limited` | `budget` | `/goal resume` |
-| `token_budget` / `wall_clock_budget_sec` 超 | `budget_limited` | `budget` | `/goal resume` |
+| `turn_budget` 超 | `budget_limited`（先跑一轮收尾） | `budget` | `/goal resume` |
+| `token_budget` / `wall_clock_budget_sec` 超 | `budget_limited`（先跑一轮收尾） | `budget` | `/goal resume` |
 
 ---
 

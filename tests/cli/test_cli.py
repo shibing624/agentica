@@ -22,6 +22,7 @@ from agentica.cli import (
 )
 from agentica.cli import commands as cli_commands
 from agentica.cli import setup as cli_setup
+from agentica.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.memory.session_log import SessionLog
 
 
@@ -1403,6 +1404,21 @@ class TestCLIHelpers(unittest.TestCase):
         self.assertEqual(view["detail"], raw)
         self.assertIn("/retry", view["hint"])
 
+    def test_display_agent_execution_error_explains_malformed_stream(self):
+        """A gateway that packs two SSE events on one line surfaces as an
+        unhelpful ``Extra data: line 1 column 260``. Name the cause and point
+        at /retry, which now works because the failed turn is persisted."""
+        import json as _json
+
+        from agentica.cli import display as disp
+
+        error = _json.JSONDecodeError("Extra data", '{"a": 1}{"b": 2}', 8)
+        view = disp._format_agent_execution_error(error)
+
+        self.assertEqual(view["summary"], "Malformed stream from the model endpoint")
+        self.assertIn("Extra data", view["detail"])
+        self.assertIn("/retry", view["hint"])
+
     def test_user_message_uses_subtle_background_panel(self):
         """Historical user queries are visually separated from assistant output."""
         from rich.padding import Padding
@@ -2421,6 +2437,95 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(budgets["turn_budget"], 5)
         self.assertEqual(budgets["token_budget"], 80000)
         self.assertEqual(budgets["wall_clock_budget_sec"], 1800)
+
+    def _steer_ctx(self, *, agent_running, steer_accepts, queue_items=()):
+        agent = MagicMock()
+        agent.steer.return_value = steer_accepts
+        pending_queue = cli_commands.PendingQueue()
+        for item in queue_items:
+            pending_queue.put(item)
+        ctx = cli_commands.CommandContext(
+            agent_config={},
+            current_agent=agent,
+            agent_running=agent_running,
+            pending_queue=pending_queue,
+        )
+        return ctx, agent, pending_queue
+
+    def test_steer_injects_into_live_run(self):
+        """Mid-run steering goes to the agent, not the queue."""
+        ctx, agent, pending_queue = self._steer_ctx(agent_running=True, steer_accepts=True)
+
+        with patch.object(cli_commands, "get_console", return_value=MagicMock()):
+            cli_commands._cmd_steer(ctx, "keep the API compatible")
+
+        agent.steer.assert_called_once_with("keep the API compatible")
+        self.assertEqual(pending_queue.peek_all(), [])
+
+    def test_steer_queues_when_run_ended_mid_dispatch(self):
+        """TOCTOU: the run ends between the UI check and steer(); never drop the text.
+
+        Under a standing goal this is the common case — the loop spends seconds
+        judging a finished turn with the agent idle.
+        """
+        ctx, agent, pending_queue = self._steer_ctx(agent_running=True, steer_accepts=False)
+
+        with patch.object(cli_commands, "get_console", return_value=MagicMock()):
+            cli_commands._cmd_steer(ctx, "stop rewriting the tests")
+
+        agent.steer.assert_called_once()
+        self.assertEqual(pending_queue.peek_all(), ["stop rewriting the tests"])
+
+    def test_steer_preempts_pending_goal_continuation(self):
+        """A queued continuation is machine-generated — the correction goes first."""
+        continuation = f"{CONTINUATION_PROMPT_PREFIX}\nGoal: ship it"
+        ctx, _agent, pending_queue = self._steer_ctx(
+            agent_running=False,
+            steer_accepts=False,
+            queue_items=[continuation],
+        )
+
+        with patch.object(cli_commands, "get_console", return_value=MagicMock()):
+            cli_commands._cmd_steer(ctx, "don't touch the public API")
+
+        self.assertEqual(pending_queue.peek_all(), ["don't touch the public API", continuation])
+
+    def test_goal_loop_does_not_double_queue_continuation(self):
+        """A /steer that jumped the queue must not spawn a second continuation.
+
+        The interjected turn is still judged and still charged to the budget,
+        but the continuation it cut in front of already covers the next step.
+        """
+        from agentica.cli import interactive as cli_interactive
+        from agentica.goals import GoalDecision
+
+        continuation = f"{CONTINUATION_PROMPT_PREFIX}\nGoal: ship it"
+        pending_queue = cli_commands.PendingQueue()
+        pending_queue.put(continuation)
+
+        mgr = MagicMock()
+        mgr.is_active.return_value = True
+        mgr.extract_turn_signals.return_value = ("did the thing", 100, 100, [])
+        decision = GoalDecision(
+            status="active",
+            should_continue=True,
+            continuation_prompt=continuation,
+            verdict="continue",
+            reason="more to do",
+            message="",
+        )
+
+        agent = MagicMock()
+        agent._cancelled = False
+        state = cli_interactive.SessionState(current_agent=agent, goal_manager=mgr)
+
+        with (
+            patch.object(cli_interactive, "_run_async_safe", return_value=decision),
+            patch.object(cli_interactive, "_cprint"),
+        ):
+            cli_interactive._maybe_continue_goal(state, pending_queue, {})
+
+        self.assertEqual(pending_queue.peek_all(), [continuation])
 
     def test_parse_extensions_remove_command(self):
         """CLI supports `agentica extensions remove <skill-name>`."""

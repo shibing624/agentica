@@ -299,6 +299,13 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
         summary = f"LLM rate limited ({status})" if status else "LLM rate limited"
         detail = provider_message or raw
         hint = "Type /retry after a short wait, or switch model/profile."
+    elif isinstance(error, json.JSONDecodeError):
+        # A gateway that packs two SSE events onto one ``data:`` line surfaces
+        # only as "Extra data: line 1 column N". Name the cause so the user
+        # doesn't go looking for it in their prompt or config.
+        summary = "Malformed stream from the model endpoint"
+        detail = f"The endpoint sent an unparsable SSE chunk: {raw}"
+        hint = "Type /retry to resend the last message."
     elif is_transient:
         summary = f"Transient LLM/API error ({status})" if status else "Transient LLM/API error"
         detail = provider_message or raw

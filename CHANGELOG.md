@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- Goal 预算耗尽不再当场砍断：任一 cap 触发时循环额外给一轮收尾 turn，喂 `[Standing goal budget reached]` prompt 要求模型交接（做完了什么、还剩什么、有什么坑），明确禁止在没有预算兜底时调 `verify_completion`；这一轮跑完才落到 `budget_limited`。收尾轮期间 goal 保持 `active` 以便正常计账（因此最终会超出 cap 一轮，状态栏如实显示），`GoalState.budget_wrapup_sent` 保证只给一次，`resume()` 重置。CLI `/goal` 与 SDK `run_goal()` 共用同一条路径
 - Goal 主成本闸改为默认开启的 `token_budget=500_000`（CLI `/goal` 与 SDK `run_goal` 一致）；`turn_budget` 默认 `None`（仅 `--turns` / 显式参数时生效）。`/goal status` 与状态栏在执行中显示 `tokens used/budget`（如 `goal 12.3K/500K`）
 - `execute(background=True)`：长命令可立即返回，由共享 `BackgroundProcessRegistry` 托管进程组；stdout/stderr 写入 `~/.agentica/projects/<user>/.../background/` 日志。CLI 新增 `/ps` 列出后台 terminal 与 background agent，`/stop <id|pid|#n>` 可按目标停止（空参停全部）；状态栏显示正在运行的 background terminal 数量。registry 经 `create_agent` / session rebuild 路径注入，与 `/background` agent 任务共用同一套 `/ps`/`/stop` 入口
 - `wait(id=...)`：等待 `execute(background=True)` 启动的后台命令，命令一退出立即返回并给出退出码、耗时和日志尾部；未结束则在超时后返回当前进度且不停止命令，单次上限 300 秒，让调用回到模型循环以便用户打断。后台命令的退出状态只报给用户，`wait` 是它回到对话里的唯一途径。它补的是「命令可能活得比一次工具调用久」这个断层：前台命令被 timeout 或被取消的一轮杀掉会丢掉全部输出，而这类任务此前只能退回 `sleep N && tail log` 的盲等。一次调用跑得完、当下就要结果的命令仍应留在前台并调高 `timeout`；真正跑几小时以上的任务则不该 `wait`，等一两次仍未结束就结束轮次，由用户收到的完成通知驱动后续
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI execute 工具调用行支持宽度感知预览：普通长命令和 heredoc 统一最多展示 3 行正文，Ctrl+O 可分别展开完整 command 和折叠 output
 
 #### fixes
+- 修复 `/steer` 在 goal 循环中丢词：agent 不在 run 中时（一轮刚结束、goal 正在判定的那几秒，以及 UI 检查到 `steer()` 之间的 TOCTOU 窗口）原先只打印一句"用 /queue"就把用户输入丢掉。现在统一降级为排队执行，并插在待跑的 continuation prompt 之前，纠偏不会被一整轮无关工作挡住；被插队的 continuation 也不会被重复排入
 - `execute(background=True)` 完成后，CLI 现在会主动异步显示成功或失败、退出码、尾部输出和完整日志路径；通知由 registry 的完成事件驱动，不会唤醒 LLM。`/stop` 和 CLI 退出触发的终止不会再重复显示为任务失败，等待 `ask_user_question` 输入期间的完成事件会保留到安全时机再展示
 - 修复 `execute(background=True)` 遇到以 `&` 结尾的命令时误报完成：shell 会 fork 掉真正的工作并立刻退出，registry 追踪到的是那个空壳，于是任务还在跑就宣布结束。该组合现在直接拒绝；前台的 `nohup ... &` 仍照常执行，只在结果末尾注明它未被追踪（`/ps`、`/stop` 和完成通知都看不见它，且取消或超时的一轮会连同进程组把它杀掉），并建议改用 `background=True`
 - `execute` 拒绝 120 秒以上的前台起始 `sleep`：观察到的轮询写法 `sleep 330 && tail log` 会把刚被后台化释放的这一轮重新堵死。阈值对齐前台默认 timeout，短重试 `sleep 2 && curl ...` 不受影响。拒绝信息同时给出两条正路：等后台命令用 `wait(id=...)`，等没有完成事件的外部条件用 `until curl -sf ...; do sleep 5; done` 这类成功即返回的重试循环

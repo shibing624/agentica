@@ -72,6 +72,7 @@ from agentica.guardrails.agent import (
     run_input_guardrails,
     run_output_guardrails,
 )
+from agentica.guardrails.core import GuardrailTriggered
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
@@ -1461,7 +1462,36 @@ class Runner:
             tool_call=ToolCallInfo.from_dict(tool_call) if tool_call else None,
         )
 
-    def _persist_interrupted_turn(
+    @staticmethod
+    def _drop_unanswered_tool_calls(msgs: List[Message]) -> List[Message]:
+        """Drop tool-call rounds whose results never arrived.
+
+        An assistant message carrying ``tool_calls`` must be followed by one
+        ``tool`` message per ``tool_call_id``. A turn that died between the
+        request and its results would otherwise persist a shape the provider
+        rejects on *every* later request in the session, not just this one.
+        """
+        answered = {m.tool_call_id for m in msgs if m.role == "tool" and m.tool_call_id}
+        kept: List[Message] = []
+        kept_ids: set = set()
+        for m in msgs:
+            if m.role == "assistant" and m.tool_calls:
+                ids = {tc.get("id") for tc in m.tool_calls if isinstance(tc, dict)}
+                if not ids.issubset(answered):
+                    continue
+                kept_ids |= ids
+            kept.append(m)
+        return [m for m in kept if m.role != "tool" or m.tool_call_id in kept_ids]
+
+    def _try_persist_incomplete_turn(self, *args: Any, **kwargs: Any) -> None:
+        """Best-effort ``_persist_incomplete_turn``: keeping history is never
+        worth masking the cancel or failure that is already propagating."""
+        try:
+            self._persist_incomplete_turn(*args, **kwargs)
+        except Exception:
+            logger.warning("incomplete-turn persistence failed", exc_info=True)
+
+    def _persist_incomplete_turn(
         self,
         agent,
         message: Any,
@@ -1473,23 +1503,30 @@ class Runner:
         model_response: Any,
         loop_state: "LoopState",
         input_message_ids: set,
+        *,
+        marker: str,
+        finish_reason: str,
     ) -> None:
-        """On user cancel, preserve the turn instead of discarding it.
+        """Preserve a turn that ended early instead of discarding it.
 
-        Mirrors the success-path memory + session-log persistence: the user
-        question and the partial assistant answer (up to the interruption
-        point) are kept as a completed Q&A turn, with a ``[User interrupted the response]``
-        marker appended. Only applies to message-based runs (``messages`` is
-        None) — the CLI path; pre-built ``messages`` runs manage their own
-        history and are left untouched.
+        Used by both terminal paths that are not natural completion: a user
+        cancel and a failed run. Mirrors the success-path memory + session-log
+        persistence — the user question plus whatever the assistant produced
+        before it stopped are kept as a completed Q&A turn with ``marker``
+        appended, so a follow-up "continue" (and ``/retry``) still see the
+        instruction that turn carried.
+
+        Only applies to message-based runs (``messages`` is None) — the CLI
+        path; pre-built ``messages`` runs manage their own history. A turn that
+        died before message assembly has no ``user_messages`` and nothing worth
+        keeping.
         """
-        if messages is not None:
+        if messages is not None or not user_messages:
             return
         # Capture the partial streamed content as the authoritative answer.
         if model_response.content:
             agent.run_response.content = model_response.content
         partial = agent.run_response.content or ""
-        marker = "[User interrupted the response]"
         persisted = (f"{partial}\n\n{marker}") if partial else marker
         agent.run_response.content = persisted
 
@@ -1505,6 +1542,7 @@ class Runner:
             ]
         else:
             turn_msgs = list(messages_for_model[num_input_messages:])
+        turn_msgs = self._drop_unanswered_tool_calls(turn_msgs)
         last_asst = None
         for _m in reversed(turn_msgs):
             if isinstance(_m, Message) and _m.role == "assistant":
@@ -1522,7 +1560,9 @@ class Runner:
         # Keep the interrupted turn in that canonical history source so a
         # follow-up such as "continue" sees the partial answer it must resume.
         if loop_state.context_collapsed:
-            run_messages = [m for m in messages_for_model if m.role != "system"]
+            run_messages = self._drop_unanswered_tool_calls(
+                [m for m in messages_for_model if m.role != "system"]
+            )
             if synthesized is not None:
                 run_messages.append(synthesized)
         else:
@@ -1564,7 +1604,7 @@ class Runner:
             # assistant(tool_calls)->tool sequence instead of orphaned tools.
             self._persist_assistant_tool_calls(agent)
             _assistant_meta = Runner._provider_replay_meta(last_asst) if last_asst is not None else {}
-            _assistant_meta["finish_reason"] = "cancelled"
+            _assistant_meta["finish_reason"] = finish_reason
             agent._session_log.append("assistant", persisted, **_assistant_meta)
 
     # =========================================================================
@@ -1787,6 +1827,20 @@ class Runner:
                 # hooks must NOT re-persist (which would double-add the exchange
                 # and wrongly stamp an interruption marker on a finished answer).
                 _memory_persisted = False
+                # Bound before anything can raise so the cancel / failure
+                # handlers below can always read them, however early the run
+                # dies. An empty `user_messages` is the signal that the turn
+                # never reached message assembly and holds nothing to preserve.
+                system_message: Optional[Message] = None
+                user_messages: List[Message] = []
+                messages_for_model: List[Message] = []
+                num_input_messages = 0
+                input_message_ids: set = set()
+                model_response = ModelResponse(content="")
+                loop_state = LoopState(
+                    max_turns=agent._max_turns,
+                    max_api_retry=agent._run_max_api_retry,
+                )
                 _run_ctx.mark_running()
                 self._emit_event(
                     RunEventType.run_started,
@@ -1927,13 +1981,6 @@ class Runner:
                         context=agent.context,
                     )
 
-                # Created before message prep so the cancel handler below can
-                # always read it, however early the interruption lands.
-                loop_state = LoopState(
-                    max_turns=agent._max_turns,
-                    max_api_retry=agent._run_max_api_retry,
-                )
-
                 # 3. Prepare messages
                 system_message, user_messages, messages_for_model = await agent.get_messages_for_run(
                     message=message, audio=audio, images=images, videos=videos, messages=messages, **kwargs
@@ -1946,7 +1993,6 @@ class Runner:
 
                 # 4. Generate response from the Model
                 # The agentic loop (tool call → LLM → ...) is driven here.
-                model_response: ModelResponse
                 agent.model = cast(Model, agent.model)
 
                 # Disable tool execution in Model layer — Runner owns tool execution now.
@@ -2592,21 +2638,20 @@ class Runner:
                 # post-completion hooks) — otherwise we'd double-add and stamp an
                 # interruption marker on a fully-finished answer.
                 if not _memory_persisted:
-                    try:
-                        self._persist_interrupted_turn(
-                            agent,
-                            message,
-                            messages,
-                            user_messages,
-                            system_message,
-                            messages_for_model,
-                            num_input_messages,
-                            model_response,
-                            loop_state,
-                            input_message_ids,
-                        )
-                    except Exception:
-                        logger.warning("interrupted-turn persistence failed", exc_info=True)
+                    self._try_persist_incomplete_turn(
+                        agent,
+                        message,
+                        messages,
+                        user_messages,
+                        system_message,
+                        messages_for_model,
+                        num_input_messages,
+                        model_response,
+                        loop_state,
+                        input_message_ids,
+                        marker="[User interrupted the response]",
+                        finish_reason="cancelled",
+                    )
                 raise
             except Exception as _run_exc:
                 _run_ctx.mark_failed(error=f"{type(_run_exc).__name__}: {_run_exc}")
@@ -2617,6 +2662,29 @@ class Runner:
                         "exception_type": type(_run_exc).__name__,
                     },
                 )
+                # A crashed turn used to be discarded whole, so the instruction
+                # it carried vanished from history and the next "continue" was
+                # answered from the previous turn's context. Keep it — except
+                # for a guardrail block, where dropping the rejected content IS
+                # the point.
+                if not _memory_persisted and not isinstance(_run_exc, GuardrailTriggered):
+                    _err = _run_ctx.error or type(_run_exc).__name__
+                    if len(_err) > 200:
+                        _err = _err[:197] + "..."
+                    self._try_persist_incomplete_turn(
+                        agent,
+                        message,
+                        messages,
+                        user_messages,
+                        system_message,
+                        messages_for_model,
+                        num_input_messages,
+                        model_response,
+                        loop_state,
+                        input_message_ids,
+                        marker=f"[Run failed: {_err}]",
+                        finish_reason="error",
+                    )
                 raise
             finally:
                 # Close the steering window under _steer_lock: flips _running

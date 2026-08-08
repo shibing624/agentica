@@ -98,7 +98,7 @@ from agentica.cli.commands import (
     display_resumed_transcript,
     hydrate_resumed_session,
 )
-from agentica.goals import CONTINUATION_PROMPT_PREFIX, GoalManager
+from agentica.goals import GoalManager, is_goal_generated_prompt
 
 
 # Slash commands that keep working in shell mode instead of being handed to the
@@ -1009,6 +1009,7 @@ def _maybe_continue_goal(
         return
 
     # User real input takes priority.
+    loop_prompt_pending = False
     for item, _ts in pending_queue.peek_all_with_timestamps():
         if isinstance(item, tuple):
             text = str(item[0]) if item[0] != "__BTW__" else ""
@@ -1016,7 +1017,8 @@ def _maybe_continue_goal(
             text = str(item)
         if not text or text.startswith("__"):
             continue
-        if text.startswith(CONTINUATION_PROMPT_PREFIX):
+        if is_goal_generated_prompt(text):
+            loop_prompt_pending = True
             continue
         return  # real user message waiting — let it run first
 
@@ -1064,7 +1066,11 @@ def _maybe_continue_goal(
         if decision.status == "complete":
             _sync_goal_budget_tui(tui_state, None)
 
-    if decision.should_continue and decision.continuation_prompt:
+    # ``loop_prompt_pending`` guards the case where a /steer (or /goal resume)
+    # jumped a turn in front of an already-queued continuation: this turn was
+    # the interjection, and the continuation behind it still stands. Enqueuing
+    # a second one would run the same next step twice.
+    if decision.should_continue and decision.continuation_prompt and not loop_prompt_pending:
         pending_queue.put(decision.continuation_prompt)
 
 

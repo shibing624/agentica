@@ -56,7 +56,7 @@ from agentica.global_config import (
     get_project_profile,
     upsert_profile,
 )
-from agentica.goals import GoalManager
+from agentica.goals import GoalManager, is_goal_generated_prompt
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
 from agentica.model.message import Message
@@ -3202,23 +3202,50 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"  Queued: {preview}")
 
 
+def _queue_ahead_of_goal_continuation(pending_queue, text: str) -> None:
+    """Enqueue ``text``, but ahead of any prompt the goal loop queued itself.
+
+    A continuation prompt is written by the goal loop, not typed by the user,
+    so letting it go first would spend a whole turn before the agent ever sees
+    the correction.
+    """
+    for idx, item in enumerate(pending_queue.peek_all()):
+        body = item[0] if isinstance(item, tuple) else item
+        if isinstance(body, str) and is_goal_generated_prompt(body):
+            if pending_queue.insert_index(idx, text):
+                return
+            break
+    pending_queue.put(text)
+
+
 def _cmd_steer(ctx: CommandContext, cmd_args: str = ""):
     """Inject guidance into the running agent's tool loop (mid-task).
 
     Unlike /queue (runs as a fresh turn after the current run finishes), /steer
     is consumed between tool batches of the CURRENT run, so the agent can course-
     correct without being interrupted.
+
+    Guidance is never dropped. When there is no live run to inject into it falls
+    back to a queued turn, placed ahead of any goal continuation prompt. Two
+    windows make that fallback matter under a standing goal: the seconds the
+    loop spends judging a finished turn (the agent is idle but the loop is very
+    much alive), and the TOCTOU gap where the run ends between the UI's
+    ``agent_running`` check and ``steer()`` — the case ``Agent.steer`` documents
+    as "the caller MUST fall back to queuing".
     """
     con = get_console()
     guidance = cmd_args.strip()
     if not guidance:
         con.print("  [dim]Usage: /steer <guidance>  (e.g. /steer don't change the API, keep it compatible)[/dim]")
         return
-    if not ctx.agent_running:
+    if ctx.agent_running and ctx.current_agent.steer(guidance):
+        con.print("  [green]Steering queued — the agent will see it on its next step.[/green]")
+        return
+    if ctx.pending_queue is None:
         con.print("  [yellow]Agent isn't running — use /queue to send this as the next message instead.[/yellow]")
         return
-    if ctx.current_agent.steer(guidance):
-        con.print("  [green]Steering queued — the agent will see it on its next step.[/green]")
+    _queue_ahead_of_goal_continuation(ctx.pending_queue, guidance)
+    con.print("  [green]Agent isn't mid-run — queued as the next turn.[/green]")
 
 
 def _checkpoint_manager(ctx: CommandContext):
