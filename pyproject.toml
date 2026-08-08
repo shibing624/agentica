@@ -33,7 +33,7 @@ dependencies = [
     "openai>=2.51.0",             # Responses compact + OpenAI-compatible providers
     "anthropic>=0.40",            # Claude 直接默认装（agentica 主推 provider）
     "pydantic>=2.0",
-    "httpx>=0.24",
+    "httpx>=0.26",                # AsyncClient(proxy=...) 单数参数自 0.26 起
     "Pillow>=10.0",               # 多模态图片编码与格式检测
     "aiofiles>=23.0",
     "tiktoken>=0.5",
@@ -95,10 +95,10 @@ huggingface = ["huggingface-hub>=0.20", "sentence-transformers>=2.0"]
 # Tools（细粒度，参照 agno）
 # ═══════════════════════════════════════════════════════════
 # 搜索
-ddg       = ["ddgs>=4.0"]
+ddg       = []
 wikipedia = ["wikipedia>=1.4"]
 serper    = []
-exa       = ["exa-py>=1.0"]
+exa       = []
 bocha     = []
 tavily    = ["tavily-python>=0.3"]
 

@@ -98,7 +98,7 @@ CLI 模式下，`DeepAgent` 自动装载以下工具（无需 `--tools` 指定�
 ### 追加额外工具
 
 ```bash
-# 启用 DuckDuckGo 搜索（需要 pip install duckduckgo-search）
+# 启用 DuckDuckGo 搜索
 agentica --tools duckduckgo
 
 # 启用多个工具

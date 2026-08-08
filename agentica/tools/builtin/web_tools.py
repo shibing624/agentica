@@ -2,35 +2,220 @@
 """
 @author:XuMing(xuming624@qq.com)
 @description: Canonical built-in web tools.
+
+``BuiltinWebSearchTool`` is a thin dispatcher: the tool the model sees is always
+named ``web_search`` with the same ``(queries, max_results)`` signature, while
+the engine behind it is swappable. That keeps prompts, ``RunConfig`` tool
+whitelists and permission rules stable across engines.
+
+Selecting an engine, highest priority first:
+
+1. ``provider=`` argument
+2. ``AGENTICA_WEB_SEARCH`` environment variable
+3. ``DEFAULT_WEB_SEARCH_PROVIDER``
+
+The engine is never inferred from which API keys happen to be set — a key set
+for some other purpose must not silently reroute the agent's searches.
 """
 
-from typing import List, Union
+import os
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
 
-from agentica.tools.baidu_search_tool import BaiduSearchTool
 from agentica.tools.base import Tool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
 from agentica.utils.log import logger
 
+DEFAULT_WEB_SEARCH_PROVIDER = "baidu"
+WEB_SEARCH_PROVIDER_ENV = "AGENTICA_WEB_SEARCH"
+
+# A backend search callable: async (queries, max_results) -> str
+SearchFn = Callable[[Union[str, List[str]], int], Awaitable[str]]
+
+
+@dataclass(frozen=True)
+class WebSearchBackend:
+    """One selectable ``web_search`` engine.
+
+    Attributes:
+        factory: ``(api_key) -> tool instance``. Imports its module lazily so
+            that engines with optional dependencies never break the others.
+        method: Name of the instance's async ``(queries, max_results)`` method.
+        key_env: Environment variable holding the API key, if the engine uses one.
+        key_required: When True, constructing without a key is an error rather
+            than a degraded call.
+    """
+
+    factory: Callable[[Optional[str]], Any]
+    method: str
+    key_env: Optional[str] = None
+    key_required: bool = False
+
+
+def _baidu_backend(api_key: Optional[str]) -> Any:
+    from agentica.tools.baidu_search_tool import BaiduSearchTool
+    return BaiduSearchTool()
+
+
+def _duckduckgo_backend(api_key: Optional[str]) -> Any:
+    from agentica.tools.duckduckgo_tool import DuckDuckGoTool
+    return DuckDuckGoTool()
+
+
+def _bocha_backend(api_key: Optional[str]) -> Any:
+    from agentica.tools.search_bocha_tool import SearchBochaTool
+    return SearchBochaTool(api_key=api_key)
+
+
+def _serper_backend(api_key: Optional[str]) -> Any:
+    from agentica.tools.search_serper_tool import SearchSerperTool
+    return SearchSerperTool(api_key=api_key)
+
+
+def _zhipu_backend(api_key: Optional[str]) -> Any:
+    """Zhipu's engines differ in quality *and* price, so the tier is selectable."""
+    from agentica.tools.zhipu_web_search_tool import DEFAULT_SEARCH_ENGINE, ZhipuWebSearchTool
+
+    engine = os.getenv("AGENTICA_ZHIPU_SEARCH_ENGINE", DEFAULT_SEARCH_ENGINE)
+    return ZhipuWebSearchTool(api_key=api_key, search_engine=engine)
+
+
+def _exa_backend(api_key: Optional[str]) -> Any:
+    from agentica.tools.search_mcp_tool import McpSearchTool
+    return McpSearchTool(api_key=api_key)
+
+
+def _custom_mcp_backend(api_key: Optional[str]) -> Any:
+    """Any MCP server exposing a search tool, described entirely by env vars."""
+    from agentica.tools.search_mcp_tool import McpSearchTool
+
+    url = os.getenv("AGENTICA_WEB_SEARCH_MCP_URL")
+    tool_name = os.getenv("AGENTICA_WEB_SEARCH_MCP_TOOL")
+    if not url or not tool_name:
+        raise ValueError(
+            "web_search provider 'mcp' needs AGENTICA_WEB_SEARCH_MCP_URL and "
+            "AGENTICA_WEB_SEARCH_MCP_TOOL to be set."
+        )
+    return McpSearchTool(
+        url=url,
+        tool_name=tool_name,
+        api_key=api_key,
+        api_key_query_param=None,  # generic servers take a Bearer header
+        count_arg=os.getenv("AGENTICA_WEB_SEARCH_MCP_COUNT_ARG", "numResults"),
+    )
+
+
+_BACKENDS: Dict[str, WebSearchBackend] = {
+    "baidu": WebSearchBackend(_baidu_backend, "baidu_search"),
+    "duckduckgo": WebSearchBackend(_duckduckgo_backend, "duckduckgo_search"),
+    # Exa's public MCP endpoint answers anonymously from a rate-limited shared
+    # pool; EXA_API_KEY moves the call onto your own quota.
+    "exa": WebSearchBackend(_exa_backend, "mcp_search", "EXA_API_KEY", key_required=False),
+    "bocha": WebSearchBackend(_bocha_backend, "search_bocha", "BOCHA_API_KEY", key_required=True),
+    "serper": WebSearchBackend(_serper_backend, "search_google", "SERPER_API_KEY", key_required=True),
+    "zhipu": WebSearchBackend(_zhipu_backend, "zhipu_web_search", "ZAI_API_KEY", key_required=True),
+    "mcp": WebSearchBackend(_custom_mcp_backend, "mcp_search", "AGENTICA_WEB_SEARCH_API_KEY"),
+}
+
+
+def register_web_search_backend(
+        name: str,
+        factory: Callable[[Optional[str]], Any],
+        method: str,
+        key_env: Optional[str] = None,
+        key_required: bool = False,
+) -> None:
+    """Register a custom ``web_search`` engine under ``name``.
+
+    Makes the engine selectable by name, including through the
+    ``AGENTICA_WEB_SEARCH`` environment variable, so a custom engine registered
+    at import time also works for CLI sessions.
+
+    Args:
+        name: Provider name used by ``provider=`` / ``AGENTICA_WEB_SEARCH``.
+        factory: ``(api_key) -> tool instance``.
+        method: Name of the instance's async ``(queries, max_results)`` method.
+        key_env: Environment variable holding the engine's API key, if any.
+        key_required: Whether a missing key should be an error.
+
+    Example:
+        >>> register_web_search_backend(
+        ...     "bing", lambda key: MyBingTool(api_key=key), "bing_search",
+        ...     key_env="BING_API_KEY", key_required=True,
+        ... )
+    """
+    _BACKENDS[name] = WebSearchBackend(factory, method, key_env, key_required)
+
+
+def list_web_search_providers() -> List[str]:
+    """Return the names of all selectable ``web_search`` engines."""
+    return sorted(_BACKENDS)
+
+
+def resolve_web_search_provider(provider: Optional[str] = None) -> str:
+    """Resolve the engine name from the argument, the environment, or the default."""
+    return provider or os.getenv(WEB_SEARCH_PROVIDER_ENV) or DEFAULT_WEB_SEARCH_PROVIDER
+
 
 class BuiltinWebSearchTool(Tool):
     """
-    Built-in web search tool using Baidu search.
+    Built-in web search tool with a swappable engine.
     Exposed as web_search function.
     """
 
-    def __init__(self):
+    def __init__(
+            self,
+            provider: Optional[str] = None,
+            api_key: Optional[str] = None,
+            search_fn: Optional[SearchFn] = None,
+    ):
         """
         Initialize BuiltinWebSearchTool.
 
-        Note: BaiduSearchTool's bs4 dependency is in agentica core (since v1.3.6),
-        so this always works after `pip install agentica`.
+        Args:
+            provider: Engine name, e.g. "baidu", "bocha", "serper", "exa",
+                "duckduckgo", "zhipu", "mcp", or any name passed to
+                ``register_web_search_backend``. Defaults to the
+                ``AGENTICA_WEB_SEARCH`` env var, then to
+                ``DEFAULT_WEB_SEARCH_PROVIDER``.
+            api_key: Engine API key. Defaults to the engine's own key env var.
+            search_fn: Escape hatch — an async ``(queries, max_results) -> str``
+                callable used verbatim, for engines that are easier to express
+                as a function (e.g. wrapping an existing MCP client) than to
+                register. Takes precedence over ``provider``.
+
+        Raises:
+            ValueError: If the provider is unknown, or if it requires an API
+                key that is neither passed nor present in the environment.
+                Failing here beats silently searching with a different engine
+                than the caller asked for.
         """
         super().__init__(name="builtin_web_search_tool")
-        self._search = BaiduSearchTool()
+
+        if search_fn is not None:
+            self.provider = "custom"
+            self._search_fn: SearchFn = search_fn
+        else:
+            self.provider = resolve_web_search_provider(provider)
+            backend = _BACKENDS.get(self.provider)
+            if backend is None:
+                raise ValueError(
+                    f"Unknown web_search provider {self.provider!r}. "
+                    f"Available: {', '.join(list_web_search_providers())}"
+                )
+            key = api_key or (os.getenv(backend.key_env) if backend.key_env else None)
+            if backend.key_required and not key:
+                raise ValueError(
+                    f"web_search provider {self.provider!r} requires an API key: "
+                    f"set {backend.key_env} or pass api_key=..."
+                )
+            self._search_fn = getattr(backend.factory(key), backend.method)
+
+        logger.debug(f"BuiltinWebSearchTool using provider: {self.provider}")
         self.register(self.web_search, concurrency_safe=True, is_read_only=True)
 
     async def web_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
-        """Search the web using Baidu for multiple queries and return results
+        """Search the web for multiple queries and return results
 
         Args:
             queries (Union[str, List[str]]): Search keyword(s), can be a single string or a list of strings
@@ -46,8 +231,7 @@ class BuiltinWebSearchTool(Tool):
         4. Cite sources by mentioning the page titles or URLs
         5. NEVER show the raw JSON to the user - always provide a formatted response
         """
-
-        result = await self._search.baidu_search(queries, max_results=max_results)
+        result = await self._search_fn(queries, max_results=max_results)
         logger.debug(f"Web search for '{queries}', result length: {len(result)} characters.")
         return result
 

@@ -28,10 +28,6 @@ pip install -e .
 Agentica 的核心功能不需要额外依赖，部分工具和功能需要单独安装：
 
 ```bash
-# 搜索工具
-pip install duckduckgo-search       # DuckDuckGoTool
-pip install exa-py                  # SearchExaTool
-
 # 浏览器工具
 pip install playwright              # BrowserTool
 playwright install chromium

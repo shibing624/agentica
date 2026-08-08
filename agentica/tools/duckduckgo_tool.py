@@ -1,30 +1,48 @@
 # -*- encoding: utf-8 -*-
 """
 @author: orange-crow, XuMing(xuming624@qq.com)
-@description:
-part of the code is from phidata
+@description: DuckDuckGo web search over the public HTML endpoint.
+
+Uses httpx + BeautifulSoup, both core dependencies, instead of the
+`duckduckgo-search` package: nothing extra to install, and no degrading to an
+"not installed" error string at runtime.
 """
 import json
-import ssl
-from typing import Any, Optional
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import parse_qs, unquote, urlparse
+
 import httpx
 from bs4 import BeautifulSoup
 
 from agentica.tools.base import Tool
 from agentica.utils.log import logger
 
-try:
-    from duckduckgo_search import AsyncDDGS
-
-    ddgs_enable = True
-except ImportError:
-    logger.warning("`duckduckgo-search` not installed. Please install using `pip install duckduckgo-search`")
-    ddgs_enable = False
-
-# Create a default context for HTTPS requests (not recommended for production)
-ssl._create_default_https_context = ssl._create_unverified_context
 DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/"
-USER_AGENT = "search-app/1.0"
+USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+# Sponsored results are routed through this tracker rather than linking out.
+_AD_MARKER = "duckduckgo.com/y.js"
+
+
+def _resolve_url(href: Optional[str]) -> str:
+    """Turn a result link into the destination URL.
+
+    DuckDuckGo sometimes links out directly and sometimes wraps the target in
+    a ``/l/?uddg=<encoded>`` redirect; the visible ``.result__url`` text is
+    truncated for display and unusable as an actual link.
+    """
+    if not href:
+        return ""
+    if href.startswith("//"):
+        href = "https:" + href
+    parsed = urlparse(href)
+    if parsed.path.startswith("/l/"):
+        target = parse_qs(parsed.query).get("uddg")
+        if target:
+            return unquote(target[0])
+    return href
 
 
 class DuckDuckGoTool(Tool):
@@ -41,8 +59,25 @@ class DuckDuckGoTool(Tool):
         self.timeout: Optional[int] = timeout
         self.register(self.duckduckgo_search)
 
-    async def duckduckgo_search(self, query: str, max_results: int = 5) -> str:
-        """Search DuckDuckGo for a query.
+    async def duckduckgo_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
+        """Search DuckDuckGo for single or multiple queries.
+
+        Args:
+            queries (Union[str, List[str]]): A single query string or a list of query strings.
+            max_results (optional, default=5): The maximum number of results to return for each query.
+
+        Returns:
+            The result from DuckDuckGo, in JSON format. The result includes the title, URL, and snippet.
+        """
+        if not isinstance(queries, str):
+            all_results = {}
+            for query in queries:
+                all_results[query] = await self.duckduckgo_search_single_query(query, max_results)
+            return json.dumps(all_results, ensure_ascii=False)
+        return await self.duckduckgo_search_single_query(queries, max_results)
+
+    async def duckduckgo_search_single_query(self, query: str, max_results: int = 5) -> str:
+        """Search DuckDuckGo for a single query.
 
         Args:
             query(str): The query to search for.
@@ -51,48 +86,41 @@ class DuckDuckGoTool(Tool):
         Returns:
             The result from DuckDuckGo, in JSON format. The result includes the title, URL, and snippet.
         """
-        logger.debug(f"Searching DDG for: {query}")
-        if not ddgs_enable:
-            return json.dumps([{"error": "duckduckgo-search not installed"}])
-        try:
-            async with AsyncDDGS(headers=self.headers, proxies=self.proxy, timeout=self.timeout) as ddgs:
-                gen_res = ddgs.text(query, backend="lite", timelimit="d, w, m, y")
-                res = [r async for r in gen_res][:max_results]
-            return json.dumps(res, indent=2, ensure_ascii=False)
-        except Exception as e:
-            logger.warning(f"DDGS search failed, fallback to DDGS HTML search. reason: {e}")
-            res = await self.ddgs_html_search(query, max_results)
-            return json.dumps(res, indent=2, ensure_ascii=False)
+        headers = {"User-Agent": USER_AGENT}
+        if self.headers:
+            headers.update(self.headers)
 
-    async def ddgs_html_search(self, query: str, max_results: int = 5) -> list:
-        """Fallback: Use DuckDuckGo HTML page and parse results."""
-        formatted_query = query.replace(" ", "+")
-        url = f"{DUCKDUCKGO_URL}?q={formatted_query}"
-        headers = {
-            "User-Agent": USER_AGENT,
-            "Content-Type": "application/json",
-        }
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, timeout=15.0)
-                response.raise_for_status()
-                soup = BeautifulSoup(response.text, "html.parser")
-                result_elements = soup.select('.result__body')
-                results = []
-                for result in result_elements[:max_results]:
-                    title_elem = result.select_one('.result__a')
-                    url_elem = result.select_one('.result__url')
-                    snippet_elem = result.select_one('.result__snippet')
-                    if title_elem and url_elem:
-                        results.append({
-                            "title": title_elem.get_text().strip(),
-                            "url": url_elem.get_text().strip(),
-                            "snippet": snippet_elem.get_text().strip() if snippet_elem else ""
-                        })
-                return results
-        except Exception as e:
-            logger.error(f"Fallback search failed: {e}")
-            return [{"error": f"Fallback search failed: {str(e)}"}]
+        async with httpx.AsyncClient(timeout=self.timeout, proxy=self.proxy, follow_redirects=True) as client:
+            response = await client.post(DUCKDUCKGO_URL, data={"q": query}, headers=headers)
+            response.raise_for_status()
+
+        results = self._parse_results(response.text, max_results)
+        logger.debug(f"Searching DDG for: {query}, results count: {len(results)}")
+        return json.dumps(results, indent=2, ensure_ascii=False)
+
+    @staticmethod
+    def _parse_results(html: str, max_results: int) -> List[Dict[str, str]]:
+        soup = BeautifulSoup(html, "html.parser")
+        results: List[Dict[str, str]] = []
+        for element in soup.select(".result__body"):
+            link = element.select_one(".result__a")
+            if link is None:
+                continue
+            href = link.get("href")
+            if href and _AD_MARKER in href:
+                continue
+            url = _resolve_url(href)
+            if not url:
+                continue
+            snippet = element.select_one(".result__snippet")
+            results.append({
+                "title": link.get_text().strip(),
+                "url": url,
+                "snippet": snippet.get_text().strip() if snippet else "",
+            })
+            if len(results) >= max_results:
+                break
+        return results
 
 
 if __name__ == '__main__':
@@ -100,3 +128,4 @@ if __name__ == '__main__':
 
     m = DuckDuckGoTool()
     print(asyncio.run(m.duckduckgo_search("Python newest version")))
+    print(asyncio.run(m.duckduckgo_search(["rust tokio", "go goroutines"], max_results=2)))

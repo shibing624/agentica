@@ -11,7 +11,12 @@ from agentica.tools.background_processes import BackgroundProcessRegistry
 from agentica.tools.builtin.file_tool import BuiltinFileTool
 from agentica.tools.builtin.execute_tool import BuiltinExecuteTool
 from agentica.tools.builtin.task_state_tools import BuiltinMemoryTool, BuiltinTodoTool
-from agentica.tools.builtin.web_tools import BuiltinFetchUrlTool, BuiltinWebSearchTool
+from agentica.tools.builtin.web_tools import (
+    BuiltinFetchUrlTool,
+    BuiltinWebSearchTool,
+    list_web_search_providers,
+    register_web_search_backend,
+)
 from agentica.tools.builtin_task_tool import BuiltinTaskTool
 
 if TYPE_CHECKING:
@@ -26,6 +31,8 @@ __all__ = [
     "BuiltinMemoryTool",
     "BuiltinTaskTool",
     "get_builtin_tools",
+    "register_web_search_backend",
+    "list_web_search_providers",
 ]
 
 
@@ -47,6 +54,7 @@ def get_builtin_tools(
         enable_diagnostics: bool = False,
         diagnostics_servers: Optional[List[str]] = None,
         diagnostics_errors_only: bool = True,
+        web_search_provider: Optional[str] = None,
 ) -> List[Tool]:
     """
     Get the list of built-in tools for Agent.
@@ -77,6 +85,11 @@ def get_builtin_tools(
         diagnostics_servers: LSP server names to use (default ["pyright"]).
         diagnostics_errors_only: When True (default), only severity "error"
             diagnostics are surfaced to the model.
+        web_search_provider: Engine behind the ``web_search`` tool, e.g.
+            "baidu", "bocha", "serper", "exa", "duckduckgo", "zhipu", "mcp".
+            Defaults to the ``AGENTICA_WEB_SEARCH`` env var, then to
+            ``DEFAULT_WEB_SEARCH_PROVIDER``. The tool name stays ``web_search``
+            whichever engine is used.
 
     Returns:
         List of tools
@@ -108,7 +121,7 @@ def get_builtin_tools(
         ))
 
     if include_web_search:
-        tools.append(BuiltinWebSearchTool())
+        tools.append(BuiltinWebSearchTool(provider=web_search_provider))
 
     if include_fetch_url:
         tools.append(BuiltinFetchUrlTool())

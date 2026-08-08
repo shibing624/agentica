@@ -301,10 +301,129 @@ tools = get_builtin_tools(work_dir="./")
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep，支持 regex） |
 | `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等） |
-| `web_search` | `BuiltinWebSearchTool` | 网页搜索 |
+| `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |
 | `write_todos` | `BuiltinTodoTool` | 任务清单管理 |
 | `task` | `BuiltinTaskTool` | 启动子 Agent 处理独立子任务 |
+
+#### 替换 web 搜索引擎
+
+`web_search` 是一个薄分发器：模型看到的工具名、参数、docstring 始终不变，背后的搜索引擎可换。所以换引擎**不会**影响 prompt、`RunConfig(enabled_tools=["web_search"])` 或权限规则。
+
+引擎选择优先级：`provider=` 参数 > `AGENTICA_WEB_SEARCH` 环境变量 > 默认 `baidu`。
+
+**引擎不会根据 API key 自动推断** —— 你为别处设的 key 不应该悄悄改变 agent 的搜索行为。要换引擎就显式说。
+
+| provider | 引擎 | API key | 说明 |
+|----------|------|---------|------|
+| `baidu` | 百度 | 不需要 | 默认，中文可用 |
+| `duckduckgo` | DuckDuckGo | 不需要 | 直连 HTML 端点，无额外依赖 |
+| `exa` | Exa（MCP） | 可选 `EXA_API_KEY` | 不设 key 走共享免费池（有限流）；设了走自己的额度 |
+| `bocha` | 博查 | `BOCHA_API_KEY` | 中文效果好 |
+| `serper` | Google/Serper | `SERPER_API_KEY` | |
+| `zhipu` | 智谱 Web Search | `ZAI_API_KEY` | 4 档引擎，见下 |
+| `mcp` | 任意 MCP 搜索服务 | 可选 | 见「自定义引擎」 |
+
+指定了需要 key 的引擎却没提供 key 时会**直接报错**，而不是静默退回百度 —— 否则你会以为在用 Bocha，实际在用百度。
+
+```python
+# SDK：显式指定
+agent = Agent(tools=get_builtin_tools(web_search_provider="bocha"))
+
+# SDK：直接构造
+agent = Agent(tools=[BuiltinWebSearchTool(provider="exa"), ...])
+```
+
+```bash
+# CLI + SDK 通用：环境变量
+export AGENTICA_WEB_SEARCH=bocha
+export BOCHA_API_KEY=sk-xxx
+```
+
+CLI 用户也可以写进 `~/.agentica/config.yaml` 的 `env:` 块，一次配置对所有会话生效：
+
+```yaml
+env:
+  AGENTICA_WEB_SEARCH: bocha
+  BOCHA_API_KEY: "sk-..."
+```
+
+#### 智谱的 4 档引擎
+
+`zhipu` 是按次计费的，不同档位质量和价格都不同，用 `AGENTICA_ZHIPU_SEARCH_ENGINE` 选（默认 `search_pro`）：
+
+| 引擎编码 | 特性 | 价格 | 结果带 link |
+|----------|------|------|-------------|
+| `search_std` | 基础版（智谱自研），满足日常查询，性价比最高 | 0.01 元/次 | 约 57% |
+| `search_pro` | 高级版（智谱自研），多引擎协作，空结果率低、召回与准确率更高 | 0.03 元/次 | 约 60% |
+| `search_pro_sogou` | 搜狗，覆盖腾讯生态（新闻/企鹅号）与知乎，百科、医疗等垂域权威性强 | 0.05 元/次 | 100% |
+| `search_pro_quark` | 夸克，精准触达垂直内容 | 0.05 元/次 | 100% |
+
+**留意 link 缺失**：实测智谱自研的两档（`search_std` / `search_pro`）约 40% 的查询会整批返回空 `link`（同一次查询要么全有要么全无），此时模型拿到标题和正文摘要但没有来源 URL —— 既没法引用，也没法再 `fetch_url` 深读。如果你的场景要求每条结果都可溯源，用 `search_pro_sogou` 或 `search_pro_quark`。
+
+```bash
+export AGENTICA_WEB_SEARCH=zhipu
+export ZAI_API_KEY=sk-xxx
+export AGENTICA_ZHIPU_SEARCH_ENGINE=search_pro_sogou   # 需要每条都有来源 URL 时
+```
+
+单独用这个工具时还能加域名白名单、时间范围和摘要长度：
+
+```python
+from agentica.tools.zhipu_web_search_tool import ZhipuWebSearchTool
+
+tool = ZhipuWebSearchTool(
+    search_engine="search_pro",
+    search_recency_filter="oneWeek",   # oneDay / oneWeek / oneMonth / oneYear / noLimit
+    search_domain_filter="www.sohu.com",
+    content_size="high",              # medium（默认）/ high，high 摘要长度约翻倍
+    user_id="tenant-000042",          # 6-128 字符，一个 key 服务多个终端用户时传
+)
+```
+
+`max_results` 一定会被遵守：智谱的 `count` 只是建议值（`search_pro_sogou` 会向上取整到 10/20/30/40/50，其他档位在部分查询上也会超发），所以多出来的结果会在客户端截掉 —— 单条正文约 1000 字，要 3 条却收到 10 条会白烧几千 token 的 context。
+
+#### 自定义引擎
+
+三种方式，按「是否要写代码」和「CLI 能否用」区分。
+
+**1. 自己的 MCP 搜索服务（零代码，CLI 可用）** —— 任何暴露搜索工具的 MCP 服务都能直接接入：
+
+```bash
+export AGENTICA_WEB_SEARCH=mcp
+export AGENTICA_WEB_SEARCH_MCP_URL=https://my-bing-mcp.example.com/mcp
+export AGENTICA_WEB_SEARCH_MCP_TOOL=bing_search
+export AGENTICA_WEB_SEARCH_API_KEY=sk-xxx          # 可选，作为 Bearer header 发送
+export AGENTICA_WEB_SEARCH_MCP_COUNT_ARG=numResults # 可选，条数参数名
+```
+
+查询参数名固定为 `query`。服务端若用别的名字，改用下面两种方式。
+
+**2. 注册命名引擎（写代码，注册后 CLI/env 也能选）**：
+
+```python
+from agentica.tools.builtin import register_web_search_backend
+
+register_web_search_backend(
+    "bing",
+    lambda api_key: MyBingTool(api_key=api_key),
+    "bing_search",                # async (queries, max_results) -> str
+    key_env="BING_API_KEY",
+    key_required=True,
+)
+# 之后 provider="bing" 或 AGENTICA_WEB_SEARCH=bing 都可用
+```
+
+**3. 直接传函数（最灵活，仅 SDK）** —— 适合包装已有的 MCP client：
+
+```python
+async def my_search(queries, max_results=5) -> str:
+    return await my_mcp_client.call_tool("bing_search", {"q": queries, "n": max_results})
+
+agent = Agent(tools=[BuiltinWebSearchTool(search_fn=my_search), ...])
+```
+
+自定义引擎只需满足一个契约：**async `(queries: str | list[str], max_results: int) -> str`**。所有内置引擎都已统一到这个签名。
 
 ```python
 from agentica import DeepAgent, OpenAIChat
@@ -320,11 +439,11 @@ agent = DeepAgent(
 
 ```python
 from agentica.tools.baidu_search_tool import BaiduSearchTool
-from agentica.tools.duckduckgo_tool import DuckDuckGoTool    # pip install duckduckgo-search
+from agentica.tools.duckduckgo_tool import DuckDuckGoTool
 from agentica.tools.search_serper_tool import SearchSerperTool  # SERPER_API_KEY
-from agentica.tools.search_exa_tool import SearchExaTool        # pip install exa-py
+from agentica.tools.search_exa_tool import SearchExaTool        # EXA_API_KEY
 
-agent = Agent(tools=[DuckDuckGoTool(max_results=10)])
+agent = Agent(tools=[DuckDuckGoTool()])
 ```
 
 ### 网页工具

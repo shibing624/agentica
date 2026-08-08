@@ -50,12 +50,12 @@ class SearchBochaTool(Tool):
 
         self.register(self.search_bocha)
 
-    async def search_bocha_single_query(self, query: str, count: Optional[int] = None) -> str:
+    async def search_bocha_single_query(self, query: str, max_results: Optional[int] = None) -> str:
         """Search Bocha for a single query.
 
         Args:
             query: The search query string.
-            count: Number of results to return. If not provided, uses instance default.
+            max_results: Number of results to return. If not provided, uses instance default.
 
         Returns:
             str: The search results in JSON format.
@@ -71,7 +71,7 @@ class SearchBochaTool(Tool):
         payload = {
             "query": query,
             "summary": self.summary,
-            "count": count or self.count,
+            "count": max_results or self.count,
         }
 
         if self.freshness:
@@ -116,22 +116,22 @@ class SearchBochaTool(Tool):
         logger.debug(f"Searching bocha for: {query}, results count: {len(parsed_results)}")
         return parsed_json
 
-    async def search_bocha(self, queries: Union[str, List[str]], count: Optional[int] = None) -> str:
+    async def search_bocha(self, queries: Union[str, List[str]], max_results: Optional[int] = None) -> str:
         """Search Bocha for single or multiple queries.
 
         Args:
             queries: A single query string or a list of query strings.
-            count: Number of results to return for each query. If not provided, default 10.
+            max_results: Number of results to return for each query. If not provided, default 10.
 
         Returns:
             str: The search results in JSON format.
         """
         if isinstance(queries, str):
-            return await self.search_bocha_single_query(queries, count=count)
+            return await self.search_bocha_single_query(queries, max_results=max_results)
 
         all_results = {}
         for query in queries:
-            result = await self.search_bocha_single_query(query, count=count)
+            result = await self.search_bocha_single_query(query, max_results=max_results)
             all_results[query] = result
         return json.dumps(all_results, ensure_ascii=False)
 
@@ -143,5 +143,5 @@ if __name__ == "__main__":
     query = "天空为什么是蓝色的？"
     r = asyncio.run(m.search_bocha(query))
     print(query, "\n\n", r)
-    r = asyncio.run(m.search_bocha(["北京的新闻top3", "上海的新闻top3"], count=3))
+    r = asyncio.run(m.search_bocha(["北京的新闻top3", "上海的新闻top3"], max_results=3))
     print(r)
