@@ -219,6 +219,7 @@ def main():
             con.print()  # final newline
         except (KeyboardInterrupt, AgentCancelledError):
             con.print("\n[yellow]Interrupted.[/yellow]")
+            assert agent_instance.model is not None
             con.print(
                 format_session_summary(
                     elapsed_seconds=time.monotonic() - started_at,

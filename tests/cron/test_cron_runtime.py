@@ -10,6 +10,9 @@ import threading
 import time
 import unittest
 
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 
 def _isolate():
     home = tempfile.mkdtemp()
@@ -88,21 +91,21 @@ class TestCronCommand(unittest.TestCase):
         }
 
     def test_add_list_pause_resume(self):
-        from agentica.cli import commands
-        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        from agentica.cli.commands import cron_cmd
+        cron_cmd._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
         jobs = self.cronjobs.list_jobs()
         self.assertEqual(len(jobs), 1)
         jid = jobs[0].id
-        commands._cmd_cron(self.ctx, f"pause {jid}")
-        commands._cmd_cron(self.ctx, f"resume {jid}")
+        cron_cmd._cmd_cron(self.ctx, f"pause {jid}")
+        cron_cmd._cmd_cron(self.ctx, f"resume {jid}")
         # list + daemon status + unknown should not raise
-        commands._cmd_cron(self.ctx, "")
-        commands._cmd_cron(self.ctx, "daemon status")
-        commands._cmd_cron(self.ctx, "bogus")
+        cron_cmd._cmd_cron(self.ctx, "")
+        cron_cmd._cmd_cron(self.ctx, "daemon status")
+        cron_cmd._cmd_cron(self.ctx, "bogus")
 
     def test_registered(self):
-        from agentica.cli import commands
-        self.assertIn("/cron", commands.COMMAND_REGISTRY)
+        from agentica.cli.commands.registry import COMMAND_REGISTRY
+        self.assertIn("/cron", COMMAND_REGISTRY)
 
     def test_daemon_status_reports_persisted_config(self):
         """`/cron daemon status` must surface the persisted cron.enabled config,
@@ -111,7 +114,7 @@ class TestCronCommand(unittest.TestCase):
         import io
         from unittest.mock import patch
         from rich.console import Console
-        from agentica.cli import commands
+        from agentica.cli.commands import cron_cmd
         from agentica.global_config import set_setting
 
         set_setting("cron.enabled", True)
@@ -119,8 +122,8 @@ class TestCronCommand(unittest.TestCase):
         self._running = False  # no live thread in this session
 
         buf = io.StringIO()
-        with patch.object(commands, "get_console", return_value=Console(file=buf, width=200)):
-            commands._cmd_cron(self.ctx, "daemon status")
+        with patch.object(cron_cmd, "get_console", return_value=Console(file=buf, width=200)):
+            cron_cmd._cmd_cron(self.ctx, "daemon status")
         out = buf.getvalue()
         self.assertIn("config", out)
         self.assertIn("cron.enabled=", out)
@@ -130,56 +133,56 @@ class TestCronCommand(unittest.TestCase):
         self.assertIn("Enabled in config but no scheduler thread", out)
 
     def test_edit_prompt_and_schedule(self):
-        from agentica.cli import commands
-        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        from agentica.cli.commands import cron_cmd
+        cron_cmd._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
         jid = self.cronjobs.list_jobs()[0].id
 
-        commands._cmd_cron(self.ctx, f'edit {jid} prompt "a much better thing"')
+        cron_cmd._cmd_cron(self.ctx, f'edit {jid} prompt "a much better thing"')
         job = self.cronjobs.get_job(jid)
         self.assertEqual(job.prompt, "a much better thing")
         self.assertEqual(job.name, "a much better thing")
 
-        commands._cmd_cron(self.ctx, f"edit {jid} schedule every 5m")
+        cron_cmd._cmd_cron(self.ctx, f"edit {jid} schedule every 5m")
         job = self.cronjobs.get_job(jid)
         from agentica.cron.types import EverySchedule
         self.assertIsInstance(job.schedule, EverySchedule)
         self.assertEqual(job.schedule.interval_ms, 5 * 60 * 1000)
 
     def test_edit_bad_usage_does_not_raise(self):
-        from agentica.cli import commands
-        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        from agentica.cli.commands import cron_cmd
+        cron_cmd._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
         jid = self.cronjobs.list_jobs()[0].id
         # Missing field/value, and unknown job id — must print, not raise.
-        commands._cmd_cron(self.ctx, f"edit {jid}")
-        commands._cmd_cron(self.ctx, "edit nope prompt hi")
+        cron_cmd._cmd_cron(self.ctx, f"edit {jid}")
+        cron_cmd._cmd_cron(self.ctx, "edit nope prompt hi")
 
     def test_remove_uses_tui_confirm_not_pt_prompt(self):
         """Regression: /cron remove must confirm via the ask_user_question_callback
         (TUI-safe), never a nested pt_prompt that deadlocks the bg thread."""
-        from agentica.cli import commands
-        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        from agentica.cli.commands import cron_cmd
+        cron_cmd._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
         jid = self.cronjobs.list_jobs()[0].id
 
         # 'no' keeps the job.
         self.ctx.ask_user_question_callback = lambda prompt, options=None: "no"
-        commands._cmd_cron(self.ctx, f"remove {jid}")
+        cron_cmd._cmd_cron(self.ctx, f"remove {jid}")
         self.assertEqual(len(self.cronjobs.list_jobs()), 1)
 
         # 'yes' removes it.
         self.ctx.ask_user_question_callback = lambda prompt, options=None: "yes"
-        commands._cmd_cron(self.ctx, f"remove {jid}")
+        cron_cmd._cmd_cron(self.ctx, f"remove {jid}")
         self.assertEqual(len(self.cronjobs.list_jobs()), 0)
 
     def test_confirm_via_tui_safe_default_without_callback(self):
-        from agentica.cli import commands
+        from agentica.cli.commands import cron_cmd
         self.ctx.ask_user_question_callback = None
-        self.assertFalse(commands._confirm_via_tui(self.ctx, "Delete?"))
+        self.assertFalse(cron_cmd._confirm_via_tui(self.ctx, "Delete?"))
 
     def test_add_refines_prompt_and_stores_recommended(self):
         """Add-time flow: refine the rough prompt with the model and, when the
         user picks the recommended option, store the refined prompt while
         keeping their original words as the display name."""
-        from agentica.cli import commands
+        from agentica.cli.commands import cron_cmd
 
         class _FakeResp:
             content = "Touch tmp/<ISO-timestamp>.txt in one run."
@@ -197,14 +200,14 @@ class TestCronCommand(unittest.TestCase):
         self.ctx.ask_user_question_callback = lambda prompt, options=None: (
             options[0] if options else "")
 
-        commands._cmd_cron(self.ctx, 'add "每分钟在tmp下touch时间戳txt" "every 1m"')
+        cron_cmd._cmd_cron(self.ctx, 'add "每分钟在tmp下touch时间戳txt" "every 1m"')
         jobs = self.cronjobs.list_jobs()
         self.assertEqual(len(jobs), 1)
         self.assertEqual(jobs[0].prompt, "Touch tmp/<ISO-timestamp>.txt in one run.")
         self.assertEqual(jobs[0].name, "每分钟在tmp下touch时间戳txt")
 
     def test_add_keeps_original_when_user_declines_refine(self):
-        from agentica.cli import commands
+        from agentica.cli.commands import cron_cmd
 
         class _FakeResp:
             content = "some refined text"
@@ -222,7 +225,7 @@ class TestCronCommand(unittest.TestCase):
         self.ctx.ask_user_question_callback = lambda prompt, options=None: (
             options[1] if options and len(options) > 1 else "")
 
-        commands._cmd_cron(self.ctx, 'add "raw words" "every 1m"')
+        cron_cmd._cmd_cron(self.ctx, 'add "raw words" "every 1m"')
         jobs = self.cronjobs.list_jobs()
         self.assertEqual(jobs[0].prompt, "raw words")
 
@@ -246,9 +249,9 @@ class TestCronCommand(unittest.TestCase):
     def test_runs_reads_real_fields(self):
         """Regression: /cron runs must read task_id/started_at_ms/RunStatus.OK,
         not the wrong job_id/started_at/'success' names it once used."""
-        from agentica.cli import commands
+        from agentica.cli.commands import cron_cmd
         from agentica.cron.types import RunStatus
-        commands._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
+        cron_cmd._cmd_cron(self.ctx, 'add "do a thing" 0 9 * * *')
         jid = self.cronjobs.list_jobs()[0].id
         # Record a successful run, then list runs.
         self.cronjobs.mark_job_run(jid, status=RunStatus.OK, result="done")
@@ -258,8 +261,8 @@ class TestCronCommand(unittest.TestCase):
         self.assertEqual(runs[0].status, RunStatus.OK)
         self.assertTrue(runs[0].started_at_ms > 0)
         # The command itself must not raise on real records.
-        commands._cmd_cron(self.ctx, "runs")
-        commands._cmd_cron(self.ctx, f"runs {jid}")
+        cron_cmd._cmd_cron(self.ctx, "runs")
+        cron_cmd._cmd_cron(self.ctx, f"runs {jid}")
 
 
 class TestCronInCliTools(unittest.TestCase):

@@ -1,0 +1,409 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Runner persistence for incomplete turns and tool-call transcripts
+"""
+
+from __future__ import annotations
+
+import json
+from collections import defaultdict
+from pathlib import Path
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
+
+
+from agentica.utils.log import logger
+from agentica.model.loop_state import LoopState
+from agentica.model.message import Message
+from agentica.run_response import RunEvent, RunResponse, ToolCallInfo
+from agentica.memory import AgentRun
+
+if TYPE_CHECKING:
+    from agentica.agent import Agent
+
+
+
+class PersistMixin:
+    """Extracted Runner methods."""
+
+    agent: Any
+
+    @staticmethod
+    def _tool_records_from_messages(
+        messages: List[Message],
+        *,
+        fallback_compacted: bool = False,
+        fallback_model: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        for msg in messages:
+            if msg.role != "tool" or not msg.tool_name:
+                continue
+            record = {
+                "tool_call_id": msg.tool_call_id,
+                "tool_name": msg.tool_name,
+                "tool_args": msg.tool_args,
+                "content": msg.content,
+                "tool_call_error": msg.tool_call_error or False,
+                "metrics": msg.metrics if msg.metrics else {},
+            }
+            if fallback_compacted:
+                record["fallback_compacted"] = True
+                record["replay"] = False
+                if fallback_model:
+                    record["fallback_model"] = fallback_model
+            records.append(record)
+        return records
+
+    @staticmethod
+    def _provider_replay_meta(message: Message) -> Dict[str, Any]:
+        """Return provider state required for faithful same-provider replay."""
+        meta: Dict[str, Any] = {}
+        if message.provider_data is not None:
+            meta["provider_data"] = message.provider_data
+        if message.provider_checkpoint is not None:
+            meta["provider_checkpoint"] = message.provider_checkpoint
+        if message.reasoning_content is not None:
+            meta["reasoning_content"] = message.reasoning_content
+        if message.finish_reason is not None:
+            meta["finish_reason"] = message.finish_reason
+        if message.metrics:
+            meta["metrics"] = message.metrics
+        return meta
+
+    @staticmethod
+    def _persist_assistant_tool_calls(agent: "Agent") -> None:
+        """Persist the turn's assistant tool-call messages to the session log.
+
+        The session log otherwise records only ``user`` -> ``tool`` results ->
+        final ``assistant`` text. The intermediate assistant messages that
+        CARRY the ``tool_calls`` are never written, so on resume the tool
+        results become orphaned (a ``tool`` message with no preceding assistant
+        holding ``tool_calls``) and the provider rejects the replay with
+        "messages with role 'tool' must be a response to a preceding message
+        with 'tool_calls'".
+
+        A single agentic turn may issue tool calls across several assistant
+        rounds (e.g. ``read_file`` then ``grep``). For each round we must log
+        ``assistant(tool_calls)`` immediately followed by its ``tool`` result,
+        preserving the exact interleaving — OpenAI-compatible providers require
+        every ``tool`` message to immediately follow the assistant message that
+        requested it. Grouping all assistants before all tools (the previous
+        implementation) re-introduced the same 400 on resume for any multi-round
+        tool turn.
+
+        We walk ``run_response.messages`` (this turn only, see the
+        ``num_input_messages`` slice in ``_run_impl``) in order: for each
+        assistant-with-tool_calls we log the assistant, and for each
+        ``role="tool"`` message we log the matching tool result (rich metadata
+        taken from ``run_response.tools`` by id). ``_build_messages`` already
+        lists ``tool_calls`` / ``tool_call_id`` in its replay fields, so the
+        replay reconstructs a valid, interleaved sequence.
+
+        Called once per turn (before the final assistant text is logged) so the
+        JSONL order is
+        ``user -> assistant(tool_calls) -> tool -> assistant(tool_calls) -> tool -> ... -> assistant(text)``.
+        """
+        if agent._session_log is None:
+            return
+        tool_by_id = {
+            tc.get("tool_call_id"): tc
+            for tc in (agent.run_response.tools or [])
+        }
+        _functions = (agent.model.functions or {}) if agent.model else {}
+        for msg in agent.run_response.messages or []:
+            if not isinstance(msg, Message):
+                continue
+            if msg.role == "assistant" and msg.tool_calls:
+                _text = msg.content if isinstance(msg.content, str) else ""
+                agent._session_log.append(
+                    "assistant",
+                    _text,
+                    tool_calls=msg.tool_calls,
+                    **PersistMixin._provider_replay_meta(msg),
+                )
+            elif msg.role == "tool":
+                _tc = tool_by_id.get(msg.tool_call_id)
+                if _tc is not None:
+                    _tool_content = _tc.get("content", "") or ""
+                    if len(_tool_content) > 2000:
+                        _tool_content = _tool_content[:2000] + "\n... [truncated]"
+                    _origin_meta: Dict[str, Any] = {}
+                    _fn = _functions.get(_tc.get("tool_name", ""))
+                    if _fn is not None and _fn.origin is not None:
+                        _origin_meta["origin_type"] = _fn.origin.type
+                        if _fn.origin.provider_name:
+                            _origin_meta["origin_provider_name"] = _fn.origin.provider_name
+                        if _fn.origin.agent_name:
+                            _origin_meta["origin_agent_name"] = _fn.origin.agent_name
+                        if _fn.origin.source_tool_name:
+                            _origin_meta["origin_source_tool_name"] = _fn.origin.source_tool_name
+                    agent._session_log.append(
+                        "tool_audit" if _tc.get("replay") is False else "tool",
+                        _tool_content,
+                        tool_name=_tc.get("tool_name", ""),
+                        tool_call_id=_tc.get("tool_call_id", ""),
+                        is_error=_tc.get("tool_call_error", False),
+                        fallback_compacted=_tc.get("fallback_compacted", False),
+                        fallback_model=_tc.get("fallback_model"),
+                        replay=_tc.get("replay", True),
+                        **PersistMixin._provider_replay_meta(msg),
+                        **_origin_meta,
+                    )
+                else:
+                    # Tool message without matching FunctionCall metadata: log a
+                    # minimal entry so resume still has a valid assistant->tool pair.
+                    agent._session_log.append(
+                        "tool",
+                        msg.content if isinstance(msg.content, str) else "",
+                        tool_call_id=msg.tool_call_id or "",
+                        **PersistMixin._provider_replay_meta(msg),
+                    )
+
+    @staticmethod
+    def _strip_tool_artifacts(msgs: List[Message], *, drop_system: bool = False) -> List[Message]:
+        """Drop tool-call/tool-result artifacts (OpenAI *and* Anthropic wire formats).
+
+        Keeps only plain user/assistant text so history recorded under one
+        provider can be replayed on another. Handles both OpenAI-style
+        (role="tool" + assistant.tool_calls) and Anthropic-style (list content
+        blocks with tool_use/tool_result) encodings. Used to recover from
+        cross-provider tool-call format mismatches — see
+        _sanitize_tool_history_after_error.
+        """
+        from agentica.agent.history_filter import strip_all_tool_artifacts
+
+        return strip_all_tool_artifacts(msgs, drop_system=drop_system)
+
+    @staticmethod
+    def _sanitize_tool_history_after_error(agent: "Agent", messages: List[Message]) -> None:
+        """Strip tool-call artifacts from history after a tool-history API error.
+
+        Recovery path for resuming a session whose history was recorded under
+        a different model provider (e.g. Claude) on a provider that rejects
+        the resulting 'tool' role messages (e.g. "Messages with role 'tool'
+        must be a response to a preceding message with 'tool_calls'"). Only
+        user/assistant text is needed going forward, so tool_calls/tool
+        results are dropped entirely — both from working-memory-backed
+        history (so future turns stay clean) and the in-flight ``messages``
+        list (so the immediate retry succeeds).
+        """
+        for run in agent.working_memory.runs:
+            if run.response and run.response.messages:
+                run.response.messages = PersistMixin._strip_tool_artifacts(run.response.messages, drop_system=True)
+        messages[:] = PersistMixin._strip_tool_artifacts(messages)
+
+    def save_run_response_to_file(
+        self,
+        message: Optional[Union[str, List, Dict, Message]] = None,
+        save_response_to_file: Optional[str] = None,
+    ) -> None:
+        _save_path = save_response_to_file
+        if _save_path is None or self.agent.run_response is None:
+            return
+        message_str = None
+        if message is not None:
+            if isinstance(message, str):
+                message_str = message
+            else:
+                logger.warning("Did not use message in output file name: message is not a string")
+        try:
+            fn = _save_path.format(name=self.agent.name, message=message_str)
+            fn_path = Path(fn)
+            if not fn_path.parent.exists():
+                fn_path.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(self.agent.run_response.content, str):
+                fn_path.write_text(self.agent.run_response.content)
+            else:
+                fn_path.write_text(json.dumps(self.agent.run_response.content, indent=2, ensure_ascii=False))
+        except Exception as e:
+            logger.warning(
+                f"Failed to save output to file '{save_response_to_file}': {e} "
+                f"[agent={self.agent.identifier}, run_id={self.agent.run_id}]"
+            )
+
+    def _aggregate_metrics_from_run_messages(self, messages: List[Message]) -> Dict[str, Any]:
+        aggregated_metrics: Dict[str, Any] = defaultdict(list)
+        for m in messages:
+            if m.role == "assistant" and m.metrics is not None:
+                for k, v in m.metrics.items():
+                    aggregated_metrics[k].append(v)
+        return aggregated_metrics
+
+    def generic_run_response(
+        self, content: Optional[str] = None, event: RunEvent = RunEvent.run_response,
+        tool_call: Optional[Dict[str, Any]] = None,
+    ) -> RunResponse:
+        """Build a RunResponse for a mid-run event.
+
+        ``tool_call`` is the raw tool-call dict a tool event is about; it is
+        surfaced as the typed ``RunResponse.tool_call`` so consumers never have to
+        infer the subject from ``tools`` by position.
+        """
+        return RunResponse(
+            run_id=self.agent.run_id,
+            agent_id=self.agent.agent_id,
+            content=content,
+            tools=self.agent.run_response.tools,
+            images=self.agent.run_response.images,
+            videos=self.agent.run_response.videos,
+            model=self.agent.run_response.model,
+            messages=self.agent.run_response.messages,
+            reasoning_content=self.agent.run_response.reasoning_content,
+            extra_data=self.agent.run_response.extra_data,
+            event=event.value,
+            tool_call=ToolCallInfo.from_dict(tool_call) if tool_call else None,
+        )
+
+    @staticmethod
+    def _drop_unanswered_tool_calls(msgs: List[Message]) -> List[Message]:
+        """Drop tool-call rounds whose results never arrived.
+
+        An assistant message carrying ``tool_calls`` must be followed by one
+        ``tool`` message per ``tool_call_id``. A turn that died between the
+        request and its results would otherwise persist a shape the provider
+        rejects on *every* later request in the session, not just this one.
+        """
+        answered = {m.tool_call_id for m in msgs if m.role == "tool" and m.tool_call_id}
+        kept: List[Message] = []
+        kept_ids: set = set()
+        for m in msgs:
+            if m.role == "assistant" and m.tool_calls:
+                ids = {tc.get("id") for tc in m.tool_calls if isinstance(tc, dict)}
+                if not ids.issubset(answered):
+                    continue
+                kept_ids |= ids
+            kept.append(m)
+        return [m for m in kept if m.role != "tool" or m.tool_call_id in kept_ids]
+
+    def _try_persist_incomplete_turn(self, *args: Any, **kwargs: Any) -> None:
+        """Best-effort ``_persist_incomplete_turn``: keeping history is never
+        worth masking the cancel or failure that is already propagating."""
+        try:
+            self._persist_incomplete_turn(*args, **kwargs)
+        except Exception:
+            logger.warning("incomplete-turn persistence failed", exc_info=True)
+
+    def _persist_incomplete_turn(
+        self,
+        agent,
+        message: Any,
+        messages: Any,
+        user_messages: List[Message],
+        system_message: Optional[Message],
+        messages_for_model: List[Message],
+        num_input_messages: int,
+        model_response: Any,
+        loop_state: "LoopState",
+        input_message_ids: set,
+        *,
+        marker: str,
+        finish_reason: str,
+    ) -> None:
+        """Preserve a turn that ended early instead of discarding it.
+
+        Used by both terminal paths that are not natural completion: a user
+        cancel and a failed run. Mirrors the success-path memory + session-log
+        persistence — the user question plus whatever the assistant produced
+        before it stopped are kept as a completed Q&A turn with ``marker``
+        appended, so a follow-up "continue" (and ``/retry``) still see the
+        instruction that turn carried.
+
+        Only applies to message-based runs (``messages`` is None) — the CLI
+        path; pre-built ``messages`` runs manage their own history. A turn that
+        died before message assembly has no ``user_messages`` and nothing worth
+        keeping.
+        """
+        if messages is not None or not user_messages:
+            return
+        # Capture the partial streamed content as the authoritative answer.
+        if model_response.content:
+            agent.run_response.content = model_response.content
+        partial = agent.run_response.content or ""
+        persisted = (f"{partial}\n\n{marker}") if partial else marker
+        agent.run_response.content = persisted
+
+        # The model layer appends the assistant message only AFTER the stream
+        # completes, so on a mid-stream cancel it's absent from
+        # messages_for_model. Patch the turn's last assistant message if one
+        # exists (cancel during tool exec / between turns), else synthesize one
+        # (cancel mid-stream) so /history surfaces the partial + marker.
+        if loop_state.context_collapsed:
+            turn_msgs = [
+                m for m in messages_for_model
+                if id(m) not in input_message_ids and m.role != "system"
+            ]
+        else:
+            turn_msgs = list(messages_for_model[num_input_messages:])
+        turn_msgs = self._drop_unanswered_tool_calls(turn_msgs)
+        last_asst = None
+        for _m in reversed(turn_msgs):
+            if isinstance(_m, Message) and _m.role == "assistant":
+                last_asst = _m
+                break
+        synthesized: Optional[Message] = None
+        if last_asst is not None:
+            last_asst.content = persisted
+        else:
+            synthesized = Message(role="assistant", content=persisted)
+            turn_msgs.append(synthesized)
+
+        # ``get_messages_from_last_n_runs()`` builds the next prompt from
+        # ``AgentRun.response.messages``, not from ``working_memory.messages``.
+        # Keep the interrupted turn in that canonical history source so a
+        # follow-up such as "continue" sees the partial answer it must resume.
+        if loop_state.context_collapsed:
+            run_messages = self._drop_unanswered_tool_calls(
+                [m for m in messages_for_model if m.role != "system"]
+            )
+            if synthesized is not None:
+                run_messages.append(synthesized)
+        else:
+            run_messages = user_messages + turn_msgs
+        if system_message is not None:
+            run_messages.insert(0, system_message)
+        agent.run_response.messages = run_messages
+
+        # working_memory so /history shows this exchange.
+        if system_message is not None:
+            agent.working_memory.add_system_message(
+                system_message,
+                system_message_role=agent.prompt_config.system_message_role,
+            )
+        agent.working_memory.add_messages(messages=(user_messages + turn_msgs))
+        agent_run = AgentRun(response=agent.run_response)
+        if user_messages:
+            agent_run.message = user_messages[0]
+            agent_run.messages = list(user_messages)
+        if loop_state.context_collapsed:
+            # Mirror the success path: the run must carry the whole surviving
+            # conversation before the runs it supersedes are dropped, or the
+            # cancel would take the entire history down with it.
+            agent.working_memory.runs.clear()
+        agent.working_memory.add_run(agent_run)
+
+        # session log so /resume restores this turn.
+        if agent._session_log is not None:
+            _user_text = None
+            if isinstance(message, str):
+                _user_text = message
+            elif isinstance(message, Message):
+                _user_text = message.content if isinstance(message.content, str) else str(message.content)
+            if _user_text:
+                _user_meta = PersistMixin._provider_replay_meta(user_messages[-1]) if user_messages else {}
+                agent._session_log.append("user", _user_text, **_user_meta)
+            # Log assistant tool-call messages AND their tool results in the
+            # exact interleaved order so /resume rebuilds a valid
+            # assistant(tool_calls)->tool sequence instead of orphaned tools.
+            self._persist_assistant_tool_calls(agent)
+            _assistant_meta = PersistMixin._provider_replay_meta(last_asst) if last_asst is not None else {}
+            _assistant_meta["finish_reason"] = finish_reason
+            agent._session_log.append("assistant", persisted, **_assistant_meta)
+

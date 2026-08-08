@@ -453,9 +453,11 @@ def _validate_profile(data: dict) -> List[str]:
                 )
             if auxiliary_reasoning is not None and auxiliary_wire_api != "responses":
                 errors.append("auxiliary_model.reasoning requires wire_api: responses.")
+            auxiliary_provider = auxiliary.get("model_provider")
+            auxiliary_model_name = auxiliary.get("model_name")
             auxiliary_effort_choices = _reasoning_effort_choices(
-                auxiliary.get("model_provider"),
-                auxiliary.get("model_name"),
+                auxiliary_provider if isinstance(auxiliary_provider, str) else "",
+                auxiliary_model_name if isinstance(auxiliary_model_name, str) else None,
             )
             if auxiliary_effort is not None and auxiliary_effort not in auxiliary_effort_choices:
                 errors.append(
@@ -826,9 +828,10 @@ def run_onboarding(console) -> Dict:
 
     # Return the active profile in the flat shape resolve_model_config expects.
     active = get_profile()
+    main_provider = active.get("model_provider")
     auxiliary_block = active.get("auxiliary_model") or {}
     result = {
-        "model_provider": active.get("model_provider"),
+        "model_provider": main_provider,
         "model_name": active.get("model_name"),
         "base_url": active.get("base_url"),
         "api_key": active.get("api_key"),
@@ -837,7 +840,7 @@ def run_onboarding(console) -> Dict:
     result.update(
         _auxiliary_resolution(
             auxiliary_block,
-            active.get("model_provider"),
+            main_provider if isinstance(main_provider, str) else "",
             active.get("base_url"),
             active.get("api_key"),
         )

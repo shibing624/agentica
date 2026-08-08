@@ -44,6 +44,26 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin):
         return await self._runner.run(message, **kw)
 ```
 
+### 模块布局（诚实拆包）
+
+大文件拆成包后，**不保留“旧路径假装一切都还在 `__init__`”的兼容层**。SDK 对外入口仍是 `agentica` / `Agent` / `Runner`；CLI 内部与测试应直接引用真实子模块。
+
+| 包 | 包根导出 | 主要子模块 |
+|----|----------|------------|
+| `agentica/runner/` | `Runner`, `LoopBreak`, `ModelCallResult`, `ToolHandlingResult` | `core.py`, `loop.py`（`_run_impl`）, `compress.py`, `retry_fallback.py` |
+| `agentica/cli/commands/` | `CommandContext`, `PendingQueue`, `COMMAND_REGISTRY` / `COMMAND_HANDLERS` | `session.py`, `model_config.py`, `runtime.py`, `goal.py`, `registry.py` |
+| `agentica/cli/display/` | TUI 公共渲染 API | `stream.py`, `console.py`, `messages.py`, `status_bar.py` |
+| `agentica/cli/interactive/` | `run_interactive` | `app.py`, `console_io.py`, `stream_loop.py`, `attachments.py` |
+
+示例：
+
+```python
+from agentica.runner import Runner
+from agentica.cli.interactive import run_interactive
+from agentica.cli.commands.runtime import _cmd_steer   # 私有命令实现走子模块
+from agentica.runner.compress import micro_compact     # 压缩逻辑不在 runner 包根
+```
+
 Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，**状态全部存在 Agent 的 dataclass fields 上**：
 
 | Mixin | 职责 |

@@ -5,6 +5,11 @@
 """
 from unittest.mock import MagicMock
 
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from agentica.model.message import Message
 from agentica.peers import PeerMessage
 from agentica.runner import Runner

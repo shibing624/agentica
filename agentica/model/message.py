@@ -96,9 +96,9 @@ class Message(BaseModel):
     # | content_filter | ...). Kept for audit/replay fidelity; not sent to the API.
     finish_reason: Optional[str] = None
     # The name of the tool called
-    tool_name: Optional[str] = Field(None, alias="tool_call_name")
+    tool_name: Optional[str] = Field(default=None, alias="tool_call_name")
     # Arguments passed to the tool
-    tool_args: Optional[Any] = Field(None, alias="tool_call_arguments")
+    tool_args: Optional[Any] = Field(default=None, alias="tool_call_arguments")
     # The error of the tool call
     tool_call_error: Optional[bool] = None
     # If True, the agent will stop executing after this tool call.

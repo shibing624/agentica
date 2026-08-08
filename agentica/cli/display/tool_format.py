@@ -1,0 +1,237 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: Tool-call line formatting for the CLI transcript
+"""
+
+import re
+import textwrap
+from pathlib import Path
+from typing import List
+
+from rich.text import Text
+
+from agentica.cli.runtime import TOOL_ICONS, get_console
+
+from .console import remember_truncated
+
+def _extract_filename(file_path: str) -> str:
+    """Extract filename from a file path."""
+    return Path(file_path).name
+
+
+def _format_line_range(offset: int, limit: int) -> str:
+    """Format line range as L{start}-{end}."""
+    start = offset + 1 if offset else 1
+    end = start + (limit or 500) - 1
+    return f"L{start}-{end}"
+
+
+def _shorten_path(file_path: str) -> str:
+    """Shorten a file path for display: prefer relative path, keep outside paths intact."""
+    if not file_path or file_path == ".":
+        return "."
+    p = Path(file_path)
+    try:
+        return str(p.relative_to(Path.cwd()))
+    except ValueError:
+        return str(p)
+
+
+def _shorten_paths_in_command(command: str) -> str:
+    """Shorten absolute paths embedded in a shell command."""
+    cwd = str(Path.cwd())
+    if cwd in command:
+        command = command.replace(cwd + "/", "").replace(cwd, ".")
+    return command
+
+
+def _wrap_command_lines(command: str, width: int) -> List[str]:
+    """Wrap a shell command for display while preserving explicit newlines.
+
+    Long indivisible tokens (URLs, IDs, paths) stay intact instead of being
+    split into misleading fragments. The full command is retained separately
+    for Ctrl+O whenever the inline preview is folded.
+    """
+    wrapped: List[str] = []
+    logical_lines = command.splitlines() or [""]
+    for line in logical_lines:
+        if not line:
+            wrapped.append("")
+            continue
+        wrapped.extend(textwrap.wrap(
+            line,
+            width=max(1, width),
+            replace_whitespace=False,
+            drop_whitespace=True,
+            break_long_words=False,
+            break_on_hyphens=False,
+        ) or [""])
+    return wrapped
+
+
+def _display_execute_command(console_instance, command: str) -> None:
+    """Render an execute command as one header plus two continuation rows."""
+    raw_command = str(command or "")
+    display_command = _shorten_paths_in_command(raw_command)
+    icon = TOOL_ICONS.get("execute", TOOL_ICONS["default"])
+    header = f" {icon} execute "
+    continuation = "   │ "
+    width = max(1, int(getattr(console_instance, "width", 80) or 80) - len(header))
+    command_lines = _wrap_command_lines(display_command, width)
+    visible_lines = command_lines[:3]
+    omitted = len(command_lines) - len(visible_lines)
+
+    for index, line in enumerate(visible_lines):
+        rendered = Text()
+        if index == 0:
+            rendered.append(f" {icon} ")
+            rendered.append("execute", style="bold magenta")
+            rendered.append(" ")
+        else:
+            rendered.append(continuation, style="dim")
+        rendered.append(line, style="dim")
+        console_instance.print(rendered)
+
+    if omitted > 0:
+        hint = Text()
+        hint.append(continuation, style="dim")
+        hint.append(f"… +{omitted} lines (Ctrl+O to expand)", style="dim italic")
+        console_instance.print(hint)
+        remember_truncated("Command · execute", raw_command)
+
+
+def format_tool_display(tool_name: str, tool_args: dict) -> str:
+    """Format tool call for user-friendly display."""
+    # File reading tools - show filename and line range
+    if tool_name == "read_file":
+        file_path = tool_args.get("file_path", "")
+        filename = _shorten_path(file_path)
+        offset = tool_args.get("offset", 0)
+        limit = tool_args.get("limit", 500)
+        line_range = _format_line_range(offset, limit)
+        return f"{filename} ({line_range})"
+    
+    # File writing tools - show filename only
+    if tool_name == "write_file":
+        file_path = tool_args.get("file_path", "")
+        return _extract_filename(file_path)
+    
+    # File editing tools - show filename only
+    if tool_name == "edit_file":
+        file_path = tool_args.get("file_path", "")
+        return _extract_filename(file_path)
+
+    if tool_name == "apply_patch":
+        patch = str(tool_args.get("patch", ""))
+        count = len(re.findall(r"^\*\*\* (?:Add|Update|Delete) File: ", patch, re.MULTILINE))
+        return f"{count} {'file' if count == 1 else 'files'}" if count else ""
+    
+    # Execute command - shorten absolute paths in command
+    if tool_name == "execute":
+        command = tool_args.get("command", "")
+        return _shorten_paths_in_command(command)
+    
+    # Todo tools - list the todo items (show ALL todos, no truncation)
+    if tool_name == "write_todos":
+        todos = tool_args.get("todos", [])
+        if isinstance(todos, list) and todos:
+            todo_lines = []
+            for todo in todos:
+                if isinstance(todo, dict):
+                    content = todo.get("content", "")
+                    status = todo.get("status", "pending")
+                    status_icon = "✓" if status == "completed" else "○" if status == "pending" else "◐"
+                    todo_lines.append(f"{status_icon} {content}")
+                else:
+                    todo_lines.append(f"○ {str(todo)}")
+            return "\n    ".join(todo_lines)
+        return f"{len(todos)} items"
+    
+    # Web search - show search queries
+    if tool_name == "web_search":
+        queries = tool_args.get("queries", "")
+        if isinstance(queries, list):
+            return ", ".join(str(q)[:40] for q in queries[:3])
+        return str(queries)[:80]
+    
+    # Fetch URL - show the URL
+    if tool_name == "fetch_url":
+        url = tool_args.get("url", "")
+        if len(url) > 60:
+            return url[:57] + "..."
+        return url
+    
+    # ls/glob/grep - show shortened path/pattern
+    if tool_name == "ls":
+        directory = tool_args.get("directory", ".")
+        return _shorten_path(directory)
+
+    if tool_name == "glob":
+        pattern = tool_args.get("pattern", "*")
+        path = tool_args.get("path", ".")
+        return f"{pattern} in {_shorten_path(path)}"
+
+    if tool_name == "grep":
+        pattern = tool_args.get("pattern", "")
+        path = tool_args.get("path", ".")
+        include = tool_args.get("include", "")
+        display = f"'{pattern[:40]}' in {_shorten_path(path)}"
+        if include:
+            display += f" ({include})"
+        return display
+    
+    # Task tool - show description
+    if tool_name == "task":
+        description = tool_args.get("description", "")
+        if len(description) > 80:
+            return description[:77] + "..."
+        return description
+    
+    # Default format for other tools
+    brief_args = []
+    for key, value in tool_args.items():
+        if isinstance(value, str):
+            if len(value) > 40:
+                value = value[:37] + "..."
+            brief_args.append(f"{key}={value!r}")
+        elif isinstance(value, (int, float, bool)):
+            brief_args.append(f"{key}={value}")
+        elif isinstance(value, list):
+            brief_args.append(f"{key}=[{len(value)} items]")
+        elif isinstance(value, dict):
+            brief_args.append(f"{key}={{...}}")
+    
+    args_str = ", ".join(brief_args[:3])
+    if len(brief_args) > 3:
+        args_str += ", ..."
+    
+    return args_str if args_str else ""
+
+
+def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
+                       tool_count: int = 0) -> None:
+    """Shared implementation for displaying a tool call."""
+    icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
+    display_str = format_tool_display(tool_name, tool_args)
+
+    # Add blank line between tools for readability
+    if tool_count > 1:
+        console_instance.print()
+
+    if tool_name == "execute":
+        _display_execute_command(console_instance, tool_args.get("command", ""))
+    # Special handling for write_todos - multi-line display.
+    # Note: in this repo "task" is the dedicated subagent-spawn tool, so we
+    # avoid using "tasks" as the label here to prevent confusion.
+    elif tool_name == "write_todos" and "\n" in display_str:
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
+        console_instance.print(f"    {display_str}", style="dim")
+    elif display_str:
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta] [dim]{display_str}[/dim]")
+    else:
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
+
+def display_tool_call(tool_name: str, tool_args: dict) -> None:
+    """Display a tool call with icon and colored tool name."""
+    _display_tool_impl(get_console(), tool_name, tool_args)

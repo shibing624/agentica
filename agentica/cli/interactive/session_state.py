@@ -1,0 +1,157 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: SessionState and input-request types for the interactive TUI
+"""
+
+from __future__ import annotations
+
+import queue
+import threading
+from dataclasses import dataclass, field
+from typing import Any, ClassVar, Dict, List, Optional
+
+from agentica.goals import GoalManager
+from agentica.tools.background_processes import BackgroundProcessRegistry
+
+SHELL_MODE_EXEMPT_CMDS = frozenset(
+    {"/exit", "/quit", "/help", "/model", "/debug", "/clear", "/reset"}
+)
+
+
+# ==================== SessionState ====================
+
+
+class _ToolResultSequencer:
+    """Align parallel tool results with their call lines.
+
+    The runner emits ``tool_call_started`` then ``tool_call_completed``
+    events. Each completed event carries the FULL accumulated tool list
+    (``chunk.tools``), so a naive handler that renders the first tool
+    with content mis-dispatches under parallelism — results get duplicated
+    or land under the wrong call line.
+
+    This sequencer keeps one ordered slot per started tool and flushes
+    results front-to-back in call order: a slow tool never blocks later
+    tools from being shown (they queue until the earlier slot is ready),
+    and every result renders exactly once, directly beneath its own call
+    line. Backend stays parallel; the frontend stays aligned.
+    """
+
+    def __init__(self) -> None:
+        self._slots: List[dict] = []
+        self._shown: set = set()
+
+    def on_start(self, tool_call_id: Optional[str], tool_name: str) -> str:
+        tc_id = tool_call_id or f"{tool_name}:{len(self._slots)}"
+        self._slots.append({"id": tc_id, "done": False, "result": None})
+        return tc_id
+
+    def on_complete(self, tool_call_id: Optional[str], tool_info: dict) -> None:
+        if not tool_call_id or tool_call_id in self._shown:
+            return
+        if "content" not in tool_info:
+            return
+        for slot in self._slots:
+            if slot["id"] == tool_call_id and not slot["done"]:
+                slot["done"] = True
+                slot["result"] = tool_info
+                return
+
+    def drain(self):
+        """Yield completed result infos in call order, popping done front slots."""
+        while self._slots and self._slots[0]["done"]:
+            slot = self._slots.pop(0)
+            self._shown.add(slot["id"])
+            yield slot["result"]
+
+
+@dataclass
+class _InputRequest:
+    """A pending ask_user_question tool request awaiting a typed reply.
+
+    Created by the ask_user_question_callback on the background agent thread; the main
+    prompt_toolkit thread fulfils it by putting the user's line on ``result``.
+    Putting the ``CANCELLED`` sentinel unblocks the agent thread so it can raise
+    :class:`AgentCancelledError` — this is how Ctrl+C escapes a pending prompt.
+    """
+
+    CANCELLED: ClassVar[object] = object()
+
+    prompt: str
+    options: Optional[List[str]] = None
+    result: "queue.Queue" = field(default_factory=lambda: queue.Queue(maxsize=1))
+    resolved: bool = False
+
+    def submit(self, answer: str) -> bool:
+        """Deliver the user's answer exactly once.
+
+        Returns ``True`` only when this call won the race to resolve the
+        request. Late submissions after cancel/submit are ignored.
+        """
+        if self.resolved:
+            return False
+        try:
+            self.result.put_nowait(answer)
+            self.resolved = True
+            return True
+        except queue.Full:
+            self.resolved = True
+            return False
+
+    def cancel(self) -> bool:
+        """Wake up the blocked agent thread and tell it the user aborted."""
+        if self.resolved:
+            return False
+        try:
+            self.result.put_nowait(_InputRequest.CANCELLED)
+            self.resolved = True
+            return True
+        except queue.Full:
+            # Someone already answered — nothing to unblock.
+            self.resolved = True
+            return False
+
+
+@dataclass
+class SessionState:
+    """All mutable session state in one place.
+
+    Replaces the scattered single-element list containers
+    (``[False]``, ``[0]``, ``[agent]``) with typed fields.
+    """
+
+    shell_mode: bool = False
+    should_exit: bool = False
+    agent_running: bool = False
+    current_agent: Any = None
+    image_counter: int = 0
+    paste_counter: int = 0
+    attached_images: List = field(default_factory=list)
+    pasted_files: List = field(default_factory=list)
+    last_ctrl_c: float = 0.0
+    # Background tasks — owned by session, not module-global
+    bg_tasks: Dict[str, dict] = field(default_factory=dict)
+    bg_task_counter: int = 0
+    background_processes: BackgroundProcessRegistry = field(default_factory=BackgroundProcessRegistry)
+    # This terminal's end of the cross-session peer channel (agentica/peers.py).
+    peer_session: Any = None
+    # Standing-goal loop (see agentica/goals.py).
+    goal_manager: Optional[GoalManager] = None
+    goal_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Token + wall-clock baselines for per-turn budget accounting (S2).
+    # A fresh CostTracker is created per Agent.run(), so each turn's
+    # cost_tracker holds THIS turn's tokens only. extract_turn_signals
+    # takes that as the delta and accumulates it onto this running baseline.
+    goal_tokens_baseline: int = 0
+    # Active ask_user_question tool request. When the agent (running in the background
+    # process_loop thread) calls the ask_user_question tool, it parks on a result queue
+    # and sets this field so the main prompt_toolkit thread routes the next typed
+    # line into the queue instead of pending_queue. None when no request pending.
+    input_request: Optional["_InputRequest"] = None
+    # Cron scheduler daemon thread (started when settings cron.enabled is true).
+    cron_thread: Optional[threading.Thread] = None
+    cron_stop_event: Optional[threading.Event] = None
+
+
+__all__ = ['SHELL_MODE_EXEMPT_CMDS', '_ToolResultSequencer', '_InputRequest', 'SessionState']

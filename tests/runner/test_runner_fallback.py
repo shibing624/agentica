@@ -787,7 +787,7 @@ class TestFallbackRecoveryEvent(unittest.TestCase):
         agent._run_fallback_models = [fb]
 
         state = LoopState()
-        with unittest.mock.patch("agentica.runner.logger") as mock_logger:
+        with unittest.mock.patch("agentica.runner.retry_fallback.logger") as mock_logger:
             asyncio.run(Runner._call_with_retry(primary, [], state, agent, stream=False))
 
         warning_msgs = [

@@ -14,10 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
-from agentica.cli.commands import (
-    CommandContext,
-    _cmd_compact,
-)
+from agentica.cli.commands.context import CommandContext
+from agentica.cli.commands.session import _cmd_compact
 from agentica.cli.context_usage import measure_context
 from agentica.memory.models import AgentRun
 from agentica.memory.working import WorkingMemory
@@ -172,8 +170,8 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         console = MagicMock()
 
         with (
-            patch("agentica.cli.commands.get_console", return_value=console),
-            patch("agentica.cli.commands.logger") as logger,
+            patch("agentica.cli.commands.session.get_console", return_value=console),
+            patch("agentica.cli.commands.session.logger") as logger,
         ):
             _cmd_compact(ctx)
 

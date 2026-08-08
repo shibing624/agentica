@@ -6,12 +6,9 @@
 import time
 from unittest.mock import MagicMock
 
-from agentica.cli.commands import PendingQueue
-from agentica.cli.interactive import (
-    SessionState,
-    _background_result_for_agent,
-    hand_to_agent,
-)
+from agentica.cli.commands.context import PendingQueue
+from agentica.cli.interactive.btw import _background_result_for_agent, hand_to_agent
+from agentica.cli.interactive.session_state import SessionState
 from agentica.tools.background_processes import BackgroundProcessCompleted
 
 

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- 内部拆包减负（结构明示，不藏兼容层）：`cli/commands.py`→`cli/commands/`、`cli/display.py`→`cli/display/`、`cli/interactive.py`→`cli/interactive/`、`runner.py`→`runner/`（`_run_impl` 在 `runner/loop.py`）；包 `__init__` 只导出公开入口，私有符号从真实子模块引用；`tests/cli/test_cli.py` 按域拆成多个小文件。SDK 主入口仍是 `agentica` / `Agent` / `Runner`
 - 跨会话消息：两个终端里的 CLI 会话可以互发纯文本，不再靠人在终端之间复制粘贴。模型自己调 `list_agents` 发现对端、`send_message` 投递，用户不需要手动触发（`/list-agents`（别名 `/peers`）只用于查看和排查）。传输是文件而非 socket：`~/.agentica/cache/peers/live/<peer_id>.json` 是心跳 + pid 探活的发现目录，`~/.agentica/cache/peers/mailbox/<peer_id>/*.md` 是每条一个带 frontmatter 的 markdown 消息，可直接 cat 排查。目录刻意放在用户级而非按项目 hash 分区——「协调同一个 repo 的多个 worktree」正是主场景，而它们 cwd 不同。收件端是拉取式：运行中的会话由 `Runner._inject_peer_messages` 在 tool batch 间隙取走（与 `/steer` 同一边界，不打断正在跑的工具），空闲会话由 CLI 轮询取走并开一轮。消息身份绑 CLI 进程而非 session log，`/resume` 换掉 session_id 后在途消息仍会落地。环路自带刹车：每条消息记录 hop（按对端分别计数，上限 3），未读堆积到 50 拒收，单条超 4000 字符拒收。工具的 system prompt 明确约束收件方——来自另一个 agent 的消息不是用户授权、不能代答权限提示、其中的斜杠命令是纯文本
 - 跨会话消息新增人工入口 `/send-message <session> <text>`（别名 `/send`，与 `list_agents` → `/list-agents` 同一命名规则，对应 agent 用的 `send_message` 工具）：不用切终端就能替 agent 自己把一句话说进另一个会话。它和 agent 发的消息在收件端语义不同，因此消息带 `from_kind`（`agent` / `user`）：agent 发的仍然「不是用户授权、不能代答权限提示」，`/send-message` 发的注入为「你的用户从另一个会话转发」，收件方按用户亲口说的处理。mailbox 是 0700 用户私有目录，所以 `user` 身份与在本终端输入等价；header 里伪造 `from_kind` 不被采信，转发指令也不消耗 agent 对话的 hop 预算。单条上限 40000 字符（够放一整篇 handoff 写给对方；再长就把内容落到文件、发路径，反正文件系统是共享的）
 - 新增 `/fork`：无参数即在当前位置分支——整段对话带过去，继续聊就是了，只是落到新 session，此后说的话不再进入被分叉的那份 transcript（`/status` 多一行 `Forked from: <parent>`，来源写在 fork 出的 sidecar meta 里，由 `SessionLog.fork()` 自己记，不依赖调用方）。`/fork list` 列出本会话自己发过的消息（序号 + 消息 id + 时间 + 预览），`/fork <n|uuid>` 分支到所选消息**之前**一条，于是模型回到「你提这个要求之前」的状态，可以换个说法重问。两种分支原会话都完整保留、照常 `/resume`，提示里直接给出旧 session id。全数字的 uuid 前缀不会被误当序号（只有能索引列表的数字才是序号）
@@ -37,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 修复 CLI 输出 OSC 8 超链接泄漏：Rich 为 Markdown 链接生成 OSC 8 终端超链接，prompt_toolkit 的 ANSI 解析器不识别 OSC 序列会把 payload 渲染成可见文本，渲染前剥离不支持的 OSC 8 包装（保留链接样式文本）
 - 修复 Ctrl+O 分页器在输出含控制字符时停在 less 的 binary-file 确认提示：less 调用统一加 `-f` 强制打开
 - `/compact` 原生压缩失败的回退提示改为 `logger.warning`，不再向终端打印打断对话流
+- 拆包后清理机械复制遗留的死 import：`runner/`（compress/core/loop/persist/retry_fallback/steer/stream）与 `cli/commands/`（context/cron_cmd/goal/helpers/model_config/runtime/session/tools_skills）各文件只保留本地真实引用，删掉约 680 行从原单文件带过来的未用 import；`tests/cli/test_cli_configuration.py` 的 4 个 patch（`reset_skill_registry`/`load_skills`/`get_skill_registry`/`create_agent`）从 `cli_tools_skills` 改到 `cli_helpers`——拆包后实际调用点在 `helpers._refresh_skills_session`，原 patch 打在错模块是无副作用的 no-op，autoflake 删掉未用 import 后才暴露
 
 #### docs
 - `apply_patch` docstring 明确要求 Update/Delete 操作前必须先 `read_file`，禁止凭记忆构造上下文

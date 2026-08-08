@@ -115,7 +115,7 @@ class TestAgentRun:
 
         with (
             patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response()),
-            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
+            patch("agentica.runner.loop.langfuse_trace_context", new=fake_langfuse_trace_context),
         ):
             agent = Agent(
                 name="A",
@@ -147,7 +147,7 @@ class TestAgentRun:
 
         with (
             patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response()),
-            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
+            patch("agentica.runner.loop.langfuse_trace_context", new=fake_langfuse_trace_context),
         ):
             agent = Agent(name="A", model=_make_model())
             await agent.run(messages=[Message(role="user", content="M1")])
@@ -188,7 +188,7 @@ class TestAgentRun:
 
         with (
             patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")),
-            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
+            patch("agentica.runner.loop.langfuse_trace_context", new=fake_langfuse_trace_context),
         ):
             agent = Agent(name="A", model=_make_model(), hooks=[InlineAgentHooks()])
             await agent.run("Hi", hooks=InlineRunHooks())
@@ -221,7 +221,7 @@ class TestAgentRun:
 
         with (
             patch.object(OpenAIChat, 'response', new_callable=AsyncMock, return_value=_mock_response("OK")),
-            patch("agentica.runner.langfuse_trace_context", new=fake_langfuse_trace_context),
+            patch("agentica.runner.loop.langfuse_trace_context", new=fake_langfuse_trace_context),
         ):
             agent = Agent(name="A", model=_make_model())
             await agent.run("Hi", hooks=RunHooks())

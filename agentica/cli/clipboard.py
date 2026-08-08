@@ -146,7 +146,7 @@ def _get_ps_exe() -> str | None:
     global _ps_exe
     if _ps_exe is False:
         _ps_exe = _find_powershell()
-    return _ps_exe
+    return _ps_exe if isinstance(_ps_exe, str) else None
 
 
 def _windows_has_image() -> bool:

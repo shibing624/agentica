@@ -8,7 +8,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from agentica.cli.interactive import (
+from agentica.cli.interactive.stream_loop import (
     _make_compact_phase_handler,
     _read_git_branch,
     _record_main_auto_compaction,

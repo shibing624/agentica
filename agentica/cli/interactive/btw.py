@@ -1,0 +1,195 @@
+# -*- coding: utf-8 -*-
+"""
+@author:XuMing(xuming624@qq.com)
+@description: BTW side questions and background-completion notices
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from typing import Optional
+
+from rich.markup import escape as rich_escape
+
+from agentica.cli.display import remember_truncated
+from agentica.cli.display.tool_format import _wrap_command_lines
+from agentica.cli.runtime import _generate_session_id, get_console
+from agentica.memory.models import AgentRun
+from agentica.model.message import Message
+from agentica.run_response import RunResponse
+from agentica.tools.background_processes import (
+    BackgroundProcessCompleted,
+    read_log_tail,
+)
+
+from .console_io import _print_boxed_result
+from .session_state import SessionState
+
+# ==================== Shell command ====================
+
+
+def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> None:
+    """Execute a shell command directly."""
+    con = get_console()
+    con.print(f"[dim]$ {user_input}[/dim]")
+    try:
+        result = subprocess.run(
+            user_input,
+            shell=True,
+            capture_output=True,
+            text=True,
+            cwd=work_dir or os.getcwd(),
+        )
+        if result.stdout:
+            con.print(result.stdout, end="")
+        if result.stderr:
+            con.print(result.stderr, style="red", end="")
+        if result.returncode != 0:
+            con.print(f"[dim]Exit code: {result.returncode}[/dim]")
+    except Exception as e:
+        con.print(f"[red]Error: {e}[/red]")
+    con.print()
+
+
+def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
+    """Give the agent text nobody typed, without interrupting its work.
+
+    A running agent takes it through ``steer()``, which lands at the next
+    tool-batch boundary. An idle one gets it as a queued turn. ``steer()``
+    returning False means the run ended between the check and the call — the
+    TOCTOU window ``Agent.steer`` documents — so the text falls through to the
+    queue instead of being dropped.
+    """
+    agent = state.current_agent
+    if state.agent_running and agent is not None and agent.steer(text):
+        return
+    pending_queue.put(text)
+
+
+def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
+    """Render a finished background command as a report for the agent."""
+    status = "finished" if event.returncode == 0 else "failed"
+    lines = [
+        f"[Background terminal #{event.num} ({event.id}) {status}: "
+        f"exit {event.returncode} after {event.elapsed}]",
+        f"Command: {event.command}",
+        f"Log: {event.log_path}",
+    ]
+    tail = read_log_tail(event.log_path, max_lines=20, max_chars=4000)
+    if tail:
+        lines.extend(["", "Output tail:", tail])
+    lines.extend(
+        [
+            "",
+            "This is an automatic report of a command you started in the background. "
+            "Pick the work back up where that command left off, or report the outcome "
+            "to the user if nothing is left to do.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _print_background_completion(event: BackgroundProcessCompleted) -> None:
+    """Print a background-terminal completion notice.
+
+    Long commands are folded like execute display: a few wrapped lines stay
+    inline, and the full command is stashed for Ctrl+O.
+    """
+    con = get_console()
+    ok = event.returncode == 0
+    marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
+    status = "finished" if ok else "failed"
+    con.print()
+    con.print(
+        f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
+        f"(exit {event.returncode})"
+    )
+    raw_command = event.command or ""
+    if raw_command:
+        try:
+            width = int(getattr(con, "width", 80) or 80)
+        except (TypeError, ValueError):
+            width = 80
+        width = max(20, width - 2)
+        command_lines = _wrap_command_lines(raw_command, width)
+        visible_lines = command_lines[:3]
+        omitted = len(command_lines) - len(visible_lines)
+        for line in visible_lines:
+            con.print(f"  {rich_escape(line)}")
+        if omitted > 0:
+            con.print(
+                f"  [dim italic]… +{omitted} lines (Ctrl+O to expand)[/dim italic]"
+            )
+            remember_truncated(
+                f"Background · #{event.num} ({event.id})",
+                raw_command,
+            )
+    tail = read_log_tail(event.log_path)
+    if tail:
+        for line in tail.splitlines():
+            con.print(f"  {rich_escape(line)}")
+    con.print(f"  [dim]log: {rich_escape(event.log_path)}[/dim]")
+
+
+def _run_btw_concurrent(agent, question: str, tui_state: dict):
+    """Run a BTW side question in a background thread.
+
+    Uses a fresh agent with NO tools but WITH a snapshot of the main agent's
+    conversation history, so it can answer side questions in context.
+    """
+    try:
+        from agentica import Agent
+
+        # Snapshot conversation context from the main agent (same as /bg)
+        context_snapshot = []
+        if agent and agent.working_memory and agent.working_memory.messages:
+            for msg in agent.working_memory.messages:
+                if msg.role in ("user", "assistant") and msg.content:
+                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    if len(content) > 500:
+                        content = content[:500] + "..."
+                    context_snapshot.append(
+                        Message.model_validate({"role": msg.role, "content": content})
+                    )
+            context_snapshot = context_snapshot[-10:]
+
+        # Clone the parent model so the BTW agent owns isolated runtime state
+        # (HTTP client, usage, metrics, error counters). Sharing the main
+        # agent's model instance while it is streaming corrupts that
+        # instance's state and breaks the main agent's subsequent turns — the
+        # classic "/btw causes follow-up bugs" symptom. Same strategy as
+        # Agent.clone() / SubagentRegistry.spawn().
+        btw_model = None
+        if agent and agent.model:
+            from agentica.subagent import SubagentRegistry
+
+            btw_model = SubagentRegistry._clone_parent_model(agent.model)
+
+        btw_agent = Agent(
+            model=btw_model,
+            tools=[],
+            instructions="You are a helpful assistant answering a quick side question. "
+            "You have NO tools, NO skills, NO file access. "
+            "Answer concisely based on your knowledge and conversation context.",
+            session_id=_generate_session_id(),
+            debug=False,
+            add_history_to_context=True,
+        )
+
+        # Inject context snapshot so the BTW agent can see prior conversation
+        if context_snapshot:
+            synthetic_run = AgentRun(
+                response=RunResponse(messages=context_snapshot),
+            )
+            btw_agent.working_memory.runs.append(synthetic_run)
+
+        response = btw_agent.run_sync(question)
+        result_text = str(response.content) if response and response.content is not None else "(no answer)"
+    except Exception as e:
+        result_text = f"Error: {e}"
+
+    _print_boxed_result("BTW", question, result_text, color="cyan")
+
+
+__all__ = ['_handle_shell_command', 'hand_to_agent', '_background_result_for_agent', '_print_background_completion', '_run_btw_concurrent']

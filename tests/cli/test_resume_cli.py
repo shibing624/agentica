@@ -5,12 +5,8 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from agentica.cli.commands import (
-    CommandContext,
-    _cmd_history,
-    display_resumed_transcript,
-    hydrate_resumed_session,
-)
+from agentica.cli.commands.context import CommandContext
+from agentica.cli.commands.session import _cmd_history, display_resumed_transcript, hydrate_resumed_session
 from agentica.cli.main import main
 from agentica.cli.runtime import parse_args
 from agentica.memory.models import AgentRun
@@ -91,7 +87,7 @@ def test_display_resumed_transcript_collapses_tool_results():
         ]
     )
 
-    with patch("agentica.cli.commands.get_console", return_value=console):
+    with patch("agentica.cli.commands.session.get_console", return_value=console):
         stats = display_resumed_transcript([run], "session-123")
 
     rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
@@ -146,7 +142,7 @@ def test_history_reads_canonical_runs_and_opens_full_tools_in_pager():
     )
     console = MagicMock()
 
-    with patch("agentica.cli.commands.get_console", return_value=console):
+    with patch("agentica.cli.commands.session.get_console", return_value=console):
         _cmd_history(ctx, "")
         compact = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)
         assert "inspect" in compact
@@ -177,7 +173,7 @@ def test_resumed_transcript_limits_error_previews_per_run():
         )
     console = MagicMock()
 
-    with patch("agentica.cli.commands.get_console", return_value=console):
+    with patch("agentica.cli.commands.session.get_console", return_value=console):
         display_resumed_transcript([_history_run(messages)], "session-123")
 
     rendered = "\n".join(str(call.args[0]) for call in console.print.call_args_list if call.args)

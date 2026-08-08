@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from agentica.cli.commands import _cmd_fork
+from agentica.cli.commands.runtime import _cmd_fork
 from agentica.memory.session_log import SessionLog
 from agentica.workspace import Workspace
 
@@ -62,8 +62,8 @@ def _fork(ctx, args):
     with (
         patch("agentica.cli.runtime.get_model", return_value=MagicMock()),
         patch("agentica.agent.deep.DeepAgent", FakeDeepAgent),
-        patch("agentica.cli.commands.hydrate_resumed_session", return_value=([], 1)),
-        patch("agentica.cli.commands.display_resumed_transcript", return_value=MagicMock(tool_result_count=0)),
+        patch("agentica.cli.commands.runtime.hydrate_resumed_session", return_value=([], 1)),
+        patch("agentica.cli.commands.runtime.display_resumed_transcript", return_value=MagicMock(tool_result_count=0)),
     ):
         return _cmd_fork(ctx, args)
 

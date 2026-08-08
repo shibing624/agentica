@@ -7,6 +7,10 @@ import asyncio
 import json
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+import os
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.run_response import RunResponse, RunEvent
 from agentica.model.loop_state import LoopState
@@ -496,7 +500,7 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model.compact_context = AsyncMock(return_value=result)
 
         with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.micro_compact") as micro, \
+             patch("agentica.runner.compress.micro_compact") as micro, \
              patch.object(cm, "should_compress") as local_rule, \
              patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
@@ -515,7 +519,7 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model.compact_context = AsyncMock(side_effect=RuntimeError("404 compact unsupported"))
 
         with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.micro_compact", return_value=0) as micro, \
+             patch("agentica.runner.compress.micro_compact", return_value=0) as micro, \
              patch.object(cm, "should_compress", return_value=False), \
              patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))

@@ -9,7 +9,7 @@ import importlib
 import inspect
 import os
 import sys
-from typing import List, Optional, Any
+from typing import Any, Callable, Dict, List, Optional
 
 from rich.console import Console
 
@@ -774,7 +774,8 @@ def create_agent(
         ``send_message`` tools and its inbox is drained between tool batches.
     """
     if permission_mode is None:
-        permission_mode = agent_config.get("permissions", "allow-all")
+        configured_permission_mode = agent_config.get("permissions")
+        permission_mode = configured_permission_mode if isinstance(configured_permission_mode, str) else "allow-all"
     model = get_model(
         model_provider=agent_config["model_provider"],
         model_name=agent_config["model_name"],
@@ -856,10 +857,10 @@ def create_agent(
     # Immediate-run executor for the cronjob tool: builds a fresh CLI agent per
     # run (mirrors the `/cron run` command) so `action='run'` is a real trial run
     # returning output, not just a "mark due" that silently needs the daemon.
-    cron_job_runner = None
+    cron_job_runner: Optional[Callable[[Any], Dict[str, Any]]] = None
     if enable_cron_immediate_run:
 
-        def cron_job_runner(job):
+        def _cron_job_runner(job):
             import asyncio
             from agentica.cron.scheduler import _execute_job
             from agentica.cron.cli_runner import CliAgentRunner, build_cli_agent_factory
@@ -867,6 +868,8 @@ def create_agent(
             factory = build_cli_agent_factory(agent_config, extra_tools, workspace, skills_registry)
             runner = CliAgentRunner(factory)
             return asyncio.run(_execute_job(job, agent_runner=runner, verbose=False))
+
+        cron_job_runner = _cron_job_runner
 
     # Always give the CLI agent the self-management + cron tools so it can
     # inspect/optimize its own config (config.yaml / .env), self-upgrade, and

@@ -11,7 +11,10 @@ Covers:
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+import sys
+import os
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agentica.run_context import RunContext, RunSource, RunStatus, TaskAnchor
 from agentica.run_events import RunEventRecord, RunEventType
 

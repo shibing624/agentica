@@ -5,9 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from agentica.cli.commands import CommandContext, _cmd_newchat
+from agentica.cli.commands.context import CommandContext
+from agentica.cli.commands.session import _cmd_newchat
 from agentica.cli.display import format_session_summary
-from agentica.cli.interactive import SessionState, _print_interactive_exit_summary, run_interactive
+from agentica.cli.interactive import run_interactive
+from agentica.cli.interactive.console_io import _print_interactive_exit_summary
+from agentica.cli.interactive.session_state import SessionState
 from agentica.model.usage import RequestUsage, TokenDetails, Usage
 
 
@@ -70,10 +73,10 @@ def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch
         current_agent=agent,
         tui_state=tui_state,
     )
-    monkeypatch.setattr("agentica.cli.commands.time.monotonic", lambda: 1_005.0)
-    monkeypatch.setattr("agentica.cli.commands.create_agent", lambda *args, **kwargs: new_agent)
-    monkeypatch.setattr("agentica.cli.commands.print_header", print_header)
-    monkeypatch.setattr("agentica.cli.commands.get_console", lambda: console)
+    monkeypatch.setattr("agentica.cli.commands.session.time.monotonic", lambda: 1_005.0)
+    monkeypatch.setattr("agentica.cli.commands.session.create_agent", lambda *args, **kwargs: new_agent)
+    monkeypatch.setattr("agentica.cli.commands.session.print_header", print_header)
+    monkeypatch.setattr("agentica.cli.commands.session.get_console", lambda: console)
 
     result = _cmd_newchat(ctx)
 
@@ -94,8 +97,8 @@ def test_interactive_exit_prints_resume_summary(monkeypatch):
     )
     console = MagicMock()
 
-    monkeypatch.setattr("agentica.cli.interactive.time.monotonic", lambda: 130.0)
-    monkeypatch.setattr("agentica.cli.interactive.get_console", lambda: console)
+    monkeypatch.setattr("agentica.cli.interactive.console_io.time.monotonic", lambda: 130.0)
+    monkeypatch.setattr("agentica.cli.interactive.console_io.get_console", lambda: console)
 
     _print_interactive_exit_summary(
         SessionState(current_agent=agent),
@@ -116,8 +119,8 @@ def test_interactive_exit_omits_resume_hint_for_unwritten_session(monkeypatch):
     )
     console = MagicMock()
 
-    monkeypatch.setattr("agentica.cli.interactive.time.monotonic", lambda: 130.0)
-    monkeypatch.setattr("agentica.cli.interactive.get_console", lambda: console)
+    monkeypatch.setattr("agentica.cli.interactive.console_io.time.monotonic", lambda: 130.0)
+    monkeypatch.setattr("agentica.cli.interactive.console_io.get_console", lambda: console)
 
     _print_interactive_exit_summary(
         SessionState(current_agent=agent),
@@ -139,7 +142,7 @@ def test_interactive_creates_session_state_before_agent(monkeypatch):
         StopAfterCreate.registry = registry
         raise StopAfterCreate
 
-    monkeypatch.setattr("agentica.cli.interactive.create_agent", create_agent)
+    monkeypatch.setattr("agentica.cli.interactive.app.create_agent", create_agent)
 
     with pytest.raises(StopAfterCreate):
         run_interactive(

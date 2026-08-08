@@ -544,7 +544,7 @@ def count_message_tokens(message: Message, model_id: str = "gpt-4o") -> int:
 
 def count_tokens(
     messages: List["Message"],
-    tools: Optional[List[Union["Function", Dict[str, Any]]]] = None,
+    tools: Optional[Sequence[Union["Function", "ModelTool", Dict[str, Any]]]] = None,
     model_id: str = "gpt-4o",
     output_schema: Optional[Union[Dict, Type[BaseModel]]] = None,
 ) -> int:
