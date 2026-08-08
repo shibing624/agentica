@@ -3781,6 +3781,42 @@ class TestCLIAwareness(unittest.TestCase):
                 finally:
                     registry.stop()
 
+    def test_cmd_ps_shows_full_background_command(self):
+        """/ps must show the complete command, not a 90-char preview."""
+        import shlex
+
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        long_tail = "QIDS=$(paste -sd, qids.txt) && python -m personamem.run " + " ".join(
+            f"--flag-{i} value-{i}" for i in range(20)
+        )
+        with tempfile.TemporaryDirectory() as td:
+            agentica_home = Path(td) / "agentica-home"
+            with patch.dict(os.environ, {"AGENTICA_HOME": str(agentica_home)}, clear=False):
+                registry = BackgroundProcessRegistry(user_id="ps-full-cmd")
+                command = (
+                    f"cd {shlex.quote(td)} && {long_tail} && "
+                    f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+                )
+                item = registry.start(command, cwd=td)
+                ctx = cli_commands.CommandContext(
+                    agent_config={},
+                    current_agent=None,
+                    background_processes=registry,
+                )
+                fake_console = MagicMock()
+                try:
+                    with patch.object(cli_commands, "get_console", return_value=fake_console):
+                        cli_commands._cmd_ps(ctx, "")
+                    rendered = "\n".join(
+                        str(call.args[0]) for call in fake_console.print.call_args_list if call.args
+                    )
+                    self.assertIn(command, rendered)
+                    self.assertNotIn("pas...", rendered)
+                    self.assertIn("--flag-19 value-19", rendered)
+                finally:
+                    registry.stop()
+
     def _make_apply_profile_ctx(self):
         """Build a CommandContext whose mock agent survives a profile switch.
 
@@ -4170,6 +4206,46 @@ class TestBackgroundCompletionNotice(unittest.TestCase):
         self.assertIn("Background terminal #3 failed", rendered)
         self.assertIn("exit 1", rendered)
         self.assertIn("command failed", rendered)
+
+    def test_print_background_completion_retains_full_command_for_ctrl_o(self):
+        """Long background commands stay expandable via Ctrl+O."""
+        import agentica.cli.interactive as it
+        from agentica.cli import display as disp
+        from agentica.tools.background_processes import BackgroundProcessCompleted
+
+        long_command = (
+            "cd /apdcephfs_qy3/share_7435715/flemingxu/nlp/exp/dual_mem_exp/benchmarks && "
+            "DUAL_MEM_EXP=1 python -m personamem.run "
+            + " ".join(f"--qid q{i}" for i in range(30))
+        )
+        with tempfile.TemporaryDirectory() as td:
+            log_path = Path(td) / "term.log"
+            log_path.write_text(f"$ {long_command}\n\nok\n", encoding="utf-8")
+            event = BackgroundProcessCompleted(
+                id="term_3",
+                num=3,
+                pid=789,
+                command=long_command,
+                cwd=td,
+                log_path=str(log_path),
+                started_at=1.0,
+                completed_at=199.0,
+                returncode=0,
+            )
+            fake_console = MagicMock()
+            fake_console.width = 80
+            disp.clear_truncated_blocks()
+
+            with patch.object(it, "get_console", return_value=fake_console):
+                it._print_background_completion(event)
+
+        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        self.assertIn("Background terminal #3 finished", rendered)
+        self.assertIn("Ctrl+O", rendered)
+        blocks = disp.get_truncated_blocks()
+        self.assertTrue(blocks)
+        self.assertEqual(blocks[-1]["content"], long_command)
+        self.assertIn("--qid q29", blocks[-1]["content"])
 
 
 class TestAskActiveFreeze(unittest.TestCase):

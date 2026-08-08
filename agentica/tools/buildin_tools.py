@@ -2010,7 +2010,7 @@ class BuiltinExecuteTool(Tool):
                 f"If it has already outlasted a wait or two, stop waiting: end your "
                 f"turn and let the completion notice the user gets drive the next step."
             )
-        lines = [header, f"Log: {item.log_path}"]
+        lines = [header, f"Command: {item.command}", f"Log: {item.log_path}"]
         if tail:
             lines.append("")
             lines.append(tail)

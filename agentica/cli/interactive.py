@@ -68,6 +68,8 @@ from agentica.cli.display import (
     resumable_session_id,
     get_file_completions,
     get_truncated_blocks,
+    remember_truncated,
+    _wrap_command_lines,
 )
 from agentica.cli.context_usage import measure_context
 from agentica.run_display import RunDisplayEventKind, classify_run_response
@@ -814,6 +816,11 @@ def _print_boxed_result(label: str, question: str, result_text: str, color: str 
 
 
 def _print_background_completion(event: BackgroundProcessCompleted) -> None:
+    """Print a background-terminal completion notice.
+
+    Long commands are folded like execute display: a few wrapped lines stay
+    inline, and the full command is stashed for Ctrl+O.
+    """
     con = get_console()
     ok = event.returncode == 0
     marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
@@ -821,8 +828,28 @@ def _print_background_completion(event: BackgroundProcessCompleted) -> None:
     con.print()
     con.print(
         f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
-        f"(exit {event.returncode}): {rich_escape(event.preview)}"
+        f"(exit {event.returncode})"
     )
+    raw_command = event.command or ""
+    if raw_command:
+        try:
+            width = int(getattr(con, "width", 80) or 80)
+        except (TypeError, ValueError):
+            width = 80
+        width = max(20, width - 2)
+        command_lines = _wrap_command_lines(raw_command, width)
+        visible_lines = command_lines[:3]
+        omitted = len(command_lines) - len(visible_lines)
+        for line in visible_lines:
+            con.print(f"  {rich_escape(line)}")
+        if omitted > 0:
+            con.print(
+                f"  [dim italic]… +{omitted} lines (Ctrl+O to expand)[/dim italic]"
+            )
+            remember_truncated(
+                f"Background · #{event.num} ({event.id})",
+                raw_command,
+            )
     tail = read_log_tail(event.log_path)
     if tail:
         for line in tail.splitlines():

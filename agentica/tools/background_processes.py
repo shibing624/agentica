@@ -27,13 +27,6 @@ def _background_root(cwd: Optional[str], user_id: Optional[str]) -> Path:
     return Path(projects_dir) / safe_user_segment(user_id) / sanitize_path(real_cwd) / "background"
 
 
-def _shorten_command(command: str, limit: int = 90) -> str:
-    text = " ".join(command.split())
-    if len(text) <= limit:
-        return text
-    return text[: limit - 3] + "..."
-
-
 def read_log_tail(log_path: str, max_lines: int = 5, max_chars: int = 2000) -> str:
     """Return the tail of a background command log, without the ``$ cmd`` header."""
     path = Path(log_path)
@@ -98,10 +91,6 @@ class BackgroundProcess:
     def elapsed(self) -> str:
         return _format_elapsed(time.time() - self.started_at)
 
-    @property
-    def preview(self) -> str:
-        return _shorten_command(self.command)
-
 
 @dataclass(frozen=True)
 class BackgroundProcessCompleted:
@@ -121,10 +110,6 @@ class BackgroundProcessCompleted:
     @property
     def elapsed(self) -> str:
         return _format_elapsed(self.completed_at - self.started_at)
-
-    @property
-    def preview(self) -> str:
-        return _shorten_command(self.command)
 
 
 class BackgroundProcessRegistry:

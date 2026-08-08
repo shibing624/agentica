@@ -3449,14 +3449,21 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
         for item in terminals:
             con.print(
                 f"    #{item.num} [dim]{item.id}[/dim] pid={item.pid} "
-                f"elapsed={item.elapsed}  {item.preview}"
+                f"elapsed={item.elapsed}"
             )
+            # Full command on its own lines — /ps is the inspection surface,
+            # so never truncate here (preview is only for one-line status UI).
+            for line in (item.command or "").splitlines() or [""]:
+                con.print(f"      {line}")
             con.print(f"      [dim]log: {item.log_path}[/dim]")
 
     if active_agents:
         con.print(f"  [cyan]Background agents ({len(active_agents)}):[/cyan]")
         for tid, info in active_agents:
-            con.print(f"    #{info['num']} [dim]{tid}[/dim] {info['prompt'][:60]}")
+            prompt = info["prompt"] or ""
+            con.print(f"    #{info['num']} [dim]{tid}[/dim]")
+            for line in prompt.splitlines() or [""]:
+                con.print(f"      {line}")
 
     con.print("  [dim]Use /stop <id|pid|#n> or /stop to stop all.[/dim]")
 
