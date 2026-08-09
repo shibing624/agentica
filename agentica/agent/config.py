@@ -90,8 +90,8 @@ class ToolConfig:
     update_knowledge: bool = False
     # References
     add_references: bool = False
-    # Compression
-    compress_tool_results: bool = False
+    # Compression. Layer 1 (eviction) is unconditional; this holds Layer 2,
+    # which is built automatically when left as None.
     compression_manager: Optional[Any] = None
 
     # ---- Deep / Agentic capabilities (Model-layer hooks) ----

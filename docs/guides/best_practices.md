@@ -587,7 +587,6 @@ from agentica.agent.config import ToolConfig
 
 agent = Agent(
     tool_config=ToolConfig(
-        compress_tool_results=True,
         compression_manager=CompressionManager(
             compress_token_limit=50000,
         ),

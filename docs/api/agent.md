@@ -242,8 +242,7 @@ from agentica.agent.config import ToolConfig
 | `tool_choice` | `str \| Dict` | `None` | 工具选择策略 |
 | `search_knowledge` | `bool` | `True` | 允许 Agent 主动搜索知识库 |
 | `add_references` | `bool` | `False` | 添加知识库引用 |
-| `compress_tool_results` | `bool` | `False` | 压缩工具结果（节省 token） |
-| `compression_manager` | `CompressionManager` | `None` | 自定义压缩管理器实例 |
+| `compression_manager` | `CompressionManager` | `None` | 自定义 Layer 2 压缩管理器；留空时自动创建 |
 | `context_overflow_threshold` | `float` | `0.0` | context_window 使用率触发截断的阈值（0-1，0=禁用，推荐 0.8） |
 
 ## WorkspaceMemoryConfig

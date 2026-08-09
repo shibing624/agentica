@@ -84,7 +84,7 @@ class DeepAgent(Agent):
     not as the minimal SDK core contract.
 
     Enabled by default:
-    - 5-stage compression pipeline (compress_tool_results=True)
+    - Two-layer compression pipeline (eviction + LLM summarisation)
     - Context overflow handling at 80% (context_overflow_threshold=0.8)
     - MCP auto-loading from local mcp_config.json/yaml when available
     - Workspace memory with relevance recall (max_memory_entries=10)
@@ -225,7 +225,6 @@ class DeepAgent(Agent):
         if tool_config is None:
             tool_config = ToolConfig(
                 auto_load_mcp=True,
-                compress_tool_results=True,
                 context_overflow_threshold=0.8,
                 permission_mode=permission_mode,
             )

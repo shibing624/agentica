@@ -66,7 +66,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 from agentica.runner import Runner
 from agentica.cli.interactive import run_interactive
 from agentica.cli.commands.runtime import _cmd_steer   # 私有命令实现走子模块
-from agentica.runner.compress import evict_tool_results  # 压缩逻辑不在 runner 包根
+from agentica.runner.compress import evict_context  # 压缩逻辑不在 runner 包根
 ```
 
 Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，**状态全部存在 Agent 的 dataclass fields 上**：
@@ -128,27 +128,24 @@ Model Response
 
 ## 上下文压缩机制
 
-当消息历史积累到一定长度时，Agentica 自动触发**三阶段压缩流水线**：
+让一个超窗口的请求装下只有两种办法，按代价从低到高尝试：
 
 ```
-触发条件：token_count >= context_window × threshold（默认 0.8）
+Layer 1 淘汰（免费，无 LLM）:
+    触发：token_count >= context_window × 0.7
+    按最旧优先把 tool result 内容换成写明调用的占位符
+    同时收缩过大的 tool_call 参数字符串（JSON 仍然合法）
+    降回 context_window × 0.5 就停；模型还没看过的当前批次永不淘汰
 
-Stage 1a: 截断工具结果
-    最旧的 tool result 内容截断为前 N chars
-    保留 "[truncated]" 标记和文件路径
-
-Stage 1b: 丢弃旧消息
-    从最旧的 assistant+tool 轮次开始丢弃
-    保留 system message + 最近 K 轮
-
-Stage 2（可选，use_llm_compression=True）:
-    用轻量 LLM 摘要旧工具结果
-    LLM：原始内容 → 精简摘要（保留关键数据）
-
-Auto Compact（手动或自动触发）:
+Layer 2 摘要（一次 LLM 调用，不可逆）:
+    淘汰兜不住时才走这层
     整个对话历史 → LLM 摘要 → [Context compressed]\n{summary}
+    保留 system prompt 和从最后一条 user 消息起的整个尾部
     CompactBoundary 写入 Session Log，恢复时从此处开始
+    provider 支持时优先用服务端原生 compact 做同一件事
 ```
+
+淘汰没有「保留最近 N 条」这类计数参数：任何固定条数都会输给 N+1 大小的并行批次，最近的结果靠「够到之前就停」自然幸存。
 
 **大工具结果持久化**（`tool_result_storage`）：单个工具结果超过阈值时，完整内容写入磁盘，上下文中只保留预览 + 文件路径：
 

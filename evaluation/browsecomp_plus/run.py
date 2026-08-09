@@ -1082,15 +1082,10 @@ async def main() -> None:
             instructions=react_instructions,
             tool_config=ToolConfig(
                 tool_call_limit=args.max_rounds,
-                compress_tool_results=True,
                 compression_manager=CompressionManager(
                     model=OpenAIChat(id=args.model),
-                    compress_tool_results=True,
                     compress_token_limit=compress_token_limit,
                     compress_target_token_limit=int(main_model.context_window * 0.5),
-                    truncate_head_chars=200,
-                    keep_recent_rounds=3,
-                    use_llm_compression=True,
                 ),
             ),
         )

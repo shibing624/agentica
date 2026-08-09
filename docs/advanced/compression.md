@@ -1,37 +1,50 @@
 # Context Compression
 
-Agentica 提供多层上下文压缩策略，防止长对话或大量工具输出导致 token 超限。使用 `OpenAIResponses` 且服务端支持 `/responses/compact` 时，优先保留模型原生状态；其他模型继续使用可跨 provider 的本地压缩。
+Agentica 提供两层上下文压缩策略，防止长对话或大量工具输出导致 token 超限。使用 `OpenAIResponses` 且服务端支持 `/responses/compact` 时，优先保留模型原生状态；其他模型继续使用可跨 provider 的本地压缩。
 
-## 压缩架构
+## 两层设计
+
+压缩本质上只有两种操作，按代价从低到高尝试：
+
+| 层 | 做什么 | 代价 | 可逆性 |
+|----|--------|------|--------|
+| Layer 1 淘汰 | 把最旧的工具结果换成写明调用的占位符；收缩过大的 tool_call 参数 | 免费，无 LLM | 模型可重发那次调用 |
+| Layer 2 摘要 | 把整段历史换成一份 LLM 摘要 | 一次 LLM 调用 | 不可逆 |
+
+在这两层之前还有一个 **Layer 0**，它不是压缩而是工具输出策略：单条结果超过阈值时在产生的那一刻就落盘，从不以全量进入上下文。
 
 ```
 Tool 输出 (可能很大)
     |
     v
-[Tool Result Storage] -- 超大输出持久化到磁盘
+[Layer 0 Tool Result Storage] -- 超大输出产生时即落盘
     |
     v
 Context Messages
     |
     v
-[Native Compact] -- Responses 原生 checkpoint（优先）
+[Layer 2 Native Compact] -- Responses 原生 checkpoint（服务端做同一件事，优先）
     |
     +--> 成功：保留 portable transcript，后续原样回放 checkpoint
-    +--> 失败：[Micro] -> [Rule-based] -> [LLM Summary]
-                                      |
-                                      +--> prompt-too-long: Reactive Compact
+    +--> 失败/不支持：[Layer 1 淘汰] -> [Layer 2 LLM 摘要]
+                                              |
+                                              +--> prompt-too-long: 强制 Layer 2
 ```
 
-实际执行顺序如下：
+### Layer 1：淘汰（`agentica.compression.evict`）
 
-1. 超大工具结果持久化到磁盘。
-2. `OpenAIResponses` 尝试 provider-native compact。
-3. 工具结果淘汰：上下文吃紧时淘汰最旧的工具结果。
-4. Rule-based 截断旧结果并丢弃旧轮次。
-5. 本地 LLM summary 压缩为可移植文本。
-6. API 返回 `prompt_too_long` 时强制执行本地 reactive compact 后重试。
+只有两个参数，没有「保留最近 N 条」这类计数：
 
-原生 compact 成功后会直接跳过第 3～5 步，避免先破坏历史再调用官方端点。原生调用失败会输出明确 warning 并继续本地流水线；第 6 步始终使用本地压缩，因为 `/responses/compact` 的输入本身也必须仍在模型 context window 内。
+- **`EVICT_THRESHOLD_RATIO = 0.7`** — 占用低于窗口 70% 时一条都不动。清掉一条窗口本来放得下的结果是净亏：省下的上下文没人要，模型却要重跑工具才能拿回来。
+- **`EVICT_TARGET_RATIO = 0.5`** — 超过阈值后按最旧优先淘汰，降回 50% 就停。目标低于阈值是为了迟滞，否则每轮刚跌破阈值又超，变成持续抖动。
+
+最近的结果之所以幸存，是因为淘汰在够到它们之前就停了。**消息尾部那一段连续的 `role="tool"`（模型还没看过的当前批次）整体排除在外**：任何固定条数都会输给 count+1 大小的并行批次，这正是「读了又读」死循环的成因。
+
+占位符写明是哪个调用（`read_file(file_path=..., offset=...)`），模型据此可以原样重发。它**不**先把内容复制到磁盘——取回同样是一次工具调用，而对文件读取来说原路径上的内容比快照更新鲜。
+
+### Layer 2：摘要（`CompressionManager`）
+
+淘汰兜不住时才走这层。它总是可用的（`ToolConfig.compression_manager` 留空时自动创建），否则长会话除了被 provider 拒绝没有别的出路。
 
 ## Responses 原生 Compact
 
@@ -62,43 +75,27 @@ agent = Agent(
 
 跨 provider fallback 前，Agentica 会用现有本地 summary 压缩 portable transcript。原生 endpoint 不支持、请求失败或 checkpoint 身份不匹配时，也不会把 opaque 数据伪装成普通摘要。
 
-## CompressionManager
-
-### 基本配置
+## CompressionManager 配置
 
 ```python
 from agentica import Agent, OpenAIChat, CompressionManager
+from agentica.agent.config import ToolConfig
 
 agent = Agent(
     model=OpenAIChat(id="gpt-4o"),
-    compression_manager=CompressionManager(
-        compress_tool_results=True,
-        compress_token_limit=100000,       # 触发压缩的 token 阈值
-        compress_target_token_limit=60000, # 压缩后的目标 token 数
+    tool_config=ToolConfig(
+        compression_manager=CompressionManager(
+            model=OpenAIChat(id="gpt-4o-mini"),  # 用便宜模型做摘要
+            compress_token_limit=100000,         # 触发摘要的 token 阈值
+            compress_target_token_limit=60000,   # 摘要后的目标 token 数
+        ),
     ),
 )
 ```
 
-### 本地两阶段压缩策略
+两个阈值都可以省略：留空时运行时按 `model.context_window` 推导（80% 触发 / 50% 目标）。`model` 省略时使用调用方传入的活跃模型。
 
-**Stage 1 -- Rule-based（免费，始终先执行）**：
-
-- 截断最旧的未压缩工具结果到 `truncate_head_chars` 字符
-- 如果仍超限，丢弃最旧的消息轮次，只保留最近 `keep_recent_rounds` 轮
-
-**Stage 2 -- LLM-based（可选，消耗 token）**：
-
-- 使用轻量级 LLM 智能摘要工具结果
-- 保留关键信息：数字、日期、实体、标识符
-- 删除冗余内容：过渡语、元评论、格式
-
-```python
-manager = CompressionManager(
-    model=OpenAIChat(id="gpt-4o-mini"),  # 用便宜模型做摘要
-    compress_tool_results=True,
-    use_llm_compression=True,
-)
-```
+摘要会保留两样东西：**system prompt**（否则本轮剩下的调用没有任何指令）和**从最后一条 user 消息开始的整个尾部**（否则对话以 assistant 结尾，provider 会直接拒绝）。
 
 ## Tool Result Storage
 
@@ -155,7 +152,7 @@ class CompactionTracker(RunHooks):
 2. 原生 compact 不可用或失败时，进入本地压缩
 3. 本地 auto-compact 带有 circuit-breaker，防止连续失败重复调用
 
-手动 `/compact [instructions]` 使用相同优先级：Responses 原生 endpoint 优先，失败后回退到本地 LLM summary，再失败则使用 rule-based 压缩。
+手动 `/compact [instructions]` 使用相同优先级：Responses 原生 endpoint 优先，失败后回退到本地 LLM summary，再失败则使用 CLI 内置的拼接式摘要。
 
 ## 下一步
 

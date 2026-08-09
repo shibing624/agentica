@@ -555,7 +555,6 @@ agent = Agent(
     tools=[...],
     tool_config=ToolConfig(
         tool_call_limit=20,            # 单次 run 最多调用 20 次工具
-        compress_tool_results=True,    # 自动压缩大工具结果（节省 token）
         context_overflow_threshold=0.8, # 上下文达到 80% 时触发压缩
     ),
 )

@@ -94,39 +94,34 @@ class TestContextOverflowHandling(unittest.TestCase):
         result = asyncio.run(hook(messages, []))
         self.assertFalse(result)
 
-    def test_compression_tried_before_eviction(self):
-        """When a compression_manager is wired, compress() must run before FIFO evict.
+    def test_eviction_tried_before_dropping_messages(self):
+        """Layer 1 eviction runs first; if it suffices, nothing is dropped.
 
-        If compression alone brings usage below the hard limit, no messages are
-        evicted. This preserves information when possible.
+        Eviction leaves a placeholder naming the call, so the model can re-issue
+        it. Dropping the message loses the turn outright, which is why it is
+        only reached when eviction was not enough.
         """
         agent = _make_agent(ToolConfig(context_overflow_threshold=0.5))
         agent.update_model()
         agent.model.context_window = 200
 
-        # Wire a mock compression manager that "compresses" by replacing content
-        # with a short stub — dropping total chars below the hard limit.
-        async def fake_compress(msgs, tools=None, model=None, response_format=None, **_kw):
-            for m in msgs:
-                if m.role != "system":
-                    m.content = "x"
-        cm = MagicMock()
-        cm.compress = AsyncMock(side_effect=fake_compress)
-        agent.tool_config.compression_manager = cm
-
         hook = agent._build_pre_tool_hook()
         messages = [
             Message(role="system", content="sys"),
             Message(role="user", content="A" * 200),
-            Message(role="assistant", content="B" * 200),
-            Message(role="user", content="C" * 200),
+            Message(role="assistant", tool_calls=[{"id": "1", "function": {"name": "read_file"}}]),
+            Message(role="tool", tool_call_id="1", tool_name="read_file",
+                    content=" ".join(f"line{i}" for i in range(200))),
+            Message(role="assistant", content="done"),
         ]
         n_before = len(messages)
+
         result = asyncio.run(hook(messages, []))
+
         self.assertFalse(result)
-        cm.compress.assert_awaited_once()
-        # With effective compression, no eviction should occur.
-        self.assertEqual(len(messages), n_before, "Compression alone should suffice")
+        self.assertTrue(messages[3]._evicted, "the old tool result should be evicted")
+        self.assertIn("read_file(", messages[3].content)
+        self.assertEqual(len(messages), n_before, "Eviction alone should suffice")
 
 class TestPostToolHook(unittest.TestCase):
     """_build_post_tool_hook: None when no TodoTool, set when TodoTool is present."""

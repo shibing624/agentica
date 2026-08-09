@@ -315,47 +315,43 @@ class TestToolPairSanitization:
     """Test tool_call/result pair sanitization in compression."""
 
     def test_orphan_result_removed(self):
-        from agentica.compression.manager import CompressionManager
+        from agentica.compression import sanitize_tool_pairs
         from agentica.model.message import Message
-        cm = CompressionManager()
         messages = [
             Message(role="user", content="hello"),
             Message(role="tool", tool_call_id="orphan_id", content="some result"),
         ]
-        result = cm._sanitize_tool_pairs(messages)
+        result = sanitize_tool_pairs(messages)
         # Orphan tool result should be removed
         tool_msgs = [m for m in result if m.role == "tool"]
         assert len(tool_msgs) == 0
 
     def test_missing_result_gets_placeholder(self):
-        from agentica.compression.manager import CompressionManager
+        from agentica.compression import sanitize_tool_pairs
         from agentica.model.message import Message
-        cm = CompressionManager()
         messages = [
             Message(role="assistant", content="", tool_calls=[{"id": "tc_1", "type": "function", "function": {"name": "test", "arguments": "{}"}}]),
         ]
-        result = cm._sanitize_tool_pairs(messages)
+        result = sanitize_tool_pairs(messages)
         tool_msgs = [m for m in result if m.role == "tool"]
         assert len(tool_msgs) == 1
         assert tool_msgs[0].tool_call_id == "tc_1"
         assert "removed during compression" in tool_msgs[0].content
 
     def test_matched_pairs_untouched(self):
-        from agentica.compression.manager import CompressionManager
+        from agentica.compression import sanitize_tool_pairs
         from agentica.model.message import Message
-        cm = CompressionManager()
         messages = [
             Message(role="assistant", content="", tool_calls=[{"id": "tc_1", "type": "function", "function": {"name": "test", "arguments": "{}"}}]),
             Message(role="tool", tool_call_id="tc_1", content="result"),
         ]
-        result = cm._sanitize_tool_pairs(messages)
+        result = sanitize_tool_pairs(messages)
         assert len(result) == 2  # both preserved
 
     def test_placeholder_inserted_after_assistant_not_at_end(self):
         """Placeholder must appear right after its assistant msg, not at tail."""
-        from agentica.compression.manager import CompressionManager
+        from agentica.compression import sanitize_tool_pairs
         from agentica.model.message import Message
-        cm = CompressionManager()
         messages = [
             Message(role="user", content="step 1"),
             Message(role="assistant", content="", tool_calls=[
@@ -367,7 +363,7 @@ class TestToolPairSanitization:
             Message(role="user", content="step 2"),
             Message(role="assistant", content="done"),
         ]
-        result = cm._sanitize_tool_pairs(messages)
+        result = sanitize_tool_pairs(messages)
 
         # Find the assistant with tool_calls
         asst_idx = next(i for i, m in enumerate(result) if m.role == "assistant" and m.tool_calls)
@@ -384,9 +380,8 @@ class TestToolPairSanitization:
 
     def test_multiple_tool_calls_preserve_order(self):
         """Multiple tool_call results must stay in tool_calls declaration order."""
-        from agentica.compression.manager import CompressionManager
+        from agentica.compression import sanitize_tool_pairs
         from agentica.model.message import Message
-        cm = CompressionManager()
         messages = [
             Message(role="assistant", content="", tool_calls=[
                 {"id": "tc_a", "type": "function", "function": {"name": "x", "arguments": "{}"}},
@@ -398,7 +393,7 @@ class TestToolPairSanitization:
             Message(role="tool", tool_call_id="tc_b", content="b_result"),
             Message(role="tool", tool_call_id="tc_a", content="a_result"),
         ]
-        result = cm._sanitize_tool_pairs(messages)
+        result = sanitize_tool_pairs(messages)
         # After sanitization, results must follow tool_calls order: tc_a, tc_b, tc_c
         assert result[1].tool_call_id == "tc_a"
         assert result[2].tool_call_id == "tc_b"
@@ -512,7 +507,6 @@ class TestAuxiliaryModel:
         agent = Agent(
             model=OpenAIChat(id="gpt-4o", api_key="fake_key"),
             auxiliary_model=auxiliary,
-            tool_config=ToolConfig(compress_tool_results=True),
         )
         cm = agent.tool_config.compression_manager
         assert cm is not None

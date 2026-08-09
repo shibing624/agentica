@@ -5,10 +5,14 @@
 """
 from agentica.compression.manager import CompressionManager
 from agentica.compression.evict import (
+    evict_context,
     evict_tool_results,
+    shrink_tool_call_arguments,
+    EvictionResult,
     EVICT_THRESHOLD_RATIO,
     EVICT_TARGET_RATIO,
 )
+from agentica.compression.tool_pairs import sanitize_tool_pairs
 from agentica.compression.tool_result_storage import (
     maybe_persist_result,
     enforce_tool_result_budget,
@@ -23,7 +27,11 @@ from agentica.compression.tool_result_classification import (
 
 __all__ = [
     "CompressionManager",
+    "evict_context",
     "evict_tool_results",
+    "shrink_tool_call_arguments",
+    "EvictionResult",
+    "sanitize_tool_pairs",
     "EVICT_THRESHOLD_RATIO",
     "EVICT_TARGET_RATIO",
     "maybe_persist_result",

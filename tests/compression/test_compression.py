@@ -198,31 +198,47 @@ class TestToolCallArgumentShrinking(unittest.TestCase):
 
         self.assertEqual(shrink_tool_call_arguments_json(args), args)
 
-    def test_compression_manager_shrinks_assistant_tool_call_arguments(self):
-        from agentica.compression.manager import CompressionManager
-
-        long_content = "z" * 300
-        messages = [
+    def _write_file_call(self, content):
+        return [
             Message(role="user", content="write file"),
             Message(role="assistant", tool_calls=[{
                 "id": "call_1",
                 "type": "function",
                 "function": {
                     "name": "write_file",
-                    "arguments": json.dumps({"content": long_content, "path": "a.txt"}),
+                    "arguments": json.dumps({"content": content, "path": "a.txt"}),
                 },
             }]),
             Message(role="tool", tool_call_id="call_1", content="ok"),
         ]
 
-        cm = CompressionManager(truncate_head_chars=20)
-        with patch("agentica.compression.manager.count_tokens", return_value=10):
-            asyncio.run(cm.compress(messages))
+    def test_shrinks_assistant_tool_call_arguments_under_pressure(self):
+        """A write payload lives in the assistant message, out of eviction's reach."""
+        from agentica.compression.evict import shrink_tool_call_arguments
 
-        args = messages[1].tool_calls[0]["function"]["arguments"]
-        parsed = json.loads(args)
+        messages = self._write_file_call("z" * 300)
+
+        shrunk = shrink_tool_call_arguments(
+            messages, context_tokens=9_000, context_window=10_000, max_string_chars=20,
+        )
+
+        self.assertEqual(shrunk, 1)
+        parsed = json.loads(messages[1].tool_calls[0]["function"]["arguments"])
         self.assertEqual(parsed["content"], "z" * 20 + "...[truncated]")
         self.assertEqual(parsed["path"], "a.txt")
+
+    def test_leaves_tool_call_arguments_alone_when_roomy(self):
+        from agentica.compression.evict import shrink_tool_call_arguments
+
+        messages = self._write_file_call("z" * 300)
+
+        shrunk = shrink_tool_call_arguments(
+            messages, context_tokens=1_000, context_window=10_000, max_string_chars=20,
+        )
+
+        self.assertEqual(shrunk, 0)
+        parsed = json.loads(messages[1].tool_calls[0]["function"]["arguments"])
+        self.assertEqual(parsed["content"], "z" * 300)
 
 
 class TestSanitizePath(unittest.TestCase):
@@ -403,17 +419,9 @@ class TestCompressionManagerInit(unittest.TestCase):
     def test_defaults(self):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
-        self.assertTrue(cm.compress_tool_results)
+        self.assertIsNone(cm.model)
         self.assertIsNone(cm.compress_token_limit)
-        self.assertEqual(cm.truncate_head_chars, 150)
-        self.assertEqual(cm.keep_recent_rounds, 3)
-        self.assertFalse(cm.use_llm_compression)
-
-    def test_default_prompt_marks_summary_as_reference_only(self):
-        from agentica.compression.manager import DEFAULT_COMPRESSION_PROMPT
-
-        self.assertIn("REFERENCE ONLY", DEFAULT_COMPRESSION_PROMPT)
-        self.assertIn("NOT active instructions", DEFAULT_COMPRESSION_PROMPT)
+        self.assertIsNone(cm.compress_target_token_limit)
 
     def test_target_from_trigger(self):
         from agentica.compression.manager import CompressionManager
@@ -442,96 +450,8 @@ class TestCompressionManagerResolveLimits(unittest.TestCase):
         self.assertEqual(cm.compress_token_limit, 5000, "Should not override explicit value")
 
 
-class TestCompressionReport(unittest.TestCase):
-    """CompressionManager exposes a compact report after compression."""
-
-    def test_compress_records_last_report(self):
-        from agentica.compression.manager import CompressionManager
-
-        messages = [
-            Message(role="user", content="start"),
-            Message(role="assistant", tool_calls=[{"id": "old", "function": {"name": "search", "arguments": "{}"}}]),
-            Message(role="tool", tool_call_id="old", content="old result " + ("a" * 100)),
-            Message(role="assistant", tool_calls=[{"id": "new", "function": {"name": "search", "arguments": "{}"}}]),
-            Message(role="tool", tool_call_id="new", content="new result " + ("b" * 100)),
-        ]
-        cm = CompressionManager(truncate_head_chars=20, keep_recent_rounds=1)
-
-        with patch("agentica.compression.manager.count_tokens", return_value=10):
-            asyncio.run(cm.compress(messages))
-
-        report = cm.get_stats()["last_report"]
-        self.assertEqual(report["trigger"], "manual")
-        self.assertEqual(report["messages_before"], 5)
-        self.assertEqual(report["messages_after"], len(messages))
-        self.assertGreaterEqual(report["tool_results_pruned"], 1)
-        self.assertFalse(report["llm_summary_used"])
-        self.assertIsNone(report["task_anchor_preserved"])
-
-    def test_runner_attaches_compression_report_to_run_metrics(self):
-        from agentica.compression.manager import CompressionManager
-        from agentica.runner import Runner
-
-        messages = [
-            Message(role="user", content="start"),
-            Message(role="assistant", tool_calls=[{"id": "old", "function": {"name": "search", "arguments": "{}"}}]),
-            Message(role="tool", tool_call_id="old", content="old result " + ("a" * 100)),
-            Message(role="assistant", tool_calls=[{"id": "new", "function": {"name": "search", "arguments": "{}"}}]),
-            Message(role="tool", tool_call_id="new", content="new result " + ("b" * 100)),
-        ]
-        cm = CompressionManager(compress_token_limit=1, truncate_head_chars=20, keep_recent_rounds=1)
-        agent = SimpleNamespace(
-            _event_callback=None,
-            _parent_run_id=None,
-            _run_hooks=None,
-            name="Agent",
-            run_id="run_1",
-            run_response=RunResponse(metrics={}),
-            tool_config=SimpleNamespace(compress_tool_results=True, compression_manager=cm),
-            task_anchor=None,
-            workspace=None,
-        )
-        model = SimpleNamespace(
-            id="gpt-4o",
-            tools=[],
-            context_window=None,
-            supports_native_compaction=False,
-            _cost_tracker=None,
-        )
-
-        from agentica.model.loop_state import LoopState
-
-        with patch("agentica.compression.manager.count_tokens", return_value=10):
-            asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
-
-        report = agent.run_response.metrics["compression"]["last_report"]
-        self.assertEqual(report["trigger"], "threshold")
-        self.assertGreaterEqual(report["tool_results_pruned"], 1)
-
-    def test_llm_tool_result_compression_redacts_prompt_input(self):
-        from agentica.compression.manager import CompressionManager
-
-        secret = "sk-abcdefghijklmnopqrstuvwxyz1234567890"
-
-        class FakeCompressionModel:
-            def __init__(self):
-                self.messages = None
-
-            async def response(self, messages):
-                self.messages = messages
-                return SimpleNamespace(content=f"compressed {secret}")
-
-        model = FakeCompressionModel()
-        cm = CompressionManager(model=model)
-        msg = Message(role="tool", tool_name="diagnostic", content=f"OPENAI_API_KEY={secret}")
-
-        result = asyncio.run(cm._compress_tool_result_llm(msg))
-
-        self.assertNotIn(secret, result)
-        self.assertIn("REDACTED", result)
-        captured = model.messages[1].content
-        self.assertNotIn(secret, captured)
-        self.assertIn("REDACTED", captured)
+class TestSummarisationRedaction(unittest.TestCase):
+    """Secrets in the transcript must not reach the summarisation model."""
 
     def test_conversation_summary_redacts_prompt_input(self):
         from agentica.compression.manager import CompressionManager
@@ -558,66 +478,6 @@ class TestCompressionReport(unittest.TestCase):
         self.assertIn("REDACTED", model.prompt)
         self.assertNotIn(secret, summary)
         self.assertIn("REDACTED", summary)
-
-
-class TestCompressionManagerShouldCompress(unittest.TestCase):
-    """should_compress triggers based on token count."""
-
-    def test_disabled_returns_false(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(compress_tool_results=False)
-        msgs = [Message(role="user", content="hi")]
-        self.assertFalse(cm.should_compress(msgs))
-
-    def test_under_threshold_returns_false(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(compress_token_limit=100_000)
-        msgs = [Message(role="user", content="hi")]
-        with patch("agentica.compression.manager.count_tokens", return_value=1000):
-            self.assertFalse(cm.should_compress(msgs))
-
-    def test_over_threshold_returns_true(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(compress_token_limit=1000)
-        msgs = [Message(role="user", content="hi")]
-        with patch("agentica.compression.manager.count_tokens", return_value=2000):
-            self.assertTrue(cm.should_compress(msgs))
-
-
-class TestCompressionManagerDropOldMessages(unittest.TestCase):
-    """_drop_old_messages preserves system + first user + recent rounds."""
-
-    def test_preserves_system_and_first_user(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(keep_recent_rounds=1)
-        msgs = [
-            Message(role="system", content="system prompt"),
-            Message(role="user", content="first user msg"),
-            Message(role="assistant", content="old reply", tool_calls=[{"id": "1"}]),
-            Message(role="tool", content="old tool result", tool_call_id="1"),
-            Message(role="assistant", content="old reply 2", tool_calls=[{"id": "2"}]),
-            Message(role="tool", content="old tool result 2", tool_call_id="2"),
-            Message(role="assistant", content="recent reply", tool_calls=[{"id": "3"}]),
-            Message(role="tool", content="recent tool result", tool_call_id="3"),
-        ]
-        dropped = asyncio.run(cm._drop_old_messages(msgs))
-        self.assertGreater(dropped, 0)
-        # System and first user always preserved
-        self.assertEqual(msgs[0].role, "system")
-        self.assertEqual(msgs[1].role, "user")
-        self.assertEqual(msgs[1].content, "first user msg")
-
-    def test_not_enough_rounds_no_drop(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(keep_recent_rounds=5)
-        msgs = [
-            Message(role="system", content="sys"),
-            Message(role="user", content="hi"),
-            Message(role="assistant", content="reply", tool_calls=[{"id": "1"}]),
-            Message(role="tool", content="result", tool_call_id="1"),
-        ]
-        dropped = asyncio.run(cm._drop_old_messages(msgs))
-        self.assertEqual(dropped, 0)
 
 
 class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
@@ -773,69 +633,20 @@ class TestCompressionManagerAutoCompact(unittest.TestCase):
 
 
 class TestCompressionManagerGetStats(unittest.TestCase):
-    """get_stats and get_compression_ratio."""
+    """get_stats returns a snapshot the caller cannot mutate."""
 
     def test_empty_stats(self):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
-        stats = cm.get_stats()
-        self.assertIn("compression_ratio", stats)
-        self.assertEqual(stats["compression_ratio"], 1.0)
+        self.assertEqual(cm.get_stats(), {})
 
-    def test_ratio_after_compression(self):
+    def test_stats_are_copied(self):
         from agentica.compression.manager import CompressionManager
         cm = CompressionManager()
-        cm.stats["llm_original_size"] = 10000
-        cm.stats["llm_compressed_size"] = 2000
-        self.assertAlmostEqual(cm.get_compression_ratio(), 0.2)
-
-
-class TestCompressionManagerCompress(unittest.TestCase):
-    """compress() runs the two-stage pipeline."""
-
-    def test_disabled_does_nothing(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(compress_tool_results=False)
-        msgs = [Message(role="user", content="hi")]
-        asyncio.run(cm.compress(msgs))
-        self.assertEqual(len(msgs), 1)
-
-    def test_stage1a_truncates(self):
-        from agentica.compression.manager import CompressionManager
-        cm = CompressionManager(
-            compress_token_limit=100,
-            compress_target_token_limit=50,
-            truncate_head_chars=20,
-            keep_recent_rounds=1,
-        )
-        msgs = [
-            Message(role="system", content="sys"),
-            Message(role="user", content="hi"),
-            Message(role="assistant", content="old", tool_calls=[{"id": "1"}]),
-            Message(
-                role="tool",
-                content="x" * 1000,
-                tool_call_id="1",
-                tool_name="read_file",
-                tool_args={"file_path": "src/example.py"},
-            ),
-            Message(role="assistant", content="recent", tool_calls=[{"id": "2"}]),
-            Message(role="tool", content="y" * 100, tool_call_id="2"),
-        ]
-        with patch("agentica.compression.manager.count_tokens", return_value=10):
-            asyncio.run(cm.compress(msgs))
-        # The old tool result (index 3) should have been truncated/persisted
-        old_tool = msgs[3]
-        # Either persisted (has <persisted-output>) or truncated
-        self.assertTrue(
-            "<persisted-output>" in str(old_tool.content) or
-            old_tool.compressed_content is not None or
-            len(str(old_tool.content)) <= 1000
-        )
-        self.assertEqual(
-            cm.get_stats()["last_report"]["evicted_file_reads"],
-            ["src/example.py"],
-        )
+        cm.stats["auto_compact_count"] = 2
+        stats = cm.get_stats()
+        stats["auto_compact_count"] = 99
+        self.assertEqual(cm.stats["auto_compact_count"], 2)
 
 
 if __name__ == "__main__":

@@ -390,13 +390,11 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         agent.model.response = fake_response
 
         cm = CompressionManager()
-        agent.tool_config.compress_tool_results = True
         agent.tool_config.compression_manager = cm
         return agent, cm
 
     def _run_with_compaction(self, agent, cm):
-        with patch.object(cm, "should_compress", return_value=False), \
-             patch.object(cm, "_should_auto_compact", return_value=True), \
+        with patch.object(cm, "_should_auto_compact", return_value=True), \
              patch.object(cm, "_summarise_conversation",
                           new_callable=AsyncMock, return_value="a summary of earlier turns"):
             return agent.run_sync("current question")
@@ -431,8 +429,7 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
     def test_uncompacted_run_still_uses_the_prefix_slice(self):
         """No compaction: the existing slice behaviour must be untouched."""
         agent, cm = self._agent_with_history(num_runs=1)
-        with patch.object(cm, "should_compress", return_value=False), \
-             patch.object(cm, "_should_auto_compact", return_value=False):
+        with patch.object(cm, "_should_auto_compact", return_value=False):
             agent.run_sync("current question")
 
         self.assertEqual(len(agent.working_memory.runs), 2)
@@ -520,7 +517,6 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model = OpenAIResponses(id="gpt-5.6-sol", api_key="fake_openai_key")
         agent = Agent(model=model)
         cm = CompressionManager()
-        agent.tool_config.compress_tool_results = True
         agent.tool_config.compression_manager = cm
         return agent, model, cm
 
@@ -544,17 +540,16 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model.compact_context = AsyncMock(return_value=result)
 
         with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.compress.evict_tool_results") as micro, \
-             patch.object(cm, "should_compress") as local_rule, \
+             patch("agentica.runner.compress.evict_context") as evict, \
              patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
         self.assertEqual(messages[-1].provider_checkpoint, result.checkpoint)
-        micro.assert_not_called()
-        local_rule.assert_not_called()
+        evict.assert_not_called()
         local_auto.assert_not_called()
 
     def test_native_failure_falls_back_to_local_pipeline(self):
+        from agentica.compression import EvictionResult
         from agentica.runner import Runner
 
         agent, model, cm = self._agent()
@@ -563,14 +558,13 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model.compact_context = AsyncMock(side_effect=RuntimeError("404 compact unsupported"))
 
         with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.compress.evict_tool_results", return_value=0) as micro, \
-             patch.object(cm, "should_compress", return_value=False), \
+             patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
              patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        micro.assert_called_once()
-        self.assertIs(micro.call_args.args[0], messages)
-        self.assertEqual(micro.call_args.kwargs["context_window"], model.context_window)
+        evict.assert_called_once()
+        self.assertIs(evict.call_args.args[0], messages)
+        self.assertEqual(evict.call_args.kwargs["context_window"], model.context_window)
         local_auto.assert_awaited_once()
         self.assertIsNone(messages[-1].provider_checkpoint)
 

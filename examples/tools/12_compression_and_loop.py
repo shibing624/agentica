@@ -94,32 +94,25 @@ def demo_auto_compact_config():
     from agentica.compression.manager import CompressionManager
 
     print("=" * 60)
-    print("Demo 2: CompressionManager 三层压缩配置")
+    print("Demo 2: Layer 2 — CompressionManager（LLM 摘要）")
     print("=" * 60)
+    print("  淘汰兜不住时才走这层：花一次 LLM 调用把历史换成摘要，不可逆\n")
 
-    # 配置 1: 默认（规则截断，无 LLM）
-    cm1 = CompressionManager(
+    # 显式阈值
+    cm = CompressionManager(
         compress_token_limit=80_000,
         compress_target_token_limit=40_000,
     )
-    print(f"  配置 1 (规则截断):")
-    print(f"    触发阈值: {cm1.compress_token_limit:,} tokens")
-    print(f"    目标阈值: {cm1.compress_target_token_limit:,} tokens")
-    print(f"    LLM 压缩: {cm1.use_llm_compression}")
+    print(f"  触发阈值: {cm.compress_token_limit:,} tokens")
+    print(f"  目标阈值: {cm.compress_target_token_limit:,} tokens")
 
-    # 配置 2: 启用 LLM 压缩（用轻量模型）
-    cm2 = CompressionManager(
-        compress_token_limit=60_000,
-        use_llm_compression=True,
-    )
-    print(f"\n  配置 2 (LLM 压缩):")
-    print(f"    触发阈值: {cm2.compress_token_limit:,} tokens")
-    print(f"    LLM 压缩: {cm2.use_llm_compression}")
+    # 不传阈值时从 model.context_window 推导（80% 触发 / 50% 目标）
+    auto = CompressionManager()
+    print(f"\n  零配置: {auto.compress_token_limit} → 运行时按 context_window 推导")
 
-    # 显示 auto_compact circuit-breaker 状态
     print(f"\n  Auto-compact circuit-breaker:")
-    print(f"    最大连续失败次数: {cm1._max_auto_compact_failures}")
-    print(f"    预留 buffer tokens: {cm1._auto_compact_buffer_tokens:,}")
+    print(f"    最大连续失败次数: {cm._max_auto_compact_failures}")
+    print(f"    预留 buffer tokens: {cm._auto_compact_buffer_tokens:,}")
     print(f"    (等同于 CC 的 AUTOCOMPACT_BUFFER_TOKENS = 13,000)\n")
 
 
@@ -192,17 +185,13 @@ async def demo_compression_with_agent():
 
     # CompressionManager: low token threshold for demo
     cm = CompressionManager(
-        compress_token_limit=2000,      # low threshold to trigger compression in demo
-        truncate_head_chars=50,         # keep max 50 chars per old tool result
+        compress_token_limit=2000,      # low threshold to trigger compaction in demo
     )
 
     agent = Agent(
         model=OpenAIChat(id="gpt-4o-mini"),
         tools=[read_source_file],
-        tool_config=ToolConfig(
-            compress_tool_results=True,
-            compression_manager=cm,
-        ),
+        tool_config=ToolConfig(compression_manager=cm),
         instructions=["You are a code analyzer. Read files and summarize their purpose."],
     )
 

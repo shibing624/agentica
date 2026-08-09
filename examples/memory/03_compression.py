@@ -5,7 +5,7 @@
 
 This example shows:
 1. Token counting for messages, tools, and multi-modal content
-2. Tool result compression to save context space
+2. Two-layer context compression: free eviction, then LLM summarisation
 """
 import os
 import sys
@@ -20,7 +20,7 @@ from agentica.utils.tokens import (
     count_message_tokens,
     count_tool_tokens,
 )
-from agentica.compression import CompressionManager
+from agentica.compression import CompressionManager, evict_context
 
 
 def demo_token_counting():
@@ -67,17 +67,11 @@ def demo_token_counting():
     print(f"   Tokens: {tool_tokens}")
 
 
-def demo_compression_manager():
-    """Demonstrate compression manager functionality."""
+def demo_layer1_eviction():
+    """Layer 1: reclaim context without an LLM call."""
     print("\n" + "=" * 60)
-    print("Compression Manager Demo")
+    print("Layer 1: tool-result eviction (free)")
     print("=" * 60)
-
-    compression_manager = CompressionManager(
-        model=OpenAIChat(id="gpt-4o-mini"),
-        compress_tool_results=True,
-        compress_token_limit=500,  # low threshold for demo
-    )
 
     messages = [
         Message(role="system", content="You are a helpful assistant."),
@@ -99,60 +93,49 @@ def demo_compression_manager():
             in 1956 at the Dartmouth Conference. Early AI research focused on symbolic reasoning.""",
             tool_name="search_history",
         ),
+        Message(role="assistant", content="Let me look at one more source."),
+        Message(role="tool", tool_call_id="call_3", tool_name="search_papers",
+                content="The newest round of results, which the model has not read yet."),
     ]
 
-    print(f"\n1. Before compression:")
-    print(f"   Number of messages: {len(messages)}")
+    print("\n1. Before eviction:")
     for msg in messages:
         if msg.role == "tool":
-            print(f"   Tool result ({msg.tool_name}): {len(str(msg.content))} chars")
+            print(f"   {msg.tool_name}: {len(str(msg.content))} chars")
 
-    should_compress = compression_manager.should_compress(messages)
-    print(f"\n2. Should compress: {should_compress}")
+    # Roomy window: nothing is evicted, because a result the window had room
+    # for costs a tool re-run to get back.
+    roomy = evict_context(messages, context_tokens=1_000, context_window=100_000)
+    print(f"\n2. Roomy window (1k/100k): evicted {roomy.tool_results}")
 
-    if should_compress:
-        compression_manager.compress(messages)
-        
-        print(f"\n3. After compression:")
-        for msg in messages:
-            if msg.role == "tool" and msg.compressed_content:
-                print(f"   Tool result ({msg.tool_name}):")
-                print(f"      Original: {len(str(msg.content))} chars")
-                print(f"      Compressed: {len(msg.compressed_content)} chars")
+    # Tight window: oldest first, down to the target. The trailing round is
+    # never touched — the model has not seen it yet.
+    tight = evict_context(messages, context_tokens=900, context_window=1_000)
+    print(f"3. Tight window (900/1k):   evicted {tight.tool_results}")
 
-        stats = compression_manager.get_stats()
-        print(f"\n4. Compression stats:")
-        print(f"   Tool results compressed: {stats.get('tool_results_compressed', 0)}")
-        print(f"   Compression ratio: {stats.get('compression_ratio', 1.0):.2%}")
+    print("\n4. After eviction:")
+    for msg in messages:
+        if msg.role == "tool":
+            print(f"   {msg.tool_name}: {str(msg.content)[:70]}")
 
 
 def demo_agent_with_compression():
-    """Demonstrate Agent with compression enabled."""
+    """Both layers are on by default; only Layer 2 is configurable."""
     print("\n" + "=" * 60)
     print("Agent with Compression Demo")
     print("=" * 60)
 
-    # Method 1: Simple - enable compression via ToolConfig flag
-    agent1 = Agent(
-        model=OpenAIChat(id="gpt-4o"),
-        tool_config=ToolConfig(compress_tool_results=True),
-        name="CompressedAgent",
-    )
-    print("\n1. Agent with compress_tool_results=True:")
-    print(f"   Compression enabled: {agent1.tool_config.compress_tool_results}")
+    agent1 = Agent(model=OpenAIChat(id="gpt-4o"), name="DefaultAgent")
+    print("\n1. Default agent — Layer 2 is wired automatically:")
+    print(f"   Manager: {type(agent1.tool_config.compression_manager).__name__}")
 
-    # Method 2: Custom compression manager via ToolConfig
     custom_compression = CompressionManager(
         model=OpenAIChat(id="gpt-4o-mini"),
         compress_token_limit=5000,
     )
-
-    agent2 = Agent(
+    Agent(
         model=OpenAIChat(id="gpt-4o"),
-        tool_config=ToolConfig(
-            compress_tool_results=True,
-            compression_manager=custom_compression,
-        ),
+        tool_config=ToolConfig(compression_manager=custom_compression),
         name="CustomCompressedAgent",
     )
     print("\n2. Agent with custom CompressionManager:")
@@ -164,9 +147,9 @@ if __name__ == "__main__":
     print("=" * 60)
 
     demo_token_counting()
+    demo_layer1_eviction()
 
     if os.getenv("OPENAI_API_KEY"):
-        demo_compression_manager()
         demo_agent_with_compression()
     else:
-        print("\n[INFO] Set OPENAI_API_KEY to run compression demos")
+        print("\n[INFO] Set OPENAI_API_KEY to run the agent demo")

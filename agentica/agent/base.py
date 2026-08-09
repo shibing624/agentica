@@ -52,7 +52,7 @@ from agentica.run_config import RunConfig
 from agentica.run_context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
 from agentica.memory.session_log import SessionLog
-from agentica.compression import CompressionManager
+from agentica.compression import CompressionManager, evict_context, sanitize_tool_pairs
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, AGENTICA_NUM_HISTORY_TURNS
 from agentica.agent.config import (
     PromptConfig,
@@ -650,12 +650,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # Load runtime config from workspace YAML
         self._load_runtime_config()
 
-        # Initialize compression manager
-        if self.tool_config.compress_tool_results and self.tool_config.compression_manager is None:
+        # Layer 2 is always wired: without it a long session has no way back
+        # from an oversized context except the provider rejecting the request.
+        if self.tool_config.compression_manager is None:
             self.tool_config.compression_manager = CompressionManager(
                 model=self.resolve_auxiliary_model("compression"),
-                compress_tool_results=True,
-                workspace=self.workspace,
             )
         # Wire auxiliary model into existing compression manager if not already set
         elif (
@@ -1410,12 +1409,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         Context overflow handling
            Triggered when: tool_config.context_overflow_threshold > 0 and
            estimated token usage / context_window >= threshold.
-           Two-stage action (compress-then-evict):
-             1. If a compression_manager is wired, try reversible compression
-                first (summarize/truncate tool results). Compression preserves
-                information — prefer it over destructive eviction.
+           Two-stage action (evict-then-drop):
+             1. Layer 1 eviction first: it replaces tool-result bodies with a
+                placeholder naming the call, so the model can re-issue it.
              2. Only if usage still exceeds the hard limit (threshold + 5pp)
-                after compression, FIFO-evict oldest non-system messages.
+                after eviction, FIFO-drop oldest non-system messages.
            Estimation uses ~4 chars/token heuristic for speed; accurate token
            counting requires the tokenizer.
 
@@ -1449,16 +1447,17 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 
             hard_limit = min(overflow_threshold + 0.05, 0.95)
 
-            # ---- Stage 1: reversible compression (prefer over eviction) ----
-            compression_manager = agent_ref.tool_config.compression_manager
-            compressed = False
-            if compression_manager is not None:
-                _uid_compress = agent_ref.workspace.user_id if agent_ref.workspace is not None else None
-                await compression_manager.compress(messages, user_id=_uid_compress)
-                compressed = True
+            # ---- Stage 1: Layer 1 eviction (prefer over dropping messages) ----
+            reclaimed = evict_context(
+                messages,
+                context_tokens=int(usage_ratio * context_window),
+                context_window=context_window,
+                model_id=model.id,
+            )
+            if reclaimed.total:
                 usage_ratio = _estimate_usage_ratio(messages, context_window)
 
-            # ---- Stage 2: FIFO evict oldest non-system messages if still over ----
+            # ---- Stage 2: FIFO drop oldest non-system messages if still over ----
             evicted = 0
             while usage_ratio >= hard_limit and len(messages) > 2:
                 for idx, m in enumerate(messages):
@@ -1470,13 +1469,18 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                     break  # Only system messages left
                 usage_ratio = _estimate_usage_ratio(messages, context_window)
 
+            if evicted:
+                # Dropping by position can strand a tool_call without its
+                # result, which providers reject outright.
+                messages[:] = sanitize_tool_pairs(messages)
+
             # Demote to debug + only once per Agent instance lifetime to
             # avoid flooding the CLI across multiple user turns.
             if not agent_ref._overflow_warning_emitted:
                 logger.debug(
                     f"Agent '{agent_ref.identifier}': context overflow handled "
                     f"(estimated {usage_ratio:.0%} of {context_window} tokens). "
-                    f"Compressed={compressed}, evicted {evicted} old messages. "
+                    f"Reclaimed={reclaimed.total}, dropped {evicted} old messages. "
                     "Set tool_config=ToolConfig(context_overflow_threshold=0.0) to disable."
                 )
                 agent_ref._overflow_warning_emitted = True
