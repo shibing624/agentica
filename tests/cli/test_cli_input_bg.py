@@ -200,8 +200,8 @@ class TestBackgroundCompletionNotice(unittest.TestCase):
         self.assertIn("exit 1", rendered)
         self.assertIn("command failed", rendered)
 
-    def test_print_background_completion_retains_full_command_for_ctrl_o(self):
-        """Long background commands stay expandable via Ctrl+O."""
+    def test_print_background_completion_shows_full_command_and_output(self):
+        """Completion notice shows the whole command and log body — no Ctrl+O fold."""
         from agentica.cli.interactive import btw as it
         from agentica.cli import display as disp
         from agentica.tools.background_processes import BackgroundProcessCompleted
@@ -213,7 +213,9 @@ class TestBackgroundCompletionNotice(unittest.TestCase):
         )
         with tempfile.TemporaryDirectory() as td:
             log_path = Path(td) / "term.log"
-            log_path.write_text(f"$ {long_command}\n\nok\n", encoding="utf-8")
+            # Many output lines: previously only a short tail was shown.
+            body_lines = [f"$ {long_command}", ""] + [f"phase-{i}" for i in range(40)]
+            log_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
             event = BackgroundProcessCompleted(
                 id="term_3",
                 num=3,
@@ -232,13 +234,15 @@ class TestBackgroundCompletionNotice(unittest.TestCase):
             with patch.object(it, "get_console", return_value=fake_console):
                 it._print_background_completion(event)
 
-        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake_console.print.call_args_list if call.args
+        )
         self.assertIn("Background terminal #3 finished", rendered)
-        self.assertIn("Ctrl+O", rendered)
-        blocks = disp.get_truncated_blocks()
-        self.assertTrue(blocks)
-        self.assertEqual(blocks[-1]["content"], long_command)
-        self.assertIn("--qid q29", blocks[-1]["content"])
+        self.assertIn("--qid q29", rendered)
+        self.assertIn("phase-0", rendered)
+        self.assertIn("phase-39", rendered)
+        self.assertNotIn("Ctrl+O", rendered)
+        self.assertEqual(disp.get_truncated_blocks(), [])
 
 
 class TestAskActiveFreeze(unittest.TestCase):

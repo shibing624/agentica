@@ -12,7 +12,6 @@ from typing import Optional
 
 from rich.markup import escape as rich_escape
 
-from agentica.cli.display import remember_truncated
 from agentica.cli.display.tool_format import _wrap_command_lines
 from agentica.cli.runtime import _generate_session_id, get_console
 from agentica.memory.models import AgentRun
@@ -134,8 +133,8 @@ def _delegate_result_for_agent(event: BackgroundProcessCompleted, status: str) -
 def _print_background_completion(event: BackgroundProcessCompleted) -> None:
     """Print a background-terminal completion notice.
 
-    Long commands are folded like execute display: a few wrapped lines stay
-    inline, and the full command is stashed for Ctrl+O.
+    The command and log body are shown in full (wrapped to the terminal width).
+    Folding behind Ctrl+O hid the identity of long overnight jobs.
     """
     con = get_console()
     ok = event.returncode == 0
@@ -163,22 +162,14 @@ def _print_background_completion(event: BackgroundProcessCompleted) -> None:
         except (TypeError, ValueError):
             width = 80
         width = max(20, width - 2)
-        command_lines = _wrap_command_lines(raw_command, width)
-        visible_lines = command_lines[:3]
-        omitted = len(command_lines) - len(visible_lines)
-        for line in visible_lines:
+        for line in _wrap_command_lines(raw_command, width):
             con.print(f"  {rich_escape(line)}")
-        if omitted > 0:
-            con.print(
-                f"  [dim italic]… +{omitted} lines (Ctrl+O to expand)[/dim italic]"
-            )
-            remember_truncated(
-                f"Background · #{event.num} ({event.id})",
-                raw_command,
-            )
-    tail = read_log_tail(event.log_path)
-    if tail:
-        for line in tail.splitlines():
+    # Generous body: background jobs are the ones users stare at when they
+    # finish, and a 5-line tail was throwing away the run. Still capped so a
+    # multi-GB log cannot dump the terminal.
+    body = read_log_tail(event.log_path, max_lines=500, max_chars=100_000)
+    if body:
+        for line in body.splitlines():
             con.print(f"  {rich_escape(line)}")
     con.print(f"  [dim]log: {rich_escape(event.log_path)}[/dim]")
 

@@ -187,6 +187,138 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("more lines", rendered)
         self.assertEqual(get_truncated_blocks(), [])
 
+    def test_wait_result_shows_full_command(self):
+        """wait's Command: line is the whole reason you looked — never ellipsis it."""
+        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
+
+        clear_truncated_blocks()
+        command = (
+            "cd /apdcephfs_qy3/share_7435715/flemingxu/nlp/exp/dual_mem_exp/benchmarks "
+            "&& RUN_FROM=P1 bash run_overnight.sh --phase all --gpus 8"
+        )
+        log_path = (
+            "/root/.agentica/projects/default/"
+            "-apdcephfs-qy3-share-7435715-flemingxu-nlp-6115aec9/background/"
+            "20260810-013023-term_4.log"
+        )
+        body = "\n".join(
+            [
+                "Background command #4 (term_4) is still running after 1:38:18; "
+                "this wait timed out but it was not stopped. If it has already "
+                "outlasted a wait or two, stop waiting: end your turn and let "
+                "the completion notice the user gets drive the next step.",
+                f"Command: {command}",
+                f"Log: {log_path}",
+            ]
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("wait", body, is_error=False, elapsed=300.1)
+
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn(command, rendered)
+        self.assertIn(log_path, rendered)
+        self.assertNotIn("run_overnight....", rendered)
+        self.assertNotIn("more lines", rendered)
+        self.assertEqual(get_truncated_blocks(), [])
+
+    def test_delegate_result_is_shown_in_full(self):
+        """delegate's Log: path is actionable — same FULL treatment as wait."""
+        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
+
+        clear_truncated_blocks()
+        log_path = (
+            "/root/.agentica/projects/default/"
+            "-apdcephfs-qy3-share-7435715-flemingxu-nlp-6115aec9/background/"
+            "20260810-013023-term_7.log"
+        )
+        body = (
+            f'Delegated "overnight bench" to a separate agentica session: term_7 '
+            f"(PID 4242).\n"
+            f"Log: {log_path}\n"
+            f"It is running now and you are not blocked. Its report is delivered "
+            f'to this conversation when it finishes; call wait(id="term_7") only '
+            f"if your next step needs the answer before you can continue."
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("delegate", body, is_error=False, elapsed=0.05)
+
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn(log_path, rendered)
+        self.assertIn('wait(id="term_7")', rendered)
+        self.assertNotIn("more lines", rendered)
+        self.assertEqual(get_truncated_blocks(), [])
+
+    def test_background_execute_start_result_is_shown_in_full(self):
+        """background=True start text carries Log: — never head/tail or 120-char cut."""
+        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
+
+        clear_truncated_blocks()
+        log_path = (
+            "/root/.agentica/projects/default/"
+            "-apdcephfs-qy3-share-7435715-flemingxu-nlp-6115aec9/background/"
+            "20260810-013023-term_4.log"
+        )
+        body = (
+            f"Started background command #4 (PID 99, id: term_4).\n"
+            f"Log: {log_path}\n"
+            f"It is detached: its exit is reported to the user, not to you. If a "
+            f'later step needs its result, call wait(id="term_4") — it returns '
+            f"the moment the command exits."
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "execute",
+            body,
+            is_error=False,
+            elapsed=0.02,
+            tool_args={"command": "bash run.sh", "background": True},
+        )
+
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn(log_path, rendered)
+        self.assertIn('wait(id="term_4")', rendered)
+        self.assertNotIn("hidden lines", rendered)
+        self.assertNotIn("20260810-013023-...", rendered)
+        self.assertEqual(get_truncated_blocks(), [])
+
+    def test_background_execute_call_shows_full_command(self):
+        """background execute call lines show the whole command, not a 3-line fold."""
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli import display as disp
+        from agentica.cli.display import StreamDisplayManager
+
+        command = "python3 -m personamem.run " + " ".join(
+            f"--question-id value-{index}" for index in range(12)
+        )
+        output = StringIO()
+        console = Console(file=output, width=60, force_terminal=False, no_color=True)
+        manager = StreamDisplayManager(console)
+        disp.clear_truncated_blocks()
+
+        manager.display_tool(
+            "execute",
+            {"command": command, "background": True},
+            tool_call_id="exec-bg",
+        )
+
+        rendered = output.getvalue()
+        self.assertIn("value-11", rendered)
+        self.assertNotIn("Ctrl+O", rendered)
+        self.assertEqual(disp.get_truncated_blocks(), [])
 
     def test_send_message_call_shows_full_body(self):
         """send_message must not hide the handoff behind the default 40-char truncate."""

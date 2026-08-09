@@ -28,6 +28,15 @@ from .console import (
 from .messages import _has_markdown
 from .tool_format import _display_tool_impl, format_tool_display
 
+
+def _is_background_execute(tool_args: Optional[dict], result_str: str = "") -> bool:
+    """True when this execute call/result is a detached background start."""
+    bg = (tool_args or {}).get("background")
+    if bg is True or bg == "true" or bg == 1 or bg == "1":
+        return True
+    return str(result_str).startswith("Started background command")
+
+
 class StreamDisplayManager:
     """Manages CLI output display state for streaming responses.
 
@@ -621,9 +630,12 @@ class StreamDisplayManager:
     # already tells the user what happened; errors are still surfaced.
     _SUPPRESS_RESULT_TOOLS = frozenset({"write_todos"})
 
-    # Peer discovery / delivery results are short but multi-line and important
-    # to the user — never fold them behind Ctrl+O.
-    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message"})
+    # Peer discovery / delivery, wait, and delegate: short multi-line status
+    # whose Log:/Command:/path lines must stay intact. Never fold behind Ctrl+O
+    # or the default 120-char ellipsis. ``task`` is NOT here — its result is
+    # JSON with a live-stream dedup path (``_display_task_result``); call-side
+    # briefs already share ``_format_handoff_display`` with delegate.
+    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate"})
 
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
@@ -746,10 +758,12 @@ class StreamDisplayManager:
 
         lines = result_str.splitlines()
 
-        # execute: head/tail window with the middle hidden — the tail carries
-        # the command's final status/output, which is usually what the user
-        # needs to see at a glance.
+        # execute: foreground uses a head/tail window; background start text is
+        # status + Log: path (same class as wait/delegate) and goes FULL.
         if tool_name == "execute":
+            if _is_background_execute(tool_args, result_str):
+                self._display_full_result_lines(lines, is_error=is_error, elapsed_str=elapsed_str)
+                return
             is_diagnostics = _is_diagnostic_execute_result(result_str)
             self._display_head_tail(
                 lines,
@@ -764,17 +778,13 @@ class StreamDisplayManager:
             )
             return
 
+        if tool_name in self._FULL_RESULT_TOOLS:
+            self._display_full_result_lines(lines, is_error=is_error, elapsed_str=elapsed_str)
+            return
+
         style = "dim red" if is_error else "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
         cont_prefix = "      "
-
-        if tool_name in self._FULL_RESULT_TOOLS:
-            for i, line in enumerate(lines):
-                p = prefix if i == 0 else cont_prefix
-                self._assistant_console.print(f"{p}{line}", style=style)
-            if elapsed_str:
-                self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
-            return
 
         max_lines = self._DEFAULT_MAX_RESULT_LINES
         max_line_width = 120
@@ -792,6 +802,19 @@ class StreamDisplayManager:
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+O to expand)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
+        if elapsed_str:
+            self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
+
+    def _display_full_result_lines(
+        self, lines: List[str], *, is_error: bool, elapsed_str: str
+    ) -> None:
+        """Print every result line without width or line-count truncation."""
+        style = "dim red" if is_error else "dim"
+        prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
+        cont_prefix = "      "
+        for i, line in enumerate(lines):
+            p = prefix if i == 0 else cont_prefix
+            self._assistant_console.print(f"{p}{line}", style=style)
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 

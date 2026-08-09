@@ -70,8 +70,13 @@ def _wrap_command_lines(command: str, width: int) -> List[str]:
     return wrapped
 
 
-def _display_execute_command(console_instance, command: str) -> None:
-    """Render an execute command as one header plus two continuation rows."""
+def _display_execute_command(console_instance, command: str, *, full: bool = False) -> None:
+    """Render an execute command.
+
+    Foreground calls keep a three-line preview (full text via Ctrl+O).
+    Background calls show every wrapped line — the command is the identity of
+    the detached job and must not hide behind a fold.
+    """
     raw_command = str(command or "")
     display_command = _shorten_paths_in_command(raw_command)
     icon = TOOL_ICONS.get("execute", TOOL_ICONS["default"])
@@ -79,8 +84,12 @@ def _display_execute_command(console_instance, command: str) -> None:
     continuation = "   │ "
     width = max(1, int(getattr(console_instance, "width", 80) or 80) - len(header))
     command_lines = _wrap_command_lines(display_command, width)
-    visible_lines = command_lines[:3]
-    omitted = len(command_lines) - len(visible_lines)
+    if full:
+        visible_lines = command_lines
+        omitted = 0
+    else:
+        visible_lines = command_lines[:3]
+        omitted = len(command_lines) - len(visible_lines)
 
     for index, line in enumerate(visible_lines):
         rendered = Text()
@@ -266,7 +275,11 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
         console_instance.print()
 
     if tool_name == "execute":
-        _display_execute_command(console_instance, tool_args.get("command", ""))
+        bg = tool_args.get("background")
+        full = bg is True or bg == "true" or bg == 1 or bg == "1"
+        _display_execute_command(
+            console_instance, tool_args.get("command", ""), full=full
+        )
     # Special handling for write_todos - multi-line display.
     # Note: in this repo "task" is the dedicated subagent-spawn tool, so we
     # avoid using "tasks" as the label here to prevent confusion.
