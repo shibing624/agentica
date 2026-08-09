@@ -63,7 +63,7 @@ Agentica は、低レベルのモデルルーティングから高レベルの�
 
 ### コア実行エンジン (Agentic Loop)
 
-Agent のコアは、ツール呼び出しによって厳密に駆動される決定論的な `while(true)` エンジン内で実行され、無限ループ防止、コスト追跡、コンテキストのマイクロ圧縮 (Compaction)、および4層のガードレールシステムが組み込まれています：
+Agent のコアは、ツール呼び出しによって厳密に駆動される決定論的な `while(true)` エンジン内で実行され、無限ループ防止、コスト追跡、[2 層のコンテキスト圧縮](https://github.com/shibing624/agentica/blob/main/docs/advanced/compression.md)（無料の追い出し → LLM 要約）、および4層のガードレールシステムが組み込まれています：
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Loop Architecture" />

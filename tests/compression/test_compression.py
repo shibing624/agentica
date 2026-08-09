@@ -166,6 +166,135 @@ class TestEvictToolResults(unittest.TestCase):
         self.assertIn("offset=56", placeholder)
 
 
+class TestEvictAnthropicToolResults(unittest.TestCase):
+    """Layer 1 on the Anthropic transcript shape.
+
+    Anthropic has no role="tool" message: a whole round is packed into the
+    content list of one role="user" message as tool_result blocks. Scanning
+    only role="tool" meant eviction never once ran on this path.
+    """
+
+    WINDOW = 10_000
+    OVER_THRESHOLD = 9_000
+
+    def _body(self, tag, words=200):
+        return " ".join(f"{tag}-token{i}" for i in range(words))
+
+    def _round(self, tag, size, name="read_file"):
+        """One assistant tool_use message plus the user message answering it."""
+        ids = [f"toolu_{tag}_{i}" for i in range(size)]
+        assistant = Message(
+            role="assistant",
+            content="calling tools",
+            tool_calls=[
+                {
+                    "type": "function",
+                    "id": call_id,
+                    "function": {
+                        "name": name,
+                        "arguments": json.dumps({"file_path": f"{tag}_{i}.py"}),
+                    },
+                }
+                for i, call_id in enumerate(ids)
+            ],
+        )
+        results = Message(role="user", content=[
+            {"type": "tool_result", "tool_use_id": call_id, "content": self._body(f"{tag}{i}")}
+            for i, call_id in enumerate(ids)
+        ])
+        return [assistant, results]
+
+    def _conversation(self, *round_sizes):
+        msgs = [Message(role="user", content="hi")]
+        for i, size in enumerate(round_sizes):
+            msgs += self._round(f"r{i}", size)
+        return msgs
+
+    def _blocks(self, msgs):
+        from agentica.compression.evict import tool_result_blocks
+        return [b for m in msgs for b in tool_result_blocks(m)]
+
+    def test_anthropic_results_are_evicted_at_all(self):
+        """The regression: this whole provider path was invisible to Layer 1."""
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(*([1] * 8))
+
+        count = evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        self.assertGreater(count, 0)
+        blocks = self._blocks(msgs)
+        evicted = [b for b in blocks if b["content"].startswith("[Tool result evicted")]
+        self.assertEqual(len(evicted), count)
+
+    def test_never_evicts_the_unseen_trailing_round(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(6)
+
+        count = evict_tool_results(
+            msgs, context_tokens=1_000_000, context_window=self.WINDOW,
+        )
+
+        self.assertEqual(count, 0)
+
+    def test_evicts_block_by_block_oldest_first(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(3, 3, 3, 4)
+
+        evict_tool_results(msgs, context_tokens=1_000_000, context_window=self.WINDOW)
+
+        flags = [b["content"].startswith("[Tool result evicted") for b in self._blocks(msgs)]
+        self.assertEqual(flags[:9], [True] * 9, "older rounds go first")
+        self.assertEqual(flags[9:], [False] * 4, "current round survives")
+
+    def test_placeholder_resolves_the_call_through_the_assistant_message(self):
+        """A tool_result block carries only tool_use_id, never the tool name."""
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(1, 1)
+
+        evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        placeholder = self._blocks(msgs)[0]["content"]
+        self.assertIn("read_file(", placeholder)
+        self.assertIn("r0_0.py", placeholder)
+
+    def test_partially_evicted_message_is_revisited(self):
+        """A round is one message but many results; the flag must not close it early."""
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(4, 1)
+        results = msgs[2]
+
+        evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+        first_pass = sum(
+            b["content"].startswith("[Tool result evicted") for b in results.content
+        )
+        self.assertGreater(first_pass, 0)
+        if first_pass < 4:
+            self.assertFalse(results._evicted, "more results left to reclaim here")
+            evict_tool_results(
+                msgs, context_tokens=1_000_000, context_window=self.WINDOW,
+            )
+            self.assertTrue(all(
+                b["content"].startswith("[Tool result evicted") for b in results.content
+            ))
+        self.assertTrue(results._evicted)
+
+    def test_sanitize_tool_pairs_leaves_anthropic_transcripts_alone(self):
+        """It only knows the role="tool" shape; rebuilding here would corrupt it."""
+        from agentica.compression.tool_pairs import sanitize_tool_pairs
+        msgs = self._conversation(2, 2)
+
+        rebuilt = sanitize_tool_pairs(msgs)
+
+        self.assertEqual([m.role for m in rebuilt], [m.role for m in msgs])
+        self.assertFalse(any(m.role == "tool" for m in rebuilt))
+
+
 # ===========================================================================
 # tool_result_storage tests
 # ===========================================================================
@@ -547,6 +676,29 @@ class TestAutoCompactPreservesRequiredMessages(unittest.TestCase):
         joined = " ".join(str(m.content) for m in msgs)
         self.assertIn("the summary", joined)
         self.assertNotIn("old answer", joined)
+
+    def test_anthropic_tool_round_is_not_mistaken_for_the_pending_question(self):
+        """Anthropic delivers a tool round as a user message of tool_result blocks.
+
+        Cutting the tail there would keep results whose tool_use block lives in
+        the assistant message the summary just replaced, which that API rejects.
+        """
+        msgs = self._compact([
+            Message(role="system", content="sys"),
+            Message(role="user", content="old question"),
+            Message(role="assistant", content="old answer"),
+            Message(role="user", content="current question"),
+            Message(role="assistant", tool_calls=[
+                {"id": "toolu_1", "function": {"name": "ls", "arguments": "{}"}},
+            ]),
+            Message(role="user", content=[
+                {"type": "tool_result", "tool_use_id": "toolu_1", "content": "file list"},
+            ]),
+        ])
+        tail = msgs[-3:]
+        self.assertEqual([m.role for m in tail], ["user", "assistant", "user"])
+        self.assertEqual(tail[0].content, "current question")
+        self.assertEqual(tail[1].tool_calls[0]["id"], "toolu_1")
 
 
 class TestCompressionManagerAutoCompact(unittest.TestCase):

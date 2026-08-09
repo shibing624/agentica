@@ -113,8 +113,10 @@ class Message(BaseModel):
     # Compressed content for tool results (used by CompressionManager)
     compressed_content: Optional[str] = None
 
-    # Set by evict_tool_results() so a placeholder is never re-measured as if
-    # it still held the original output.
+    # Set by evict_tool_results() once every result this message carries is a
+    # placeholder, so later passes can skip it outright. A message is the unit
+    # here, but a result is not: an Anthropic round packs several tool_result
+    # blocks into one user message and is only done when the last one goes.
     _evicted: bool = False
 
     # The Unix timestamp the message was created.

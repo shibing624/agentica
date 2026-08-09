@@ -12,6 +12,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from agentica.compression.evict import carries_tool_results
 from agentica.model.message import Message
 from agentica.security.redact import redact_sensitive_text
 from agentica.utils.log import logger
@@ -327,10 +328,15 @@ class CompressionManager:
         #   Keeping the whole tail also keeps tool_calls paired with their
         #   results. The summary covers this span too, so nothing is lost when
         #   the tail turns out to be an injected notice rather than the question.
+        #
+        #   "User message" here means one the *user* sent. Anthropic delivers a
+        #   tool round as a user message full of tool_result blocks, and cutting
+        #   there would keep results whose tool_use block sits in the assistant
+        #   message we just deleted — which that API rejects outright.
         preserved_system = [m for m in messages if m.role == "system"]
         tail_start = len(messages)
         for i in range(len(messages) - 1, -1, -1):
-            if messages[i].role == "user":
+            if messages[i].role == "user" and not carries_tool_results(messages[i]):
                 tail_start = i
                 break
         preserved_tail = [m for m in messages[tail_start:] if m.role != "system"]

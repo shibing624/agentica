@@ -3,15 +3,17 @@
 @author:XuMing(xuming624@qq.com)
 @description: Compression module for managing context compression.
 """
-from agentica.compression.manager import CompressionManager
 from agentica.compression.evict import (
     evict_context,
     evict_tool_results,
     shrink_tool_call_arguments,
+    carries_tool_results,
+    tool_result_blocks,
     EvictionResult,
     EVICT_THRESHOLD_RATIO,
     EVICT_TARGET_RATIO,
 )
+from agentica.compression.manager import CompressionManager
 from agentica.compression.tool_pairs import sanitize_tool_pairs
 from agentica.compression.tool_result_storage import (
     maybe_persist_result,
@@ -30,6 +32,8 @@ __all__ = [
     "evict_context",
     "evict_tool_results",
     "shrink_tool_call_arguments",
+    "carries_tool_results",
+    "tool_result_blocks",
     "EvictionResult",
     "sanitize_tool_pairs",
     "EVICT_THRESHOLD_RATIO",

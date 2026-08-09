@@ -8,9 +8,16 @@ in the order the calls were issued. Any path that removes messages by position
 — the context-overflow FIFO drop is the one that still does — can break that
 rule and get the whole request rejected. Layer 1 eviction cannot: it rewrites
 content in place and never removes a message.
+
+This repair only understands the OpenAI shape (one ``role="tool"`` message per
+result). An Anthropic transcript keeps its results in ``tool_result`` blocks
+inside a user message, so it looks to this code like every call went unanswered
+— rebuilding it would inject a placeholder per call and corrupt a transcript
+that was never broken. Those are left alone.
 """
 from typing import Dict, List
 
+from agentica.compression.evict import tool_result_blocks
 from agentica.model.message import Message
 from agentica.utils.log import logger
 
@@ -22,7 +29,12 @@ def sanitize_tool_pairs(messages: List[Message]) -> List[Message]:
     inserts the existing result (matched by call_id) or a placeholder, in the
     original tool_calls order. Orphan tool results — those whose call_id no
     assistant message references — are dropped.
+
+    Anthropic-shaped transcripts are returned untouched (see module docstring).
     """
+    if any(tool_result_blocks(msg) for msg in messages):
+        return list(messages)
+
     result_by_id: Dict[str, Message] = {}
     for msg in messages:
         if msg.role == "tool" and msg.tool_call_id:

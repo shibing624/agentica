@@ -64,7 +64,7 @@ Agentica provides a complete abstraction stack, from low-level model routing to 
 
 ### Core Execution Engine (Agentic Loop)
 
-At its core, a single Agent runs inside a pure deterministic `while(true)` engine driven strictly by tool calls, featuring built-in infinite-loop prevention, cost tracking, context micro-compression (Compaction), and a 4-layer guardrail system:
+At its core, a single Agent runs inside a pure deterministic `while(true)` engine driven strictly by tool calls, featuring built-in infinite-loop prevention, cost tracking, [two-layer context compression](https://github.com/shibing624/agentica/blob/main/docs/advanced/compression.md) (free eviction, then LLM summarisation), and a 4-layer guardrail system:
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Loop Architecture" />

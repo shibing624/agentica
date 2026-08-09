@@ -66,7 +66,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 from agentica.runner import Runner
 from agentica.cli.interactive import run_interactive
 from agentica.cli.commands.runtime import _cmd_steer   # 私有命令实现走子模块
-from agentica.runner.compress import evict_context  # 压缩逻辑不在 runner 包根
+from agentica.compression import evict_context          # 压缩逻辑在 compression 包
 ```
 
 Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，**状态全部存在 Agent 的 dataclass fields 上**：
@@ -94,10 +94,9 @@ Runner._run_impl()
     │       ├── Semi-static:    workspace context + git status
     │       └── Dynamic Zone:   workspace memory + datetime
     │
-    ├─► 上下文压缩检查       (CompressionManager.compress)
-    │       ├── Stage 1a: 截断旧工具结果
-    │       ├── Stage 1b: 丢弃旧消息轮次
-    │       └── Stage 2:  LLM 摘要压缩（可选）
+    ├─► 上下文压缩检查       (Runner._maybe_compress_messages)
+    │       ├── Layer 1: evict_context() — 淘汰旧结果 + 收缩参数（免费）
+    │       └── Layer 2: CompressionManager.auto_compact() — LLM 摘要
     │
     ├─► LLM API 调用         (Model.response / response_stream)
     │
@@ -146,6 +145,8 @@ Layer 2 摘要（一次 LLM 调用，不可逆）:
 ```
 
 淘汰没有「保留最近 N 条」这类计数参数：任何固定条数都会输给 N+1 大小的并行批次，最近的结果靠「够到之前就停」自然幸存。
+
+两层都以「一条工具结果」而非「一条消息」为单位判断，因为 provider 的打包形态不同：OpenAI 系是一条结果一条 `role="tool"` 消息，Anthropic 则把一整轮塞进单条 `role="user"` 消息的 `tool_result` block 列表。细节见 [Compression](../advanced/compression.md)。
 
 **大工具结果持久化**（`tool_result_storage`）：单个工具结果超过阈值时，完整内容写入磁盘，上下文中只保留预览 + 文件路径：
 

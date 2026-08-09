@@ -70,7 +70,7 @@ Agentica 提供了从底层模型路由到顶层多智能体协作的完整抽�
 
 ### 核心执行引擎 (Agentic Loop)
 
-Agentica 的单体 Agent 运行在一个纯粹的基于控制流的 `while(true)` 引擎中，严格依据工具调用来驱动，并内置了防死循环、成本追踪、上下文微压缩（Compaction）和四层安全护栏：
+Agentica 的单体 Agent 运行在一个纯粹的基于控制流的 `while(true)` 引擎中，严格依据工具调用来驱动，并内置了防死循环、成本追踪、[两层上下文压缩](https://github.com/shibing624/agentica/blob/main/docs/advanced/compression.md)（免费淘汰 → LLM 摘要）和四层安全护栏：
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/shibing624/agentica/main/docs/assets/agent_loop.png" width="800" alt="Agentica Loop Architecture" />

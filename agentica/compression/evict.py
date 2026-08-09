@@ -27,8 +27,21 @@ arguments, which no amount of result eviction can reach. Those strings are
 shrunk in place, keeping the JSON valid so the provider still accepts the
 transcript. When Layer 1 cannot get the request under target, the answer is
 Layer 2 (``CompressionManager.auto_compact``), not more aggressive evicting.
+
+**The unit of eviction is a result, not a message**, because the two provider
+shapes disagree about how results are packed:
+
+* OpenAI-style — one result per ``role="tool"`` message.
+* Anthropic-style — a whole round packed into the ``content`` list of a single
+  ``role="user"`` message, as ``{"type": "tool_result", "tool_use_id": ...}``
+  blocks (``AnthropicClaude.format_function_call_results``).
+
+Scanning only ``role="tool"`` meant Layer 1 never once ran on the Anthropic
+path. Those blocks also carry no tool name, so the placeholder resolves the
+call through an index of the assistant ``tool_calls`` that requested it.
 """
-from typing import List, NamedTuple, TYPE_CHECKING
+import json
+from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
 
 from agentica.compression.tool_call_args import shrink_tool_call_arguments_json
 from agentica.utils.tokens import count_message_tokens
@@ -50,6 +63,10 @@ TOOL_CALL_ARG_MAX_CHARS = 150
 _MAX_CALL_SIGNATURE_CHARS = 120
 
 _EVICTED = "Tool result evicted to free context"
+_EVICTED_PREFIX = f"[{_EVICTED}"
+
+# Anthropic packs a whole tool round into one user message as blocks of this type.
+_TOOL_RESULT_BLOCK = "tool_result"
 
 
 class EvictionResult(NamedTuple):
@@ -69,6 +86,21 @@ def under_pressure(context_tokens: int, context_window: int) -> bool:
     return context_tokens >= context_window * EVICT_THRESHOLD_RATIO
 
 
+def tool_result_blocks(msg: "Message") -> List[dict]:
+    """The Anthropic-shaped ``tool_result`` blocks a user message carries, if any."""
+    if msg.role != "user" or not isinstance(msg.content, list):
+        return []
+    return [
+        block for block in msg.content
+        if isinstance(block, dict) and block.get("type") == _TOOL_RESULT_BLOCK
+    ]
+
+
+def carries_tool_results(msg: "Message") -> bool:
+    """True for either provider shape of "this message holds tool results"."""
+    return msg.role == "tool" or bool(tool_result_blocks(msg))
+
+
 def _last_batch_start(messages: "List[Message]") -> int:
     """Index where the trailing run of tool results begins.
 
@@ -78,16 +110,51 @@ def _last_batch_start(messages: "List[Message]") -> int:
     rather than throwing away the turn's own evidence.
     """
     i = len(messages)
-    while i > 0 and messages[i - 1].role == "tool":
+    while i > 0 and carries_tool_results(messages[i - 1]):
         i -= 1
     return i
 
 
-def _placeholder(msg: "Message") -> str:
+def _call_index(messages: "List[Message]") -> Dict[str, Tuple[Optional[str], Any]]:
+    """Map tool-call id to the ``(name, arguments)`` the assistant requested.
+
+    An Anthropic ``tool_result`` block records only ``tool_use_id``, so naming
+    the evicted call means looking back at the assistant message that made it.
+    """
+    index: Dict[str, Tuple[Optional[str], Any]] = {}
+    for msg in messages:
+        if msg.role != "assistant" or not msg.tool_calls:
+            continue
+        for call in msg.tool_calls:
+            if not isinstance(call, dict):
+                continue
+            call_id = call.get("id")
+            function = call.get("function")
+            if call_id and isinstance(function, dict):
+                index[call_id] = (function.get("name"), function.get("arguments"))
+    return index
+
+
+def _resolve_call(
+    msg: "Message", block: Optional[dict], calls: Dict[str, Tuple[Optional[str], Any]]
+) -> Tuple[Optional[str], Any]:
+    """The ``(name, arguments)`` behind one result, whichever shape holds it."""
+    if block is not None:
+        return calls.get(block.get("tool_use_id") or "", (None, None))
+    if msg.tool_name:
+        return msg.tool_name, msg.tool_args
+    return calls.get(msg.tool_call_id or "", (None, None))
+
+
+def _placeholder(name: Optional[str], args: Any) -> str:
     """Name the call that produced the evicted result so it can be re-issued."""
-    if not msg.tool_name:
+    if not name:
         return f"[{_EVICTED}.]"
-    args = msg.tool_args
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except (ValueError, TypeError):
+            pass
     if isinstance(args, dict):
         rendered = ", ".join(f"{k}={v!r}" for k, v in args.items())
     elif args:
@@ -96,7 +163,33 @@ def _placeholder(msg: "Message") -> str:
         rendered = ""
     if len(rendered) > _MAX_CALL_SIGNATURE_CHARS:
         rendered = rendered[:_MAX_CALL_SIGNATURE_CHARS - 3] + "..."
-    return f"[{_EVICTED}: {msg.tool_name}({rendered}). Re-run the call if you still need it.]"
+    return f"[{_EVICTED}: {name}({rendered}). Re-run the call if you still need it.]"
+
+
+def _evictable_results(
+    messages: "List[Message]", cutoff: int
+) -> "Iterator[Tuple[Message, Optional[dict]]]":
+    """Yield every already-seen tool result, oldest first, as ``(message, block)``.
+
+    ``block`` is None for the OpenAI shape, where the message *is* the result;
+    it is the ``tool_result`` dict for the Anthropic shape, where one message
+    holds the whole round.
+    """
+    for msg in messages[:cutoff]:
+        if msg._evicted:
+            continue
+        if msg.role == "tool":
+            yield msg, None
+            continue
+        for block in tool_result_blocks(msg):
+            yield msg, block
+
+
+def _result_text(msg: "Message", block: Optional[dict]) -> Optional[str]:
+    raw = block.get("content") if block is not None else msg.content
+    if raw is None:
+        return None
+    return raw if isinstance(raw, str) else str(raw)
 
 
 def evict_tool_results(
@@ -116,7 +209,7 @@ def evict_tool_results(
         model_id:       Tokenizer selection for measuring what each eviction saves.
 
     Returns:
-        Number of messages whose content was replaced.
+        Number of tool results whose content was replaced.
     """
     if not under_pressure(context_tokens, context_window):
         return 0
@@ -126,32 +219,45 @@ def evict_tool_results(
         return 0
 
     cutoff = _last_batch_start(messages)
+    calls = _call_index(messages)
     saved = 0
     evicted = 0
-    for msg in messages[:cutoff]:
-        if msg.role != "tool" or msg._evicted:
+    for msg, block in _evictable_results(messages, cutoff):
+        text = _result_text(msg, block)
+        if text is None or text.startswith(_EVICTED_PREFIX):
             continue
-        content = msg.content
-        if content is None:
-            continue
-        content_str = content if isinstance(content, str) else str(content)
-        if "<persisted-output>" in content_str:
+        if "<persisted-output>" in text:
             # Already bounded by the tool-result budget, and the path it carries
             # is the only handle on output too large to re-read into context.
             continue
-        placeholder = _placeholder(msg)
-        if len(placeholder) >= len(content_str):
+        name, args = _resolve_call(msg, block, calls)
+        placeholder = _placeholder(name, args)
+        if len(placeholder) >= len(text):
             continue
 
         before = count_message_tokens(msg, model_id)
-        msg.content = placeholder
-        msg._evicted = True
+        if block is not None:
+            block["content"] = placeholder
+        else:
+            msg.content = placeholder
         saved += before - count_message_tokens(msg, model_id)
         evicted += 1
+        if _fully_evicted(msg, block):
+            msg._evicted = True
         if saved >= must_save:
             break
 
     return evicted
+
+
+def _fully_evicted(msg: "Message", block: Optional[dict]) -> bool:
+    """Whether the message has nothing left worth scanning on a later pass."""
+    if block is None:
+        return True
+    return all(
+        str(b.get("content") or "").startswith(_EVICTED_PREFIX)
+        for b in tool_result_blocks(msg)
+    )
 
 
 def shrink_tool_call_arguments(
