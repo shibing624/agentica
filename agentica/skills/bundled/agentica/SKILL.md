@@ -20,7 +20,8 @@ Three live sources, in the order you should reach for them:
 | Question | Source | How you read it |
 |---|---|---|
 | What can the command line do? | `agentica --help` | `execute` |
-| How is this machine configured? | `~/.agentica/config.yaml` | `read_file` |
+| How is this machine configured? | your own config | `self_manage(action="show")` |
+| What is on disk, exactly? | `~/.agentica/config.yaml` | `read_file` |
 | What is this session doing? | slash commands | **ask the user to type it** |
 
 `agentica --help` is generated from the parser, so it is never out of date. It
@@ -68,6 +69,28 @@ print an API key you read from them, and never write a key into a command line.
 - **Permission tiers.** Tool access runs in one of three modes. The user can
   change it mid-session, so never assume the tier you started with is still in
   force; if a tool is refused, that is the answer, not a bug to work around.
+
+## Changing yourself
+
+Reading is files; changing is the `self_manage` tool. It edits `config.yaml`
+and `.env`, reports and installs upgrades, and installs skills. Its own schema
+lists the actions and is in front of you every turn, so it — not this page — is
+where you look up what to pass.
+
+- **Do not hand-edit `config.yaml` or invent a `pip` command.** Writing the file
+  yourself loses the comment-preserving round trip; running `pip install -U`
+  through `execute` skips the version check and the restart notice.
+- **Keys never touch a command line, a log, or your reply.** `set_config` and
+  `set_env` take them as arguments; `show` masks them on the way back.
+- **`upgrade` needs `confirm=True`** and installs a new version. Say what
+  changes before asking for that confirmation, and afterwards tell the user to
+  restart the CLI — the running process keeps the old code.
+- **Config edits land in the file immediately; the live session does not
+  change.** A new model or tuning value applies on the next agent rebuild or
+  restart, so say so rather than implying the switch already happened.
+- **`/config` and `/upgrade` are the human's version of this tool.** Point the
+  user at them when they want to drive; use the tool when you are the one doing
+  it.
 
 ## Answering well
 

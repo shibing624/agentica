@@ -45,7 +45,16 @@ class TestBundledSkillsShip(unittest.TestCase):
         self.assertEqual(cmds["/agentica"].name, "agentica")
         self.assertEqual(cmds["/multi-agent"].name, "multi-agent")
 
-    def test_loading_registers_them_as_bundled(self):
+    def test_loading_registers_exactly_these_as_bundled(self):
+        """The bundled set is closed on purpose, so adding to it is a decision.
+
+        Shipping a skill spends every user's context and cannot be uninstalled,
+        so the bar is: knowledge about *agentica itself* that an install cannot
+        work out on its own. General workflow skills (TDD, brainstorming, code
+        review) belong in the hub or a user directory, and a capability that
+        changes machine state belongs in a tool — `self_manage` stays a tool;
+        the judgement about using it lives in the `agentica` skill.
+        """
         loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
         registry = SkillRegistry()
         for skill_md in loader.discover_skills(SkillLoader.BUNDLED_SKILL_DIR):
@@ -112,6 +121,18 @@ class TestBundledSkillContent(unittest.TestCase):
         self.assertIn("config.yaml", body)
         # Slash commands are typed by the user; the model cannot run them.
         self.assertIn("cannot type slash commands", body)
+
+    def test_the_agentica_skill_sends_changes_through_the_tool(self):
+        """Self-management is a capability, not a workflow: the hand is
+        ``SelfManageTool`` (always mounted by the CLI), and this skill only
+        carries the judgement around using it. It must not grow a copy of the
+        tool's action list — that ships in the schema every turn."""
+        body = self._body("agentica")
+        self.assertIn("self_manage", body)
+        self.assertIn("confirm=True", body)
+        self.assertIn("pip", body)  # ... telling it not to roll its own
+        for action in ("action='set_env'", "action='check_upgrade'"):
+            self.assertNotIn(action, body)
 
     def test_the_multi_agent_skill_covers_all_three_mechanisms(self):
         body = self._body("multi-agent")
