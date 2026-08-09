@@ -21,7 +21,7 @@
 - **Async-First 架构** -- 所有核心方法原生 async，同步适配器无缝兼容
 - **开发者友好** -- 简洁直观的面向对象 API，5 行代码创建一个 Agent
 - **模块化可扩展** -- 模型、记忆后端、向量存储均可自由替换
-- **功能完备** -- 内置 40+ 工具、RAG、多智能体协作（Swarm/Subagent）、工作流编排、安全守卫
+- **功能完备** -- 内置 40+ 工具、RAG、多智能体协作（Swarm/Subagent/Workflow；CLI 另有 `task`/`delegate`/peer）、工作流编排、安全守卫
 - **生产就绪** -- CLI / Web UI / API 服务多种部署方式
 - **协议支持** -- MCP (Model Context Protocol) + ACP (Agent Client Protocol)
 - **安全机制** -- Death Spiral 检测、Cost Budget、Guardrails 三层守卫

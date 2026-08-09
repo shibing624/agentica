@@ -39,15 +39,15 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | [架构总览](introduction/architecture.md) | 五层架构与数据流 |
 | [安装](getting-started/installation.md) | 安装与环境配置 |
 | [快速入门](getting-started/quickstart.md) | 5 分钟上手 |
-| [CLI 终端](getting-started/terminal.md) | 命令行交互模式 |
+| [CLI 终端](getting-started/terminal.md) | 命令行交互：`task` / `delegate` / peer、斜杠命令 |
 | **核心概念** | |
 | [Agent](concepts/agent.md) | Agent 核心概念、Model、Memory、Tools |
 | [Model](concepts/model.md) | 20+ 模型提供商 |
-| [Tools](concepts/tools.md) | 内置工具与自定义工具 |
+| [Tools](concepts/tools.md) | 内置工具与自定义工具（含 `task`/`delegate`/peer） |
 | [Memory & Workspace](concepts/memory.md) | 记忆系统与工作空间 |
 | [Knowledge (RAG)](concepts/rag.md) | 知识库、向量检索 |
 | **多智能体** | |
-| [选择编排模式](multi-agent/choosing.md) | as_tool、Workflow、Subagent、Swarm 决策树 |
+| [选择编排模式](multi-agent/choosing.md) | SDK 与 CLI：`as_tool`、Workflow、Subagent、Swarm、`task`/`delegate`/peer |
 | [Workflow](multi-agent/workflow.md) | 确定性工作流编排 |
 | [Swarm](multi-agent/swarm.md) | 自主多智能体协作 |
 | [Subagent](multi-agent/subagent.md) | Markdown 定义、项目级/用户级自定义与子任务委派 |

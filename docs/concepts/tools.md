@@ -299,11 +299,25 @@ tools = get_builtin_tools(work_dir="./")
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件 |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep，支持 regex） |
-| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等） |
+| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`background=True` 进后台 |
+| `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |
 | `write_todos` | `BuiltinTodoTool` | 任务清单管理 |
-| `task` | `BuiltinTaskTool` | 启动子 Agent 处理独立子任务 |
+| `task` | `BuiltinTaskTool` | 同进程启动子 Agent（subagent，默认 auxiliary、偏只读） |
+| `delegate` | `BuiltinDelegateTool` | **交互 CLI 专用**：另起完整 `agentica --query --print` 进程；不阻塞，经 `/ps`/`wait`/`/stop` 托管 |
+| `list_agents` / `send_message` | `PeerMessagingTool` | **交互 CLI 专用**：跨终端对等会话发现与纯文本消息 |
+
+#### `task` vs `delegate` vs peer
+
+| | `task` | `delegate` | peer |
+|---|---|---|---|
+| 场景 | SDK / CLI 都可用 | 仅交互 CLI（需要 `BackgroundProcessRegistry`） | 仅交互 CLI（需要 `PeerSession`） |
+| 进程 | 同进程 | 新 OS 进程 | 两个用户开的终端 |
+| 成本 | 低（aux 模型） | 高（完整 agentica run） | 几乎只是写 mailbox |
+| 选用 | 搜代码、查资料 | 独立 context / 换目录的大活 | 通知另一会话，不是雇工 |
+
+选型见 [Choosing](../multi-agent/choosing.md)；CLI 行为见 [终端文档](../getting-started/terminal.md)。
 
 #### 替换 web 搜索引擎
 

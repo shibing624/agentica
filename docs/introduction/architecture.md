@@ -58,7 +58,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 | `agentica/cli/commands/` | `CommandContext`, `PendingQueue`, `COMMAND_REGISTRY` / `COMMAND_HANDLERS` | `session.py`, `model_config.py`, `runtime.py`, `goal.py`, `registry.py` |
 | `agentica/cli/display/` | TUI 公共渲染 API | `stream.py`, `console.py`, `messages.py`, `status_bar.py` |
 | `agentica/cli/interactive/` | `run_interactive` | `app.py`, `console_io.py`, `stream_loop.py`, `attachments.py` |
-| `agentica/tools/builtin/` | `get_builtin_tools` + 7 个工具类 | `file_tool.py`, `execute_tool.py`, `task_state_tools.py`, `web_tools.py` |
+| `agentica/tools/builtin/` | `get_builtin_tools` + 内置工具类 | `file_tool.py`, `execute_tool.py`, `delegate_tool.py`, `task_state_tools.py`, `web_tools.py` |
 
 示例：
 

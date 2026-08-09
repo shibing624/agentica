@@ -70,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `apply_patch` docstring 明确要求 Update/Delete 操作前必须先 `read_file`，禁止凭记忆构造上下文
 - README News 区重构：旧版本条目折叠进 `<details>` 区块
 - 终端文档更新 `/new` 命令别名说明及退出 CLI 后按 session ID 恢复的用法
+- 文档与 README 补充 CLI `task` / `delegate` / peer 选型：`docs/getting-started/terminal.md`、`docs/multi-agent/choosing.md`、`docs/concepts/tools.md`、`docs/multi-agent/subagent.md`；中/英/日 README News + 协作对照表
+- CLI 对 `task` / `delegate`（及结果锚点）完整展示任务正文，不再 40/80 字截断；子 agent 启动行同样全文
 
 ## [1.4.11] - 2026-08-04
 

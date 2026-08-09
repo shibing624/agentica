@@ -45,6 +45,7 @@ tool calling, long-running tasks, multi-agent orchestration, cross-session memor
 
 ## 🔥 News
 
+- [2026/08/09] **CLI multi-session collaboration**: cross-terminal peer messaging (`list_agents` / `send_message`, `/list-agents` / `/send-message`); process-level `delegate` (spawns a full `agentica --query --print` with its own context/cwd, managed via `/ps` `/stop` `wait`) vs cheap in-process `task` (subagent); CLI shows the full `task` / `delegate` / `send_message` brief without truncation. See [Terminal docs](https://shibing624.github.io/agentica/getting-started/terminal)
 - [2026/08/04] **v1.4.11**: Adds OpenAI Responses API (with provider-native compaction), Markdown-configurable subagents, and multi-file `apply_patch`; improves CLI resume/status/compaction feedback; trims prompt and grep/glob schema cost; fixes Learned Experiences corruption and `write_todos` full-list echo. See [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**: Adds native image input with catalog-driven model capability routing; introduces `/rename` and name-based `/resume`; fixes Pillow core dependency metadata. See [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**: Unified 3-tier permission across SDK/CLI/Web (`ask`/`auto`/`allow-all`; drops yolo/full/strict); built-in subagents are read-only (`task` defaults to `explore`, edit/execute denied — fixes aux-model garbage code); `OpenAIChat` parses Claude `<invoke>` text tool calls leaked by OpenAI-compatible proxies; `edit_file` gives advisory tips instead of hard-rejecting; fixes `ask_user_question` CLI freeze. See [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
@@ -111,7 +112,7 @@ agent.run_sync("Search Python 3.13 new features and write them to features.md")
 - **20+ Models** — OpenAI / DeepSeek / Claude / ZhipuAI / Qwen / Moonshot / Ollama / LiteLLM and more
 - **40+ Built-in Tools** — Search, code execution, file operations, browser, OCR, image generation
 - **RAG** — Knowledge base management, hybrid retrieval, Rerank, LangChain / LlamaIndex integration
-- **Multi-Agent** — `Agent.as_tool()` (lightweight composition), Swarm (parallel / autonomous), and Workflow (deterministic orchestration)
+- **Multi-Agent** — SDK: `Agent.as_tool()`, Workflow, Swarm, [Markdown Subagents](https://shibing624.github.io/agentica/multi-agent/subagent); CLI: in-process `task`, process-level `delegate`, cross-terminal peer messaging (see [Terminal docs](https://shibing624.github.io/agentica/getting-started/terminal))
 - **Actor-Critic Refinement** — `refine()` with parallel multi-critic review, `SchemaCritic` for zero-cost program-level validation, `AgentCritic` for heterogeneous strong-model gating, and automatic loop-detection early-stop
 - **`/goal` Long-running Tasks** — `await agent.run_goal("xxx")` keeps pushing toward a goal, auto-judging completion, resuming, or pausing; supports token / wall-clock / turn hard caps; CLI `/goal /subgoal` ready out of the box, see [docs](https://shibing624.github.io/agentica/advanced/goals)
 - **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
@@ -168,6 +169,16 @@ CLI:
 ```
 
 Full guide: [Standing Goal Loop docs](https://shibing624.github.io/agentica/advanced/goals).
+
+### Collaboration: `task` / `delegate` / peer
+
+| Mechanism | What it does | When to use |
+|-----------|--------------|-------------|
+| `task` | In-process subagent (aux model by default, read-only) | Short lookups: search code, gather facts |
+| `delegate` | Spawns a full `agentica --query --print` process | Large work needing its own context / cwd; managed via `/ps`, `wait`, `/stop` |
+| peer | Plain-text between two interactive terminals (`list_agents` / `send_message`) | Inform another session — not hire a worker |
+
+Details: [Choosing](https://shibing624.github.io/agentica/multi-agent/choosing) · [Terminal docs](https://shibing624.github.io/agentica/getting-started/terminal).
 
 ## Web UI / IM Integration
 

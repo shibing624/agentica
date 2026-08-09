@@ -2,6 +2,8 @@
 
 Subagent 用于把边界清楚的调查任务放进独立上下文，例如定位文件、追踪调用链、收集外部资料。主 Agent 负责理解结果、修改代码、正确性审查和最终决策。
 
+CLI 里模型通过 **`task` 工具**调用 Subagent（同进程、默认 auxiliary 模型、内置类型只读）。若需要**另一个完整 agentica 进程**（独立 context / cwd、可写、经 `/ps`/`wait` 托管），那是 CLI 的 **`delegate`**，不是 Subagent——见 [Choosing](choosing.md) 与 [终端文档](../getting-started/terminal.md)。
+
 如果任务只是固定步骤流水线，优先使用 [Workflow](workflow.md)；如果要把长期存在的 Agent 当作工具组合，使用 `Agent.as_tool()`。只有子任务确实需要独立的提示词、工具权限、模型和运行预算时，才使用 Subagent。
 
 ## 内置 Subagent

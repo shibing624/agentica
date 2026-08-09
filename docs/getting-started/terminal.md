@@ -221,15 +221,31 @@ mcp, skill, ...
 
 一个交互会话可以把**整块**工作丢给另一个 agentica 进程去做：它有自己的上下文窗口、自己的模型、自己的工作目录，做完把结论交回来。
 
+这和进程内的 `task`（subagent）、跨终端的 peer 消息不是一回事：
+
+| | `task` | `delegate` | peer（`send_message`） |
+|---|---|---|---|
+| 关系 | 父 → 子 | 父 → 子 | 对等会话 |
+| 进程 | **同进程** | **新 OS 进程**（`agentica --query --print`） | 用户自己开的两个交互 CLI |
+| 模型 | 默认 auxiliary（便宜） | 默认跟主会话 | 各自会话的模型 |
+| 结果 | 工具返回值立刻回来 | 后台跑完再回执 / `wait` | 对方自己决定是否行动 |
+| 出现在 `list_agents` | 否 | **否**（刻意） | **是** |
+
 ```text
 > 把 ../service-a 和 ../service-b 这两个仓库分别做一遍依赖升级，做完告诉我结果
 
-  🔧 delegate → "upgrade service-a"   term_1  (PID 51204)
-  🔧 delegate → "upgrade service-b"   term_2  (PID 51205)
+  🔧 delegate
+      label='upgrade service-a'
+      把 ../service-a 做一遍依赖升级……（全文，不截断）
+  🔧 delegate
+      label='upgrade service-b'
+      ……
   …主会话继续做自己的事…
 
 ✓ Delegated task "upgrade service-a" finished in 04:12 (exit 0)
 ```
+
+CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任务正文（含换行），不再用 `...` 省略——这是你审计「派了什么活」的依据。
 
 要点：
 
@@ -240,6 +256,7 @@ mcp, skill, ...
 - **只有一层**。被委托出去的会话拿不到 `delegate` 工具，不会再往下派。
 - **不出现在 `list_agents` 里**。它是一次性 `--query` 进程，不是一个终端会话；委托是父子关系并且有返回值，peer 消息是平级会话之间说话，两者刻意分开。
 - 子进程用的是 `agentica --query "..." --print`，`--print` 只把最终回答写到 stdout（没有 banner、没有日志），你也可以在脚本里直接这么用；失败时退出码非 0。
+- **小活用 `task`**。读代码、搜仓库、查资料——`task` 便宜得多；只有工作大到值得独立 context（或必须换目录）时才 `delegate`。
 
 ### `/config`
 

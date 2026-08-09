@@ -44,6 +44,7 @@ Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI
 
 ## 🔥 News
 
+- [2026/08/09] **CLI 複数セッション協調**：端末をまたぐ peer メッセージ（`list_agents` / `send_message`）；プロセス級 `delegate`（独立した `agentica --query --print`）と安価なプロセス内 `task`（subagent）を明確に分離；CLI は `task` / `delegate` / `send_message` の指示文を省略せず全文表示。詳細は [端末ドキュメント](https://shibing624.github.io/agentica/getting-started/terminal)
 - [2026/08/04] **v1.4.11**：OpenAI Responses API（ネイティブ compaction 含む）、Markdown 設定可能なサブエージェント、複数ファイル `apply_patch` を追加；CLI の resume/ステータス/圧縮フィードバックを改善；prompt と grep/glob schema のコストを削減；Learned Experiences の汚染と `write_todos` の全リストエコーを修正。詳細は [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：カタログ駆動のモデル能力判定によるネイティブ画像入力を追加；`/rename` と名前指定の `/resume` を追加；Pillow コア依存関係のメタデータを修正。詳細は [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：SDK/CLI/Web の権限を 3 階層（`ask`/`auto`/`allow-all`、yolo/full/strict 廃止）に統一；内蔵サブエージェントは読み取り専用化（`task` のデフォルトを `explore` に、edit/execute を禁止し aux モデルの低品質コード生成を修正）；`OpenAIChat` が OpenAI 互換プロキシから漏れた Claude `<invoke>` テキストツール呼び出しを解析；`edit_file` を硬拒否から tip 提示に変更；`ask_user_question` の CLI フリーズを修正。詳細は [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
@@ -110,7 +111,7 @@ agent.run_sync("Python 3.13 の新機能を調べて features.md に書いてく
 - **20以上のモデル** — OpenAI / DeepSeek / Claude / ZhipuAI / Qwen / Moonshot / Ollama / LiteLLM など
 - **40以上の組み込みツール** — 検索、コード実行、ファイル操作、ブラウザ、OCR、画像生成
 - **RAG** — ナレッジベース管理、ハイブリッド検索、Rerank、LangChain / LlamaIndex 統合
-- **マルチエージェント** — `Agent.as_tool()`（軽量合成）、Swarm（並列 / 自律）、Workflow（確定的オーケストレーション）
+- **マルチエージェント** — SDK：`Agent.as_tool()`、Workflow、Swarm、[Markdown Subagent](https://shibing624.github.io/agentica/multi-agent/subagent)；CLI：プロセス内 `task`、プロセス級 `delegate`、端末間 peer メッセージ（[端末ドキュメント](https://shibing624.github.io/agentica/getting-started/terminal)）
 - **Actor-Critic 精錬** — `refine()` による複数 Critic 並列レビュー、`SchemaCritic` のゼロコストプログラム検証 / `AgentCritic` の異種強モデル監査、ループ検出による自動早期停止
 - **`/goal` 長時間タスク** — `await agent.run_goal("xxx")` で目標に向けて継続的に推進、完了・再開・一時停止を自動判定；token / wall-clock / turn の 3 種ハードキャップ対応；CLI の `/goal /subgoal` はそのまま使えます。詳細は [ドキュメント](https://shibing624.github.io/agentica/advanced/goals)
 - **ガードレール** — 入力 / 出力 / ツールレベルのガードレール、ストリーミングリアルタイム検出
