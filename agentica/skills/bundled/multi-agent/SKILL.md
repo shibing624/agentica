@@ -1,7 +1,11 @@
 ---
 name: multi-agent
-description: Run work across more than one agent - choose between the task subagent, the delegate tool, and starting a second agentica CLI in tmux that you drive with peer messages. Use when a job wants a parallel worker, its own terminal, or coordination between sessions.
-when_to_use: parallel agents, second cli, new terminal, tmux, delegate, subagent, send_message, list_agents, another session, coordinate, worker
+description: >-
+  Run work across more than one agent — choose between the task subagent, the
+  delegate tool, and a second agentica CLI in tmux driven by peer messages
+  (list_agents / send_message). Use when a job wants parallel workers, its own
+  terminal, coordination between sessions, or you are choosing among task,
+  delegate, and a second CLI.
 metadata:
   version: "1.0"
 ---

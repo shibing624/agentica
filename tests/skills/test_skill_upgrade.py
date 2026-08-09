@@ -29,8 +29,9 @@ from agentica.skills import reset_skill_registry
 # slug.
 _VALID_SKILL_MD = (
     "---\nname: pandas-preference\n"
-    "description: Use pandas for tabular data, not the csv module\n"
-    "when-to-use: csv, dataframe, tabular, parsing\n---\n\n"
+    "description: Use pandas for tabular data, not the csv module. "
+    "Use when working with CSV, dataframes, or tabular parsing.\n"
+    "---\n\n"
     "Reach for pandas.read_csv before the stdlib csv module.\n\n"
     "## Gotchas\n"
     "- \u26a0\ufe0f csv.reader strips dtypes: every cell becomes str. "
@@ -113,7 +114,6 @@ class TestNormalizeSkillMd(unittest.TestCase):
             "```yaml\n"
             "name: check-dir\n"
             "description: check directory\n"
-            "when-to-use: before reading files\n"
             "```\n"
             "# Overview\n"
             "Step 1.\n"
@@ -188,8 +188,8 @@ class TestSkillEvolutionManager(unittest.TestCase):
             "reason": "Repeated correction about data processing",
             "skill_md": (
                 "---\nname: pandas-preference\n"
-                "description: Use pandas for data processing\n"
-                "when-to-use: data processing, CSV, dataframes\n---\n\n"
+                "description: Use pandas for data processing, CSV, and dataframes\n"
+                "---\n\n"
                 "Use pandas.read_csv instead of the csv module for any "
                 "tabular workload.\n\n## Gotchas\n"
                 "- \u26a0\ufe0f csv.reader strips dtypes: every cell becomes "
@@ -706,7 +706,7 @@ class TestSkillContentValidator(unittest.TestCase):
     def test_missing_gotchas_fails(self):
         from agentica.experience.skill_upgrade import SkillEvolutionManager
         md = (
-            "---\nname: t\ndescription: t\nwhen-to-use: t\n---\n"
+            "---\nname: t\ndescription: t\n---\n"
             "Just a plain body with no warnings."
         )
         ok, reason = SkillEvolutionManager._validate_skill_content(md)
@@ -730,7 +730,7 @@ class TestSkillContentValidator(unittest.TestCase):
     def test_skeleton_code_block_fails(self):
         from agentica.experience.skill_upgrade import SkillEvolutionManager
         md = (
-            "---\nname: t\ndescription: t\nwhen-to-use: t\n---\n"
+            "---\nname: t\ndescription: t\n---\n"
             "summary\n\n## Gotchas\n- \u26a0\ufe0f a: b. c.\n- \u26a0\ufe0f d: e. f.\n\n"
             "## Minimal Example\n```python\ndef f():\n  pass\n```\n"
         )
@@ -793,7 +793,7 @@ class TestSpawnSkillEvidenceAndIndex(unittest.TestCase):
 
         index_md = (self._gen_dir / "INDEX.md").read_text()
         self.assertIn("pandas-preference", index_md)
-        self.assertIn("csv, dataframe", index_md)
+        self.assertIn("tabular", index_md)
 
     def test_spawn_recovery_gate_blocks_when_no_recoveries(self):
         from agentica.experience.skill_upgrade import SkillEvolutionManager
@@ -1117,14 +1117,14 @@ class TestRebuildIndex(unittest.TestCase):
         active = self._gen_dir / "active"
         active.mkdir()
         (active / "SKILL.md").write_text(
-            "---\nname: active\ndescription: alive\nwhen-to-use: foo, bar\n---\nbody"
+            "---\nname: active\ndescription: alive\n---\nbody"
         )
         SkillEvolutionManager.write_meta(active / "meta.json", {"status": "shadow"})
         # Rolled-back skill
         dead = self._gen_dir / "dead"
         dead.mkdir()
         (dead / "SKILL.md").write_text(
-            "---\nname: dead\ndescription: gone\nwhen-to-use: x\n---\nbody"
+            "---\nname: dead\ndescription: gone\n---\nbody"
         )
         SkillEvolutionManager.write_meta(dead / "meta.json", {"status": "rolled_back"})
 
@@ -1958,7 +1958,7 @@ class TestSourceTasksPersistence(unittest.TestCase):
 
     def test_append_source_section_writes_originating_tasks(self):
         from agentica.experience.skill_upgrade import SkillEvolutionManager
-        skill_md = "---\nname: x\ndescription: y\nwhen-to-use: z\n---\n\n## Body\nhello"
+        skill_md = "---\nname: x\ndescription: y\n---\n\n## Body\nhello"
         out = SkillEvolutionManager._append_source_section(
             skill_md, source="my_card", event_count=4,
             source_tasks=["alpha task", "beta task"],

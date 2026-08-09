@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for Skill lazy loading and keyword matching."""
+"""Tests for Skill lazy loading and standard frontmatter discovery."""
 import tempfile
 import unittest
 import importlib
@@ -87,39 +87,6 @@ class TestSkillLazyLoading(unittest.TestCase):
         self.assertTrue(skill._content_loaded)
 
 
-class TestSkillWhenToUse(unittest.TestCase):
-    """Skill when_to_use field and keyword matching."""
-
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp()
-        self.skill_dir = Path(self.tmpdir) / "search-skill"
-        self.skill_dir.mkdir()
-        (self.skill_dir / "SKILL.md").write_text(
-            "---\nname: arxiv-search\ndescription: Search papers\nwhen_to_use: arxiv, papers, academic search\n---\n# Instructions",
-            encoding="utf-8",
-        )
-
-    def test_when_to_use_parsed_from_frontmatter(self):
-        skill = Skill.from_skill_md(self.skill_dir / "SKILL.md")
-        self.assertIsNotNone(skill)
-        self.assertEqual(skill.when_to_use, "arxiv, papers, academic search")
-
-    def test_matches_keywords_positive(self):
-        skill = Skill(
-            name="test", description="desc", path=Path("/tmp"),
-            when_to_use="arxiv, papers, search",
-        )
-        self.assertTrue(skill.matches_keywords("search arxiv papers"))
-        self.assertTrue(skill.matches_keywords("I want to search papers"))
-
-    def test_matches_keywords_negative(self):
-        skill = Skill(
-            name="test", description="desc", path=Path("/tmp"),
-            when_to_use="arxiv, papers, search",
-        )
-        self.assertFalse(skill.matches_keywords("hello world"))
-
-
 class TestConfigurableMemoryBudget(unittest.TestCase):
     """Workspace should consume the configurable AGENTS context budget."""
 
@@ -133,100 +100,50 @@ class TestConfigurableMemoryBudget(unittest.TestCase):
         importlib.reload(agentica_config)
         importlib.reload(workspace_module)
 
-    def test_matches_keywords_short_words_ignored(self):
-        skill = Skill(
-            name="test", description="desc", path=Path("/tmp"),
-            when_to_use="AI, search",
-        )
-        # "AI" is only 2 chars, should be ignored; "search" should match
-        self.assertTrue(skill.matches_keywords("search for something"))
-        self.assertFalse(skill.matches_keywords("AI is great"))  # "AI" too short
 
-    def test_matches_keywords_none(self):
-        skill = Skill(name="test", description="desc", path=Path("/tmp"))
-        self.assertFalse(skill.matches_keywords("anything"))
+class TestSkillDescriptionIsTheDiscoveryField(unittest.TestCase):
+    """Agent Skills discover via description; when_to_use is not a field."""
 
-    def test_to_xml_includes_when_to_use(self):
-        skill = Skill(
-            name="test", description="desc", path=Path("/tmp"),
-            when_to_use="arxiv, papers",
-        )
-        xml = skill.to_xml()
-        self.assertIn("<when_to_use>", xml)
-        self.assertIn("arxiv, papers", xml)
-
-    def test_to_dict_includes_when_to_use(self):
-        skill = Skill(
-            name="test", description="desc", path=Path("/tmp"),
-            when_to_use="arxiv, papers",
-        )
-        d = skill.to_dict()
-        self.assertEqual(d["when_to_use"], "arxiv, papers")
-
-
-class TestSkillRegistryKeywordMatch(unittest.TestCase):
-    """SkillRegistry.match_trigger falls back to keyword matching."""
-
-    def test_keyword_match_fallback(self):
-        registry = SkillRegistry()
-        skill = Skill(
-            name="paper-search", description="Search papers",
-            path=Path("/tmp"),
-            when_to_use="arxiv, papers, academic",
-            user_invocable=True,
-        )
-        registry.register(skill)
-
-        # No trigger match, but keyword match should work
-        matched = registry.match_trigger("search for arxiv papers")
-        self.assertIsNotNone(matched)
-        self.assertEqual(matched.name, "paper-search")
-
-    def test_trigger_match_takes_priority(self):
-        registry = SkillRegistry()
-        skill = Skill(
-            name="commit", description="Git commit",
-            path=Path("/tmp"),
-            trigger="/commit",
-            when_to_use="git, commit, version control",
-            user_invocable=True,
-        )
-        registry.register(skill)
-
-        # Trigger match
-        matched = registry.match_trigger("/commit fix bug")
-        self.assertIsNotNone(matched)
-        self.assertEqual(matched.name, "commit")
-
-    def test_no_match_returns_none(self):
-        registry = SkillRegistry()
-        skill = Skill(
-            name="commit", description="Git commit",
-            path=Path("/tmp"),
-            trigger="/commit",
-            when_to_use="git, commit",
-            user_invocable=True,
-        )
-        registry.register(skill)
-
-        matched = registry.match_trigger("hello world")
-        self.assertIsNone(matched)
-
-
-class TestSkillWhenToUseDashFrontmatter(unittest.TestCase):
-    """when-to-use (dashed) frontmatter key should also work."""
-
-    def test_dashed_key(self):
+    def test_legacy_when_to_use_frontmatter_is_ignored(self):
         tmpdir = tempfile.mkdtemp()
-        skill_dir = Path(tmpdir) / "test-skill"
+        skill_dir = Path(tmpdir) / "search-skill"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text(
-            "---\nname: test\ndescription: desc\nwhen-to-use: foo, bar\n---\n# Body",
+            "---\nname: arxiv-search\n"
+            "description: Search papers. Use when the user mentions arxiv or academic search.\n"
+            "when_to_use: arxiv, papers\n"
+            "when-to-use: ignored-too\n"
+            "---\n# Instructions",
             encoding="utf-8",
         )
         skill = Skill.from_skill_md(skill_dir / "SKILL.md")
         self.assertIsNotNone(skill)
-        self.assertEqual(skill.when_to_use, "foo, bar")
+        self.assertNotIn("when_to_use", skill.__dataclass_fields__)
+        self.assertNotIn("when_to_use", skill.to_dict(include_content=False))
+        self.assertNotIn("<when_to_use>", skill.to_xml())
+        self.assertIn("arxiv", skill.description)
+
+    def test_match_trigger_requires_explicit_trigger(self):
+        registry = SkillRegistry()
+        registry.register(Skill(
+            name="paper-search",
+            description="Search papers. Use for arxiv and academic search.",
+            path=Path("/tmp"),
+            user_invocable=True,
+        ))
+        self.assertIsNone(registry.match_trigger("search for arxiv papers"))
+
+        registry.register(Skill(
+            name="commit",
+            description="Git commit helper",
+            path=Path("/tmp"),
+            trigger="/commit",
+            user_invocable=True,
+        ))
+        matched = registry.match_trigger("/commit fix bug")
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched.name, "commit")
+        self.assertIsNone(registry.match_trigger("hello world"))
 
 
 class TestSkillLoaderManagedDirs(unittest.TestCase):

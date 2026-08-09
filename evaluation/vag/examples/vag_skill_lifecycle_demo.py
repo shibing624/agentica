@@ -53,7 +53,6 @@ GENERATED_SKILLS_DIR = DEMO_DIR / "generated_skills"
 GOOD_SKILL_MD = """---
 name: check-path-before-read
 description: Check paths before reading files
-when-to-use: file operations, path validation
 ---
 
 Check that a path exists before reading it.

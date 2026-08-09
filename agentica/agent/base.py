@@ -156,7 +156,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     name: Optional[str] = None
     agent_id: str = ""
     description: Optional[str] = None
-    when_to_use: Optional[str] = None  # Hint for LLM: when to delegate tasks to this agent
     instructions: Optional[Union[str, List[str], Callable]] = None
     tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None
     knowledge: Optional[Any] = None  # Knowledge type
@@ -294,7 +293,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         name: Optional[str] = None,
         agent_id: Optional[str] = None,
         description: Optional[str] = None,
-        when_to_use: Optional[str] = None,
         instructions: Optional[Union[str, List[str], Callable]] = None,
         tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]] = None,
         knowledge: Optional[Any] = None,
@@ -342,7 +340,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             name=name,
             agent_id=agent_id,
             description=description,
-            when_to_use=when_to_use,
             instructions=instructions,
             tools=tools,
             knowledge=knowledge,
@@ -403,7 +400,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         name: Optional[str],
         agent_id: Optional[str],
         description: Optional[str],
-        when_to_use: Optional[str],
         instructions: Optional[Union[str, List[str], Callable]],
         tools: Optional[List[Union[ModelTool, Tool, Callable, Dict, Function]]],
         knowledge: Optional[Any],
@@ -426,7 +422,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self.name = name
         self.agent_id = agent_id or str(uuid4())
         self.description = description
-        self.when_to_use = when_to_use
         self.instructions = instructions
         self.tools = tools
         self.knowledge = knowledge
@@ -1034,7 +1029,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             name=definition.name,
             agent_id=definition.agent_id,
             description=definition.description,
-            when_to_use=definition.when_to_use,
             instructions=definition.instructions,
             tools=definition.tools,
             knowledge=definition.knowledge,

@@ -1,7 +1,11 @@
 ---
 name: agentica
-description: How to answer questions about the agentica product you are running inside - flags, config profiles, models, sessions, tools, skills, self-management, and where state lives on disk. Use when asked how agentica works, how to configure it, upgrade it, or where something is stored.
-when_to_use: agentica, cli flag, config.yaml, profile, api key, switch model, session, resume, workspace, skills, logs, where is, upgrade, self_manage
+description: >-
+  How to answer questions about the agentica product you are running inside —
+  CLI flags, config.yaml profiles, API keys, models, sessions, resume,
+  workspace, skills, logs, upgrade, and self_manage. Use when asked how
+  agentica works, how to configure or upgrade it, where state lives on disk,
+  or how to change your own settings.
 metadata:
   version: "1.0"
 ---

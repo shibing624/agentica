@@ -17,7 +17,6 @@ from evaluation.vag.lifecycle import (
 VALID_SKILL_MD = """---
 name: safe-skill
 description: Check file paths before reading them
-when-to-use: file operations, path validation
 ---
 
 Check that a path exists before reading it.

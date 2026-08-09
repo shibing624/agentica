@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Unit tests for Agent.as_tool(), clone(), and when_to_use.
+@description: Unit tests for Agent.as_tool() and clone().
 """
 import asyncio
 import sys
@@ -76,19 +76,14 @@ class TestAsToolBasic(unittest.TestCase):
         self.assertEqual(tool.name, "translate_zh")
 
     def test_as_tool_default_description_from_agent_description(self):
-        agent = Agent(name="Translator", description="A professional translator agent", instructions="Translate text")
-        tool = agent.as_tool()
-        self.assertIn("A professional translator agent", tool.description)
-
-    def test_as_tool_default_description_from_when_to_use(self):
         agent = Agent(
             name="Translator",
-            description="A translator",
-            when_to_use="Use when the user needs text translated to Chinese",
+            description="A professional translator agent. Use when text needs translation to Chinese.",
             instructions="Translate text",
         )
         tool = agent.as_tool()
-        self.assertIn("Use when the user needs text translated to Chinese", tool.description)
+        self.assertIn("A professional translator agent", tool.description)
+        self.assertIn("translation to Chinese", tool.description)
 
     def test_as_tool_default_description_from_agent_role(self):
         agent = Agent(
@@ -190,19 +185,6 @@ class TestSerializeContent(unittest.TestCase):
         result = _serialize_content([1, 2, 3])
         parsed = json.loads(result)
         self.assertEqual(parsed, [1, 2, 3])
-
-
-class TestWhenToUse(unittest.TestCase):
-    """Test when_to_use routing hint."""
-
-    def test_when_to_use_in_as_tool(self):
-        agent = Agent(
-            name="Coder",
-            when_to_use="Use for code generation and debugging tasks",
-            instructions="Generate code",
-        )
-        tool = agent.as_tool()
-        self.assertEqual(tool.description, "Use for code generation and debugging tasks")
 
 
 class TestIntegration(unittest.TestCase):

@@ -52,7 +52,6 @@ def _default_stub_generator(task: TBTask) -> str:
         "---\n"
         f"name: tb2-{task.task_id}\n"
         f"description: Generated stub skill for {task.task_id}\n"
-        f"when-to-use: tasks similar to '{task.prompt[:60]}...'\n"
         "---\n\n"
         f"Work in `{task.working_dir}` and prefer commands that touch "
         f"{', '.join(task.expected_command_markers) or 'no specific files'}.\n"

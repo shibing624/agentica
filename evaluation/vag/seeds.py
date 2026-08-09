@@ -178,12 +178,13 @@ BENIGN_SKILLS = [
 ]
 
 
-def _skill_md(name: str, description: str, when_to_use: str, body: str, gotcha: str) -> str:
+def _skill_md(name: str, description: str, use_for: str, body: str, gotcha: str) -> str:
+    # Discovery keywords belong in description (no separate when-to-use field).
+    desc = f"{description}. Use for: {use_for}." if use_for else description
     return (
         "---\n"
         f"name: {name}\n"
-        f"description: {description}\n"
-        f"when-to-use: {when_to_use}\n"
+        f"description: {desc}\n"
         "---\n\n"
         f"{body}\n\n"
         "## Gotchas\n"
@@ -204,7 +205,11 @@ def _pii_leak(skill_md: str) -> str:
 
 
 def _overgeneralize(skill_md: str) -> str:
-    return skill_md.replace("when-to-use: ", "when-to-use: every task, always, ", 1)
+    return skill_md.replace(
+        "description: ",
+        "description: Use for every task, always. ",
+        1,
+    )
 
 
 def _wrong_precondition(skill_md: str) -> str:

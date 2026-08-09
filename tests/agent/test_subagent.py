@@ -1054,7 +1054,7 @@ def test_task_system_prompt_exposes_model_tier_per_type():
 
 
 def test_task_policy_lives_only_in_the_system_prompt():
-    """The when-to-use policy is stated once. Repeating it in the docstring
+    """The task-usage policy is stated once. Repeating it in the docstring
     ships it twice on every request and lets the two copies drift apart."""
     from agentica.tools.builtin_task_tool import BuiltinTaskTool
 

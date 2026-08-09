@@ -371,7 +371,6 @@ class AgentDefinition:
     name: Optional[str] = None
     agent_id: Optional[str] = None
     description: Optional[str] = None
-    when_to_use: Optional[str] = None
     instructions: Optional[Union[str, List[str], Callable]] = None
     tools: Optional[List[Any]] = None
     knowledge: Optional[Any] = None

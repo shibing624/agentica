@@ -7,7 +7,7 @@ A small maintenance tool over the skill directories that ``SkillLoader`` knows
 about. It surfaces common problems before they bite at runtime:
 
   - SKILL.md that fails to parse (missing name/description) -> broken
-  - description too long / missing when_to_use -> won't trigger well
+  - description too long / empty -> won't discover well
   - trigger that doesn't start with "/"
   - bundled resource dirs referenced in the body but missing on disk
   - duplicate skill names or triggers across the install set
@@ -110,11 +110,6 @@ class SkillCurator:
         if skill.trigger and not skill.trigger.startswith("/"):
             report.issues.append(SkillIssue(
                 "warning", "bad_trigger", f"trigger '{skill.trigger}' should start with '/'"))
-
-        if not skill.when_to_use:
-            report.issues.append(SkillIssue(
-                "warning", "no_when_to_use",
-                "no 'when_to_use' keywords -> skill won't auto-activate by context"))
 
         self._check_resources(skill, report)
         self._check_body_size(skill, report)

@@ -118,10 +118,10 @@ class SkillRegistry:
         """
         Find a skill that matches the given trigger text.
 
-        First tries exact trigger prefix match, then falls back to
-        keyword matching against when_to_use field.
-
-        Only matches skills that are user_invocable=True.
+        Matches skills that are user_invocable=True and whose ``trigger``
+        prefixes the text. Discovery for the model uses ``description``
+        (standard Agent Skills); this helper is only for explicit ``/slug``
+        style invocations.
 
         Args:
             text: User input text (e.g., "/commit fix bug")
@@ -130,13 +130,8 @@ class SkillRegistry:
             Matching Skill or None if no match found
         """
         text = text.strip()
-        # 1. Exact trigger prefix match
         for skill in self._skills.values():
             if skill.user_invocable and skill.matches_trigger(text):
-                return skill
-        # 2. Keyword match from when_to_use
-        for skill in self._skills.values():
-            if skill.user_invocable and skill.matches_keywords(text):
                 return skill
         return None
 

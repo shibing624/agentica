@@ -53,20 +53,14 @@ class TestSkillCurator(unittest.TestCase):
 
     def test_clean_skill_is_ok(self):
         _write_skill(self.root, "good",
-                     "name: Good Skill\ndescription: Does good\nwhen_to_use: foo, bar\ntrigger: /good")
+                     "name: Good Skill\ndescription: Does good. Use for foo and bar.\ntrigger: /good")
         reports = self._curator().scan()
         self.assertEqual(len(reports), 1)
         self.assertEqual(reports[0].status, STATUS_OK)
 
-    def test_missing_when_to_use_warns(self):
-        _write_skill(self.root, "nowtu", "name: No WTU\ndescription: x")
-        report = self._curator().scan()[0]
-        self.assertEqual(report.status, STATUS_WARNING)
-        self.assertTrue(any(i.code == "no_when_to_use" for i in report.issues))
-
     def test_bad_trigger_warns(self):
         _write_skill(self.root, "badtrig",
-                     "name: Bad Trigger\ndescription: x\nwhen_to_use: a\ntrigger: nofslash")
+                     "name: Bad Trigger\ndescription: x\ntrigger: nofslash")
         report = self._curator().scan()[0]
         self.assertTrue(any(i.code == "bad_trigger" for i in report.issues))
 
@@ -78,22 +72,22 @@ class TestSkillCurator(unittest.TestCase):
         self.assertTrue(any(i.code == "parse_failed" for i in report.issues))
 
     def test_duplicate_name_is_error(self):
-        _write_skill(self.root, "a", "name: Dup\ndescription: x\nwhen_to_use: a")
-        _write_skill(self.root, "b", "name: Dup\ndescription: y\nwhen_to_use: b")
+        _write_skill(self.root, "a", "name: Dup\ndescription: x")
+        _write_skill(self.root, "b", "name: Dup\ndescription: y")
         reports = self._curator().scan()
         self.assertTrue(all(r.status == STATUS_BROKEN for r in reports))
         self.assertTrue(all(any(i.code == "duplicate_name" for i in r.issues) for r in reports))
 
     def test_missing_resource_dir_warns(self):
         _write_skill(self.root, "res",
-                     "name: Res\ndescription: x\nwhen_to_use: a",
+                     "name: Res\ndescription: x",
                      body="Run scripts/build.sh to do the thing.")
         report = self._curator().scan()[0]
         self.assertTrue(any(i.code == "missing_resource_dir" for i in report.issues))
 
     def test_present_resource_dir_no_warn(self):
         d = _write_skill(self.root, "res2",
-                         "name: Res2\ndescription: x\nwhen_to_use: a",
+                         "name: Res2\ndescription: x",
                          body="Run scripts/build.sh.")
         (d / "scripts").mkdir()
         report = self._curator().scan()[0]
@@ -101,14 +95,14 @@ class TestSkillCurator(unittest.TestCase):
 
     def test_catalog_generation(self):
         _write_skill(self.root, "good",
-                     "name: Cat Skill\ndescription: d\nwhen_to_use: a\ntrigger: /cat")
+                     "name: Cat Skill\ndescription: d\ntrigger: /cat")
         catalog = self._curator().generate_catalog()
         self.assertIn("# Skill Catalog", catalog)
         self.assertIn("Cat Skill", catalog)
         self.assertIn("/cat", catalog)
 
     def test_summary_runs(self):
-        _write_skill(self.root, "good", "name: S\ndescription: d\nwhen_to_use: a")
+        _write_skill(self.root, "good", "name: S\ndescription: d")
         out = self._curator().summary()
         self.assertIn("Scanned 1 skill", out)
 

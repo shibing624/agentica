@@ -69,7 +69,6 @@ class Skill:
         license: Optional license information
         trigger: Optional trigger command (e.g., /commit)
         argument_hint: Hint for trigger arguments (e.g. "<file-path>")
-        when_to_use: Keywords describing when this skill is useful
         requires: List of required tools or commands
         allowed_tools: List of tools allowed for this skill
         metadata: Additional metadata from frontmatter
@@ -90,7 +89,6 @@ class Skill:
     license: Optional[str] = None
     trigger: Optional[str] = None  # Trigger command like /commit
     argument_hint: Optional[str] = None  # Hint for argument (e.g. "<file-path>")
-    when_to_use: Optional[str] = None  # Keywords describing when this skill is useful
     requires: List[str] = field(default_factory=list)  # Required tools/commands
     allowed_tools: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
@@ -126,7 +124,7 @@ class Skill:
 
         Call this after the underlying SKILL.md file has been modified on disk.
         Only the body is reloaded; frontmatter fields (name, description, trigger,
-        when_to_use, etc.) are NOT refreshed. To pick up frontmatter changes,
+        etc.) are NOT refreshed. To pick up frontmatter changes,
         re-parse via ``Skill.from_skill_md()`` and re-register.
         """
         self._content = None
@@ -177,7 +175,6 @@ class Skill:
             license=frontmatter.get('license'),
             trigger=frontmatter.get('trigger'),
             argument_hint=frontmatter.get('argument-hint'),
-            when_to_use=frontmatter.get('when_to_use') or frontmatter.get('when-to-use'),
             requires=frontmatter.get('requires', []) or [],
             allowed_tools=frontmatter.get('allowed-tools', []) or [],
             metadata=frontmatter.get('metadata', {}) or {},
@@ -337,21 +334,6 @@ Base directory: {self.path}
         ])
         return "\n".join(lines)
 
-    def matches_keywords(self, text: str) -> bool:
-        """Check if text matches this skill's when_to_use keywords.
-
-        Args:
-            text: User input text to check
-
-        Returns:
-            True if any keyword from when_to_use appears in text
-        """
-        if not self.when_to_use:
-            return False
-        text_lower = text.lower()
-        keywords = [kw.strip().lower() for kw in re.split(r'[,;.\n]', self.when_to_use) if kw.strip()]
-        return any(kw in text_lower for kw in keywords if len(kw) > 2)
-
     def to_xml(self) -> str:
         """
         Format skill as XML for inclusion in prompts.
@@ -364,8 +346,6 @@ Base directory: {self.path}
             f"<description>{self.description}</description>",
             f"<location>{self.location}</location>",
         ]
-        if self.when_to_use:
-            parts.append(f"<when_to_use>{self.when_to_use}</when_to_use>")
         inner = "\n".join(parts)
         return f"<skill>\n{inner}\n</skill>"
 
@@ -388,7 +368,6 @@ Base directory: {self.path}
             "license": self.license,
             "trigger": self.trigger,
             "argument_hint": self.argument_hint,
-            "when_to_use": self.when_to_use,
             "requires": self.requires,
             "allowed_tools": self.allowed_tools,
             "metadata": self.metadata,

@@ -30,7 +30,6 @@ async def _stub_generator(task: NexAUTask) -> str:
         "---\n"
         f"name: nexau-{task.task_id}\n"
         f"description: Action-utility skill for '{task.user_intent[:60]}'\n"
-        "when-to-use: next-action ranking under user-intent shift\n"
         "---\n\n"
         f"Plan: candidate action = `{task.candidate_action}`.\n"
     )

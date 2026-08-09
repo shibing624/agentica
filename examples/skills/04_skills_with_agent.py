@@ -92,7 +92,6 @@ def demo_skill_tool_custom_dirs():
             """---
 name: python-style-guide
 description: Apply a concise Python coding style guide.
-when-to-use: python, style, code review
 ---
 
 Prefer small functions, explicit names, and direct control flow.

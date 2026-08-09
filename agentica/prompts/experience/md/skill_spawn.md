@@ -14,11 +14,10 @@ Return JSON only:
 
 The skill_md string MUST NOT be wrapped in ```yaml or any other code fence. It MUST start with '-' (the opening '---').
 
-FRONTMATTER (minimal, exactly 3 keys):
+FRONTMATTER (minimal, exactly 2 keys — Agent Skills standard):
 ---
 name: <kebab-case slug, equals skill_name above>
-description: <one sentence, <=25 words>
-when-to-use: <comma-separated keywords for discovery>
+description: <what it does AND when to use it; include trigger phrases users would say; <=1024 chars>
 ---
 
 BODY STRUCTURE (strict, in this order):

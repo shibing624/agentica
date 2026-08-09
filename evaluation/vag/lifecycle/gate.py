@@ -160,11 +160,6 @@ class SkillAdmissionGate:
             return json.dumps({
                 "name": str(frontmatter.get("name") or ""),
                 "description": str(frontmatter.get("description") or ""),
-                "when_to_use": str(
-                    frontmatter.get("when-to-use")
-                    or frontmatter.get("when_to_use")
-                    or ""
-                ),
                 "body": body.strip(),
                 "source_experience": source_experience,
             })

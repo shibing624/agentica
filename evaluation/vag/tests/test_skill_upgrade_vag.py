@@ -18,7 +18,6 @@ from evaluation.vag.lifecycle import VaGLifecycleHooks, read_provenance_events
 VALID_SKILL_MD = """---
 name: gated-skill
 description: Check paths before reading files
-when-to-use: file operations
 ---
 
 Check that a path exists before reading it.

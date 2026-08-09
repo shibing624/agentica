@@ -16,7 +16,6 @@ class SkillCandidate(BaseModel):
 
     name: str = Field(min_length=1)
     description: str = Field(min_length=1)
-    when_to_use: str = ""
     body: str = Field(min_length=1)
     source_experience: str = ""
 
@@ -31,11 +30,6 @@ class SkillCandidate(BaseModel):
         return cls(
             name=str(frontmatter.get("name") or ""),
             description=str(frontmatter.get("description") or ""),
-            when_to_use=str(
-                frontmatter.get("when-to-use")
-                or frontmatter.get("when_to_use")
-                or ""
-            ),
             body=body.strip(),
             source_experience=source_experience,
         )

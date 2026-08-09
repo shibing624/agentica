@@ -42,7 +42,6 @@ async def _stub_generator(task: InterCodeTask) -> str:
         "---\n"
         f"name: ic-bash-{task.task_id}\n"
         f"description: Bash skill for '{task.instruction[:60]}'\n"
-        "when-to-use: bash command synthesis tasks\n"
         "---\n\n"
         f"Plan: produce a command similar to `{task.gold_command}`.\n"
     )

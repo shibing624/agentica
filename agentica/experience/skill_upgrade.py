@@ -828,7 +828,7 @@ class SkillEvolutionManager:
     _INDEX_HEADER = (
         "# Generated Skills Index (L1)\n\n"
         "Auto-generated from skill frontmatter. Do not edit by hand.\n"
-        "One row per active skill: `keywords -> name (description)`.\n\n"
+        "One row per active skill: `name — description`.\n\n"
     )
 
     @classmethod
@@ -854,8 +854,7 @@ class SkillEvolutionManager:
                 continue
             name = extract_frontmatter_value(raw, "name") or skill_dir.name
             desc = extract_frontmatter_value(raw, "description") or ""
-            keywords = extract_frontmatter_value(raw, "when-to-use") or ""
-            rows.append(f"- `{keywords}` -> **{name}** — {desc}")
+            rows.append(f"- **{name}** — {desc}")
 
         if not rows:
             return None

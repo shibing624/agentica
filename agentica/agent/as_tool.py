@@ -49,7 +49,7 @@ class AsToolMixin:
 
         Args:
             tool_name: Tool name. Defaults to snake_case of agent name or 'agent_{id}'.
-            tool_description: Tool description. Defaults to when_to_use or description.
+            tool_description: Tool description. Defaults to description or role.
             custom_output_extractor: Optional callable to extract output from RunResponse.
 
         Returns:
@@ -67,7 +67,6 @@ class AsToolMixin:
 
         description = (
             tool_description
-            or self.when_to_use
             or self.description
             or self.prompt_config.role
             or f"Run the {name} agent."
