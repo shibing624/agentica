@@ -306,6 +306,13 @@ def _setup_tui(
         if not text and not has_images:
             return
 
+        # The user is at the keyboard, so no agent-to-agent exchange running
+        # underneath is unattended any more. Reopen the peer channel before the
+        # line is dispatched: refusing "message the other session" because two
+        # agents had been chatting earlier makes the cap look broken.
+        if state.peer_session is not None:
+            state.peer_session.note_user_turn()
+
         images = _deduplicate_image_attachments(list(state.attached_images))
         state.attached_images.clear()
         payload = (text, images) if images else text

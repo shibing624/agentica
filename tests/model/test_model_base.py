@@ -239,6 +239,80 @@ class TestRunFunctionCalls:
             assert max(started_indices) < min(completed_indices)
 
     @pytest.mark.asyncio
+    async def test_a_cancelled_run_does_not_start_parallel_tools(self):
+        """Parallel tools used to skip the cancellation check entirely, so
+        Ctrl+C still fired off every read — and, since ``task`` became
+        concurrency_safe, every subagent — in the pending batch."""
+        import weakref
+
+        model = self._make_model_instance()
+        started = []
+
+        async def read_tool(x: int = 0) -> str:
+            """Read."""
+            started.append(x)
+            return str(x)
+
+        class _CancelledAgent:
+            agent_id = "a"
+            name = "a"
+            run_id = "r"
+            tool_input_guardrails = []
+            tool_output_guardrails = []
+            context = None
+            _run_hooks = None
+            _cancelled = True
+
+        agent = _CancelledAgent()
+        model._agent_ref = weakref.ref(agent)
+        fcs = [self._make_fc(read_tool, {"x": i}, f"c{i}") for i in range(3)]
+        for fc in fcs:
+            fc.function.concurrency_safe = True
+
+        results = []
+        async for _ in model.run_function_calls(fcs, results):
+            pass
+
+        assert started == [], "cancelled run still launched parallel tools"
+        assert all("cancelled by user" in str(m.content).lower() for m in results)
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_run_still_runs_tools_that_cannot_be_interrupted(self):
+        """``interrupt_behavior="block"`` means the tool cannot be torn down
+        cleanly, so the parallel branch must honour it the way the serial one
+        always has."""
+        import weakref
+
+        model = self._make_model_instance()
+        started = []
+
+        async def blocking_tool(x: int = 0) -> str:
+            """Blocking."""
+            started.append(x)
+            return str(x)
+
+        class _CancelledAgent:
+            agent_id = "a"
+            name = "a"
+            run_id = "r"
+            tool_input_guardrails = []
+            tool_output_guardrails = []
+            context = None
+            _run_hooks = None
+            _cancelled = True
+
+        agent = _CancelledAgent()
+        model._agent_ref = weakref.ref(agent)
+        fc = self._make_fc(blocking_tool, {"x": 1}, "c0")
+        fc.function.concurrency_safe = True
+        fc.function.interrupt_behavior = "block"
+
+        async for _ in model.run_function_calls([fc], []):
+            pass
+
+        assert started == [1]
+
+    @pytest.mark.asyncio
     async def test_tool_exception_isolated(self):
         """One tool failing should not prevent other tools from completing."""
         model = self._make_model_instance()

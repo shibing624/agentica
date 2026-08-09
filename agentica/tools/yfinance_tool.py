@@ -29,24 +29,27 @@ class YFinanceTool(Tool):
     ):
         super().__init__(name="yfinance_tool")
 
+        # Every function here is a read-only Yahoo Finance query, and a research
+        # turn typically asks for several symbols or several facets at once.
+        read_only = dict(concurrency_safe=True, is_read_only=True)
         if stock_price:
-            self.register(self.get_current_stock_price)
+            self.register(self.get_current_stock_price, **read_only)
         if company_info:
-            self.register(self.get_company_info)
+            self.register(self.get_company_info, **read_only)
         if stock_fundamentals:
-            self.register(self.get_stock_fundamentals)
+            self.register(self.get_stock_fundamentals, **read_only)
         if income_statements:
-            self.register(self.get_income_statements)
+            self.register(self.get_income_statements, **read_only)
         if key_financial_ratios:
-            self.register(self.get_key_financial_ratios)
+            self.register(self.get_key_financial_ratios, **read_only)
         if analyst_recommendations:
-            self.register(self.get_analyst_recommendations)
+            self.register(self.get_analyst_recommendations, **read_only)
         if company_news:
-            self.register(self.get_company_news)
+            self.register(self.get_company_news, **read_only)
         if technical_indicators:
-            self.register(self.get_technical_indicators)
+            self.register(self.get_technical_indicators, **read_only)
         if historical_prices:
-            self.register(self.get_historical_stock_prices)
+            self.register(self.get_historical_stock_prices, **read_only)
 
     def get_current_stock_price(self, symbol: str) -> str:
         """Use this function to get the current stock price for a given symbol.

@@ -4,9 +4,11 @@
 @description: Prompt building methods for Agent
 """
 
+import asyncio
 import json
 import os
 from datetime import datetime
+from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from agentica.agent.history_filter import apply_history_pipeline
@@ -335,7 +337,7 @@ class PromptsMixin:
 
         # Git status injection (branch, uncommitted changes, recent commits)
         if self.workspace and self.workspace.exists():
-            git_context = self.workspace.get_git_context()
+            git_context = await self.workspace.get_git_context()
             if git_context:
                 system_message_lines.append(f"## Git Status\n\n{git_context}\n")
 
@@ -484,7 +486,7 @@ class PromptsMixin:
             )
 
         if self.workspace and self.workspace.exists():
-            git_context = self.workspace.get_git_context()
+            git_context = await self.workspace.get_git_context()
             if git_context:
                 system_message_lines.append(f"\n## Git Status\n\n{git_context}")
 
@@ -551,13 +553,24 @@ class PromptsMixin:
         final_prompt = "\n".join(system_message_lines)
         return Message(role=pc.system_message_role, content=final_prompt.strip())
 
-    def get_relevant_docs_from_knowledge(
+    async def get_relevant_docs_from_knowledge(
             self, query: str, num_documents: Optional[int] = None, **kwargs
     ) -> Optional[List[Dict[str, Any]]]:
-        """Return a list of references from the knowledge base."""
+        """Return a list of references from the knowledge base.
+
+        ``Knowledge.search`` is synchronous all the way down — a query
+        embedding over HTTP, then the vector store, then an optional reranker
+        over HTTP again. Called inline it would block the event loop for that
+        whole round trip on every turn that has ``add_references`` on, freezing
+        unrelated concurrent work, so it runs in the default executor.
+        """
         if self.knowledge is None:
             return None
-        relevant_docs: List[Document] = self.knowledge.search(query=query, num_documents=num_documents, **kwargs)
+        loop = asyncio.get_running_loop()
+        relevant_docs: List[Document] = await loop.run_in_executor(
+            None,
+            partial(self.knowledge.search, query=query, num_documents=num_documents, **kwargs),
+        )
         if len(relevant_docs) == 0:
             return None
         return [doc.to_dict() for doc in relevant_docs]
@@ -595,7 +608,7 @@ class PromptsMixin:
                 logger.error(f"Failed to convert sanitized context to JSON: {e}")
                 return str(context)
 
-    def get_user_message(
+    async def get_user_message(
             self,
             *,
             message: Optional[Union[str, List]],
@@ -612,7 +625,7 @@ class PromptsMixin:
         if tc.add_references and message and isinstance(message, str):
             retrieval_timer = Timer()
             retrieval_timer.start()
-            docs_from_knowledge = self.get_relevant_docs_from_knowledge(query=message, **kwargs)
+            docs_from_knowledge = await self.get_relevant_docs_from_knowledge(query=message, **kwargs)
             if docs_from_knowledge is not None:
                 references = MessageReferences(
                     query=message, references=docs_from_knowledge, time=round(retrieval_timer.elapsed, 4)
@@ -721,7 +734,7 @@ class PromptsMixin:
             if isinstance(message, Message):
                 user_messages.append(message)
             elif isinstance(message, str) or isinstance(message, list):
-                user_message: Optional[Message] = self.get_user_message(
+                user_message: Optional[Message] = await self.get_user_message(
                     message=message, audio=audio, images=images, videos=videos, **kwargs
                 )
                 if user_message is not None:

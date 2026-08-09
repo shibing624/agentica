@@ -258,7 +258,7 @@ class BaiduSearchTool(Tool):
         self.headers = headers
         self.timeout = timeout
         self.debug = debug
-        self.register(self.baidu_search)
+        self.register(self.baidu_search, concurrency_safe=True, is_read_only=True)
 
     async def baidu_search_single_query(self, query: str, max_results: int = 5) -> str:
         """Execute Baidu search and return results

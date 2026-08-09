@@ -259,22 +259,22 @@ class TestGuardrailsCore(unittest.TestCase):
         result = asyncio.run(run())
         self.assertTrue(result.tripwire_triggered)
 
-    def test_run_guardrails_seq_all_pass(self):
-        """run_guardrails_seq should return all results when none triggered."""
-        from agentica.guardrails.core import run_guardrails_seq
+    def test_run_guardrails_all_pass(self):
+        """run_guardrails should return all results when none triggered."""
+        from agentica.guardrails.core import run_guardrails
 
         async def run_one(guard):
             return f"result_{guard}", False, guard, None
 
         async def run():
-            return await run_guardrails_seq(["g1", "g2"], run_one)
+            return await run_guardrails(["g1", "g2"], run_one)
 
         results = asyncio.run(run())
         self.assertEqual(results, ["result_g1", "result_g2"])
 
-    def test_run_guardrails_seq_one_triggers(self):
-        """run_guardrails_seq should raise when a guardrail triggers."""
-        from agentica.guardrails.core import run_guardrails_seq, GuardrailTriggered
+    def test_run_guardrails_one_triggers(self):
+        """run_guardrails should raise when a guardrail triggers."""
+        from agentica.guardrails.core import run_guardrails, GuardrailTriggered
 
         async def run_one(guard):
             if guard == "bad":
@@ -282,11 +282,28 @@ class TestGuardrailsCore(unittest.TestCase):
             return "ok", False, guard, None
 
         async def run():
-            return await run_guardrails_seq(["ok", "bad"], run_one)
+            return await run_guardrails(["ok", "bad"], run_one)
 
         with self.assertRaises(GuardrailTriggered) as ctx:
             asyncio.run(run())
         self.assertEqual(ctx.exception.guardrail_name, "bad")
+
+    def test_run_guardrails_without_a_predicate_stops_at_the_first_trigger(self):
+        """Serial is the default: nothing after a blocking guardrail runs."""
+        from agentica.guardrails.core import run_guardrails, GuardrailTriggered
+
+        ran = []
+
+        async def run_one(guard):
+            ran.append(guard)
+            return "r", guard == "bad", guard, None
+
+        async def run():
+            return await run_guardrails(["bad", "never"], run_one)
+
+        with self.assertRaises(GuardrailTriggered):
+            asyncio.run(run())
+        self.assertEqual(ran, ["bad"])
 
     def test_agent_guardrail_output_export(self):
         """GuardrailOutput should be exported directly."""

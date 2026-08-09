@@ -57,7 +57,7 @@ class DuckDuckGoTool(Tool):
         self.headers: Optional[Any] = headers
         self.proxy: Optional[Any] = proxy
         self.timeout: Optional[int] = timeout
-        self.register(self.duckduckgo_search)
+        self.register(self.duckduckgo_search, concurrency_safe=True, is_read_only=True)
 
     async def duckduckgo_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
         """Search DuckDuckGo for single or multiple queries.

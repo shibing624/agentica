@@ -21,9 +21,9 @@ class HackerNewsTool(Tool):
 
         # Register functions in the toolkit
         if get_top_stories:
-            self.register(self.get_top_hackernews_stories)
+            self.register(self.get_top_hackernews_stories, concurrency_safe=True, is_read_only=True)
         if get_user_details:
-            self.register(self.get_user_details)
+            self.register(self.get_user_details, concurrency_safe=True, is_read_only=True)
 
     async def get_top_hackernews_stories(self, num_stories: int = 10) -> str:
         """Get top stories from Hacker News.

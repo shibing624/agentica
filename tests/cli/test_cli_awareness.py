@@ -218,6 +218,35 @@ class TestCLIAwareness(unittest.TestCase):
                 finally:
                     registry.stop()
 
+    def test_cmd_ps_shows_a_delegated_session_by_its_task(self):
+        """A delegated worker's command line is a `--query <whole task>`; the
+        user needs to see which task is running, not that shell line."""
+        import shlex
+
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        with tempfile.TemporaryDirectory() as td:
+            registry = BackgroundProcessRegistry(user_id="ps-delegate")
+            command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+            registry.start(command, cwd=td, kind="delegate", label="upgrade service-a")
+            ctx = CommandContext(
+                agent_config={},
+                current_agent=None,
+                background_processes=registry,
+            )
+            fake_console = MagicMock()
+            try:
+                with patch.object(cli_runtime_commands, "get_console", return_value=fake_console):
+                    cli_runtime_commands._cmd_ps(ctx, "")
+                rendered = "\n".join(
+                    str(call.args[0]) for call in fake_console.print.call_args_list if call.args
+                )
+                self.assertIn("delegated session", rendered)
+                self.assertIn("upgrade service-a", rendered)
+                self.assertNotIn("time.sleep(30)", rendered)
+            finally:
+                registry.stop()
+
     def _make_apply_profile_ctx(self):
         """Build a CommandContext whose mock agent survives a profile switch.
 

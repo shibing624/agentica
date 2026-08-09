@@ -17,7 +17,7 @@ from agentica.utils.log import logger
 class DblpTool(Tool):
     def __init__(self):
         super().__init__(name="Dblp_tool")
-        self.register(self.search_dblp_and_return_articles)
+        self.register(self.search_dblp_and_return_articles, concurrency_safe=True, is_read_only=True)
 
     async def search_dblp_and_return_articles(
             self,

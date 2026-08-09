@@ -522,20 +522,30 @@ class BuiltinExecuteTool(Tool):
         while not item.finished.is_set() and time.monotonic() < deadline:
             await asyncio.sleep(_WAIT_POLL_INTERVAL)
 
-        tail = read_log_tail(item.log_path, max_lines=40, max_chars=4000)
+        # A delegated session's stdout is its final report, not a command log,
+        # so it is named for the task and quoted at length.
+        delegated = item.kind == "delegate"
+        what = f'Delegated task "{item.label}"' if delegated else f"Background command #{item.num}"
+        tail = read_log_tail(
+            item.log_path,
+            max_lines=120 if delegated else 40,
+            max_chars=8000 if delegated else 4000,
+        )
         if item.finished.is_set():
             header = (
-                f"Background command #{item.num} ({item.id}) exited with code "
+                f"{what} ({item.id}) exited with code "
                 f"{item.returncode} after {item.elapsed}."
             )
         else:
             header = (
-                f"Background command #{item.num} ({item.id}) is still running after "
-                f"{item.elapsed}; this wait timed out but the command was not stopped. "
+                f"{what} ({item.id}) is still running after "
+                f"{item.elapsed}; this wait timed out but it was not stopped. "
                 f"If it has already outlasted a wait or two, stop waiting: end your "
                 f"turn and let the completion notice the user gets drive the next step."
             )
-        lines = [header, f"Command: {item.command}", f"Log: {item.log_path}"]
+        lines = [header, f"Log: {item.log_path}"]
+        if not delegated:
+            lines.insert(1, f"Command: {item.command}")
         if tail:
             lines.append("")
             lines.append(tail)

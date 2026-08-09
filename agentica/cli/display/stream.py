@@ -652,11 +652,21 @@ class StreamDisplayManager:
         the block unambiguous without giving up the live call line.
         """
         icon = TOOL_ICONS.get(tool_name, TOOL_ICONS["default"])
-        params = format_tool_display(tool_name, tool_args).replace("\n", " ")
-        if len(params) > 60:
-            params = params[:57] + "..."
+        params = format_tool_display(tool_name, tool_args)
+        # task / delegate briefs must stay intact on the anchor line too —
+        # collapsing them to 60 chars re-introduces the same omission the
+        # start-time call line was fixed to avoid.
+        if tool_name not in ("task", "delegate", "send_message"):
+            params = params.replace("\n", " ")
+            if len(params) > 60:
+                params = params[:57] + "..."
         line = f"    ↳ {icon} {tool_name}"
         if params:
+            if "\n" in params:
+                self._assistant_console.print(line, style="dim")
+                for part in params.splitlines():
+                    self._assistant_console.print(f"      {part}", style="dim")
+                return
             line += f" {params}"
         self._assistant_console.print(line, style="dim")
 
@@ -943,10 +953,8 @@ class StreamDisplayManager:
                 return
 
             agent_name = event.get("agent_name", "Subagent")
-            task = event.get("task", "")
-            preview = task.replace("\n", " ").strip()
-            if len(preview) > 100:
-                preview = preview[:97] + "..."
+            # Full task text — truncating here hides the brief the parent wrote.
+            task = str(event.get("task", "") or "").strip()
             max_turns = event.get("max_turns")
             tool_call_limit = event.get("tool_call_limit")
             budget = ""
@@ -959,11 +967,22 @@ class StreamDisplayManager:
             # most useful thing to know when judging its output.
             model_id = event.get("model_id")
             model_note = f" [dim]({model_id})[/dim]" if model_id else ""
-            self._assistant_console.print(
+            prefix = (
                 f"{self._SUB_INDENT}{self._subagent_prefix(run_id)}"
-                f"[dim cyan]⮕ {agent_name}[/dim cyan]{model_note} "
-                f"[dim italic]{preview}[/dim italic][dim]{budget}[/dim]"
+                f"[dim cyan]⮕ {agent_name}[/dim cyan]{model_note}"
             )
+            if not task:
+                self._assistant_console.print(f"{prefix}[dim]{budget}[/dim]")
+            elif "\n" in task:
+                self._assistant_console.print(f"{prefix}[dim]{budget}[/dim]")
+                for line in task.splitlines():
+                    self._assistant_console.print(
+                        f"{self._SUB_INDENT}  [dim italic]{line}[/dim italic]"
+                    )
+            else:
+                self._assistant_console.print(
+                    f"{prefix} [dim italic]{task}[/dim italic][dim]{budget}[/dim]"
+                )
 
         elif et == "subagent.tool_started":
             if verbosity == "off":

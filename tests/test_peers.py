@@ -11,7 +11,6 @@ import pytest
 
 from agentica import peers
 from agentica.peers import (
-    MAX_EXCHANGE_TURNS,
     MAX_UNREAD,
     PeerMessage,
     PeerMessageRefused,
@@ -206,68 +205,91 @@ class TestDelivery:
         assert receiver.drain()[0].to_name == "receiver"
 
 
-class TestExchangeLength:
-    """The channel hands over information; it is not a discussion forum."""
+class TestRepeatsAndFlooding:
+    """The channel hands over information; it is not a discussion forum.
 
-    @staticmethod
-    def _ping_pong(a, b, turns):
-        for turn in range(turns):
+    What it must never do is refuse a message that is actually carrying work —
+    that lands on whatever the user asked for next.
+    """
+
+    def test_a_long_handoff_is_not_cut_off(self):
+        a = _session("alpha")
+        b = _session("beta")
+
+        # Ten rounds of a real back-and-forth, each saying something new. A
+        # count of the exchange used to stop this at six.
+        for turn in range(10):
             sender, receiver = (a, b) if turn % 2 == 0 else (b, a)
-            sender.send(receiver.name, f"turn {turn}")
+            sender.send(receiver.name, f"finding {turn}: the parser drops turn {turn}")
             receiver.drain()
 
-    def test_a_handoff_and_its_answer_go_through(self):
-        a = _session("alpha")
-        b = _session("beta")
-
-        self._ping_pong(a, b, 2)
-
-    def test_the_exchange_runs_out_and_says_where_to_go_instead(self):
-        a = _session("alpha")
-        b = _session("beta")
-
-        self._ping_pong(a, b, MAX_EXCHANGE_TURNS)
-
-        with pytest.raises(PeerMessageRefused, match="report to your user"):
-            a.send("beta", "one more thought")
-
-    def test_the_last_allowed_message_announces_itself(self):
-        a = _session("alpha")
-        b = _session("beta")
-
-        self._ping_pong(a, b, MAX_EXCHANGE_TURNS - 1)
-        last = a.send("beta", "wrapping up")
-
-        assert last.exchange_turn == MAX_EXCHANGE_TURNS
-        assert last.last_of_exchange
-        # The receiving side is told not to answer, rather than answering and
-        # discovering the refusal.
-        received = b.drain()[0]
-        assert "do not reply" in peers.format_for_model([received])
-
-    def test_a_monologue_counts_too(self):
+    def test_saying_the_same_thing_twice_is_refused(self):
         a = _session("alpha")
         _session("beta")
 
-        for i in range(MAX_EXCHANGE_TURNS):
-            a.send("beta", f"note {i}")
+        a.send("beta", "the migration is done, rebase before you test")
 
-        with pytest.raises(PeerMessageRefused, match="exchange"):
+        with pytest.raises(PeerMessageRefused, match="already sent"):
+            a.send("beta", "the migration is done, rebase before you test")
+
+    def test_reformatting_a_repeat_does_not_make_it_new(self):
+        a = _session("alpha")
+        _session("beta")
+
+        a.send("beta", "The migration is done.")
+
+        with pytest.raises(PeerMessageRefused, match="already sent"):
+            a.send("beta", "  the   migration\nis done.  ")
+
+    def test_the_same_thing_may_be_told_to_a_different_peer(self):
+        a = _session("alpha")
+        _session("beta")
+        _session("gamma")
+
+        a.send("beta", "the migration is done")
+        a.send("gamma", "the migration is done")
+
+    def test_it_can_be_said_again_once_the_window_has_passed(self, monkeypatch):
+        a = _session("alpha")
+        _session("beta")
+
+        monkeypatch.setattr(peers, "RATE_WINDOW_SECONDS", 0.01)
+        a.send("beta", "still waiting on your answer")
+        time.sleep(0.02)
+
+        a.send("beta", "still waiting on your answer")
+
+    def test_a_stream_of_messages_to_one_peer_is_refused(self):
+        a = _session("alpha")
+        _session("beta")
+
+        for i in range(peers.MAX_SENDS_PER_WINDOW):
+            a.send("beta", f"thought number {i}")
+
+        with pytest.raises(PeerMessageRefused, match="report to your user"):
             a.send("beta", "and another thing")
 
-    def test_the_user_relaying_a_message_starts_a_fresh_exchange(self):
+    def test_the_user_typing_here_clears_the_brakes(self):
         a = _session("alpha")
-        b = _session("beta")
+        _session("beta")
 
-        self._ping_pong(a, b, MAX_EXCHANGE_TURNS)
-        # The human types /send-message in the other terminal: the agents'
-        # spent exchange must not stop their user from restarting it.
-        b.send("alpha", "carry on, I need this", from_kind="user")
-        a.drain()
+        for i in range(peers.MAX_SENDS_PER_WINDOW):
+            a.send("beta", f"thought number {i}")
+        # The user turns to their own terminal and says "tell beta we use
+        # claude". The brakes are about *unattended* loops; an instruction the
+        # user just typed must never be refused because of them.
+        a.note_user_turn()
 
-        resumed = a.send("beta", "ok, continuing")
+        a.send("beta", "our user says we use claude")
 
-        assert resumed.exchange_turn == 1
+    def test_the_user_relaying_a_message_is_never_refused(self):
+        a = _session("alpha")
+        _session("beta")
+
+        a.send("beta", "rebase before you test")
+
+        # Same text, but the human is sending it with /send-message this time.
+        a.send("beta", "rebase before you test", from_kind="user")
 
 
 class TestChannelLimits:
@@ -275,8 +297,8 @@ class TestChannelLimits:
         sender = _session("sender")
         _session("receiver")
 
-        # Relayed user messages are not part of an agent exchange, so this
-        # fills the mailbox without running into the exchange cap first.
+        # Relayed user messages bypass the repeat/rate brakes, so this fills
+        # the mailbox without tripping one of those first.
         for i in range(MAX_UNREAD):
             sender.send("receiver", f"message {i}", from_kind="user")
 

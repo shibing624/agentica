@@ -60,7 +60,12 @@ def _format_elapsed(seconds: float) -> str:
 
 @dataclass
 class BackgroundProcess:
-    """One shell command running outside the agent turn."""
+    """One shell command running outside the agent turn.
+
+    ``kind`` says what started it, which decides how it is counted and how it is
+    reported when it ends: ``"command"`` is execute(background=True), ``"delegate"``
+    is a whole agentica session working on ``label`` (see the delegate tool).
+    """
 
     id: str
     num: int
@@ -69,6 +74,8 @@ class BackgroundProcess:
     cwd: Optional[str]
     log_path: str
     started_at: float
+    kind: str = "command"
+    label: str = ""
     stop_requested: bool = False
     # Set by the watcher thread once the process is reaped. Callers that need to
     # block until the command is done wait on this instead of racing the watcher
@@ -105,6 +112,8 @@ class BackgroundProcessCompleted:
     started_at: float
     completed_at: float
     returncode: int
+    kind: str = "command"
+    label: str = ""
     stop_requested: bool = False
 
     @property
@@ -132,7 +141,20 @@ class BackgroundProcessRegistry:
         with self._lock:
             return self._user_id
 
-    def start(self, command: str, *, cwd: Optional[str] = None) -> BackgroundProcess:
+    def start(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[dict] = None,
+        kind: str = "command",
+        label: str = "",
+    ) -> BackgroundProcess:
+        """Spawn ``command`` detached from the turn.
+
+        ``env`` is merged over the current environment (it does not replace it),
+        so a caller only names what it wants to change.
+        """
         with self._lock:
             self._counter += 1
             num = self._counter
@@ -145,12 +167,17 @@ class BackgroundProcessRegistry:
         log_path = root / f"{stamp}-{proc_id}.log"
         log_fh = open(log_path, "ab", buffering=0)
         try:
-            header = f"$ {command}\n\n".encode("utf-8", errors="replace")
+            # One physical line, always: readers strip the header by dropping a
+            # leading `$ ` line, and a command that spans lines (a delegated
+            # worker's whole task does) would otherwise leak into the output.
+            header = f"$ {command}".replace("\n", "\\n") + "\n\n"
+            header = header.encode("utf-8", errors="replace")
             log_fh.write(header)
             process = subprocess.Popen(
                 command,
                 shell=True,
                 cwd=cwd,
+                env={**os.environ, **env} if env else None,
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
@@ -172,6 +199,8 @@ class BackgroundProcessRegistry:
             cwd=cwd,
             log_path=str(log_path),
             started_at=time.time(),
+            kind=kind,
+            label=label,
         )
         with self._lock:
             self._items[proc_id] = item
@@ -197,6 +226,8 @@ class BackgroundProcessRegistry:
                 started_at=item.started_at,
                 completed_at=completed_at,
                 returncode=int(returncode),
+                kind=item.kind,
+                label=item.label,
                 stop_requested=item.stop_requested,
             )
         item.finished.set()
@@ -206,15 +237,17 @@ class BackgroundProcessRegistry:
         """Wait for the next completed command emitted by a watcher."""
         return self._completed.get(timeout=timeout)
 
-    def list(self, *, include_finished: bool = False) -> List[BackgroundProcess]:
+    def list(self, *, include_finished: bool = False, kind: Optional[str] = None) -> List[BackgroundProcess]:
         with self._lock:
             items = list(self._items.values())
+        if kind is not None:
+            items = [item for item in items if item.kind == kind]
         if include_finished:
             return items
         return [item for item in items if item.running]
 
-    def running_count(self) -> int:
-        return len(self.list(include_finished=False))
+    def running_count(self, *, kind: Optional[str] = None) -> int:
+        return len(self.list(include_finished=False, kind=kind))
 
     def _matches(self, item: BackgroundProcess, target: str) -> bool:
         target = target.strip()

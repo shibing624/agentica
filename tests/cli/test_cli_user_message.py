@@ -206,6 +206,48 @@ class TestCLIUserMessage(unittest.TestCase):
         )
 
 
+    def test_typing_a_line_reopens_the_peer_channel(self):
+        """A typed line is the human interrupting, so the agent-to-agent cap
+        must not refuse the instruction that line is about."""
+        from types import SimpleNamespace
+
+        from prompt_toolkit.keys import Keys
+
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.session_state import SessionState
+        from agentica.cli.interactive.tui import _setup_tui
+
+        peer_session = Mock()
+        state = SessionState()
+        state.peer_session = peer_session
+        pending_queue = PendingQueue()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch(
+                "agentica.cli.interactive.tui.history_file",
+                return_value=os.path.join(tmp, "history"),
+            ):
+                app = _setup_tui(
+                    state,
+                    skills_registry=None,
+                    tui_state={},
+                    pending_queue=pending_queue,
+                    image_counter_ref=[0],
+                )
+        # prompt_toolkit normalises "enter" to Keys.ControlM.
+        handler = next(
+            binding.handler
+            for binding in app.key_bindings.bindings
+            if binding.keys == (Keys.ControlM,)
+        )
+        buffer = Mock()
+        buffer.text = "发送消息给 temp-30, 我们用的 claude 模型"
+        handler(SimpleNamespace(app=SimpleNamespace(
+            current_buffer=buffer, invalidate=Mock())))
+
+        peer_session.note_user_turn.assert_called_once()
+        self.assertEqual(pending_queue.qsize(), 1)
+
     def test_deduplicate_image_attachments_preserves_first_path(self):
         """One pasted image represented by two temp paths stays one attachment."""
         from pathlib import Path

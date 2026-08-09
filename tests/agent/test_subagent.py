@@ -493,20 +493,19 @@ def test_builtin_task_tool_surfaces_partial_on_timeout():
 
     tool = BuiltinTaskTool()
 
-    class _FakeRegistry:
-        async def spawn(self, **kwargs):
-            return {
-                "status": "timeout",
-                "error": "Subagent timed out after 1 seconds",
-                "agent_type": "code",
-                "subagent_name": "code",
-                "run_id": "r-1",
-                "content": "[timed out]\n\npartial work done",
-                "tool_calls_summary": [{"name": "read_file", "info": "a.py"}],
-                "tool_count": 1,
-                "elapsed_seconds": 1.0,
-                "partial": True,
-            }
+    async def fake_spawn(self, **kwargs):
+        return {
+            "status": "timeout",
+            "error": "Subagent timed out after 1 seconds",
+            "agent_type": "code",
+            "subagent_name": "code",
+            "run_id": "r-1",
+            "content": "[timed out]\n\npartial work done",
+            "tool_calls_summary": [{"name": "read_file", "info": "a.py"}],
+            "tool_count": 1,
+            "elapsed_seconds": 1.0,
+            "partial": True,
+        }
 
     parent = SimpleNamespace(
         _event_callback=None,
@@ -515,7 +514,7 @@ def test_builtin_task_tool_surfaces_partial_on_timeout():
     )
     tool._parent_agent = parent
 
-    with patch("agentica.subagent.SubagentRegistry", return_value=_FakeRegistry()):
+    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
         raw = asyncio.run(tool.task(description="d", subagent_type="code"))
     payload = json.loads(raw)
     assert payload["success"] is False
@@ -956,6 +955,90 @@ def test_task_tool_forwards_auxiliary_model_as_tier_hint_not_hard_override():
 
     assert captured["auxiliary_model_override"] is aux
     assert "model_override" not in captured
+
+
+def test_two_tasks_in_one_batch_actually_overlap():
+    """The tool's own system prompt promises "launch independent tasks in one
+    message to run them in parallel". The executor only honours that for
+    ``concurrency_safe`` functions, so assert on the real scheduler rather than
+    on the flag: two spawns must be in flight at the same moment."""
+    from agentica.model.openai import OpenAIChat
+    from agentica.tools.base import FunctionCall
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    tool = BuiltinTaskTool()
+    tool.set_parent_agent(SimpleNamespace())
+    in_flight = 0
+    peak = 0
+
+    async def fake_spawn(self, **kwargs):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            in_flight -= 1
+        return {"status": "completed", "content": "ok", "agent_type": "explore"}
+
+    model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+    model.metrics = {}
+    model.function_call_stack = None
+    model.tool_call_limit = None
+    calls = [
+        FunctionCall(
+            function=tool.functions["task"],
+            arguments={"description": f"d{i}", "subagent_type": "explore"},
+            call_id=f"c{i}",
+        )
+        for i in range(3)
+    ]
+
+    async def _drive():
+        results = []
+        async for _ in model.run_function_calls(calls, results):
+            pass
+
+    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+        asyncio.run(_drive())
+
+    assert peak == 3, f"tasks ran {peak}-at-a-time; they must all be in flight together"
+
+
+def test_a_burst_of_tasks_is_capped_at_three_in_flight():
+    """Parallel does not mean unbounded: each subagent is a whole Agent with
+    its own model and tool loop. Extra calls wait for a slot instead of all
+    starting at once, matching ``SubagentRegistry.MAX_CONCURRENT``."""
+    from agentica.subagent import SubagentRegistry
+    from agentica.tools.builtin_task_tool import BuiltinTaskTool
+
+    tool = BuiltinTaskTool()
+    tool.set_parent_agent(SimpleNamespace())
+    in_flight = 0
+    peak = 0
+    completed = 0
+
+    async def fake_spawn(self, **kwargs):
+        nonlocal in_flight, peak, completed
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            await asyncio.sleep(0.02)
+        finally:
+            in_flight -= 1
+        completed += 1
+        return {"status": "completed", "content": "ok", "agent_type": "explore"}
+
+    async def _drive():
+        await asyncio.gather(*[
+            tool.task(description=f"d{i}", subagent_type="explore") for i in range(6)
+        ])
+
+    with patch("agentica.subagent.SubagentRegistry.spawn", new=fake_spawn):
+        asyncio.run(_drive())
+
+    assert peak == SubagentRegistry.MAX_CONCURRENT, f"{peak} subagents ran at once"
+    assert completed == 6, "every queued task must still run"
 
 
 def test_task_system_prompt_exposes_model_tier_per_type():

@@ -16,6 +16,8 @@ from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from agentica import config as agentica_config
+from agentica.cli.interactive import app as interactive_app
 from agentica.cost_tracker import CostTracker
 from agentica.cli import (
     TOOL_ICONS,
@@ -153,6 +155,28 @@ class TestStatusSessionIdentity(unittest.TestCase):
         self.assertIn("Peer:", printed)
         self.assertIn("agentica-73", printed)
         self.assertIn("735ac7e4", printed)
+
+
+class TestPeerRecordAdvertisesTheCliLog(unittest.TestCase):
+    """`list_agents` publishes this session's log path, so another agent can
+    read what we just did instead of asking."""
+
+    def test_the_log_path_is_read_after_the_cli_sets_it(self):
+        # agentica.cli.main assigns the daily path onto agentica.config during
+        # startup, which is *after* this module is imported. Reading the
+        # constant at import time froze the SDK default (empty) and every peer
+        # advertised no log file at all.
+        with patch.object(agentica_config, "AGENTICA_LOG_FILE", ""):
+            self.assertEqual(interactive_app._cli_log_file(), (None, None))
+
+        with (
+            patch.object(agentica_config, "AGENTICA_LOG_FILE", "/logs/20260809-31964.log"),
+            patch.object(agentica_config, "AGENTICA_LOG_LEVEL", "INFO"),
+        ):
+            self.assertEqual(
+                interactive_app._cli_log_file(),
+                ("/logs/20260809-31964.log", "INFO"),
+            )
 
 
 class TestResumeArchivedFilter(unittest.TestCase):

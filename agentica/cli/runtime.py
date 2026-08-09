@@ -294,6 +294,13 @@ def parse_args():
     )
 
     parser.add_argument("--query", type=str, help="Question to ask the LLM", default=None)
+    parser.add_argument(
+        "--print",
+        dest="print_only",
+        action="store_true",
+        help="With --query: write only the agent's final answer to stdout, no banner "
+        "or styling. For scripts and for one agentica session delegating to another.",
+    )
     # Default is None so saved CLI config (from the first-run wizard) can take
     # effect; main.py resolves args > saved config > hardcoded default.
     parser.add_argument(
@@ -889,6 +896,29 @@ def create_agent(
         from agentica.tools.peer_tool import PeerMessagingTool
 
         cli_tools.insert(0, PeerMessagingTool(peer_session))
+
+    # Delegating needs the session's process registry (that is how the worker is
+    # tracked, waited on and reported), so a one-shot `--query` run and a
+    # cron-spawned agent — neither of which has one — simply do not get the tool.
+    # Nor does a worker that was itself delegated: MAX_DEPTH stops a tree of
+    # agents spawning agents with nobody watching the bill.
+    from agentica.tools.builtin.delegate_tool import BuiltinDelegateTool, MAX_DEPTH, delegation_depth
+
+    if background_process_registry is not None and delegation_depth() < MAX_DEPTH:
+        cli_tools.insert(
+            0,
+            BuiltinDelegateTool(
+                background_process_registry=background_process_registry,
+                # Read at call time, not now: /permissions switches the tier in
+                # place without rebuilding the agent, and a worker must start
+                # under the tier in effect when it is spawned. `new_agent` is
+                # assigned a few lines below, before any tool can run.
+                permission_mode=lambda: new_agent.tool_config.permission_mode,
+                work_dir=work_dir,
+                model_provider=agent_config.get("model_provider"),
+                model_name=agent_config.get("model_name"),
+            ),
+        )
 
     new_agent = DeepAgent(
         model=model,

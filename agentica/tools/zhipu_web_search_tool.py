@@ -113,7 +113,7 @@ class ZhipuWebSearchTool(Tool):
         self.search_intent = search_intent
         self.user_id = user_id
         self.timeout = timeout
-        self.register(self.zhipu_web_search)
+        self.register(self.zhipu_web_search, concurrency_safe=True, is_read_only=True)
 
     def _build_payload(self, query: str, count: int) -> Dict[str, Any]:
         payload: Dict[str, Any] = {

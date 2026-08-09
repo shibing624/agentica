@@ -29,7 +29,7 @@ from agentica.guardrails.core import (
     GuardrailTriggered,
     GuardrailOutput,
     BaseGuardrail,
-    run_guardrails_seq,
+    run_guardrails,
 )
 
 if TYPE_CHECKING:
@@ -238,7 +238,12 @@ async def run_input_guardrails(
     guardrails: List[InputGuardrail[Any]],
     context: Optional[Any] = None,
 ) -> List[InputGuardrailResult]:
-    """Run all input guardrails sequentially.
+    """Run all input guardrails, overlapping the ones declared ``run_in_parallel``.
+
+    They all inspect the same inbound payload and most are a moderation call,
+    so making the user wait for them one after another is pure latency. Set
+    ``run_in_parallel=False`` on a guardrail to keep it on its own — that also
+    stops the guardrails after it from starting when it blocks.
 
     Raises InputGuardrailTripwireTriggered if any guardrail blocks.
     """
@@ -246,7 +251,12 @@ async def run_input_guardrails(
         result = await guard.run(agent, input_data, context)
         return result, result.output.tripwire_triggered, guard.get_name(), result.output
 
-    return await run_guardrails_seq(guardrails, _run_one, InputGuardrailTripwireTriggered)
+    return await run_guardrails(
+        guardrails,
+        _run_one,
+        InputGuardrailTripwireTriggered,
+        parallel_when=lambda guard: guard.run_in_parallel,
+    )
 
 
 async def run_output_guardrails(
@@ -257,13 +267,16 @@ async def run_output_guardrails(
 ) -> List[OutputGuardrailResult]:
     """Run all output guardrails sequentially.
 
+    Sequential by design: the answer is already generated, so the first one to
+    block ends the turn and the ones after it are wasted calls.
+
     Raises OutputGuardrailTripwireTriggered if any guardrail blocks.
     """
     async def _run_one(guard):
         result = await guard.run(agent, agent_output, context)
         return result, result.output.tripwire_triggered, guard.get_name(), result.output
 
-    return await run_guardrails_seq(guardrails, _run_one, OutputGuardrailTripwireTriggered)
+    return await run_guardrails(guardrails, _run_one, OutputGuardrailTripwireTriggered)
 
 
 # =============================================================================

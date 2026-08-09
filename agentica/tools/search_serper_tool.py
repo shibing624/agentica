@@ -98,7 +98,7 @@ class SearchSerperTool(Tool):
 
         self.timeout: Optional[int] = timeout
         self.api_key: Optional[str] = api_key or os.getenv("SERPER_API_KEY")
-        self.register(self.search_google)
+        self.register(self.search_google, concurrency_safe=True, is_read_only=True)
 
     async def search_google_single_query(
             self,

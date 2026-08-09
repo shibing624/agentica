@@ -7,6 +7,7 @@ Provides base exception, output types, guard base class, and execution engine.
 agent.py and tool.py inherit/compose from this module for concrete logic.
 """
 
+import asyncio
 import inspect
 from dataclasses import dataclass, field
 from typing import (
@@ -104,28 +105,67 @@ class BaseGuardrail(Generic[TContext]):
 # Unified Execution Engine
 # =============================================================================
 
-async def run_guardrails_seq(
+def _batches(
+    guardrails: List[Any],
+    parallel_when: Optional[Callable[[Any], bool]],
+) -> List[List[Any]]:
+    """Group consecutive parallel-safe guardrails; everything else stands alone."""
+    if parallel_when is None:
+        return [[guard] for guard in guardrails]
+    batches: List[List[Any]] = []
+    for guard in guardrails:
+        if batches and parallel_when(guard) and parallel_when(batches[-1][-1]):
+            batches[-1].append(guard)
+        else:
+            batches.append([guard])
+    return batches
+
+
+async def run_guardrails(
     guardrails: List[Any],
     run_one: Callable,
     exception_class: type = GuardrailTriggered,
+    parallel_when: Optional[Callable[[Any], bool]] = None,
 ) -> List[Any]:
-    """Sequential guardrail execution engine.
+    """Guardrail execution engine.
+
+    Guardrails run in declaration order. ``parallel_when(guard)`` marks one as
+    safe to overlap with its neighbours, and consecutive marked guardrails are
+    awaited together — a policy built from three moderation calls should cost
+    one round trip, not three. Order is preserved instead of hoisting all the
+    parallel ones to the front, because opting out is precisely how a caller
+    puts a cheap filter ahead of an expensive one.
+
+    Within a batch every guardrail finishes before a tripwire is raised, and
+    the one raised is the first in declaration order: otherwise which guardrail
+    blocked a request would depend on which call happened to return first.
 
     Args:
         guardrails: List of guardrail instances.
-        run_one: Async callable that takes a guardrail and returns (result, triggered: bool, name: str).
+        run_one: Async callable taking a guardrail, returning
+            ``(result, triggered, name, output)``.
         exception_class: Exception class to raise on trigger.
+        parallel_when: Optional predicate; omit to run everything serially.
 
     Returns:
-        List of results.
+        List of results, in declaration order.
     """
     results = []
-    for guard in guardrails:
-        result, triggered, name, output = await run_one(guard)
-        results.append(result)
-        if triggered:
-            logger.warning(f"Guardrail '{name}' triggered")
-            raise exception_class(guardrail_name=name, output=output)
+    for batch in _batches(guardrails, parallel_when):
+        if len(batch) == 1:
+            outcomes: List[Any] = [await run_one(batch[0])]
+        else:
+            outcomes = await asyncio.gather(
+                *(run_one(guard) for guard in batch), return_exceptions=True,
+            )
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
+            result, triggered, name, output = outcome
+            results.append(result)
+            if triggered:
+                logger.warning(f"Guardrail '{name}' triggered")
+                raise exception_class(guardrail_name=name, output=output)
     return results
 
 
@@ -133,5 +173,5 @@ __all__ = [
     "GuardrailTriggered",
     "GuardrailOutput",
     "BaseGuardrail",
-    "run_guardrails_seq",
+    "run_guardrails",
 ]

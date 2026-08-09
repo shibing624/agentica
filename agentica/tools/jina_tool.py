@@ -67,7 +67,7 @@ class JinaTool(Tool):
         if jina_reader_by_goal:
             self.register(self.jina_url_reader_by_goal)
         if jina_search:
-            self.register(self.jina_search)
+            self.register(self.jina_search, concurrency_safe=True, is_read_only=True)
 
     def update_llm(self) -> None:
         if self.llm is None:

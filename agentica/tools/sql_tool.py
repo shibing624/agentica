@@ -57,9 +57,9 @@ class SQLTool(Tool):
 
         # Register functions in the toolkit
         if list_tables:
-            self.register(self.list_tables)
+            self.register(self.list_tables, concurrency_safe=True, is_read_only=True)
         if describe_table:
-            self.register(self.describe_table)
+            self.register(self.describe_table, concurrency_safe=True, is_read_only=True)
         if run_sql_query:
             self.register(self.run_sql_query)
 

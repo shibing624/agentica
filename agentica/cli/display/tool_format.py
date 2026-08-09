@@ -101,6 +101,32 @@ def _display_execute_command(console_instance, command: str) -> None:
         remember_truncated("Command · execute", raw_command)
 
 
+def _format_handoff_display(
+    tool_args: dict,
+    *,
+    body_key: str,
+    meta_keys: tuple,
+) -> str:
+    """Format a work-handoff tool (task / delegate) with no truncation.
+
+    Meta args stay on the first line as ``key=value``; the instruction body
+    follows on its own lines so newlines in the brief stay readable.
+    """
+    body = str(tool_args.get(body_key, "") or "")
+    meta: List[str] = []
+    for key in meta_keys:
+        value = tool_args.get(key)
+        if value is None or value == "":
+            continue
+        meta.append(f"{key}={value!r}" if isinstance(value, str) else f"{key}={value}")
+    if body:
+        indented = "\n    ".join(body.splitlines() or [""])
+        if meta:
+            return ", ".join(meta) + "\n    " + indented
+        return indented
+    return ", ".join(meta)
+
+
 def format_tool_display(tool_name: str, tool_args: dict) -> str:
     """Format tool call for user-friendly display."""
     # File reading tools - show filename and line range
@@ -181,12 +207,21 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
             display += f" ({include})"
         return display
     
-    # Task tool - show description
+    # task / delegate — these hand off work; truncating the brief hides what
+    # the user needs to audit. Show every arg in full (multi-line body below).
     if tool_name == "task":
-        description = tool_args.get("description", "")
-        if len(description) > 80:
-            return description[:77] + "..."
-        return description
+        return _format_handoff_display(
+            tool_args,
+            body_key="description",
+            meta_keys=("subagent_type", "timeout", "max_turns", "resume_from_run_id"),
+        )
+
+    if tool_name == "delegate":
+        return _format_handoff_display(
+            tool_args,
+            body_key="task",
+            meta_keys=("label", "work_dir", "model"),
+        )
 
     # Peer messaging — show the full body; truncating here hides the handoff.
     if tool_name == "send_message":
@@ -238,7 +273,7 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     elif tool_name == "write_todos" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
         console_instance.print(f"    {display_str}", style="dim")
-    elif tool_name == "send_message" and "\n" in display_str:
+    elif tool_name in ("send_message", "task", "delegate") and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
         for line in display_str.splitlines():
             console_instance.print(f"    {line}", style="dim")

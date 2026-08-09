@@ -40,7 +40,11 @@ from agentica.tools.builtin import (
     list_web_search_providers,
     register_web_search_backend,
 )
-from agentica.tools.background_processes import BackgroundProcess, BackgroundProcessRegistry
+from agentica.tools.background_processes import (
+    BackgroundProcess,
+    BackgroundProcessRegistry,
+    read_log_tail,
+)
 from agentica.tools.builtin.web_tools import (
     BuiltinFetchUrlTool as CanonicalBuiltinFetchUrlTool,
     BuiltinWebSearchTool as CanonicalBuiltinWebSearchTool,
@@ -1309,6 +1313,45 @@ class TestBuiltinExecuteTool:
         with pytest.raises(queue.Empty):
             registry.wait_completed(timeout=0.01)
 
+    def test_registry_passes_extra_env_to_the_child_without_replacing_it(self, tmp_dir):
+        """The delegate tool marks a worker's depth this way; the child still
+        needs the rest of the environment (PATH, API keys) to run at all."""
+        registry = BackgroundProcessRegistry()
+        script = 'import os; print(os.environ["DEPTH_MARKER"], "PATH" in os.environ)'
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote(script)}"
+
+        item = registry.start(command, cwd=tmp_dir, env={"DEPTH_MARKER": "1"})
+        assert item.finished.wait(timeout=30)
+
+        assert "1 True" in Path(item.log_path).read_text(encoding="utf-8")
+
+    def test_a_multi_line_command_does_not_leak_into_the_output(self, tmp_dir):
+        """A delegated worker's command carries its whole task, newlines and all.
+        The log header has to stay one line or readers, which strip the header by
+        dropping a leading `$ ` line, hand the rest of it back as output."""
+        registry = BackgroundProcessRegistry()
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')} # first line\\\n# second line"
+
+        item = registry.start(command, cwd=tmp_dir)
+        assert item.finished.wait(timeout=30)
+
+        assert read_log_tail(item.log_path) == "1"
+
+    def test_a_delegated_process_is_counted_and_reported_as_one(self, tmp_dir):
+        registry = BackgroundProcessRegistry()
+        command = f"{shlex.quote(sys.executable)} -c {shlex.quote('print(1)')}"
+
+        registry.start(command, cwd=tmp_dir)
+        registry.start(command, cwd=tmp_dir, kind="delegate", label="parser port")
+        event_kinds = {
+            registry.wait_completed(timeout=10).kind,
+            registry.wait_completed(timeout=10).kind,
+        }
+
+        assert registry.running_count(kind="delegate") == 0
+        assert [p.label for p in registry.list(include_finished=True, kind="delegate")] == ["parser port"]
+        assert event_kinds == {"command", "delegate"}
+
     def test_background_stop_tolerates_wait_after_sigkill_timeout(self):
         registry = BackgroundProcessRegistry()
         process = MagicMock(pid=12345)
@@ -2038,7 +2081,13 @@ class TestBuiltinTaskTool:
     def test_task_declares_own_timeout_management(self):
         tool = BuiltinTaskTool()
         assert tool.functions["task"].manages_own_timeout is True
-        assert tool.functions["task"].interrupt_behavior == "block"
+
+    def test_task_is_registered_as_a_parallelizable_read_only_tool(self):
+        # The executor only gathers ``concurrency_safe`` calls; without the flag
+        # a batch of subagents runs one after another.
+        tool = BuiltinTaskTool()
+        assert tool.functions["task"].concurrency_safe is True
+        assert tool.functions["task"].is_read_only is True
 
     def test_task_passes_auxiliary_model_to_spawn(self):
         """When ``auxiliary_model`` is set, the adapter forwards it to spawn as

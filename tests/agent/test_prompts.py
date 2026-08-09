@@ -337,5 +337,60 @@ class TestGetSystemMessage:
         assert "Prefer concise responses." in msg.content
 
 
+class TestKnowledgeRetrievalDoesNotBlockTheLoop:
+    """``Knowledge.search`` is synchronous down to the embedding HTTP call, the
+    vector store and the reranker. On the per-turn prompt path it must not run
+    inline, or every turn with ``add_references`` freezes unrelated concurrent
+    work for the whole retrieval round trip."""
+
+    class _BlockingKnowledge:
+        def __init__(self):
+            self.thread_name = None
+
+        def search(self, query, num_documents=None, **kwargs):
+            import threading
+            import time as _time
+
+            self.thread_name = threading.current_thread().name
+            _time.sleep(0.1)
+            return []
+
+    def _agent(self, knowledge):
+        from agentica.agent.config import ToolConfig
+
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            knowledge=knowledge,
+            tool_config=ToolConfig(add_references=True, search_knowledge=False),
+        )
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_retrieval_runs_off_the_event_loop(self):
+        import asyncio
+        import threading
+
+        knowledge = self._BlockingKnowledge()
+        agent = self._agent(knowledge)
+        ticks = 0
+
+        async def ticker():
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.005)
+                ticks += 1
+
+        spinner = asyncio.create_task(ticker())
+        await agent.get_user_message(message="what is agentica")
+        spinner.cancel()
+
+        assert knowledge.thread_name is not None, "knowledge.search was never called"
+        assert knowledge.thread_name != threading.current_thread().name, (
+            "knowledge.search ran on the event loop thread"
+        )
+        assert ticks > 5, f"event loop only advanced {ticks} times during retrieval"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

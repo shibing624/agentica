@@ -5,6 +5,8 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.session import _cmd_history, display_resumed_transcript, hydrate_resumed_session
 from agentica.cli.main import main
@@ -273,6 +275,9 @@ def test_noninteractive_interrupt_prints_resume_summary():
         patch("agentica.cli.main.resolve_model_config", return_value=resolved),
         patch("agentica.cli.main.create_agent", return_value=agent),
         patch("agentica.cli.main.get_console", return_value=console),
+        # An interrupted one-shot run reports 130 in its exit status, the way a
+        # shell expects; the summary is printed first.
+        pytest.raises(SystemExit),
     ):
         main()
 

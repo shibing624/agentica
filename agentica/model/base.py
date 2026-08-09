@@ -815,8 +815,34 @@ class Model(ABC):
         else:
             _has_guardrails = False
 
+        def _cancelled_before_start(fc: FunctionCall) -> bool:
+            """The user cancelled before this call got to start.
+
+            ``interrupt_behavior`` decides what that means: "cancel" tools are
+            skipped, "block" tools (which cannot be torn down cleanly once
+            running) are still allowed to run. Both branches ask, so a batch of
+            reads and a batch of subagents are not treated differently.
+            """
+            return (
+                _agent is not None
+                and _agent._cancelled
+                and fc.function.interrupt_behavior == "cancel"
+            )
+
+        def _mark_cancelled(idx: int) -> None:
+            exceptions[idx] = RuntimeError("Tool cancelled by user")
+            results[idx] = False
+            timers[idx].start()
+            timers[idx].stop()
+
         # Phase 2a: run safe tools in parallel
         async def _execute_safe(idx: int, fc: FunctionCall) -> None:
+            # Parallel tools all start at once, so this is their only chance to
+            # notice a cancel: without it, Ctrl+C still launches every read and
+            # every subagent in the batch.
+            if _cancelled_before_start(fc):
+                _mark_cancelled(idx)
+                return
             # Input guardrail check
             if _has_guardrails:
                 _fc_args = json.dumps(fc.arguments) if fc.arguments else None
@@ -894,15 +920,10 @@ class Model(ABC):
                 timers[idx].start()
                 timers[idx].stop()
                 continue
-            # Cancellation check before each unsafe tool (interrupt_behavior aware).
-            # "cancel" tools are skipped; "block" tools are allowed to run.
-            if _agent is not None and getattr(_agent, '_cancelled', False):
-                if fc.function.interrupt_behavior == "cancel":
-                    exceptions[idx] = RuntimeError("Tool cancelled by user")
-                    results[idx] = False
-                    timers[idx].start()
-                    timers[idx].stop()
-                    continue
+            # Cancellation check before each unsafe tool.
+            if _cancelled_before_start(fc):
+                _mark_cancelled(idx)
+                continue
             # Input guardrail check (before execution)
             if _has_guardrails:
                 _fc_args = json.dumps(fc.arguments) if fc.arguments else None

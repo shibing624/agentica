@@ -14,7 +14,7 @@ from agentica.guardrails.core import (
     GuardrailTriggered,
     GuardrailOutput,
     BaseGuardrail,
-    run_guardrails_seq,
+    run_guardrails,
 )
 
 # Agent-level guardrails
@@ -55,7 +55,7 @@ __all__ = [
     "GuardrailTriggered",
     "GuardrailOutput",
     "BaseGuardrail",
-    "run_guardrails_seq",
+    "run_guardrails",
     # Agent-level
     "InputGuardrailTripwireTriggered",
     "OutputGuardrailTripwireTriggered",

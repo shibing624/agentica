@@ -15,7 +15,7 @@ class WeatherTool(Tool):
 
     def __init__(self):
         super().__init__(name="get_weather_tool")
-        self.register(self.get_weather)
+        self.register(self.get_weather, concurrency_safe=True, is_read_only=True)
         # API key for OpenWeatherMap (optional, falls back to free sources)
         self.openweather_api_key = os.getenv("OPENWEATHER_API_KEY")
 

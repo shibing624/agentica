@@ -54,7 +54,7 @@ class SearchExaTool(Tool):
         self.category: Optional[str] = category
         self.timeout: int = timeout
 
-        self.register(self.search_exa)
+        self.register(self.search_exa, concurrency_safe=True, is_read_only=True)
 
     def _build_payload(self, query: str, max_results: int) -> Dict[str, Any]:
         contents: Dict[str, Any] = {}

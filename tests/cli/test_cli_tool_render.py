@@ -210,6 +210,36 @@ class TestCLIToolRender(unittest.TestCase):
         rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list if call.args)
         self.assertIn(long_msg, rendered)
 
+    def test_task_and_delegate_calls_show_full_brief(self):
+        """task / delegate must not truncate the handoff instruction in the CLI."""
+        from agentica.cli.display.tool_format import format_tool_display, _display_tool_impl
+
+        long_task = (
+            "写一个快速排序算法（Python），包含以下内容：\n"
+            "1. 实现 quicksort 函数\n"
+            "2. 边界用例与简单测试\n"
+            "3. 时间复杂度说明"
+        )
+        for name, args, body_key in (
+            ("delegate", {"task": long_task, "label": "quicksort-delegate"}, "task"),
+            ("task", {"description": long_task, "subagent_type": "code"}, "description"),
+        ):
+            display = format_tool_display(name, args)
+            self.assertIn(args[body_key].splitlines()[0], display)
+            self.assertIn("2. 边界用例与简单测试", display)
+            self.assertNotIn("...", display)
+
+            fake = MagicMock()
+            fake.width = 80
+            _display_tool_impl(fake, name, args)
+            rendered = "\n".join(
+                str(call.args[0]) for call in fake.print.call_args_list if call.args
+            )
+            self.assertIn("2. 边界用例与简单测试", rendered)
+            if name == "delegate":
+                self.assertIn("quicksort-delegate", rendered)
+            else:
+                self.assertIn("subagent_type='code'", rendered)
 
     def test_display_tool_defers_read_only_call_line(self):
         """Read-only tools skip the start-time call line (deferred to completion)."""

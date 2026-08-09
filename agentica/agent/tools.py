@@ -49,7 +49,7 @@ class ToolsMixin:
 
         return tools if len(tools) > 0 else []
 
-    def search_knowledge_base(self, query: str) -> str:
+    async def search_knowledge_base(self, query: str) -> str:
         """Use this function to search the knowledge base for information about a query.
 
         Args:
@@ -61,7 +61,7 @@ class ToolsMixin:
         # Get the relevant documents from the knowledge base
         retrieval_timer = Timer()
         retrieval_timer.start()
-        docs_from_knowledge = self.get_relevant_docs_from_knowledge(query=query)
+        docs_from_knowledge = await self.get_relevant_docs_from_knowledge(query=query)
         if docs_from_knowledge is not None:
             # Truncate each document's content to prevent context overflow
             _max_doc_chars = 2000

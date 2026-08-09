@@ -11,7 +11,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any, Optional, Dict, List, Tuple
 from dataclasses import dataclass
@@ -618,54 +617,64 @@ class Workspace:
         selected_reversed.reverse()
         return selected_reversed
 
-    def get_git_context(self, max_status_lines: int = 30) -> Optional[str]:
+    async def _git(self, *args: str, timeout: float = 5.0) -> Optional[str]:
+        """Run one git command in the workspace and return its stdout.
+
+        ``None`` on any failure (no git binary, non-zero exit, timeout) — the
+        caller treats every git read as optional context.
+        """
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git", *args,
+                cwd=str(self.path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+        except (OSError, ValueError) as exc:
+            logger.debug("Failed to run git %s in %s: %s", args[0], self.path, exc)
+            return None
+        try:
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            logger.debug("git %s timed out in %s", args[0], self.path)
+            return None
+        if proc.returncode != 0:
+            return None
+        return stdout.decode(errors="replace").strip()
+
+    async def get_git_context(self, max_status_lines: int = 30) -> Optional[str]:
         """Get git status context for system prompt injection.
 
         Returns branch, uncommitted changes, and recent commits.
         Returns None if not in a git repo or git is unavailable.
+
+        This sits on the per-turn system-prompt path, so the git calls are
+        async subprocesses rather than ``subprocess.run``: four blocking calls
+        with a 5s timeout each can stall the whole event loop — including
+        unrelated concurrent tools — for as long as 20s. The three reads are
+        independent, so they run together behind the repo check.
         """
-        cwd = str(self.path)
-        try:
-            subprocess.run(
-                ["git", "rev-parse", "--git-dir"],
-                cwd=cwd, capture_output=True, check=True, timeout=5,
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        if await self._git("rev-parse", "--git-dir") is None:
             return None
 
+        branch, status, log = await asyncio.gather(
+            self._git("branch", "--show-current"),
+            self._git("status", "--short"),
+            self._git("log", "--oneline", "-3"),
+        )
+
         parts = []
-        try:
-            branch = subprocess.run(
-                ["git", "branch", "--show-current"],
-                cwd=cwd, capture_output=True, text=True, timeout=5,
-            ).stdout.strip()
-            if branch:
-                parts.append(f"Git branch: {branch}")
-        except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
-            logger.debug("Failed to read git branch for %s: %s", cwd, exc)
-
-        try:
-            status = subprocess.run(
-                ["git", "status", "--short"],
-                cwd=cwd, capture_output=True, text=True, timeout=5,
-            ).stdout.strip()
-            if status:
-                lines = status.splitlines()
-                if len(lines) > max_status_lines:
-                    lines = lines[:max_status_lines] + [f"... ({len(lines) - max_status_lines} more)"]
-                parts.append(f"Uncommitted changes:\n{chr(10).join(lines)}")
-        except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
-            logger.debug("Failed to read git status for %s: %s", cwd, exc)
-
-        try:
-            log = subprocess.run(
-                ["git", "log", "--oneline", "-3"],
-                cwd=cwd, capture_output=True, text=True, timeout=5,
-            ).stdout.strip()
-            if log:
-                parts.append(f"Recent commits:\n{log}")
-        except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
-            logger.debug("Failed to read git log for %s: %s", cwd, exc)
+        if branch:
+            parts.append(f"Git branch: {branch}")
+        if status:
+            lines = status.splitlines()
+            if len(lines) > max_status_lines:
+                lines = lines[:max_status_lines] + [f"... ({len(lines) - max_status_lines} more)"]
+            parts.append(f"Uncommitted changes:\n{chr(10).join(lines)}")
+        if log:
+            parts.append(f"Recent commits:\n{log}")
 
         return "\n".join(parts) if parts else None
 

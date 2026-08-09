@@ -14,7 +14,7 @@ from agentica.utils.log import logger
 class WikipediaTool(Tool):
     def __init__(self):
         super().__init__(name="wikipedia_tool")
-        self.register(self.search_wikipedia)
+        self.register(self.search_wikipedia, concurrency_safe=True, is_read_only=True)
 
     def search_wikipedia_single_query(self, query: str) -> str:
         """Search Wikipedia for a query.

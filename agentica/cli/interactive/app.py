@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -42,7 +42,7 @@ from agentica.cli.runtime import (
     get_console,
     set_active_console,
 )
-from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
+from agentica import config
 from agentica.global_config import get_setting, resolve_active_profile_name
 from agentica.peers import PeerSession, format_for_cli, format_for_model
 from agentica.run_response import AgentCancelledError
@@ -97,6 +97,18 @@ from .stream_loop import (
 from .tui import _setup_tui
 
 # ==================== Main entry ====================
+
+
+def _cli_log_file() -> Tuple[Optional[str], Optional[str]]:
+    """This CLI process's log file and its level, read at call time.
+
+    ``agentica.cli.main`` assigns the daily ``logs/<date>-<pid>.log`` path onto
+    ``agentica.config`` *after* this module is imported, so binding the constant
+    with a module-level ``from agentica.config import AGENTICA_LOG_FILE`` freezes
+    the SDK default (empty) and every peer would publish "no log file".
+    """
+    path = config.AGENTICA_LOG_FILE or None
+    return path, config.AGENTICA_LOG_LEVEL if path else None
 
 
 def _maybe_start_cron(state: SessionState, agent_config, extra_tools,
@@ -271,8 +283,7 @@ def run_interactive(
     peer_memory_path = None
     if workspace is not None:
         peer_memory_path = str(workspace._get_user_memory_md())
-    peer_log_file = AGENTICA_LOG_FILE or None
-    peer_log_level = AGENTICA_LOG_LEVEL if peer_log_file else None
+    peer_log_file, peer_log_level = _cli_log_file()
     state.peer_session = PeerSession(
         cwd=peer_cwd,
         git_branch=_read_git_branch(peer_cwd),

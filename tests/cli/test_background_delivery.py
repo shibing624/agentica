@@ -12,7 +12,7 @@ from agentica.cli.interactive.session_state import SessionState
 from agentica.tools.background_processes import BackgroundProcessCompleted
 
 
-def _event(returncode=0, command="pytest -q", log_path=""):
+def _event(returncode=0, command="pytest -q", log_path="", kind="command", label=""):
     now = time.time()
     return BackgroundProcessCompleted(
         id="term_3",
@@ -24,6 +24,8 @@ def _event(returncode=0, command="pytest -q", log_path=""):
         started_at=now - 198,
         completed_at=now,
         returncode=returncode,
+        kind=kind,
+        label=label,
     )
 
 
@@ -60,6 +62,62 @@ class TestReportText:
 
         assert "#3" in text
         assert "Output tail" not in text
+
+
+class TestDelegatedTaskReport:
+    """A delegated session hands back an answer, not a command log."""
+
+    @staticmethod
+    def _delegated(tmp_path, answer, returncode=0):
+        log = tmp_path / "term_3.log"
+        log.write_text(
+            f"$ /usr/bin/python -m agentica.cli.main --query 'port the parser'\n\n{answer}\n",
+            encoding="utf-8",
+        )
+        return _background_result_for_agent(
+            _event(
+                kind="delegate",
+                label="parser port",
+                log_path=str(log),
+                returncode=returncode,
+                command="/usr/bin/python -m agentica.cli.main --query 'port the parser'",
+            )
+        )
+
+    def test_the_report_is_named_after_the_task_not_the_terminal(self, tmp_path):
+        text = self._delegated(tmp_path, "Ported. The v1 shim is gone.")
+
+        assert 'Delegated task "parser port" finished' in text
+        assert "Background terminal" not in text
+
+    def test_the_workers_answer_is_the_body_of_the_report(self, tmp_path):
+        text = self._delegated(tmp_path, "Ported. The v1 shim is gone.")
+
+        assert "Ported. The v1 shim is gone." in text
+        # The command line that started it is a python -m invocation carrying
+        # the whole task; repeating it would spend context on what the label
+        # already says.
+        assert "agentica.cli.main" not in text
+
+    def test_a_long_answer_is_not_cut_to_a_command_tail(self, tmp_path):
+        answer = "\n".join(f"line {i}" for i in range(100))
+
+        text = self._delegated(tmp_path, answer)
+
+        assert "line 0" in text
+        assert "line 99" in text
+
+    def test_a_failed_worker_says_so_and_does_not_invite_a_retry(self, tmp_path):
+        text = self._delegated(tmp_path, "Traceback: no such file", returncode=1)
+
+        assert 'Delegated task "parser port" failed' in text
+        assert "Exit code: 1" in text
+        assert "do not simply delegate the same task again" in text
+
+    def test_a_silent_worker_still_produces_a_report(self, tmp_path):
+        text = self._delegated(tmp_path, "")
+
+        assert "no output" in text
 
 
 class TestHandToAgent:

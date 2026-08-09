@@ -70,6 +70,8 @@ def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
 def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     """Render a finished background command as a report for the agent."""
     status = "finished" if event.returncode == 0 else "failed"
+    if event.kind == "delegate":
+        return _delegate_result_for_agent(event, status)
     lines = [
         f"[Background terminal #{event.num} ({event.id}) {status}: "
         f"exit {event.returncode} after {event.elapsed}]",
@@ -90,6 +92,45 @@ def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
     return "\n".join(lines)
 
 
+def _delegate_result_for_agent(event: BackgroundProcessCompleted, status: str) -> str:
+    """Render a finished delegated session as a report for the agent that sent it.
+
+    The worker ran with ``--print``, so its stdout is its final answer and not a
+    command log — it gets a much larger slice than a background command's tail,
+    because that answer is the entire deliverable.
+    """
+    answer = read_log_tail(event.log_path, max_lines=120, max_chars=8000)
+    lines = [f'[Delegated task "{event.label}" {status} after {event.elapsed} ({event.id})]']
+    if event.returncode == 0:
+        lines.extend(["", "Its report:", answer or "(the worker produced no output)"])
+        lines.extend(
+            [
+                "",
+                "This is the whole of what that session hands back. Fold it into your "
+                "own work, or report it to the user if nothing is left to do.",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                f"Exit code: {event.returncode}",
+                f"Log: {event.log_path}",
+                "",
+                "Output tail:",
+                answer or "(no output)",
+            ]
+        )
+        lines.extend(
+            [
+                "",
+                "The delegated session did not finish its task. Decide whether to do "
+                "the work yourself or tell the user why it failed — do not simply "
+                "delegate the same task again.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def _print_background_completion(event: BackgroundProcessCompleted) -> None:
     """Print a background-terminal completion notice.
 
@@ -100,12 +141,22 @@ def _print_background_completion(event: BackgroundProcessCompleted) -> None:
     ok = event.returncode == 0
     marker = "[green]✓[/green]" if ok else "[red]✗[/red]"
     status = "finished" if ok else "failed"
+    delegated = event.kind == "delegate"
     con.print()
-    con.print(
-        f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
-        f"(exit {event.returncode})"
-    )
-    raw_command = event.command or ""
+    if delegated:
+        con.print(
+            f'{marker} Delegated task "{rich_escape(event.label)}" {status} in '
+            f"{event.elapsed} (exit {event.returncode})"
+        )
+    else:
+        con.print(
+            f"{marker} Background terminal #{event.num} {status} in {event.elapsed} "
+            f"(exit {event.returncode})"
+        )
+    # The delegated command line is a `python -m agentica.cli.main --query <the
+    # whole task>` — the label above already says what it was, so showing it
+    # again as a wrapped shell command is noise.
+    raw_command = "" if delegated else (event.command or "")
     if raw_command:
         try:
             width = int(getattr(con, "width", 80) or 80)

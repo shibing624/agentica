@@ -613,13 +613,17 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
     if terminals:
         con.print(f"  [cyan]Background terminals ({len(terminals)}):[/cyan]")
         for item in terminals:
+            kind = " [magenta]delegated session[/magenta]" if item.kind == "delegate" else ""
             con.print(
                 f"    #{item.num} [dim]{item.id}[/dim] pid={item.pid} "
-                f"elapsed={item.elapsed}"
+                f"elapsed={item.elapsed}{kind}"
             )
             # Full command on its own lines — /ps is the inspection surface,
             # so never truncate here (preview is only for one-line status UI).
-            for line in (item.command or "").splitlines() or [""]:
+            # A delegated session shows its task instead: its command line is a
+            # `python -m agentica.cli.main --query <the whole task>`.
+            body = item.label if item.kind == "delegate" else (item.command or "")
+            for line in body.splitlines() or [""]:
                 con.print(f"      {line}")
             con.print(f"      [dim]log: {item.log_path}[/dim]")
 

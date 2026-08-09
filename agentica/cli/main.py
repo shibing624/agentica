@@ -5,6 +5,7 @@
 """
 
 import os
+import sys
 import time
 from datetime import datetime
 
@@ -204,9 +205,18 @@ def main():
     if args.query:
         # Non-interactive mode
         con = get_console()
-        con.print(f"Running query: {args.query}", style="cyan")
-        tools_info = f", Extra Tools: {', '.join(extra_tool_names)}" if extra_tool_names else ""
-        con.print(f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}", style="magenta")
+        # --print means the caller wants the answer and nothing else: another
+        # agentica session delegating work, or a shell pipeline. Anything on
+        # stdout that is not the answer is noise there, including log lines.
+        if args.print_only:
+            suppress_console_logging()
+        else:
+            con.print(f"Running query: {args.query}", style="cyan")
+            tools_info = f", Extra Tools: {', '.join(extra_tool_names)}" if extra_tool_names else ""
+            con.print(
+                f"Model: {agent_config['model_provider']}/{agent_config['model_name']}{tools_info}",
+                style="magenta",
+            )
 
         extra_tools = configure_tools(extra_tool_names) if extra_tool_names else None
         agent_instance = create_agent(agent_config, extra_tools, workspace, skills_registry)
@@ -215,8 +225,17 @@ def main():
             response = agent_instance.run_stream_sync(args.query)
             for chunk in response:
                 if chunk and chunk.content:
-                    con.print(chunk.content, end="")
-            con.print()  # final newline
+                    if args.print_only:
+                        # Raw write: the answer may contain [brackets] that
+                        # rich would read as markup and swallow.
+                        sys.stdout.write(chunk.content)
+                    else:
+                        con.print(chunk.content, end="")
+            if args.print_only:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+            else:
+                con.print()  # final newline
         except (KeyboardInterrupt, AgentCancelledError):
             con.print("\n[yellow]Interrupted.[/yellow]")
             assert agent_instance.model is not None
@@ -227,8 +246,13 @@ def main():
                     session_id=resumable_session_id(agent_instance),
                 )
             )
+            sys.exit(130)
         except Exception as e:
             display_agent_execution_error(con, e)
+            # A one-shot run that failed must say so in its exit status: the
+            # caller is a script or a delegating session, and both decide what
+            # to do next from the return code.
+            sys.exit(1)
     else:
         # Interactive mode
         run_interactive(agent_config, extra_tool_names, workspace, skills_registry)

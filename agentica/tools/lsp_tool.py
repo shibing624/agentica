@@ -206,13 +206,20 @@ class JsonRpcClient:
         self._send_message(message)
 
     def _send_message(self, message: Dict) -> None:
-        """Send a message via stdin."""
+        """Send a message via stdin.
+
+        Held under ``_lock``: the read-only queries are ``concurrency_safe``, so
+        two of them can reach this from different executor threads, and
+        interleaved writes would split one message's header from its body and
+        desync the framing for every message after it.
+        """
         content = json.dumps(message)
         header = f"Content-Length: {len(content.encode('utf-8'))}\r\n\r\n"
         data = header + content
 
-        self._process.stdin.write(data.encode('utf-8'))
-        self._process.stdin.flush()
+        with self._lock:
+            self._process.stdin.write(data.encode('utf-8'))
+            self._process.stdin.flush()
 
     def stop(self) -> None:
         """Stop the client."""
@@ -482,11 +489,11 @@ class LspTool(Tool):
 
         # Register functions
         if enable_definition:
-            self.register(self.goto_definition)
+            self.register(self.goto_definition, concurrency_safe=True, is_read_only=True)
         if enable_references:
-            self.register(self.find_references)
+            self.register(self.find_references, concurrency_safe=True, is_read_only=True)
         if enable_hover:
-            self.register(self.hover_info)
+            self.register(self.hover_info, concurrency_safe=True, is_read_only=True)
         if enable_formatting:
             self.register(self.format_document)
 

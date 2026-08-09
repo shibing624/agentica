@@ -12,6 +12,7 @@ limit, registry tracking, event streaming, usage merge, timeout) lives in
      forwards to ``SubagentRegistry().spawn(parent_agent=self._parent_agent, ...)``.
   3. JSON-serializes the registry's structured result for the LLM.
 """
+import asyncio
 import json
 import re
 from textwrap import dedent
@@ -62,7 +63,9 @@ class BuiltinTaskTool(Tool):
     know and why, the files or functions to start from, and ask for findings as
     path:line. Never ask it to edit or implement.
 
-    - Launch independent tasks in one message to run them in parallel.
+    - Launch independent tasks in one message to run them in parallel. Three
+      run at a time; any beyond that wait for a slot, so send the ones that
+      matter.
     - Once delegated, do not duplicate that work yourself.
     - On `partial=true`, default to synthesizing the partial output. If the
       result contains only a timeout/limit note and no substantive findings,
@@ -80,9 +83,37 @@ class BuiltinTaskTool(Tool):
         super().__init__(name="builtin_task_tool")
         self._auxiliary_model = auxiliary_model
         self._parent_agent: Optional["Agent"] = None
-        self.register(self.task)
+        self._slots: Optional[asyncio.Semaphore] = None
+        self._slots_loop: Optional[asyncio.AbstractEventLoop] = None
+        # A subagent is read-only (writes and state-changing commands are
+        # refused, see SubagentRegistry) and owns entirely isolated state — its
+        # own cloned model, HTTP client and Agent. It must be concurrency_safe
+        # or the executor runs a batch of them one after another, which makes
+        # "launch independent tasks in one message to run them in parallel"
+        # (stated in this tool's own system prompt) a lie.
+        self.register(self.task, concurrency_safe=True, is_read_only=True)
         self.functions["task"].manages_own_timeout = True
-        self.functions["task"].interrupt_behavior = "block"
+
+    def _free_slot(self) -> asyncio.Semaphore:
+        """Bound how many subagents this agent runs at once.
+
+        ``task`` is ``concurrency_safe``, so a single assistant turn can put an
+        unbounded number of subagents in flight — each one a full Agent with
+        its own model and tool loop, and nobody is watching that bill. The
+        limit matches ``SubagentRegistry.MAX_CONCURRENT``, which already bounds
+        ``spawn_batch``; extra calls wait for a slot rather than being refused.
+
+        Rebuilt per event loop: a Semaphore binds to the loop it is first
+        awaited on, and one tool instance can outlive that loop (``run_sync``,
+        tests calling ``asyncio.run`` more than once).
+        """
+        from agentica.subagent import SubagentRegistry
+
+        loop = asyncio.get_running_loop()
+        if self._slots is None or self._slots_loop is not loop:
+            self._slots = asyncio.Semaphore(SubagentRegistry.MAX_CONCURRENT)
+            self._slots_loop = loop
+        return self._slots
 
     def _build_subagent_table(self) -> str:
         """Build a markdown table of available subagent types with their model tier."""
@@ -160,16 +191,17 @@ class BuiltinTaskTool(Tool):
 
         from agentica.subagent import SubagentRegistry
 
-        result = await SubagentRegistry().spawn(
-            parent_agent=self._parent_agent,
-            task=description,
-            agent_type=subagent_type,
-            auxiliary_model_override=self._auxiliary_model,
-            timeout_override=timeout,
-            max_turns_override=max_turns,
-            system_prompt_override=system_prompt_override,
-            resume_from_run_id=resume_from_run_id,
-        )
+        async with self._free_slot():
+            result = await SubagentRegistry().spawn(
+                parent_agent=self._parent_agent,
+                task=description,
+                agent_type=subagent_type,
+                auxiliary_model_override=self._auxiliary_model,
+                timeout_override=timeout,
+                max_turns_override=max_turns,
+                system_prompt_override=system_prompt_override,
+                resume_from_run_id=resume_from_run_id,
+            )
 
         status = result.get("status", "error")
         # ``completed`` = clean success. ``timeout`` / ``max_turns`` /

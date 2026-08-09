@@ -35,7 +35,7 @@ class ArxivTool(Tool):
         self.download_dir: Path = download_dir or Path(__file__).parent.joinpath("arxiv_pdfs")
 
         if search_arxiv:
-            self.register(self.search_arxiv_and_return_articles)
+            self.register(self.search_arxiv_and_return_articles, concurrency_safe=True, is_read_only=True)
         if read_arxiv_papers:
             self.register(self.read_arxiv_papers)
 

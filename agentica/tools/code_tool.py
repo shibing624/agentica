@@ -69,15 +69,15 @@ class CodeTool(Tool):
         self.work_dir = Path(work_dir) if work_dir else Path.cwd()
 
         if enable_analysis:
-            self.register(self.analyze_code)
+            self.register(self.analyze_code, concurrency_safe=True, is_read_only=True)
         if enable_format:
             self.register(self.format_code)
         if enable_lint:
-            self.register(self.lint_code)
+            self.register(self.lint_code, concurrency_safe=True, is_read_only=True)
         if enable_symbols:
-            self.register(self.find_symbols)
+            self.register(self.find_symbols, concurrency_safe=True, is_read_only=True)
         if enable_outline:
-            self.register(self.get_code_outline)
+            self.register(self.get_code_outline, concurrency_safe=True, is_read_only=True)
 
     def _resolve_path(self, file_path: str) -> Path:
         """Resolves a file path, making it absolute if it's relative."""

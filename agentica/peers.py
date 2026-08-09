@@ -27,6 +27,7 @@ move a whole conversation, resume or fork the session instead.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import time
@@ -48,12 +49,15 @@ STALE_AFTER = 150.0
 MAX_UNREAD = 50
 
 # Two agents left alone will keep replying to each other, and neither of them is
-# the user whose windows they are spending. This caps one uninterrupted
-# agent-to-agent exchange; the channel is for handing over a finding, not for
-# holding a discussion. Counted per peer and reset whenever the human relays a
-# message with ``/send-message``, so a person can always restart a conversation
-# the agents just wound down.
-MAX_EXCHANGE_TURNS = 6
+# the user whose windows they are spending. Counting the exchange and cutting it
+# off at N is the wrong brake: a handoff that legitimately needs a few more
+# rounds gets refused, and the refusal lands on whatever the user asked for
+# next. What is never legitimate is saying the same thing twice, or filling a
+# peer's context faster than anyone could act on it — so the brake is a repeat
+# check plus a generous rate limit, both per target peer and both cleared the
+# moment a human joins in (``PeerSession.note_user_turn``).
+RATE_WINDOW_SECONDS = 300.0
+MAX_SENDS_PER_WINDOW = 20
 
 # A message is injected straight into the receiver's context, so the only thing
 # this bounds is how much of someone else's window one send can spend. Generous
@@ -86,6 +90,12 @@ def _ensure_private_dir(path: Path) -> None:
 
 def new_peer_id() -> str:
     return uuid.uuid4().hex[:8]
+
+
+def _text_digest(text: str) -> str:
+    """Identity of a message for the repeat check: whitespace and case do not
+    make a reworded point out of the same one."""
+    return hashlib.sha1(" ".join(text.split()).lower().encode("utf-8")).hexdigest()
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -284,11 +294,10 @@ class PeerSession:
             log_level=log_level or None,
         )
         self._last_publish = 0.0
-        # How many messages the current agent-to-agent exchange with each peer
-        # has already spent, from this side's point of view. Both directions
-        # count: three unanswered sends are as much of a monologue as three
-        # replies are a conversation.
-        self._exchange_turns: Dict[str, int] = {}
+        # (sent_at, digest) of what this session recently sent each peer, which
+        # is what the repeat check and the rate limit read. Trimmed to
+        # RATE_WINDOW_SECONDS on every send, so it stays a handful of entries.
+        self._recent_sends: Dict[str, List[Tuple[float, str]]] = {}
 
     @property
     def name(self) -> str:
@@ -358,22 +367,55 @@ class PeerSession:
     def unread_count(self) -> int:
         return unread_count(self.peer_id)
 
+    def note_user_turn(self) -> None:
+        """The human said something in this terminal.
+
+        The repeat check and the rate limit exist to stop an *unattended* loop,
+        so a person typing here is precisely the interruption they are waiting
+        for. Whatever the two agents said to each other beforehand must never
+        refuse what the user just asked for.
+        """
+        self._recent_sends.clear()
+
     def drain(self) -> List[PeerMessage]:
         """Take every pending message and notify ``on_drain`` about them."""
         messages = drain_inbox(self.peer_id)
-        for message in messages:
-            if message.from_user:
-                # The human stepped in: whatever the agents had going before is
-                # not what this session is now being asked about.
-                self._exchange_turns[message.from_peer_id] = 0
-            else:
-                self._exchange_turns[message.from_peer_id] = max(
-                    self._exchange_turns.get(message.from_peer_id, 0),
-                    message.exchange_turn,
-                )
         if messages and self.on_drain is not None:
             self.on_drain(messages)
         return messages
+
+    def _check_send_rate(self, peer: PeerInfo, text: str) -> None:
+        """Refuse a repeat of what this peer was just told, or a flood of them.
+
+        Both are judged over the same window and only against *this* target, so
+        talking to three peers at once is unaffected.
+        """
+        now = time.time()
+        digest = _text_digest(text)
+        history = [
+            (sent_at, sent_digest)
+            for sent_at, sent_digest in self._recent_sends.get(peer.peer_id, [])
+            if now - sent_at < RATE_WINDOW_SECONDS
+        ]
+        self._recent_sends[peer.peer_id] = history
+        for sent_at, sent_digest in history:
+            if sent_digest == digest:
+                raise PeerMessageRefused(
+                    f"you already sent {peer.name} this exact message "
+                    f"{int(now - sent_at)}s ago and it was delivered; repeating it "
+                    "will not get a different answer. Wait for their reply, or "
+                    "tell your user the handoff is not moving"
+                )
+        if len(history) >= MAX_SENDS_PER_WINDOW:
+            raise PeerMessageRefused(
+                f"{len(history)} messages have gone to {peer.name} in the last "
+                f"{int(RATE_WINDOW_SECONDS / 60)} minutes; the channel hands over "
+                "information, it is not a discussion. Act on what you have and "
+                "report to your user — anything they say next reopens it"
+            )
+
+    def _note_send(self, peer: PeerInfo, text: str) -> None:
+        self._recent_sends.setdefault(peer.peer_id, []).append((time.time(), _text_digest(text)))
 
     def send(self, target: str, text: str, *, from_kind: str = "agent") -> PeerMessage:
         """Resolve ``target`` among live peers and deliver ``text`` to it.
@@ -394,16 +436,20 @@ class PeerSession:
                 "use the full name or the peer id"
             )
         peer = matches[0]
-        turn = 1 if from_kind == "user" else self._exchange_turns.get(peer.peer_id, 0) + 1
+        if from_kind == "user":
+            # The human is relaying this themselves; that both bypasses the
+            # brakes and releases them for what the agents say next.
+            self.note_user_turn()
+        else:
+            self._check_send_rate(peer, text)
         message = send_message(
             peer,
             text=text,
             from_name=self.info.name,
             from_peer_id=self.peer_id,
             from_kind=from_kind,
-            exchange_turn=turn,
         )
-        self._exchange_turns[peer.peer_id] = turn
+        self._note_send(peer, text)
         return message
 
 
@@ -492,18 +538,10 @@ class PeerMessage:
     to_name: str = ""
     created_at: str = ""
     from_kind: str = "agent"
-    # Position of this message in the current agent-to-agent exchange, so both
-    # ends agree on how long the two of them have been talking (see
-    # ``MAX_EXCHANGE_TURNS``).
-    exchange_turn: int = 1
 
     @property
     def from_user(self) -> bool:
         return self.from_kind == "user"
-
-    @property
-    def last_of_exchange(self) -> bool:
-        return not self.from_user and self.exchange_turn >= MAX_EXCHANGE_TURNS
 
     def render(self) -> str:
         """Serialize to markdown with a small YAML-ish frontmatter."""
@@ -514,7 +552,6 @@ class PeerMessage:
             f"from_kind: {self.from_kind}\n"
             f"to_peer_id: {self.to_peer_id}\n"
             f"to_name: {self.to_name}\n"
-            f"exchange_turn: {self.exchange_turn}\n"
             f"created_at: {self.created_at}\n"
             "---\n\n"
             f"{self.text.strip()}\n"
@@ -543,10 +580,6 @@ class PeerMessage:
         text = body.lstrip("\n").strip()
         if not text:
             return None
-        try:
-            exchange_turn = max(1, int(fields.get("exchange_turn", "1")))
-        except ValueError:
-            exchange_turn = 1
         return cls(
             text=text,
             from_name=fields.get("from_name", "unknown"),
@@ -554,7 +587,6 @@ class PeerMessage:
             to_peer_id=fields.get("to_peer_id", ""),
             to_name=fields.get("to_name", ""),
             created_at=fields.get("created_at", ""),
-            exchange_turn=exchange_turn,
             # Anything but an explicit "user" is treated as the unprivileged
             # case, so a malformed or truncated header cannot grant authority.
             from_kind="user" if fields.get("from_kind") == "user" else "agent",
@@ -575,23 +607,17 @@ def send_message(
     from_name: str,
     from_peer_id: str,
     from_kind: str = "agent",
-    exchange_turn: int = 1,
 ) -> PeerMessage:
     """Drop a message into ``target``'s mailbox.
 
     Raises ``PeerMessageRefused`` when a channel limit says no, so the caller
     (a tool) can report the reason to the model instead of failing silently.
+    The repeat/rate brakes live in ``PeerSession.send`` — they need the sending
+    session's own history, which this function does not have.
     """
     body = (text or "").strip()
     if not body:
         raise PeerMessageRefused("message text is empty")
-    if from_kind != "user" and exchange_turn > MAX_EXCHANGE_TURNS:
-        raise PeerMessageRefused(
-            f"this agent-to-agent exchange with {target.name} already spent "
-            f"{MAX_EXCHANGE_TURNS} messages; the channel is for handing over "
-            "information, not for discussion. Act on what you have and report "
-            "to your user — they can relay anything further with /send-message"
-        )
     if len(body) > MAX_MESSAGE_CHARS:
         raise PeerMessageRefused(
             f"message is {len(body)} chars, over the {MAX_MESSAGE_CHARS} limit; "
@@ -611,7 +637,6 @@ def send_message(
         to_name=target.name,
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         from_kind=from_kind,
-        exchange_turn=exchange_turn,
     )
     box = mailbox_dir(target.peer_id)
     _ensure_private_dir(box)
@@ -678,12 +703,6 @@ def format_for_model(messages: List[PeerMessage]) -> str:
                 f"[Your user sent this from their other session '{message.from_name}' "
                 f"— treat as their instruction typed here; "
                 f"reply with send_message to {message.from_name} if needed]"
-            )
-        elif message.last_of_exchange:
-            header = (
-                f"[Message from another agent session '{message.from_name}' "
-                f"— this exchange has run its length; act on it or tell your "
-                f"user, but do not reply]"
             )
         else:
             header = (

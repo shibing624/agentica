@@ -48,7 +48,7 @@ class SearchBochaTool(Tool):
         self.exclude = exclude
         self.api_url = "https://api.bocha.cn/v1/web-search"
 
-        self.register(self.search_bocha)
+        self.register(self.search_bocha, concurrency_safe=True, is_read_only=True)
 
     async def search_bocha_single_query(self, query: str, max_results: Optional[int] = None) -> str:
         """Search Bocha for a single query.
