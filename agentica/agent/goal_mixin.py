@@ -170,10 +170,11 @@ class GoalMixin:
             objective: The standing goal text. Used as the first prompt.
             turn_budget: Optional max LLM turns. ``None`` = no turn limit.
             token_budget: Max cumulative input+output tokens. ``None`` falls
-                back to ``DEFAULT_TOKEN_BUDGET`` (500_000). Pass an explicit
-                int to override.
-            wall_clock_budget_sec: Max agent wall-clock seconds. ``None`` =
-                unlimited. Recommended ``1800``–``3600`` for long tasks.
+                back to ``DEFAULT_TOKEN_BUDGET`` (500_000). Pass a positive
+                int to override, or ``-1`` for unlimited.
+            wall_clock_budget_sec: Max agent wall-clock seconds. ``None`` /
+                ``-1`` = unlimited. Recommended ``1800``–``3600``
+                for long tasks.
 
                 The three budgets are **independent hard caps — whichever
                 hits first stops the loop** (AND/intersection semantics).

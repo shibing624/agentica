@@ -69,6 +69,27 @@ def test_goal_manager_set_applies_default_token_budget(tmp_path: Path):
     assert state.turn_budget is None
 
 
+@pytest.mark.parametrize("raw", [-1])
+def test_goal_manager_set_minus_one_disables_budgets(tmp_path: Path, raw: int):
+    mgr = GoalManager(_make_session_log(tmp_path))
+    state = mgr.set(
+        "long running",
+        token_budget=raw,
+        turn_budget=raw,
+        wall_clock_budget_sec=float(raw),
+    )
+    assert state.token_budget is None
+    assert state.turn_budget is None
+    assert state.wall_clock_budget_sec is None
+
+
+@pytest.mark.parametrize("raw", [0, -5])
+def test_goal_manager_set_rejects_zero_and_other_negatives(tmp_path: Path, raw: int):
+    mgr = GoalManager(_make_session_log(tmp_path))
+    with pytest.raises(ValueError, match="-1"):
+        mgr.set("x", token_budget=raw)
+
+
 def test_goalstate_roundtrip():
     s = GoalState(
         session_id="abc",

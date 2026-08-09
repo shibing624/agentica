@@ -13,7 +13,7 @@ from agentica.cli.commands.context import CommandContext
 from agentica.cli.runtime import (
     get_console,
 )
-from agentica.goals import GoalManager
+from agentica.goals import UNLIMITED_BUDGET_VALUE, GoalManager
 from agentica.run_context import TaskAnchor
 from agentica.tools.goal_tool import GoalTool
 
@@ -142,8 +142,12 @@ def _parse_goal_set_args(raw: str) -> tuple[str, Dict[str, Any], Optional[str]]:
         i += 1
 
     for key, value in budgets.items():
+        # -1 means unlimited (GoalManager stores None). 0 and other non-positives
+        # are rejected so a zero cap is not confused with "no cap".
+        if value == UNLIMITED_BUDGET_VALUE or value == -1.0:
+            continue
         if value <= 0:
-            return "", {}, f"{key} must be positive"
+            return "", {}, f"{key} must be positive, or -1 for unlimited"
     return " ".join(objective).strip(), budgets, None
 
 
@@ -155,6 +159,7 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     /goal <objective>      -> set new objective + enqueue first turn
     /goal --turns 5 <objective>       -> set turn budget
     /goal --tokens 80000 <objective>  -> set token budget
+    /goal --tokens -1 <objective>     -> no token cap
     /goal --wall 1800 <objective>     -> set wall-clock budget seconds
     /goal pause            -> pause auto-continuation
     /goal resume           -> resume + enqueue continuation
@@ -174,7 +179,11 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     if not arg or sub == "status":
         con.print(f"  {mgr.status_line()}")
         if mgr.load() is None:
-            con.print("  [dim]Usage: /goal <objective>  |  pause | resume | clear[/dim]")
+            con.print(
+                "  [dim]Usage: /goal [--turns N] [--tokens N] [--wall SECONDS] "
+                "<objective>  |  pause | resume | clear[/dim]"
+            )
+            con.print("  [dim]Budgets: omit token → 500000 default; -1 → unlimited[/dim]")
         return {"goal_manager": mgr}
 
     # ── pause / resume / clear are safe while agent is running ──
@@ -222,7 +231,10 @@ def _cmd_goal(ctx: CommandContext, cmd_args: str = ""):
     objective, budgets, parse_error = _parse_goal_set_args(arg)
     if parse_error:
         con.print(f"  [red]Invalid goal options: {parse_error}[/red]")
-        con.print("  [dim]Usage: /goal [--turns N] [--tokens N] [--wall SECONDS] <objective>[/dim]")
+        con.print(
+            "  [dim]Usage: /goal [--turns N] [--tokens N] [--wall SECONDS] <objective>[/dim]"
+        )
+        con.print("  [dim]Budgets: -1 = unlimited[/dim]")
         return {"goal_manager": mgr}
     try:
         state = mgr.set(objective, **budgets)

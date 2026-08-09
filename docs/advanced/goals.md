@@ -64,7 +64,9 @@ print(result.response_content)  # == result.run_response.content or ""
 | `turn_budget` | `None` | **不限**（不计轮数） | LLM 循环总轮数上限（可选） |
 | `wall_clock_budget_sec` | `None` | **不限**（不计时） | agent wall-clock 秒数上限 |
 
-> 注意：`token_budget` 即便传 `None` 也会回落到 `DEFAULT_TOKEN_BUDGET`（`GoalManager.set` / `run_goal` 路径）。想要更大预算就显式传更大的数，例如 `token_budget=2_000_000`。`turn_budget` 只有显式传入正整数时才生效。
+> **无限预算**：显式传 `-1`（CLI：`/goal --tokens -1 ...`；SDK：`token_budget=-1`）会存成 `None`，关闭该闸。这与「不传参数」不同——不传 `token_budget` 仍回落默认 `500_000`。`turn` / `wall` 同样认 `-1`。`0` 会被拒绝（避免和「零额度」混淆）。
+
+> 想要更大但仍有限的预算就传正整数，例如 `token_budget=2_000_000` 或 `/goal --tokens 2000000 ...`。`turn_budget` 只有显式传入正整数时才生效。
 
 **判定优先级**（在 `evaluate_after_turn` 里固定为）：
 
@@ -108,7 +110,7 @@ Goal [active]: 实现 xxx 功能并跑通 pytest
 经验法则：
 
 - **默认就有 token 闸**——CLI `/goal xxx` 与 SDK `run_goal()` 未传时都是 500k
-- **需要更紧/更松就显式传 `token_budget`**——例如 `/goal --tokens 80000 ...`
+- **需要更紧/更松就显式传 `token_budget`**——例如 `/goal --tokens 80000 ...`；不限则 `/goal --tokens -1 ...`
 - **`turn_budget` 可选**——只在你想额外限制轮数时用 `--turns N`
 - **`wall_clock_budget_sec` 主要给 SLA 用**——例如"30 分钟内出个结果"
 

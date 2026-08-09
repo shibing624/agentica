@@ -393,6 +393,23 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertEqual(budgets["token_budget"], 80000)
         self.assertEqual(budgets["wall_clock_budget_sec"], 1800)
 
+    def test_parse_goal_budget_minus_one_means_unlimited(self):
+        from agentica.cli.commands.goal import _parse_goal_set_args
+
+        objective, budgets, err = _parse_goal_set_args("--tokens=-1 长任务")
+        self.assertIsNone(err)
+        self.assertEqual(objective, "长任务")
+        self.assertEqual(budgets["token_budget"], -1)
+
+        _, budgets, err = _parse_goal_set_args("--turns -1 --wall -1 长任务")
+        self.assertIsNone(err)
+        self.assertEqual(budgets["turn_budget"], -1)
+        self.assertEqual(budgets["wall_clock_budget_sec"], -1)
+
+        for raw in ("--tokens 0 长任务", "--tokens -5 坏值"):
+            _, _, err = _parse_goal_set_args(raw)
+            self.assertIsNotNone(err, raw)
+
     def _steer_ctx(self, *, agent_running, steer_accepts, queue_items=()):
         agent = MagicMock()
         agent.steer.return_value = steer_accepts

@@ -68,7 +68,7 @@ COMMAND_REGISTRY = {
     "/compact": (_cmd_compact, "Compact context (summarize history)"),
     "/rename": (_cmd_rename, "Rename the current session for easy resume"),
     "/resume": (_cmd_resume, "Resume by number, name, or id prefix"),
-    "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done)"),
+    "/goal": (_cmd_goal, "Set or manage a standing goal (auto-continues until done; --tokens -1 = unlimited)"),
     "/subgoal": (_cmd_subgoal, "Add or manage acceptance criteria on the active goal"),
     "/btw": (_cmd_btw, "Quick aside answered in parallel \u2014 no tools, not persisted"),
     "/queue": (

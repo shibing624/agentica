@@ -69,6 +69,10 @@ DEFAULT_TOKEN_BUDGET = 500_000
 # ``/goal --turns N`` only when you want a hard turn ceiling on top of
 # the token budget.
 DEFAULT_TURN_BUDGET: Optional[int] = None
+# Explicit ``-1`` on token/turn/wall budgets means unlimited (stored as
+# ``None``). Distinguishes "caller omitted the arg → use default" from
+# "caller asked for no cap". ``0`` is rejected (ambiguous with a zero cap).
+UNLIMITED_BUDGET_VALUE = -1
 MAX_CONSECUTIVE_PARSE_FAILURES = 3
 # Auto-pause after N consecutive turns where every tool call failed. Guards
 # against the agent getting stuck repeating the same broken tool invocation
@@ -94,6 +98,34 @@ def is_goal_generated_prompt(text: str) -> bool:
     traffic.
     """
     return text.startswith((CONTINUATION_PROMPT_PREFIX, BUDGET_WRAPUP_PROMPT_PREFIX))
+
+
+def resolve_budget_int(value: Optional[int], *, default: Optional[int]) -> Optional[int]:
+    """Normalize an optional int budget.
+
+    - ``None`` → ``default`` (for ``token_budget``, usually ``DEFAULT_TOKEN_BUDGET``)
+    - ``-1`` → ``None`` (unlimited)
+    - positive int → that cap
+    - ``0`` / other negatives → ``ValueError``
+    """
+    if value is None:
+        return default
+    if value == UNLIMITED_BUDGET_VALUE:
+        return None
+    if value <= 0:
+        raise ValueError("budget must be positive, or -1 for unlimited")
+    return value
+
+
+def resolve_budget_float(value: Optional[float]) -> Optional[float]:
+    """Normalize an optional float budget (wall-clock). Same ``-1`` → unlimited."""
+    if value is None:
+        return None
+    if value == UNLIMITED_BUDGET_VALUE or value == -1.0:
+        return None
+    if value <= 0:
+        raise ValueError("budget must be positive, or -1 for unlimited")
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -655,6 +687,13 @@ class GoalManager:
         token_budget: Optional[int] = None,
         wall_clock_budget_sec: Optional[float] = None,
     ) -> GoalState:
+        """Create/replace the standing goal.
+
+        ``token_budget``: omit/``None`` → ``default_token_budget`` (500_000);
+        ``-1`` → unlimited; positive int → that cap.
+        ``turn_budget`` / ``wall_clock_budget_sec``: omit → no cap (or manager
+        default for turns); ``-1`` → unlimited; positive → that cap.
+        """
         objective = (objective or "").strip()
         if not objective:
             raise ValueError("Goal objective cannot be empty.")
@@ -664,11 +703,11 @@ class GoalManager:
             session_id=self.session_log.session_id,
             objective=objective,
             status="active",
-            turn_budget=turn_budget if turn_budget is not None else self.default_turn_budget,
+            turn_budget=resolve_budget_int(turn_budget, default=self.default_turn_budget),
             turns_used=0,
-            token_budget=token_budget if token_budget is not None else self.default_token_budget,
+            token_budget=resolve_budget_int(token_budget, default=self.default_token_budget),
             tokens_used=0,
-            wall_clock_budget_sec=wall_clock_budget_sec,
+            wall_clock_budget_sec=resolve_budget_float(wall_clock_budget_sec),
             wall_clock_used_sec=0.0,
             subgoals=[],
             consecutive_parse_failures=0,
