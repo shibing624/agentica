@@ -621,6 +621,10 @@ class StreamDisplayManager:
     # already tells the user what happened; errors are still surfaced.
     _SUPPRESS_RESULT_TOOLS = frozenset({"write_todos"})
 
+    # Peer discovery / delivery results are short but multi-line and important
+    # to the user — never fold them behind Ctrl+O.
+    _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message"})
+
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
     # execute: show up to this many lines inline; beyond that, a head+tail
@@ -750,12 +754,20 @@ class StreamDisplayManager:
             )
             return
 
-        max_lines = self._DEFAULT_MAX_RESULT_LINES
-        max_line_width = 120
-
         style = "dim red" if is_error else "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
         cont_prefix = "      "
+
+        if tool_name in self._FULL_RESULT_TOOLS:
+            for i, line in enumerate(lines):
+                p = prefix if i == 0 else cont_prefix
+                self._assistant_console.print(f"{p}{line}", style=style)
+            if elapsed_str:
+                self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
+            return
+
+        max_lines = self._DEFAULT_MAX_RESULT_LINES
+        max_line_width = 120
 
         display_lines = lines[:max_lines]
         for i, line in enumerate(display_lines):

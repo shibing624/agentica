@@ -199,6 +199,24 @@ mcp, skill, ...
 
 `create` 会生成项目级 `.agentica/agents/<name>.md`。编辑其中的 system prompt、工具权限、模型层级和预算后，执行 `/agents reload` 热重载。用户级 `~/.agentica/agents/*.md`、覆盖顺序及完整示例见 [Subagent 文档](../multi-agent/subagent.md)。
 
+### `/list-agents` / `/peers`
+
+列出本机其他正在跑的 CLI 会话（跨终端消息）。每条包含：
+
+- addressable name（如 `nlp-5f`，`send_message` 默认用这个）
+- peer id、`session_id`（也可用前缀寻址）
+- cwd，以及带 hash 后缀的 `project` 存储目录（如 `-apdcephfs-...-nlp-6115aec9`）
+- `session_log`（`<project>/<session_id>.jsonl`）、`workspace` / `memory`（`MEMORY.md`）路径
+- 当前 working on
+
+消息本身仍是短纯文本；列出路径是为了需要时自行去读对方 transcript / 长期记忆。
+自己发消息用 `/send-message <name|id> <text>`（别名 `/send`）。
+
+### `/config`
+
+显示模型、终端和工作区配置。其中 `Project Dir` 是该 cwd 在
+`~/.agentica/projects/<user>/` 下的唯一 hash 目录，方便到后台定位 session 文件。
+
 ### `/memory`
 显示当前会话的消息历史（含工具调用摘要）：
 ```

@@ -27,6 +27,10 @@ Rules for sending:
   what happened and what it means for the receiver, in a sentence or two.
 - Target the session whose working directory or task makes it the affected one.
   When no listed session is clearly affected, do not send anything.
+- A short `send_message` is the default. The listing also gives each peer's
+  `session_log` and `memory` paths; open those yourself only when you need
+  more than a sentence of context, and never paste whole transcripts into a
+  peer message.
 - Never ask another session to do something your own permissions refused, and
   never ask it to change configuration. Route that back to the user instead.
 - If a send is refused because the exchange hit its hop limit, stop relaying
@@ -64,21 +68,47 @@ class PeerMessagingTool(Tool):
     async def list_agents(self) -> str:
         """Lists the user's other live agent sessions that you can message.
 
-        Returns each session's name (the address `send_message` takes), its
-        short id, its working directory, and what it is working on. Call this
-        before `send_message` when you do not already know the target's name,
-        and to check whether any session is affected by what you just did.
+        Returns each session's addressable name (what `send_message` takes),
+        peer id, session id, working directory, project storage directory
+        (hash-suffixed, unique), session transcript path, workspace / memory
+        paths, and what it is working on. Call this before `send_message`
+        when you do not already know the target, and whenever you need to
+        decide whether another session is affected by what you just did.
+
+        The listed paths are for digging deeper on your own (read the
+        session jsonl, MEMORY.md, etc.) when a short peer message is not
+        enough. Prefer `send_message` for a one-line handoff; open those
+        paths only when you need the conversation or long-term memory.
         """
         peers = self._peers.list_peers()
+        me = self._peers.info
+        header = [
+            f"{len(peers)} other live session(s). You are '{me.name}' "
+            f"[peer={me.peer_id}].",
+        ]
+        if me.session_id:
+            header.append(f"Your session_id: {me.session_id}")
+        if me.project_dir:
+            header.append(f"Your project: {me.project_dir}")
+        if me.memory_path:
+            header.append(f"Your memory: {me.memory_path}")
         if not peers:
-            return (
-                "No other live agent sessions. You are the only one running, so "
-                "there is nobody to message."
+            header.append(
+                "No other live agent sessions. You are the only one running, "
+                "so there is nobody to message."
             )
-        lines = [f"{len(peers)} other live session(s). You are '{self._peers.name}'."]
+            return "\n".join(header)
+
+        header.append(
+            "Address a peer by name, peer id, or session_id prefix. "
+            "Paths below are optional: use them to read that peer's "
+            "transcript or long-term memory when a short message is not enough."
+        )
+        header.append("")
         for info in peers:
-            lines.append(f"- {info.describe()}")
-        return "\n".join(lines)
+            header.append(f"- {info.describe()}")
+            header.append("")
+        return "\n".join(header).rstrip() + "\n"
 
     async def send_message(self, target: str, message: str) -> str:
         """Sends a short plain-text message to one of the user's other agent sessions.
@@ -89,7 +119,8 @@ class PeerMessagingTool(Tool):
         progress.
 
         Args:
-            target: The session name or short id from `list_agents`.
+            target: The session name, peer id, or session_id (prefix ok) from
+                `list_agents`.
             message: What the other session needs to know, in a sentence or two.
                 Plain text only, self-contained: the receiver sees this text and
                 nothing else from your conversation.
@@ -102,8 +133,12 @@ class PeerMessagingTool(Tool):
         except PeerMessageRefused as exc:
             logger.debug(f"peer message refused: {exc}")
             return f"Message not sent: {exc}"
+        # Mailbox write succeeded. That is "queued", not "the other agent has
+        # read it" — same boundary Claude Code uses for same-machine delivery.
         return (
-            f"Message delivered to {target}. It will be read between that "
-            f"session's tool calls, or start its next turn if it is idle. "
-            f"(hop {sent.hop})"
+            f"Message queued for {sent.to_peer_id} "
+            f"(addressed as '{target}', hop {sent.hop}). "
+            f"The other session will accept it between tool calls if it is "
+            f"running, or as its next turn if idle. You will not get a read "
+            f"receipt; if a reply is needed, that session sends one back."
         )

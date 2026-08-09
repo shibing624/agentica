@@ -406,8 +406,8 @@ def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
         con.print(f"  [red]Not sent: {exc}[/red]")
         return
     con.print(
-        f"  [green]Sent to {target}.[/green] [dim]It arrives between that session's tool "
-        f"calls, or starts its next turn if it is idle.[/dim]"
+        f"  [green]Queued for {target}.[/green] [dim]The other session accepts it "
+        f"between tool calls if running, or as its next turn if idle.[/dim]"
     )
 
 
@@ -424,7 +424,18 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
         con.print("  [yellow]Cross-session messaging is not active in this session.[/yellow]")
         return
 
-    con.print(f"  This session: [cyan]{peers.name}[/cyan] [dim]({peers.peer_id})[/dim]")
+    con.print(f"  This session: [cyan]{peers.name}[/cyan] [dim]peer={peers.peer_id}[/dim]")
+    if peers.info.session_id:
+        con.print(f"  session_id:  [cyan]{peers.info.session_id}[/cyan]")
+    con.print(f"  cwd:         {peers.info.cwd}")
+    if peers.info.project_dir:
+        con.print(f"  project:     [dim]{peers.info.project_dir}[/dim]")
+    if peers.info.session_log_path:
+        con.print(f"  session_log: [dim]{peers.info.session_log_path}[/dim]")
+    if peers.info.workspace_path:
+        con.print(f"  workspace:   [dim]{peers.info.workspace_path}[/dim]")
+    if peers.info.memory_path:
+        con.print(f"  memory:      [dim]{peers.info.memory_path}[/dim]")
     con.print(f"  [dim]mailbox: {mailbox_dir(peers.peer_id)}[/dim]")
     pending = peers.unread_count()
     if pending:
@@ -436,15 +447,26 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
         return
     con.print(f"\n  [cyan]Other live sessions ({len(live)}):[/cyan]")
     for info in live:
-        con.print(f"    [bold]{info.name}[/bold] [dim]{info.peer_id}[/dim]  pid={info.pid}")
-        con.print(f"      [dim]cwd: {info.cwd}[/dim]")
+        con.print(f"    [bold]{info.name}[/bold] [dim]peer={info.peer_id}[/dim]  pid={info.pid}")
+        if info.session_id:
+            con.print(f"      session_id:  {info.session_id}")
+        con.print(f"      cwd:         {info.cwd}")
+        if info.project_dir:
+            con.print(f"      project:     [dim]{info.project_dir}[/dim]")
+        if info.session_log_path:
+            con.print(f"      session_log: [dim]{info.session_log_path}[/dim]")
+        if info.workspace_path:
+            con.print(f"      workspace:   [dim]{info.workspace_path}[/dim]")
+        if info.memory_path:
+            con.print(f"      memory:      [dim]{info.memory_path}[/dim]")
         if info.git_branch:
-            con.print(f"      [dim]branch: {info.git_branch}[/dim]")
+            con.print(f"      branch:      {info.git_branch}")
         if info.task:
-            con.print(f"      working on: {info.task}")
+            con.print(f"      working on:  {info.task}")
     con.print(
-        "  [dim]Ask the agent to message one by name (it calls send_message itself), "
-        "or say it yourself with /send-message <name> <text>.[/dim]"
+        "  [dim]Ask the agent to message one by name / peer id / session_id "
+        "(it calls send_message itself), or say it yourself with "
+        "/send-message <name|id> <text>.[/dim]"
     )
 
 

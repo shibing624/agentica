@@ -128,6 +128,12 @@ class PeerInfo:
     # One line of "what this session is working on", so a sending agent can
     # pick a target on its own instead of guessing from the name.
     task: Optional[str] = None
+    # Session transcript lives under project_dir; long-term memory under
+    # memory_path. Published so another agent can dig deeper than a short
+    # peer message when it decides that is worth it.
+    project_dir: Optional[str] = None
+    workspace_path: Optional[str] = None
+    memory_path: Optional[str] = None
     updated_at: float = 0.0
 
     @property
@@ -137,6 +143,19 @@ class PeerInfo:
     @property
     def alive(self) -> bool:
         return self.age <= STALE_AFTER and _pid_alive(self.pid)
+
+    @property
+    def project_slug(self) -> Optional[str]:
+        """Basename of ``project_dir`` (hash-suffixed, unique per cwd)."""
+        if not self.project_dir:
+            return None
+        return Path(self.project_dir).name
+
+    @property
+    def session_log_path(self) -> Optional[str]:
+        if not self.project_dir or not self.session_id:
+            return None
+        return str(Path(self.project_dir) / f"{self.session_id}.jsonl")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -148,19 +167,39 @@ class PeerInfo:
             name=str(data.get("name") or ""),
             pid=int(data.get("pid") or 0),
             cwd=str(data.get("cwd") or ""),
-            session_id=data.get("session_id"),
-            git_branch=data.get("git_branch"),
-            task=data.get("task"),
+            session_id=data.get("session_id") or None,
+            git_branch=data.get("git_branch") or None,
+            task=data.get("task") or None,
+            project_dir=data.get("project_dir") or None,
+            workspace_path=data.get("workspace_path") or None,
+            memory_path=data.get("memory_path") or None,
             updated_at=float(data.get("updated_at") or 0.0),
         )
 
     def describe(self) -> str:
-        parts = [f"{self.name} [{self.peer_id}]", f"cwd={self.cwd}"]
+        """Multi-line listing used by ``list_agents`` and ``/list-agents``.
+
+        Keep the addressable name on the first line; put the diggable paths
+        underneath so a model (or a human scanning the terminal) can resume
+        the session or read its memory without guessing directory names.
+        """
+        lines = [f"{self.name} [peer={self.peer_id}]"]
+        if self.session_id:
+            lines.append(f"  session_id: {self.session_id}")
+        lines.append(f"  cwd: {self.cwd}")
+        if self.project_dir:
+            lines.append(f"  project: {self.project_dir}")
+        if self.session_log_path:
+            lines.append(f"  session_log: {self.session_log_path}")
+        if self.workspace_path:
+            lines.append(f"  workspace: {self.workspace_path}")
+        if self.memory_path:
+            lines.append(f"  memory: {self.memory_path}")
         if self.git_branch:
-            parts.append(f"branch={self.git_branch}")
+            lines.append(f"  branch: {self.git_branch}")
         if self.task:
-            parts.append(f"working on: {self.task}")
-        return "  ".join(parts)
+            lines.append(f"  working on: {self.task}")
+        return "\n".join(lines)
 
 
 def _write_private_json(path: Path, payload: Dict[str, Any]) -> None:
@@ -193,8 +232,18 @@ class PeerSession:
         cwd: Optional[str] = None,
         session_id: Optional[str] = None,
         git_branch: Optional[str] = None,
+        user_id: Optional[str] = None,
+        workspace_path: Optional[str] = None,
+        memory_path: Optional[str] = None,
+        on_drain: Optional[Any] = None,
     ) -> None:
+        from agentica.compression.tool_result_storage import get_project_dir
+
         self.peer_id = peer_id or new_peer_id()
+        self._user_id = user_id
+        # Optional CLI/SDK hook fired after a successful drain, so the UI can
+        # show the accepted message whether the Runner or the idle loop took it.
+        self.on_drain = on_drain
         resolved_cwd = os.path.realpath(os.path.expanduser(cwd or os.getcwd()))
         self.info = PeerInfo(
             peer_id=self.peer_id,
@@ -203,6 +252,9 @@ class PeerSession:
             cwd=resolved_cwd,
             session_id=session_id,
             git_branch=git_branch,
+            project_dir=get_project_dir(resolved_cwd, user_id=user_id),
+            workspace_path=workspace_path,
+            memory_path=memory_path,
         )
         self._last_publish = 0.0
         # Hop depth of the last message received from each peer, so a reply
@@ -221,9 +273,20 @@ class PeerSession:
 
     def publish(self, **updates: Any) -> None:
         """Write (or refresh) this session's live record."""
+        from agentica.compression.tool_result_storage import get_project_dir
+
         for key, value in updates.items():
             if value is not None and hasattr(self.info, key):
                 setattr(self.info, key, value)
+        if updates.get("cwd"):
+            resolved = os.path.realpath(os.path.expanduser(str(updates["cwd"])))
+            self.info.cwd = resolved
+            self.info.project_dir = get_project_dir(resolved, user_id=self._user_id)
+            # Addressable name tracks the directory this process is working in.
+            self.info.name = default_peer_name(resolved, self.peer_id)
+        if "user_id" in updates and updates["user_id"] is not None:
+            self._user_id = updates["user_id"]
+            self.info.project_dir = get_project_dir(self.info.cwd, user_id=self._user_id)
         self.info.updated_at = time.time()
         _ensure_private_dir(live_dir())
         _write_private_json(self.path, self.info.to_dict())
@@ -262,6 +325,8 @@ class PeerSession:
                 self._inbound_hop[message.from_peer_id] = max(
                     self._inbound_hop.get(message.from_peer_id, 0), message.hop
                 )
+        if messages and self.on_drain is not None:
+            self.on_drain(messages)
         return messages
 
     def send(self, target: str, text: str, *, from_kind: str = "agent") -> PeerMessage:
@@ -309,7 +374,7 @@ def list_live_peers(exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
 
 
 def resolve_peer(target: str, *, exclude_peer_id: Optional[str] = None) -> Optional[PeerInfo]:
-    """Find one live peer by peer_id, exact name, or unique name prefix."""
+    """Find one live peer by peer_id, session_id, exact name, or unique prefix."""
     needle = (target or "").strip()
     if not needle:
         return None
@@ -317,6 +382,18 @@ def resolve_peer(target: str, *, exclude_peer_id: Optional[str] = None) -> Optio
     for info in peers:
         if needle == info.peer_id:
             return info
+    session_exact = [p for p in peers if p.session_id and needle == p.session_id]
+    if len(session_exact) == 1:
+        return session_exact[0]
+    if len(needle) >= 8:
+        session_prefixed = [
+            p for p in peers
+            if p.session_id and p.session_id.startswith(needle)
+        ]
+        if len(session_prefixed) == 1:
+            return session_prefixed[0]
+        if len(session_prefixed) > 1:
+            return None
     lowered = needle.casefold()
     exact = [p for p in peers if p.name.casefold() == lowered]
     if len(exact) == 1:
@@ -531,3 +608,21 @@ def format_for_model(messages: List[PeerMessage]) -> str:
             )
         blocks.append(f"{header}\n{message.text}")
     return "\n\n".join(blocks)
+
+
+def format_for_cli(messages: List[PeerMessage], *, delivery: str) -> str:
+    """Render drained messages for the receiving terminal.
+
+    ``delivery`` is a short clause such as ``starting a turn`` or
+    ``will reach the agent between tool calls`` — the CLI knows which path
+    accepted the message; this helper only formats it.
+    """
+    blocks = []
+    for message in messages:
+        who = "your user via" if message.from_user else "agent"
+        blocks.append(
+            f"✉ Accepted peer message from {who} {message.from_name} "
+            f"[peer={message.from_peer_id}] — {delivery}\n"
+            f"  {message.text}"
+        )
+    return "\n".join(blocks)

@@ -75,12 +75,49 @@ class TestDiscovery:
         assert resolve_peer("payments", exclude_peer_id=me.peer_id) is not None
         assert resolve_peer("nope", exclude_peer_id=me.peer_id) is None
 
+    def test_resolve_accepts_session_id_and_unique_prefix(self):
+        me = _session("me")
+        target = PeerSession(
+            name="worker",
+            cwd="/tmp/worker",
+            session_id="7e17bc1f-95b4-47f4-95a4-0250b32c7b3c",
+        )
+        target.publish()
+
+        assert resolve_peer(
+            "7e17bc1f-95b4-47f4-95a4-0250b32c7b3c",
+            exclude_peer_id=me.peer_id,
+        ).peer_id == target.peer_id
+        assert resolve_peer("7e17bc1f", exclude_peer_id=me.peer_id).peer_id == target.peer_id
+
     def test_an_ambiguous_prefix_resolves_to_nothing(self):
         me = _session("me")
         _session("worker-one")
         _session("worker-two")
 
         assert resolve_peer("worker", exclude_peer_id=me.peer_id) is None
+
+    def test_live_record_carries_project_and_memory_paths(self):
+        session = PeerSession(
+            name="nlp",
+            cwd="/apdcephfs_qy3/share_7435715/flemingxu/nlp",
+            session_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            user_id="default",
+            workspace_path="/tmp/ws",
+            memory_path="/tmp/ws/users/default/MEMORY.md",
+        )
+        session.publish()
+
+        assert session.info.project_slug == (
+            "-apdcephfs-qy3-share-7435715-flemingxu-nlp-6115aec9"
+        )
+        assert session.info.project_dir.endswith(session.info.project_slug)
+        assert "MEMORY.md" in session.info.describe()
+        assert "session_id:" in session.info.describe()
+        reloaded = list_live_peers()[0]
+        assert reloaded.session_id == session.info.session_id
+        assert reloaded.memory_path == session.info.memory_path
+        assert reloaded.project_dir == session.info.project_dir
 
 
 class TestDelivery:
@@ -252,7 +289,13 @@ class TestPeerMessagingTool:
 
     def test_list_agents_shows_name_cwd_and_task(self):
         me = _session("me")
-        other = _session("payments", cwd="/repos/payments")
+        other = PeerSession(
+            name="payments",
+            cwd="/repos/payments",
+            session_id="11111111-2222-3333-4444-555555555555",
+            workspace_path="/tmp/ws",
+            memory_path="/tmp/ws/users/default/MEMORY.md",
+        )
         other.publish(task="adding idempotency keys")
 
         out = asyncio.run(PeerMessagingTool(me).list_agents())
@@ -260,14 +303,29 @@ class TestPeerMessagingTool:
         assert "payments" in out
         assert "/repos/payments" in out
         assert "adding idempotency keys" in out
+        assert "11111111-2222-3333-4444-555555555555" in out
+        assert "session_log:" in out
+        assert "MEMORY.md" in out
+        assert "Address a peer by name" in out
 
-    def test_send_message_delivers_and_reports_the_hop(self):
+    def test_list_agents_is_multi_line_not_a_single_crammed_row(self):
+        me = _session("me")
+        other = _session("payments", cwd="/repos/payments")
+        other.publish(task="x" * 80)
+
+        out = asyncio.run(PeerMessagingTool(me).list_agents())
+
+        assert out.count("\n") >= 4
+        assert "cwd:" in out
+        assert "project:" in out
+
+    def test_send_message_queues_and_reports_the_hop(self):
         tool = PeerMessagingTool(_session("sender"))
         receiver = _session("receiver")
 
         out = asyncio.run(tool.send_message(target="receiver", message="schema changed"))
 
-        assert "delivered" in out.lower()
+        assert "queued" in out.lower()
         assert [m.text for m in receiver.drain()] == ["schema changed"]
 
     def test_send_message_reports_a_refusal_instead_of_raising(self):
@@ -301,6 +359,35 @@ class TestFormatting:
         assert "alpha" in rendered
         assert "reply_to=abcd1234" in rendered
         assert "another agent session" in rendered
+
+    def test_cli_receipt_shows_the_accepted_message_body(self):
+        message = PeerMessage(
+            text="schema migration finished",
+            from_name="nlp-5f",
+            from_peer_id="abcd1234",
+            to_peer_id="beef",
+        )
+
+        rendered = peers.format_for_cli(
+            [message], delivery="starting a turn"
+        )
+
+        assert "Accepted peer message" in rendered
+        assert "nlp-5f" in rendered
+        assert "schema migration finished" in rendered
+        assert "starting a turn" in rendered
+
+    def test_drain_notifies_the_cli_hook(self):
+        seen = []
+        receiver = PeerSession(name="receiver", cwd="/tmp/recv", on_drain=seen.append)
+        receiver.publish()
+        _session("sender").send("receiver", "hello from peer")
+
+        drained = receiver.drain()
+
+        assert [m.text for m in drained] == ["hello from peer"]
+        assert len(seen) == 1
+        assert [m.text for m in seen[0]] == ["hello from peer"]
 
     def test_default_name_falls_back_when_the_folder_has_no_word_characters(self):
         assert default_peer_name("/", "ab12cd34").startswith("session-")

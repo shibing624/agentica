@@ -34,6 +34,7 @@ from agentica.global_config import (
 from agentica.subagent import get_subagent_configs
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
+from agentica.compression.tool_result_storage import get_project_dir
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.helpers import (
@@ -167,7 +168,16 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
 
     con.print()
     con.print("  [bold]-- Terminal --[/bold]")
-    con.print(f"  Working Dir: {os.getcwd()}")
+    work_dir = ctx.agent_config.get("work_dir") or os.getcwd()
+    con.print(f"  Working Dir: {work_dir}")
+    user_id = None
+    if ctx.current_agent is not None:
+        user_id = ctx.current_agent.user_id
+    elif ctx.workspace is not None:
+        user_id = ctx.workspace.user_id
+    else:
+        user_id = ctx.agent_config.get("user_id")
+    con.print(f"  Project Dir: {get_project_dir(work_dir, user_id=user_id)}")
     con.print(f"  Mode:        {'Shell' if ctx.shell_mode else 'Agent'}")
     if ctx.current_agent:
         con.print(f"  Permissions: {ctx.current_agent.tool_config.permission_mode}")

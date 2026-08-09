@@ -43,7 +43,7 @@ from agentica.cli.runtime import (
     set_active_console,
 )
 from agentica.global_config import get_setting, resolve_active_profile_name
-from agentica.peers import PeerSession, format_for_model
+from agentica.peers import PeerSession, format_for_cli, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_skills
 from agentica.subagent_loader import load_all_agents
@@ -265,10 +265,22 @@ def run_interactive(
         return
 
     peer_cwd = agent_config.get("work_dir") or os.getcwd()
+    peer_user_id = agent_config.get("user_id") or (workspace.user_id if workspace else None)
+    peer_workspace_path = str(workspace.path) if workspace is not None else None
+    peer_memory_path = None
+    if workspace is not None:
+        peer_memory_path = str(workspace._get_user_memory_md())
     state.peer_session = PeerSession(
         cwd=peer_cwd,
         git_branch=_read_git_branch(peer_cwd),
+        session_id=agent_config.get("session_id"),
+        user_id=peer_user_id,
+        workspace_path=peer_workspace_path,
+        memory_path=peer_memory_path,
     )
+    # Show every accepted peer message in this terminal, whether the idle loop
+    # or the running agent drained the mailbox. Set after construction so the
+    # callback can close over ``state`` / ``app`` once those exist below.
     state.peer_session.publish()
     current_agent = create_agent(
         agent_config, extra_tools, workspace, skills_registry,
@@ -277,6 +289,9 @@ def run_interactive(
         permission_mode=perm_mode,
         peer_session=state.peer_session,
     )
+    # create_agent assigns a session_id when the config did not; publish it so
+    # other terminals can address / resume this conversation by that id.
+    state.peer_session.publish(session_id=current_agent.session_id)
     state.current_agent = current_agent
 
     # User/project files fail softly per definition; invalid packaged defaults
@@ -470,6 +485,19 @@ def run_interactive(
             # A fresh agent (/clear, /model) carries a fresh system prompt and
             # tool set — re-measure rather than dropping the bar to zero.
             _seed_context_tokens(state.current_agent, tui_state)
+        if state.peer_session is not None and (
+            "current_agent" in result or "work_dir" in result
+        ):
+            # Keep the live peer record in sync with /resume (new session_id
+            # and possibly a new cwd/project dir) so other terminals can still
+            # address this process and dig into the right transcript.
+            peer_updates = {
+                "session_id": state.current_agent.session_id if state.current_agent else None,
+                "git_branch": tui_state.get("git_branch"),
+            }
+            if "work_dir" in result:
+                peer_updates["cwd"] = result["work_dir"]
+            state.peer_session.publish(**peer_updates)
         if "session_started_at" in result:
             tui_state["session_started_at"] = result["session_started_at"]
             tui_state["active_seconds"] = 0.0
@@ -710,7 +738,7 @@ def run_interactive(
             # Publish what this terminal is working on so another session's
             # agent can pick it as a message target without guessing.
             if state.peer_session is not None:
-                state.peer_session.publish(task=" ".join(user_input.split())[:120])
+                state.peer_session.publish(task=" ".join(user_input.split())[:240])
             app.invalidate()
             _process_stream_response(
                 state.current_agent,
@@ -838,6 +866,9 @@ def run_interactive(
         While a run is active the Runner drains the same mailbox between tool
         batches, so the message reaches the agent mid-task; this loop must not
         race it for those messages, hence the ``agent_running`` skip.
+
+        Accepted messages are printed by ``peer_session.on_drain`` (shared with
+        the mid-run path) so both paths show the same receipt.
         """
         peers = state.peer_session
         if peers is None:
@@ -858,14 +889,22 @@ def run_interactive(
                 continue
             if not messages:
                 continue
-            for message in messages:
-                _cprint(
-                    f"\n✉ Message from {message.from_name} "
-                    f"[{message.from_peer_id}] — starting a turn to handle it"
-                )
             _hand_to_agent(format_for_model(messages))
             if app.is_running:
                 app.invalidate()
+
+    def _on_peer_drain(messages) -> None:
+        delivery = (
+            "will reach the agent between tool calls"
+            if state.agent_running
+            else "starting a turn"
+        )
+        _cprint("\n" + format_for_cli(messages, delivery=delivery))
+        if app.is_running:
+            app.invalidate()
+
+    if state.peer_session is not None:
+        state.peer_session.on_drain = _on_peer_drain
 
     peer_message_thread = threading.Thread(
         target=peer_message_loop,

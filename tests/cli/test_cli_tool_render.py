@@ -152,6 +152,40 @@ class TestCLIToolRender(unittest.TestCase):
         fake.print.assert_not_called()
 
 
+    def test_list_agents_result_is_shown_in_full(self):
+        """Peer discovery is multi-line and must not be folded behind Ctrl+O."""
+        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
+
+        clear_truncated_blocks()
+        body = "\n".join(
+            [
+                "1 other live session(s). You are 'nlp-5f' [peer=abc].",
+                "Your session_id: aaaa",
+                "",
+                "- payments [peer=def]",
+                "  session_id: bbbb",
+                "  cwd: /repos/payments",
+                "  project: /tmp/projects/payments-hash",
+                "  session_log: /tmp/projects/payments-hash/bbbb.jsonl",
+                "  memory: /tmp/ws/users/default/MEMORY.md",
+                "  working on: adding keys",
+            ]
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("list_agents", body, is_error=False, elapsed=0.004)
+
+        rendered = "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+        self.assertIn("session_log:", rendered)
+        self.assertIn("MEMORY.md", rendered)
+        self.assertIn("working on: adding keys", rendered)
+        self.assertNotIn("more lines", rendered)
+        self.assertEqual(get_truncated_blocks(), [])
+
+
     def test_display_tool_defers_read_only_call_line(self):
         """Read-only tools skip the start-time call line (deferred to completion)."""
         from agentica.cli.display import StreamDisplayManager
