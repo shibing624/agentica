@@ -30,7 +30,6 @@ class TestToolDecorator(unittest.TestCase):
         self.assertEqual(meta["name"], "my_func")
         self.assertEqual(meta["description"], "My docstring")
         self.assertFalse(meta["show_result"])
-        self.assertTrue(meta["sanitize_arguments"])
         self.assertFalse(meta["stop_after_tool_call"])
         self.assertFalse(meta["concurrency_safe"])
         self.assertFalse(meta["is_read_only"])

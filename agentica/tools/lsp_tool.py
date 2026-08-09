@@ -70,6 +70,14 @@ DEFAULT_LSP_SERVERS = {
 }
 
 
+# Install hints keyed by the binary that FileNotFoundError reports.
+_LSP_INSTALL_HINTS = {
+    "pyright-langserver": "pip install pyright",
+    "pylsp": "pip install python-lsp-server",
+    "typescript-language-server": "npm install -g typescript-language-server typescript",
+}
+
+
 class JsonRpcClient:
     """Generic JSON-RPC client for LSP communication."""
 
@@ -239,7 +247,12 @@ class LspClient:
                 cwd=self.workspace_path
             )
         except FileNotFoundError as e:
-            raise RuntimeError(f"LSP server not found: {self.config.command[0]}. Please install it.") from e
+            binary = self.config.command[0]
+            hint = _LSP_INSTALL_HINTS.get(binary)
+            msg = f"LSP server not found: {binary}. Please install it."
+            if hint:
+                msg += f" e.g. `{hint}`"
+            raise RuntimeError(msg) from e
 
         self._rpc = JsonRpcClient(self._process)
         self._initialize()

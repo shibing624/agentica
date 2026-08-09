@@ -256,77 +256,50 @@ def set_active_profile(name: str) -> bool:
 # ---------- Project-scoped profile override ----------
 #
 # Active profile has two layers:
-#   1. Project override: ~/.agentica/projects/default/<key>/profile (this section)
+#   1. Project override: ~/.agentica/projects/<user>/<key>/project.json
+#      field ``active_profile`` (this section)
 #   2. Global default:   config.yaml -> active_profile
 #
-# Reuses tool_result_storage.get_project_dir(), which already lays out
-# ~/.agentica/projects/<user>/<sanitized-cwd>/... for session logs and
-# tool-result spill files (<user> defaults to "default" for the single-user
-# CLI). One scheme for one directory tree — readable with `ls` instead of an
-# opaque hash, and no risk of two conventions drifting apart.
-# Deliberately using work_dir (not git toplevel) so it aligns with Workspace /
-# AGENTICA_HOME and works for non-git directories (~/notes, /tmp/scratch)
-# with zero fallback logic.
+# Shares the same project directory as SessionLog / tool-result spill files
+# via :mod:`agentica.project_store`. Deliberately keyed by work_dir (not git
+# toplevel) so it aligns with Workspace / AGENTICA_HOME and works for
+# non-git directories with zero fallback logic.
 
-def _project_profile_path(work_dir: str) -> str:
-    # Lazy import: agentica.config imports global_config at module level, so
-    # global_config can't import tool_result_storage (-> agentica.config) at
-    # module level without a cycle.
-    #
-    # Deliberately NOT calling tool_result_storage.get_project_dir() here: it
-    # bakes AGENTICA_PROJECTS_DIR in as a module-level constant at first
-    # import, so it can't pick up a test's later `os.environ["AGENTICA_HOME"]
-    # = tmp` override — that mismatch previously leaked test directories into
-    # the real ~/.agentica/projects/. Re-reading the env var on every call
-    # keeps this override live-testable while still mirroring the exact same
-    # <projects_dir>/<user>/<sanitized-cwd>/ layout (user segment "default"
-    # for the single-user CLI, same as tool_result_storage's default).
-    from agentica.compression.tool_result_storage import safe_user_segment, sanitize_path
-    home = os.path.expanduser(os.getenv("AGENTICA_HOME", "~/.agentica"))
-    projects_dir = os.getenv("AGENTICA_PROJECTS_DIR", os.path.join(home, "projects"))
-    real = os.path.realpath(os.path.expanduser(work_dir))
-    return os.path.join(projects_dir, safe_user_segment(None), sanitize_path(real), "profile")
+def _project_meta_path(work_dir: str) -> str:
+    from agentica.project_store import project_base_dir, project_file_path
+
+    return str(project_file_path(project_base_dir(work_dir)))
 
 
 def get_project_profile(work_dir: Optional[str]) -> Optional[str]:
     """Return the project-scoped active profile name, or None if not set."""
     if not work_dir:
         return None
-    path = _project_profile_path(work_dir)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            name = f.read().strip()
-        return name or None
-    except OSError:
-        return None
+    from agentica.project_store import get_project_active_profile, project_base_dir
+
+    return get_project_active_profile(project_base_dir(work_dir))
 
 
 def set_project_profile(work_dir: str, name: str) -> None:
     """Persist the project-scoped active profile. Does NOT touch config.yaml."""
-    path = _project_profile_path(work_dir)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(name.strip() + "\n")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    from agentica.project_store import (
+        ensure_project_work_dir,
+        project_base_dir,
+        set_project_active_profile,
+    )
+
+    base = project_base_dir(work_dir)
+    ensure_project_work_dir(base, work_dir)
+    set_project_active_profile(base, name)
 
 
 def clear_project_profile(work_dir: str) -> bool:
-    """Remove project-scoped override. Returns True if a file was deleted."""
+    """Remove project-scoped override. Returns True if a profile was cleared."""
     if not work_dir:
         return False
-    path = _project_profile_path(work_dir)
-    if os.path.exists(path):
-        try:
-            os.remove(path)
-            return True
-        except OSError:
-            return False
-    return False
+    from agentica.project_store import clear_project_active_profile, project_base_dir
+
+    return clear_project_active_profile(project_base_dir(work_dir))
 
 
 def resolve_active_profile_name(

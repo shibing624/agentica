@@ -160,9 +160,15 @@ class TestCLIAwareness(unittest.TestCase):
                 )
                 fake_console = MagicMock()
                 try:
+                    projects_dir = Path(
+                        os.environ.get(
+                            "AGENTICA_PROJECTS_DIR",
+                            str(agentica_home / "projects"),
+                        )
+                    )
                     self.assertNotIn(str(Path(td) / ".agentica"), item.log_path)
-                    self.assertIn(str(agentica_home / "projects" / "alice@example.com"), item.log_path)
-                    self.assertNotIn(str(agentica_home / "projects" / "default"), item.log_path)
+                    self.assertIn(str(projects_dir / "alice@example.com"), item.log_path)
+                    self.assertNotIn(str(projects_dir / "default"), item.log_path)
                     with patch.object(cli_runtime_commands, "get_console", return_value=fake_console):
                         cli_runtime_commands._cmd_ps(ctx, "")
                         rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list)
@@ -259,7 +265,7 @@ class TestCLIAwareness(unittest.TestCase):
                 # _apply_profile persists a project-scoped override via
                 # set_project_profile(work_dir, name); work_dir=None here falls
                 # back to os.getcwd(), which would otherwise leak a real
-                # ~/.agentica/projects/<repo>/profile file on every test run.
+                # ~/.agentica/projects/<repo>/project.json on every test run.
                 patch.object(cli_model_config, "set_project_profile"),
             ):
                 gc.upsert_profile(

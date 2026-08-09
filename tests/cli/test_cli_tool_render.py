@@ -167,6 +167,7 @@ class TestCLIToolRender(unittest.TestCase):
                 "  cwd: /repos/payments",
                 "  project: /tmp/projects/payments-hash",
                 "  session_log: /tmp/projects/payments-hash/bbbb.jsonl",
+                "  log_file (INFO): /tmp/home/.agentica/logs/20260809-80403.log",
                 "  memory: /tmp/ws/users/default/MEMORY.md",
                 "  working on: adding keys",
             ]
@@ -180,10 +181,34 @@ class TestCLIToolRender(unittest.TestCase):
             str(call.args[0]) for call in fake.print.call_args_list if call.args
         )
         self.assertIn("session_log:", rendered)
+        self.assertIn("log_file (INFO):", rendered)
         self.assertIn("MEMORY.md", rendered)
         self.assertIn("working on: adding keys", rendered)
         self.assertNotIn("more lines", rendered)
         self.assertEqual(get_truncated_blocks(), [])
+
+
+    def test_send_message_call_shows_full_body(self):
+        """send_message must not hide the handoff behind the default 40-char truncate."""
+        from agentica.cli.display.tool_format import format_tool_display, _display_tool_impl
+
+        long_msg = (
+            "用户决定：合并 schema 改动，并说明这是用户的决定。"
+            "请对方在采纳前仍向其用户确认 agent 消息边界。"
+        )
+        display = format_tool_display(
+            "send_message",
+            {"target": "temp-af", "message": long_msg},
+        )
+        self.assertIn("→ temp-af", display)
+        self.assertIn(long_msg, display)
+        self.assertNotIn("...", display)
+
+        fake = MagicMock()
+        fake.width = 80
+        _display_tool_impl(fake, "send_message", {"target": "temp-af", "message": long_msg})
+        rendered = "\n".join(str(call.args[0]) for call in fake.print.call_args_list if call.args)
+        self.assertIn(long_msg, rendered)
 
 
     def test_display_tool_defers_read_only_call_line(self):

@@ -124,9 +124,11 @@ def display_user_message(
     # easy to find while scanning a long conversation. No trailing blank line here:
     # the response section (start_tool_section / _start_response) adds its spacing.
     # A separate content column keeps wrapped and explicit continuation lines aligned.
-    history = Table.grid(padding=(0, 1))
+    # overflow="fold" is required: Rich Table defaults to ellipsis and silently
+    # truncates long peer-injected (or pasted) turns with "…".
+    history = Table.grid(padding=(0, 1), expand=True)
     history.add_column(no_wrap=True)
-    history.add_column(ratio=1)
+    history.add_column(ratio=1, overflow="fold")
     history.add_row(Text("❯", style="bold bright_yellow"), rich_text)
     console = get_console()
     console.print()

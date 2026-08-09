@@ -391,8 +391,11 @@ def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
         con.print("  [yellow]Cross-session messaging is not active in this session.[/yellow]")
         return
 
-    target, _, text = (cmd_args or "").strip().partition(" ")
-    text = text.strip()
+    # split() rather than partition(" "): extra spaces after the target are
+    # typing, not an empty message.
+    parts = (cmd_args or "").strip().split(maxsplit=1)
+    target = parts[0] if parts else ""
+    text = parts[1].strip() if len(parts) > 1 else ""
     if not target or not text:
         con.print("  [dim]Usage: /send-message <session> <text>   (see /list-agents for names)[/dim]")
         con.print(
@@ -401,15 +404,29 @@ def _cmd_send_message(ctx: CommandContext, cmd_args: str = ""):
         return
 
     try:
-        peers.send(target, text, from_kind="user")
+        sent = peers.send(target, text, from_kind="user")
     except PeerMessageRefused as exc:
         con.print(f"  [red]Not sent: {exc}[/red]")
         return
+    # Name the peer it actually resolved to: '/send-message 7e17' should show
+    # which session that prefix picked.
     con.print(
-        f"  [green]Queued for {target}.[/green] [dim]The other session accepts it "
+        f"  [green]Queued for {sent.to_name}.[/green] [dim]The other session accepts it "
         f"between tool calls if running, or as its next turn if idle.[/dim]"
     )
 
+
+
+def _print_peer_details(con, info, *, indent: str) -> None:
+    """Print one session's fields, aligned, from ``PeerInfo.detail_rows()``.
+
+    The rows come from the same place the ``list_agents`` tool renders, so the
+    user and the model never see different field sets.
+    """
+    rows = info.detail_rows()
+    width = max((len(label) for label, _ in rows), default=0)
+    for label, value in rows:
+        con.print(f"{indent}{label + ':':<{width + 1}} [dim]{value}[/dim]")
 
 
 def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
@@ -425,17 +442,7 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
         return
 
     con.print(f"  This session: [cyan]{peers.name}[/cyan] [dim]peer={peers.peer_id}[/dim]")
-    if peers.info.session_id:
-        con.print(f"  session_id:  [cyan]{peers.info.session_id}[/cyan]")
-    con.print(f"  cwd:         {peers.info.cwd}")
-    if peers.info.project_dir:
-        con.print(f"  project:     [dim]{peers.info.project_dir}[/dim]")
-    if peers.info.session_log_path:
-        con.print(f"  session_log: [dim]{peers.info.session_log_path}[/dim]")
-    if peers.info.workspace_path:
-        con.print(f"  workspace:   [dim]{peers.info.workspace_path}[/dim]")
-    if peers.info.memory_path:
-        con.print(f"  memory:      [dim]{peers.info.memory_path}[/dim]")
+    _print_peer_details(con, peers.info, indent="  ")
     con.print(f"  [dim]mailbox: {mailbox_dir(peers.peer_id)}[/dim]")
     pending = peers.unread_count()
     if pending:
@@ -448,21 +455,7 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
     con.print(f"\n  [cyan]Other live sessions ({len(live)}):[/cyan]")
     for info in live:
         con.print(f"    [bold]{info.name}[/bold] [dim]peer={info.peer_id}[/dim]  pid={info.pid}")
-        if info.session_id:
-            con.print(f"      session_id:  {info.session_id}")
-        con.print(f"      cwd:         {info.cwd}")
-        if info.project_dir:
-            con.print(f"      project:     [dim]{info.project_dir}[/dim]")
-        if info.session_log_path:
-            con.print(f"      session_log: [dim]{info.session_log_path}[/dim]")
-        if info.workspace_path:
-            con.print(f"      workspace:   [dim]{info.workspace_path}[/dim]")
-        if info.memory_path:
-            con.print(f"      memory:      [dim]{info.memory_path}[/dim]")
-        if info.git_branch:
-            con.print(f"      branch:      {info.git_branch}")
-        if info.task:
-            con.print(f"      working on:  {info.task}")
+        _print_peer_details(con, info, indent="      ")
     con.print(
         "  [dim]Ask the agent to message one by name / peer id / session_id "
         "(it calls send_message itself), or say it yourself with "

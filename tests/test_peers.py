@@ -11,7 +11,7 @@ import pytest
 
 from agentica import peers
 from agentica.peers import (
-    MAX_HOP,
+    MAX_EXCHANGE_TURNS,
     MAX_UNREAD,
     PeerMessage,
     PeerMessageRefused,
@@ -105,6 +105,8 @@ class TestDiscovery:
             user_id="default",
             workspace_path="/tmp/ws",
             memory_path="/tmp/ws/users/default/MEMORY.md",
+            log_file="/tmp/home/.agentica/logs/20260809-80403.log",
+            log_level="INFO",
         )
         session.publish()
 
@@ -114,10 +116,14 @@ class TestDiscovery:
         assert session.info.project_dir.endswith(session.info.project_slug)
         assert "MEMORY.md" in session.info.describe()
         assert "session_id:" in session.info.describe()
+        assert "log_file (INFO):" in session.info.describe()
+        assert "20260809-80403.log" in session.info.describe()
         reloaded = list_live_peers()[0]
         assert reloaded.session_id == session.info.session_id
         assert reloaded.memory_path == session.info.memory_path
         assert reloaded.project_dir == session.info.project_dir
+        assert reloaded.log_file == session.info.log_file
+        assert reloaded.log_level == "INFO"
 
 
 class TestDelivery:
@@ -160,7 +166,6 @@ class TestDelivery:
 
         received = receiver.drain()
         assert received[0].text == tricky
-        assert received[0].hop == 1
         assert received[0].from_name == "sender"
 
     def test_an_unparsable_file_does_not_block_the_mailbox(self):
@@ -180,54 +185,103 @@ class TestDelivery:
         with pytest.raises(PeerMessageRefused, match="no live session"):
             sender.send("ghost", "hello")
 
+    def test_an_ambiguous_target_says_so_instead_of_unknown(self):
+        sender = _session("sender")
+        _session("worker-one")
+        _session("worker-two")
+
+        # "unknown name" and "be more specific" have different fixes, so the
+        # refusal must not collapse them into one message.
+        with pytest.raises(PeerMessageRefused, match="matches 2 live sessions"):
+            sender.send("worker", "which of you?")
+
+    def test_the_message_records_the_peer_it_resolved_to(self):
+        sender = _session("sender")
+        receiver = _session("receiver")
+
+        sent = sender.send("recei", "prefix addressing")
+
+        assert sent.to_name == "receiver"
+        assert sent.to_peer_id == receiver.peer_id
+        assert receiver.drain()[0].to_name == "receiver"
+
+
+class TestExchangeLength:
+    """The channel hands over information; it is not a discussion forum."""
+
+    @staticmethod
+    def _ping_pong(a, b, turns):
+        for turn in range(turns):
+            sender, receiver = (a, b) if turn % 2 == 0 else (b, a)
+            sender.send(receiver.name, f"turn {turn}")
+            receiver.drain()
+
+    def test_a_handoff_and_its_answer_go_through(self):
+        a = _session("alpha")
+        b = _session("beta")
+
+        self._ping_pong(a, b, 2)
+
+    def test_the_exchange_runs_out_and_says_where_to_go_instead(self):
+        a = _session("alpha")
+        b = _session("beta")
+
+        self._ping_pong(a, b, MAX_EXCHANGE_TURNS)
+
+        with pytest.raises(PeerMessageRefused, match="report to your user"):
+            a.send("beta", "one more thought")
+
+    def test_the_last_allowed_message_announces_itself(self):
+        a = _session("alpha")
+        b = _session("beta")
+
+        self._ping_pong(a, b, MAX_EXCHANGE_TURNS - 1)
+        last = a.send("beta", "wrapping up")
+
+        assert last.exchange_turn == MAX_EXCHANGE_TURNS
+        assert last.last_of_exchange
+        # The receiving side is told not to answer, rather than answering and
+        # discovering the refusal.
+        received = b.drain()[0]
+        assert "do not reply" in peers.format_for_model([received])
+
+    def test_a_monologue_counts_too(self):
+        a = _session("alpha")
+        _session("beta")
+
+        for i in range(MAX_EXCHANGE_TURNS):
+            a.send("beta", f"note {i}")
+
+        with pytest.raises(PeerMessageRefused, match="exchange"):
+            a.send("beta", "and another thing")
+
+    def test_the_user_relaying_a_message_starts_a_fresh_exchange(self):
+        a = _session("alpha")
+        b = _session("beta")
+
+        self._ping_pong(a, b, MAX_EXCHANGE_TURNS)
+        # The human types /send-message in the other terminal: the agents'
+        # spent exchange must not stop their user from restarting it.
+        b.send("alpha", "carry on, I need this", from_kind="user")
+        a.drain()
+
+        resumed = a.send("beta", "ok, continuing")
+
+        assert resumed.exchange_turn == 1
+
 
 class TestChannelLimits:
-    def test_a_reply_continues_the_hop_count_of_its_exchange(self):
-        a = _session("alpha")
-        b = _session("beta")
-
-        a.send("beta", "ping")
-        b.drain()
-        replied = b.send("alpha", "pong")
-
-        assert replied.hop == 2
-
-    def test_a_ping_pong_dies_at_the_hop_limit(self):
-        a = _session("alpha")
-        b = _session("beta")
-
-        message = a.send("beta", "ping")
-        for _ in range(MAX_HOP * 2):
-            receiver, sender = (b, a) if message.to_peer_id == b.peer_id else (a, b)
-            receiver.drain()
-            try:
-                message = receiver.send(sender.name, "and again")
-            except PeerMessageRefused as exc:
-                assert "hop" in str(exc)
-                break
-        else:
-            pytest.fail("the exchange never hit the hop limit")
-
-    def test_hop_is_tracked_per_peer_not_globally(self):
-        a = _session("alpha")
-        b = _session("beta")
-        _session("gamma")
-
-        a.send("beta", "ping")
-        b.drain()
-        # Deep in one exchange, a first message to a different session is still
-        # a fresh conversation and must not inherit the other's hop count.
-        assert b.send("gamma", "unrelated news").hop == 1
-
     def test_an_unread_mailbox_stops_accepting_more(self):
         sender = _session("sender")
         _session("receiver")
 
+        # Relayed user messages are not part of an agent exchange, so this
+        # fills the mailbox without running into the exchange cap first.
         for i in range(MAX_UNREAD):
-            sender.send("receiver", f"message {i}")
+            sender.send("receiver", f"message {i}", from_kind="user")
 
         with pytest.raises(PeerMessageRefused, match="unread"):
-            sender.send("receiver", "one too many")
+            sender.send("receiver", "one too many", from_kind="user")
 
     def test_an_oversized_message_is_refused(self):
         sender = _session("sender")
@@ -295,6 +349,8 @@ class TestPeerMessagingTool:
             session_id="11111111-2222-3333-4444-555555555555",
             workspace_path="/tmp/ws",
             memory_path="/tmp/ws/users/default/MEMORY.md",
+            log_file="/tmp/home/.agentica/logs/20260809-80403.log",
+            log_level="INFO",
         )
         other.publish(task="adding idempotency keys")
 
@@ -302,6 +358,8 @@ class TestPeerMessagingTool:
 
         assert "payments" in out
         assert "/repos/payments" in out
+        assert "log_file (INFO):" in out
+        assert "20260809-80403.log" in out
         assert "adding idempotency keys" in out
         assert "11111111-2222-3333-4444-555555555555" in out
         assert "session_log:" in out
@@ -319,13 +377,14 @@ class TestPeerMessagingTool:
         assert "cwd:" in out
         assert "project:" in out
 
-    def test_send_message_queues_and_reports_the_hop(self):
+    def test_send_message_queues_and_confirms_by_peer_name(self):
         tool = PeerMessagingTool(_session("sender"))
         receiver = _session("receiver")
 
         out = asyncio.run(tool.send_message(target="receiver", message="schema changed"))
 
         assert "queued" in out.lower()
+        assert "'receiver'" in out
         assert [m.text for m in receiver.drain()] == ["schema changed"]
 
     def test_send_message_reports_a_refusal_instead_of_raising(self):
@@ -341,7 +400,8 @@ class TestPeerMessagingTool:
 
         # The model must be told a peer message is not the user talking; without
         # it, another session's text can talk it into skipping a confirmation.
-        assert "NOT from your" in prompt
+        assert "NOT your user" in prompt
+        assert "adopt the instruction" in prompt
         assert "plain text" in prompt
 
 
@@ -357,7 +417,8 @@ class TestFormatting:
         rendered = peers.format_for_model([message])
 
         assert "alpha" in rendered
-        assert "reply_to=abcd1234" in rendered
+        assert "reply with send_message to alpha" in rendered
+        assert "abcd1234" not in rendered
         assert "another agent session" in rendered
 
     def test_cli_receipt_shows_the_accepted_message_body(self):
@@ -426,18 +487,9 @@ class TestUserRelayedMessages:
         rendered = peers.format_for_model([message])
 
         assert "Your user sent this" in rendered
+        assert "treat as their instruction" in rendered
         assert "another agent session" not in rendered
-
-    def test_a_relayed_instruction_does_not_spend_the_exchange_hop_budget(self):
-        a = _session("alpha")
-        b = _session("beta")
-
-        a.send("beta", "ping")
-        b.drain()
-        # The user typing into their own terminal starts a fresh conversation;
-        # inheriting the agent exchange's hop count would let a long ping-pong
-        # lock the human out of messaging that session.
-        assert b.send("alpha", "actually do this instead", from_kind="user").hop == 1
+        assert "abcd1234" not in rendered
 
     def test_a_forged_kind_in_the_header_is_not_trusted(self):
         a = _session("alpha")

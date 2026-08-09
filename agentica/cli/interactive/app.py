@@ -42,6 +42,7 @@ from agentica.cli.runtime import (
     get_console,
     set_active_console,
 )
+from agentica.config import AGENTICA_LOG_FILE, AGENTICA_LOG_LEVEL
 from agentica.global_config import get_setting, resolve_active_profile_name
 from agentica.peers import PeerSession, format_for_cli, format_for_model
 from agentica.run_response import AgentCancelledError
@@ -270,6 +271,8 @@ def run_interactive(
     peer_memory_path = None
     if workspace is not None:
         peer_memory_path = str(workspace._get_user_memory_md())
+    peer_log_file = AGENTICA_LOG_FILE or None
+    peer_log_level = AGENTICA_LOG_LEVEL if peer_log_file else None
     state.peer_session = PeerSession(
         cwd=peer_cwd,
         git_branch=_read_git_branch(peer_cwd),
@@ -277,6 +280,8 @@ def run_interactive(
         user_id=peer_user_id,
         workspace_path=peer_workspace_path,
         memory_path=peer_memory_path,
+        log_file=peer_log_file,
+        log_level=peer_log_level,
     )
     # Show every accepted peer message in this terminal, whether the idle loop
     # or the running agent drained the mailbox. Set after construction so the

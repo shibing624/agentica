@@ -29,12 +29,17 @@ class _ProjectStore:
         stack.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         self.projects = self.root / "projects"
-        patcher = patch(
-            "agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR",
-            str(self.projects),
-        )
-        patcher.start()
-        stack.addCleanup(patcher.stop)
+        self.projects.mkdir(parents=True, exist_ok=True)
+        prev = os.environ.get("AGENTICA_PROJECTS_DIR")
+        os.environ["AGENTICA_PROJECTS_DIR"] = str(self.projects)
+
+        def _restore_projects_dir() -> None:
+            if prev is None:
+                os.environ.pop("AGENTICA_PROJECTS_DIR", None)
+            else:
+                os.environ["AGENTICA_PROJECTS_DIR"] = prev
+
+        stack.addCleanup(_restore_projects_dir)
 
     def work_dir(self, name: str) -> str:
         path = self.root / name
@@ -60,7 +65,7 @@ class TestProjectMarker(unittest.TestCase):
     def test_marker_is_written_once(self):
         work_dir = self.store.work_dir("alpha")
         log = self.store.session(work_dir, "11111111-aaaa")
-        marker = Path(log.base_dir) / ".project.json"
+        marker = Path(log.base_dir) / "project.json"
         marker.write_text(json.dumps({"work_dir": "/kept"}), encoding="utf-8")
 
         self.store.session(work_dir, "22222222-bbbb")
@@ -70,7 +75,7 @@ class TestProjectMarker(unittest.TestCase):
     def test_legacy_dir_falls_back_to_transcript_cwd(self):
         work_dir = self.store.work_dir("alpha")
         log = self.store.session(work_dir, "11111111-aaaa")
-        (Path(log.base_dir) / ".project.json").unlink()
+        (Path(log.base_dir) / "project.json").unlink()
 
         # No marker: the cwd stamped on the first entry is the next best source.
         self.assertEqual(SessionLog.project_work_dir(log.base_dir), os.getcwd())
@@ -78,7 +83,7 @@ class TestProjectMarker(unittest.TestCase):
     def test_explicit_base_dir_writes_no_marker(self):
         with tempfile.TemporaryDirectory() as directory:
             SessionLog("33333333-cccc", base_dir=directory).append("user", "hi")
-            self.assertFalse((Path(directory) / ".project.json").exists())
+            self.assertFalse((Path(directory) / "project.json").exists())
 
 
 class TestFindSessions(unittest.TestCase):

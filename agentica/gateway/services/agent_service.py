@@ -929,8 +929,8 @@ class AgentService:
         This is what makes the Web sidebar and the CLI ``/resume`` list a
         consistent set of sessions for the same project + user.
         """
-        from agentica.compression.tool_result_storage import get_project_dir
-        return get_project_dir(work_dir, user_id=settings.default_user_id)
+        from agentica.project_store import project_base_dir
+        return project_base_dir(work_dir, user_id=settings.default_user_id)
 
     def update_work_dir(self, new_dir: str) -> None:
         """Update the global work_dir and clear ALL cached agents.

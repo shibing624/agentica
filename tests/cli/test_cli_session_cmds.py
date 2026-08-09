@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, MagicMock
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -135,6 +136,7 @@ class TestStatusSessionIdentity(unittest.TestCase):
             agent_config={"model_provider": "openai", "model_name": "gpt-4o"},
             current_agent=agent,
             tui_state={},
+            peer_session=SimpleNamespace(name="agentica-73", peer_id="735ac7e4"),
         )
         console = MagicMock()
 
@@ -148,6 +150,9 @@ class TestStatusSessionIdentity(unittest.TestCase):
         printed = "\n".join(str(call.args[0]) for call in console.print.call_args_list)
         self.assertIn("Session:", printed)
         self.assertIn("Release investigation (sess-current-1234)", printed)
+        self.assertIn("Peer:", printed)
+        self.assertIn("agentica-73", printed)
+        self.assertIn("735ac7e4", printed)
 
 
 class TestResumeArchivedFilter(unittest.TestCase):

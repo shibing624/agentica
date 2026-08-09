@@ -123,7 +123,6 @@ agent = Agent(model=ZhipuAI(), tools=[search_in_codebase, delete_file])
 | `is_destructive` | bool | `False` | True=破坏性操作（删除、覆写、发送） |
 | `stop_after_tool_call` | bool | `False` | True=执行后立即终止 Agent |
 | `show_result` | bool | `False` | True=工具结果同时展示给用户 |
-| `sanitize_arguments` | bool | `True` | True=自动清理 LLM 传入的参数（去除多余引号等） |
 
 ### 方式四：类工具（封装一组相关功能）
 

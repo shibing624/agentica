@@ -278,7 +278,7 @@ class TestCLIConfiguration(unittest.TestCase):
                 patch.object(cli_model_config, "create_agent", return_value=MagicMock()),
                 # /model <profile> -> _apply_profile -> set_project_profile(work_dir, name);
                 # work_dir=None falls back to os.getcwd(), which would otherwise leak a
-                # real ~/.agentica/projects/<repo>/profile file on every test run.
+                # real ~/.agentica/projects/<repo>/project.json on every test run.
                 patch.object(cli_model_config, "set_project_profile"),
             ):
                 gc.upsert_profile(

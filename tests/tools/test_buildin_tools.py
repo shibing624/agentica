@@ -453,7 +453,6 @@ class TestBuiltinFileToolApplyPatch:
 
         assert function.is_destructive is True
         assert function.concurrency_safe is False
-        assert function.sanitize_arguments is False
         assert function.parameters["required"] == ["patch"]
         assert function.parameters["properties"]["patch"]["type"] == "string"
 
@@ -1040,7 +1039,6 @@ class TestBuiltinExecuteTool:
         function = execute_tool.functions["execute"]
         function.process_entrypoint(strict=False)
 
-        assert function.sanitize_arguments is False
         assert "passed unchanged" in function.description
 
     def test_background_command_management_tools_not_registered(self, execute_tool):
@@ -1074,8 +1072,14 @@ class TestBuiltinExecuteTool:
             assert "/stop" in result
             assert Path(item.log_path).exists()
             assert str(Path(tmp_dir) / ".agentica") not in item.log_path
-            assert str(agentica_home / "projects" / "alice@example.com") in item.log_path
-            assert str(agentica_home / "projects" / "default") not in item.log_path
+            projects_dir = Path(
+                os.environ.get(
+                    "AGENTICA_PROJECTS_DIR",
+                    str(agentica_home / "projects"),
+                )
+            )
+            assert str(projects_dir / "alice@example.com") in item.log_path
+            assert str(projects_dir / "default") not in item.log_path
         finally:
             registry.stop()
         assert registry.running_count() == 0
@@ -1481,7 +1485,6 @@ class TestShellTool:
 
         result = asyncio.run(tool.execute(command))
 
-        assert tool.functions["execute"].sanitize_arguments is False
         assert result == "a\nb"
 
     def test_execute_cancellation_cleans_up_subprocess(self, tmp_dir):

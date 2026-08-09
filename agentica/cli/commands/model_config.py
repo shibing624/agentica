@@ -34,7 +34,7 @@ from agentica.global_config import (
 from agentica.subagent import get_subagent_configs
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
-from agentica.compression.tool_result_storage import get_project_dir
+from agentica.project_store import project_base_dir
 
 from agentica.cli.commands.context import CommandContext
 from agentica.cli.commands.helpers import (
@@ -125,6 +125,13 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
         forked_from = agent._session_log.get_forked_from() if agent._session_log is not None else None
         if forked_from:
             con.print(f"  Forked from: [dim]{forked_from}[/dim]")
+    peers = ctx.peer_session
+    if peers is not None:
+        con.print(
+            f"  Peer:       [cyan]{peers.name}[/cyan] "
+            f"[dim]peer={peers.peer_id}[/dim]  "
+            f"[dim](other sessions address you as this name)[/dim]"
+        )
 
 
 
@@ -177,7 +184,7 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
         user_id = ctx.workspace.user_id
     else:
         user_id = ctx.agent_config.get("user_id")
-    con.print(f"  Project Dir: {get_project_dir(work_dir, user_id=user_id)}")
+    con.print(f"  Project Dir: {project_base_dir(work_dir, user_id=user_id)}")
     con.print(f"  Mode:        {'Shell' if ctx.shell_mode else 'Agent'}")
     if ctx.current_agent:
         con.print(f"  Permissions: {ctx.current_agent.tool_config.permission_mode}")
@@ -493,10 +500,10 @@ def _apply_profile(ctx: CommandContext, name: str):
         new_auxiliary_model = None
     ctx.agent_config["auxiliary_model"] = new_auxiliary_model
 
-    # Persist the switch as a *project-scoped* override under
-    # ~/.agentica/projects/<key>/profile. config.yaml's global
-    # `active_profile:` pointer is untouched — that stays the machine-wide
-    # default, and other projects keep whatever they had.
+    # Persist the switch as a project-scoped override in project.json
+    # (``active_profile``). config.yaml's global `active_profile:` pointer is
+    # untouched — that stays the machine-wide default, and other projects keep
+    # whatever they had.
     #
     # Profile bodies (model_*, auxiliary_*, tuning) are write-only-by-setup
     # — never touched here. That separation is what fixed the original

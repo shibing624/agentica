@@ -6,12 +6,12 @@
 These verify the two-layer profile resolution introduced in
 ``global_config.resolve_active_profile_name``:
 
-  1. Project override (``~/.agentica/projects/<key>/profile``)
+  1. Project override (``~/.agentica/projects/<key>/project.json`` ``active_profile``)
   2. Global default (``config.yaml -> active_profile``)
 
-Key contract: the project override is keyed by ``realpath(work_dir)``, NOT
-by git toplevel. This aligns with Workspace / AGENTICA_HOME and needs no
-fallback logic for non-git directories.
+Key contract: the project override is keyed by ``work_dir`` (same hash as
+SessionLog), NOT by git toplevel. This aligns with Workspace / AGENTICA_HOME
+and needs no fallback logic for non-git directories.
 """
 
 import logging
@@ -122,22 +122,26 @@ class TestProjectProfile(unittest.TestCase):
 
     # ------------------------------------------------------------------ key semantics
 
-    def test_realpath_symlink_consistency(self):
-        """Symlink pointing at the same real dir must resolve to the same key."""
+    def test_symlink_path_is_independent_key(self):
+        """Symlink path and real path hash differently (same as SessionLog).
+
+        Session storage keys on the work_dir string as given, not
+        ``os.path.realpath``. Profile overrides must use that same key so
+        ``project.json`` lands next to the session files.
+        """
         link = os.path.join(self._tmp.name, "link_to_a")
         os.symlink(self._proj_a, link)
         gc.set_project_profile(self._proj_a, "personal")
-        # Resolving via the symlink should still see the override.
         name, source = gc.resolve_active_profile_name(work_dir=link)
-        self.assertEqual((name, source), ("personal", "project"))
+        self.assertEqual((name, source), ("work", "global"))
+        self.assertEqual(gc.get_project_profile(self._proj_a), "personal")
+        self.assertIsNone(gc.get_project_profile(link))
 
     def test_project_key_uses_workdir_not_git_toplevel(self):
         """Two sibling subdirs get INDEPENDENT keys even inside one git repo.
 
-        We don't actually initialize git here — the point is that the key
-        function only looks at realpath, so it can't accidentally collapse
-        sibling directories together the way ``git rev-parse --show-toplevel``
-        would.
+        Keying is the work_dir string (SessionLog / sanitize_path), not
+        ``git rev-parse --show-toplevel``, so siblings never collapse.
         """
         sub_a = os.path.join(self._proj_a, "frontend")
         sub_b = os.path.join(self._proj_a, "backend")
@@ -150,7 +154,7 @@ class TestProjectProfile(unittest.TestCase):
 
     def test_override_file_perms_are_restrictive(self):
         gc.set_project_profile(self._proj_a, "personal")
-        path = gc._project_profile_path(self._proj_a)
+        path = gc._project_meta_path(self._proj_a)
         self.assertTrue(os.path.exists(path))
         import stat
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
@@ -159,12 +163,13 @@ class TestProjectProfile(unittest.TestCase):
         self.assertIsNone(gc.get_project_profile(self._proj_a))
 
     def test_get_project_profile_strips_whitespace(self):
-        # Write a file with trailing whitespace/newlines manually to make sure
-        # get_project_profile normalises reads.
+        # Pad active_profile in project.json; get_project_profile must strip.
         gc.set_project_profile(self._proj_a, "personal")
-        path = gc._project_profile_path(self._proj_a)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("  personal  \n\n")
+        from agentica.project_store import project_base_dir, read_project_file, write_project_file
+        base = project_base_dir(self._proj_a)
+        data = read_project_file(base)
+        data["active_profile"] = "  personal  \n"
+        write_project_file(base, data)
         self.assertEqual(gc.get_project_profile(self._proj_a), "personal")
 
 

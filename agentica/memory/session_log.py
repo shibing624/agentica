@@ -43,9 +43,11 @@ _LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
 # Marker file written once per project directory. ``sanitize_path`` hashes the
 # work_dir into the directory name and cannot be reversed, so without this the
 # only way to learn which project a stored session belongs to is to parse a
-# transcript. Keeping it at the directory level (rather than per session) means
-# one small file per project instead of one per session.
-_PROJECT_MARKER = ".project.json"
+# transcript. ``project.json`` also holds the project-scoped active profile.
+from agentica.project_store import (
+    ensure_project_work_dir,
+    read_project_file,
+)
 
 
 def _get_default_base_dir(
@@ -67,8 +69,9 @@ def _get_default_base_dir(
             for the Web (per-session work_dir differs from the server cwd).
         user_id: Owner of the sessions. Keeps different users' sessions apart.
     """
-    from agentica.compression.tool_result_storage import get_project_dir
-    return get_project_dir(work_dir or os.getcwd(), user_id=user_id)
+    from agentica.project_store import project_base_dir
+
+    return project_base_dir(work_dir or os.getcwd(), user_id=user_id)
 
 
 def _iso_now() -> str:
@@ -117,7 +120,7 @@ class SessionLog:
         self.meta_path = self.base_dir / f"{session_id}.meta.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if project_work_dir:
-            self._ensure_project_marker(self.base_dir, project_work_dir)
+            ensure_project_work_dir(self.base_dir, project_work_dir)
         self._last_uuid: Optional[str] = None
         self._cwd: str = os.getcwd()
         self._version: str = self._get_version()
@@ -530,35 +533,16 @@ class SessionLog:
     # Cross-project lookup (resuming a session started in another directory)
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _ensure_project_marker(base_dir: Path, work_dir: str) -> None:
-        """Record which work_dir a project directory represents (write once).
-
-        Best-effort: a session that cannot write its marker still works, it just
-        falls back to the slower transcript-derived lookup below.
-        """
-        marker = base_dir / _PROJECT_MARKER
-        if marker.exists():
-            return
-        try:
-            payload = {"work_dir": str(Path(work_dir).expanduser()), "created_at": _iso_now()}
-            tmp = marker.with_suffix(marker.suffix + ".tmp")
-            with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, ensure_ascii=False, indent=2)
-            os.replace(tmp, marker)
-        except OSError as e:
-            logger.debug(f"Could not write project marker in {base_dir}: {e}")
-
     @classmethod
     def project_work_dir(cls, base_dir: Any) -> Optional[str]:
         """Return the work_dir a project directory belongs to, or ``None``.
 
-        Reads the marker written by :meth:`_ensure_project_marker`. Directories
-        created before markers existed fall back to the ``cwd`` stamped on the
-        first entry of the newest transcript.
+        Reads ``project.json`` written by :func:`ensure_project_work_dir`.
+        Directories created before that file existed fall back to the ``cwd``
+        stamped on the first entry of the newest transcript.
         """
         base = Path(base_dir)
-        recorded = cls._read_meta(base / _PROJECT_MARKER).get("work_dir")
+        recorded = read_project_file(base).get("work_dir")
         if isinstance(recorded, str) and recorded:
             return recorded
         try:
@@ -584,9 +568,9 @@ class SessionLog:
     @classmethod
     def list_projects(cls, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """List every project directory holding sessions for ``user_id``."""
-        from agentica.compression.tool_result_storage import get_projects_root
+        from agentica.project_store import projects_root
 
-        root = Path(get_projects_root(user_id))
+        root = Path(projects_root(user_id))
         if not root.is_dir():
             return []
         projects = []
@@ -609,12 +593,12 @@ class SessionLog:
         ``work_dir`` of the project they live in so the caller can offer to
         switch to it.
         """
-        from agentica.compression.tool_result_storage import get_projects_root
+        from agentica.project_store import projects_root
 
         needle = (needle or "").split("...", 1)[0].strip()
         if not needle:
             return []
-        root = Path(get_projects_root(user_id))
+        root = Path(projects_root(user_id))
         if not root.is_dir():
             return []
 

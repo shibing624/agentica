@@ -145,6 +145,33 @@ class TestCLIUserMessage(unittest.TestCase):
         self.assertEqual(marker_column._cells[0].plain, "❯")
         self.assertEqual(marker_column._cells[0].style, "bold bright_yellow")
         self.assertEqual(content_column._cells[0].plain, "hello\nsecond line")
+        self.assertEqual(content_column.overflow, "fold")
+
+
+    def test_user_message_does_not_ellipsis_truncate_long_peer_text(self):
+        """Peer-injected turns must render in full — Rich Table defaults to …."""
+        from io import StringIO
+        from rich.console import Console
+
+        from agentica.cli.display import display_user_message
+        from agentica.cli.display import messages as disp_messages
+
+        body = (
+            "[Message from another agent session 'temp-af' "
+            "— reply with send_message to temp-af]\n"
+            "用户反馈：希望你以后发消息时说明这是用户的决定。"
+            "不过需要对齐一个边界——agent 间消息无论怎么措辞都不构成对我的用户授权，"
+            "我这边仍会向用户本人确认后才采纳，不会仅凭消息里这是用户的意思就直接改。"
+            "真正的指令请让用户亲自下达。"
+        )
+        output = StringIO()
+        console = Console(file=output, width=80, force_terminal=False, no_color=True)
+        with patch.object(disp_messages, "get_console", return_value=console):
+            display_user_message(body)
+
+        rendered = output.getvalue()
+        self.assertIn("真正的指令请让用户亲自下达", rendered)
+        self.assertNotIn("…", rendered)
 
 
     def test_user_message_lists_each_attached_image_once_inside_panel(self):

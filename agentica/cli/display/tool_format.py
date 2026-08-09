@@ -187,7 +187,18 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
         if len(description) > 80:
             return description[:77] + "..."
         return description
-    
+
+    # Peer messaging — show the full body; truncating here hides the handoff.
+    if tool_name == "send_message":
+        target = str(tool_args.get("target", "") or "")
+        message = str(tool_args.get("message", "") or "")
+        if not message:
+            return f"→ {target}" if target else ""
+        return f"→ {target}\n    {message}" if target else message
+
+    if tool_name == "list_agents":
+        return ""
+
     # Default format for other tools
     brief_args = []
     for key, value in tool_args.items():
@@ -227,6 +238,10 @@ def _display_tool_impl(console_instance, tool_name: str, tool_args: dict,
     elif tool_name == "write_todos" and "\n" in display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]:")
         console_instance.print(f"    {display_str}", style="dim")
+    elif tool_name == "send_message" and "\n" in display_str:
+        console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta]")
+        for line in display_str.splitlines():
+            console_instance.print(f"    {line}", style="dim")
     elif display_str:
         console_instance.print(f" {icon} [bold magenta]{tool_name}[/bold magenta] [dim]{display_str}[/dim]")
     else:

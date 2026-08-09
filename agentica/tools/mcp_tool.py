@@ -427,7 +427,6 @@ class McpTool(Tool):
                         description=tool.description,
                         parameters=tool_params,
                         entrypoint=entrypoint,
-                        sanitize_arguments=False,  # We'll handle this in the entrypoint
                         skip_entrypoint_processing=True,
                         origin=ToolOrigin(
                             type="mcp",

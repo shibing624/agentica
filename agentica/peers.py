@@ -31,9 +31,9 @@ import os
 import re
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from agentica.config import AGENTICA_CACHE_DIR
 from agentica.utils.log import logger
@@ -43,14 +43,17 @@ from agentica.utils.log import logger
 HEARTBEAT_INTERVAL = 30.0
 STALE_AFTER = 150.0
 
-# Loop brake. Every message carries the hop count of the exchange that produced
-# it, so a ping-pong between two sessions dies on its own instead of burning
-# tokens forever.
-MAX_HOP = 3
-
 # Backpressure: a session that never reads its mailbox must not accumulate
 # unbounded work for whenever it finally does.
 MAX_UNREAD = 50
+
+# Two agents left alone will keep replying to each other, and neither of them is
+# the user whose windows they are spending. This caps one uninterrupted
+# agent-to-agent exchange; the channel is for handing over a finding, not for
+# holding a discussion. Counted per peer and reset whenever the human relays a
+# message with ``/send-message``, so a person can always restart a conversation
+# the agents just wound down.
+MAX_EXCHANGE_TURNS = 6
 
 # A message is injected straight into the receiver's context, so the only thing
 # this bounds is how much of someone else's window one send can spend. Generous
@@ -134,6 +137,10 @@ class PeerInfo:
     project_dir: Optional[str] = None
     workspace_path: Optional[str] = None
     memory_path: Optional[str] = None
+    # CLI runtime log (~/.agentica/logs/YYYYMMDD-<pid>.log) — easier to grep
+    # than reconstructing the conversation from session_log.
+    log_file: Optional[str] = None
+    log_level: Optional[str] = None
     updated_at: float = 0.0
 
     @property
@@ -173,8 +180,38 @@ class PeerInfo:
             project_dir=data.get("project_dir") or None,
             workspace_path=data.get("workspace_path") or None,
             memory_path=data.get("memory_path") or None,
+            log_file=data.get("log_file") or None,
+            log_level=data.get("log_level") or None,
             updated_at=float(data.get("updated_at") or 0.0),
         )
+
+    def detail_rows(self) -> List[Tuple[str, str]]:
+        """``(label, value)`` pairs for this session, in display order.
+
+        The single source for both the plain text a model reads via
+        ``list_agents`` and the styled ``/list-agents`` listing — the two
+        drifted apart while they each hand-rolled the same field list.
+        """
+        rows: List[Tuple[str, str]] = []
+        if self.session_id:
+            rows.append(("session_id", self.session_id))
+        rows.append(("cwd", self.cwd))
+        if self.project_dir:
+            rows.append(("project", self.project_dir))
+        if self.session_log_path:
+            rows.append(("session_log", self.session_log_path))
+        if self.log_file:
+            label = f"log_file ({self.log_level})" if self.log_level else "log_file"
+            rows.append((label, self.log_file))
+        if self.workspace_path:
+            rows.append(("workspace", self.workspace_path))
+        if self.memory_path:
+            rows.append(("memory", self.memory_path))
+        if self.git_branch:
+            rows.append(("branch", self.git_branch))
+        if self.task:
+            rows.append(("working on", self.task))
+        return rows
 
     def describe(self) -> str:
         """Multi-line listing used by ``list_agents`` and ``/list-agents``.
@@ -184,21 +221,7 @@ class PeerInfo:
         the session or read its memory without guessing directory names.
         """
         lines = [f"{self.name} [peer={self.peer_id}]"]
-        if self.session_id:
-            lines.append(f"  session_id: {self.session_id}")
-        lines.append(f"  cwd: {self.cwd}")
-        if self.project_dir:
-            lines.append(f"  project: {self.project_dir}")
-        if self.session_log_path:
-            lines.append(f"  session_log: {self.session_log_path}")
-        if self.workspace_path:
-            lines.append(f"  workspace: {self.workspace_path}")
-        if self.memory_path:
-            lines.append(f"  memory: {self.memory_path}")
-        if self.git_branch:
-            lines.append(f"  branch: {self.git_branch}")
-        if self.task:
-            lines.append(f"  working on: {self.task}")
+        lines.extend(f"  {label}: {value}" for label, value in self.detail_rows())
         return "\n".join(lines)
 
 
@@ -219,9 +242,6 @@ class PeerSession:
     session id underneath but in-flight messages addressed to this terminal
     must still land, so both the live record and the mailbox are keyed by
     ``peer_id``.
-
-    One object owns all three concerns because they share state — the hop count
-    of a reply depends on what arrived from that same peer earlier.
     """
 
     def __init__(
@@ -235,16 +255,21 @@ class PeerSession:
         user_id: Optional[str] = None,
         workspace_path: Optional[str] = None,
         memory_path: Optional[str] = None,
-        on_drain: Optional[Any] = None,
+        log_file: Optional[str] = None,
+        log_level: Optional[str] = None,
+        on_drain: Optional[Callable[[List["PeerMessage"]], None]] = None,
     ) -> None:
-        from agentica.compression.tool_result_storage import get_project_dir
+        from agentica.project_store import project_base_dir
 
         self.peer_id = peer_id or new_peer_id()
         self._user_id = user_id
         # Optional CLI/SDK hook fired after a successful drain, so the UI can
         # show the accepted message whether the Runner or the idle loop took it.
         self.on_drain = on_drain
-        resolved_cwd = os.path.realpath(os.path.expanduser(cwd or os.getcwd()))
+        # Storage key must match SessionLog (work_dir string as given). Display
+        # cwd is realpath so "same directory" checks collapse symlinks.
+        self._storage_cwd = cwd or os.getcwd()
+        resolved_cwd = os.path.realpath(os.path.expanduser(self._storage_cwd))
         self.info = PeerInfo(
             peer_id=self.peer_id,
             name=name or default_peer_name(resolved_cwd, self.peer_id),
@@ -252,14 +277,18 @@ class PeerSession:
             cwd=resolved_cwd,
             session_id=session_id,
             git_branch=git_branch,
-            project_dir=get_project_dir(resolved_cwd, user_id=user_id),
+            project_dir=project_base_dir(self._storage_cwd, user_id=user_id),
             workspace_path=workspace_path,
             memory_path=memory_path,
+            log_file=log_file or None,
+            log_level=log_level or None,
         )
         self._last_publish = 0.0
-        # Hop depth of the last message received from each peer, so a reply
-        # continues that exchange's count instead of restarting at 1.
-        self._inbound_hop: Dict[str, int] = {}
+        # How many messages the current agent-to-agent exchange with each peer
+        # has already spent, from this side's point of view. Both directions
+        # count: three unanswered sends are as much of a monologue as three
+        # replies are a conversation.
+        self._exchange_turns: Dict[str, int] = {}
 
     @property
     def name(self) -> str:
@@ -272,21 +301,33 @@ class PeerSession:
     # -- presence ----------------------------------------------------------
 
     def publish(self, **updates: Any) -> None:
-        """Write (or refresh) this session's live record."""
-        from agentica.compression.tool_result_storage import get_project_dir
+        """Write (or refresh) this session's live record.
 
+        ``None`` values are skipped so a caller can hand over a dict of
+        "possibly changed" fields (``/resume`` does) without wiping what it
+        does not know. An unknown field name is a typo, not an update, and
+        raises rather than silently doing nothing.
+        """
+        from agentica.project_store import project_base_dir
+
+        user_id = updates.pop("user_id", None)
+        if user_id is not None:
+            self._user_id = user_id
+        unknown = sorted(key for key in updates if not hasattr(self.info, key))
+        if unknown:
+            raise AttributeError(f"PeerInfo has no field(s): {', '.join(unknown)}")
         for key, value in updates.items():
-            if value is not None and hasattr(self.info, key):
+            if value is not None:
                 setattr(self.info, key, value)
-        if updates.get("cwd"):
-            resolved = os.path.realpath(os.path.expanduser(str(updates["cwd"])))
+        cwd = updates.get("cwd")
+        if cwd:
+            self._storage_cwd = str(cwd)
+            resolved = os.path.realpath(os.path.expanduser(self._storage_cwd))
             self.info.cwd = resolved
-            self.info.project_dir = get_project_dir(resolved, user_id=self._user_id)
             # Addressable name tracks the directory this process is working in.
             self.info.name = default_peer_name(resolved, self.peer_id)
-        if "user_id" in updates and updates["user_id"] is not None:
-            self._user_id = updates["user_id"]
-            self.info.project_dir = get_project_dir(self.info.cwd, user_id=self._user_id)
+        if cwd or user_id is not None:
+            self.info.project_dir = project_base_dir(self._storage_cwd, user_id=self._user_id)
         self.info.updated_at = time.time()
         _ensure_private_dir(live_dir())
         _write_private_json(self.path, self.info.to_dict())
@@ -318,34 +359,52 @@ class PeerSession:
         return unread_count(self.peer_id)
 
     def drain(self) -> List[PeerMessage]:
-        """Take every pending message, recording hop depth per sender."""
+        """Take every pending message and notify ``on_drain`` about them."""
         messages = drain_inbox(self.peer_id)
         for message in messages:
-            if message.from_peer_id:
-                self._inbound_hop[message.from_peer_id] = max(
-                    self._inbound_hop.get(message.from_peer_id, 0), message.hop
+            if message.from_user:
+                # The human stepped in: whatever the agents had going before is
+                # not what this session is now being asked about.
+                self._exchange_turns[message.from_peer_id] = 0
+            else:
+                self._exchange_turns[message.from_peer_id] = max(
+                    self._exchange_turns.get(message.from_peer_id, 0),
+                    message.exchange_turn,
                 )
         if messages and self.on_drain is not None:
             self.on_drain(messages)
         return messages
 
     def send(self, target: str, text: str, *, from_kind: str = "agent") -> PeerMessage:
-        """Resolve ``target`` among live peers and deliver ``text`` to it."""
-        info = resolve_peer(target, exclude_peer_id=self.peer_id)
-        if info is None:
+        """Resolve ``target`` among live peers and deliver ``text`` to it.
+
+        "Nobody by that name" and "be more specific" are different problems
+        with different fixes, so an ambiguous target says so and names the
+        candidates instead of reporting the target as unknown.
+        """
+        matches = match_peers(target, exclude_peer_id=self.peer_id)
+        if not matches:
             raise PeerMessageRefused(
                 f"no live session matches '{target}'; call list_agents to see current names"
             )
-        return send_message(
-            info,
+        if len(matches) > 1:
+            names = ", ".join(info.name for info in matches)
+            raise PeerMessageRefused(
+                f"'{target}' matches {len(matches)} live sessions ({names}); "
+                "use the full name or the peer id"
+            )
+        peer = matches[0]
+        turn = 1 if from_kind == "user" else self._exchange_turns.get(peer.peer_id, 0) + 1
+        message = send_message(
+            peer,
             text=text,
             from_name=self.info.name,
             from_peer_id=self.peer_id,
-            # A relayed user instruction is not part of an agent-to-agent
-            # exchange, so it does not consume that exchange's hop budget.
-            hop=1 if from_kind == "user" else self._inbound_hop.get(info.peer_id, 0) + 1,
             from_kind=from_kind,
+            exchange_turn=turn,
         )
+        self._exchange_turns[peer.peer_id] = turn
+        return message
 
 
 def list_live_peers(exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
@@ -373,41 +432,45 @@ def list_live_peers(exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
     return peers
 
 
-def resolve_peer(target: str, *, exclude_peer_id: Optional[str] = None) -> Optional[PeerInfo]:
-    """Find one live peer by peer_id, session_id, exact name, or unique prefix."""
+def match_peers(target: str, *, exclude_peer_id: Optional[str] = None) -> List[PeerInfo]:
+    """Live peers matching ``target``, most specific interpretation first.
+
+    Tried in order — peer_id, whole session_id, session_id prefix, name, name
+    prefix — and the first interpretation that matches anything wins, so a
+    name that happens to prefix another name never shadows an exact hit.
+    Returns several entries only when the string is genuinely ambiguous, which
+    lets a caller distinguish "unknown" from "be more specific".
+    """
     needle = (target or "").strip()
     if not needle:
-        return None
+        return []
     peers = list_live_peers(exclude_peer_id=exclude_peer_id)
-    for info in peers:
-        if needle == info.peer_id:
-            return info
-    session_exact = [p for p in peers if p.session_id and needle == p.session_id]
-    if len(session_exact) == 1:
-        return session_exact[0]
-    if len(needle) >= 8:
-        session_prefixed = [
-            p for p in peers
-            if p.session_id and p.session_id.startswith(needle)
-        ]
-        if len(session_prefixed) == 1:
-            return session_prefixed[0]
-        if len(session_prefixed) > 1:
-            return None
     lowered = needle.casefold()
-    exact = [p for p in peers if p.name.casefold() == lowered]
-    if len(exact) == 1:
-        return exact[0]
-    if exact:
-        return None
-    prefixed = [p for p in peers if p.name.casefold().startswith(lowered)]
-    if len(prefixed) == 1:
-        return prefixed[0]
-    return None
+    candidate_sets = [
+        [p for p in peers if p.peer_id == needle],
+        [p for p in peers if p.session_id == needle],
+        # A short prefix of a uuid is more likely a typo than an address.
+        [
+            p for p in peers
+            if len(needle) >= 8 and p.session_id and p.session_id.startswith(needle)
+        ],
+        [p for p in peers if p.name.casefold() == lowered],
+        [p for p in peers if p.name.casefold().startswith(lowered)],
+    ]
+    for candidates in candidate_sets:
+        if candidates:
+            return candidates
+    return []
+
+
+def resolve_peer(target: str, *, exclude_peer_id: Optional[str] = None) -> Optional[PeerInfo]:
+    """Find the one live peer ``target`` names, or None when it is not unique."""
+    matches = match_peers(target, exclude_peer_id=exclude_peer_id)
+    return matches[0] if len(matches) == 1 else None
 
 
 class PeerMessageRefused(Exception):
-    """A send was refused by a channel limit (hop, backpressure, size)."""
+    """A send was refused: unknown/ambiguous target, backpressure, or size."""
 
 
 @dataclass
@@ -426,14 +489,21 @@ class PeerMessage:
     from_name: str
     from_peer_id: str
     to_peer_id: str
-    hop: int = 1
+    to_name: str = ""
     created_at: str = ""
     from_kind: str = "agent"
-    path: Optional[str] = field(default=None, compare=False)
+    # Position of this message in the current agent-to-agent exchange, so both
+    # ends agree on how long the two of them have been talking (see
+    # ``MAX_EXCHANGE_TURNS``).
+    exchange_turn: int = 1
 
     @property
     def from_user(self) -> bool:
         return self.from_kind == "user"
+
+    @property
+    def last_of_exchange(self) -> bool:
+        return not self.from_user and self.exchange_turn >= MAX_EXCHANGE_TURNS
 
     def render(self) -> str:
         """Serialize to markdown with a small YAML-ish frontmatter."""
@@ -443,18 +513,19 @@ class PeerMessage:
             f"from_peer_id: {self.from_peer_id}\n"
             f"from_kind: {self.from_kind}\n"
             f"to_peer_id: {self.to_peer_id}\n"
-            f"hop: {self.hop}\n"
+            f"to_name: {self.to_name}\n"
+            f"exchange_turn: {self.exchange_turn}\n"
             f"created_at: {self.created_at}\n"
             "---\n\n"
             f"{self.text.strip()}\n"
         )
 
     @classmethod
-    def parse(cls, raw: str, *, path: Optional[str] = None) -> Optional["PeerMessage"]:
+    def parse(cls, raw: str) -> Optional["PeerMessage"]:
         """Parse a mailbox file.
 
-        The frontmatter is written by ``render`` and holds only slugs, an int
-        and a timestamp, so a flat ``key: value`` split is enough — no YAML
+        The frontmatter is written by ``render`` and holds only slugs and a
+        timestamp, so a flat ``key: value`` split is enough — no YAML
         dependency and no way for message text (which lives strictly after the
         closing delimiter) to be mistaken for a field.
         """
@@ -473,20 +544,20 @@ class PeerMessage:
         if not text:
             return None
         try:
-            hop = int(fields.get("hop", "1"))
+            exchange_turn = max(1, int(fields.get("exchange_turn", "1")))
         except ValueError:
-            hop = 1
+            exchange_turn = 1
         return cls(
             text=text,
             from_name=fields.get("from_name", "unknown"),
             from_peer_id=fields.get("from_peer_id", ""),
             to_peer_id=fields.get("to_peer_id", ""),
-            hop=hop,
+            to_name=fields.get("to_name", ""),
             created_at=fields.get("created_at", ""),
+            exchange_turn=exchange_turn,
             # Anything but an explicit "user" is treated as the unprivileged
             # case, so a malformed or truncated header cannot grant authority.
             from_kind="user" if fields.get("from_kind") == "user" else "agent",
-            path=path,
         )
 
 
@@ -503,8 +574,8 @@ def send_message(
     text: str,
     from_name: str,
     from_peer_id: str,
-    hop: int = 1,
     from_kind: str = "agent",
+    exchange_turn: int = 1,
 ) -> PeerMessage:
     """Drop a message into ``target``'s mailbox.
 
@@ -514,15 +585,17 @@ def send_message(
     body = (text or "").strip()
     if not body:
         raise PeerMessageRefused("message text is empty")
+    if from_kind != "user" and exchange_turn > MAX_EXCHANGE_TURNS:
+        raise PeerMessageRefused(
+            f"this agent-to-agent exchange with {target.name} already spent "
+            f"{MAX_EXCHANGE_TURNS} messages; the channel is for handing over "
+            "information, not for discussion. Act on what you have and report "
+            "to your user — they can relay anything further with /send-message"
+        )
     if len(body) > MAX_MESSAGE_CHARS:
         raise PeerMessageRefused(
             f"message is {len(body)} chars, over the {MAX_MESSAGE_CHARS} limit; "
             "put the long version in a file and send the path instead"
-        )
-    if hop > MAX_HOP:
-        raise PeerMessageRefused(
-            f"this exchange already went {hop - 1} hops (limit {MAX_HOP}); "
-            "stop relaying and report back to the user instead"
         )
     pending = unread_count(target.peer_id)
     if pending >= MAX_UNREAD:
@@ -535,9 +608,10 @@ def send_message(
         from_name=from_name,
         from_peer_id=from_peer_id,
         to_peer_id=target.peer_id,
-        hop=hop,
+        to_name=target.name,
         created_at=time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         from_kind=from_kind,
+        exchange_turn=exchange_turn,
     )
     box = mailbox_dir(target.peer_id)
     _ensure_private_dir(box)
@@ -556,7 +630,6 @@ def send_message(
         pass
     # Rename last so a reader never sees a half-written message.
     os.replace(tmp, path)
-    message.path = str(path)
     logger.debug(f"peer message sent to {target.name} [{target.peer_id}]: {path}")
     return message
 
@@ -579,7 +652,7 @@ def drain_inbox(peer_id: str) -> List[PeerMessage]:
             # message that a later drain could still deliver.
             continue
         path.unlink(missing_ok=True)
-        message = PeerMessage.parse(raw, path=str(path))
+        message = PeerMessage.parse(raw)
         if message is None:
             logger.warning(f"discarded unparsable peer message: {path}")
             continue
@@ -593,18 +666,30 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     The header states who is speaking, because the two cases differ in what the
     receiver may act on: a relayed user instruction is the human talking and
     carries their authority, while another session's agent carries none.
+
+    Reply address is the sender's addressable name (what ``send_message`` /
+    ``/send-message`` take), not the opaque peer_id — same idea as Claude Code
+    telling the model to copy the peer's name into ``to``.
     """
     blocks = []
     for message in messages:
         if message.from_user:
             header = (
                 f"[Your user sent this from their other session '{message.from_name}' "
-                f"(reply_to={message.from_peer_id})]"
+                f"— treat as their instruction typed here; "
+                f"reply with send_message to {message.from_name} if needed]"
+            )
+        elif message.last_of_exchange:
+            header = (
+                f"[Message from another agent session '{message.from_name}' "
+                f"— this exchange has run its length; act on it or tell your "
+                f"user, but do not reply]"
             )
         else:
             header = (
-                f"[Message from another agent session: {message.from_name} "
-                f"(reply_to={message.from_peer_id})]"
+                f"[Message from another agent session '{message.from_name}' "
+                f"— reply with send_message to {message.from_name} only if it "
+                f"is waiting on an answer]"
             )
         blocks.append(f"{header}\n{message.text}")
     return "\n\n".join(blocks)
@@ -621,8 +706,7 @@ def format_for_cli(messages: List[PeerMessage], *, delivery: str) -> str:
     for message in messages:
         who = "your user via" if message.from_user else "agent"
         blocks.append(
-            f"✉ Accepted peer message from {who} {message.from_name} "
-            f"[peer={message.from_peer_id}] — {delivery}\n"
+            f"✉ Accepted peer message from {who} {message.from_name} — {delivery}\n"
             f"  {message.text}"
         )
     return "\n".join(blocks)

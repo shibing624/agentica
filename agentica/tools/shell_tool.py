@@ -37,7 +37,7 @@ class ShellTool(Tool):
         self.timeout = timeout
         self.max_output_length = max_output_length
 
-        self.register(self.execute, sanitize_arguments=False)
+        self.register(self.execute)
 
     async def execute(self, command: str) -> str:
         """Executes a given command in the specified base directory.

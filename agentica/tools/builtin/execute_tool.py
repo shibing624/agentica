@@ -199,7 +199,7 @@ class BuiltinExecuteTool(Tool):
         # Override timeout from sandbox config if set
         if sandbox_config and sandbox_config.enabled and sandbox_config.max_execution_time:
             self._timeout = sandbox_config.max_execution_time
-        self.register(self.execute, sanitize_arguments=False, is_destructive=True)
+        self.register(self.execute, is_destructive=True)
         # Large bash outputs are persisted to disk (context gets preview only).
         # read_file keeps max_result_size_chars=None (never persist — avoids
         # reading its own persisted output file in a loop).

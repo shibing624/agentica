@@ -143,9 +143,9 @@ class BuiltinFileTool(Tool):
         # Write tools stay serialised.
         self.register(self.ls, concurrency_safe=True, is_read_only=True)
         self.register(self.read_file, concurrency_safe=True, is_read_only=True)
-        self.register(self.write_file, sanitize_arguments=False, is_destructive=True)
-        self.register(self.edit_file, sanitize_arguments=False, is_destructive=True)
-        self.register(self.apply_patch, sanitize_arguments=False, is_destructive=True)
+        self.register(self.write_file, is_destructive=True)
+        self.register(self.edit_file, is_destructive=True)
+        self.register(self.apply_patch, is_destructive=True)
         self.register(self.request_path_access, is_destructive=False)
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)

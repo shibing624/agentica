@@ -188,7 +188,7 @@ class TestMaybePersistResult(unittest.TestCase):
         from agentica.compression.tool_result_storage import maybe_persist_result
         with tempfile.TemporaryDirectory() as tmpdir:
             big = "x" * 100
-            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmpdir):
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
                 result = maybe_persist_result(
                     "test_tool", "call_3", big,
                     max_result_size_chars=50, cwd="/test/project",
@@ -202,7 +202,7 @@ class TestMaybePersistResult(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             secret = "sk-abcdefghijklmnopqrstuvwxyz1234567890"
             big = f"before {secret} after " + ("x" * 100)
-            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmpdir):
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
                 result = maybe_persist_result(
                     "test_tool", "call_secret", big,
                     max_result_size_chars=50, cwd="/test/project",
@@ -271,7 +271,7 @@ class TestEnforceToolResultBudget(unittest.TestCase):
                 Message(role="tool", content="b" * 500, tool_call_id="t2"),  # largest
                 Message(role="tool", content="c" * 50, tool_call_id="t3"),
             ]
-            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmpdir):
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
                 count = enforce_tool_result_budget(msgs, budget=200, cwd="/test")
             self.assertGreater(count, 0)
             # The largest should be persisted
@@ -286,7 +286,7 @@ class TestEnforceToolResultBudget(unittest.TestCase):
                 Message(role="tool", content="safe", tool_call_id="t1"),
                 Message(role="tool", content=f"{secret} " + ("b" * 500), tool_call_id="t2"),
             ]
-            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmpdir):
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
                 count = enforce_tool_result_budget(msgs, budget=100, cwd="/test")
                 file_path = get_tool_result_path("t2", cwd="/test", session_id="default")
                 persisted = open(file_path, encoding="utf-8").read()
@@ -304,7 +304,7 @@ class TestEnforceToolResultBudget(unittest.TestCase):
             Message(role="tool", content="b" * 500, tool_call_id="t2"),
         ]
         with tempfile.TemporaryDirectory() as tmpdir:
-            with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmpdir):
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
                 count = enforce_tool_result_budget(msgs, budget=100, cwd="/test")
         # Only the non-persisted one should be targeted
         self.assertLessEqual(count, 1)

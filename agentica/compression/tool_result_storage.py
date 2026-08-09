@@ -26,7 +26,6 @@ import re
 from pathlib import Path
 from typing import List, Optional, TYPE_CHECKING
 
-from agentica.config import AGENTICA_PROJECTS_DIR
 from agentica.security.redact import redact_sensitive_text
 from agentica.utils.log import logger
 
@@ -85,24 +84,22 @@ def safe_user_segment(user_id: Optional[str]) -> str:
 def get_projects_root(user_id: Optional[str] = None) -> str:
     """Return ``<AGENTICA_PROJECTS_DIR>/<user>/`` — the parent of every project dir.
 
-    ``sanitize_path`` is one-way, so a project directory name cannot be turned
-    back into the cwd it came from. Enumerating this root is how callers that
-    need to look across projects (e.g. resuming a session started elsewhere)
-    reach every project dir belonging to one user.
+    Delegates to :func:`agentica.project_store.projects_root` so sessions,
+    profiles, and tool-result spill share one layout.
     """
-    return os.path.join(AGENTICA_PROJECTS_DIR, safe_user_segment(user_id))
+    from agentica.project_store import projects_root
+
+    return projects_root(user_id)
 
 
 def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) -> str:
     """Return ``<AGENTICA_PROJECTS_DIR>/<user>/<sanitized-cwd>/`` for the given user + cwd.
 
-    The ``user_id`` segment was added to prevent multi-tenant collisions:
-    two requests from different tenants that happen to share the same cwd
-    (e.g. both running from ``/tmp`` in a worker) used to spill to the same
-    directory and read each other's persisted tool outputs.
+    Thin wrapper around :func:`agentica.project_store.project_base_dir`.
     """
-    cwd = cwd or os.getcwd()
-    return os.path.join(get_projects_root(user_id), sanitize_path(cwd))
+    from agentica.project_store import project_base_dir
+
+    return project_base_dir(cwd, user_id=user_id)
 
 
 def get_tool_results_dir(

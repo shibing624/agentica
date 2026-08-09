@@ -206,11 +206,14 @@ mcp, skill, ...
 - addressable name（如 `nlp-5f`，`send_message` 默认用这个）
 - peer id、`session_id`（也可用前缀寻址）
 - cwd，以及带 hash 后缀的 `project` 存储目录（如 `-apdcephfs-...-nlp-6115aec9`）
-- `session_log`（`<project>/<session_id>.jsonl`）、`workspace` / `memory`（`MEMORY.md`）路径
+- `session_log`（`<project>/<session_id>.jsonl`）、CLI `log_file`（如 `~/.agentica/logs/20260809-80403.log`）、`workspace` / `memory`（`MEMORY.md`）路径
 - 当前 working on
 
-消息本身仍是短纯文本；列出路径是为了需要时自行去读对方 transcript / 长期记忆。
+消息本身仍是短纯文本；列出路径是为了需要时自行去读对方 transcript / 运行时日志 / 长期记忆。`log_file` 通常比翻 conversation 更快定位另一会话刚发生的错误与工具痕迹。
 自己发消息用 `/send-message <name|id> <text>`（别名 `/send`）。
+注入到对方会话时，回复地址是对方的短名字（如 `agentica-73`），不是 opaque 的 peer id；本会话自己的短名字可在 `/status` 的 `Peer:` 行确认。`/send-message`（用户转发）在收件端按「用户亲口说的」采纳；agent 发的消息即使正文自称用户决定，也不构成授权。
+
+这个通道用来传递结论、交接信息，不是让两个 agent 讨论细节的地方：两个 agent 之间**连续**往返最多 6 条（单向连发也算），到上限后再发会被拒绝，agent 只能回头向自己的用户汇报。最后一条允许的消息会同时提示发送方和接收方「到此为止」，所以是自然收尾而不是撞墙。你用 `/send-message` 转发的消息不计入这个额度，并且会把计数清零——需要它们继续聊时，由你来重启。
 
 ### `/config`
 

@@ -30,7 +30,6 @@ def _apply_metadata(
     name: Optional[str] = None,
     description: Optional[str] = None,
     show_result: bool = False,
-    sanitize_arguments: bool = True,
     stop_after_tool_call: bool = False,
     concurrency_safe: bool = False,
     is_read_only: bool = False,
@@ -47,7 +46,6 @@ def _apply_metadata(
         "name": name or func.__name__,
         "description": description or (func.__doc__ or "").strip(),
         "show_result": show_result,
-        "sanitize_arguments": sanitize_arguments,
         "stop_after_tool_call": stop_after_tool_call,
         "concurrency_safe": concurrency_safe,
         "is_read_only": is_read_only,
@@ -73,7 +71,6 @@ def tool(
     name: Optional[str] = None,
     description: Optional[str] = None,
     show_result: bool = False,
-    sanitize_arguments: bool = True,
     stop_after_tool_call: bool = False,
     concurrency_safe: bool = False,
     is_read_only: bool = False,
@@ -102,7 +99,6 @@ def tool(
         name: Tool name (defaults to function __name__). Keyword-only.
         description: Tool description (defaults to function docstring).
         show_result: Whether to show tool result to the user.
-        sanitize_arguments: Whether to sanitize tool arguments.
         stop_after_tool_call: Whether to stop agent execution after this tool call.
         concurrency_safe: If True the tool may run in parallel with other
             concurrency_safe tools (e.g. read_file, glob, grep).
@@ -128,7 +124,6 @@ def tool(
             name=name,
             description=description,
             show_result=show_result,
-            sanitize_arguments=sanitize_arguments,
             stop_after_tool_call=stop_after_tool_call,
             concurrency_safe=concurrency_safe,
             is_read_only=is_read_only,
@@ -148,7 +143,6 @@ def tool(
             name=resolved_name,
             description=description,
             show_result=show_result,
-            sanitize_arguments=sanitize_arguments,
             stop_after_tool_call=stop_after_tool_call,
             concurrency_safe=concurrency_safe,
             is_read_only=is_read_only,

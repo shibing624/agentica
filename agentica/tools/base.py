@@ -181,8 +181,6 @@ class Function(BaseModel):
     entrypoint: Optional[Callable] = None
     # If True, the entrypoint processing is skipped and the Function is used as is.
     skip_entrypoint_processing: bool = False
-    # If True, the arguments are sanitized before being passed to the function.
-    sanitize_arguments: bool = True
     # If True, the function call will show the result along with sending it to the model.
     show_result: bool = False
     # If True, the agent will stop after the function call.
@@ -335,7 +333,6 @@ class Function(BaseModel):
                 parameters=parameters,
                 entrypoint=_safe_validate_call(c),
                 show_result=metadata.get("show_result", False),
-                sanitize_arguments=metadata.get("sanitize_arguments", True),
                 stop_after_tool_call=metadata.get("stop_after_tool_call", False),
                 concurrency_safe=metadata.get("concurrency_safe", False),
                 is_read_only=metadata.get("is_read_only", False),
@@ -704,53 +701,34 @@ def get_function_call(
         function_call.call_id = call_id
     if arguments is not None and arguments != "":
         try:
-            if function_to_call.sanitize_arguments:
-                if "None" in arguments:
-                    arguments = arguments.replace("None", "null")
-                if "True" in arguments:
-                    arguments = arguments.replace("True", "true")
-                if "False" in arguments:
-                    arguments = arguments.replace("False", "false")
             _arguments = json.loads(arguments)
-        except Exception as e:
-            logger.error(f"Unable to decode function arguments:\n{arguments}\nError: {e}")
-            function_call.error = f"Error while decoding function arguments:\n{arguments}\nError: {e}\n\n " \
-                                  f"Please make sure we can json.loads() the arguments and retry."
-            return function_call
+        except json.JSONDecodeError:
+            # Some models emit a Python-repr dict (True/False/None, single
+            # quotes) instead of JSON. literal_eval recovers those safely
+            # (literals only, no code execution) and — unlike the blind
+            # "True" -> "true" replace this used to do — leaves the *contents*
+            # of string arguments alone. That replace rewrote any code snippet
+            # or message body containing the word True, which is how a peer
+            # message about `swapped = True` arrived saying `swapped = true`.
+            try:
+                _arguments = ast.literal_eval(arguments)
+            except (ValueError, SyntaxError) as e:
+                logger.error(f"Unable to decode function arguments:\n{arguments}\nError: {e}")
+                function_call.error = f"Error while decoding function arguments:\n{arguments}\nError: {e}\n\n " \
+                                      f"Please make sure we can json.loads() the arguments and retry."
+                return function_call
 
         if not isinstance(_arguments, dict):
             logger.error(f"Function arguments are not a valid JSON object: {arguments}")
             function_call.error = "Function arguments are not a valid JSON object.\n\n Please fix and retry."
             return function_call
 
-        # Schema-aware type coercion: fix LLM string→number/boolean mistakes
-        _arguments = coerce_tool_args(_arguments, function_to_call)
-
-        try:
-            if not function_to_call.sanitize_arguments:
-                function_call.arguments = _arguments
-                return function_call
-
-            clean_arguments: Dict[str, Any] = {}
-            for k, v in _arguments.items():
-                if isinstance(v, str):
-                    _v = v.strip().lower()
-                    if _v in ("none", "null"):
-                        clean_arguments[k] = None
-                    elif _v == "true":
-                        clean_arguments[k] = True
-                    elif _v == "false":
-                        clean_arguments[k] = False
-                    else:
-                        clean_arguments[k] = v.strip()
-                else:
-                    clean_arguments[k] = v
-
-            function_call.arguments = clean_arguments
-        except Exception as e:
-            logger.error(f"Unable to parsing function arguments:\n{arguments}\nError: {e}")
-            function_call.error = f"Error while parsing function arguments: {e}\n\n Please fix and retry."
-            return function_call
+        # Schema-aware type coercion: fix LLM string→number/boolean mistakes.
+        # This is the only argument massaging there is. The blanket pass that
+        # used to follow it — strip() every string and turn "none"/"true" into
+        # None/True regardless of the declared type — silently edited message
+        # bodies and file content, which is never what the model meant.
+        function_call.arguments = coerce_tool_args(_arguments, function_to_call)
     return function_call
 
 
@@ -842,7 +820,7 @@ class Tool:
         self.description = description
         self.functions: Dict[str, Function] = OrderedDict()
 
-    def register(self, function: Callable[..., Any], sanitize_arguments: bool = True,
+    def register(self, function: Callable[..., Any],
                  concurrency_safe: bool = False, is_read_only: bool = False,
                  is_destructive: bool = False,
                  available_when: Optional[Callable[[], bool]] = None,
@@ -851,8 +829,6 @@ class Tool:
 
         Args:
             function:           The callable to register.
-            sanitize_arguments: If True, the arguments will be sanitized before
-                                being passed to the function.
             concurrency_safe:   If True the function may run concurrently with other
                                 concurrency_safe tools (e.g. read_file, glob).
             is_read_only:       If True, the function only reads data and never modifies state.
@@ -896,7 +872,6 @@ class Tool:
                 name=normalize_tool_name(function.__name__),
                 description=function.__doc__ or self.description,
                 entrypoint=function,
-                sanitize_arguments=sanitize_arguments,
                 concurrency_safe=concurrency_safe,
                 is_read_only=is_read_only,
                 is_destructive=is_destructive,

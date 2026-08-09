@@ -23,7 +23,7 @@ class AirflowTool(Tool):
                 _dags_dir = dags_dir
         self.dags_dir: Path = _dags_dir or Path.cwd()
         if save_dag:
-            self.register(self.save_dag_file, sanitize_arguments=False)
+            self.register(self.save_dag_file)
         if read_dag:
             self.register(self.read_dag_file)
 

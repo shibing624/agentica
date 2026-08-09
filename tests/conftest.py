@@ -23,30 +23,24 @@ os.environ.setdefault("AGENTICA_LOG_FILE", "")
 
 import tempfile
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 from agentica.agent import Agent
 from agentica.model.base import Model
 from agentica.model.response import ModelResponse
 
 
 @pytest.fixture(autouse=True)
-def _isolate_default_project_dir():
+def _isolate_default_project_dir(monkeypatch):
     """Prevent tests from spilling real files into ~/.agentica/projects/.
 
-    SessionLog (agent/base.py's default session logging) and tool-result
-    persistence (compression/manager.py, model/base.py) both fall back to
-    tool_result_storage.get_project_dir(os.getcwd()) whenever a test creates
-    a real Agent/SessionLog/CompressionManager without passing an explicit
-    base_dir/cwd override. Since pytest's cwd is this repo's real working
-    directory, that used to write real test fixture data (session ids like
-    "session-1", tool results like "old result aaa...") into this repo's own
-    ~/.agentica/projects/default/<this-repo>/ tree. Patching the storage
-    root here, once, for every test isolates all of that into a throwaway
-    tmp dir instead of requiring each test file to remember to do it.
+    SessionLog, tool-result spill, peers, and project.json all resolve paths
+    via ``project_store`` (live ``AGENTICA_PROJECTS_DIR`` env). Patch the env
+    for every test so accidental Agent/SessionLog construction cannot write
+    into this repo's real projects tree.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        with patch("agentica.compression.tool_result_storage.AGENTICA_PROJECTS_DIR", tmpdir):
-            yield
+        monkeypatch.setenv("AGENTICA_PROJECTS_DIR", tmpdir)
+        yield
 
 
 # ---------------------------------------------------------------------------
