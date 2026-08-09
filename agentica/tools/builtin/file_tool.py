@@ -25,21 +25,21 @@ from agentica.utils.string import truncate_if_too_long
 # grep self-imposed timeout (seconds). Covers both the rg subprocess and the
 # pure-Python fallback so a missing rg can't walk huge trees for the outer
 # 120s executor timeout. grep is marked manages_own_timeout=True. The default
-# 10s bounds the common case; the LLM may override it via the `timeout` arg.
+# 3s fails fast on NFS / huge trees; the LLM may override via the `timeout` arg.
 #
 # Default timeout for the built-in ``glob`` tool, in seconds. Same rationale
 # as ``_GREP_TIMEOUT``: caller can override without upper cap, but we must
 # always be bounded — a bare ``**/pattern`` walk over ``$HOME`` or a stuck
 # network mount will otherwise hang for the full outer harness limit (120s).
-_GLOB_TIMEOUT = 10
+_GLOB_TIMEOUT = 3
 
 # Default timeout (in seconds) for the built-in ``grep`` tool. Callers may
 # override this per-invocation by passing ``timeout``, and the override is
 # used as-is (no upper cap — the caller decides). A timeout must always be
 # set: on a bad disk / network mount, or with a backtracking regex (e.g.
-# nested .*.*) over a large file, grep can hang or go exponential and 10s
-# is already generous.
-_GREP_TIMEOUT = 10
+# nested .*.*) over a large file, grep can hang or go exponential — keep the
+# default short so the model scopes the path instead of waiting.
+_GREP_TIMEOUT = 3
 
 _BLOCKED_DEVICE_PATHS = frozenset({
     "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
@@ -150,7 +150,7 @@ class BuiltinFileTool(Tool):
         self.register(self.glob, concurrency_safe=True, is_read_only=True)
         self.register(self.grep, concurrency_safe=True, is_read_only=True)
         # glob and grep enforce their own timeouts on both fast (rg / native
-        # pathlib.glob) and fallback paths (default 10s, LLM-tunable with no
+        # pathlib.glob) and fallback paths (default 3s, LLM-tunable with no
         # upper cap), so skip the outer 120s executor wrapper — otherwise a
         # bare ``**/*.log`` walk from ``$HOME`` or a stuck network mount used
         # to hang for the full 120s.
@@ -1080,7 +1080,7 @@ class BuiltinFileTool(Tool):
             pattern: Glob pattern, e.g. "*.py", "**/*.md", "src/?*.js". May be
                 absolute ("/home/user/*.py") or relative to `path`.
             path: Directory to search from (default: ".")
-            timeout: Search timeout in seconds (default 10, no upper cap). Raise it
+            timeout: Search timeout in seconds (default 3, no upper cap). Raise it
                 only for a legitimately huge tree; a bare `**/...` walk from a home
                 directory or a stuck network mount can otherwise run for minutes.
 
@@ -1164,7 +1164,7 @@ class BuiltinFileTool(Tool):
             after_context: Lines to show after each match ("content" mode only)
             limit: Maximum results to return (default: 100)
             fixed_strings: Treat pattern as literal text, not regex (default: False)
-            timeout: Search timeout in seconds (default 10, no upper cap). Raise it
+            timeout: Search timeout in seconds (default 3, no upper cap). Raise it
                 only for a legitimately huge tree; a backtracking pattern such as
                 nested `.*.*` can otherwise run for an unbounded time.
 

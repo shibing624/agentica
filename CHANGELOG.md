@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI execute 工具调用行支持宽度感知预览：普通长命令和 heredoc 统一最多展示 3 行正文，Ctrl+O 可分别展开完整 command 和折叠 output
 
 #### fixes
+- `glob` / `grep` 默认超时从 10s 收到 3s：NFS 大树上慢搜尽快失败好让模型收窄 path；调用仍可传更大的 `timeout`
 - `/list-agents`（及 `list_agents` 工具）对本会话与其他 live session 用同一套字段：`project` / `session_log` / `log_file` / `workspace` / `memory` / `mailbox` 都会列出。对端若是旧版未发布这些路径，本机按 cwd/pid/peer_id 补全能确定的项，不再只剩 session_id+cwd+working on
 - LSP 编辑诊断不再把 `agentica` 启动打崩，也不拖慢启动：CLI 默认仍开 `--enable-diagnostics`，但 language server **懒启动**（第一次改文件才 `initialize`，`create_agent` 不阻塞）。半残 pyright（只 `pip install pyright` 没 `[nodejs]`）或 NFS 超时只会在首次编辑时 warning 降级并杀掉进程；`initialize` 的约 5s 是 deadline 不是 sleep（正常几百毫秒就返回）。安装提示改为 `pip install 'pyright[nodejs]'`
 - 状态栏和 `/status` 不再报一个和正在跑的模型对不上的 profile 名：两处都读 `resolve_active_profile_name()`，那回答的是「config.yaml 指向哪个 profile」，而 `agentica --model_name X` 之后跑的已经不是那个 profile 的模型了，于是状态栏出现 `venus-opus-4.8 openai/deepseek-v4-flash` 这种自相矛盾的一行。改为由真正做决定的 `resolve_model_config` 把结果记在 `agent_config` 上（`profile_name` / `profile_source`），新的 `setup.session_profile()` 是所有展示面的唯一读取口：`--profile` 指定的显示为那个名字并标 `flag`，模型被 flag 覆盖时显示「无 profile」——此时确实没有哪个 profile 能描述这个会话，报一个名字只会让人以为自己在那个 profile 上。空字符串是「明确没有」，键缺失才回退到 config 级答案，所以手搓 `agent_config` 的调用方（测试、其他入口）行为不变。`/model <profile>` 切换时同步这两个字段，`/config` 在会话 profile 与 config.yaml 不一致时多打一行说明
