@@ -197,7 +197,7 @@ LLM 返回: [read_file("a.py"), read_file("b.py"), grep("TODO")]
 结果全部就绪后，一起追加到消息历史，继续 LLM 调用
 ```
 
-**前提**：工具必须标注 `concurrency_safe=True`（内置的 `read_file`、`glob`、`grep` 等只读工具默认为 `True`）。写操作工具（`write_file`、`execute` 等）保持串行。
+**前提**：工具必须标注 `concurrency_safe=True`（内置的 `read_file`、`glob`、`grep` 等只读工具默认为 `True`）。写操作工具（`write_file` 等）保持串行，并按模型发出的顺序执行。
 
 ```python
 # 这两个工具可以并发：
@@ -207,6 +207,28 @@ self.register(self.read_schema, concurrency_safe=True, is_read_only=True)
 # 这个工具必须串行（写操作）：
 self.register(self.write_output)  # concurrency_safe=False (默认)
 ```
+
+### 由调用方逐次决定：`execute`
+
+`execute` 在注册时无法回答「能不能并行」——同一个工具既跑 `pytest`，也跑 `git commit`。
+固定成 `False` 会把互相独立的命令白白串起来，固定成 `True` 会让 `git add` 和 `git commit`
+互相竞争。所以这个判断下放到每一次调用：
+
+```python
+# 工具侧：声明由哪个参数决定
+self.functions["execute"].parallel_arg = "parallel_safe"
+```
+
+模型在同一条消息里发多个 `execute(command=..., parallel_safe=True)` 才会真正并发；
+不带这个参数时整批串行、保持顺序，并且其中一条报错会取消后面的（sibling-abort）。
+只有当批次内每条命令读写的东西互不相交时才应该带上它——有依赖关系的命令应该用
+`&&` 写在同一条 `command` 里。
+
+调度器读的是 `FunctionCall.is_concurrency_safe()`：未设置 `parallel_arg` 的工具沿用
+函数级的 `concurrency_safe`，设置了的则以本次调用传入的值为准（缺省仍回落到函数级）。
+
+> `background=True` 是**生命周期**开关（命令能否活过这一轮），不是并行入口。需要同时跑多条
+> 且这轮就要结果，用 `parallel_safe`；`wait` 只服务于 `background`。
 
 ## 流控异常
 
@@ -299,7 +321,7 @@ tools = get_builtin_tools(work_dir="./")
 | `apply_patch` | `BuiltinFileTool` | 一次补丁新增、更新或删除多个文件 |
 | `glob` | `BuiltinFileTool` | 文件模式匹配（`**/*.py`） |
 | `grep` | `BuiltinFileTool` | 内容搜索（基于 ripgrep，支持 regex） |
-| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`background=True` 进后台 |
+| `execute` | `BuiltinExecuteTool` | Shell 命令执行（git/pytest/pip 等）；`parallel_safe=True` 同轮并发，`background=True` 进后台 |
 | `wait` | `BuiltinExecuteTool` | 等待后台命令 / `delegate` 结束并取回结果 |
 | `web_search` | `BuiltinWebSearchTool` | 网页搜索（引擎可替换，见下节） |
 | `fetch_url` | `BuiltinFetchUrlTool` | 抓取网页内容 |

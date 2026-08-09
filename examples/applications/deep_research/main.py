@@ -6,11 +6,10 @@
 Demonstrates DeepAgent capabilities powered by the Runner agentic loop:
 - 40+ built-in tools (file ops, web search, execute code, subagent task, todos)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
-- 5-stage compression pipeline (tool-result budget → tool-result eviction →
-  rule-based → auto-compact → reactive compact)
+- Two-layer compression (tool-result budget → Layer 1 evict → Layer 2
+  native/LLM summarise; reactive compact on prompt_too_long)
 - Death spiral detection (stops on consecutive all-error tool turns)
 - Cost tracking + cost budget control (max_cost_usd)
-- Context overflow handling (FIFO message truncation)
 - Repeated tool-call detection (inject "change strategy" message)
 - Workspace memory (AGENT.md, MEMORY.md, daily memory, relevance recall)
 - Agentic prompt (enhanced system prompt with self-verification)

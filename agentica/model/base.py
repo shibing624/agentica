@@ -740,10 +740,16 @@ class Model(ABC):
         """Execute tool calls with concurrency-split execution.
 
         Strategy (mirrors CC's StreamingToolExecutor):
-        - concurrency_safe=True  tools run in parallel with each other.
-        - concurrency_safe=False tools run sequentially, one at a time.
-        - A *bash/execute* error aborts any remaining unsafe tools
-          (sibling_error pattern from CC).
+        - concurrency-safe calls run in parallel with each other.
+        - the rest run sequentially, one at a time, in the order the model
+          issued them.
+        - A *bash/execute* error aborts any remaining serial tools
+          (sibling_error pattern from CC), whichever phase the failure
+          happened in.
+
+        Safety is asked of the *call* (``FunctionCall.is_concurrency_safe``),
+        not the function: ``execute`` issues both independent and dependent
+        work, so it declares safety per call instead of once at registration.
 
         Phase 1: Emit tool_call_started events (in order)
         Phase 2a: Execute safe tools in parallel (asyncio.gather)
@@ -795,8 +801,8 @@ class Model(ABC):
         exceptions: List[Optional[BaseException]] = [None] * len(function_calls)
         results: List[bool] = [False] * len(function_calls)
 
-        safe_indices   = [i for i, fc in enumerate(function_calls) if fc.function.concurrency_safe]
-        unsafe_indices = [i for i, fc in enumerate(function_calls) if not fc.function.concurrency_safe]
+        safe_indices   = [i for i, fc in enumerate(function_calls) if fc.is_concurrency_safe()]
+        unsafe_indices = [i for i, fc in enumerate(function_calls) if not fc.is_concurrency_safe()]
 
         if safe_indices or unsafe_indices:
             logger.debug(
@@ -907,8 +913,14 @@ class Model(ABC):
                     exceptions[idx] = gather_results[gi]
                     results[idx] = False
 
-        # Phase 2b: run unsafe tools serially; bash error → cancel rest
-        bash_errored = False
+        # Phase 2b: run unsafe tools serially; bash error → cancel rest.
+        # A shell call that ran in the parallel phase counts as well: "a failed
+        # command cancels the rest of the batch" is a statement about the batch,
+        # not about which branch happened to run the failure.
+        bash_errored = any(
+            function_calls[i].function.name in _SHELL_TOOL_NAMES and exceptions[i] is not None
+            for i in safe_indices
+        )
         for idx in unsafe_indices:
             fc = function_calls[idx]
             if bash_errored:

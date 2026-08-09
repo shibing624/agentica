@@ -196,6 +196,14 @@ class Function(BaseModel):
     # Write/shell tools (execute, write_file, edit_file …) must remain False (default).
     # Mirrors CC's StreamingToolExecutor.isConcurrencySafe flag.
     concurrency_safe: bool = False
+    # Name of a boolean argument that decides concurrency safety per call.
+    # For a tool whose safety is a property of the arguments rather than of the
+    # tool — `execute` runs both `git status` and `git commit` — a static flag
+    # can only be wrong in one direction: False serialises independent work,
+    # True races dependent work. Only the caller knows which it issued, so the
+    # decision moves to the call. Defaults to `concurrency_safe` when the
+    # argument is absent, which keeps the safe answer the default.
+    parallel_arg: Optional[str] = None
     # If True, the tool only reads data and never modifies state.
     # Used by permission systems to skip confirmation for safe operations.
     is_read_only: bool = False
@@ -425,6 +433,21 @@ class FunctionCall(BaseModel):
 
     # Error while parsing arguments or running the function.
     error: Optional[str] = None
+
+    def is_concurrency_safe(self) -> bool:
+        """Whether this call may overlap with the rest of its batch.
+
+        Ask the call, not the function: a tool that sets ``parallel_arg`` has
+        no answer of its own, because the same tool issues both independent and
+        dependent work. Everything else falls back to the tool-level flag.
+        """
+        arg = self.function.parallel_arg
+        if arg is None:
+            return self.function.concurrency_safe
+        value = (self.arguments or {}).get(arg)
+        if value is None:
+            return self.function.concurrency_safe
+        return bool(value)
 
     def get_call_str(self) -> str:
         """Returns a string representation of the function call."""

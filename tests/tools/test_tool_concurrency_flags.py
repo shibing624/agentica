@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 """
 @author:XuMing(xuming624@qq.com)
-@description: Read-only tools must declare ``concurrency_safe``.
+@description: Which tool calls the executor is allowed to overlap.
 
-``Model.run_function_calls`` gathers only the calls whose function is
-``concurrency_safe`` and runs the rest in a serial loop, so a read-only tool
-that forgets the flag quietly turns "three searches in one turn" into three
-round trips. These tests pin the flag on the tools where a single turn
-routinely issues several independent calls.
+``Model.run_function_calls`` gathers only the concurrency-safe calls and runs
+the rest in a serial loop, so a read-only tool that forgets the flag quietly
+turns "three searches in one turn" into three round trips. These tests pin the
+flag on the tools where a single turn routinely issues several independent
+calls.
+
+``execute`` is the exception that has no tool-level answer — the same tool runs
+`pytest` and `git commit` — so it declares safety per call via
+``parallel_safe``. Those tests assert the schedule (how many calls were in
+flight) rather than the flag, since reading the flag back would pass even if
+the executor ignored it.
 """
 import importlib
 
@@ -82,6 +88,114 @@ def test_lsp_queries_are_parallel_and_the_write_path_is_not():
     formatting = _build("agentica.tools.lsp_tool", "LspTool", {"enable_formatting": True})
     # format_document writes the formatted buffer back to disk.
     assert formatting.functions["format_document"].concurrency_safe is False
+
+
+def _shell_calls(tool, *commands, **shared):
+    """A batch of execute() calls the way one assistant message issues them."""
+    from agentica.tools.base import FunctionCall
+
+    return [
+        FunctionCall(
+            function=tool.functions["execute"],
+            arguments={"command": command, **shared},
+            call_id=f"c{i}",
+        )
+        for i, command in enumerate(commands)
+    ]
+
+
+def _drive(calls):
+    """Run one batch through the real executor and return the results list."""
+    import asyncio
+
+    from agentica.model.openai import OpenAIChat
+
+    model = OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key")
+    model.metrics = {}
+    model.function_call_stack = None
+    model.tool_call_limit = None
+
+    async def _run():
+        results = []
+        async for _ in model.run_function_calls(calls, results):
+            pass
+        return results
+
+    return asyncio.run(_run())
+
+
+def _peak_tracking_tool():
+    """A BuiltinExecuteTool whose execute() records how many calls overlap."""
+    from agentica.tools.builtin.execute_tool import BuiltinExecuteTool
+    import asyncio
+
+    tool = BuiltinExecuteTool()
+    state = {"in_flight": 0, "peak": 0}
+    real = tool.functions["execute"]
+
+    async def _fake(command, timeout=None, background=False, parallel_safe=False):
+        state["in_flight"] += 1
+        state["peak"] = max(state["peak"], state["in_flight"])
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            state["in_flight"] -= 1
+        return f"ran {command}"
+
+    real.entrypoint = _fake
+    return tool, state
+
+
+def test_parallel_safe_shell_calls_actually_overlap():
+    """Assert the schedule, not the flag: three calls must be in flight at once.
+
+    ``execute`` cannot answer "is this parallel-safe" at registration time — the
+    same tool runs `pytest` and `git commit` — so the answer travels per call.
+    A test that reads the flag back would pass even if the executor ignored it.
+    """
+    tool, state = _peak_tracking_tool()
+    calls = _shell_calls(
+        tool, "pytest tests/a -q", "pytest tests/b -q", "pytest tests/c -q",
+        parallel_safe=True,
+    )
+
+    _drive(calls)
+
+    assert state["peak"] == 3, f"ran {state['peak']}-at-a-time; must overlap"
+
+
+def test_shell_calls_are_serial_unless_the_caller_says_otherwise():
+    """The default has to stay serial: `git add` then `git commit` is the same
+    shape as two independent test runs, and only the caller can tell them
+    apart. Guessing "parallel" here corrupts a working tree."""
+    tool, state = _peak_tracking_tool()
+
+    _drive(_shell_calls(tool, "git add -A", "git commit -m x", "git push"))
+
+    assert state["peak"] == 1, f"ran {state['peak']}-at-a-time; must be serial"
+
+
+def test_a_parallel_shell_failure_still_cancels_the_serial_remainder():
+    """Sibling-abort is a property of the batch, not of the branch that ran the
+    failure. Without this, opting one call into the parallel phase would let a
+    later dependent command run against the state a failed one left behind."""
+    from agentica.tools.base import ToolCallException
+    from agentica.tools.builtin.execute_tool import BuiltinExecuteTool
+
+    tool = BuiltinExecuteTool()
+
+    async def _fake(command, timeout=None, background=False, parallel_safe=False):
+        if "boom" in command:
+            raise ToolCallException("command blew up")
+        return f"ran {command}"
+
+    tool.functions["execute"].entrypoint = _fake
+    calls = _shell_calls(tool, "boom", parallel_safe=True) + _shell_calls(tool, "git commit -m x")
+    calls[1].call_id = "c1"
+
+    results = _drive(calls)
+
+    assert "Cancelled" in str(results[1].content)
 
 
 def test_lsp_writes_one_message_at_a_time():

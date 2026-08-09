@@ -162,11 +162,9 @@ _SELF_DETACHING_COMMAND = re.compile(r"(?<!&)&\s*$")
 _LEADING_SLEEP = re.compile(r"^\s*sleep\s+(\d+(?:\.\d+)?)\b")
 _MAX_FOREGROUND_SLEEP_SECONDS = 120
 
-# Upper bound on a single `wait` call. The wait returns the instant the command
-# exits, so this only caps how long one tool call may hold the turn: the caller
-# comes back through the model loop periodically, which is what lets the user
-# interrupt and lets the caller reconsider a job that is taking too long.
-_MAX_WAIT_SECONDS = 300
+# Default for a single `wait` call when the model omits timeout. Same contract
+# as execute(timeout=...): the caller decides, no silent upper clamp.
+_DEFAULT_WAIT_SECONDS = 300
 _WAIT_POLL_INTERVAL = 0.2
 
 class BuiltinExecuteTool(Tool):
@@ -207,9 +205,13 @@ class BuiltinExecuteTool(Tool):
         # Execute tool manages its own timeout internally via asyncio.wait_for
         # on the subprocess. Skip the outer timeout wrapper in Model.run_function_calls.
         self.functions["execute"].manages_own_timeout = True
+        # Shell has no tool-level answer to "may this run in parallel": the same
+        # tool issues `pytest tests/a` and `git commit`. The caller declares it
+        # per call; absent the flag the batch stays serial and ordered.
+        self.functions["execute"].parallel_arg = "parallel_safe"
         self.register(self.wait, concurrency_safe=True, is_read_only=True, is_destructive=False)
-        # `wait` may block up to _MAX_WAIT_SECONDS, past the outer 120s executor
-        # wrapper that would otherwise cancel it mid-wait.
+        # `wait` may block past the outer 120s executor wrapper; it owns its
+        # timeout so the caller-supplied value is not cut short mid-wait.
         self.functions["wait"].manages_own_timeout = True
 
     async def execute(
@@ -217,6 +219,7 @@ class BuiltinExecuteTool(Tool):
             command: str,
             timeout: Optional[int] = None,
             background: bool = False,
+            parallel_safe: bool = False,
     ) -> str:
         """Executes a shell command, capturing both stdout and stderr.
 
@@ -243,21 +246,32 @@ class BuiltinExecuteTool(Tool):
         - Foreground commands timeout after 120 seconds by default
         - You may specify a custom ``timeout`` (in seconds) for long-running
           commands; there is no upper cap — the caller decides.
-        - ``background=True`` detaches the command. Use it when you do not need
-          the output to continue this turn, or when the command may outlive one
-          tool call: a foreground command killed by ``timeout`` or a cancelled
-          turn loses everything it printed, while a background one keeps its
-          log. Something you need right now that fits in one call belongs in the
-          foreground with a raised ``timeout`` instead. A background command's
-          exit is reported to the user, not to you; ``wait`` with the returned
-          id is what brings it back to you. Never improvise a wait with
-          ``sleep``, polling, or a blocking ``tail``; a 120s+ leading ``sleep``
-          is refused. A trailing ``&`` detaches into an untracked orphan that
-          ``wait``, ``/ps`` and ``/stop`` cannot see, so prefer
-          ``background=True``.
+        - ``parallel_safe=True`` lets this call run at the same time as the
+          other calls in the same message. Default is False: calls run one at a
+          time, in the order you issued them, and a failing command cancels the
+          ones after it. Set it only when every command in the batch is
+          independent of the others — nothing one writes is read or written by
+          another. Two test suites, two `git log` reads, two builds in separate
+          directories: yes. `git add` then `git commit`, `pip install` then the
+          command that imports it, anything touching one file twice: no, and
+          `&&` in a single call is the right way to say that anyway. When
+          unsure, leave it off; the cost is waiting, and the cost of getting it
+          wrong is a corrupted working tree.
+        - ``background=True`` decides how long the command lives, not how many
+          run at once. Use it when the output is not needed to continue this
+          turn, or when the command may outlive one tool call: a foreground
+          command killed by ``timeout`` or a cancelled turn loses everything it
+          printed, while a background one keeps its log. Something you need
+          right now that fits in one call belongs in the foreground with a
+          raised ``timeout`` — reach for ``parallel_safe`` rather than
+          ``background`` when the goal is speed. A background command's exit is
+          reported to the user, not to you; ``wait`` with the returned id is
+          what brings it back to you. Never improvise a wait with ``sleep``,
+          polling, or a blocking ``tail``; a 120s+ leading ``sleep`` is refused.
+          A trailing ``&`` detaches into an untracked orphan that ``wait``,
+          ``/ps`` and ``/stop`` cannot see, so prefer ``background=True``.
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
-        - When issuing multiple independent commands, make multiple execute calls in parallel
         - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
           Large output is explicitly marked as truncated. When output redaction
           is enabled, detected secrets are replaced before the result reaches
@@ -275,7 +289,9 @@ class BuiltinExecuteTool(Tool):
             - execute(command="pytest /path/to/tests/ -v --tb=short")
             - execute(command="git status")
             - execute(command="npm install && npm test", timeout=300)
-            - execute(command="pytest tests -q", background=True)
+            - execute(command="pytest tests/unit -q", parallel_safe=True)
+              alongside execute(command="pytest tests/e2e -q", parallel_safe=True)
+            - execute(command="make release", background=True)
 
         Bad examples (use dedicated tools instead):
             - execute(command="find . -name '*.py'")   → use glob(pattern="**/*.py")
@@ -289,10 +305,17 @@ class BuiltinExecuteTool(Tool):
             background: detach and return immediately; ``timeout`` no longer
                 applies and the exit reaches the user, not this conversation —
                 use ``wait`` to bring it back into this conversation
+            parallel_safe: run concurrently with the other calls in this
+                message. Only for commands independent of every sibling call;
+                the default runs the batch serially in order
 
         Returns:
             str: The output of the command (stdout + stderr) with exit code
         """
+        # `parallel_safe` is read by the executor (via Function.parallel_arg) to
+        # decide the schedule before this ever runs; it means nothing here.
+        del parallel_safe
+
         # Apply timeout: use per-call override if provided, else the tool default.
         # No upper cap — the caller decides.
         effective_timeout = self._timeout if timeout is None else max(1, timeout)
@@ -480,7 +503,7 @@ class BuiltinExecuteTool(Tool):
 
         return output
 
-    async def wait(self, id: str, timeout: int = _MAX_WAIT_SECONDS) -> str:
+    async def wait(self, id: str, timeout: int = _DEFAULT_WAIT_SECONDS) -> str:
         """Blocks until a background command finishes, then reports how it went.
 
         Returns the instant the command exits, so a generous timeout costs no
@@ -501,9 +524,10 @@ class BuiltinExecuteTool(Tool):
 
         Args:
             id: Background command id from execute(background=True), e.g. "term_4"
-            timeout: Seconds this one call may wait (default 300, capped at 300).
-                Reaching it does not stop the command: the result reports the
-                progress so far and you may wait again.
+            timeout: Seconds this one call may wait (default 300, no upper cap —
+                same as ``execute(timeout=...)``). Reaching it does not stop the
+                command: the result reports the progress so far and you may wait
+                again.
 
         Returns:
             str: Exit code and log tail once it finishes, or its output so far
@@ -517,7 +541,7 @@ class BuiltinExecuteTool(Tool):
                    else "None have been started in this session.")
             )
 
-        effective_timeout = max(1, min(timeout, _MAX_WAIT_SECONDS))
+        effective_timeout = max(1, int(timeout))
         deadline = time.monotonic() + effective_timeout
         while not item.finished.is_set() and time.monotonic() < deadline:
             await asyncio.sleep(_WAIT_POLL_INTERVAL)

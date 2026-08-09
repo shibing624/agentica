@@ -1256,26 +1256,41 @@ class TestBuiltinExecuteTool:
 
         assert "term_1" in str(excinfo.value)
 
-    def test_wait_caps_a_single_call(self, execute_tool):
-        """One call must not hold the turn indefinitely: the caller returns
-        through the model loop, which is where the user can interrupt."""
+    def test_wait_honors_timeout_above_default(self, execute_tool):
+        """Caller-supplied timeout is applied as-is — same as execute(timeout=...).
+
+        A silent 300s clamp made ``wait(timeout=600)`` behave like 300, so the
+        model could not actually ask for a longer single wait.
+        """
         assert execute_tool.functions["wait"].manages_own_timeout is True
 
         registry = execute_tool._background_process_registry
         command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+        clock = {"t": 0.0}
+
+        def fake_monotonic():
+            return clock["t"]
+
+        async def fake_sleep(seconds):
+            clock["t"] += seconds
 
         async def scenario():
             await execute_tool.execute(command, background=True)
             item_id = registry.list()[0].id
-            with patch("agentica.tools.builtin.execute_tool._MAX_WAIT_SECONDS", 1):
-                return await execute_tool.wait(item_id, timeout=300)
+            with (
+                patch("agentica.tools.builtin.execute_tool.time.monotonic", fake_monotonic),
+                patch("agentica.tools.builtin.execute_tool.asyncio.sleep", fake_sleep),
+            ):
+                result = await execute_tool.wait(item_id, timeout=400)
+            return result, clock["t"]
 
         try:
-            result = asyncio.run(scenario())
+            result, waited = asyncio.run(scenario())
         finally:
             registry.stop()
 
         assert "still running" in result
+        assert waited >= 400, f"timeout=400 was clamped; only waited {waited:.1f}s"
 
     def test_execute_background_emits_completion_event(self, tmp_dir, monkeypatch):
         agentica_home = Path(tmp_dir) / "agentica-home"

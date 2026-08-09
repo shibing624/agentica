@@ -317,9 +317,10 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
 ```
 
 !!! tip "自动压缩"
-    上下文接近模型 context window 80% 时，CLI 会自动触发压缩，无需手动执行。
+    占用升高时会先做免费的 Layer 1 淘汰（约 70% 起）；接近窗口上限时再跑 Layer 2
+    （provider-native compact 或本地 LLM summary）。`/compact` 始终强制 Layer 2。
 
-使用 `OpenAIResponses` 且 endpoint 支持 `/responses/compact` 时，`/compact` 会优先生成 provider-native checkpoint，并保留可跨 provider 的普通 transcript。原生请求失败时才回退到本地 LLM summary 和 rule-based 压缩。
+使用 `OpenAIResponses` 且 endpoint 支持 `/responses/compact` 时，`/compact` 会优先生成 provider-native checkpoint，并保留可跨 provider 的普通 transcript。原生请求失败时回退到本地 LLM summary；失败则保持对话不变（已无 rule-based 回退）。
 
 ### `/new` / `/newchat`
 开启全新会话（清除消息历史，保留模型和工具配置）。切换前会显示当前会话的
