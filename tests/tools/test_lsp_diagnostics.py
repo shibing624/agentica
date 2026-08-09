@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agentica.lsp_diagnostics import Diagnostic, format_diagnostics, _parse, LspDiagnosticsChecker
 from agentica.tools.builtin import BuiltinFileTool
+from agentica.tools.lsp_tool import LspServerManager
 
 
 class TestDiagnosticParsing(unittest.TestCase):
@@ -139,6 +140,40 @@ class TestCheckerReportAfterDiff(unittest.TestCase):
         # Edit 2: same problem still present -> should NOT be reported again.
         second = checker.report_after("/x/app.py")
         self.assertEqual(second, "")
+
+
+    def test_constructor_does_not_start_servers(self):
+        """CLI startup must not block on pyright initialize."""
+        with patch.object(LspServerManager, "register_server") as register:
+            checker = LspDiagnosticsChecker(work_dir=".", servers=["pyright"])
+            register.assert_not_called()
+            self.assertFalse(checker._started)
+
+    def test_first_use_starts_servers_once(self):
+        with patch.object(LspServerManager, "register_server") as register:
+            checker = LspDiagnosticsChecker(work_dir=".", servers=["pyright"])
+            checker.has_client("app.py")
+            checker.has_client("other.py")
+            self.assertEqual(register.call_count, 1)
+
+    def test_init_timeout_does_not_crash_checker(self):
+        """A hung language server must degrade to no-op, not abort Agent construction."""
+        with patch.object(
+            LspServerManager,
+            "register_server",
+            side_effect=TimeoutError("LSP request timeout: initialize"),
+        ):
+            checker = LspDiagnosticsChecker(work_dir=".", servers=["pyright"])
+            self.assertFalse(checker.available())
+
+    def test_init_runtime_error_does_not_crash_checker(self):
+        with patch.object(
+            LspServerManager,
+            "register_server",
+            side_effect=RuntimeError("LSP server not found: pyright-langserver"),
+        ):
+            checker = LspDiagnosticsChecker(work_dir=".", servers=["pyright"])
+            self.assertFalse(checker.available())
 
 
 if __name__ == "__main__":

@@ -78,10 +78,12 @@ def get_builtin_tools(
         ask_user_question_callback: Custom callback for ask_user_question tool (optional)
         sandbox_config: SandboxConfig instance for security isolation (optional)
         background_process_registry: Shared registry for execute(background=True) (optional)
-        enable_diagnostics: When True, start an LSP diagnostics checker and attach
-            it to the file tool so write/edit results report newly-introduced
-            type/import/syntax errors. Requires a language server (e.g. pyright)
-            on PATH; degrades to a no-op if none is available. Default False.
+        enable_diagnostics: When True, attach an LSP diagnostics checker to the
+            file tool so write/edit results report newly-introduced type/import/
+            syntax errors. Language servers start lazily on the first edit
+            (not during Agent construction). Requires a language server
+            (e.g. ``pip install 'pyright[nodejs]'``); degrades to a no-op if
+            initialize fails. Default False.
         diagnostics_servers: LSP server names to use (default ["pyright"]).
         diagnostics_errors_only: When True (default), only severity "error"
             diagnostics are surfaced to the model.
@@ -100,12 +102,12 @@ def get_builtin_tools(
         diagnostics_checker = None
         if enable_diagnostics:
             from agentica.lsp_diagnostics import LspDiagnosticsChecker
-            checker = LspDiagnosticsChecker(
+            # Attach eagerly; LSP servers start lazily on first file edit.
+            diagnostics_checker = LspDiagnosticsChecker(
                 work_dir=work_dir,
                 servers=diagnostics_servers,
                 errors_only=diagnostics_errors_only,
             )
-            diagnostics_checker = checker if checker.available() else None
         tools.append(BuiltinFileTool(
             work_dir=work_dir,
             sandbox_config=sandbox_config,

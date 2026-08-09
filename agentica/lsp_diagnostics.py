@@ -8,12 +8,12 @@ feedback (type errors, undefined names, bad imports) right after it edits a
 file — and crucially returns ONLY the diagnostics newly introduced by the edit,
 so the model isn't flooded with the project's pre-existing issues.
 
-This is an opt-in SDK primitive. It never starts automatically; the caller
-constructs an ``LspDiagnosticsChecker`` and either uses it directly or passes
-it to ``BuiltinFileTool(diagnostics_checker=...)``.
+This is an opt-in SDK primitive. Language servers start lazily on the first
+diagnostics call (first file edit), never during Agent construction, so CLI
+startup is not blocked by pyright initialize.
 
     checker = LspDiagnosticsChecker(work_dir=".", servers=["pyright"])
-    checker.snapshot_before("app.py")            # cheap: cached after first call
+    checker.snapshot_before("app.py")            # starts LSP here if needed
     ... edit app.py ...
     print(checker.report_after("app.py"))        # "" if no new problems
 
@@ -97,32 +97,56 @@ class LspDiagnosticsChecker:
             timeout: Max seconds to wait for a publishDiagnostics batch. Kept low
                 (3s) because this sits on the hot edit path; a slow/unresponsive
                 server should degrade to "no feedback" rather than stall the edit.
+                Also used as the floor for the one-shot initialize timeout
+                (``max(timeout, 5)``) on first use — that is a deadline, not a
+                sleep: a healthy server returns as soon as it answers.
             errors_only: When True, only severity=="error" diagnostics are returned.
         """
         self.workspace_path = Path(work_dir) if work_dir else Path.cwd()
         self.timeout = timeout
         self.errors_only = errors_only
+        self._server_names = list(servers or ["pyright"])
         # Per-file baseline cache (resolved path -> last known diagnostics), so
         # repeated edits to a file don't each re-fetch a pre-edit baseline.
         self._baselines: Dict[str, List[Diagnostic]] = {}
         self.manager = LspServerManager(self.workspace_path)
-        for name in (servers or ["pyright"]):
-            if name in DEFAULT_LSP_SERVERS:
-                try:
-                    self.manager.register_server(DEFAULT_LSP_SERVERS[name])
-                except RuntimeError as e:
-                    logger.warning(f"LSP diagnostics: server '{name}' unavailable: {e}")
+        # Defer spawn+initialize until the first edit needs diagnostics so
+        # ``create_agent`` / CLI startup never blocks on pyright.
+        self._started = False
+
+    def _ensure_started(self) -> None:
+        """Start configured language servers once (first diagnostics use)."""
+        if self._started:
+            return
+        self._started = True
+        # Deadline for initialize only — returns immediately when the server replies.
+        init_timeout = max(self.timeout, 5.0)
+        for name in self._server_names:
+            if name not in DEFAULT_LSP_SERVERS:
+                continue
+            try:
+                self.manager.register_server(
+                    DEFAULT_LSP_SERVERS[name],
+                    init_timeout=init_timeout,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"LSP diagnostics: server '{name}' unavailable ({type(e).__name__}: {e})"
+                )
 
     def available(self) -> bool:
         """True if any language server actually started."""
+        self._ensure_started()
         return self.manager.has_any()
 
     def has_client(self, file_path: str) -> bool:
         """True if a server can handle this file's language."""
+        self._ensure_started()
         return self.manager.get_client(file_path) is not None
 
     def diagnostics(self, file_path: str) -> List[Diagnostic]:
         """Current diagnostics for a file (empty if no server handles it)."""
+        self._ensure_started()
         client = self.manager.get_client(file_path)
         if client is None:
             return []

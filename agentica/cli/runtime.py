@@ -424,7 +424,7 @@ def parse_args():
         "--enable-diagnostics",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Enable edit-time LSP diagnostics for built-in file tools (default: on; use --no-enable-diagnostics to disable)",
+        help="Enable edit-time LSP diagnostics for built-in file tools (default: on; use --no-enable-diagnostics to disable). Needs a working language server, e.g. pip install 'pyright[nodejs]'; startup degrades if initialize fails.",
     )
     parser.add_argument(
         "--diagnostics-server",

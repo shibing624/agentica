@@ -10,7 +10,7 @@ This tool provides code understanding capabilities based on LSP servers:
 - Diagnostics (errors, warnings)
 
 Prerequisites:
-    - Python: pip install pyright or python-lsp-server
+    - Python: pip install 'pyright[nodejs]' or python-lsp-server
     - TypeScript: npm install -g typescript-language-server
 
 Difference from built-in tools:
@@ -72,7 +72,7 @@ DEFAULT_LSP_SERVERS = {
 
 # Install hints keyed by the binary that FileNotFoundError reports.
 _LSP_INSTALL_HINTS = {
-    "pyright-langserver": "pip install pyright",
+    "pyright-langserver": "pip install 'pyright[nodejs]'",
     "pylsp": "pip install python-lsp-server",
     "typescript-language-server": "npm install -g typescript-language-server typescript",
 }
@@ -167,7 +167,7 @@ class JsonRpcClient:
                 self._diag_cv.wait(timeout=remaining)
             return list(self._diagnostics.get(uri, []))
 
-    def send_request(self, method: str, params: Dict) -> Any:
+    def send_request(self, method: str, params: Dict, timeout: float = 30) -> Any:
         """Send a JSON-RPC request and wait for response."""
         with self._lock:
             self._id_counter += 1
@@ -185,7 +185,7 @@ class JsonRpcClient:
 
         # Wait for response with timeout
         try:
-            response = self._pending[req_id].get(timeout=30)
+            response = self._pending[req_id].get(timeout=timeout)
             del self._pending[req_id]
         except queue.Empty:
             del self._pending[req_id]
@@ -234,9 +234,10 @@ class LspError(Exception):
 class LspClient:
     """LSP client for a specific language server."""
 
-    def __init__(self, config: LspConfig, workspace_path: Path):
+    def __init__(self, config: LspConfig, workspace_path: Path, init_timeout: float = 30):
         self.config = config
         self.workspace_path = workspace_path
+        self.init_timeout = init_timeout
         self._process: Optional[subprocess.Popen] = None
         self._rpc: Optional[JsonRpcClient] = None
         self._initialized = False
@@ -244,7 +245,12 @@ class LspClient:
         self._opened: set = set()
 
     def start(self) -> None:
-        """Start the LSP server process."""
+        """Start the LSP server process.
+
+        On any failure after the process is spawned (initialize timeout, crash,
+        broken framing), the process is torn down so a hung langserver does not
+        outlive the failed registration.
+        """
         try:
             self._process = subprocess.Popen(
                 self.config.command,
@@ -261,8 +267,12 @@ class LspClient:
                 msg += f" e.g. `{hint}`"
             raise RuntimeError(msg) from e
 
-        self._rpc = JsonRpcClient(self._process)
-        self._initialize()
+        try:
+            self._rpc = JsonRpcClient(self._process)
+            self._initialize()
+        except Exception:
+            self.stop()
+            raise
 
     def stop(self) -> None:
         """Stop the LSP server."""
@@ -282,10 +292,12 @@ class LspClient:
                 self._process.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self._process.kill()
+            self._process = None
+        self._initialized = False
 
     def _initialize(self) -> None:
         """Send LSP initialize request."""
-        result = self._rpc.send_request("initialize", {
+        self._rpc.send_request("initialize", {
             "processId": os.getpid(),
             "rootUri": self.workspace_path.as_uri(),
             "capabilities": {
@@ -300,7 +312,7 @@ class LspClient:
                 }
             },
             "initializationOptions": self.config.initialization_options or {}
-        })
+        }, timeout=self.init_timeout)
         self._initialized = True
         self._rpc.send_notification("initialized", {})
 
@@ -400,9 +412,9 @@ class LspServerManager:
         self._clients: Dict[str, LspClient] = {}
         self._ext_to_client: Dict[str, LspClient] = {}
 
-    def register_server(self, config: LspConfig) -> None:
+    def register_server(self, config: LspConfig, init_timeout: float = 30) -> None:
         """Register and start an LSP server."""
-        client = LspClient(config, self.workspace_path)
+        client = LspClient(config, self.workspace_path, init_timeout=init_timeout)
         client.start()
 
         self._clients[config.name] = client
@@ -441,7 +453,7 @@ class LspTool(Tool):
     - format_document: Format code using LSP formatter
 
     Prerequisites:
-        For Python: pip install pyright
+        For Python: pip install 'pyright[nodejs]'
         For TypeScript: npm install -g typescript-language-server
 
     Example:
