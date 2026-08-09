@@ -29,6 +29,7 @@ agentica [OPTIONS]
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `--query` / `-q` | str | -- | 单次查询，执行后退出 |
+| `--profile` | str | -- | 本次会话改用某个已保存的 profile（不写 config.yaml）；换 provider 只能用它 |
 | `--model_provider` | str | `zhipuai` | 模型提供商（见下表） |
 | `--model_name` | str | `glm-4.7-flash` | 模型名称 |
 | `--base_url` | str | -- | 自定义 API 地址（代理/私有部署） |
@@ -72,6 +73,16 @@ profiles:
 ```
 
 `wire_api: responses` 只能与 `model_provider: openai` 配合，推理强度使用 `reasoning`，不能使用 Chat Completions 的 `reasoning_effort`。完整参数和辅助模型配置见 [OpenAI Responses API](../guides/openai-responses.md)。
+
+### 临时换一个 profile
+
+```bash
+agentica --profile responses          # 这一次用 responses，config.yaml 不动
+```
+
+`--profile` 是**换 provider 的唯一命令行方式**：`--model_name` 只在当前 endpoint 内换模型，base_url 和 key 仍然来自当前 profile。名字不存在会直接报错并列出可用的，不会悄悄退回默认。想永久切换用会话里的 `/model <profile>`（写项目级覆盖）。
+
+状态栏和 `/status` 显示的 profile 名以**本次会话实际用的**为准：`--profile` 显示被指定的那个（标 `flag`），而当 `--model_name` 覆盖掉了 profile 的模型时不再显示 profile 名——此时没有哪个 profile 能描述正在跑的东西。
 
 ## 内置工具
 

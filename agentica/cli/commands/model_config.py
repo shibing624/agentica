@@ -21,6 +21,7 @@ from agentica.cli.setup import (
     default_base_url,
     default_model_name,
     get_profile_api_key,
+    session_profile,
 )
 from agentica.global_config import (
     get_profile,
@@ -59,7 +60,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     provider = ac.get("model_provider")
     model_name = ac.get("model_name")
     base_url = ac.get("base_url")
-    profile, profile_source = resolve_active_profile_name(work_dir=ac.get("work_dir") or os.getcwd())
+    profile, profile_source = session_profile(ac, ac.get("work_dir") or os.getcwd())
 
     auxiliary_provider = ac.get("auxiliary_model_provider")
     auxiliary_model_name = ac.get("auxiliary_model_name")
@@ -106,7 +107,7 @@ def _cmd_status(ctx: CommandContext, cmd_args: str = ""):
     cost_str = f"${session_cost:.4f}" if isinstance(session_cost, (int, float)) else "n/a"
 
     profile_label = profile or "(none)"
-    if profile and profile_source in ("project", "global", "default"):
+    if profile and profile_source in ("flag", "project", "global", "default"):
         profile_label = f"{profile} ({profile_source})"
     con.print(f"  [bold]Agentica[/bold] [dim]v{__version__}[/dim]  profile: [cyan]{profile_label}[/cyan]")
     con.print(f"  Model:     [bold]{model_str}[/bold]")
@@ -250,6 +251,13 @@ def _cmd_config_show_files(ctx: CommandContext):
         con.print(f"  active profile: [cyan]{active_name}[/cyan]{source_label}")
         if active_source == "project":
             con.print(f"  [dim](global default: {summary.get('active_profile')})[/dim]")
+        # This view describes config.yaml; --profile picks a profile for one
+        # run without touching it, so say when the two disagree.
+        session_name, session_source = session_profile(
+            ctx.agent_config, ctx.agent_config.get("work_dir") or os.getcwd()
+        )
+        if session_source == "flag" and session_name != active_name:
+            con.print(f"  [dim](this session: {session_name}, from --profile)[/dim]")
         for pname, profile in (summary.get("profiles") or {}).items():
             marker = "*" if pname == active_name else " "
             con.print(f"  {marker} [yellow]{pname}[/yellow]")
@@ -511,6 +519,10 @@ def _apply_profile(ctx: CommandContext, name: str):
     # path rewrote fields of the active profile in place.
     work_dir = ctx.agent_config.get("work_dir") or os.getcwd()
     set_project_profile(work_dir, name)
+    # The session is now on this profile whole, which also retires any
+    # --profile choice or model override it started with.
+    ctx.agent_config["profile_name"] = name
+    ctx.agent_config["profile_source"] = "project"
 
     model_kwargs = {
         "model_provider": new_provider,

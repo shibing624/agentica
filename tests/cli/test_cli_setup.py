@@ -269,6 +269,107 @@ class TestResolveModelConfig(_CliSetupTestBase):
         self.assertIsNone(resolved["extra_headers"])
 
 
+class TestProfileFlag(_CliSetupTestBase):
+    """``--profile`` runs one session on a saved profile without writing anything.
+
+    It exists because ``--model_name`` cannot leave the current endpoint: the
+    base_url and key still come from the active profile, so a worker on another
+    provider was impossible to start from the command line.
+    """
+
+    def _two_providers(self):
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-deepseek",
+        }, name="fast", make_active=True)
+        self._write_profile({
+            "model_provider": "zhipuai", "model_name": "glm-4.7-flash",
+            "base_url": "https://open.bigmodel.cn/api/paas/v4", "api_key": "sk-zhipu",
+        }, name="other", make_active=False)
+
+    def test_it_switches_provider_endpoint_and_key_together(self):
+        self._two_providers()
+        resolved = cli_setup.resolve_model_config(_make_args(profile="other"), console=None)
+        self.assertEqual(resolved["model_provider"], "zhipuai")
+        self.assertEqual(resolved["model_name"], "glm-4.7-flash")
+        self.assertEqual(resolved["base_url"], "https://open.bigmodel.cn/api/paas/v4")
+        self.assertEqual(resolved["api_key"], "sk-zhipu")
+
+    def test_it_does_not_touch_the_configured_active_profile(self):
+        from agentica import global_config as gc
+
+        self._two_providers()
+        cli_setup.resolve_model_config(_make_args(profile="other"), console=None)
+        self.assertEqual(gc.get_active_profile_name(), "fast")
+
+    def test_an_unknown_name_stops_the_run_and_lists_the_real_ones(self):
+        self._two_providers()
+        with self.assertRaises(SystemExit) as caught:
+            cli_setup.resolve_model_config(_make_args(profile="nope"), console=None)
+        message = str(caught.exception)
+        self.assertIn("nope", message)
+        self.assertIn("fast", message)
+        self.assertIn("other", message)
+
+    def test_flags_still_win_over_the_named_profile(self):
+        self._two_providers()
+        args = _make_args(profile="other", model_name="glm-4.7-plus")
+        resolved = cli_setup.resolve_model_config(args, console=None)
+        self.assertEqual(resolved["model_name"], "glm-4.7-plus")
+        self.assertEqual(resolved["base_url"], "https://open.bigmodel.cn/api/paas/v4")
+
+
+class TestReportedSessionProfile(_CliSetupTestBase):
+    """What the status bar and /status call "the profile you are on"."""
+
+    def _profile(self):
+        self._write_profile({
+            "model_provider": "openai", "model_name": "gpt-4o",
+            "base_url": "https://proxy.example/v1", "api_key": "sk-x",
+        }, name="work")
+
+    def test_a_plain_run_reports_the_active_profile(self):
+        self._profile()
+        resolved = cli_setup.resolve_model_config(_make_args(), console=None)
+        self.assertEqual(resolved["profile_name"], "work")
+        self.assertTrue(resolved["profile_source"])
+
+    def test_the_named_profile_is_reported_as_coming_from_the_flag(self):
+        self._profile()
+        self._write_profile({
+            "model_provider": "deepseek", "model_name": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com", "api_key": "sk-d",
+        }, name="fast", make_active=False)
+        resolved = cli_setup.resolve_model_config(_make_args(profile="fast"), console=None)
+        self.assertEqual(resolved["profile_name"], "fast")
+        self.assertEqual(resolved["profile_source"], "flag")
+
+    def test_overriding_the_model_leaves_the_session_on_no_profile(self):
+        # The bug this fixes: the bar read "work openai/gpt-5", naming a
+        # profile whose model is not the one running.
+        self._profile()
+        resolved = cli_setup.resolve_model_config(_make_args(model_name="gpt-5"), console=None)
+        self.assertEqual(resolved["profile_name"], "")
+        self.assertEqual(resolved["profile_source"], "")
+
+    def test_session_profile_prefers_what_the_run_resolved(self):
+        self._profile()
+        self.assertEqual(
+            cli_setup.session_profile({"profile_name": "fast", "profile_source": "flag"}),
+            ("fast", "flag"),
+        )
+        # Empty is a decision; the caller must not fall back past it.
+        self.assertEqual(
+            cli_setup.session_profile({"profile_name": "", "profile_source": ""}),
+            ("", ""),
+        )
+
+    def test_session_profile_falls_back_for_hand_built_configs(self):
+        self._profile()
+        name, _source = cli_setup.session_profile({})
+        self.assertEqual(name, "work")
+
+
 class TestResolveAuxModel(_CliSetupTestBase):
     """Optional auxiliary model resolution: CLI flag > profile auxiliary_model block >
     main model (same provider) / preset + matching profile (cross provider)."""

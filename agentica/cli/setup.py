@@ -23,7 +23,7 @@ own ``api_key``, so it can never silently reuse the real OpenAI key.
 
 import os
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from prompt_toolkit import prompt as pt_prompt
@@ -37,6 +37,7 @@ from agentica.global_config import (
     upsert_profile,
     set_active_profile,
     find_profile_for_provider,
+    global_config_path,
     write_commented_template,
 )
 from agentica.model.anthropic.claude import CLAUDE_OPUS_5_REASONING_EFFORTS, is_claude_opus_5
@@ -1126,6 +1127,26 @@ def _auxiliary_resolution(
     }
 
 
+def session_profile(agent_config: Dict, work_dir: Optional[str] = None) -> Tuple[str, str]:
+    """The profile this session is actually running on, as ``(name, source)``.
+
+    ``resolve_active_profile_name`` answers a different question — which profile
+    *config.yaml* points at — and that stopped being the same answer once
+    ``--profile`` could pick another one for a single run and ``--model_name``
+    could replace the model of the one it picked. Both of those are decided in
+    ``resolve_model_config``, which records the outcome on ``agent_config``, so
+    read it from there.
+
+    An empty ``profile_name`` is a decision ("no profile describes this
+    session"), a missing key is not: callers that build ``agent_config`` by
+    hand fall back to the config-level answer.
+    """
+    name = agent_config.get("profile_name")
+    if name is not None:
+        return name, agent_config.get("profile_source") or ""
+    return resolve_active_profile_name(work_dir=work_dir or os.getcwd())
+
+
 def resolve_model_config(args, console=None) -> Dict:
     """Resolve provider/model/base_url/api_key with CLI args > profile > env.
 
@@ -1150,12 +1171,21 @@ def resolve_model_config(args, console=None) -> Dict:
     profile ``auxiliary_model`` block; a different provider never reuses the main
     model's api_key or base_url.
     """
-    # Resolve effective profile: project override > global default > builtin.
+    # Resolve effective profile: --profile > project override > global default.
     # work_dir may be None on some callers (e.g. `agentica setup` before a
     # workspace exists) — fall back to cwd so we still respect any project
     # override at the launch directory.
     work_dir = getattr(args, "work_dir", None) or os.getcwd()
-    profile_name, _profile_source = resolve_active_profile_name(work_dir=work_dir)
+    requested_profile = getattr(args, "profile", None)
+    if requested_profile:
+        profile_name, profile_source = requested_profile, "flag"
+        if profile_name not in get_profiles():
+            raise SystemExit(
+                f"No profile named '{profile_name}' in {global_config_path()}.\n"
+                f"Available: {', '.join(get_profiles()) or '(none)'}"
+            )
+    else:
+        profile_name, profile_source = resolve_active_profile_name(work_dir=work_dir)
     active_profile = get_profile(profile_name)
     profile_provider = active_profile.get("model_provider")
 
@@ -1181,9 +1211,11 @@ def resolve_model_config(args, console=None) -> Dict:
         model_name = args.model_name or result["model_name"]
         base_url = args.base_url or result["base_url"]
         resolved_key = result.get("api_key")
-        # Onboarding may have written/activated a new profile.
-        profile_name, _profile_source = resolve_active_profile_name(work_dir=work_dir)
-        active_profile = get_profile(profile_name)
+        # Onboarding may have written/activated a new profile — unless the user
+        # named one on the command line, which is not up for renegotiation.
+        if not requested_profile:
+            profile_name, profile_source = resolve_active_profile_name(work_dir=work_dir)
+            active_profile = get_profile(profile_name)
         use_profile = provider == active_profile.get("model_provider")
 
     # API key resolution: active profile -> any profile matching provider/base_url.
@@ -1240,7 +1272,15 @@ def resolve_model_config(args, console=None) -> Dict:
         auxiliary_reasoning = None
         auxiliary_reasoning_effort = None
 
+    # What the status bar and /status report as "the profile you are on". A
+    # flag that replaced the model means the profile no longer describes what
+    # is running, so the session reports no profile rather than a name the
+    # model line contradicts.
+    on_profile = use_profile and model_name == active_profile.get("model_name")
+
     return {
+        "profile_name": profile_name if on_profile else "",
+        "profile_source": profile_source if on_profile else "",
         "model_provider": provider,
         "model_name": model_name,
         "base_url": base_url,

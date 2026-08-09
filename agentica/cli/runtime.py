@@ -301,6 +301,14 @@ def parse_args():
         help="With --query: write only the agent's final answer to stdout, no banner "
         "or styling. For scripts and for one agentica session delegating to another.",
     )
+    parser.add_argument(
+        "--profile",
+        type=str,
+        default=None,
+        help="Run on a saved config.yaml profile instead of the active one, for this "
+        "session only (nothing is written). The way to start a session on a "
+        "different provider; --model_name alone cannot leave the current endpoint.",
+    )
     # Default is None so saved CLI config (from the first-run wizard) can take
     # effect; main.py resolves args > saved config > hardcoded default.
     parser.add_argument(

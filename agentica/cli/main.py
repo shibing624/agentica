@@ -122,6 +122,10 @@ def main():
 
     # Store agent configuration parameters
     agent_config = {
+        # Which saved profile this session is on (empty when a flag replaced
+        # the model, so no profile describes it). Read via setup.session_profile.
+        "profile_name": resolved.get("profile_name"),
+        "profile_source": resolved.get("profile_source"),
         "model_provider": resolved["model_provider"],
         "model_name": resolved["model_name"],
         "base_url": resolved["base_url"],

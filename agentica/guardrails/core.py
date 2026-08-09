@@ -16,14 +16,14 @@ from typing import (
     Generic,
     List,
     Optional,
+    TypeVar,
     Union,
     Awaitable,
 )
-from typing_extensions import TypeVar
 
 from agentica.utils.log import logger
 
-TContext = TypeVar("TContext", bound=Any, default=Any)
+TContext = TypeVar("TContext")
 
 
 # =============================================================================
@@ -173,5 +173,6 @@ __all__ = [
     "GuardrailTriggered",
     "GuardrailOutput",
     "BaseGuardrail",
+    "TContext",
     "run_guardrails",
 ]

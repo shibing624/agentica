@@ -22,20 +22,18 @@ from typing import (
 )
 
 from agentica.model.message import Message
-from typing_extensions import TypeVar
 
 from agentica.utils.log import logger
 from agentica.guardrails.core import (
     GuardrailTriggered,
     GuardrailOutput,
     BaseGuardrail,
+    TContext,
     run_guardrails,
 )
 
 if TYPE_CHECKING:
     from agentica.agent import Agent
-
-TContext = TypeVar("TContext", bound=Any, default=Any)
 
 
 # =============================================================================

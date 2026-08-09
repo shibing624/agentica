@@ -16,15 +16,18 @@ class SkillRegistry:
     Skills are organized by name and can be looked up for execution.
     The registry also handles skill deduplication (project skills override user skills).
 
-    Priority order: project > user > managed
+    Priority order: project > user > managed > generated > bundled
     """
 
-    # Priority mapping for location types
+    # Priority mapping for location types. "bundled" ships inside the package
+    # and sits last on purpose: a user who writes their own skill of the same
+    # name is correcting the one we shipped, and must win.
     LOCATION_PRIORITY = {
         "project": 0,
         "user": 1,
         "managed": 2,
         "generated": 3,
+        "bundled": 4,
     }
 
     def __init__(self):
@@ -34,6 +37,7 @@ class SkillRegistry:
             "user": [],
             "managed": [],
             "generated": [],
+            "bundled": [],
         }
 
     def register(self, skill: Skill) -> bool:

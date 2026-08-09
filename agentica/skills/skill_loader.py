@@ -31,6 +31,7 @@ class SkillLoader:
     3. AGENTICA_EXTRA_SKILL_PATH (external extra skill dirs)
     4. ~/.claude/skills (user-level)
     5. ~/.agentica/skills (user-level)
+    6. agentica/skills/bundled (ships with the package)
 
     Project-level skills override user-level skills with the same name.
 
@@ -49,6 +50,10 @@ class SkillLoader:
     ]
 
     SKILL_FILE = "SKILL.md"
+
+    # Skills shipped inside the package, so an agentica install always knows
+    # how to drive agentica itself.
+    BUNDLED_SKILL_DIR = Path(__file__).parent / "bundled"
 
     def __init__(self, project_root: Optional[Path] = None):
         """
@@ -96,6 +101,9 @@ class SkillLoader:
         for skill_dir in self.SKILL_DIRS:
             user_path = self.home_dir / skill_dir
             add_path(user_path, "user")
+
+        # Bundled last: anything the user writes with the same name wins.
+        add_path(self.BUNDLED_SKILL_DIR, "bundled")
 
         return paths
 

@@ -1,0 +1,127 @@
+# -*- coding: utf-8 -*-
+"""Tests for the skills shipped inside the package.
+
+An agentica install should know how to drive agentica, so two skills travel
+with the code. They are ordinary skills in every other respect — in particular
+a user who writes their own of the same name must win, and slash commands
+come from ``name`` (no ``trigger`` field; that is not part of the standard
+Agent Skills format).
+"""
+import tempfile
+import unittest
+from pathlib import Path
+
+from agentica.skills.skill import Skill
+from agentica.skills.skill_loader import SkillLoader
+from agentica.skills.skill_registry import SkillRegistry
+
+BUNDLED = ("agentica", "multi-agent")
+
+
+class TestBundledSkillsShip(unittest.TestCase):
+    def test_the_bundled_directory_lives_inside_the_package(self):
+        # Not a fixture path: this is what gets packaged, and package-data
+        # picks it up through the agentica/**/*.md glob.
+        self.assertTrue(SkillLoader.BUNDLED_SKILL_DIR.is_dir())
+        self.assertEqual(SkillLoader.BUNDLED_SKILL_DIR.parent.name, "skills")
+
+    def test_every_bundled_skill_parses(self):
+        for name in BUNDLED:
+            path = SkillLoader.BUNDLED_SKILL_DIR / name / "SKILL.md"
+            skill = Skill.from_skill_md(path, location="bundled")
+            self.assertIsNotNone(skill, f"{name} failed to parse")
+            self.assertEqual(skill.name, name)
+            self.assertTrue(skill.description.strip())
+            # Standard Agent Skills have no trigger; CLI /slug comes from name.
+            self.assertIsNone(skill.trigger, f"{name} must not set trigger")
+            self.assertTrue(skill.content.strip())
+
+    def test_slash_commands_come_from_name(self):
+        registry = SkillRegistry()
+        loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
+        for skill_md in loader.discover_skills(SkillLoader.BUNDLED_SKILL_DIR):
+            registry.register(loader.load_skill(skill_md, "bundled"))
+        cmds = registry.auto_commands()
+        self.assertEqual(cmds["/agentica"].name, "agentica")
+        self.assertEqual(cmds["/multi-agent"].name, "multi-agent")
+
+    def test_loading_registers_them_as_bundled(self):
+        loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
+        registry = SkillRegistry()
+        for skill_md in loader.discover_skills(SkillLoader.BUNDLED_SKILL_DIR):
+            registry.register(loader.load_skill(skill_md, "bundled"))
+        self.assertEqual(sorted(s.name for s in registry.list_all()), sorted(BUNDLED))
+        self.assertEqual({s.location for s in registry.list_all()}, {"bundled"})
+
+
+class TestBundledSkillsArePreemptable(unittest.TestCase):
+    """Shipping a skill is a default, not a decision taken away from the user."""
+
+    def _register(self, registry, name, location):
+        tmp = Path(tempfile.mkdtemp()) / name
+        tmp.mkdir()
+        (tmp / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: mine\n---\nmy own version",
+            encoding="utf-8",
+        )
+        return registry.register(Skill.from_skill_md(tmp / "SKILL.md", location=location))
+
+    def test_a_user_skill_of_the_same_name_wins(self):
+        registry = SkillRegistry()
+        loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
+        bundled = loader.load_skill(
+            SkillLoader.BUNDLED_SKILL_DIR / "multi-agent" / "SKILL.md", "bundled",
+        )
+        registry.register(bundled)
+        self.assertTrue(self._register(registry, "multi-agent", "user"))
+        self.assertEqual(registry.get("multi-agent").location, "user")
+        self.assertIn("my own version", registry.get("multi-agent").content)
+
+    def test_a_bundled_skill_never_displaces_one_already_loaded(self):
+        registry = SkillRegistry()
+        self._register(registry, "multi-agent", "user")
+        loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
+        bundled = loader.load_skill(
+            SkillLoader.BUNDLED_SKILL_DIR / "multi-agent" / "SKILL.md", "bundled",
+        )
+        self.assertFalse(registry.register(bundled))
+        self.assertEqual(registry.get("multi-agent").location, "user")
+
+    def test_bundled_is_the_last_search_path(self):
+        loader = SkillLoader(project_root=Path(tempfile.mkdtemp()))
+        paths = loader.get_search_paths()
+        self.assertEqual(paths[-1][1], "bundled")
+        self.assertEqual(
+            Path(paths[-1][0]).resolve(), SkillLoader.BUNDLED_SKILL_DIR.resolve(),
+        )
+
+
+class TestBundledSkillContent(unittest.TestCase):
+    """These bodies are prompt text. The point of them is to send the model to
+    a live source instead of to a remembered flag list, so a few load-bearing
+    pointers are locked in."""
+
+    def _body(self, name: str) -> str:
+        return Skill.from_skill_md(
+            SkillLoader.BUNDLED_SKILL_DIR / name / "SKILL.md", location="bundled",
+        ).content
+
+    def test_the_agentica_skill_points_at_live_sources(self):
+        body = self._body("agentica")
+        self.assertIn("agentica --help", body)
+        self.assertIn("config.yaml", body)
+        # Slash commands are typed by the user; the model cannot run them.
+        self.assertIn("cannot type slash commands", body)
+
+    def test_the_multi_agent_skill_covers_all_three_mechanisms(self):
+        body = self._body("multi-agent")
+        for mechanism in ("`task`", "`delegate`", "tmux"):
+            self.assertIn(mechanism, body)
+        # Verified behaviours that are easy to get wrong.
+        self.assertIn("tmux kill-session", body)
+        self.assertIn("tmux attach", body)
+        self.assertIn("never by session id", body)
+
+
+if __name__ == "__main__":
+    unittest.main()

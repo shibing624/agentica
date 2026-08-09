@@ -43,7 +43,8 @@ from agentica.cli.runtime import (
     set_active_console,
 )
 from agentica import config
-from agentica.global_config import get_setting, resolve_active_profile_name
+from agentica.cli.setup import session_profile
+from agentica.global_config import get_setting
 from agentica.peers import PeerSession, format_for_cli, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_skills
@@ -366,7 +367,7 @@ def run_interactive(
     tui_state = {
         "model_name": agent_config.get("model_name", ""),
         "model_provider": agent_config.get("model_provider", ""),
-        "profile_name": resolve_active_profile_name(work_dir=status_work_dir)[0],
+        "profile_name": session_profile(agent_config, status_work_dir)[0],
         "thinking_mode": _status_thinking_mode(current_agent, agent_config),
         "work_dir": status_work_dir,
         "git_branch": _read_git_branch(status_work_dir),
@@ -488,8 +489,8 @@ def run_interactive(
             tui_state["compaction_count"] = 0
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
-            tui_state["profile_name"] = resolve_active_profile_name(
-                work_dir=agent_config.get("work_dir") or os.getcwd()
+            tui_state["profile_name"] = session_profile(
+                agent_config, agent_config.get("work_dir") or os.getcwd()
             )[0]
             tui_state["thinking_mode"] = _status_thinking_mode(
                 state.current_agent, agent_config
@@ -526,8 +527,8 @@ def run_interactive(
             # pre-switch values for the rest of the session.
             tui_state["model_name"] = agent_config.get("model_name", "")
             tui_state["model_provider"] = agent_config.get("model_provider", "")
-            tui_state["profile_name"] = resolve_active_profile_name(
-                work_dir=agent_config.get("work_dir") or os.getcwd()
+            tui_state["profile_name"] = session_profile(
+                agent_config, agent_config.get("work_dir") or os.getcwd()
             )[0]
             tui_state["thinking_mode"] = _status_thinking_mode(
                 state.current_agent, agent_config
