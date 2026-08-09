@@ -158,11 +158,17 @@ class TestResumeArchivedFilter(unittest.TestCase):
     """
 
     def _sessions(self):
+        # work_dir matches the process cwd so these cases never hit the
+        # "session started elsewhere" prompt — that path has its own tests.
+        here = os.getcwd()
         return [
             {
                 "session_id": "sess-active-1111",
                 "path": "/tmp/sess-active-1111.jsonl",
+                "base_dir": "/tmp",
+                "work_dir": here,
                 "size_bytes": 100,
+                "mtime": 1.0,
                 "last_timestamp": "2026-01-01T00:00:00",
                 "name": "Release investigation",
                 "archived": False,
@@ -170,7 +176,10 @@ class TestResumeArchivedFilter(unittest.TestCase):
             {
                 "session_id": "sess-archived-2222",
                 "path": "/tmp/sess-archived-2222.jsonl",
+                "base_dir": "/tmp",
+                "work_dir": here,
                 "size_bytes": 100,
+                "mtime": 2.0,
                 "last_timestamp": "2026-01-02T00:00:00",
                 "name": "Archived work",
                 "archived": True,
@@ -178,7 +187,10 @@ class TestResumeArchivedFilter(unittest.TestCase):
             {
                 "session_id": "sess-active-3333",
                 "path": "/tmp/sess-active-3333.jsonl",
+                "base_dir": "/tmp",
+                "work_dir": here,
                 "size_bytes": 100,
+                "mtime": 3.0,
                 "last_timestamp": "2026-01-03T00:00:00",
                 "name": None,
                 "archived": False,

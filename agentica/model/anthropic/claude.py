@@ -101,6 +101,14 @@ except (ModuleNotFoundError, ImportError):
     _MESSAGE_STOP_TYPES = ()
 
 
+def _is_empty_text_block(block: Any) -> bool:
+    """True for a text block the API would reject (``{"type": "text", "text": ""}``)."""
+    if not isinstance(block, dict) or block.get("type") != "text":
+        return False
+    text = block.get("text")
+    return not (isinstance(text, str) and text.strip())
+
+
 @dataclass
 class MessageData:
     response_content: str = ""
@@ -180,6 +188,11 @@ class Claude(Model):
     # Structured output support
     use_structured_outputs: bool = False
     supports_structured_outputs: bool = True
+
+    # Tool rounds live in `content` as tool_use / tool_result blocks here, not
+    # in `tool_calls` + role="tool" messages. A transcript persisted by any
+    # provider comes back in the latter shape, which this API cannot accept.
+    supports_replayed_tool_history: bool = False
 
     # Prompt caching: inject cache_control breakpoints into system message
     # and conversation history to reduce input token costs on multi-turn runs.
@@ -359,14 +372,24 @@ class Claude(Model):
                 continue
             else:
                 if isinstance(content, str):
-                    content = [{"type": "text", "text": content}]
+                    blocks = [{"type": "text", "text": content}] if content.strip() else []
+                else:
+                    blocks = [b for b in content if not _is_empty_text_block(b)]
 
                 if message.role == "user" and message.images is not None:
                     self.validate_image_input()
                     for image in message.images:
-                        content.append(await self.add_image(image))
+                        blocks.append(await self.add_image(image))
 
-                chat_messages.append({"role": message.role, "content": content})  # type: ignore
+                if not blocks:
+                    # Anthropic rejects empty text blocks outright, and a turn
+                    # with nothing left to send carries no information anyway.
+                    # Replayed tool-call assistant messages land here: their
+                    # tool_use blocks did not survive persistence, so only an
+                    # empty string remains.
+                    continue
+
+                chat_messages.append({"role": message.role, "content": blocks})  # type: ignore
 
         # system_and_3 strategy: cache the system prompt (breakpoint added in
         # prepare_request_kwargs) + the last 3 messages for a rolling cache
@@ -388,14 +411,10 @@ class Claude(Model):
             for msg in reversed(chat_messages):
                 if applied >= 3:
                     break
-                content = msg.get("content")
-                if isinstance(content, list) and content:
-                    last_block = content[-1]
-                    if isinstance(last_block, dict):
-                        last_block["cache_control"] = {"type": "ephemeral"}
-                        applied += 1
-                elif isinstance(content, str) and content:
-                    msg["content"] = [{"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}]
+                content = msg["content"]
+                last_block = content[-1]
+                if isinstance(last_block, dict):
+                    last_block["cache_control"] = {"type": "ephemeral"}
                     applied += 1
 
         return chat_messages, " ".join(system_messages)

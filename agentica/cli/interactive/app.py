@@ -29,6 +29,7 @@ from agentica.cli.commands.session import (
     display_resumed_transcript,
     hydrate_resumed_session,
 )
+from agentica.cli.session_resume import prepare_startup_resume
 from agentica.cli.display import (
     display_user_message,
     inject_file_contents,
@@ -189,6 +190,11 @@ def run_interactive(
         with _ask_state_lock:
             state_ref.input_request = req
             _ask_active[0] = True
+            # A slash command (e.g. /resume, /cron) asks between turns, when
+            # agent_running is False. Only a question armed *during* a run may
+            # be aborted by that run ending, or those prompts would cancel
+            # themselves on the first watchdog poll.
+            armed_during_run = state_ref.agent_running
         app_ref.invalidate()
 
         # Block the agent thread until the user submits a line, or Ctrl+C
@@ -206,7 +212,7 @@ def run_interactive(
                     answer = req.result.get(timeout=1.0)
                     break
                 except queue.Empty:
-                    if state_ref.should_exit or not state_ref.agent_running:
+                    if state_ref.should_exit or (armed_during_run and not state_ref.agent_running):
                         logger.info("[ask] watchdog: run ended, aborting prompt")
                         answer = _InputRequest.CANCELLED
                         break
@@ -248,6 +254,16 @@ def run_interactive(
     # Publish this terminal in the peer directory before the first agent exists:
     # the messaging tools are built from this object, and the identity must
     # survive agent rebuilds (/resume, /model) so in-flight messages still land.
+    # `agentica resume <id>` may name a session recorded in another directory.
+    # Settle that before anything derives state from the cwd — the peer identity,
+    # the agent's work_dir and the session storage all depend on the answer.
+    if agent_config.get("_resume_requested") and not prepare_startup_resume(
+        agent_config,
+        user_id=agent_config.get("user_id") or (workspace.user_id if workspace else None),
+        printer=get_console().print,
+    ):
+        return
+
     peer_cwd = agent_config.get("work_dir") or os.getcwd()
     state.peer_session = PeerSession(
         cwd=peer_cwd,
@@ -427,6 +443,13 @@ def run_interactive(
     def _apply_command_result(result: dict):
         """Apply side effects from command handler results."""
         nonlocal skills_registry, extra_tool_names
+        if "work_dir" in result:
+            # /resume moved us into the directory the session was started in.
+            # The handler already chdir'd; everything downstream reads work_dir
+            # from agent_config or the status bar, so both must follow.
+            agent_config["work_dir"] = result["work_dir"]
+            tui_state["work_dir"] = result["work_dir"]
+            tui_state["git_branch"] = _read_git_branch(result["work_dir"])
         if "current_agent" in result:
             state.current_agent = result["current_agent"]
             # Counts only compactions observed for the currently selected CLI

@@ -29,7 +29,7 @@ def test_hydrate_resumed_session_builds_prompt_runs(tmp_path):
     log = SessionLog("session-123", base_dir=str(tmp_path))
     log.append("user", "inspect the file")
     log.append("assistant", "partial answer\n\n[User interrupted the response]", finish_reason="cancelled")
-    agent = SimpleNamespace(_session_log=log, working_memory=WorkingMemory())
+    agent = SimpleNamespace(_session_log=log, working_memory=WorkingMemory(), model=None)
 
     messages, runs_built = hydrate_resumed_session(agent)
 
@@ -38,6 +38,55 @@ def test_hydrate_resumed_session_builds_prompt_runs(tmp_path):
     history = agent.working_memory.get_messages_from_last_n_runs()
     assert [message.role for message in history] == ["user", "assistant"]
     assert "partial answer" in history[-1].content
+
+
+def _tool_round_log(tmp_path, session_id):
+    log = SessionLog(session_id, base_dir=str(tmp_path))
+    log.append("user", "read config.py")
+    log.append(
+        "assistant",
+        "",
+        tool_calls=[
+            {
+                "id": "call-read",
+                "type": "function",
+                "function": {"name": "read_file", "arguments": json.dumps({"file_path": "config.py"})},
+            }
+        ],
+    )
+    log.append("tool", "PORT = 8080", tool_name="read_file", tool_call_id="call-read")
+    log.append("assistant", "The port is 8080.")
+    return log
+
+
+def test_resume_keeps_tool_history_for_a_provider_that_can_replay_it(tmp_path):
+    agent = SimpleNamespace(
+        _session_log=_tool_round_log(tmp_path, "session-openai"),
+        working_memory=WorkingMemory(),
+        model=SimpleNamespace(supports_replayed_tool_history=True),
+    )
+
+    hydrate_resumed_session(agent)
+
+    history = agent.working_memory.get_messages_from_last_n_runs()
+    assert [message.role for message in history] == ["user", "assistant", "tool", "assistant"]
+
+
+def test_resume_drops_tool_history_for_a_provider_that_cannot(tmp_path):
+    """Anthropic cannot replay assistant.tool_calls + role="tool"; it gets the text."""
+    agent = SimpleNamespace(
+        _session_log=_tool_round_log(tmp_path, "session-claude"),
+        working_memory=WorkingMemory(),
+        model=SimpleNamespace(supports_replayed_tool_history=False),
+    )
+
+    hydrate_resumed_session(agent)
+
+    history = agent.working_memory.get_messages_from_last_n_runs()
+    assert [(m.role, m.content) for m in history] == [
+        ("user", "read config.py"),
+        ("assistant", "The port is 8080."),
+    ]
 
 
 def _history_run(messages):

@@ -26,6 +26,12 @@ from agentica.cli.display import (
     print_header,
     resumable_session_id,
 )
+from agentica.cli.session_resume import (
+    choose_resume_work_dir,
+    enter_work_dir,
+    find_sessions_by_id,
+)
+from agentica.agent.history_filter import strip_tool_artifacts_from_memory
 from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.memory.session_log import SessionLog
@@ -344,6 +350,11 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
             session_id=resumable_session_id(old_agent),
         )
     )
+    # `agentica resume <id>` pins a session (and possibly another project's
+    # storage) into agent_config. A new chat must not inherit either, or it
+    # would keep appending to the session it was supposed to leave behind.
+    ctx.agent_config.pop("session_id", None)
+    ctx.agent_config.pop("session_base_dir", None)
     current_agent = create_agent(
         ctx.agent_config,
         ctx.extra_tools,
@@ -382,6 +393,12 @@ def _resume_base_dir(ctx: CommandContext) -> Optional[str]:
     return str(log.base_dir) if log is not None else None
 
 
+def _resume_user_id(ctx: CommandContext) -> Optional[str]:
+    """User whose sessions ``/resume`` may search across projects."""
+    agent = ctx.current_agent
+    return agent.user_id if agent is not None else ctx.agent_config.get("user_id")
+
+
 
 def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[dict[str, Any]], int]:
     """Load a session log into the prompt history used by subsequent runs."""
@@ -391,6 +408,8 @@ def hydrate_resumed_session(agent, resume_at: str | None = None) -> tuple[list[d
     resumed = session_log.load(resume_at=resume_at)
     agent.working_memory.clear()
     runs_built = agent.working_memory.hydrate_runs_from_history(resumed) if resumed else 0
+    if runs_built and agent.model is not None and not agent.model.supports_replayed_tool_history:
+        strip_tool_artifacts_from_memory(agent.working_memory)
     return resumed, runs_built
 
 
@@ -399,6 +418,130 @@ def display_resumed_transcript(runs: list[AgentRun], session_label: str) -> Hist
     """Display resumed conversation text with tool activity collapsed by run."""
     return display_conversation_history(runs, f"Resumed transcript: {session_label}")
 
+
+
+def _split_resume_at(args_str: str) -> tuple[str, Optional[str]]:
+    """Split ``<session> at <uuid>`` into its two halves."""
+    session_target, separator, at_candidate = args_str.rpartition(" at ")
+    if not (separator and session_target.strip() and at_candidate.strip()):
+        return args_str, None
+    try:
+        UUID(at_candidate.strip())
+    except ValueError:
+        return args_str, None
+    return session_target.strip(), at_candidate.strip()
+
+
+def _print_session_list(
+    ctx: CommandContext,
+    con,
+    sessions: list[dict[str, Any]],
+    *,
+    title: str,
+    usage_hint: str,
+    show_work_dir: bool = False,
+) -> None:
+    """Render the resume picker and remember what each number pointed at.
+
+    The numbering has to survive until the follow-up ``/resume <n>``, otherwise
+    a list that spans projects would renumber under the user's feet.
+    """
+    shown = sessions[:10]
+    con.print(f"\n[bold]{title}[/bold]\n")
+    for i, s in enumerate(shown, 1):
+        ts_str = s.get("last_timestamp", "") or ""
+        if ts_str:
+            ts_str = ts_str[:16].replace("T", " ")
+        size_kb = s["size_bytes"] / 1024
+        sid = s["session_id"]
+        # Show a clean, copy-pasteable 8-char prefix that /resume accepts
+        # directly. Avoid the old "abc...wxyz" form which users would copy
+        # verbatim (ellipsis included) and which then failed to match.
+        short_id = sid if len(sid) <= 12 else sid[:8]
+        # Prefer the user-set `/rename` label; otherwise show the first
+        # user message that started the session.
+        preview = SessionLog.session_preview(s["path"])
+        turns = preview["user_count"]
+        first_user = preview["first_user"]
+        user_name = s.get("name")
+        if user_name:
+            # Named session: name is the headline, preview is the subline.
+            summary = user_name[:80]
+            subline = " ".join(first_user.split())[:80] if first_user else "(no messages yet)"
+        elif first_user:
+            # Unnamed session: keep the legacy single-line preview.
+            summary = " ".join(first_user.split())[:80]
+            subline = None
+        else:
+            summary = "(empty session)"
+            subline = None
+        is_current = ctx.current_agent is not None and sid == ctx.current_agent.session_id
+        current_marker = "  [green](current)[/green]" if is_current else ""
+        con.print(
+            f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
+            f"({size_kb:.0f}KB, {turns} turns){current_marker}"
+        )
+        if user_name:
+            con.print(f"     [bold]{summary}[/bold]")
+            if subline:
+                con.print(f"     [dim]> {subline}[/dim]")
+        else:
+            con.print(f"     [dim]> {summary}[/dim]")
+        if show_work_dir and s.get("work_dir"):
+            con.print(f"     [dim]{s['work_dir']}[/dim]")
+    con.print(f"\n[dim]{usage_hint}[/dim]")
+    if ctx.tui_state is not None:
+        ctx.tui_state["resume_picker"] = shown
+
+
+def _select_session(
+    ctx: CommandContext,
+    con,
+    args_str: str,
+    sessions: list[dict[str, Any]],
+    visible_sessions: list[dict[str, Any]],
+    user_id: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Resolve ``/resume <arg>`` to one session, or report why it could not."""
+    named_matches = [
+        session
+        for session in visible_sessions
+        if isinstance(session.get("name"), str)
+        and session["name"].casefold() == args_str.casefold()
+    ]
+    if args_str.isdecimal():
+        # Numbers refer to the listing the user last saw, which may have spanned
+        # every project (`/resume all`), not just this one.
+        picker = (ctx.tui_state or {}).get("resume_picker") or visible_sessions
+        index = int(args_str) - 1
+        if 0 <= index < len(picker):
+            return picker[index]
+        if len(named_matches) == 1:
+            return named_matches[0]
+        con.print("[red]Invalid number.[/red]")
+        return None
+    if len(named_matches) == 1:
+        return named_matches[0]
+    if len(named_matches) > 1:
+        con.print(
+            f"[red]Ambiguous: multiple sessions are named '{args_str}'. Use the number or id prefix.[/red]"
+        )
+        return None
+
+    # Accept the exact id, any unique prefix, or the truncated
+    # "7154826e...0358" form printed by the picker. Archived sessions stay
+    # reachable by id even though the picker hides them, and a miss here falls
+    # through to every other project of the same user.
+    matching = find_sessions_by_id(args_str, sessions, user_id=user_id)
+    if not matching:
+        con.print(f"[red]No session matching '{args_str}'[/red]")
+        return None
+    if len(matching) > 1:
+        con.print(
+            f"[red]Ambiguous: '{args_str}' matches {len(matching)} sessions. Use a longer prefix or the number.[/red]"
+        )
+        return None
+    return matching[0]
 
 
 def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
@@ -410,77 +553,70 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
     # The running agent already carries the correctly-scoped work_dir/user_id;
     # fall back to the process cwd (which for the CLI equals the project).
     base_dir = _resume_base_dir(ctx)
+    user_id = _resume_user_id(ctx)
 
-    sessions = SessionLog.list_sessions(base_dir=base_dir)
-    if not sessions:
-        con.print("[yellow]No sessions found to resume.[/yellow]")
+    args_str, resume_at_uuid = _split_resume_at((cmd_args or "").strip())
+
+    if args_str.casefold() == "all":
+        every = [
+            s
+            for project in SessionLog.list_projects(user_id=user_id)
+            for s in SessionLog.list_sessions(
+                base_dir=project["base_dir"], work_dir=project["work_dir"]
+            )
+            if not s.get("archived")
+        ]
+        every.sort(key=lambda s: s["mtime"], reverse=True)
+        if not every:
+            con.print("[yellow]No sessions found to resume.[/yellow]")
+            return
+        _print_session_list(
+            ctx,
+            con,
+            every,
+            title="Sessions across all projects:",
+            usage_hint="Usage: /resume <number|id-prefix> — resuming a session from "
+            "another directory asks which directory to work in.",
+            show_work_dir=True,
+        )
         return
 
+    sessions = SessionLog.list_sessions(base_dir=base_dir)
     # Archived sessions are hidden from the picker (same "I don't want to see
     # this anymore" semantic as the Web UI sidebar), but an explicit id/prefix
-    # match below still searches the full unfiltered `sessions` list so an
-    # archived session remains directly resumable by id.
+    # match still searches the full unfiltered `sessions` list so an archived
+    # session remains directly resumable by id.
     visible_sessions = [s for s in sessions if not s.get("archived")]
 
-    args_str = (cmd_args or "").strip()
-    resume_at_uuid = None
-    session_target, separator, at_candidate = args_str.rpartition(" at ")
-    if separator and session_target.strip() and at_candidate.strip():
-        try:
-            UUID(at_candidate.strip())
-        except ValueError:
-            pass
-        else:
-            args_str = session_target.strip()
-            resume_at_uuid = at_candidate.strip()
-
     if args_str:
-        named_matches = [
-            session
-            for session in visible_sessions
-            if isinstance(session.get("name"), str)
-            and session["name"].casefold() == args_str.casefold()
-        ]
-        if args_str.isdecimal():
-            index = int(args_str) - 1
-            if 0 <= index < len(visible_sessions):
-                chosen = visible_sessions[index]
-            elif len(named_matches) == 1:
-                chosen = named_matches[0]
-            else:
-                con.print("[red]Invalid number.[/red]")
-                return
-        elif len(named_matches) == 1:
-            chosen = named_matches[0]
-        elif len(named_matches) > 1:
-            con.print(
-                f"[red]Ambiguous: multiple sessions are named '{args_str}'. Use the number or id prefix.[/red]"
-            )
+        chosen = _select_session(ctx, con, args_str, sessions, visible_sessions, user_id)
+        if chosen is None:
             return
-        else:
-            # Accept the exact id, any unique prefix, or the truncated
-            # "7154826e...0358" form printed by the picker.
-            needle = args_str
-            if "..." in needle:
-                needle = needle.split("...", 1)[0].strip()
-            matching = [
-                session
-                for session in sessions
-                if needle and session["session_id"].startswith(needle)
-            ]
-            if not matching:
-                con.print(f"[red]No session matching '{args_str}'[/red]")
-                return
-            if len(matching) > 1:
-                con.print(
-                    f"[red]Ambiguous: '{args_str}' matches {len(matching)} sessions. Use a longer prefix or the number.[/red]"
-                )
-                return
-            chosen = matching[0]
+
+        current_work_dir = ctx.agent_config.get("work_dir") or os.getcwd()
+        choice = choose_resume_work_dir(
+            chosen.get("work_dir"),
+            current_work_dir,
+            asker=ctx.ask_user_question_callback,
+            printer=con.print,
+        )
+        if choice.cancelled:
+            con.print("[yellow]Resume cancelled.[/yellow]")
+            return
 
         agent_config = dict(ctx.agent_config)
         agent_config["session_id"] = chosen["session_id"]
         agent_config["_resume_at_uuid"] = resume_at_uuid
+        # Pin storage to where the transcript already lives. Without this a
+        # session resumed from elsewhere would be looked up in the current
+        # project, come up empty, and silently start over.
+        agent_config["session_base_dir"] = chosen["base_dir"]
+        if choice.work_dir:
+            if not enter_work_dir(choice.work_dir):
+                con.print(f"[red]Cannot enter {choice.work_dir}; resume aborted.[/red]")
+                return
+            agent_config["work_dir"] = choice.work_dir
+            con.print(f"[dim]Working directory: {choice.work_dir}[/dim]")
         current_agent = create_agent(
             agent_config,
             ctx.extra_tools,
@@ -538,53 +674,27 @@ def _cmd_resume(ctx: CommandContext, cmd_args: str = ""):
                 elif state.status in ("paused", "complete"):
                     con.print(f"  [dim]⊙ Previous goal ({state.status}): {state.objective}[/dim]")
 
-        return {"current_agent": current_agent, "goal_manager": resumed_goal_manager}
+        result = {"current_agent": current_agent, "goal_manager": resumed_goal_manager}
+        if choice.work_dir:
+            result["work_dir"] = choice.work_dir
+        return result
     else:
         if not visible_sessions:
-            con.print("[yellow]No sessions found to resume (all sessions are archived).[/yellow]")
-            return
-        con.print("\n[bold]Available sessions:[/bold]\n")
-        for i, s in enumerate(visible_sessions[:10], 1):
-            ts_str = s.get("last_timestamp", "") or ""
-            if ts_str:
-                ts_str = ts_str[:16].replace("T", " ")
-            size_kb = s["size_bytes"] / 1024
-            sid = s["session_id"]
-            # Show a clean, copy-pasteable 8-char prefix that /resume accepts
-            # directly. Avoid the old "abc...wxyz" form which users would copy
-            # verbatim (ellipsis included) and which then failed to match.
-            short_id = sid if len(sid) <= 12 else sid[:8]
-            # Prefer the user-set `/rename` label; otherwise show the first
-            # user message that started the session.
-            preview = SessionLog.session_preview(s["path"])
-            turns = preview["user_count"]
-            first_user = preview["first_user"]
-            user_name = s.get("name")
-            if user_name:
-                # Named session: name is the headline, preview is the subline.
-                summary = user_name[:80]
-                subline = " ".join(first_user.split())[:80] if first_user else "(no messages yet)"
-            elif first_user:
-                # Unnamed session: keep the legacy single-line preview.
-                summary = " ".join(first_user.split())[:80]
-                subline = None
-            else:
-                summary = "(empty session)"
-                subline = None
-            is_current = ctx.current_agent is not None and sid == ctx.current_agent.session_id
-            current_marker = "  [green](current)[/green]" if is_current else ""
             con.print(
-                f"  {i}. [cyan]{short_id}[/cyan]  {ts_str}  "
-                f"({size_kb:.0f}KB, {turns} turns){current_marker}"
+                "[yellow]No sessions in this directory.[/yellow] "
+                "[dim]Use `/resume all` to list sessions from every project.[/dim]"
             )
-            if user_name:
-                con.print(f"     [bold]{summary}[/bold]")
-                if subline:
-                    con.print(f"     [dim]> {subline}[/dim]")
-            else:
-                con.print(f"     [dim]> {summary}[/dim]")
-        con.print(
-            f"\n[dim]Usage: /resume <number|name|id-prefix> (e.g. /resume {visible_sessions[0]['session_id'][:8]})[/dim]"
+            return
+        _print_session_list(
+            ctx,
+            con,
+            visible_sessions,
+            title="Available sessions:",
+            usage_hint=(
+                f"Usage: /resume <number|name|id-prefix> "
+                f"(e.g. /resume {visible_sessions[0]['session_id'][:8]})  ·  "
+                f"/resume all lists every project"
+            ),
         )
         return
 

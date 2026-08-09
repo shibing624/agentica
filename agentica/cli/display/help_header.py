@@ -110,7 +110,7 @@ def show_help(skills_registry=None):
             "/new":             "Start a new chat session",
             "/clear, /reset":   "Clear screen and reset conversation",
             "/rename <name>":   "Name current session for easy resume",
-            "/resume [target]": "Resume by number, name, or id prefix ('at <uuid>' forks)",
+            "/resume [target]": "Resume by number, name, or id prefix ('all' lists every project, 'at <uuid>' forks)",
             "/fork [n|uuid]":   "Branch into a new session ('list' shows earlier points)",
             "/history":         "Show conversation history or full tool details",
             "/save, /export":   "Save conversation to JSON (no system prompts)",

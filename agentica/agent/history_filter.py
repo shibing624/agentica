@@ -162,6 +162,22 @@ def strip_all_tool_artifacts(messages: List[Message], *, drop_system: bool = Fal
     return cleaned
 
 
+def strip_tool_artifacts_from_memory(working_memory) -> None:
+    """Reduce a WorkingMemory's history to plain user/assistant text, in place.
+
+    Both stores have to be cleaned: ``runs[].response.messages`` is what the
+    prompt builder replays to the model, and ``messages`` is what ``/history``
+    and ``/export`` show. Leaving the flat list untouched would make the two
+    disagree about what the model can still see.
+    """
+    for run in working_memory.runs:
+        if run.response is None or not run.response.messages:
+            continue
+        run.response.messages = strip_all_tool_artifacts(run.response.messages, drop_system=True)
+    if working_memory.messages:
+        working_memory.messages = strip_all_tool_artifacts(working_memory.messages, drop_system=False)
+
+
 def _matches_any(name: Optional[str], patterns: List[str]) -> bool:
     if not name:
         return False

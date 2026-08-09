@@ -82,6 +82,17 @@ def safe_user_segment(user_id: Optional[str]) -> str:
     return Workspace.sanitize_user_id(user_id)
 
 
+def get_projects_root(user_id: Optional[str] = None) -> str:
+    """Return ``<AGENTICA_PROJECTS_DIR>/<user>/`` — the parent of every project dir.
+
+    ``sanitize_path`` is one-way, so a project directory name cannot be turned
+    back into the cwd it came from. Enumerating this root is how callers that
+    need to look across projects (e.g. resuming a session started elsewhere)
+    reach every project dir belonging to one user.
+    """
+    return os.path.join(AGENTICA_PROJECTS_DIR, safe_user_segment(user_id))
+
+
 def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) -> str:
     """Return ``<AGENTICA_PROJECTS_DIR>/<user>/<sanitized-cwd>/`` for the given user + cwd.
 
@@ -91,7 +102,7 @@ def get_project_dir(cwd: Optional[str] = None, user_id: Optional[str] = None) ->
     directory and read each other's persisted tool outputs.
     """
     cwd = cwd or os.getcwd()
-    return os.path.join(AGENTICA_PROJECTS_DIR, safe_user_segment(user_id), sanitize_path(cwd))
+    return os.path.join(get_projects_root(user_id), sanitize_path(cwd))
 
 
 def get_tool_results_dir(

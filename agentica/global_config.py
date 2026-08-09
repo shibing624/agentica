@@ -581,4 +581,6 @@ env: {}
 settings:
 #  cli_markdown: auto        # off|auto|on — render only the final assistant reply
 #  num_history_turns: 20     # conversation turns kept in the prompt window
+#  resume_cwd: ask           # ask|session|current — directory to use when /resume
+#                            # picks a session started in another directory
 """

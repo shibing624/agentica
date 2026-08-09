@@ -267,7 +267,7 @@ To continue this session, run agentica resume c1392649-f07d-4f05-808b-f852c31902
   Renamed current session to 前端视觉问题排查
 ```
 
-### `/resume [number|name|id-prefix]`
+### `/resume [number|name|id-prefix|all]`
 按序号、名称或 ID 前缀恢复之前的会话（基于 Session Log JSONL 机制）：
 ```
 > /resume
@@ -289,17 +289,49 @@ To continue this session, run agentica resume c1392649-f07d-4f05-808b-f852c31902
 正文和每轮工具统计，成功的 tool result 不再写入 scrollback。失败结果最多显示 3 条
 单行摘要。
 
-也可以退出 CLI 后直接从 shell 恢复完整 session ID：
+也可以退出 CLI 后直接从 shell 恢复（ID 前缀即可）：
 
 ```bash
-agentica resume c1392649-f07d-4f05-808b-f852c3190236
+agentica resume c1392649
 ```
 
-Session Log 按项目目录隔离，因此应在原项目目录执行。若当前目录不同，可以显式指定：
+#### 跨目录恢复
 
-```bash
-agentica --work_dir /path/to/original-project resume c1392649-f07d-4f05-808b-f852c3190236
+Session Log 按项目目录（work_dir）分区存放，但 `/resume <id>` 和 `agentica resume <id>`
+会先在当前项目找，找不到再搜索该用户的全部项目，所以在任何目录都能按 ID 恢复。
+
+当会话属于另一个目录时，会询问在哪个目录继续工作：
+
 ```
+? This session was started in another directory. Choose the working directory to resume it in.
+    1. Use session directory (/Users/me/Codes/agentica)
+    2. Use current directory (/Users/me/temp)
+    3. Always use session directory
+    4. Always use current directory
+```
+
+- 选 1/2 只对本次生效；选 3/4 会写入 `~/.agentica/config.yaml` 的 `settings.resume_cwd`
+  （`session` / `current`），之后不再询问。想恢复询问就把它改回 `ask` 或删除该行。
+- 无论选哪个，transcript 始终继续追加到它原本所在的项目目录，不会分裂成两个文件。
+- 会话目录已被删除时不再询问，直接留在当前目录并提示。
+
+`/resume all` 列出所有项目的会话（附带各自的目录），列表里的序号可直接用于随后的
+`/resume <n>`：
+
+```
+> /resume all
+  Sessions across all projects:
+    1. a8c3f217  2026-07-24 10:20  (48KB, 23 turns)
+       > 修复登录超时
+       /Users/me/Codes/agentica
+```
+
+#### 换 provider 恢复
+
+Session Log 里的 tool 轮次统一按 OpenAI 线格式存放，Anthropic 的 `/v1/messages`
+无法回放这种形状。用 `anthropic/*` 恢复（或 fork）一个会话时，历史会自动降级为纯粹的
+问答文本：之前的提问和回答都在，工具调用和工具结果不跟过去。同一个 provider 内恢复
+不受影响，tool 历史照旧完整回放。
 
 ### `/history [tools [run-number]]`
 

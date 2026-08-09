@@ -23,6 +23,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from agentica.utils.log import logger, _run_id_var, _parent_run_id_var, _short
+from agentica.agent.history_filter import strip_tool_artifacts_from_memory
 from agentica.cost_tracker import CostTracker
 from agentica.hooks import RunHooks, _CompositeAgentHooks, _CompositeRunHooks
 from agentica.model.base import Model
@@ -566,6 +567,15 @@ class LoopMixin:
                     resumed_messages = agent._session_log.load()
                     if resumed_messages:
                         runs_built = agent.working_memory.hydrate_runs_from_history(resumed_messages)
+                        # The transcript stores tool rounds in the OpenAI wire
+                        # shape; a provider that speaks another one would 400
+                        # on replay, so it continues from the text turns only.
+                        if (
+                            runs_built
+                            and agent.model is not None
+                            and not agent.model.supports_replayed_tool_history
+                        ):
+                            strip_tool_artifacts_from_memory(agent.working_memory)
                         logger.debug(
                             f"Session resumed from JSONL: {len(resumed_messages)} messages, "
                             f"{runs_built} runs reconstructed"

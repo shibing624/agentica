@@ -833,12 +833,17 @@ def create_agent(
     # `resume <id> at <uuid>` (truncated). Popped rather than read so rebuilding
     # the agent later (a `/model` switch) does not fork again from the same point.
     session_id = agent_config.get("session_id") or _generate_session_id()
+    # Set when resuming a session that lives in another project directory: the
+    # transcript keeps growing where it was written, wherever the agent works.
+    session_base_dir = agent_config.get("session_base_dir")
     fork_at_uuid = agent_config.pop("_resume_at_uuid", None)
     fork_whole_log = agent_config.pop("_fork_session", False)
     if fork_at_uuid or fork_whole_log:
         from agentica.memory.session_log import SessionLog
 
-        source = SessionLog(session_id, work_dir=work_dir, user_id=cli_user_id)
+        source = SessionLog(
+            session_id, base_dir=session_base_dir, work_dir=work_dir, user_id=cli_user_id
+        )
         if source.exists():
             forked = source.fork(_generate_session_id(), at_uuid=fork_at_uuid)
             logger.info(
@@ -900,6 +905,7 @@ def create_agent(
         workspace=workspace,
         user_id=cli_user_id,
         session_id=session_id,
+        session_base_dir=session_base_dir,
         debug=agent_config["debug"],
         enable_experience_capture=agent_config.get("enable_experience_capture", True),
         experience_config=experience_config,

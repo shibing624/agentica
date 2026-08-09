@@ -313,6 +313,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         hooks: Optional[Union[AgentHooks, List[AgentHooks]]] = None,
         # ---- Session persistence ----
         session_id: Optional[str] = None,
+        session_base_dir: Optional[str] = None,
         # ---- Packed config ----
         prompt_config: Optional[PromptConfig] = None,
         tool_config: Optional[ToolConfig] = None,
@@ -360,6 +361,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             enable_tracing=enable_tracing,
             hooks=hooks,
             session_id=session_id,
+            session_base_dir=session_base_dir,
         )
         self._init_packed_config(
             prompt_config=prompt_config,
@@ -468,6 +470,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         enable_tracing: bool,
         hooks: Optional[Union[AgentHooks, List[AgentHooks]]],
         session_id: Optional[str],
+        session_base_dir: Optional[str] = None,
     ) -> None:
         """Initialize execution behavior and session state."""
         self.add_history_to_context = add_history_to_context
@@ -489,8 +492,14 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # project resolves to the same directory across entrypoints. For the
             # CLI work_dir==cwd; for the Web it is the per-session work_dir which
             # differs from the server process cwd.
+            #
+            # session_base_dir pins storage to a directory the caller already
+            # knows. Resuming a session from a different directory needs it: the
+            # transcript must keep growing where it was written, even though the
+            # agent now works somewhere else.
             self._session_log = SessionLog(
                 session_id=session_id,
+                base_dir=session_base_dir,
                 work_dir=self.work_dir,
                 user_id=self.user_id,
             )

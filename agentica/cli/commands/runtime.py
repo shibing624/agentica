@@ -355,8 +355,11 @@ def _cmd_fork(ctx: CommandContext, cmd_args: str = ""):
             f"everything after it; restored {runs_built} runs into context "
             f"({display_stats.tool_result_count} tool results collapsed)[/green]"
         )
-    con.print(f"  [dim]Forked from {source_session_id} — resume it any time with "
-              f"/resume {source_session_id}[/dim]")
+    con.print(
+        f"  [dim]Forked from {source_session_id} — resume it any time with "
+        f"`/resume {source_session_id}` here, or `agentica resume {source_session_id}` "
+        f"from a shell[/dim]"
+    )
 
     goal_manager = None
     if current_agent._session_log is not None:

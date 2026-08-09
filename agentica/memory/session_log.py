@@ -19,6 +19,7 @@ JSONL format (CC-aligned):
     {"type":"assistant","uuid":"...","parent_uuid":"<prev>","timestamp":"...","content":"...","model":"gpt-4o","usage":{...}}
     {"type":"compact_boundary","uuid":"...","parent_uuid":null,"timestamp":"...","summary":"..."}
 """
+import glob
 import json
 import os
 from datetime import datetime, timezone
@@ -38,6 +39,13 @@ class _ToDict(Protocol):
 
 # Large file optimization threshold (5MB, same as CC's SKIP_PRECOMPACT_THRESHOLD)
 _LARGE_FILE_THRESHOLD = 5 * 1024 * 1024
+
+# Marker file written once per project directory. ``sanitize_path`` hashes the
+# work_dir into the directory name and cannot be reversed, so without this the
+# only way to learn which project a stored session belongs to is to parse a
+# transcript. Keeping it at the directory level (rather than per session) means
+# one small file per project instead of one per session.
+_PROJECT_MARKER = ".project.json"
 
 
 def _get_default_base_dir(
@@ -95,13 +103,21 @@ class SessionLog:
         # base_dir wins when given (explicit override). Otherwise derive it from
         # the project (work_dir) + user_id so CLI and Web scope sessions the
         # same way for the same project + user.
-        self.base_dir = (
-            Path(base_dir) if base_dir
-            else Path(_get_default_base_dir(work_dir=work_dir, user_id=user_id))
-        )
+        if base_dir:
+            self.base_dir = Path(base_dir)
+            # An explicit base_dir carries no project identity of its own, so
+            # only stamp the marker when the caller also named the work_dir.
+            project_work_dir = work_dir
+        else:
+            project_work_dir = work_dir or os.getcwd()
+            self.base_dir = Path(
+                _get_default_base_dir(work_dir=project_work_dir, user_id=user_id)
+            )
         self.path = self.base_dir / f"{session_id}.jsonl"
         self.meta_path = self.base_dir / f"{session_id}.meta.json"
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if project_work_dir:
+            self._ensure_project_marker(self.base_dir, project_work_dir)
         self._last_uuid: Optional[str] = None
         self._cwd: str = os.getcwd()
         self._version: str = self._get_version()
@@ -455,6 +471,34 @@ class SessionLog:
     # ------------------------------------------------------------------
 
     @classmethod
+    def _session_entry(cls, path: Path, work_dir: Optional[str]) -> Dict[str, Any]:
+        """Build one listing row for a session transcript."""
+        stat = path.stat()
+        last_timestamp = None
+        try:
+            with open(path, "rb") as fh:
+                fh.seek(max(0, stat.st_size - 4096))
+                tail = fh.read().decode("utf-8", errors="replace")
+                lines = tail.strip().splitlines()
+                if lines:
+                    last_timestamp = json.loads(lines[-1]).get("timestamp")
+        except Exception:
+            pass
+
+        meta_path = path.parent / f"{path.stem}.meta.json"
+        return {
+            "session_id": path.stem,
+            "path": str(path),
+            "base_dir": str(path.parent),
+            "work_dir": work_dir,
+            "size_bytes": stat.st_size,
+            "mtime": stat.st_mtime,
+            "last_timestamp": last_timestamp,
+            "name": cls._read_meta_name(meta_path),
+            "archived": cls._read_meta_archived(meta_path),
+        }
+
+    @classmethod
     def list_sessions(
         cls,
         base_dir: Optional[str] = None,
@@ -476,33 +520,121 @@ class SessionLog:
         if not base.exists():
             return []
 
-        sessions = []
-        for f in sorted(base.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
-            session_id = f.stem
-            stat = f.stat()
-            last_timestamp = None
+        project_dir = work_dir or cls.project_work_dir(base)
+        return [
+            cls._session_entry(f, project_dir)
+            for f in sorted(base.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        ]
+
+    # ------------------------------------------------------------------
+    # Cross-project lookup (resuming a session started in another directory)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _ensure_project_marker(base_dir: Path, work_dir: str) -> None:
+        """Record which work_dir a project directory represents (write once).
+
+        Best-effort: a session that cannot write its marker still works, it just
+        falls back to the slower transcript-derived lookup below.
+        """
+        marker = base_dir / _PROJECT_MARKER
+        if marker.exists():
+            return
+        try:
+            payload = {"work_dir": str(Path(work_dir).expanduser()), "created_at": _iso_now()}
+            tmp = marker.with_suffix(marker.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False, indent=2)
+            os.replace(tmp, marker)
+        except OSError as e:
+            logger.debug(f"Could not write project marker in {base_dir}: {e}")
+
+    @classmethod
+    def project_work_dir(cls, base_dir: Any) -> Optional[str]:
+        """Return the work_dir a project directory belongs to, or ``None``.
+
+        Reads the marker written by :meth:`_ensure_project_marker`. Directories
+        created before markers existed fall back to the ``cwd`` stamped on the
+        first entry of the newest transcript.
+        """
+        base = Path(base_dir)
+        recorded = cls._read_meta(base / _PROJECT_MARKER).get("work_dir")
+        if isinstance(recorded, str) and recorded:
+            return recorded
+        try:
+            transcripts = sorted(
+                base.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True
+            )
+        except OSError:
+            return None
+        for f in transcripts:
             try:
-                with open(f, "rb") as fh:
-                    fh.seek(max(0, stat.st_size - 4096))
-                    tail = fh.read().decode("utf-8", errors="replace")
-                    lines = tail.strip().splitlines()
-                    if lines:
-                        last_entry = json.loads(lines[-1])
-                        last_timestamp = last_entry.get("timestamp")
-            except Exception:
-                pass
+                with open(f, "r", encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if not line.strip():
+                            continue
+                        cwd = json.loads(line).get("cwd")
+                        if isinstance(cwd, str) and cwd:
+                            return cwd
+                        break
+            except (OSError, json.JSONDecodeError):
+                continue
+        return None
 
-            meta_path = base / f"{session_id}.meta.json"
-            sessions.append({
-                "session_id": session_id,
-                "path": str(f),
-                "size_bytes": stat.st_size,
-                "last_timestamp": last_timestamp,
-                "name": cls._read_meta_name(meta_path),
-                "archived": cls._read_meta_archived(meta_path),
-            })
+    @classmethod
+    def list_projects(cls, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List every project directory holding sessions for ``user_id``."""
+        from agentica.compression.tool_result_storage import get_projects_root
 
-        return sessions
+        root = Path(get_projects_root(user_id))
+        if not root.is_dir():
+            return []
+        projects = []
+        for d in root.iterdir():
+            if not d.is_dir():
+                continue
+            projects.append({"base_dir": str(d), "work_dir": cls.project_work_dir(d)})
+        return projects
+
+    @classmethod
+    def find_sessions(
+        cls,
+        needle: str,
+        user_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Find sessions whose id starts with ``needle`` across all projects.
+
+        This is what makes a session resumable from a directory other than the
+        one it was started in. Results are newest-first and carry the
+        ``work_dir`` of the project they live in so the caller can offer to
+        switch to it.
+        """
+        from agentica.compression.tool_result_storage import get_projects_root
+
+        needle = (needle or "").split("...", 1)[0].strip()
+        if not needle:
+            return []
+        root = Path(get_projects_root(user_id))
+        if not root.is_dir():
+            return []
+
+        matches: List[Dict[str, Any]] = []
+        for base in root.iterdir():
+            if not base.is_dir():
+                continue
+            try:
+                # glob.escape keeps an id prefix literal; resolving the project's
+                # work_dir is deferred until something actually matched, so a
+                # store with hundreds of projects costs one directory scan each.
+                found = list(base.glob(f"{glob.escape(needle)}*.jsonl"))
+            except OSError:
+                continue
+            if not found:
+                continue
+            work_dir = cls.project_work_dir(base)
+            matches.extend(cls._session_entry(f, work_dir) for f in found)
+        matches.sort(key=lambda s: s["mtime"], reverse=True)
+        return matches
 
     @classmethod
     def session_preview(cls, path: str, max_chars: int = 200) -> Dict[str, Any]:

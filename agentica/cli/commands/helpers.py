@@ -40,15 +40,9 @@ def _sanitize_history_for_model_switch(agent) -> None:
     Both ``wm.runs[].response.messages`` (the source for future prompts) and
     the flat ``wm.messages`` list are sanitised.
     """
-    from agentica.agent.history_filter import strip_all_tool_artifacts
+    from agentica.agent.history_filter import strip_tool_artifacts_from_memory
 
-    wm = agent.working_memory
-    for run in wm.runs:
-        if not run.response or not run.response.messages:
-            continue
-        run.response.messages = strip_all_tool_artifacts(run.response.messages, drop_system=True)
-    if getattr(wm, "messages", None):
-        wm.messages = strip_all_tool_artifacts(wm.messages, drop_system=False)
+    strip_tool_artifacts_from_memory(agent.working_memory)
 
 
 
