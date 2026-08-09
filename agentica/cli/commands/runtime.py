@@ -22,7 +22,7 @@ from agentica.cli.display import (
 )
 from agentica.goals import GoalManager, is_goal_generated_prompt
 from agentica.memory.models import AgentRun
-from agentica.peers import PeerMessageRefused, mailbox_dir
+from agentica.peers import PeerMessageRefused
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 
@@ -443,7 +443,6 @@ def _cmd_list_agents(ctx: CommandContext, cmd_args: str = ""):
 
     con.print(f"  This session: [cyan]{peers.name}[/cyan] [dim]peer={peers.peer_id}[/dim]")
     _print_peer_details(con, peers.info, indent="  ")
-    con.print(f"  [dim]mailbox: {mailbox_dir(peers.peer_id)}[/dim]")
     pending = peers.unread_count()
     if pending:
         con.print(f"  [yellow]{pending} message(s) waiting to be read[/yellow]")

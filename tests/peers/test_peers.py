@@ -386,7 +386,31 @@ class TestPeerMessagingTool:
         assert "11111111-2222-3333-4444-555555555555" in out
         assert "session_log:" in out
         assert "MEMORY.md" in out
+        assert "mailbox:" in out
         assert "Address a peer by name" in out
+
+    def test_list_agents_fills_paths_when_peer_omitted_them(self):
+        """Older live records without project/log/workspace still get a full listing."""
+        me = _session("me")
+        other = PeerSession(
+            name="legacy",
+            cwd="/repos/legacy",
+            session_id="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        )
+        # Simulate a sparse record: only the fields an older agentica wrote.
+        other.info.project_dir = None
+        other.info.workspace_path = None
+        other.info.memory_path = None
+        other.info.log_file = None
+        other.publish(task="still alive")
+
+        out = asyncio.run(PeerMessagingTool(me).list_agents())
+
+        assert "project:" in out
+        assert "session_log:" in out
+        assert "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl" in out
+        assert "mailbox:" in out
+        assert other.peer_id in out
 
     def test_list_agents_is_multi_line_not_a_single_crammed_row(self):
         me = _session("me")

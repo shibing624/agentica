@@ -128,6 +128,28 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _guess_cli_log_file(pid: int) -> Optional[str]:
+    """Best-effort CLI log path for a live peer that did not publish ``log_file``.
+
+    CLI logs are ``~/.agentica/logs/YYYYMMDD-<pid>.log``. When the other
+    process is an older agentica that never advertised the path, the pid on
+    its live record is still enough to find the file on the shared machine.
+    """
+    if pid <= 0:
+        return None
+    from agentica.config import AGENTICA_HOME
+
+    log_dir = Path(AGENTICA_HOME) / "logs"
+    if not log_dir.is_dir():
+        return None
+    matches = sorted(
+        log_dir.glob(f"*-{pid}.log"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return str(matches[0]) if matches else None
+
+
 @dataclass
 class PeerInfo:
     """One live session, as published for other sessions to discover."""
@@ -164,15 +186,28 @@ class PeerInfo:
     @property
     def project_slug(self) -> Optional[str]:
         """Basename of ``project_dir`` (hash-suffixed, unique per cwd)."""
-        if not self.project_dir:
+        resolved = self.resolved_project_dir
+        if not resolved:
             return None
-        return Path(self.project_dir).name
+        return Path(resolved).name
+
+    @property
+    def resolved_project_dir(self) -> Optional[str]:
+        """Published ``project_dir``, or the deterministic path for ``cwd``."""
+        if self.project_dir:
+            return self.project_dir
+        if not self.cwd:
+            return None
+        from agentica.project_store import project_base_dir
+
+        return project_base_dir(self.cwd)
 
     @property
     def session_log_path(self) -> Optional[str]:
-        if not self.project_dir or not self.session_id:
+        project = self.resolved_project_dir
+        if not project or not self.session_id:
             return None
-        return str(Path(self.project_dir) / f"{self.session_id}.jsonl")
+        return str(Path(project) / f"{self.session_id}.jsonl")
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -201,22 +236,42 @@ class PeerInfo:
         The single source for both the plain text a model reads via
         ``list_agents`` and the styled ``/list-agents`` listing — the two
         drifted apart while they each hand-rolled the same field list.
+
+        Self and other peers use the same field set. When a live record is
+        from an older agentica that omitted paths, fill what is deterministic
+        on this machine (project from cwd, session_log, mailbox from peer_id,
+        CLI log from pid) so ``/list-agents`` is not a hollow listing.
         """
+        from agentica.config import AGENTICA_WORKSPACE_DIR
+
+        project = self.resolved_project_dir
+        session_log = self.session_log_path
+        log_file = self.log_file or _guess_cli_log_file(self.pid)
+        workspace = self.workspace_path
+        if not workspace:
+            default_ws = os.path.expanduser(AGENTICA_WORKSPACE_DIR)
+            if Path(default_ws).is_dir():
+                workspace = default_ws
+        memory = self.memory_path
+        if not memory and workspace:
+            memory = str(Path(workspace) / "users" / "default" / "MEMORY.md")
+
         rows: List[Tuple[str, str]] = []
         if self.session_id:
             rows.append(("session_id", self.session_id))
         rows.append(("cwd", self.cwd))
-        if self.project_dir:
-            rows.append(("project", self.project_dir))
-        if self.session_log_path:
-            rows.append(("session_log", self.session_log_path))
-        if self.log_file:
+        if project:
+            rows.append(("project", project))
+        if session_log:
+            rows.append(("session_log", session_log))
+        if log_file:
             label = f"log_file ({self.log_level})" if self.log_level else "log_file"
-            rows.append((label, self.log_file))
-        if self.workspace_path:
-            rows.append(("workspace", self.workspace_path))
-        if self.memory_path:
-            rows.append(("memory", self.memory_path))
+            rows.append((label, log_file))
+        if workspace:
+            rows.append(("workspace", workspace))
+        if memory:
+            rows.append(("memory", memory))
+        rows.append(("mailbox", str(mailbox_dir(self.peer_id))))
         if self.git_branch:
             rows.append(("branch", self.git_branch))
         if self.task:
