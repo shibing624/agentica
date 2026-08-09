@@ -467,6 +467,50 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         self.assertIs(event["is_main_agent"], False)
 
 
+class TestRunnerEvictionGate(unittest.TestCase):
+    """Stage 3 must only evict tool results when the context is actually tight."""
+
+    def _agent_and_messages(self):
+        from agentica.agent import Agent
+        from agentica.model.openai import OpenAIChat
+
+        model = OpenAIChat(id="gpt-4o", api_key="fake_openai_key")
+        agent = Agent(model=model)
+        messages = [Message(role="user", content="analyse these files")]
+        for i in range(8):
+            messages.append(Message(role="assistant", content="calling tools"))
+            body = " ".join(f"b{i}-token{w}" for w in range(200))
+            messages.append(Message(role="tool", content=body))
+        return agent, model, messages
+
+    def _evicted(self, messages):
+        return sum(1 for m in messages if m.role == "tool" and m._evicted)
+
+    def test_roomy_context_keeps_every_tool_result(self):
+        from agentica.runner import Runner
+
+        agent, model, messages = self._agent_and_messages()
+        model.context_window = 200_000
+
+        asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+
+        self.assertEqual(self._evicted(messages), 0)
+
+    def test_tight_context_evicts_the_oldest_results(self):
+        from agentica.runner import Runner
+
+        agent, model, messages = self._agent_and_messages()
+        # 8 results of ~800 tokens each: ~6.4k occupied, so an 8k window puts
+        # the request past the 70% trigger.
+        model.context_window = 8_000
+
+        asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
+
+        evicted = self._evicted(messages)
+        self.assertGreater(evicted, 0)
+        self.assertLess(evicted, 7, "must stop at target and spare the trailing batch")
+
+
 class TestRunnerNativeCompaction(unittest.TestCase):
     def _agent(self):
         from agentica.agent import Agent
@@ -500,7 +544,7 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model.compact_context = AsyncMock(return_value=result)
 
         with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.compress.micro_compact") as micro, \
+             patch("agentica.runner.compress.evict_tool_results") as micro, \
              patch.object(cm, "should_compress") as local_rule, \
              patch.object(cm, "auto_compact", new_callable=AsyncMock) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
@@ -519,12 +563,14 @@ class TestRunnerNativeCompaction(unittest.TestCase):
         model.compact_context = AsyncMock(side_effect=RuntimeError("404 compact unsupported"))
 
         with patch.object(cm, "should_native_compact", return_value=True), \
-             patch("agentica.runner.compress.micro_compact", return_value=0) as micro, \
+             patch("agentica.runner.compress.evict_tool_results", return_value=0) as micro, \
              patch.object(cm, "should_compress", return_value=False), \
              patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 
-        micro.assert_called_once_with(messages)
+        micro.assert_called_once()
+        self.assertIs(micro.call_args.args[0], messages)
+        self.assertEqual(micro.call_args.kwargs["context_window"], model.context_window)
         local_auto.assert_awaited_once()
         self.assertIsNone(messages[-1].provider_checkpoint)
 

@@ -16,7 +16,7 @@ from typing import (
 
 
 from agentica.utils.log import logger
-from agentica.compression.micro import micro_compact
+from agentica.compression.evict import evict_tool_results
 from agentica.compression.tool_result_storage import enforce_tool_result_budget
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
@@ -88,7 +88,7 @@ class CompressMixin:
         Stages ordered to preserve provider-native state when available:
           Stage 1 - Tool result budget (free, O(n))
           Stage 2 - Provider-native compact (Responses API)
-          Stage 3 - Micro-compact (free, O(n))
+          Stage 3 - Tool-result eviction (free, O(n))
           Stage 4 - Rule-based compress (free, O(n))
           Stage 5 - Auto-compact (costly, portable LLM summarisation)
           Stage 6 (reactive compact) is handled in _call_with_retry on API error.
@@ -173,17 +173,26 @@ class CompressMixin:
                     )
                 return
 
-        # Stage 3: micro-compact (clear old tool results, free)
-        n = micro_compact(messages)
+        # Stage 3: evict old tool results (free). Gated on real context
+        # pressure: below the threshold there is nothing to buy by dropping a
+        # result the window had room for, and the model pays for it by
+        # re-running the tool.
+        _window = model.context_window if isinstance(model.context_window, int) else 0
+        n = evict_tool_results(
+            messages,
+            context_tokens=count_tokens(messages, model.tools, model.id) if _window else 0,
+            context_window=_window,
+            model_id=model.id,
+        )
         if n:
-            logger.debug(f"Stage 3 (micro-compact): cleared {n} old tool result(s)")
+            logger.debug(f"Stage 3 (evict): evicted {n} old tool result(s)")
             if cb is not None:
                 cb(
                     {
-                        "type": "compact.micro",
+                        "type": "compact.evict",
                         "agent_name": agent_name,
                         "is_main_agent": is_main_agent,
-                        "cleared": n,
+                        "evicted": n,
                     }
                 )
 

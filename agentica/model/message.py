@@ -113,8 +113,9 @@ class Message(BaseModel):
     # Compressed content for tool results (used by CompressionManager)
     compressed_content: Optional[str] = None
 
-    # Flag set by micro_compact() to avoid re-processing the same tool result
-    _micro_compacted: bool = False
+    # Set by evict_tool_results() so a placeholder is never re-measured as if
+    # it still held the original output.
+    _evicted: bool = False
 
     # The Unix timestamp the message was created.
     created_at: int = Field(default_factory=lambda: int(time()))

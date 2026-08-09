@@ -77,13 +77,13 @@ class TestCLIStreamDisplay(unittest.TestCase):
         self.assertLess(len(sep_lines[-1]), 60, "separator must be fixed-width, not stretch to full console width")
 
 
-    def test_stream_display_manager_suppresses_micro_compact(self):
+    def test_stream_display_manager_suppresses_evict_events(self):
         from agentica.cli.display import StreamDisplayManager
 
         fake = MagicMock()
         fake.width = 80
         dm = StreamDisplayManager(fake)
-        dm.handle_event({"type": "compact.micro", "agent_name": "Agent", "cleared": 3})
+        dm.handle_event({"type": "compact.evict", "agent_name": "Agent", "evicted": 3})
         fake.print.assert_not_called()
 
 

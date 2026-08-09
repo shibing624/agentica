@@ -4,6 +4,11 @@
 @description: Compression module for managing context compression.
 """
 from agentica.compression.manager import CompressionManager
+from agentica.compression.evict import (
+    evict_tool_results,
+    EVICT_THRESHOLD_RATIO,
+    EVICT_TARGET_RATIO,
+)
 from agentica.compression.tool_result_storage import (
     maybe_persist_result,
     enforce_tool_result_budget,
@@ -18,6 +23,9 @@ from agentica.compression.tool_result_classification import (
 
 __all__ = [
     "CompressionManager",
+    "evict_tool_results",
+    "EVICT_THRESHOLD_RATIO",
+    "EVICT_TARGET_RATIO",
     "maybe_persist_result",
     "enforce_tool_result_budget",
     "DEFAULT_MAX_RESULT_SIZE_CHARS",

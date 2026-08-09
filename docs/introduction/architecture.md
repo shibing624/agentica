@@ -66,7 +66,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 from agentica.runner import Runner
 from agentica.cli.interactive import run_interactive
 from agentica.cli.commands.runtime import _cmd_steer   # 私有命令实现走子模块
-from agentica.runner.compress import micro_compact     # 压缩逻辑不在 runner 包根
+from agentica.runner.compress import evict_tool_results  # 压缩逻辑不在 runner 包根
 ```
 
 Agent 通过 Mixin 组合获得各类能力，每个 Mixin 只是方法容器，**状态全部存在 Agent 的 dataclass fields 上**：

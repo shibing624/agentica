@@ -9,7 +9,7 @@ Use plain Agent for SDK integrations that need the smallest stable surface.
 DeepAgent enables the product defaults users expect from an unattended assistant:
 - 40+ built-in tools (file ops, web search, execute, subagent task, todos)
 - Runner agentic loop: LLM ↔ tool-call auto-loop with multi-turn reasoning
-- 5-stage compression pipeline (tool-result budget → micro-compact →
+- 5-stage compression pipeline (tool-result budget → tool-result eviction →
   rule-based → auto-compact → reactive compact)
 - Death spiral detection + cost tracking + cost budget
 - Context overflow handling (FIFO message truncation at 80%)

@@ -1,0 +1,128 @@
+# -*- coding: utf-8 -*-
+"""
+@description: Tool-result eviction — the free, non-destructive compression pass.
+
+Runs before every LLM call in the tool loop. It answers one question: is the
+request too big, and if so, what is the cheapest thing to throw away?
+
+Two rules, both learned from a real re-read loop:
+
+* **Only act under pressure.** Evicting a result the window had room for is a
+  pure loss — the model just re-runs the tool to get it back. Nothing happens
+  below ``EVICT_THRESHOLD_RATIO``.
+* **Evict oldest-first, only down to a target.** There is deliberately no
+  "keep the last N results" knob: any fixed count loses to a batch of N+1
+  parallel calls, which is exactly how a batch used to lose its first result
+  before the model had ever seen it. Recent results survive because eviction
+  stops once the request is small enough to reach them.
+
+Evicted content is replaced by a placeholder naming the call, so the model can
+re-issue it. It is deliberately *not* copied to disk first: recovering from a
+spill file costs the same one tool call as re-running the original, and for a
+file read the original path holds fresher content than the snapshot would.
+"""
+from typing import List, TYPE_CHECKING
+
+from agentica.utils.tokens import count_message_tokens
+
+if TYPE_CHECKING:
+    from agentica.model.message import Message
+
+# Occupancy at which eviction starts, as a fraction of the context window.
+EVICT_THRESHOLD_RATIO = 0.7
+
+# Occupancy eviction aims to reach. Strictly below the threshold so one pass
+# buys several turns of headroom instead of re-triggering every turn.
+EVICT_TARGET_RATIO = 0.5
+
+# Cap on the rendered call arguments inside a placeholder.
+_MAX_CALL_SIGNATURE_CHARS = 120
+
+_EVICTED = "Tool result evicted to free context"
+
+
+def _last_batch_start(messages: "List[Message]") -> int:
+    """Index where the trailing run of tool results begins.
+
+    The pipeline runs immediately before a model call, so that trailing run is
+    the batch the model has not seen yet. Evicting from it guarantees a re-run,
+    and if the request is still too big without it, the answer is summarisation
+    rather than throwing away the turn's own evidence.
+    """
+    i = len(messages)
+    while i > 0 and messages[i - 1].role == "tool":
+        i -= 1
+    return i
+
+
+def _placeholder(msg: "Message") -> str:
+    """Name the call that produced the evicted result so it can be re-issued."""
+    if not msg.tool_name:
+        return f"[{_EVICTED}.]"
+    args = msg.tool_args
+    if isinstance(args, dict):
+        rendered = ", ".join(f"{k}={v!r}" for k, v in args.items())
+    elif args:
+        rendered = str(args)
+    else:
+        rendered = ""
+    if len(rendered) > _MAX_CALL_SIGNATURE_CHARS:
+        rendered = rendered[:_MAX_CALL_SIGNATURE_CHARS - 3] + "..."
+    return f"[{_EVICTED}: {msg.tool_name}({rendered}). Re-run the call if you still need it.]"
+
+
+def evict_tool_results(
+    messages: "List[Message]",
+    *,
+    context_tokens: int,
+    context_window: int,
+    model_id: str = "gpt-4o",
+) -> int:
+    """Evict the oldest tool results until the request is back under target.
+
+    Args:
+        messages:       Full message list for the current turn (mutated in place).
+        context_tokens: Tokens the request currently occupies.
+        context_window: Model context window. Zero disables eviction — without a
+                        window there is no way to tell pressure from comfort.
+        model_id:       Tokenizer selection for measuring what each eviction saves.
+
+    Returns:
+        Number of messages whose content was replaced.
+    """
+    if context_window <= 0:
+        return 0
+    if context_tokens < context_window * EVICT_THRESHOLD_RATIO:
+        return 0
+
+    must_save = context_tokens - int(context_window * EVICT_TARGET_RATIO)
+    if must_save <= 0:
+        return 0
+
+    cutoff = _last_batch_start(messages)
+    saved = 0
+    evicted = 0
+    for msg in messages[:cutoff]:
+        if msg.role != "tool" or msg._evicted:
+            continue
+        content = msg.content
+        if content is None:
+            continue
+        content_str = content if isinstance(content, str) else str(content)
+        if "<persisted-output>" in content_str:
+            # Already bounded by the tool-result budget, and the path it carries
+            # is the only handle on output too large to re-read into context.
+            continue
+        placeholder = _placeholder(msg)
+        if len(placeholder) >= len(content_str):
+            continue
+
+        before = count_message_tokens(msg, model_id)
+        msg.content = placeholder
+        msg._evicted = True
+        saved += before - count_message_tokens(msg, model_id)
+        evicted += 1
+        if saved >= must_save:
+            break
+
+    return evicted

@@ -1061,10 +1061,10 @@ class StreamDisplayManager:
                 )
 
     def _handle_compact_event(self, et: str, event: dict) -> None:
-        # Micro-compact is an expected per-turn maintenance pass and fires too
-        # frequently to be useful in the CLI. Keep it silent; surface only the
-        # heavier compaction stages that change conversation structure.
-        if et == "compact.micro":
+        # Eviction only replaces old tool-result bodies and leaves the call
+        # visible in the transcript. Keep it silent; surface only the heavier
+        # compaction stages that change conversation structure.
+        if et == "compact.evict":
             return
 
         is_main_agent = event.get("is_main_agent") is True

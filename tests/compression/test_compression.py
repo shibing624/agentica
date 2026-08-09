@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Tests for agentica.compression — micro-compact, tool result storage, compression manager."""
+"""Tests for agentica.compression — eviction, tool result storage, compression manager."""
 import asyncio
 import json
 import os
@@ -13,79 +13,157 @@ from agentica.run_response import RunResponse
 
 
 # ===========================================================================
-# micro_compact tests
+# evict_tool_results tests
 # ===========================================================================
 
-class TestMicroCompact(unittest.TestCase):
-    """Tests for agentica.compression.micro.micro_compact."""
+class TestEvictToolResults(unittest.TestCase):
+    """Tests for agentica.compression.evict.evict_tool_results.
 
-    def _make_tool_msg(self, content: str, compacted: bool = False) -> Message:
-        msg = Message(role="tool", content=content, tool_call_id="tc_1")
-        msg._micro_compacted = compacted
-        return msg
+    Messages are laid out the way the runner really builds them: each parallel
+    tool round is preceded by the assistant message that requested it, and the
+    list ends on the round the model has not seen yet.
+    """
 
-    def test_keeps_recent_messages_untouched(self):
-        from agentica.compression.micro import micro_compact, DEFAULT_KEEP_RECENT
-        msgs = [
-            Message(role="user", content="hi"),
-        ] + [self._make_tool_msg(f"result {'x' * 100}") for _ in range(DEFAULT_KEEP_RECENT)]
-        count = micro_compact(msgs)
-        self.assertEqual(count, 0, "Should not compact when tool msgs <= keep_recent")
+    WINDOW = 10_000
+    OVER_THRESHOLD = 9_000  # 90% — well past the 70% trigger
+    UNDER_THRESHOLD = 3_000  # 30% — nothing to buy
 
-    def test_compacts_oldest_tool_results(self):
-        from agentica.compression.micro import micro_compact, MICRO_COMPACT_PLACEHOLDER
-        msgs = [
-            Message(role="user", content="hi"),
-            self._make_tool_msg("A" * 200),  # old → should be compacted
-            self._make_tool_msg("B" * 200),  # old → should be compacted
-        ] + [self._make_tool_msg(f"C{'x' * 100}") for _ in range(5)]  # recent 5 → kept
-        count = micro_compact(msgs, keep_recent=5)
-        self.assertEqual(count, 2)
-        self.assertEqual(msgs[1].content, MICRO_COMPACT_PLACEHOLDER)
-        self.assertEqual(msgs[2].content, MICRO_COMPACT_PLACEHOLDER)
-        # Recent 5 untouched
-        for m in msgs[3:]:
-            self.assertNotEqual(m.content, MICRO_COMPACT_PLACEHOLDER)
+    def _body(self, tag, words=200):
+        """~1k tokens of non-repeating text, so evictions save measurable tokens."""
+        return " ".join(f"{tag}-token{i}" for i in range(words))
 
-    def test_skips_short_content(self):
-        from agentica.compression.micro import micro_compact, _MIN_CONTENT_LEN
-        msgs = [
-            Message(role="user", content="hi"),
-            self._make_tool_msg("short"),  # < _MIN_CONTENT_LEN → skip
-        ] + [self._make_tool_msg(f"x{'y' * 100}") for _ in range(5)]
-        count = micro_compact(msgs, keep_recent=5)
-        self.assertEqual(count, 0, "Short content should be skipped")
-        self.assertEqual(msgs[1].content, "short")
+    def _batch(self, contents):
+        msgs = [Message(role="assistant", content="calling tools")]
+        for content in contents:
+            msgs.append(Message(role="tool", content=content))
+        return msgs
 
-    def test_skips_already_compacted(self):
-        from agentica.compression.micro import micro_compact
-        msgs = [
-            Message(role="user", content="hi"),
-            self._make_tool_msg("A" * 200, compacted=True),  # already compacted
-        ] + [self._make_tool_msg(f"B{'x' * 100}") for _ in range(5)]
-        count = micro_compact(msgs, keep_recent=5)
-        self.assertEqual(count, 0, "Already compacted messages should be skipped")
+    def _conversation(self, *batch_sizes):
+        msgs = [Message(role="user", content="hi")]
+        for b, size in enumerate(batch_sizes):
+            msgs += self._batch([self._body(f"b{b}r{i}") for i in range(size)])
+        return msgs
 
-    def test_marks_compacted_flag(self):
-        from agentica.compression.micro import micro_compact
-        msgs = [
-            Message(role="user", content="hi"),
-            self._make_tool_msg("A" * 200),
-        ] + [self._make_tool_msg(f"B{'x' * 100}") for _ in range(5)]
-        micro_compact(msgs, keep_recent=5)
-        self.assertTrue(msgs[1]._micro_compacted)
+    def _tools(self, msgs):
+        return [m for m in msgs if m.role == "tool"]
 
-    def test_compacts_oldest_beyond_keep_recent(self):
-        from agentica.compression.micro import micro_compact
-        messages = [
-            Message(role="tool", content="old " + ("x" * 100), tool_call_id="old"),
-        ] + [
-            Message(role="tool", content=f"recent {i}" + ("x" * 100), tool_call_id=str(i))
-            for i in range(5)
-        ]
-        count = micro_compact(messages)
-        self.assertEqual(count, 1)
-        self.assertTrue(messages[0]._micro_compacted)
+    def test_gate_skips_when_context_is_roomy(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(*([1] * 8))
+        count = evict_tool_results(
+            msgs, context_tokens=self.UNDER_THRESHOLD, context_window=self.WINDOW,
+        )
+        self.assertEqual(count, 0, "Nothing to buy while the window has room")
+        self.assertFalse(any(m._evicted for m in self._tools(msgs)))
+
+    def test_no_context_window_disables_eviction(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(*([1] * 8))
+        count = evict_tool_results(msgs, context_tokens=9_000, context_window=0)
+        self.assertEqual(count, 0)
+
+    def test_evicts_oldest_first_and_stops_at_target(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(*([1] * 8))
+
+        count = evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        tools = self._tools(msgs)
+        self.assertGreater(count, 0)
+        self.assertLess(count, len(tools) - 1, "must stop at target, not evict everything")
+        # Evicted results form a prefix: recency decides what survives.
+        flags = [m._evicted for m in tools]
+        self.assertEqual(flags, sorted(flags, reverse=True))
+        self.assertEqual(count, sum(flags))
+
+    def test_never_evicts_the_unseen_trailing_batch(self):
+        """The regression: a 6-call round lost its first result before it was sent.
+
+        A fixed "keep the last N results" budget always loses to a batch of
+        N+1, so the model re-issued the same reads forever. Eviction now
+        excludes the trailing batch outright, even under extreme pressure.
+        """
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(6)
+
+        count = evict_tool_results(
+            msgs, context_tokens=1_000_000, context_window=self.WINDOW,
+        )
+
+        self.assertEqual(count, 0)
+        self.assertFalse(any(m._evicted for m in self._tools(msgs)))
+
+    def test_extreme_pressure_still_spares_the_trailing_batch(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(2, 2, 2, 6)
+
+        evict_tool_results(msgs, context_tokens=1_000_000, context_window=self.WINDOW)
+
+        tools = self._tools(msgs)
+        self.assertTrue(all(m._evicted for m in tools[:6]), "older rounds go first")
+        self.assertFalse(any(m._evicted for m in tools[6:]), "current round survives")
+
+    def test_skips_already_evicted(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = self._conversation(*([1] * 8))
+        for msg in self._tools(msgs):
+            msg._evicted = True
+
+        count = evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        self.assertEqual(count, 0)
+
+    def test_skips_content_shorter_than_the_placeholder(self):
+        """Replacing a tiny result would make the request bigger, not smaller."""
+        from agentica.compression.evict import evict_tool_results
+        msgs = [Message(role="user", content="hi")]
+        msgs += self._batch(["ok"])
+        msgs += self._batch([self._body("b1")])
+
+        evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        self.assertEqual(self._tools(msgs)[0].content, "ok")
+
+    def test_skips_results_already_spilled_to_disk(self):
+        """Their path is the only handle on output too large to hold in context."""
+        from agentica.compression.evict import evict_tool_results
+        msgs = [Message(role="user", content="hi")]
+        msgs += self._batch(["<persisted-output>\n" + self._body("big") + "\n</persisted-output>"])
+        msgs += self._batch([self._body("b1")])
+
+        evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        self.assertIn("<persisted-output>", self._tools(msgs)[0].content)
+
+    def test_placeholder_names_the_call_so_it_can_be_re_issued(self):
+        from agentica.compression.evict import evict_tool_results
+        msgs = [Message(role="user", content="hi")]
+        msgs.append(Message(role="assistant", content="calling"))
+        msgs.append(Message(
+            role="tool",
+            content=self._body("old"),
+            tool_call_id="call_old",
+            tool_name="read_file",
+            tool_args={"file_path": "run.sh", "offset": 56},
+        ))
+        msgs += self._batch([self._body("b1")])
+
+        evict_tool_results(
+            msgs, context_tokens=self.OVER_THRESHOLD, context_window=self.WINDOW,
+        )
+
+        placeholder = self._tools(msgs)[0].content
+        self.assertIn("read_file(", placeholder)
+        self.assertIn("run.sh", placeholder)
+        self.assertIn("offset=56", placeholder)
 
 
 # ===========================================================================

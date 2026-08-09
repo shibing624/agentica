@@ -68,7 +68,7 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 08 | [concurrency_safe_tools.py](tools/08_concurrency_safe_tools.py) | 并发安全分流：读工具并行、写工具串行 | `concurrency_safe`, sibling-error 模式 |
 | 09 | [cost_tracker.py](tools/09_cost_tracker.py) | 成本追踪：Token 用量 + USD 成本 | `CostTracker`, `RunResponse.cost_summary` |
 | 10 | [sandbox_config.py](tools/10_sandbox_config.py) | 沙箱配置：路径/命令隔离 | `SandboxConfig`, 路径白名单, 命令黑名单 |
-| 12 | [compression_and_loop.py](tools/12_compression_and_loop.py) | 上下文压缩 + Agent Loop 安全阀 | Micro-compact, Reactive compact, 死循环检测 |
+| 12 | [compression_and_loop.py](tools/12_compression_and_loop.py) | 上下文压缩 + Agent Loop 安全阀 | 工具结果淘汰, Reactive compact, 死循环检测 |
 
 ### 3. Agent 设计模式 (`agent_patterns/`)
 

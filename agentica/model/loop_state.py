@@ -49,7 +49,7 @@ class LoopState:
     # That invalidates the `num_input_messages` prefix boundary the runner uses
     # to slice out "this turn's new messages", so persistence must switch to
     # storing the whole surviving list instead. Content-only compaction (tool
-    # result truncation, micro-compact) leaves the boundary intact and does not
+    # result truncation, tool-result eviction) leaves the boundary intact and does not
     # set this.
     context_collapsed: bool = False
 

@@ -26,7 +26,7 @@ Context Messages
 
 1. 超大工具结果持久化到磁盘。
 2. `OpenAIResponses` 尝试 provider-native compact。
-3. Micro-compact 清理旧工具结果。
+3. 工具结果淘汰：上下文吃紧时淘汰最旧的工具结果。
 4. Rule-based 截断旧结果并丢弃旧轮次。
 5. 本地 LLM summary 压缩为可移植文本。
 6. API 返回 `prompt_too_long` 时强制执行本地 reactive compact 后重试。
