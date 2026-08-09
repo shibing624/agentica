@@ -100,18 +100,52 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         _cmd_compact(ctx)
         return ctx
 
-    def test_rule_based_compact_shrinks_runs_history(self):
+    def _summary(self, agent, text="the summary"):
+        """Stub the one LLM call /compact makes; None means it failed."""
+        cm = agent.tool_config.compression_manager
+        return patch.object(
+            cm, "_summarise_conversation", new_callable=AsyncMock, return_value=text,
+        )
+
+    def test_llm_summary_shrinks_runs_history(self):
         agent = _build_agent(num_runs=5)
         before = asyncio.run(measure_context(agent)).total
 
-        self._run_compact(agent)
+        with self._summary(agent):
+            self._run_compact(agent)
 
         self.assertLess(asyncio.run(measure_context(agent)).total, before)
 
-    def test_rule_based_compact_lowers_status_bar_context(self):
+    def test_llm_summary_lowers_status_bar_context(self):
         agent = _build_agent(num_runs=5)
-        ctx = self._run_compact(agent)
+        with self._summary(agent):
+            ctx = self._run_compact(agent)
         self.assertLess(ctx.tui_state["context_tokens"], 120000)
+
+    def test_failed_summary_leaves_the_conversation_untouched(self):
+        """The rule-based fallback this replaces "succeeded" by clearing the
+        message list — system prompt included — so a failed /compact used to
+        destroy more than it saved. Failing loudly and changing nothing is the
+        only honest outcome."""
+        agent = _build_agent(num_runs=5)
+        agent._session_log = MagicMock()
+        messages_before = list(agent.working_memory.messages)
+        runs_before = len(agent.working_memory.runs)
+        tokens_before = asyncio.run(measure_context(agent)).total
+        console = MagicMock()
+
+        with (
+            self._summary(agent, text=None),
+            patch("agentica.cli.commands.session.get_console", return_value=console),
+        ):
+            self._run_compact(agent)
+
+        self.assertEqual(agent.working_memory.messages, messages_before)
+        self.assertEqual(len(agent.working_memory.runs), runs_before)
+        self.assertEqual(asyncio.run(measure_context(agent)).total, tokens_before)
+        agent._session_log.append_compact_boundary.assert_not_called()
+        rendered = "\n".join(str(call) for call in console.print.call_args_list)
+        self.assertIn("Compaction failed", rendered)
 
     def test_compact_is_noop_on_empty_history(self):
         from agentica import Agent
@@ -170,6 +204,7 @@ class TestCmdCompactShrinksNextRequest(unittest.TestCase):
         console = MagicMock()
 
         with (
+            self._summary(agent),
             patch("agentica.cli.commands.session.get_console", return_value=console),
             patch("agentica.cli.commands.session.logger") as logger,
         ):

@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Tests for Model-layer pre/post tool hooks:
-- _build_pre_tool_hook() injection via update_model()
-- Context overflow handling (context_overflow_threshold) — compress then evict
-- Fast path: feature disabled → hook is None
+Tests for the post-tool hook (todo reminder injection).
+
+There is no pre-tool hook: context-overflow FIFO dropping was a third
+compression layer with its own threshold and its own char/4 token estimate,
+and it now lives nowhere — the Runner's evict → summarise pipeline is the
+only thing that shrinks a request.
+
 All tests mock LLM API keys — no real API calls.
 """
 import asyncio
 import unittest
-from unittest.mock import AsyncMock, MagicMock
 
 from agentica.agent.config import ToolConfig
 from agentica.model.message import Message
@@ -22,106 +24,6 @@ def _make_agent(tool_config=None):
         tool_config=tool_config or ToolConfig(),
     )
 
-
-class TestHookInjection(unittest.TestCase):
-    """_build_pre_tool_hook() must return None or callable based on ToolConfig."""
-
-    def test_disabled_hook_is_none(self):
-        agent = _make_agent(ToolConfig())
-        self.assertIsNone(agent._build_pre_tool_hook())
-
-    def test_overflow_enabled_hook_is_set(self):
-        agent = _make_agent(ToolConfig(context_overflow_threshold=0.8))
-        self.assertIsNotNone(agent._build_pre_tool_hook())
-
-    def test_hook_cleared_on_subsequent_config_change(self):
-        """Switching to disabled config makes _build_pre_tool_hook() return None."""
-        agent = _make_agent(ToolConfig(context_overflow_threshold=0.8))
-        self.assertIsNotNone(agent._build_pre_tool_hook())
-        # Switch to disabled
-        agent.tool_config = ToolConfig()
-        self.assertIsNone(agent._build_pre_tool_hook())
-
-
-class TestContextOverflowHandling(unittest.TestCase):
-    """_build_pre_tool_hook must handle context overflow without dropping system msg."""
-
-    def _make_hook(self, threshold=0.5, window=200):
-        agent = _make_agent(ToolConfig(context_overflow_threshold=threshold))
-        agent.update_model()
-        agent.model.context_window = window
-        hook = agent._build_pre_tool_hook()
-        return hook
-
-    def test_overflow_evicts_oldest_non_system_message(self):
-        hook = self._make_hook(threshold=0.5, window=200)
-        messages = [
-            Message(role="system", content="You are helpful."),
-            Message(role="user", content="A" * 150),
-            Message(role="assistant", content="B" * 150),
-            Message(role="user", content="C" * 150),
-        ]
-        result = asyncio.run(hook(messages, []))
-        self.assertFalse(result, "Overflow handling does not skip tool batch")
-        self.assertLess(len(messages), 4, "At least one message should be dropped")
-
-    def test_system_message_always_preserved(self):
-        hook = self._make_hook(threshold=0.1, window=50)
-        messages = [
-            Message(role="system", content="System prompt."),
-            Message(role="user", content="X" * 200),
-        ]
-        asyncio.run(hook(messages, []))
-        self.assertEqual(messages[0].role, "system")
-
-    def test_no_overflow_no_change(self):
-        hook = self._make_hook(threshold=0.9, window=100000)
-        messages = [
-            Message(role="system", content="System."),
-            Message(role="user", content="short message"),
-        ]
-        original_len = len(messages)
-        asyncio.run(hook(messages, []))
-        self.assertEqual(len(messages), original_len)
-
-    def test_overflow_returns_false_not_true(self):
-        """Context overflow handling does NOT skip the tool batch."""
-        hook = self._make_hook(threshold=0.1, window=10)
-        messages = [
-            Message(role="system", content="Sys"),
-            Message(role="user", content="A" * 50),
-        ]
-        result = asyncio.run(hook(messages, []))
-        self.assertFalse(result)
-
-    def test_eviction_tried_before_dropping_messages(self):
-        """Layer 1 eviction runs first; if it suffices, nothing is dropped.
-
-        Eviction leaves a placeholder naming the call, so the model can re-issue
-        it. Dropping the message loses the turn outright, which is why it is
-        only reached when eviction was not enough.
-        """
-        agent = _make_agent(ToolConfig(context_overflow_threshold=0.5))
-        agent.update_model()
-        agent.model.context_window = 200
-
-        hook = agent._build_pre_tool_hook()
-        messages = [
-            Message(role="system", content="sys"),
-            Message(role="user", content="A" * 200),
-            Message(role="assistant", tool_calls=[{"id": "1", "function": {"name": "read_file"}}]),
-            Message(role="tool", tool_call_id="1", tool_name="read_file",
-                    content=" ".join(f"line{i}" for i in range(200))),
-            Message(role="assistant", content="done"),
-        ]
-        n_before = len(messages)
-
-        result = asyncio.run(hook(messages, []))
-
-        self.assertFalse(result)
-        self.assertTrue(messages[3]._evicted, "the old tool result should be evicted")
-        self.assertIn("read_file(", messages[3].content)
-        self.assertEqual(len(messages), n_before, "Eviction alone should suffice")
 
 class TestPostToolHook(unittest.TestCase):
     """_build_post_tool_hook: None when no TodoTool, set when TodoTool is present."""

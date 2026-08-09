@@ -85,7 +85,6 @@ class DeepAgent(Agent):
 
     Enabled by default:
     - Two-layer compression pipeline (eviction + LLM summarisation)
-    - Context overflow handling at 80% (context_overflow_threshold=0.8)
     - MCP auto-loading from local mcp_config.json/yaml when available
     - Workspace memory with relevance recall (max_memory_entries=10)
     - Conversation auto-archive (auto_archive=True)
@@ -225,7 +224,6 @@ class DeepAgent(Agent):
         if tool_config is None:
             tool_config = ToolConfig(
                 auto_load_mcp=True,
-                context_overflow_threshold=0.8,
                 permission_mode=permission_mode,
             )
         else:

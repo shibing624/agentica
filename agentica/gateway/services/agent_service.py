@@ -306,8 +306,8 @@ class AgentService:
         """Build a new DeepAgent instance (sync, runs in thread).
 
         DeepAgent auto-includes: builtin tools, skills, agentic prompt,
-        compression (context_overflow_threshold=0.8
-        with compress-before-evict), workspace memory (auto_archive +
+        two-layer compression (eviction then LLM summarisation),
+        workspace memory (auto_archive +
         auto_extract_memory + relevance recall), experience capture (tool
         errors / user corrections / success patterns), memory tools.
 

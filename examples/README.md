@@ -86,7 +86,6 @@ asyncio.run(Agent().run('一句话介绍北京').then(print))
 | 08 | [swarm.py](agent_patterns/08_swarm.py) | Swarm 多 Agent 并行/自治协作 | `Swarm`, parallel 模式, autonomous 模式 |
 | 09 | [runtime_config.py](agent_patterns/09_runtime_config.py) | 运行时配置：动态启停工具/技能 | `RunConfig`, `enable_tool`, `disable_tool` |
 | 10 | [subagent_demo.py](agent_patterns/10_subagent_demo.py) | 文件配置驱动的只读子 Agent 委派 | `SubagentRegistry`, `agents/*.md` |
-| 11 | [model_hooks.py](agent_patterns/11_model_hooks.py) | 模型层钩子：上下文溢出保护（先压缩再驱逐） | `context_overflow_threshold` |
 | 12 | [session_resume.py](agent_patterns/12_session_resume.py) | 会话恢复：JSONL 持久化 + 断点续传 | `SessionLog`, `session_id`, compact boundary |
 | 13 | [actor_critic_refine.py](agent_patterns/13_actor_critic_refine.py) | Actor-Critic 精炼：Schema + Agent 多 critic 并行评审 | `refine()`, `SchemaCritic`, `AgentCritic`, `RefineResult` |
 
@@ -340,9 +339,8 @@ for chunk in agent.run_stream_sync("Hello"):
 3. `workflow/01_data_pipeline.py` — 工作流编排
 4. `agent_patterns/10_subagent_demo.py` — 子 Agent 委派
 5. `goal/task_runner.py` — `run_goal()` 多任务循环（tasks.md → 处理 → 写回）
-6. `agent_patterns/11_model_hooks.py` — 模型层保护（溢出/重复检测）
-7. `mcp/01_stdio.py` — MCP 协议集成
-8. `applications/financial_research/main.py` — 6-Agent 金融研究流水线
+6. `mcp/01_stdio.py` — MCP 协议集成
+7. `applications/financial_research/main.py` — 6-Agent 金融研究流水线
 
 ---
 

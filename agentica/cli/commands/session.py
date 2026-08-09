@@ -792,9 +792,11 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
             )
 
     cm = agent.tool_config.compression_manager if agent.tool_config else None
-    if not native_compacted and cm is not None:
+    if not native_compacted:
+        if cm is None:
+            con.print("[red]No compression manager on this agent; nothing to compact with.[/red]")
+            return
         con.print(f"[dim]Compacting {msg_count} messages with LLM summary...[/dim]")
-
         compacted = _run_async_safe(
             cm.auto_compact(
                 messages,
@@ -804,58 +806,23 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
                 custom_instructions=custom_instructions,
             )
         )
-        if compacted:
-            wm.collapse_runs(messages)
-            con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} summary.[/green]")
-        else:
-            con.print("[yellow]Compaction failed. Falling back to rule-based.[/yellow]")
-            _rule_based_compact(agent, messages, msg_count)
-    elif not native_compacted:
-        con.print(f"[dim]Compacting {msg_count} messages (rule-based)...[/dim]")
-        _rule_based_compact(agent, messages, msg_count)
+        if not compacted:
+            # auto_compact only rewrites the list once it holds a summary, so a
+            # False return means nothing moved. Saying so and stopping is the
+            # whole answer: the fallback this replaces "succeeded" by clearing
+            # the message list — system prompt included — and stitching a
+            # 300-char-per-message digest back in its place, which is a worse
+            # transcript than the one it destroyed.
+            con.print("[red]Compaction failed; conversation left unchanged.[/red]")
+            return
+        wm.collapse_runs(messages)
+        con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} summary.[/green]")
 
     if ctx.tui_state is not None:
         breakdown = _run_async_safe(measure_context(agent))
         ctx.tui_state["context_tokens"] = breakdown.total
         ctx.tui_state["context_window"] = breakdown.window
     con.print("[dim]Workspace memory preserved.[/dim]")
-
-
-
-def _rule_based_compact(current_agent, messages, msg_count):
-    con = get_console()
-    keep_recent = 6
-    if msg_count <= keep_recent:
-        con.print("[yellow]Too few messages to compact.[/yellow]")
-        return
-
-    old_messages = messages[:-keep_recent]
-    recent_messages = messages[-keep_recent:]
-
-    summary_parts = []
-    for msg in old_messages:
-        content = msg.content or ""
-        if isinstance(content, str) and content:
-            preview = content[:300] + "..." if len(content) > 300 else content
-            summary_parts.append(f"[{msg.role}] {preview}")
-
-    if summary_parts:
-        summary = "Previous conversation summary:\n" + "\n".join(summary_parts)
-        messages.clear()
-        messages.append(Message(role="user", content=f"[Context compressed]\n\n{summary}"))
-        messages.append(Message(role="assistant", content="Understood. I have the conversation context. Continuing."))
-        messages.extend(recent_messages)
-        con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} messages.[/green]")
-    else:
-        summary = ""
-        messages.clear()
-        con.print(f"[green]Context cleared ({msg_count} messages).[/green]")
-
-    current_agent.working_memory.collapse_runs(messages)
-    # The LLM path writes this from auto_compact(); without it here a /resume
-    # would replay the whole pre-compact transcript and undo the compaction.
-    if current_agent._session_log is not None:
-        current_agent._session_log.append_compact_boundary(summary)
 
 
 

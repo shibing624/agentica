@@ -94,13 +94,6 @@ class ToolConfig:
     # which is built automatically when left as None.
     compression_manager: Optional[Any] = None
 
-    # ---- Deep / Agentic capabilities (Model-layer hooks) ----
-
-    # Context overflow handling: when token usage exceeds the threshold (0–1 fraction
-    # of context_window), truncate old non-system messages before the next LLM call.
-    # 0.0 = disabled. Recommended: 0.8 (warn at 80%, hard-truncate at 90%).
-    context_overflow_threshold: float = 0.0
-
     # Unified 3-tier tool permission mode shared by the SDK, CLI, and Gateway.
     # See agentica.agent.permissions for the exact semantics of each tier.
     # "ask" | "auto" | "allow-all". Defaults to "allow-all" (today's SDK

@@ -295,7 +295,6 @@ agent = Agent(
     tools=[...],
     tool_config=ToolConfig(
         tool_call_limit=30,            # 单次 run 最多调用工具 30 次（防止无限循环）
-        context_overflow_threshold=0.8, # 上下文达 80% 时触发压缩
         search_knowledge=True,         # 允许 Agent 主动搜索知识库
     ),
 )
@@ -391,7 +390,7 @@ result = await agent.run("""
 
 **DeepAgent 默认开启**：
 - `enable_agentic_prompt=True`（Soul + Tools Guide + Heartbeat）
-- `context_overflow_threshold=0.8`（上下文 80% 触发压缩）
+- 两层上下文压缩（淘汰 → LLM 摘要），见 [Compression](../advanced/compression.md)
 - Workspace 长期记忆
 - Session Log 会话持久化
 

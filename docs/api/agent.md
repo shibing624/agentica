@@ -243,7 +243,6 @@ from agentica.agent.config import ToolConfig
 | `search_knowledge` | `bool` | `True` | 允许 Agent 主动搜索知识库 |
 | `add_references` | `bool` | `False` | 添加知识库引用 |
 | `compression_manager` | `CompressionManager` | `None` | 自定义 Layer 2 压缩管理器；留空时自动创建 |
-| `context_overflow_threshold` | `float` | `0.0` | context_window 使用率触发截断的阈值（0-1，0=禁用，推荐 0.8） |
 
 ## WorkspaceMemoryConfig
 

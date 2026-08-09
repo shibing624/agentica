@@ -709,11 +709,6 @@ class LoopMixin:
                 agent.model.run_tools = False
 
                 # Build hooks from Agent (they live on Agent, not Model).
-                # De-dup state (_overflow_warning_emitted) is intentionally
-                # persistent across runs for the same Agent instance, so the CLI
-                # does not repeatedly emit the same overflow notice every user
-                # turn.
-                _pre_tool_hook = agent._build_pre_tool_hook()
                 _post_tool_hook = agent._build_post_tool_hook()
 
                 if stream and agent.is_streamable:
@@ -776,13 +771,6 @@ class LoopMixin:
 
                         # Safety: cancellation
                         agent._check_cancelled()
-
-                        # Pre-tool hook (context overflow handling)
-                        if _pre_tool_hook is not None and loop_state.turn_count > 1:
-                            _skip = await _pre_tool_hook(messages_for_model, [])
-                            if _skip:
-                                # Hook says skip this batch — let model reconsider
-                                continue
 
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.
@@ -1005,12 +993,6 @@ class LoopMixin:
                                 if loop_state.last_used_model_id is not None:
                                     agent.run_response.model = loop_state.last_used_model_id
                             break
-
-                        # Pre-tool hook (context overflow handling)
-                        if _pre_tool_hook is not None and loop_state.turn_count > 1:
-                            _skip = await _pre_tool_hook(messages_for_model, [])
-                            if _skip:
-                                continue  # Let model reconsider
 
                         # Mid-run steering: flush any guidance pushed since the last
                         # inference so the model sees it on THIS call.

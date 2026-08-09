@@ -52,7 +52,7 @@ from agentica.run_config import RunConfig
 from agentica.run_context import RunContext, TaskAnchor
 from agentica.memory import WorkingMemory
 from agentica.memory.session_log import SessionLog
-from agentica.compression import CompressionManager, evict_context, sanitize_tool_pairs
+from agentica.compression import CompressionManager
 from agentica.config import LANGFUSE_SECRET_KEY, LANGFUSE_PUBLIC_KEY, AGENTICA_NUM_HISTORY_TURNS
 from agentica.agent.config import (
     PromptConfig,
@@ -593,10 +593,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # Session-level set of memory filenames already surfaced (dedup across turns).
         # Prevents the same memory entry from occupying system prompt slots every turn.
         self._surfaced_memories: set = set()
-
-        # Context-overflow protection dedup state. Guards prevent the same
-        # overflow warning from being emitted on every loop iteration.
-        self._overflow_warning_emitted: bool = False
 
     def _post_init(self):
         """Post-initialization setup."""
@@ -1245,9 +1241,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # tool gating. Same for skill runtime configs.
         clone._tool_runtime_configs = dict(getattr(self, "_tool_runtime_configs", {}))
         clone._skill_runtime_configs = dict(getattr(self, "_skill_runtime_configs", {}))
-        # Inherit hook dedup state from source so cloned sub-agents do not
-        # re-emit the same overflow warning that the parent already handled.
-        clone._overflow_warning_emitted = getattr(self, "_overflow_warning_emitted", False)
         # Fresh Runner bound to the clone
         clone._runner = Runner(clone)
         # Tool isolation: stateful tools (todos, parent_agent, workspace, skill
@@ -1396,98 +1389,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             model.user_id = self.user_id
             model.session_id = self.session_id
             model.agent_name = self.name
-
-    def _build_pre_tool_hook(self):
-        """Build the pre-tool hook function based on ToolConfig settings.
-
-        Returns an async callable (messages, function_calls) -> bool, or None
-        if no hook is active. Returning False tells the Runner to proceed with
-        tool execution normally.
-
-        Capability (opt-in via ToolConfig):
-
-        Context overflow handling
-           Triggered when: tool_config.context_overflow_threshold > 0 and
-           estimated token usage / context_window >= threshold.
-           Two-stage action (evict-then-drop):
-             1. Layer 1 eviction first: it replaces tool-result bodies with a
-                placeholder naming the call, so the model can re-issue it.
-             2. Only if usage still exceeds the hard limit (threshold + 5pp)
-                after eviction, FIFO-drop oldest non-system messages.
-           Estimation uses ~4 chars/token heuristic for speed; accurate token
-           counting requires the tokenizer.
-
-        Returning None means no hook is registered (fast path, no overhead).
-        """
-        overflow_threshold = self.tool_config.context_overflow_threshold
-
-        # Fast path: feature is disabled
-        if overflow_threshold <= 0.0:
-            return None
-
-        agent_ref = self  # captured in closure
-
-        def _estimate_usage_ratio(msgs: list, ctx_window: int) -> float:
-            total_chars = sum(len(str(m.content)) if m.content else 0 for m in msgs)
-            return (total_chars / 4.0) / ctx_window
-
-        async def _pre_tool_hook(messages: list, function_calls: list) -> bool:
-            model = agent_ref.model
-            if model is None:
-                return False
-
-            if overflow_threshold <= 0.0:
-                return False
-
-            context_window = model.context_window or 128000
-            usage_ratio = _estimate_usage_ratio(messages, context_window)
-
-            if usage_ratio < overflow_threshold:
-                return False
-
-            hard_limit = min(overflow_threshold + 0.05, 0.95)
-
-            # ---- Stage 1: Layer 1 eviction (prefer over dropping messages) ----
-            reclaimed = evict_context(
-                messages,
-                context_tokens=int(usage_ratio * context_window),
-                context_window=context_window,
-                model_id=model.id,
-            )
-            if reclaimed.total:
-                usage_ratio = _estimate_usage_ratio(messages, context_window)
-
-            # ---- Stage 2: FIFO drop oldest non-system messages if still over ----
-            evicted = 0
-            while usage_ratio >= hard_limit and len(messages) > 2:
-                for idx, m in enumerate(messages):
-                    if m.role != "system":
-                        messages.pop(idx)
-                        evicted += 1
-                        break
-                else:
-                    break  # Only system messages left
-                usage_ratio = _estimate_usage_ratio(messages, context_window)
-
-            if evicted:
-                # Dropping by position can strand a tool_call without its
-                # result, which providers reject outright.
-                messages[:] = sanitize_tool_pairs(messages)
-
-            # Demote to debug + only once per Agent instance lifetime to
-            # avoid flooding the CLI across multiple user turns.
-            if not agent_ref._overflow_warning_emitted:
-                logger.debug(
-                    f"Agent '{agent_ref.identifier}': context overflow handled "
-                    f"(estimated {usage_ratio:.0%} of {context_window} tokens). "
-                    f"Reclaimed={reclaimed.total}, dropped {evicted} old messages. "
-                    "Set tool_config=ToolConfig(context_overflow_threshold=0.0) to disable."
-                )
-                agent_ref._overflow_warning_emitted = True
-
-            return False  # proceed with tool execution
-
-        return _pre_tool_hook
 
     def _build_post_tool_hook(self):
         """Build the post-tool hook function for todo reminder injection.

@@ -1069,15 +1069,7 @@ class StreamDisplayManager:
 
         is_main_agent = event.get("is_main_agent") is True
         prefix = "  " if is_main_agent else "    "
-        if et == "compact.rule_based":
-            before = event.get("before", 0)
-            after = event.get("after", 0)
-            elapsed = event.get("elapsed", 0.0)
-            self._assistant_console.print(
-                f"{prefix}[dim yellow]🗜 compact [/dim yellow] "
-                f"[dim]{before} → {after} msgs ({elapsed:.2f}s)[/dim]"
-            )
-        elif et == "compact.auto":
+        if et == "compact.auto":
             before = event.get("before", 0)
             after = event.get("after", 0)
             elapsed = event.get("elapsed", 0.0)

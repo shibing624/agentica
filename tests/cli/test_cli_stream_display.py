@@ -224,18 +224,6 @@ class TestCLIStreamDisplay(unittest.TestCase):
         self.assertEqual(f(123.456), " (123.5s)")
 
 
-    def test_stream_display_manager_keeps_rule_based_compact_visible(self):
-        output = self._render_compact_event({
-            "type": "compact.rule_based",
-            "agent_name": "Agent",
-            "is_main_agent": True,
-            "before": 20,
-            "after": 8,
-            "elapsed": 0.25,
-        })
-        self.assertIn("compact", output)
-
-
     def test_main_auto_compact_warns_and_points_to_new(self):
         output = self._render_compact_event({
             "type": "compact.auto",
