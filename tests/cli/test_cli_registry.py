@@ -6,6 +6,7 @@
 
 import logging
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -91,6 +92,56 @@ class TestToolRegistryIntegrity(unittest.TestCase):
         """Test no duplicate tool names in registry."""
         tool_names = list(TOOL_REGISTRY.keys())
         self.assertEqual(len(tool_names), len(set(tool_names)))
+
+
+class TestHelpRendering(unittest.TestCase):
+    """`/help` renders command names verbatim, brackets included.
+
+    A key like "/model [p/m]" parses as a rich style tag, so an unescaped
+    render drops the placeholder without any error.
+    """
+
+    ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+    def _render_help(self, skills_registry=None) -> str:
+        from rich.console import Console
+        from agentica.cli.display import help_header
+
+        buffer = StringIO()
+        console = Console(file=buffer, width=120, highlight=False)
+        with patch.object(help_header, "get_console", lambda: console):
+            help_header.show_help(skills_registry=skills_registry)
+        return self.ANSI_RE.sub("", buffer.getvalue())
+
+    def test_bracketed_placeholders_survive(self):
+        out = self._render_help()
+
+        for cmd in ("/model [p/m]", "/resume [target]", "/fork [n|uuid]", "/debug [on|off]"):
+            self.assertIn(cmd, out)
+
+    def test_columns_stay_aligned(self):
+        """Escaping must not shift the description column."""
+        lines = self._render_help().splitlines()
+
+        def desc_column(prefix, desc):
+            line = next(ln for ln in lines if ln.strip().startswith(prefix))
+            return line.index(desc)
+
+        self.assertEqual(
+            desc_column("/model [", "Show or switch model"),
+            desc_column("/config", "Show current configuration"),
+        )
+
+    def test_skill_description_with_brackets_is_not_swallowed(self):
+        skill = Mock()
+        skill.description = "Handles [urgent] tickets"
+        registry = MagicMock()
+        registry.__len__.return_value = 1
+        registry.auto_commands.return_value = {"/triage": skill}
+
+        out = self._render_help(skills_registry=registry)
+
+        self.assertIn("Handles [urgent] tickets", out)
 
 
 if __name__ == "__main__":

@@ -96,7 +96,7 @@ COMMAND_REGISTRY = {
     "/upgrade": (_cmd_upgrade, "Self-upgrade agentica via pip (check | --pre)"),
     "/cron": (_cmd_cron, "Scheduled jobs: list | add | edit | pause | resume | remove | runs | run | daemon"),
     "/usage": (_cmd_usage, "Show token usage, cost, and context breakdown"),
-    "/debug": (_cmd_debug, "Show debug info"),
+    "/debug": (_cmd_debug, "Toggle verbose debug logging: on | off"),
     "/reasoning": (_cmd_reasoning, "Toggle reasoning display: on | off"),
     "/statusbar": (_cmd_statusbar, "Toggle the status bar visibility"),
     "/sb": (_cmd_statusbar, "Toggle the status bar (alias)"),

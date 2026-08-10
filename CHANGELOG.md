@@ -10,6 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+#### features
+- **`list_agents` / `/list-agents` 多报会话的配置与负载**：profile、model（`provider/name`）、idle/busy、context 已用/窗口。这些字段从 peer 心跳每秒 tick 里带出，读的是状态栏同一份 `tui_state`——`/model`、`/model --clear`、`/config set` 都能改模型，靠各处 push 迟早漏一条；心跳本身只在值真变了才写盘，不会把 30s 的 presence 写成每秒一次。字段描述的是配置与代价，不是容量：忙着的会话仍会在 tool 间隙收信，将近满的窗口也只是「再塞东西会触发对方压缩」，不是拒收墙。
+- **`/debug [on|off]` 改成会话内开关 verbose 日志**（对标启动时的 `--debug`）：无参翻转，`on`/`off` 显式设置；写回 `agent_config` 以便 `/model`、`/resume` 重建 agent 后仍在。原先打印的会话事实（model、history 条数等）本来就在 `/status`。
+
+#### fixes
+- **experiences 与 skills 目录改为每会话冻结一次**，system prompt 里最后两处「每轮实读」就此清零。`freeze_snapshots()` 现在连同经验一起冻（新增 `get_frozen_experiences()`），skills 目录由新增的 `Agent.freeze_session_guidance()` 冻结，Runner 在首轮 run 一起调用。
+  这两处和 git 状态不是同一类问题，但后果一样、而且更隐蔽：它们是**这个 agent 自己在会话中途写的**。捕获钩子会在工具出错、用户纠正、每约 10 轮的批量 judge 时写入新的经验卡片；skill upgrade 钩子会在后台调 `refresh_tool_system_prompts()`，而 `SkillTool.get_system_prompt()` 每次读都按使用近度重排一遍。于是没有任何人提出要求，一次后台写入就改掉 system prompt 的字节——经验那块还在 `VOLATILE_SYSTEM_MARKER` 之后（尾巴仍在所有 message 断点的前缀里，历史照样重写），skills 那块直接在 marker **之前**，连 system head 那个断点都保不住。
+  代价用一行指针补回来：经验块写明是会话开始时选中的，并给出 `EXPERIENCE.md` 的索引路径（新增 `Workspace.experience_index_path`），要最新的让 agent 自己 `read_file` 一次。skills 不需要指针——`/skills install` 走的是重建 agent，新 agent 会重新冻结，所以新装的技能照样立刻可见；被挡住的只有无人看管的后台升级。`clone()` 会重跑 `_init_runtime`，subagent 因此从未冻结状态开始，不会继承父 agent 的快照。`/context` 的 Skills 行改为统计实际注入的块，否则冻结后它报的是一份没人用的列表。
+- **system prompt 不再注入 git 状态**，`Workspace.get_git_context()` / `_git()` / `_is_git_repo` 整块删除。prompt cache 是**按字节精确的前缀匹配**，而 system message 位于后续每一个缓存断点的前缀里——所以 `git status --short` 每轮变一行（写代码的会话里等于每一轮），失效的不只是 tools+system 那个断点，而是**连同整段对话历史一起**按 1.25x 重写。它是 marker 之前变得最勤的东西：工作区上下文和记忆早就由 `freeze_snapshots()` 冻结、日期只到天（skills 目录同在 marker 前、经验在 marker 后，两者也会中途变，见上一条），所以这一条注入实际上单独承担了 Claude 上偏低的复用率和过半的 cache write 开销。
+  分支 / 未提交变更 / 最近 commit 改由 agent 需要时自己跑一次 git 获取——这本来就是一次工具调用的事，而且模型每一次编辑都已经在自己的工具结果里看见了。顺带每轮省掉 4 次 git 子进程（本仓库约 38ms）。
+  **两条走不通的替代方案**：① 挪到 `VOLATILE_SYSTEM_MARKER` 之后——只保住 system head 那一个断点，volatile 尾巴仍在所有 message 断点的前缀里，历史照样每轮重写；marker 成立的前提是它后面的内容**跨轮稳定**（冻结的记忆、天级日期），不是每轮都变的东西换个位置继续变。② 像工作区上下文那样每会话冻结一次——省下了钱，换来的是一份越来越旧的文件列表，模型把 20 轮前的状态当成现状，比没有更糟。
+- `/help` 里带方括号的命令名（如 `/model [p/m]`、`/debug [on|off]`）不再被 rich 当成 markup 静默吃掉；先 pad 再 `escape`，对齐也不歪。
+
 ## [1.4.12] - 2026-08-10
 
 #### features

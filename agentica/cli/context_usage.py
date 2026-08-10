@@ -96,7 +96,10 @@ async def measure_context(agent) -> ContextBreakdown:
 
     workspace = await agent.get_workspace_context_prompt()
     workspace_tokens = count_tokens([_as_message(workspace)], None, model_id) if workspace else 0
-    skills_tokens = _count_prompt_list(agent._session_guidance_prompts, model_id)
+    # The rendered block, not the source list: once the session is frozen the
+    # two diverge (a mid-session skill upgrade rewrites the list only).
+    skills_block = agent._get_session_guidance_block()
+    skills_tokens = _count_prompt_list([skills_block] if skills_block else [], model_id)
     tool_guide_tokens = _count_prompt_list(agent._tool_policy_prompts, model_id)
 
     attributed = workspace_tokens + skills_tokens + tool_guide_tokens

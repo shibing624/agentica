@@ -585,9 +585,12 @@ class LoopMixin:
                 _cost_tracker = CostTracker()
                 agent.run_response.cost_tracker = _cost_tracker
 
-                # --- Freeze workspace snapshots on first run (prompt cache stability) ---
-                # Hermes-style: freeze context + memory at session start so the
-                # system prompt prefix stays identical across turns.
+                # --- Freeze prompt snapshots on first run (prompt cache stability) ---
+                # Hermes-style: freeze everything the system prompt reads from
+                # live state at session start so its bytes stay identical across
+                # turns. The skills block is agent-side and has no workspace to
+                # depend on, so it is frozen unconditionally.
+                agent.freeze_session_guidance()
                 if (
                     agent.workspace is not None
                     and agent.workspace.exists()

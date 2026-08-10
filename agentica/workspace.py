@@ -194,9 +194,7 @@ class Workspace:
         # Frozen snapshots for prompt cache stability (Hermes-style)
         self._context_snapshot: Optional[str] = None
         self._memory_snapshot: Optional[str] = None
-        # None = not probed yet. Only the False answer is remembered; see
-        # get_git_context().
-        self._is_git_repo: Optional[bool] = None
+        self._experience_snapshot: Optional[str] = None
 
     @property
     def user_id(self) -> str:
@@ -437,19 +435,28 @@ class Workspace:
         return "\n\n---\n\n".join(contents) if contents else ""
 
     async def freeze_snapshots(self, query: str = "") -> None:
-        """Freeze context + memory snapshots at session start.
+        """Freeze context + memory + experience snapshots at session start.
 
-        Once frozen, get_frozen_context() and get_frozen_memory() return the
-        snapshot instead of re-reading from disk every turn. This keeps the
-        system prompt prefix stable across turns, enabling LLM prompt cache
-        hits (Hermes-style _system_prompt_snapshot pattern).
+        Once frozen, get_frozen_context() / get_frozen_memory() /
+        get_frozen_experiences() return the snapshot instead of re-reading from
+        disk every turn. This keeps the system prompt prefix stable across
+        turns, enabling LLM prompt cache hits (Hermes-style
+        _system_prompt_snapshot pattern).
 
-        Call once at session start. Memory tool writes update the live files
-        on disk but do NOT mutate the frozen snapshot — the next session
+        Experiences are frozen for the same reason and are the one that used to
+        break it: the capture hooks write new cards *during* the session (tool
+        errors, user corrections, the batched judge), so retrieval returned a
+        different set mid-conversation and re-priced every request behind it.
+        The way back to the current set is ``experience_index_path``, which the
+        prompt names — one file read, only when the agent actually wants it.
+
+        Call once at session start. Memory / experience writes update the live
+        files on disk but do NOT mutate the frozen snapshot — the next session
         will pick up changes.
         """
         self._context_snapshot = await self.get_context_prompt()
         self._memory_snapshot = await self.get_relevant_memories(query=query)
+        self._experience_snapshot = await self.get_relevant_experiences(query=query)
 
     def get_frozen_context(self) -> Optional[str]:
         """Return frozen context snapshot, or None if not yet frozen."""
@@ -458,6 +465,14 @@ class Workspace:
     def get_frozen_memory(self) -> Optional[str]:
         """Return frozen memory snapshot, or None if not yet frozen."""
         return self._memory_snapshot
+
+    def get_frozen_experiences(self) -> Optional[str]:
+        """Return frozen experience snapshot, or None if not yet frozen.
+
+        An empty string means "frozen, and there was nothing to inject" — the
+        caller must not read that as "not frozen" and fall back to a live read.
+        """
+        return self._experience_snapshot
 
     # =========================================================================
     # Cross-product project config compatibility (Hermes-style)
@@ -619,78 +634,6 @@ class Workspace:
 
         selected_reversed.reverse()
         return selected_reversed
-
-    async def _git(self, *args: str, timeout: float = 5.0) -> Optional[str]:
-        """Run one git command in the workspace and return its stdout.
-
-        ``None`` on any failure (no git binary, non-zero exit, timeout) — the
-        caller treats every git read as optional context.
-        """
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "git", *args,
-                cwd=str(self.path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-        except (OSError, ValueError) as exc:
-            logger.debug("Failed to run git %s in %s: %s", args[0], self.path, exc)
-            return None
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.wait()
-            logger.debug("git %s timed out in %s", args[0], self.path)
-            return None
-        if proc.returncode != 0:
-            return None
-        return stdout.decode(errors="replace").strip()
-
-    async def get_git_context(self, max_status_lines: int = 30) -> Optional[str]:
-        """Get git status context for system prompt injection.
-
-        Returns branch, uncommitted changes, and recent commits.
-        Returns None if not in a git repo or git is unavailable.
-
-        This sits on the per-turn system-prompt path, so the git calls are
-        async subprocesses rather than ``subprocess.run``: four blocking calls
-        with a 5s timeout each can stall the whole event loop — including
-        unrelated concurrent tools — for as long as 20s. The three reads are
-        independent, so they run together behind the repo check.
-
-        A negative repo check is remembered for the life of the workspace.
-        A service whose workspace is ``~/.agentica/workspace`` is not going to
-        become a repo mid-process, and paying a subprocess spawn per turn to
-        re-learn that is the whole cost of this method for that deployment. A
-        positive answer is not cached: branch, status and commits are exactly
-        what changes between turns.
-        """
-        if self._is_git_repo is False:
-            return None
-        if await self._git("rev-parse", "--git-dir") is None:
-            self._is_git_repo = False
-            return None
-        self._is_git_repo = True
-
-        branch, status, log = await asyncio.gather(
-            self._git("branch", "--show-current"),
-            self._git("status", "--short"),
-            self._git("log", "--oneline", "-3"),
-        )
-
-        parts = []
-        if branch:
-            parts.append(f"Git branch: {branch}")
-        if status:
-            lines = status.splitlines()
-            if len(lines) > max_status_lines:
-                lines = lines[:max_status_lines] + [f"... ({len(lines) - max_status_lines} more)"]
-            parts.append(f"Uncommitted changes:\n{chr(10).join(lines)}")
-        if log:
-            parts.append(f"Recent commits:\n{log}")
-
-        return "\n".join(parts) if parts else None
 
     # =========================================================================
     # Memory index constants (mirrors CC's MEMORY.md limits)
@@ -1555,6 +1498,16 @@ class Workspace:
     def _get_user_experience_md(self) -> Path:
         """Get current user's experience index file path."""
         return self._get_user_path() / self._EXPERIENCE_INDEX_FILE
+
+    @property
+    def experience_index_path(self) -> Path:
+        """Path to the current user's EXPERIENCE.md index.
+
+        Public because the system prompt names it: the injected experiences are
+        a session-start snapshot, and this is where the agent reads the current
+        set from.
+        """
+        return self._get_user_experience_md()
 
     def _get_user_generated_skills_dir(self) -> Path:
         """Get current user's generated skills directory."""

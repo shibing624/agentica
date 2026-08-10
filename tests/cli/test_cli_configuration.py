@@ -848,5 +848,87 @@ class TestCLIConfiguration(unittest.TestCase):
         self.assertNotIn("builtin_delegate_tool", names)
 
 
+class TestDebugToggle(unittest.TestCase):
+    """`/debug` is a runtime switch for verbose logging, not a status dump.
+
+    The logging helpers are patched in the command module's namespace so the
+    test never mutates the process-wide handler list other tests rely on.
+    """
+
+    def _ctx(self, debug: bool):
+        agent = Mock()
+        agent.debug = debug
+        return CommandContext(
+            agent_config={"model_provider": "openai", "model_name": "gpt-4o", "debug": debug},
+            current_agent=agent,
+            tui_state={"debug": debug},
+        )
+
+    def _run(self, ctx, cmd_args=""):
+        with patch.object(cli_model_config, "restore_console_logging") as restore, patch.object(
+            cli_model_config, "suppress_console_logging"
+        ) as suppress, patch.object(cli_model_config, "set_log_level_to_debug") as to_debug, patch.object(
+            cli_model_config, "set_log_level_to_info"
+        ) as to_info:
+            cli_model_config._cmd_debug(ctx, cmd_args)
+        return restore, suppress, to_debug, to_info
+
+    def test_bare_debug_turns_verbose_logging_on(self):
+        ctx = self._ctx(debug=False)
+        restore, suppress, to_debug, to_info = self._run(ctx)
+
+        self.assertTrue(ctx.agent_config["debug"])
+        self.assertTrue(ctx.tui_state["debug"])
+        self.assertTrue(ctx.current_agent.debug)
+        restore.assert_called_once()
+        to_debug.assert_called_once()
+        suppress.assert_not_called()
+        to_info.assert_not_called()
+
+    def test_bare_debug_flips_back_off(self):
+        ctx = self._ctx(debug=True)
+        restore, suppress, to_debug, to_info = self._run(ctx)
+
+        self.assertFalse(ctx.agent_config["debug"])
+        self.assertFalse(ctx.tui_state["debug"])
+        self.assertFalse(ctx.current_agent.debug)
+        suppress.assert_called_once()
+        to_info.assert_called_once()
+        restore.assert_not_called()
+        to_debug.assert_not_called()
+
+    def test_explicit_on_is_idempotent(self):
+        ctx = self._ctx(debug=True)
+        restore, _suppress, to_debug, _to_info = self._run(ctx, "on")
+
+        self.assertTrue(ctx.agent_config["debug"])
+        restore.assert_called_once()
+        to_debug.assert_called_once()
+
+    def test_explicit_off(self):
+        ctx = self._ctx(debug=True)
+        _restore, suppress, _to_debug, to_info = self._run(ctx, "off")
+
+        self.assertFalse(ctx.agent_config["debug"])
+        suppress.assert_called_once()
+        to_info.assert_called_once()
+
+    def test_unknown_argument_changes_nothing(self):
+        ctx = self._ctx(debug=False)
+        restore, suppress, to_debug, to_info = self._run(ctx, "verbose")
+
+        self.assertFalse(ctx.agent_config["debug"])
+        self.assertFalse(ctx.tui_state["debug"])
+        for mock in (restore, suppress, to_debug, to_info):
+            mock.assert_not_called()
+
+    def test_registered_as_a_toggle(self):
+        from agentica.cli.commands.registry import COMMAND_REGISTRY
+
+        handler, description = COMMAND_REGISTRY["/debug"]
+        self.assertIs(handler, cli_model_config._cmd_debug)
+        self.assertIn("Toggle", description)
+
+
 if __name__ == "__main__":
     unittest.main()

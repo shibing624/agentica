@@ -424,8 +424,17 @@ Session Log 里的 tool 轮次统一按 OpenAI 线格式存放，Anthropic 的 `
 ### `/clear` / `/reset`
 清屏并重置当前会话（等同于 `/newchat` + 清除屏幕）。
 
-### `/debug`
-显示内部调试信息（当前 token 用量、模型配置、工具列表等），排查问题时使用。
+### `/debug [on|off]`
+运行时开关 verbose 调试日志，等价于启动时的 `--debug`：打开后 DEBUG 级日志打到终端
+（文件日志本来就有），subagent 的工具输出从下一轮起切换为 verbose 形式。不带参数为
+翻转当前状态。会话本身的信息（模型、token、工具数）看 `/status`。
+
+```text
+> /debug
+  Debug logging: ON
+> /debug off
+  Debug logging: OFF
+```
 
 ### `/reload-skills`
 从磁盘重新加载技能文件，适合开发技能时热更新：

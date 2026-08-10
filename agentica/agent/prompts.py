@@ -154,9 +154,17 @@ class PromptsMixin:
         """Return static tool-usage policy prompts collected from tools."""
         return list(self._tool_policy_prompts)
 
-    def _get_session_guidance_prompts(self) -> List[str]:
-        """Return dynamic per-session guidance prompts collected from tools or CLI."""
-        return list(self._session_guidance_prompts)
+    def _get_session_guidance_block(self) -> str:
+        """Return the rendered session-guidance (skills) block.
+
+        Prefers the session-start snapshot so a mid-session skill re-rank or
+        upgrade cannot rewrite the cached stable prefix; falls back to the live
+        list when nothing was frozen (no Runner, e.g. a direct
+        get_system_message call). See Agent.freeze_session_guidance.
+        """
+        if self._session_guidance_snapshot is not None:
+            return self._session_guidance_snapshot
+        return "\n\n---\n\n".join(self._session_guidance_prompts)
 
     @staticmethod
     def _render_xml_cdata_block(tag: str, content: str) -> str:
@@ -265,15 +273,20 @@ class PromptsMixin:
         #   │ description, task, role, instructions,          │  ← never changes
         #   │ guidelines, expected_output, additional_context │     between runs
         #   ├─ SEMI-STATIC ZONE ─────────────────────────────┤
-        #   │ workspace context (AGENTS.md etc.)               │  ← rarely changes
-        #   │ model system message                            │
-        #   ├─ DYNAMIC ZONE ─────────────────────────────────┤
-        #   │ workspace memory, session summary, datetime     │  ← may change every
-        #   │ json output prompt                              │     turn / run
+        #   │ workspace context (AGENTS.md etc.)               │  ← frozen once
+        #   │ model system message, session guidance (skills) │     per session
+        #   ├─ VOLATILE ZONE (after VOLATILE_SYSTEM_MARKER) ─┤
+        #   │ workspace memory, experiences (both frozen),    │  ← only the date
+        #   │ session summary, datetime, json output prompt   │     moves, per day
         #   └────────────────────────────────────────────────┘
         #
-        # By keeping all dynamic content at the END, the static prefix is
-        # identical across runs and will be served from prompt cache.
+        # The marker splits the system message into two cache blocks, so churn
+        # below it costs only the tail. That is a fallback, not a licence: the
+        # tail is still in the prefix of every *message* breakpoint, so anything
+        # that changes per turn re-prices the conversation history too. Hence
+        # memory / experiences / skills are all session snapshots, and the date
+        # is day-precision — everything here is meant to hold still for a whole
+        # session, wherever it sits.
 
         instructions = self._get_instructions_list()
 
@@ -335,12 +348,6 @@ class PromptsMixin:
             system_message_lines.append(self._render_xml_cdata_block("workspace_context", workspace_context))
             system_message_lines.append("")
 
-        # Git status injection (branch, uncommitted changes, recent commits)
-        if self.workspace and self.workspace.exists():
-            git_context = await self.workspace.get_git_context()
-            if git_context:
-                system_message_lines.append(f"## Git Status\n\n{git_context}\n")
-
         system_message_from_model = self.model.get_system_message_for_model()
         if system_message_from_model is not None:
             system_message_lines.append(system_message_from_model)
@@ -356,14 +363,11 @@ class PromptsMixin:
             system_message_lines.append(anchor_block)
             system_message_lines.append("")
 
-        session_guidance_prompts = self._get_session_guidance_prompts()
-        if session_guidance_prompts:
+        session_guidance = self._get_session_guidance_block()
+        if session_guidance:
             system_message_lines.append("## Session Guidance")
             system_message_lines.append(
-                self._render_xml_cdata_block(
-                    "session_guidance",
-                    "\n\n---\n\n".join(session_guidance_prompts),
-                )
+                self._render_xml_cdata_block("session_guidance", session_guidance)
             )
             system_message_lines.append("")
 
@@ -485,11 +489,6 @@ class PromptsMixin:
                 self._render_xml_cdata_block("workspace_context", workspace_context)
             )
 
-        if self.workspace and self.workspace.exists():
-            git_context = await self.workspace.get_git_context()
-            if git_context:
-                system_message_lines.append(f"\n## Git Status\n\n{git_context}")
-
         # Config directives
         directives = self._get_config_directives()
         if directives:
@@ -507,14 +506,11 @@ class PromptsMixin:
             system_message_lines.append("\n## Original Task")
             system_message_lines.append(anchor_block)
 
-        session_guidance_prompts = self._get_session_guidance_prompts()
-        if session_guidance_prompts:
+        session_guidance = self._get_session_guidance_block()
+        if session_guidance:
             system_message_lines.append("\n## Session Guidance")
             system_message_lines.append(
-                self._render_xml_cdata_block(
-                    "session_guidance",
-                    "\n\n---\n\n".join(session_guidance_prompts),
-                )
+                self._render_xml_cdata_block("session_guidance", session_guidance)
             )
 
         # Cache boundary: everything below (workspace memory / experiences /

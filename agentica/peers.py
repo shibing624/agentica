@@ -173,6 +173,19 @@ class PeerInfo:
     # than reconstructing the conversation from session_log.
     log_file: Optional[str] = None
     log_level: Optional[str] = None
+    # Which profile / model this CLI session is actually running — the same
+    # pair the status bar shows. Empty profile_name means a flag replaced the
+    # model and no profile describes the session.
+    profile_name: Optional[str] = None
+    model_provider: Optional[str] = None
+    model_name: Optional[str] = None
+    # Whether this session is mid-turn, and how much of its window is spent.
+    # Neither bounds what it can take on — every session compacts its own
+    # context, and a message reaches a busy one between its tool calls — so
+    # both read as the price of sending, not as capacity.
+    busy: bool = False
+    context_tokens: Optional[int] = None
+    context_window: Optional[int] = None
     updated_at: float = 0.0
 
     @property
@@ -227,6 +240,12 @@ class PeerInfo:
             memory_path=data.get("memory_path") or None,
             log_file=data.get("log_file") or None,
             log_level=data.get("log_level") or None,
+            profile_name=data.get("profile_name") or None,
+            model_provider=data.get("model_provider") or None,
+            model_name=data.get("model_name") or None,
+            busy=bool(data.get("busy")),
+            context_tokens=data.get("context_tokens") or None,
+            context_window=data.get("context_window") or None,
             updated_at=float(data.get("updated_at") or 0.0),
         )
 
@@ -257,8 +276,20 @@ class PeerInfo:
             memory = str(Path(workspace) / "users" / "default" / "MEMORY.md")
 
         rows: List[Tuple[str, str]] = []
+        rows.append(("status", "running a turn" if self.busy else "idle"))
         if self.session_id:
             rows.append(("session_id", self.session_id))
+        if self.profile_name:
+            rows.append(("profile", self.profile_name))
+        if self.model_provider and self.model_name:
+            rows.append(("model", f"{self.model_provider}/{self.model_name}"))
+        elif self.model_name:
+            rows.append(("model", self.model_name))
+        elif self.model_provider:
+            rows.append(("model", self.model_provider))
+        if self.context_window:
+            used = f"{self.context_tokens:,}" if self.context_tokens else "?"
+            rows.append(("context", f"{used} / {self.context_window:,} tokens"))
         rows.append(("cwd", self.cwd))
         if project:
             rows.append(("project", project))
@@ -322,6 +353,9 @@ class PeerSession:
         memory_path: Optional[str] = None,
         log_file: Optional[str] = None,
         log_level: Optional[str] = None,
+        profile_name: Optional[str] = None,
+        model_provider: Optional[str] = None,
+        model_name: Optional[str] = None,
         on_drain: Optional[Callable[[List["PeerMessage"]], None]] = None,
     ) -> None:
         from agentica.project_store import project_base_dir
@@ -347,6 +381,9 @@ class PeerSession:
             memory_path=memory_path,
             log_file=log_file or None,
             log_level=log_level or None,
+            profile_name=profile_name or None,
+            model_provider=model_provider or None,
+            model_name=model_name or None,
         )
         self._last_publish = 0.0
         # (sent_at, digest) of what this session recently sent each peer, which
@@ -398,8 +435,22 @@ class PeerSession:
         self._last_publish = self.info.updated_at
 
     def heartbeat(self, **updates: Any) -> None:
-        """Refresh the record when the heartbeat interval has elapsed."""
-        if time.time() - self._last_publish < HEARTBEAT_INTERVAL and not updates:
+        """Refresh the record when the interval elapsed or something changed.
+
+        Callers tick this far more often than ``HEARTBEAT_INTERVAL`` (the CLI
+        loop wakes every second to check its mailbox) and hand over the fields
+        that can change under them. Passing fields must not defeat the
+        interval: ``and not updates`` did exactly that, turning a 30s presence
+        write into one write per second for the whole session. So an update
+        that repeats what is already published counts as no update at all,
+        while a real change still lands immediately.
+        """
+        changed = any(
+            value is not None and getattr(self.info, key, None) != value
+            for key, value in updates.items()
+            if key != "user_id"
+        )
+        if not changed and time.time() - self._last_publish < HEARTBEAT_INTERVAL:
             return
         self.publish(**updates)
 

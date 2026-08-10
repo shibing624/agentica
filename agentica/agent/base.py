@@ -88,6 +88,14 @@ from agentica.runner import Runner
 # Bound TypeVar so find_hook(SensitiveAlertHook) is typed as Optional[SensitiveAlertHook].
 _HookT = TypeVar("_HookT", bound=AgentHooks)
 
+# Experiences are snapshotted once per session (Workspace.freeze_snapshots) so
+# the system prompt stays byte-identical and cacheable. Say so and name the
+# index, or the model reads a set that predates its own corrections as complete.
+_EXPERIENCE_SNAPSHOT_NOTE = (
+    "Selected when this session started. The full, current index is {path} — "
+    "read it if you need experiences recorded since."
+)
+
 # Import mixin classes — pure method containers, no state, no __init__
 from agentica.agent.prompts import PromptsMixin
 from agentica.agent.as_tool import AsToolMixin
@@ -585,6 +593,10 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         self.todos = []
         self._tool_policy_prompts: List[str] = []
         self._session_guidance_prompts: List[str] = []
+        # Session-start snapshot of the rendered session-guidance block. See
+        # freeze_session_guidance(). Reset here so clone() (which re-runs
+        # _init_runtime) starts unfrozen rather than inheriting the parent's.
+        self._session_guidance_snapshot: Optional[str] = None
 
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
@@ -821,6 +833,15 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     async def get_experience_prompt(self, query: str = "") -> Optional[str]:
         """Load relevant experiences for system prompt injection.
 
+        Prefers the session-start snapshot (if freeze_snapshots() was called).
+        Experiences are the one prompt section that both changes mid-session
+        and is written by the agent's own hooks, so a live read per turn moved
+        the system prompt under the provider's prompt cache — which matches on
+        a byte-exact prefix — and re-priced the conversation behind it. The
+        snapshot is labelled and carries the index path, so the current set is
+        one file read away. Falls back to a live read when nothing was frozen
+        (no Runner, e.g. a direct get_system_message call).
+
         Args:
             query: Current user query for relevance scoring.
 
@@ -829,6 +850,12 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """
         if not self.enable_experience_capture or not self.workspace:
             return None
+        frozen = self.workspace.get_frozen_experiences()
+        if frozen is not None:
+            if not frozen:
+                return None
+            note = _EXPERIENCE_SNAPSHOT_NOTE.format(path=self.workspace.experience_index_path)
+            return f"{frozen}\n\n{note}"
         experiences = await self.workspace.get_relevant_experiences(
             query=query,
             limit=self.experience_config.max_experiences_in_prompt,
@@ -883,9 +910,33 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             self._tool_policy_prompts.append(prompt)
 
     def add_session_guidance(self, prompt: Optional[str]) -> None:
-        """Add a dynamic per-session guidance section to the system prompt."""
+        """Add a per-session guidance section to the system prompt.
+
+        Takes effect only until freeze_session_guidance() runs — after that the
+        rendered block is pinned for the session and this only updates the
+        source list (which the next session, or a rebuilt agent, renders from).
+        """
         if prompt and prompt not in self._session_guidance_prompts:
             self._session_guidance_prompts.append(prompt)
+
+    def freeze_session_guidance(self) -> None:
+        """Pin the rendered session-guidance block for the rest of the session.
+
+        The block is the skills catalogue, and it is rebuilt from live state:
+        SkillTool re-ranks it by usage recency on every read, and the skill
+        upgrade hook calls refresh_tool_system_prompts() mid-session. Both
+        rewrite bytes that sit *before* VOLATILE_SYSTEM_MARKER — the stable
+        head the provider cache breakpoint is placed on — so an unattended
+        background upgrade could invalidate the cached prefix and the whole
+        conversation behind it.
+
+        Freezing costs nothing the user notices: the catalogue is names and
+        one-line descriptions, and a newly installed skill still lands
+        immediately because /skills rebuilds the agent (a fresh agent freezes
+        again). Idempotent; call once per session.
+        """
+        if self._session_guidance_snapshot is None:
+            self._session_guidance_snapshot = "\n\n---\n\n".join(self._session_guidance_prompts)
 
     def steer(self, guidance: str) -> bool:
         """Inject guidance into a running tool loop without interrupting it.

@@ -337,6 +337,144 @@ class TestGetSystemMessage:
         assert "Prefer concise responses." in msg.content
 
 
+class TestGitStateStaysOutOfThePrompt:
+    """Git state is a tool call away and belongs there.
+
+    Provider prompt caching is a byte-exact prefix match, and the system message
+    sits in the prefix of *every* later cache breakpoint — so a per-turn
+    ``git status`` re-prices not just the cached system prefix but the whole
+    conversation behind it. Freezing it instead would only trade that for a
+    stale file list. Both are worse than one `git` call when the agent
+    actually needs the answer."""
+
+    @pytest.mark.asyncio
+    async def test_no_git_state_in_the_system_prompt(self, tmp_path):
+        import subprocess
+
+        from agentica.workspace import Workspace
+
+        try:
+            subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip("git is unavailable")
+        # Workspace.exists() is gated on AGENTS.md; without it the prompt would
+        # skip the whole workspace zone and the assertions below prove nothing.
+        (tmp_path / "AGENTS.md").write_text("# Rules\n- be brief\n")
+        (tmp_path / "dirty.py").write_text("x = 1\n")
+
+        workspace = Workspace(tmp_path)
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            workspace=workspace,
+        )
+        await workspace.freeze_snapshots()
+        content = (await agent.get_system_message()).content
+
+        assert "be brief" in content, "workspace context never reached the prompt"
+        for leaked in ("## Git Status", "Git branch", "Uncommitted changes", "dirty.py"):
+            assert leaked not in content
+
+
+class TestSessionSnapshotsKeepThePromptByteStable:
+    """Everything the system prompt reads from live state is a session snapshot.
+
+    Provider prompt caching matches a byte-exact prefix, and the system message
+    sits in the prefix of every later cache breakpoint — so a section that
+    changes mid-session re-prices the whole conversation behind it, not just
+    itself. Experiences and the skills catalogue are both written *by the agent
+    itself* during a session (capture hooks, skill upgrade), which is exactly
+    how that used to happen with nobody asking for it."""
+
+    @pytest.mark.asyncio
+    async def test_experiences_are_frozen_and_name_their_index(self, tmp_path):
+        from agentica.experience.compiler import CompiledCard
+        from agentica.workspace import Workspace
+
+        workspace = Workspace(tmp_path)
+        workspace.initialize()
+        store = workspace.get_compiled_experience_store()
+        await store.write(CompiledCard(
+            title="session_start_lesson",
+            content="Verify the path before writing.",
+            experience_type="correction",
+        ))
+
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            workspace=workspace,
+            enable_experience_capture=True,
+        )
+        await workspace.freeze_snapshots()
+        before = (await agent.get_system_message()).content
+
+        # What the capture hooks do mid-session: write a new card.
+        await store.write(CompiledCard(
+            title="mid_session_lesson",
+            content="Learned after the prompt was frozen.",
+            experience_type="correction",
+        ))
+        after = (await agent.get_system_message()).content
+
+        assert before == after, "a new experience card rewrote the cached prompt"
+        assert "session_start_lesson" in before
+        assert "mid_session_lesson" not in after
+        assert str(workspace.experience_index_path) in before, (
+            "the snapshot must name the index so the current set stays reachable"
+        )
+
+    @pytest.mark.asyncio
+    async def test_skill_catalogue_survives_a_mid_session_refresh(self):
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+            tools=[SkillTool(auto_load=False)],
+        )
+        # Patch the agent's per-instance SkillTool clone (see isolation contract).
+        skill_tool = next(t for t in agent.tools if isinstance(t, SkillTool))
+        skill_tool.get_system_prompt = lambda: "# Skills\n\nORIGINAL CATALOGUE"
+        agent.refresh_tool_system_prompts()
+        agent.freeze_session_guidance()
+        before = (await agent.get_system_message()).content
+
+        # What the skill upgrade hook does mid-session, unattended.
+        skill_tool.get_system_prompt = lambda: "# Skills\n\nUPGRADED CATALOGUE"
+        agent.refresh_tool_system_prompts()
+        after = (await agent.get_system_message()).content
+
+        assert before == after, "a background skill upgrade rewrote the stable prefix"
+        assert "ORIGINAL CATALOGUE" in before
+        assert "UPGRADED CATALOGUE" not in after
+
+    @pytest.mark.asyncio
+    async def test_unfrozen_agent_still_renders_live_guidance(self):
+        """No Runner (direct SDK call) must not mean an empty skills block."""
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+        )
+        agent.add_session_guidance("# Skills\n\nLIVE GUIDANCE")
+
+        content = (await agent.get_system_message()).content
+
+        assert "LIVE GUIDANCE" in content
+
+    def test_freeze_is_idempotent_and_clones_start_unfrozen(self):
+        agent = Agent(
+            name="A",
+            model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),
+        )
+        agent.add_session_guidance("FIRST")
+        agent.freeze_session_guidance()
+        agent.add_session_guidance("SECOND")
+        agent.freeze_session_guidance()
+
+        assert agent._get_session_guidance_block() == "FIRST"
+        # A subagent / swarm clone is a new session and must freeze its own.
+        assert agent.clone()._session_guidance_snapshot is None
+
+
 class TestKnowledgeRetrievalDoesNotBlockTheLoop:
     """``Knowledge.search`` is synchronous down to the embedding HTTP call, the
     vector store and the reranker. On the per-turn prompt path it must not run

@@ -214,21 +214,30 @@ file path, function, or flag, verify it still exists before recommending it.
 
 ---
 
-## Git 上下文注入
+## 会话快照与 prompt cache
 
-Workspace 支持自动注入 Git 状态到 System Prompt：
+System Prompt 里所有从「实时状态」读出来的部分，都在会话第一轮一次性冻结：
 
-```python
-agent = Agent(
-    workspace=Workspace(path="./my_project"),
-)
-# System Prompt 将包含：
-# - Git branch: main
-# - Uncommitted changes: M file1.py, A file2.py
-# - Recent commits: abc1234 feat: add new feature
-```
+| 内容 | 冻结入口 |
+|------|----------|
+| 工作区上下文（AGENTS.md 等） | `Workspace.freeze_snapshots()` |
+| 工作区记忆 | `Workspace.freeze_snapshots()` |
+| 经验（experiences） | `Workspace.freeze_snapshots()` |
+| skills 目录（session guidance） | `Agent.freeze_session_guidance()` |
 
-`Workspace.get_git_context()` 获取分支名、未提交变更、最近 3 条 commit。
+原因是 prompt cache 按**字节精确的前缀**匹配，而 system message 位于后续每一个缓存断点的前缀里：中途改一行，失效的不只是 system 那个断点，而是**连同整段对话历史一起**重新计价。
+
+经验和 skills 尤其要冻，因为它们是**这个 agent 自己在会话中途写的**：捕获钩子会在工具出错、用户纠正、批量 judge 时写入新的经验卡片，skill upgrade 钩子会在后台调 `refresh_tool_system_prompts()` 重排 skills 目录。也就是说，没有任何人提出要求，一次后台写入就让整段对话重新计价。
+
+代价用一行指针补回来：注入的经验块会写明这是会话开始时选中的，并给出 `EXPERIENCE.md` 索引路径（`Workspace.experience_index_path`），需要最新的经验时 agent 自己 `read_file` 一次即可。skills 则不需要指针——新装的 skill 会立刻生效，因为 `/skills` 会重建 agent，而新 agent 会重新冻结。
+
+---
+
+## Git 上下文（为什么不注入）
+
+Workspace **不会**把 Git 状态注入 System Prompt。分支、未提交变更、最近 commit 由 agent 需要时自己跑一次 git 获取（`execute`）。
+
+原因是 prompt cache 按**字节精确的前缀**匹配，而 system message 位于后续每一个缓存断点的前缀里：`git status --short` 每轮变一行，失效的不只是 tools+system 那个断点，而是**连同整段对话历史一起**按 1.25x 重写。改成会话开始时冻结一次也不划算——省下了钱，换来的是一份会越来越旧的文件列表，而模型本来就从自己的工具结果里看见了每一次编辑。
 
 ---
 

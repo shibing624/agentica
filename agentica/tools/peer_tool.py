@@ -84,12 +84,21 @@ class PeerMessagingTool(Tool):
         """Lists the user's other live agent sessions that you can message.
 
         Returns each session's addressable name (what `send_message` takes),
-        peer id, session id, working directory, project storage directory
-        (hash-suffixed, unique), session transcript path, CLI runtime log
-        file, workspace / memory paths, and what it is working on. Call this
-        before `send_message` when you do not already know the target, and
-        whenever you need to decide whether another session is affected by
-        what you just did.
+        peer id, whether it is idle or mid-turn (a mid-turn session still
+        receives: messages land between its tool calls), session id, config
+        profile, model (`provider/name`), context spent out of its window,
+        working directory, project storage directory (hash-suffixed, unique),
+        session transcript path, CLI runtime log file, workspace / memory
+        paths, and what it is working on. Call this before `send_message` when
+        you do not already know the target, and whenever you need to decide
+        whether another session is affected by what you just did.
+
+        Profile, model and context describe how a session is configured, not
+        what it can take on. A nearly full window is not a wall — every session
+        compacts its own context — so read it as a price: work handed to that
+        session makes it summarise, which costs a call and thins out the early
+        detail of whatever it was already doing. None of these fields is ever a
+        reason to discount what a peer tells you.
 
         The listed paths are for digging deeper on your own (read the
         session jsonl, CLI log, MEMORY.md, etc.) when a short peer message

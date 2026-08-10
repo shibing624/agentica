@@ -33,6 +33,12 @@ from agentica.global_config import (
     get_project_profile,
 )
 from agentica.subagent import get_subagent_configs
+from agentica.utils.log import (
+    restore_console_logging,
+    set_log_level_to_debug,
+    set_log_level_to_info,
+    suppress_console_logging,
+)
 from agentica.cli import self_manage
 from agentica.cli.context_usage import measure_context
 from agentica.project_store import project_base_dir
@@ -734,21 +740,45 @@ def _model_list_overview(ctx: CommandContext) -> None:
 
 
 def _cmd_debug(ctx: CommandContext, cmd_args: str = ""):
+    """Turn verbose debug logging on or off for the rest of the session.
+
+    Runtime equivalent of the ``--debug`` startup flag: DEBUG records reach the
+    console (the file log already gets them) and subagent tool output switches
+    to the verbose form on the next turn. The flag is written back to
+    ``agent_config`` so it survives an agent rebuild (``/model``, ``/resume``).
+
+    ``/debug`` with no argument flips the current state; ``on`` / ``off`` set it
+    explicitly. The session facts this command used to print live in ``/status``.
+    """
     con = get_console()
-    con.print("[bold cyan]Debug Info[/bold cyan]")
-    con.print(f"  Model: {ctx.agent_config['model_provider']}/{ctx.agent_config['model_name']}")
-    con.print(f"  Shell Mode: {'[green]ON[/green]' if ctx.shell_mode else '[dim]OFF[/dim]'}")
-    con.print(f"  Work Dir: {ctx.agent_config.get('work_dir') or os.getcwd()}")
-    agent = ctx.current_agent
-    if agent and agent.working_memory:
-        msg_count = len(agent.working_memory.messages)
-        con.print(f"  History Messages: {msg_count}")
-    if agent and agent.tools:
-        con.print(f"  Extra Tools: {len(agent.tools)}")
-    if ctx.workspace:
-        con.print(f"  Workspace: {ctx.workspace.path}")
-    if ctx.skills_registry:
-        con.print(f"  Skills Loaded: {len(ctx.skills_registry)}")
+    arg = cmd_args.strip().lower()
+    current = bool(ctx.agent_config.get("debug"))
+
+    if arg == "":
+        enable = not current
+    elif arg in ("on", "true", "1"):
+        enable = True
+    elif arg in ("off", "false", "0"):
+        enable = False
+    else:
+        con.print(f"  [dim]Unknown argument: {arg}. Use: /debug on|off[/dim]")
+        return
+
+    ctx.agent_config["debug"] = enable
+    if ctx.tui_state is not None:
+        ctx.tui_state["debug"] = enable
+    if ctx.current_agent is not None:
+        ctx.current_agent.debug = enable
+
+    if enable:
+        restore_console_logging("DEBUG")
+        set_log_level_to_debug()
+        con.print("  [green]Debug logging: ON[/green]")
+        con.print("  [dim]DEBUG records now print to the console; subagent output turns verbose next turn.[/dim]")
+    else:
+        set_log_level_to_info()
+        suppress_console_logging()
+        con.print("  [green]Debug logging: OFF[/green]")
 
 
 

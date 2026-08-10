@@ -285,6 +285,7 @@ def run_interactive(
     if workspace is not None:
         peer_memory_path = str(workspace._get_user_memory_md())
     peer_log_file, peer_log_level = _cli_log_file()
+    peer_profile, _ = session_profile(agent_config, peer_cwd)
     state.peer_session = PeerSession(
         cwd=peer_cwd,
         git_branch=_read_git_branch(peer_cwd),
@@ -294,6 +295,9 @@ def run_interactive(
         memory_path=peer_memory_path,
         log_file=peer_log_file,
         log_level=peer_log_level,
+        profile_name=peer_profile or None,
+        model_provider=agent_config.get("model_provider"),
+        model_name=agent_config.get("model_name"),
     )
     # Show every accepted peer message in this terminal, whether the idle loop
     # or the running agent drained the mailbox. Set after construction so the
@@ -894,7 +898,23 @@ def run_interactive(
             time.sleep(1.0)
             agent = state.current_agent
             try:
-                peers.heartbeat(session_id=agent.session_id if agent is not None else None)
+                # Everything a peer reads about this session that can change
+                # under it is published from the same values the status bar
+                # renders, on every tick rather than at each mutation site:
+                # `/model <name>`, `/model --clear` and `/config set` all change
+                # the model, so a record kept current by pushes goes stale the
+                # day a fourth path forgets to. Empty strings publish as
+                # "unset" rather than being skipped, so clearing works too;
+                # heartbeat itself only writes when one of these differs.
+                peers.heartbeat(
+                    session_id=agent.session_id if agent is not None else None,
+                    profile_name=tui_state["profile_name"],
+                    model_provider=tui_state["model_provider"],
+                    model_name=tui_state["model_name"],
+                    busy=state.agent_running,
+                    context_tokens=tui_state["context_tokens"],
+                    context_window=tui_state["context_window"],
+                )
             except OSError:
                 logger.warning("peer heartbeat failed", exc_info=True)
             if state.agent_running:

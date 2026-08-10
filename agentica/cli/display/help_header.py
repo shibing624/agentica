@@ -7,6 +7,7 @@
 import os
 from typing import Any, List, Optional
 
+from rich.markup import escape
 from rich.text import Text
 
 from agentica.cli.runtime import BUILTIN_TOOLS, get_console
@@ -131,7 +132,7 @@ def show_help(skills_registry=None):
             "/model [p/m]":     "Show or switch model",
             "/config":          "Show current configuration",
             "/usage":           "Token usage, cost, and what fills the context",
-            "/debug":           "Show debug info (model, history count)",
+            "/debug [on|off]":  "Toggle verbose debug logging",
             "/reasoning":       "Toggle reasoning display: on | off",
             "/statusbar, /sb":  "Toggle the status bar",
         },
@@ -156,10 +157,14 @@ def show_help(skills_registry=None):
     console.print("  [bold]Available Commands[/bold]")
     console.print()
 
+    # Command names and descriptions are data, not markup: a bracketed
+    # placeholder like "/model [p/m]" parses as a style tag and rich drops it
+    # silently. Pad first, then escape, so the backslashes rich strips at
+    # render time don't skew column alignment.
     for category, commands in categories.items():
         console.print(f"  [bold]-- {category} --[/bold]")
         for cmd, desc in commands.items():
-            console.print(f"    [bright_green]{cmd:<18}[/bright_green] [dim]{desc}[/dim]")
+            console.print(f"    [bright_green]{escape(f'{cmd:<18}')}[/bright_green] [dim]{escape(desc)}[/dim]")
         console.print()
 
     # Skill auto-commands
@@ -169,7 +174,7 @@ def show_help(skills_registry=None):
             console.print("  [bold]-- Skill Commands --[/bold]")
             for slug, skill in skill_cmds.items():
                 desc = skill.description[:50] if skill.description else ""
-                console.print(f"    [bright_green]{slug:<18}[/bright_green] [dim]{desc}[/dim]")
+                console.print(f"    [bright_green]{escape(f'{slug:<18}')}[/bright_green] [dim]{escape(desc)}[/dim]")
             console.print()
 
     console.print("  [bold]Keyboard Shortcuts[/bold]")
@@ -185,7 +190,7 @@ def show_help(skills_registry=None):
         "Ctrl+O":            "Expand truncated tool commands and output in pager",
     }
     for key, desc in shortcuts.items():
-        console.print(f"    [bright_green]{key:<20}[/bright_green] [dim]{desc}[/dim]")
+        console.print(f"    [bright_green]{escape(f'{key:<20}')}[/bright_green] [dim]{escape(desc)}[/dim]")
     console.print()
 
     console.print("  [bold]Input Features[/bold]")

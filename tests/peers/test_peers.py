@@ -4,6 +4,7 @@
 @description: Tests for cross-session peer messaging (agentica/peers.py).
 """
 import asyncio
+import json
 import os
 import time
 
@@ -337,11 +338,42 @@ class TestLifecycle:
         session.heartbeat()
         assert session.info.updated_at == first
 
-        # An explicit update is the caller saying something changed, so it is
-        # written through regardless of how recently we published.
+        # A field that really changed is written through regardless of how
+        # recently we published.
         session.heartbeat(task="running benchmarks")
         assert session.info.updated_at > first
         assert session.list_peers() == []
+
+    def test_heartbeat_ignores_updates_that_change_nothing(self):
+        """The CLI ticks every second and hands over its mutable fields, so a
+        repeat of what is already published must stay a no-op."""
+        session = _session("alpha")
+        session.publish(model_name="glm-4.7", busy=False)
+        written_at = session.info.updated_at
+
+        session.heartbeat(model_name="glm-4.7", busy=False)
+
+        assert session.info.updated_at == written_at
+
+    def test_heartbeat_publishes_a_switched_model_right_away(self):
+        session = _session("alpha")
+        session.publish(model_name="glm-4.7")
+
+        session.heartbeat(model_name="deepseek-v4")
+
+        published = peers.PeerInfo.from_dict(json.loads(session.path.read_text()))
+        assert published.model_name == "deepseek-v4"
+
+    def test_heartbeat_still_refreshes_presence_on_the_interval(self):
+        """Presence is what STALE_AFTER reads; an unchanging session must keep
+        proving it is alive."""
+        session = _session("alpha")
+        session._last_publish = time.time() - (peers.HEARTBEAT_INTERVAL + 1)
+        stale_at = session.info.updated_at
+
+        session.heartbeat(model_name=session.info.model_name)
+
+        assert session.info.updated_at > stale_at
 
     def test_published_task_is_visible_to_other_sessions(self):
         watcher = _session("watcher")
@@ -373,6 +405,9 @@ class TestPeerMessagingTool:
             memory_path="/tmp/ws/users/default/MEMORY.md",
             log_file="/tmp/home/.agentica/logs/20260809-80403.log",
             log_level="INFO",
+            profile_name="work",
+            model_provider="deepseek",
+            model_name="deepseek-v4-flash",
         )
         other.publish(task="adding idempotency keys")
 
@@ -380,6 +415,8 @@ class TestPeerMessagingTool:
 
         assert "payments" in out
         assert "/repos/payments" in out
+        assert "profile: work" in out
+        assert "model: deepseek/deepseek-v4-flash" in out
         assert "log_file (INFO):" in out
         assert "20260809-80403.log" in out
         assert "adding idempotency keys" in out
@@ -388,6 +425,39 @@ class TestPeerMessagingTool:
         assert "MEMORY.md" in out
         assert "mailbox:" in out
         assert "Address a peer by name" in out
+
+    def test_list_agents_omits_empty_profile_but_keeps_model(self):
+        """A flag-replaced model has no profile name; still publish provider/name."""
+        me = _session("me")
+        other = PeerSession(
+            name="scratch",
+            cwd="/repos/scratch",
+            model_provider="openai",
+            model_name="gpt-4o",
+        )
+        other.publish()
+
+        out = asyncio.run(PeerMessagingTool(me).list_agents())
+
+        assert "profile:" not in out
+        assert "model: openai/gpt-4o" in out
+
+    def test_list_agents_reports_turn_state_and_context_spent(self):
+        """Neither field gates anything (peers compact, and a running session
+        still receives) — they are published as the price of sending."""
+        me = _session("me")
+        busy = PeerSession(name="busy-one", cwd="/repos/busy")
+        busy.publish(busy=True, context_tokens=180_000, context_window=200_000)
+        idle = PeerSession(name="idle-one", cwd="/repos/idle")
+        idle.publish(context_window=200_000)
+
+        out = asyncio.run(PeerMessagingTool(me).list_agents())
+
+        assert "status: running a turn" in out
+        assert "context: 180,000 / 200,000 tokens" in out
+        assert "status: idle" in out
+        # A session that has not reported usage yet still advertises its window.
+        assert "context: ? / 200,000 tokens" in out
 
     def test_list_agents_fills_paths_when_peer_omitted_them(self):
         """Older live records without project/log/workspace still get a full listing."""
