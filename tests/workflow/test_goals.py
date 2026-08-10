@@ -7,8 +7,6 @@ All tests mock ``Model.response()`` — no real LLM calls.
 """
 
 import asyncio
-import json
-import tempfile
 from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import AsyncMock

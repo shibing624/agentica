@@ -44,6 +44,7 @@ Async-first Python agent harness · 40+ ツール · 20+ モデル · MCP · CLI
 
 ## 🔥 News
 
+- [2026/08/10] **v1.4.12**：コンテキスト圧縮を二層に整理——Layer 1 が窓圧で古い tool result を淘汰（約 70%→50%）、Layer 2 が LLM/native 要約。読み直し無限ループと Anthropic 経路で圧縮が一度も動かなかった問題を修正。Layer 0 は回収可能かで落盤か正直な切り詰めかを決め、圧縮回数は `RunResponse.context_compactions` に記録；CLI 前提を SDK に押し付けない（`enable_session_log=False`、registry なしでは `background` なし）。詳細は [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/09] **CLI 複数セッション協調**：端末をまたぐ peer メッセージ（`list_agents` / `send_message`）；プロセス級 `delegate`（独立した `agentica --query --print`）と安価なプロセス内 `task`（subagent）を明確に分離；CLI は `task` / `delegate` / `send_message` の指示文を省略せず全文表示。詳細は [端末ドキュメント](https://shibing624.github.io/agentica/getting-started/terminal)
 - [2026/08/04] **v1.4.11**：OpenAI Responses API（ネイティブ compaction 含む）、Markdown 設定可能なサブエージェント、複数ファイル `apply_patch` を追加；CLI の resume/ステータス/圧縮フィードバックを改善；prompt と grep/glob schema のコストを削減；Learned Experiences の汚染と `write_todos` の全リストエコーを修正。詳細は [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：カタログ駆動のモデル能力判定によるネイティブ画像入力を追加；`/rename` と名前指定の `/resume` を追加；Pillow コア依存関係のメタデータを修正。詳細は [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)

@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.12] - 2026-08-10
+
 #### features
 - **为 CLI 做的功能不再默认落到 SDK 用户头上**。CLI 只是产品之一，但它和后端服务共用同一套 builtin 与同一个 Runner，于是「CLI 一定有的能力」被当成了前提而不是需要检查的条件。这一批统一改成先问再做：
   - **Layer 0 按「取回得回来吗」决定形态**。超大工具结果以前一律落盘 + 在上下文里换成文件路径。可 CLI 之外没人能打开这个路径——一个只挂业务工具（无 `read_file`、无 `execute`）的服务型 agent 拿到的是**一句它读不了的路径**，等于数据直接丢了，还会诱导模型去调一个它没有的工具。现在 `can_recover_spill(model.functions)` 检查会话里有没有 `read_file` / `execute`：有就照旧落盘给路径（`<persisted-output>`），没有就**不写盘**、如实截断成 `<truncated-output>` 并说明原因和「请缩小查询范围」。
