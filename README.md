@@ -45,8 +45,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 ## 🔥 News
 
 
-- [2026/08/10] **v1.4.12**：上下文压缩收敛为两层——Layer 1 按窗口压力淘汰旧 tool result（约 70%→50%），Layer 2 再做 LLM/native 摘要；修掉「读了又读」死循环与 Anthropic 路径上压缩从未生效的问题。Layer 0 按会话能否取回结果决定落盘还是诚实截断，压缩次数写入 `RunResponse.context_compactions`；CLI 专属假设不再默认落到 SDK（`enable_session_log=False`、无 registry 不挂 `background`）。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
-- [2026/08/09] **CLI 多会话协作**：跨终端 peer 消息（`list_agents` / `send_message`、`/list-agents` / `/send-message`）；进程级 `delegate`（另起完整 `agentica --query --print`，独立 context / cwd，经 `/ps` `/stop` `wait` 托管）与便宜的进程内 `task`（subagent）分工明确；CLI 对 `task` / `delegate` / `send_message` **完整展示**任务正文，不再截断。详见 [终端文档](https://shibing624.github.io/agentica/getting-started/terminal)
+- [2026/08/10] **v1.4.12**：上下文压缩收敛为两层（约 70%→50% 淘汰旧 tool result → LLM/native 摘要），修掉「读了又读」死循环与 Anthropic 路径失效；Layer 0 按能否取回决定落盘或诚实截断，压缩次数写入 `RunResponse.context_compactions`，CLI 假设不再默认落到 SDK。新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与便宜的进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
 - [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
