@@ -300,6 +300,16 @@ class OpenAIChat(Model):
     # backend and actually hit the cache written by earlier requests. None = off.
     cache_control_session_header: Optional[str] = None
     _cache_session_id: Optional[str] = field(default=None, init=False, repr=False)
+    # OpenAI's own cache is implicit — nothing is marked, the prefix is matched
+    # automatically — but a hit also requires landing on the machine holding it,
+    # and routing hashes only the first ~256 prompt tokens. ``prompt_cache_key``
+    # is folded into that hash, so reusing one key across a conversation is the
+    # sanctioned way to buy routing affinity (and on gpt-5.6+ it is required for
+    # the more reliable matching). Orthogonal to ``enable_cache_control``, which
+    # is the Anthropic breakpoint protocol: this one costs nothing and applies
+    # to every OpenAI-compatible endpoint, hence default ON. Turn it off for an
+    # endpoint strict enough to reject unknown request fields.
+    enable_prompt_cache_key: bool = True
     # Cache keep-alive: while the session sits idle, re-read the cached
     # tools+system prefix every `cache_keepalive_interval` seconds (a cache read
     # costs ~0.1x input price vs ~1.25x for a re-write after the 5-min TTL
@@ -539,6 +549,9 @@ class OpenAIChat(Model):
         if self._is_deepseek_thinking_request(request_params):
             for param_name in _DEEPSEEK_THINKING_UNSUPPORTED_PARAMS:
                 request_params.pop(param_name, None)
+        cache_key = self._prompt_cache_key()
+        if cache_key is not None:
+            request_params.setdefault("prompt_cache_key", cache_key)
         return request_params
 
     def to_dict(self) -> Dict[str, Any]:
@@ -571,6 +584,25 @@ class OpenAIChat(Model):
         return message.to_model_dict()
 
     # ── Prompt caching (Anthropic-via-OpenAI proxies, e.g. Venus) ──
+
+    def _prompt_cache_key(self) -> Optional[str]:
+        """Routing-affinity key for OpenAI's implicit prompt cache.
+
+        Scoped to the conversation: one session shares a prompt prefix, and
+        OpenAI asks that a key stay under roughly 15 requests per minute, which
+        a single session cannot exceed. Falls back to the endpoint's sticky
+        routing id when the caller never set a session (a bare SDK ``Agent``),
+        since an arbitrary stable key still beats none — without one, requests
+        are spread across machines for load balancing and the cache goes with
+        them.
+        """
+        if not self.enable_prompt_cache_key:
+            return None
+        if self.session_id:
+            return self.session_id
+        if self._cache_session_id is None:
+            self._cache_session_id = _persistent_cache_session_id(self.base_url)
+        return self._cache_session_id
 
     def _with_cache_session_header(self, existing: Any) -> Any:
         """Merge a stable per-run session id into extra_headers for sticky routing.

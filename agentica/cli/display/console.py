@@ -11,6 +11,8 @@ from typing import Any, ContextManager, Dict, List, Optional, Tuple, cast
 
 from rich.text import Text
 
+from agentica.utils.log import logger
+
 # Rich console color scheme (unified - no separate ANSI codes)
 COLORS = {
     "user": "bright_cyan",
@@ -126,8 +128,31 @@ def _parse_provider_error_payload(message: str) -> Dict[str, Any]:
     return details
 
 
+def _decode_error_window(error: json.JSONDecodeError, span: int = 30) -> str:
+    """Return the text on either side of where JSON parsing gave up.
+
+    Kept to one terminal line: it exists so the shape of the garbage is
+    recognisable at a glance (two events glued together, an HTML error page,
+    a truncated object). The whole chunk is one Ctrl+O away.
+    """
+    doc = error.doc
+    if not doc:
+        return ""
+    start = max(0, error.pos - span)
+    end = min(len(doc), error.pos + span)
+    window = " ".join(doc[start:end].split())
+    return f"{'…' if start else ''}{window}{'…' if end < len(doc) else ''}"
+
+
 def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
-    """Build a concise CLI-facing error view while retaining raw details."""
+    """Build a concise CLI-facing error view while retaining raw details.
+
+    ``raw`` is what Ctrl+O expands and what goes to the log, so it has to be
+    something the short on-screen line does not already say. For a decode
+    error ``str(error)`` is just "Extra data: line 1 column 309" — expanding
+    that shows the user the same sentence twice. The chunk the endpoint
+    actually sent is in ``.doc``, and nothing else keeps a copy of it.
+    """
     raw = str(error)
     details = _parse_provider_error_payload(raw)
     low = raw.lower()
@@ -170,9 +195,13 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
     elif isinstance(error, json.JSONDecodeError):
         # A gateway that packs two SSE events onto one ``data:`` line surfaces
         # only as "Extra data: line 1 column N". Name the cause so the user
-        # doesn't go looking for it in their prompt or config.
+        # doesn't go looking for it in their prompt or config, and show the
+        # text around the break — that is what says *which* garbage arrived.
         summary = "Malformed stream from the model endpoint"
         detail = f"The endpoint sent an unparsable SSE chunk: {raw}"
+        window = _decode_error_window(error)
+        if window:
+            detail = f"{detail}\n  near the break: {window}"
         hint = "Type /retry to resend the last message."
     elif is_transient:
         summary = f"Transient LLM/API error ({status})" if status else "Transient LLM/API error"
@@ -196,6 +225,12 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
         if value:
             diagnostics.append(f"{label}={value}")
 
+    if isinstance(error, json.JSONDecodeError) and error.doc:
+        raw = (
+            f"{raw}\n\nOffending chunk sent by the endpoint "
+            f"({len(error.doc)} chars, parsing stopped at char {error.pos}):\n{error.doc}"
+        )
+
     return {
         "summary": summary,
         "detail": detail,
@@ -206,10 +241,18 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
 
 
 def display_agent_execution_error(console_instance, error: BaseException) -> Dict[str, Any]:
-    """Render a structured agent error and retain raw details for Ctrl+O."""
+    """Render a structured agent error, log it, and retain raw for Ctrl+O.
+
+    The Ctrl+O copy lives in a buffer that the next user turn clears, so it is
+    gone the moment the user says anything else — which is exactly when a
+    malformed-stream error tends to be looked at. The file log is the durable
+    copy, and it is the only one an unattended run leaves behind at all.
+    """
     view = _format_agent_execution_error(error)
     if view["raw"]:
         remember_truncated("Agent error · raw", view["raw"])
+        # One log record per error, so the raw text is greppable as a unit.
+        logger.error("%s: %s", view["summary"], " ".join(view["raw"].split()))
 
     headline = Text("● Error: ", style="bold red")
     headline.append(view["summary"], style="bold red")

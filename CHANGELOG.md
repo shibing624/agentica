@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 #### features
+- **OpenAI 侧补上 `prompt_cache_key`（默认开启，`enable_prompt_cache_key`）**，取 `session_id`，没有会话时退到该端点的粘性路由 id。此前只有 `cache_control_session_header` 一条路径，那是 Venus 专有 header；跑原生 OpenAI / DeepSeek / Qwen 时走的是隐式缓存，**一个路由提示都没传**。而隐式缓存命中要同时满足两件事：前缀一致、且请求落到存着这份前缀的那台机器上——路由只哈希 prompt 前约 256 个 token，共享前缀的请求本来就会被摊到多台机器做负载均衡，缓存不会跟着走。`prompt_cache_key` 会并进这个哈希，官方案例里某编码客户接入后命中率从 60% 升到 87%，gpt-5.6 起更是用上更可靠匹配的前提。作用域按会话：官方建议单个 key 不超过约 15 请求/分钟，一个会话不可能超。
+  与 `enable_cache_control` 正交——后者是 Anthropic 的断点协议，这条只是路由亲和性，不认这个字段的端点忽略即可（已在真实兼容端点上验证不会 400），所以默认开启；遇到严格校验未知字段的端点可关。
+
 - **`list_agents` / `/list-agents` 多报会话的配置与负载**：profile、model（`provider/name`）、idle/busy、context 已用/窗口。这些字段从 peer 心跳每秒 tick 里带出，读的是状态栏同一份 `tui_state`——`/model`、`/model --clear`、`/config set` 都能改模型，靠各处 push 迟早漏一条；心跳本身只在值真变了才写盘，不会把 30s 的 presence 写成每秒一次。字段描述的是配置与代价，不是容量：忙着的会话仍会在 tool 间隙收信，将近满的窗口也只是「再塞东西会触发对方压缩」，不是拒收墙。
 - **`/debug [on|off]` 改成会话内开关 verbose 日志**（对标启动时的 `--debug`）：无参翻转，`on`/`off` 显式设置；写回 `agent_config` 以便 `/model`、`/resume` 重建 agent 后仍在。原先打印的会话事实（model、history 条数等）本来就在 `/status`。
 
@@ -22,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   分支 / 未提交变更 / 最近 commit 改由 agent 需要时自己跑一次 git 获取——这本来就是一次工具调用的事，而且模型每一次编辑都已经在自己的工具结果里看见了。顺带每轮省掉 4 次 git 子进程（本仓库约 38ms）。
   **两条走不通的替代方案**：① 挪到 `VOLATILE_SYSTEM_MARKER` 之后——只保住 system head 那一个断点，volatile 尾巴仍在所有 message 断点的前缀里，历史照样每轮重写；marker 成立的前提是它后面的内容**跨轮稳定**（冻结的记忆、天级日期），不是每轮都变的东西换个位置继续变。② 像工作区上下文那样每会话冻结一次——省下了钱，换来的是一份越来越旧的文件列表，模型把 20 轮前的状态当成现状，比没有更糟。
 - `/help` 里带方括号的命令名（如 `/model [p/m]`、`/debug [on|off]`）不再被 rich 当成 markup 静默吃掉；先 pad 再 `escape`，对齐也不歪。
+- **SSE 解析失败时，报错终于说得出端点发了什么**。`Malformed stream from the model endpoint` 的 raw 一直是 `str(JSONDecodeError)`，也就是 `Extra data: line 1 column 309` 那一句——屏幕上已经完整印过，所以 Ctrl+O 展开出来的是同一句话，纯属白按。坏掉的那段字节只在 `JSONDecodeError.doc` 里，别处没有第二份拷贝，于是这个错**从来没有可诊断的信息**。现在 `.doc` 整段进 `view["raw"]`（Ctrl+O 和日志共用同一份，不会只补一半），屏幕上另给一行断点前后 60 字符的窗口——两个 SSE 事件粘在一行、HTML 错误页、半截 JSON，一眼就能认出来，不必开 pager。
+- **运行报错的原文写进文件日志**。此前它只存在 Ctrl+O 那个进程内缓冲里，而新一轮用户消息开头就 `clear_truncated_blocks()`（为了让 Ctrl+O 展开当前轮）——于是「看到报错、下一轮已经发出去、再按 Ctrl+O 什么都没有」，日志里也查不到，原文彻底消失。现在 `display_agent_execution_error` 同时 `logger.error`（折成一行，便于 grep），`~/.agentica/logs/` 里随时可查；CLI 默认已 suppress console logging，所以不会在屏幕上打印两遍。
 
 ## [1.4.12] - 2026-08-10
 

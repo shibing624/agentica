@@ -124,6 +124,73 @@ class TestCLIUserMessage(unittest.TestCase):
         self.assertEqual(view["summary"], "Malformed stream from the model endpoint")
         self.assertIn("Extra data", view["detail"])
         self.assertIn("/retry", view["hint"])
+        # The line on screen shows what arrived around the break, so the user
+        # can recognise a double-packed SSE event without opening the pager.
+        self.assertIn('{"a": 1}{"b": 2}', view["detail"])
+
+
+    def test_malformed_stream_raw_carries_the_chunk_not_the_same_sentence(self):
+        """Ctrl+O must expand to more than the message already on screen.
+
+        ``str(JSONDecodeError)`` is only "Extra data: line 1 column N"; if that
+        is all ``raw`` holds, expanding it repeats the line above it verbatim.
+        """
+        import json as _json
+
+        from agentica.cli.display import console as disp
+
+        chunk = '{"choices":[{"delta":{"content":"hi"}}]}{"choices":[{"delta":{}}]}'
+        error = _json.JSONDecodeError("Extra data", chunk, 40)
+
+        view = disp._format_agent_execution_error(error)
+
+        self.assertIn(chunk, view["raw"])
+        self.assertIn("Extra data", view["raw"])
+        self.assertNotEqual(view["raw"], str(error))
+
+
+    def test_display_agent_execution_error_logs_raw_to_file_log(self):
+        """The raw provider error must outlive the Ctrl+O buffer.
+
+        That buffer is cleared by the next user turn, so an error the user
+        reads a moment too late has no copy anywhere. The file log is the one
+        place it can still be found.
+        """
+        from rich.console import Console
+
+        from agentica.cli.display import console as disp
+
+        raw = "Error code: 500 - {'error': {'message': 'upstream exploded'}}"
+        console = Console(file=StringIO(), width=100, force_terminal=False, no_color=True)
+
+        with self.assertLogs("agentica", level="ERROR") as captured:
+            disp.display_agent_execution_error(console, RuntimeError(raw))
+
+        logged = "\n".join(captured.output)
+        self.assertIn("upstream exploded", logged)
+        self.assertIn("Agent execution failed (500)", logged)
+
+
+    def test_display_agent_execution_error_logs_and_folds_the_same_chunk(self):
+        """The chunk reaches both durable surfaces: Ctrl+O and the file log."""
+        import json as _json
+
+        from rich.console import Console
+
+        from agentica.cli.display import console as disp
+
+        chunk = '{"choices":[{"delta":{"content":"hi"}}]}{"choices":[]}'
+        error = _json.JSONDecodeError("Extra data", chunk, 40)
+        console = Console(file=StringIO(), width=100, force_terminal=False, no_color=True)
+        disp.clear_truncated_blocks()
+
+        with self.assertLogs("agentica", level="ERROR") as captured:
+            disp.display_agent_execution_error(console, error)
+
+        logged = "\n".join(captured.output)
+        self.assertIn("Malformed stream from the model endpoint", logged)
+        self.assertIn(chunk, logged)
+        self.assertIn(chunk, disp.get_truncated_blocks()[-1]["content"])
 
 
     def test_user_message_uses_subtle_background_panel(self):

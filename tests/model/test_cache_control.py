@@ -492,6 +492,59 @@ def test_keepalive_ping_request_shape(monkeypatch):
     assert "http_client" in sent["client_params"]  # throwaway client, not the shared one
 
 
+# ── prompt_cache_key (OpenAI-side routing affinity) ───────────────────────────
+
+
+def test_prompt_cache_key_is_the_session_id():
+    model = OpenAIChat(id="m", api_key="fake_openai_key")
+    model.session_id = "sess-abc"
+    assert model.request_kwargs["prompt_cache_key"] == "sess-abc"
+
+
+def test_prompt_cache_key_is_independent_of_cache_control():
+    """Anthropic breakpoints and OpenAI routing affinity are separate features."""
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_cache_control=False)
+    model.session_id = "sess-abc"
+    assert model.request_kwargs["prompt_cache_key"] == "sess-abc"
+
+
+def test_prompt_cache_key_can_be_turned_off():
+    model = OpenAIChat(id="m", api_key="fake_openai_key", enable_prompt_cache_key=False)
+    model.session_id = "sess-abc"
+    assert "prompt_cache_key" not in model.request_kwargs
+
+
+def test_prompt_cache_key_falls_back_to_sticky_routing_id(monkeypatch):
+    """A bare SDK Agent sets no session; an arbitrary stable key still beats none."""
+    from agentica.model.openai import chat as chat_mod
+
+    monkeypatch.setattr(chat_mod, "_persistent_cache_session_id", lambda _base: "sticky-1")
+    model = OpenAIChat(id="m", api_key="fake_openai_key")
+    assert model.session_id is None
+    assert model.request_kwargs["prompt_cache_key"] == "sticky-1"
+
+
+def test_explicit_prompt_cache_key_wins():
+    model = OpenAIChat(id="m", api_key="fake_openai_key",
+                       request_params={"prompt_cache_key": "mine"})
+    model.session_id = "sess-abc"
+    assert model.request_kwargs["prompt_cache_key"] == "mine"
+
+
+def test_prompt_cache_key_is_stable_across_turns():
+    """The whole point: one key for the life of the conversation."""
+    model = OpenAIChat(id="m", api_key="fake_openai_key")
+    model.session_id = "sess-abc"
+    assert model.request_kwargs["prompt_cache_key"] == model.request_kwargs["prompt_cache_key"]
+
+
+def test_prompt_cache_key_absent_from_to_dict():
+    """to_dict describes the model's configuration, not per-session routing."""
+    model = OpenAIChat(id="m", api_key="fake_openai_key")
+    model.session_id = "sess-abc"
+    assert "prompt_cache_key" not in model.to_dict()
+
+
 # ── marker must not leak to non-caching providers ─────────────────────────────
 
 
