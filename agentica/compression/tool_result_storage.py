@@ -1,39 +1,57 @@
 # -*- coding: utf-8 -*-
 """
-@description: Tool result storage - persist large tool outputs to disk.
+@description: Layer 0 — bound how much one turn's tool output may inject.
 
-When a tool result exceeds a threshold, the full content is saved to disk
-and the context message is replaced with a short preview + file path.
+This is not compression but an output policy, and it runs at the moment a
+result is produced rather than before a request. Two rules:
 
-Path structure (mirrors CC's toolResultStorage.ts):
-    ~/.agentica/projects/<sanitized-cwd>/<session-id>/tool-results/<tool-use-id>.txt
+    1. Per-result: a single result over ``Function.max_result_size_chars``
+       is shrunk on the spot, so a 5 MB output never enters the context once.
+    2. Per-batch: when the whole batch of fresh results would occupy more than
+       ``TOOL_BATCH_BUDGET_RATIO`` of the window, the largest ones are shrunk
+       until it fits. Layer 1 deliberately never touches the trailing batch,
+       so without this a single wide parallel round has nothing to save it.
 
-Two-layer budget:
-    1. Per-tool: single result > DEFAULT_MAX_RESULT_SIZE_CHARS -> persist
-    2. Per-message: all tool_results in one message > MAX_TOOL_RESULTS_PER_MESSAGE_CHARS
-       -> persist the largest ones until under budget
+**Shrinking to a file path is only useful when someone can open the path.**
+An agent with ``read_file`` (or ``execute``) can pull the full copy back for
+one tool call; an agent assembled from business tools alone cannot, and for it
+the path is a handle nobody in the session can hold — the data is gone and the
+message invites the model to read a file it has no way to read. So the form of
+the shrink follows the session's actual capability (``can_recover_spill``):
+spill to disk and hand over the path when it can be read back, otherwise
+truncate honestly and say so.
+
+Accumulated *history* is not this layer's problem. That is Layer 1's, gated on
+real window pressure; a second budget here in fixed chars would be a second
+threshold governing the same decision, and it fired long before the window was
+under any pressure at all.
+
+Path structure:
+    ~/.agentica/projects/<user>/<sanitized-cwd>/<session-id>/tool-results/<tool-use-id>.txt
 
 Usage (automatic - called from Model.run_function_calls):
     from agentica.compression.tool_result_storage import maybe_persist_result
     content = maybe_persist_result(
         tool_name="execute", tool_use_id="call_abc123",
         content=huge_bash_output, session_id="sess_xyz",
+        recoverable=can_recover_spill(model.functions),
     )
 """
 import hashlib
 import os
 import re
 from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import Iterable, List, Optional, TYPE_CHECKING
 
 from agentica.security.redact import redact_sensitive_text
 from agentica.utils.log import logger
+from agentica.utils.tokens import count_text_tokens
 
 if TYPE_CHECKING:
     from agentica.model.message import Message
 
 # ---------------------------------------------------------------------------
-# Constants (aligned with CC's toolLimits.ts)
+# Constants
 # ---------------------------------------------------------------------------
 
 # Max chars to keep inline in the context (preview)
@@ -43,9 +61,22 @@ PREVIEW_CHARS = 2000
 # Individual tools can override via Function.max_result_size_chars.
 DEFAULT_MAX_RESULT_SIZE_CHARS = 50_000
 
-# Per-message budget: total chars across all tool_results in one assistant response.
-# When exceeded, the largest fresh results are persisted until under budget.
-MAX_TOOL_RESULTS_PER_MESSAGE_CHARS = 200_000
+# Share of the context window one turn's fresh tool output may occupy. Tied to
+# the window rather than to a char count so this layer and Layer 1 measure
+# pressure against the same number: a 200K-char budget fired on a 512K-token
+# window that had room to spare, and never fired on a 8K-token window that had
+# none.
+TOOL_BATCH_BUDGET_RATIO = 0.25
+
+# Tools that can read an arbitrary local path back into the context. Handing
+# out a spill path is only better than truncating when one of these is
+# registered for the call.
+RECOVERY_TOOL_NAMES = frozenset({"read_file", "execute"})
+
+
+def can_recover_spill(function_names: Iterable[str]) -> bool:
+    """Whether this session could read a persisted result back into context."""
+    return bool(RECOVERY_TOOL_NAMES.intersection(function_names))
 
 
 # ---------------------------------------------------------------------------
@@ -131,37 +162,78 @@ def get_tool_result_path(
 # Persistence message builder
 # ---------------------------------------------------------------------------
 
+def _preview(content: str) -> str:
+    """40% head + 60% tail — keeps both the early context (command echo,
+    headers) and the final results (exit codes, summaries)."""
+    if len(content) <= PREVIEW_CHARS:
+        return content
+    head_chars = int(PREVIEW_CHARS * 0.4)
+    tail_chars = PREVIEW_CHARS - head_chars
+    omitted = len(content) - head_chars - tail_chars
+    return (
+        content[:head_chars]
+        + f"\n\n... [{omitted} chars omitted] ...\n\n"
+        + content[-tail_chars:]
+    )
+
+
+def _size_kb(content: str) -> float:
+    return len(content.encode("utf-8", errors="ignore")) / 1024
+
+
 def _build_persisted_message(file_path: str, content: str) -> str:
-    """Build the preview message returned to the model after persisting.
-
-    Uses 40% head + 60% tail strategy to preserve both early context
-    (command echo, headers) and final results (exit codes, summaries).
-    """
-    max_preview = PREVIEW_CHARS
-    size_kb = len(content.encode("utf-8", errors="ignore")) / 1024
-
-    if len(content) <= max_preview:
-        preview = content
-    else:
-        # 40% head + 60% tail — preserves both early context and final results
-        head_chars = int(max_preview * 0.4)
-        tail_chars = max_preview - head_chars
-        omitted = len(content) - head_chars - tail_chars
-        preview = (
-            content[:head_chars]
-            + f"\n\n... [{omitted} chars omitted] ...\n\n"
-            + content[-tail_chars:]
-        )
-
-    msg = (
+    """Preview + the path holding the full copy, for a session that can read it."""
+    return (
         f"<persisted-output>\n"
-        f"Output too large ({size_kb:.1f} KB). Full output saved to:\n"
+        f"Output too large ({_size_kb(content):.1f} KB). Full output saved to:\n"
         f"{file_path}\n\n"
-        f"Preview ({max_preview} chars, 40%head+60%tail):\n"
-        f"{preview}"
+        f"Preview ({PREVIEW_CHARS} chars, 40%head+60%tail):\n"
+        f"{_preview(content)}"
         f"\n</persisted-output>"
     )
-    return msg
+
+
+def _build_truncated_message(content: str) -> str:
+    """Preview only, for a session with no way to read a saved copy.
+
+    Naming the missing capability matters: the model's next move should be to
+    narrow the call, not to look for a file, and not to assume it saw
+    everything.
+    """
+    return (
+        f"<truncated-output>\n"
+        f"Output too large ({_size_kb(content):.1f} KB) and no tool in this session can read "
+        f"a saved copy, so it was truncated.\n\n"
+        f"Preview ({PREVIEW_CHARS} chars, 40%head+60%tail):\n"
+        f"{_preview(content)}\n\n"
+        f"Narrow the call (a filter, fewer items, a smaller range) if you need the rest."
+        f"\n</truncated-output>"
+    )
+
+
+def _shrink_one_result(
+    tool_use_id: str,
+    content: str,
+    *,
+    session_id: str,
+    cwd: Optional[str],
+    user_id: Optional[str],
+    recoverable: bool,
+) -> str:
+    """Shrink one oversized result to a bounded message.
+
+    Spills to disk and hands over the path only when the session can read it
+    back; otherwise nothing is written — a file no one can open is landfill,
+    and the debug log already records that a truncation happened.
+    """
+    redacted = redact_sensitive_text(content)
+    if recoverable:
+        file_path = get_tool_result_path(
+            tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
+        )
+        if _persist_to_disk(file_path, redacted):
+            return _build_persisted_message(file_path, redacted)
+    return _build_truncated_message(redacted)
 
 
 def _persist_to_disk(file_path: str, content: str) -> bool:
@@ -188,8 +260,9 @@ def maybe_persist_result(
     cwd: Optional[str] = None,
     max_result_size_chars: Optional[int] = DEFAULT_MAX_RESULT_SIZE_CHARS,
     user_id: Optional[str] = None,
+    recoverable: bool = True,
 ) -> str:
-    """If content exceeds threshold, persist to disk and return preview.
+    """Shrink one oversized result at the moment it is produced.
 
     Args:
         tool_name:              Name of the tool that produced the result.
@@ -197,10 +270,13 @@ def maybe_persist_result(
         content:                Full tool output string.
         session_id:             Session identifier for directory isolation.
         cwd:                    Project working directory (for path generation).
-        max_result_size_chars:  Threshold in chars. None = never persist.
+        max_result_size_chars:  Threshold in chars. None = never shrink.
+        recoverable:            Whether the session has a tool that could read a
+                                spilled copy back (see ``can_recover_spill``).
+                                False truncates instead of writing a file.
 
     Returns:
-        Original content (if under threshold) or preview + disk path.
+        Original content (if under threshold) or a bounded preview.
     """
     if max_result_size_chars is None:
         return content
@@ -213,6 +289,8 @@ def maybe_persist_result(
     cls = classify_tool_result(content, large_threshold=max_result_size_chars)
     if cls in (ToolResultClass.IMAGE, ToolResultClass.BINARY) and len(content) > PREVIEW_CHARS:
         descriptor = describe_media(content, cls)
+        if not recoverable:
+            return descriptor
         file_path = get_tool_result_path(
             tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
         )
@@ -224,95 +302,95 @@ def maybe_persist_result(
     if len(content) <= max_result_size_chars:
         return content
 
-    redacted_content = redact_sensitive_text(content)
-    file_path = get_tool_result_path(
-        tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
-    )
-    if not _persist_to_disk(file_path, redacted_content):
-        # Fallback: truncate in-place
-        return redacted_content[:max_result_size_chars] + "\n... (output truncated)"
-
     logger.debug(
-        f"Persisted {tool_name} result ({len(content):,} chars) to {file_path}"
+        f"Layer 0: {tool_name} result is {len(content):,} chars "
+        f"(recoverable={recoverable})"
     )
-    return _build_persisted_message(file_path, redacted_content)
+    return _shrink_one_result(
+        tool_use_id,
+        content,
+        session_id=session_id,
+        cwd=cwd,
+        user_id=user_id,
+        recoverable=recoverable,
+    )
 
 
 # ---------------------------------------------------------------------------
-# Layer 2: Per-message budget enforcement
+# Per-batch budget enforcement
 # ---------------------------------------------------------------------------
 
-def enforce_tool_result_budget(
+def enforce_tool_batch_budget(
     tool_results: List["Message"],
+    *,
+    context_window: int,
+    model_id: str = "gpt-4o",
     session_id: str = "default",
     cwd: Optional[str] = None,
-    budget: int = MAX_TOOL_RESULTS_PER_MESSAGE_CHARS,
     user_id: Optional[str] = None,
+    recoverable: bool = True,
+    budget_ratio: float = TOOL_BATCH_BUDGET_RATIO,
 ) -> int:
-    """Enforce per-message budget on a batch of tool result messages.
+    """Bound one turn's fresh tool results to a share of the context window.
 
-    If the total chars across all tool_results exceed `budget`, persist the
-    largest results to disk (biggest first) until total is under budget.
-    Modifies messages in-place.
+    Called where the batch is produced, so it sees plain result messages
+    whatever the provider will later pack them into. Shrinks the largest
+    results first, in place, until the batch fits.
 
     Args:
-        tool_results: List of tool result Message objects from one assistant turn.
-        session_id:   Session ID for path generation.
-        cwd:          Project working directory.
-        budget:       Max total chars allowed across all tool results.
+        tool_results:   Result messages from one assistant turn.
+        context_window: Model window. Zero disables the check — without a
+                        window there is no way to tell a big batch from a
+                        batch this model has ample room for.
+        model_id:       Tokenizer selection.
+        recoverable:    See ``can_recover_spill``. Decides whether a shrunk
+                        result keeps a readable path or is simply truncated.
 
     Returns:
-        Number of results that were persisted by this call.
+        Number of results shrunk by this call.
     """
-    if not tool_results or budget <= 0:
+    if not tool_results or context_window <= 0:
+        return 0
+    budget = int(context_window * budget_ratio)
+    if budget <= 0:
         return 0
 
-    # Compute sizes, skip already-persisted results
+    # An already-shrunk result is bounded, and re-shrinking a persisted one
+    # would throw away the path that is the only handle on its full content.
     sizes = []
     for msg in tool_results:
         content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-        # Already persisted results contain the <persisted-output> tag
-        already_persisted = "<persisted-output>" in content
-        sizes.append((len(content), already_persisted))
+        already_shrunk = "<persisted-output>" in content or "<truncated-output>" in content
+        sizes.append((count_text_tokens(content, model_id), already_shrunk))
 
-    total = sum(s for s, _ in sizes)
+    total = sum(t for t, _ in sizes)
     if total <= budget:
         return 0
 
-    # Sort indices by size descending, skip already-persisted
-    candidates = [
-        (i, sizes[i][0])
-        for i in range(len(tool_results))
-        if not sizes[i][1]
-    ]
+    candidates = [(i, sizes[i][0]) for i in range(len(tool_results)) if not sizes[i][1]]
     candidates.sort(key=lambda x: x[1], reverse=True)
 
-    persisted_count = 0
-    for idx, size in candidates:
+    shrunk_count = 0
+    for idx, tokens in candidates:
         if total <= budget:
             break
         msg = tool_results[idx]
         content = msg.content if isinstance(msg.content, str) else str(msg.content or "")
-        tool_use_id = msg.tool_call_id or f"budget_{idx}"
-        file_path = get_tool_result_path(
-            tool_use_id, cwd=cwd, session_id=session_id, user_id=user_id,
+        new_content = _shrink_one_result(
+            msg.tool_call_id or f"batch_{idx}",
+            content,
+            session_id=session_id,
+            cwd=cwd,
+            user_id=user_id,
+            recoverable=recoverable,
         )
+        msg.content = new_content
+        total -= tokens - count_text_tokens(new_content, model_id)
+        shrunk_count += 1
 
-        redacted_content = redact_sensitive_text(content)
-        if _persist_to_disk(file_path, redacted_content):
-            new_content = _build_persisted_message(file_path, redacted_content)
-            msg.content = new_content
-            saved = size - len(new_content)
-            total -= saved
-            persisted_count += 1
-            logger.debug(
-                f"Budget enforcement: persisted tool result [{idx}] "
-                f"({size:,} -> {len(new_content):,} chars, saved {saved:,})"
-            )
-
-    if persisted_count:
+    if shrunk_count:
         logger.debug(
-            f"Budget enforcement: persisted {persisted_count} tool results, "
-            f"total now {total:,} chars (budget={budget:,})"
+            f"Layer 0 batch budget: shrunk {shrunk_count} tool result(s), "
+            f"batch now ~{total:,} tokens (budget={budget:,}, recoverable={recoverable})"
         )
-    return persisted_count
+    return shrunk_count

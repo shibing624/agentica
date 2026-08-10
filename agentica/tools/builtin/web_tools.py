@@ -20,7 +20,7 @@ for some other purpose must not silently reroute the agent's searches.
 
 import os
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
 from agentica.tools.base import Tool
 from agentica.tools.url_crawler_tool import UrlCrawlerTool
@@ -185,10 +185,17 @@ class BuiltinWebSearchTool(Tool):
                 register. Takes precedence over ``provider``.
 
         Raises:
-            ValueError: If the provider is unknown, or if it requires an API
-                key that is neither passed nor present in the environment.
-                Failing here beats silently searching with a different engine
-                than the caller asked for.
+            ValueError: Only when ``provider`` was passed explicitly and is
+                unknown or missing its API key. An engine named in code is an
+                intent, and silently searching with a different one would be
+                lying to the caller.
+
+        A provider that came from the environment instead (``AGENTICA_WEB_SEARCH``,
+        which ``config.yaml``'s env block also feeds) degrades to the default
+        keyless engine with a warning. That value is deployment configuration,
+        possibly set for an entirely different process on the same machine;
+        letting it abort construction takes down the whole service because one
+        optional tool is missing one optional key.
         """
         super().__init__(name="builtin_web_search_tool")
 
@@ -196,23 +203,39 @@ class BuiltinWebSearchTool(Tool):
             self.provider = "custom"
             self._search_fn: SearchFn = search_fn
         else:
+            explicit = provider is not None
             self.provider = resolve_web_search_provider(provider)
-            backend = _BACKENDS.get(self.provider)
+            backend, reason = self._resolve_backend(self.provider, api_key)
             if backend is None:
-                raise ValueError(
-                    f"Unknown web_search provider {self.provider!r}. "
-                    f"Available: {', '.join(list_web_search_providers())}"
-                )
+                if explicit:
+                    raise ValueError(reason)
+                logger.warning(f"{reason} Falling back to {DEFAULT_WEB_SEARCH_PROVIDER!r}.")
+                self.provider = DEFAULT_WEB_SEARCH_PROVIDER
+                backend, _ = self._resolve_backend(self.provider, None)
             key = api_key or (os.getenv(backend.key_env) if backend.key_env else None)
-            if backend.key_required and not key:
-                raise ValueError(
-                    f"web_search provider {self.provider!r} requires an API key: "
-                    f"set {backend.key_env} or pass api_key=..."
-                )
             self._search_fn = getattr(backend.factory(key), backend.method)
 
         logger.debug(f"BuiltinWebSearchTool using provider: {self.provider}")
         self.register(self.web_search, concurrency_safe=True, is_read_only=True)
+
+    @staticmethod
+    def _resolve_backend(
+            provider: str, api_key: Optional[str]
+    ) -> Tuple[Optional[WebSearchBackend], str]:
+        """The backend for ``provider``, or None plus why it is unusable."""
+        backend = _BACKENDS.get(provider)
+        if backend is None:
+            return None, (
+                f"Unknown web_search provider {provider!r}. "
+                f"Available: {', '.join(list_web_search_providers())}."
+            )
+        key = api_key or (os.getenv(backend.key_env) if backend.key_env else None)
+        if backend.key_required and not key:
+            return None, (
+                f"web_search provider {provider!r} requires an API key: "
+                f"set {backend.key_env} or pass api_key=..."
+            )
+        return backend, ""
 
     async def web_search(self, queries: Union[str, List[str]], max_results: int = 5) -> str:
         """Search the web for multiple queries and return results

@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from agentica.compression.evict import carries_tool_results
+from agentica.compression.evict import trailing_user_turn_start
 from agentica.model.message import Message
 from agentica.security.redact import redact_sensitive_text
 from agentica.utils.log import logger
@@ -106,14 +106,27 @@ class CompressionManager:
     # Layer 2: auto_compact — LLM-summarise when context approaches the limit
     # -------------------------------------------------------------------------
 
-    def _should_auto_compact(self, messages: List["Message"], model: Optional[Any] = None) -> bool:
-        """Return True when token count is within _auto_compact_buffer_tokens of the context window."""
+    def should_auto_compact(
+        self,
+        messages: List["Message"],
+        model: Optional[Any] = None,
+        context_tokens: Optional[int] = None,
+    ) -> bool:
+        """Return True when token count is within _auto_compact_buffer_tokens of the context window.
+
+        Public because the decision has a side effect outside this class: the
+        runner must fire ``on_pre_compact`` (which flushes memory buffers
+        through an auxiliary LLM) only on turns that actually compact. Pass
+        ``context_tokens`` when the caller already counted the request, so the
+        gate and the compaction agree on one number instead of tokenising the
+        transcript twice per turn.
+        """
         context_window = model.context_window if model is not None else None
         if context_window is None:
             return False
         threshold = context_window - self._auto_compact_buffer_tokens
         model_id = model.id if model else 'gpt-4o'
-        tokens = count_tokens(messages, None, model_id, None)
+        tokens = context_tokens if context_tokens is not None else count_tokens(messages, None, model_id, None)
         over = tokens >= threshold
         if over:
             logger.debug(
@@ -270,7 +283,7 @@ class CompressionManager:
             )
             return False
 
-        if not force and not self._should_auto_compact(messages, model):
+        if not force and not self.should_auto_compact(messages, model):
             return False
 
         # INFO: auto-compact is a once-per-many-rounds transition that
@@ -334,11 +347,7 @@ class CompressionManager:
         #   there would keep results whose tool_use block sits in the assistant
         #   message we just deleted — which that API rejects outright.
         preserved_system = [m for m in messages if m.role == "system"]
-        tail_start = len(messages)
-        for i in range(len(messages) - 1, -1, -1):
-            if messages[i].role == "user" and not carries_tool_results(messages[i]):
-                tail_start = i
-                break
+        tail_start = trailing_user_turn_start(messages)
         preserved_tail = [m for m in messages[tail_start:] if m.role != "system"]
 
         messages.clear()
@@ -353,14 +362,19 @@ class CompressionManager:
         self.stats["auto_compact_count"] = self.stats.get("auto_compact_count", 0) + 1
         logger.info(f"Auto-compact complete, messages reduced to {len(messages)}")
 
-        # Write compact boundary to JSONL session log (if configured)
+        # Write compact boundary to JSONL session log (if configured), then
+        # re-append the preserved tail. load()/fork() replay from the last
+        # boundary only, and rebuild the summary turn from the boundary itself —
+        # so only the tail needs writing. Without it, /resume and /fork after
+        # /compact keep the summary and silently drop the pending turn.
         try:
             _agent = self._agent_of(model)
             if _agent is not None:
                 _slog = _agent._session_log
                 if _slog is not None:
                     _slog.append_compact_boundary(summary)
-                    logger.debug("Compact boundary written to session log")
+                    _slog.append_post_compact_messages(preserved_tail)
+                    logger.debug("Compact boundary + preserved tail written to session log")
         except Exception as cb_err:
             logger.warning(f"Failed to write compact boundary: {cb_err}")
 

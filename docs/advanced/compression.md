@@ -113,37 +113,38 @@ agent = Agent(
 
 摘要会保留两样东西：**system prompt**（否则本轮剩下的调用没有任何指令）和**从最后一条 user 消息开始的整个尾部**（否则对话以 assistant 结尾，provider 会直接拒绝）。
 
-## Tool Result Storage
+## Layer 0：工具输出预算
 
-当单个工具输出超过阈值时，自动持久化到磁盘：
+不是压缩，是输出策略——在**结果产生的那一刻**（`Model.run_function_calls`）就把它限住，
+所以超大输出一次都不会完整进入上下文。两条规则：
 
-```
-~/.agentica/projects/<project-hash>/<session-id>/tool-results/
-+-- {tool_use_id}.txt    # 完整输出
-```
-
-Context 中只保留前 2000 字符的预览 + 文件路径。
-
-### 两层预算
-
-| 层级 | 阈值 | 说明 |
+| 规则 | 阈值 | 说明 |
 |------|------|------|
-| 单工具限制 | 50,000 字符 | 单个 tool result 超过此值 -> 持久化 |
-| 消息预算 | 200,000 字符 | 单条消息中所有 tool_result 总和超过此值 -> 持久化最大的几个 |
+| 单条结果 | `Function.max_result_size_chars`（`execute` 为 50,000 字符） | 单个 tool result 超过此值就收缩。`read_file` 为 `None`（不收缩），否则它会去读自己的落盘文件，形成循环 |
+| 单轮批次 | `0.25 × model.context_window` | 本轮全部新结果加起来超过窗口的这个份额时，从最大的开始收缩。Layer 1 从不动尾部批次（模型还没看过），所以一轮并行 6 个大调用只有这里能兜 |
 
-### 配置
+批次预算按**窗口比例**而不是固定字符数：固定 200K 字符在 512K token 的窗口上会误伤，
+在 8K token 的窗口上又完全不触发。
 
-通过 `Function.max_result_size_chars` 控制单工具阈值：
+### 收缩成什么形态，取决于这个 session 能不能取回
 
-- 默认阈值：50,000 字符
-- 设为 `None` 禁用持久化
-- 预览长度：2,000 字符
+`can_recover_spill(model.functions)` 检查是否注册了 `read_file` 或 `execute`：
 
-### 工作流程
+- **能取回**（CLI、带文件工具的 agent）：写入磁盘，上下文里换成预览 + 路径（`<persisted-output>`），
+  模型一次 `read_file` 就能拿回全量。
 
-1. 工具执行完成，返回输出字符串
-2. Layer 1: `maybe_persist_result()` 检查单工具大小，超限 -> 写入磁盘 -> 返回预览
-3. Layer 2: `enforce_tool_result_budget()` 检查本轮所有 tool_result 总大小，超限 -> 持久化最大的结果
+  ```
+  ~/.agentica/projects/<user>/<project-hash>/<session-id>/tool-results/<tool_use_id>.txt
+  ```
+
+- **不能取回**（只挂业务工具的服务型 agent）：**不写盘**，直接截断成 `<truncated-output>`，
+  并说明"本 session 没有能读取副本的工具"。给一个没人能打开的路径既丢了数据，
+  又会诱导模型去调一个它根本没有的工具。
+
+目录按 `session_id` 分（缺省 `"default"`），按 `workspace.user_id` 隔离租户——
+**不按 `run_id`**：run_id 每轮一个新 uuid，会把同一次会话打散成几十个目录。
+
+预览统一 2,000 字符（40% 头 + 60% 尾），写盘和预览都先过一遍敏感信息脱敏。
 
 ## Hooks 集成
 
@@ -168,7 +169,20 @@ class CompactionTracker(RunHooks):
 2. 原生 compact 不可用或失败时，进入本地压缩
 3. 本地 auto-compact 带有 circuit-breaker，防止连续失败重复调用
 
-手动 `/compact [instructions]` 使用相同优先级：Responses 原生 endpoint 优先，失败后回退到本地 LLM summary，再失败则使用 CLI 内置的拼接式摘要。
+手动 `/compact [instructions]` 使用相同优先级：Responses 原生 endpoint 优先，失败后回退到本地 LLM summary，再失败则如实报告失败、不改动历史。
+
+## 观测压缩是否发生
+
+摘要不可逆，而且要花一次 LLM 调用。SDK 调用方没有 CLI 的事件回调，所以次数直接挂在响应上：
+
+```python
+response = await agent.run("...")
+if response.context_compactions:
+    logger.info(f"本轮压缩了 {response.context_compactions} 次历史")
+```
+
+原生 compact、本地 Layer 2、以及 `prompt_too_long` 之后的 reactive 压缩都会计数；
+Layer 1 淘汰是免费且可通过重跑工具恢复的，不计数。
 
 ## 下一步
 

@@ -768,6 +768,13 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
     custom_instructions = cmd_args.strip() if cmd_args else None
     model = agent.model
     wm = agent.working_memory
+
+    # Same data-loss boundary as the runner: flush memory/experience buffers
+    # before the transcript is replaced by a summary.
+    hooks = agent._run_hooks
+    if hooks is not None:
+        _run_async_safe(hooks.on_pre_compact(agent=agent, messages=messages))
+
     native_compacted = False
     if model.supports_native_compaction:
         con.print(f"[dim]Compacting {msg_count} messages with the provider-native endpoint...[/dim]")
@@ -817,6 +824,9 @@ def _cmd_compact(ctx: CommandContext, cmd_args: str = ""):
             return
         wm.collapse_runs(messages)
         con.print(f"[green]Context compacted: {msg_count} messages -> {len(messages)} summary.[/green]")
+
+    if hooks is not None:
+        _run_async_safe(hooks.on_post_compact(agent=agent, messages=messages))
 
     if ctx.tui_state is not None:
         breakdown = _run_async_safe(measure_context(agent))

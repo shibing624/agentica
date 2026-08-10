@@ -17,7 +17,6 @@ from typing import (
 
 from agentica.utils.log import logger
 from agentica.compression.evict import evict_context
-from agentica.compression.tool_result_storage import enforce_tool_result_budget
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
@@ -97,9 +96,13 @@ class CompressMixin:
                     supports it; the reactive path in ``_call_with_retry``
                     forces this layer after a ``prompt_too_long`` rejection.
 
-        Ahead of both is the tool-result budget, which is not compression but
-        an output policy: a single oversized result is spilled to disk the
-        moment it is produced, so it never enters the context at full size.
+        Ahead of both is Layer 0, which is not compression but an output
+        policy and does not run here: it bounds a result the moment it is
+        produced (``Model.run_function_calls``), so nothing enters the context
+        at full size in the first place. It used to run a second sweep from
+        here over the whole transcript against a fixed char budget — a second
+        threshold governing the same decision Layer 1 owns, firing on history
+        that the window had ample room for.
 
         Sets ``loop_state.context_collapsed`` whenever a stage drops messages,
         so the caller knows the ``num_input_messages`` prefix boundary is gone.
@@ -107,24 +110,8 @@ class CompressMixin:
         cb = agent._event_callback
         agent_name = agent.name or "Agent"
         is_main_agent = agent._parent_run_id is None
-        # Layer 0: tool result budget (persist oversized results to disk)
-        _sid = agent.run_id or "default"
-        _uid = agent.workspace.user_id if agent.workspace is not None else None
-        _recent_tools = [m for m in messages if m.role == "tool" and not m.compressed_content]
-        if _recent_tools:
-            enforce_tool_result_budget(
-                tool_results=_recent_tools,
-                session_id=_sid,
-                user_id=_uid,
-            )
 
         cm = agent.tool_config.compression_manager
-
-        async def _fire_compact_hooks(event: str) -> None:
-            if agent._run_hooks is not None:
-                fn = getattr(agent._run_hooks, event, None)
-                if fn is not None:
-                    await fn(agent=agent, messages=messages)
 
         # Layer 2, provider-native variant. Tried before the local layers
         # because a successful checkpoint leaves the portable transcript
@@ -135,7 +122,7 @@ class CompressMixin:
         ):
             before_tokens = model.estimate_native_compaction_tokens(messages, model.tools)
             t0 = time.monotonic()
-            await _fire_compact_hooks("on_pre_compact")
+            await CompressMixin._fire_pre_compact(agent, messages)
             try:
                 result = await model.compact_context(messages)
                 if result is None:
@@ -158,6 +145,7 @@ class CompressMixin:
             else:
                 messages[-1].provider_checkpoint = result.checkpoint
                 logger.info(f"Native compact complete for {model.id}")
+                CompressMixin._note_compaction(agent)
                 if agent.run_response is not None:
                     agent.run_response.metrics = agent.run_response.metrics or {}
                     compression_metrics = agent.run_response.metrics.setdefault("compression", {})
@@ -166,7 +154,7 @@ class CompressMixin:
                         "input_tokens_before": before_tokens,
                         "usage": result.usage,
                     }
-                await _fire_compact_hooks("on_post_compact")
+                await CompressMixin._fire_post_compact(agent, messages)
                 if cb is not None:
                     cb(
                         {
@@ -185,9 +173,10 @@ class CompressMixin:
         # threshold there is nothing to buy by dropping a result the window had
         # room for, and the model pays for it by re-running the tool.
         _window = model.context_window if isinstance(model.context_window, int) else 0
+        context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
         reclaimed = evict_context(
             messages,
-            context_tokens=count_tokens(messages, model.tools, model.id) if _window else 0,
+            context_tokens=context_tokens,
             context_window=_window,
             model_id=model.id,
         )
@@ -206,20 +195,33 @@ class CompressMixin:
                         "shrunk": reclaimed.tool_call_args,
                     }
                 )
+            # Eviction rewrote content, so the count taken above is stale — and
+            # too high. Re-measure before deciding on Layer 2: an LLM summary
+            # bought for a request eviction already made fit is pure waste.
+            context_tokens = count_tokens(messages, model.tools, model.id) if _window else 0
 
         if cm is None:
             return
 
-        # Layer 2: LLM summarisation. auto_compact() returns False fast when the
-        # threshold is not met; only fire events when it actually compacts
-        # (avoids per-turn spam).
+        # Layer 2: LLM summarisation. The threshold is checked *here* rather
+        # than inside auto_compact() because on_pre_compact flushes memory and
+        # experience buffers through an auxiliary LLM: firing it on every turn
+        # would turn a once-per-many-rounds boundary into a per-turn cost.
+        # Deciding once and forcing keeps the gate and the compaction from
+        # disagreeing about the same number.
+        if not cm.should_auto_compact(
+            messages, model, context_tokens=context_tokens if _window else None
+        ):
+            return
+        await CompressMixin._fire_pre_compact(agent, messages)
         before = len(messages)
         t0 = time.monotonic()
-        compacted = await cm.auto_compact(messages, model=model)
+        compacted = await cm.auto_compact(messages, model=model, force=True)
         if compacted:
             loop_state.context_collapsed = True
+            CompressMixin._note_compaction(agent)
             logger.debug("Layer 2 (auto-compact): conversation summarised by LLM")
-            await _fire_compact_hooks("on_post_compact")
+            await CompressMixin._fire_post_compact(agent, messages)
             if cb is not None:
                 cb(
                     {
@@ -233,6 +235,31 @@ class CompressMixin:
                 )
 
     @staticmethod
+    def _note_compaction(agent: "Agent") -> None:
+        """Record on the run that history was summarised.
+
+        Without this the only witness is the CLI event callback, so an SDK
+        caller sees a turn that was slow, cost extra, and quietly lost the
+        early transcript, with nothing to attribute it to.
+        """
+        if agent.run_response is not None:
+            agent.run_response.context_compactions += 1
+
+    @staticmethod
+    async def _fire_pre_compact(agent: "Agent", messages: List[Message]) -> None:
+        """Data-loss boundary: buffered memories/experience must be extracted
+        from the transcript before a summary replaces it."""
+        if agent._run_hooks is not None:
+            await agent._run_hooks.on_pre_compact(agent=agent, messages=messages)
+
+    @staticmethod
+    async def _fire_post_compact(agent: "Agent", messages: List[Message]) -> None:
+        """Fired by every path that actually compacts — native, Layer 2 and
+        reactive — so a hook cannot see a compaction start and never finish."""
+        if agent._run_hooks is not None:
+            await agent._run_hooks.on_post_compact(agent=agent, messages=messages)
+
+    @staticmethod
     async def _try_reactive_compact(
         messages: List[Message],
         agent: "Agent",
@@ -242,11 +269,14 @@ class CompressMixin:
         cm = agent.tool_config.compression_manager if agent is not None else None
         if cm is None:
             return False
+        await CompressMixin._fire_pre_compact(agent, messages)
         before = len(messages)
         t0 = time.monotonic()
         compacted = await cm.auto_compact(messages, model=model, force=True)
         if compacted:
+            CompressMixin._note_compaction(agent)
             logger.info("Reactive compact triggered (prompt_too_long) -- retrying")
+            await CompressMixin._fire_post_compact(agent, messages)
             cb = agent._event_callback
             if cb is not None:
                 cb(

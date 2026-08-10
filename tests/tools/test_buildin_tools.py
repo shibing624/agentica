@@ -87,8 +87,18 @@ def file_tool(tmp_dir):
 
 @pytest.fixture
 def execute_tool(tmp_dir):
-    """BuiltinExecuteTool scoped to a temp directory."""
+    """BuiltinExecuteTool as an SDK caller gets it — no background registry."""
     return BuiltinExecuteTool(work_dir=tmp_dir)
+
+
+@pytest.fixture
+def bg_execute_tool(tmp_dir):
+    """BuiltinExecuteTool as the CLI builds it — a registry owns detached commands."""
+    registry = BackgroundProcessRegistry()
+    try:
+        yield BuiltinExecuteTool(work_dir=tmp_dir, background_process_registry=registry)
+    finally:
+        registry.stop()
 
 
 @pytest.fixture
@@ -1115,14 +1125,43 @@ class TestBuiltinExecuteTool:
         result = asyncio.run(execute_tool.execute("nohup echo started > /dev/null 2>&1 &"))
 
         assert "It is untracked" in result
+        # No registry here, so background is not a thing to point at.
+        assert "background=True" not in result
+
+    def test_self_detaching_command_points_at_background_when_it_exists(self, bg_execute_tool):
+        result = asyncio.run(bg_execute_tool.execute("nohup echo started > /dev/null 2>&1 &"))
+
+        assert "It is untracked" in result
         assert "background=True" in result
 
-    def test_execute_refuses_self_detaching_command_in_background_mode(self, execute_tool):
+    def test_execute_refuses_self_detaching_command_in_background_mode(self, bg_execute_tool):
         """Here the '&' is not merely untracked but wrong: the registry would
         watch a shell that exits at once and announce a completion while the
         command is still running."""
         with pytest.raises(ValueError, match="Remove the trailing '&'"):
-            asyncio.run(execute_tool.execute("python3 run.py &", background=True))
+            asyncio.run(bg_execute_tool.execute("python3 run.py &", background=True))
+
+    def test_background_is_not_offered_without_a_registry(self, execute_tool):
+        """An SDK agent has nowhere to register a detached command: no listing,
+        no completion report, no way to stop it. Offering the knob there buys
+        an orphan that outlives the agent, so the schema must not carry it."""
+        properties = execute_tool.functions["execute"].parameters["properties"]
+
+        assert "background" not in properties
+        assert "wait" not in execute_tool.functions
+        assert "background=True" not in execute_tool.functions["execute"].description
+
+    def test_a_forced_background_call_starts_no_process(self, execute_tool):
+        """Belt and braces for a model that passes the argument anyway."""
+        with pytest.raises(ValueError, match="background is not available"):
+            asyncio.run(execute_tool.execute("sleep 30", background=True))
+
+    def test_background_is_offered_with_a_registry(self, bg_execute_tool):
+        properties = bg_execute_tool.functions["execute"].parameters["properties"]
+
+        assert "background" in properties
+        assert "wait" in bg_execute_tool.functions
+        assert "background=True" in bg_execute_tool.functions["execute"].description
 
     def test_execute_leaves_plain_commands_unflagged(self, execute_tool):
         """`2>&1` contains an ampersand without detaching anything."""
@@ -1256,12 +1295,13 @@ class TestBuiltinExecuteTool:
 
         assert "term_1" in str(excinfo.value)
 
-    def test_wait_honors_timeout_above_default(self, execute_tool):
+    def test_wait_honors_timeout_above_default(self, bg_execute_tool):
         """Caller-supplied timeout is applied as-is — same as execute(timeout=...).
 
         A silent 300s clamp made ``wait(timeout=600)`` behave like 300, so the
         model could not actually ask for a longer single wait.
         """
+        execute_tool = bg_execute_tool
         assert execute_tool.functions["wait"].manages_own_timeout is True
 
         registry = execute_tool._background_process_registry
@@ -1684,6 +1724,33 @@ class TestWebSearchProviderSelection:
     def test_unknown_provider_raises_and_lists_options(self):
         with pytest.raises(ValueError, match="Unknown web_search provider"):
             BuiltinWebSearchTool(provider="nope")
+
+    def test_env_provider_missing_its_key_degrades_instead_of_raising(self):
+        """Deployment config must not be able to abort agent construction.
+
+        AGENTICA_WEB_SEARCH may be seeded from config.yaml for an entirely
+        different process on the same machine; raising here takes the whole
+        service down because one optional tool is missing one optional key.
+        """
+        with patch.dict(os.environ, {"AGENTICA_WEB_SEARCH": "serper"}, clear=False):
+            os.environ.pop("SERPER_API_KEY", None)
+            tool = BuiltinWebSearchTool()
+        assert tool.provider == "baidu"
+        assert "web_search" in tool.functions
+
+    def test_unknown_env_provider_degrades_too(self):
+        with patch.dict(os.environ, {"AGENTICA_WEB_SEARCH": "nope"}, clear=False):
+            tool = BuiltinWebSearchTool()
+        assert tool.provider == "baidu"
+
+    def test_a_deep_agent_still_builds_under_a_dirty_env(self):
+        with patch.dict(os.environ, {"AGENTICA_WEB_SEARCH": "serper"}, clear=False):
+            os.environ.pop("SERPER_API_KEY", None)
+            tools = get_builtin_tools(
+                include_file_tools=False, include_execute=False,
+                include_fetch_url=False, include_todos=False, include_task=False,
+            )
+        assert [t.provider for t in tools] == ["baidu"]
 
     def test_get_builtin_tools_passes_provider_through(self):
         tools = get_builtin_tools(

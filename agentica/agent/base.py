@@ -312,6 +312,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # ---- Session persistence ----
         session_id: Optional[str] = None,
         session_base_dir: Optional[str] = None,
+        enable_session_log: bool = True,
         # ---- Packed config ----
         prompt_config: Optional[PromptConfig] = None,
         tool_config: Optional[ToolConfig] = None,
@@ -359,6 +360,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             hooks=hooks,
             session_id=session_id,
             session_base_dir=session_base_dir,
+            enable_session_log=enable_session_log,
         )
         self._init_packed_config(
             prompt_config=prompt_config,
@@ -466,6 +468,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         hooks: Optional[Union[AgentHooks, List[AgentHooks]]],
         session_id: Optional[str],
         session_base_dir: Optional[str] = None,
+        enable_session_log: bool = True,
     ) -> None:
         """Initialize execution behavior and session state."""
         self.add_history_to_context = add_history_to_context
@@ -481,8 +484,13 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             self.hooks = hooks
 
         self.session_id = session_id
+        # A session_id normally implies a transcript on disk — the CLI needs it
+        # for /resume, /fork and /export. A service that already stores its own
+        # conversations sets enable_session_log=False: there the JSONL is a
+        # second copy of the same data, growing per turn under the process's
+        # home directory, that nothing in that deployment ever reads back.
         self._session_log = None
-        if session_id is not None:
+        if session_id is not None and enable_session_log:
             # Scope session storage by project (work_dir) + user so the same
             # project resolves to the same directory across entrypoints. For the
             # CLI work_dir==cwd; for the Web it is the per-session work_dir which

@@ -146,10 +146,27 @@ def _format_agent_execution_error(error: BaseException) -> Dict[str, Any]:
         for hint in ("connection", "timeout", "502", "503", "504", "gateway", "remote disconnected")
     )
 
+    is_context_length = any(
+        hint in low
+        for hint in (
+            "context_length_exceeded",
+            "maximum context length",
+            "maximum context",
+            "prompt_too_long",
+            "too many tokens",
+        )
+    )
+
     if is_rate_limited:
         summary = f"LLM rate limited ({status})" if status else "LLM rate limited"
         detail = provider_message or raw
         hint = "Type /retry after a short wait, or switch model/profile."
+    elif is_context_length:
+        # Oversized single queries (and irreducible prompt_too_long) must show
+        # the provider's limit text, not a generic "execution failed".
+        summary = "Input exceeds model context window"
+        detail = provider_message or raw
+        hint = "Shorten the message, /compact earlier history, or switch to a larger-context model."
     elif isinstance(error, json.JSONDecodeError):
         # A gateway that packs two SSE events onto one ``data:`` line surfaces
         # only as "Extra data: line 1 column N". Name the cause so the user

@@ -24,10 +24,13 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol, runtime_checkable
 from uuid import uuid4
 
 from agentica.utils.log import logger
+
+if TYPE_CHECKING:
+    from agentica.model.message import Message
 
 
 @runtime_checkable
@@ -201,6 +204,39 @@ class SessionLog:
         self._last_uuid = entry_uuid
         self._write_search_index_entry("compact_boundary", summary)
         return entry_uuid
+
+    def append_post_compact_messages(self, messages: List["Message"]) -> int:
+        """Persist the turn compaction preserved, right after a compact_boundary.
+
+        ``load()`` replays only the entries after the last boundary, and
+        synthesises the summary turn from the boundary itself. So the caller
+        passes the *preserved tail* (never the summary turn, which would then
+        appear twice); without it, ``/compact`` followed by ``/fork`` or
+        ``/resume`` keeps the summary and drops the pending question.
+        System messages are skipped — they are rebuilt when the Agent is created.
+        """
+        written = 0
+        for msg in messages:
+            if msg.role not in ("user", "assistant", "tool"):
+                continue
+            meta: Dict[str, Any] = {}
+            if msg.tool_call_id:
+                meta["tool_call_id"] = msg.tool_call_id
+            if msg.tool_name:
+                meta["tool_name"] = msg.tool_name
+            if msg.tool_args is not None:
+                meta["tool_args"] = msg.tool_args
+            if msg.tool_calls:
+                meta["tool_calls"] = msg.tool_calls
+            if msg.reasoning_content:
+                meta["reasoning_content"] = msg.reasoning_content
+            self.append(
+                msg.role,
+                msg.content if isinstance(msg.content, str) else json.dumps(msg.content, ensure_ascii=False),
+                **meta,
+            )
+            written += 1
+        return written
 
     def append_provider_checkpoint(self, checkpoint: Dict[str, Any]) -> str:
         """Persist opaque provider state without changing the visible transcript."""

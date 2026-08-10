@@ -148,10 +148,12 @@ Layer 2 摘要（一次 LLM 调用，不可逆）:
 
 两层都以「一条工具结果」而非「一条消息」为单位判断，因为 provider 的打包形态不同：OpenAI 系是一条结果一条 `role="tool"` 消息，Anthropic 则把一整轮塞进单条 `role="user"` 消息的 `tool_result` block 列表。细节见 [Compression](../advanced/compression.md)。
 
-**大工具结果持久化**（`tool_result_storage`）：单个工具结果超过阈值时，完整内容写入磁盘，上下文中只保留预览 + 文件路径：
+**Layer 0 工具输出预算**（`tool_result_storage`）：在结果产生的那一刻限住单条结果和本轮批次
+（批次上限为 `0.25 × context_window`）。收缩形态取决于这个 session 有没有 `read_file` / `execute`
+能把副本读回来——能，就落盘并给出路径；不能，就直接如实截断，不留一个没人能打开的路径：
 
 ```
-~/.agentica/projects/<cwd>/<session_id>/tool-results/<tool_use_id>.txt
+~/.agentica/projects/<user>/<cwd>/<session_id>/tool-results/<tool_use_id>.txt
 ```
 
 ## Session Log（JSONL 会话日志）

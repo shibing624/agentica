@@ -167,6 +167,29 @@ _MAX_FOREGROUND_SLEEP_SECONDS = 120
 _DEFAULT_WAIT_SECONDS = 300
 _WAIT_POLL_INTERVAL = 0.2
 
+# Appended to the `execute` description only where a shared registry exists to
+# own the process (an interactive CLI session). Kept out of the docstring so
+# the parameter and the prose describing it appear and disappear together: a
+# session with nowhere to register a detached process has no `wait`, no
+# listing, and no way to stop it, so offering `background` there would buy an
+# orphan that outlives the agent and nobody can see.
+_BACKGROUND_GUIDANCE = """
+- ``background=True`` decides how long the command lives, not how many run at
+  once. Use it when the output is not needed to continue this turn, or when the
+  command may outlive one tool call: a foreground command killed by ``timeout``
+  or a cancelled turn loses everything it printed, while a background one keeps
+  its log. Something you need right now that fits in one call belongs in the
+  foreground with a raised ``timeout`` — reach for ``parallel_safe`` rather than
+  ``background`` when the goal is speed. A background command's exit is reported
+  to the user, not to you; ``wait`` with the returned id is what brings it back
+  to you. Never improvise a wait with ``sleep``, polling, or a blocking ``tail``;
+  a 120s+ leading ``sleep`` is refused. A trailing ``&`` detaches into an
+  untracked orphan that nothing can wait on or stop, so prefer
+  ``background=True``.
+  Example: execute(command="make release", background=True)
+"""
+
+
 class BuiltinExecuteTool(Tool):
     """
     Built-in command execution tool using async subprocess.
@@ -186,14 +209,19 @@ class BuiltinExecuteTool(Tool):
                 are applied as-is with no upper cap — the caller decides.
             max_output_length: Maximum length of output to return
             sandbox_config: SandboxConfig instance for command restriction enforcement
-            background_process_registry: optional shared registry for background commands
+            background_process_registry: shared registry owning detached
+                commands. Supplied by surfaces that can also list, report and
+                stop them (the interactive CLI). Without one, ``background``
+                and ``wait`` are not offered at all rather than being backed by
+                a private registry nobody can reach: a detached process would
+                outlive the agent with no way to see it or kill it.
         """
         super().__init__(name="builtin_execute_tool")
         self._work_dir: Optional[Path] = Path(work_dir) if work_dir else None
         self._timeout = timeout
         self._max_output_length = max_output_length
         self._sandbox_config = sandbox_config
-        self._background_process_registry = background_process_registry or BackgroundProcessRegistry()
+        self._background_process_registry = background_process_registry
         # Override timeout from sandbox config if set
         if sandbox_config and sandbox_config.enabled and sandbox_config.max_execution_time:
             self._timeout = sandbox_config.max_execution_time
@@ -209,10 +237,22 @@ class BuiltinExecuteTool(Tool):
         # tool issues `pytest tests/a` and `git commit`. The caller declares it
         # per call; absent the flag the batch stays serial and ordered.
         self.functions["execute"].parallel_arg = "parallel_safe"
-        self.register(self.wait, concurrency_safe=True, is_read_only=True, is_destructive=False)
-        # `wait` may block past the outer 120s executor wrapper; it owns its
-        # timeout so the caller-supplied value is not cut short mid-wait.
-        self.functions["wait"].manages_own_timeout = True
+
+        # Whether `background` exists at all is decided per instance, and the
+        # schema is normally derived per class from the signature — so prepare
+        # this one now and mark it done, or the agent's own pass would put the
+        # parameter and its prose straight back.
+        execute_fn = self.functions["execute"]
+        execute_fn.process_entrypoint()
+        if self._background_process_registry is not None:
+            execute_fn.description += _BACKGROUND_GUIDANCE
+            self.register(self.wait, concurrency_safe=True, is_read_only=True, is_destructive=False)
+            # `wait` may block past the outer 120s executor wrapper; it owns its
+            # timeout so the caller-supplied value is not cut short mid-wait.
+            self.functions["wait"].manages_own_timeout = True
+        else:
+            execute_fn.parameters["properties"].pop("background", None)
+        execute_fn.skip_entrypoint_processing = True
 
     async def execute(
             self,
@@ -257,19 +297,6 @@ class BuiltinExecuteTool(Tool):
           `&&` in a single call is the right way to say that anyway. When
           unsure, leave it off; the cost is waiting, and the cost of getting it
           wrong is a corrupted working tree.
-        - ``background=True`` decides how long the command lives, not how many
-          run at once. Use it when the output is not needed to continue this
-          turn, or when the command may outlive one tool call: a foreground
-          command killed by ``timeout`` or a cancelled turn loses everything it
-          printed, while a background one keeps its log. Something you need
-          right now that fits in one call belongs in the foreground with a
-          raised ``timeout`` — reach for ``parallel_safe`` rather than
-          ``background`` when the goal is speed. A background command's exit is
-          reported to the user, not to you; ``wait`` with the returned id is
-          what brings it back to you. Never improvise a wait with ``sleep``,
-          polling, or a blocking ``tail``; a 120s+ leading ``sleep`` is refused.
-          A trailing ``&`` detaches into an untracked orphan that ``wait``,
-          ``/ps`` and ``/stop`` cannot see, so prefer ``background=True``.
         - Use '&&' to chain dependent commands; use ';' for independent commands
         - DO NOT use newlines in commands (newlines ok inside quoted strings)
         - stdout and stderr are decoded as UTF-8; invalid bytes are replaced.
@@ -291,7 +318,6 @@ class BuiltinExecuteTool(Tool):
             - execute(command="npm install && npm test", timeout=300)
             - execute(command="pytest tests/unit -q", parallel_safe=True)
               alongside execute(command="pytest tests/e2e -q", parallel_safe=True)
-            - execute(command="make release", background=True)
 
         Bad examples (use dedicated tools instead):
             - execute(command="find . -name '*.py'")   → use glob(pattern="**/*.py")
@@ -302,9 +328,6 @@ class BuiltinExecuteTool(Tool):
         Args:
             command: Exact shell command to execute without normalization or repair
             timeout: optional timeout in seconds (default 120, no upper cap)
-            background: detach and return immediately; ``timeout`` no longer
-                applies and the exit reaches the user, not this conversation —
-                use ``wait`` to bring it back into this conversation
             parallel_safe: run concurrently with the other calls in this
                 message. Only for commands independent of every sibling call;
                 the default runs the batch serially in order
@@ -367,6 +390,12 @@ class BuiltinExecuteTool(Tool):
         self_detaching = bool(_SELF_DETACHING_COMMAND.search(command))
 
         if background:
+            if self._background_process_registry is None:
+                raise ValueError(
+                    "background is not available in this session — there is nothing "
+                    "to track a detached command, so it could neither be waited on "
+                    "nor stopped. Run it in the foreground, raising timeout if needed."
+                )
             if self_detaching:
                 raise ValueError(
                     "Remove the trailing '&': with background=True the shell would "
@@ -481,11 +510,15 @@ class BuiltinExecuteTool(Tool):
             output = redact_sensitive_text(output)
 
         if self_detaching:
+            hint = (
+                " Use background=True for anything worth reporting."
+                if self._background_process_registry is not None else ""
+            )
             output = (
                 f"{output}\n\n[Note: the trailing '&' detached this work from the "
-                "shell. It is untracked — /ps and /stop cannot see it, its exit is "
+                "shell. It is untracked — nothing can see it or stop it, its exit is "
                 "never reported, and a cancelled or timed-out turn kills it with the "
-                "process group. Use background=True for anything worth reporting.]"
+                f"process group.{hint}]"
             )
 
         # A non-zero exit code that is NOT covered by _interpret_exit_code

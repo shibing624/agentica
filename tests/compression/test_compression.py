@@ -438,7 +438,7 @@ class TestMaybePersistResult(unittest.TestCase):
         self.assertIn("REDACTED", result)
         self.assertIn("REDACTED", persisted)
 
-    def test_disk_failure_fallback_truncation(self):
+    def test_disk_failure_falls_back_to_truncation(self):
         from agentica.compression.tool_result_storage import maybe_persist_result
         big = "x" * 100
         with patch("agentica.compression.tool_result_storage._persist_to_disk", return_value=False):
@@ -446,8 +446,57 @@ class TestMaybePersistResult(unittest.TestCase):
                 "test_tool", "call_4", big,
                 max_result_size_chars=50,
             )
-        self.assertIn("truncated", result)
-        self.assertLessEqual(len(result), 80)  # truncated to threshold + message
+        self.assertIn("<truncated-output>", result)
+        self.assertNotIn("<persisted-output>", result)
+
+    def test_without_a_reader_nothing_is_written_and_no_path_is_offered(self):
+        """A path is only useful to a session that can open it.
+
+        An agent assembled from business tools has no read_file and no
+        execute: handing it a filesystem path loses the data *and* invites it
+        to call a tool it does not have.
+        """
+        from agentica.compression.tool_result_storage import (
+            get_tool_results_dir, maybe_persist_result,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
+                result = maybe_persist_result(
+                    "claw_list_customers", "call_5", "x" * 100,
+                    max_result_size_chars=50, cwd="/test/project",
+                    recoverable=False,
+                )
+                spill_dir = get_tool_results_dir(cwd="/test/project", session_id="default")
+
+        self.assertIn("<truncated-output>", result)
+        self.assertNotIn("<persisted-output>", result)
+        self.assertNotIn(tmpdir, result, "no path may be offered without a reader")
+        self.assertFalse(os.path.isdir(spill_dir), "nothing should be written to disk")
+
+    def test_with_a_reader_the_path_is_still_offered(self):
+        from agentica.compression.tool_result_storage import maybe_persist_result
+        with tempfile.TemporaryDirectory() as tmpdir:
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
+                result = maybe_persist_result(
+                    "execute", "call_6", "x" * 100,
+                    max_result_size_chars=50, cwd="/test/project",
+                    recoverable=True,
+                )
+        self.assertIn("<persisted-output>", result)
+
+
+class TestCanRecoverSpill(unittest.TestCase):
+    """Which sessions may be handed a spill path."""
+
+    def test_file_or_shell_tool_can_read_it_back(self):
+        from agentica.compression.tool_result_storage import can_recover_spill
+        self.assertTrue(can_recover_spill({"read_file", "web_search"}))
+        self.assertTrue(can_recover_spill({"execute"}))
+
+    def test_a_business_tool_set_cannot(self):
+        from agentica.compression.tool_result_storage import can_recover_spill
+        self.assertFalse(can_recover_spill({"claw_get_funnel", "claw_list_customers"}))
+        self.assertFalse(can_recover_spill([]))
 
 
 class TestBuildPersistedMessage(unittest.TestCase):
@@ -474,68 +523,97 @@ class TestBuildPersistedMessage(unittest.TestCase):
         self.assertNotIn("\n...\n", msg)
 
 
-class TestEnforceToolResultBudget(unittest.TestCase):
-    """Tests for enforce_tool_result_budget — Layer 2 per-message budget."""
+class TestEnforceToolBatchBudget(unittest.TestCase):
+    """Layer 0 per-batch budget — bound one turn's fresh results by the window."""
 
-    def test_under_budget_no_changes(self):
-        from agentica.compression.tool_result_storage import enforce_tool_result_budget
-        msgs = [
-            Message(role="tool", content="short1", tool_call_id="t1"),
-            Message(role="tool", content="short2", tool_call_id="t2"),
+    @staticmethod
+    def _batch():
+        return [
+            Message(role="tool", content="alpha " * 40, tool_call_id="t1"),
+            Message(role="tool", content="beta " * 400, tool_call_id="t2"),  # largest
+            Message(role="tool", content="gamma " * 20, tool_call_id="t3"),
         ]
-        count = enforce_tool_result_budget(msgs, budget=1000)
-        self.assertEqual(count, 0)
 
-    def test_over_budget_largest_persisted(self):
-        from agentica.compression.tool_result_storage import enforce_tool_result_budget
+    def test_a_batch_the_window_has_room_for_is_untouched(self):
+        from agentica.compression.tool_result_storage import enforce_tool_batch_budget
+        msgs = self._batch()
+        count = enforce_tool_batch_budget(msgs, context_window=200_000)
+        self.assertEqual(count, 0)
+        self.assertNotIn("output>", msgs[1].content)
+
+    def test_no_window_is_a_no_op(self):
+        """Without a window there is no way to tell a big batch from a batch
+        this model has ample room for — the old fixed char budget guessed."""
+        from agentica.compression.tool_result_storage import enforce_tool_batch_budget
+        msgs = self._batch()
+        self.assertEqual(enforce_tool_batch_budget(msgs, context_window=0), 0)
+        self.assertNotIn("output>", msgs[1].content)
+
+    def test_over_budget_shrinks_the_largest_first(self):
+        from agentica.compression.tool_result_storage import enforce_tool_batch_budget
         with tempfile.TemporaryDirectory() as tmpdir:
-            msgs = [
-                Message(role="tool", content="a" * 100, tool_call_id="t1"),
-                Message(role="tool", content="b" * 500, tool_call_id="t2"),  # largest
-                Message(role="tool", content="c" * 50, tool_call_id="t3"),
-            ]
+            msgs = self._batch()
             with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
-                count = enforce_tool_result_budget(msgs, budget=200, cwd="/test")
+                count = enforce_tool_batch_budget(
+                    msgs, context_window=400, cwd="/test", recoverable=True,
+                )
             self.assertGreater(count, 0)
-            # The largest should be persisted
             self.assertIn("<persisted-output>", msgs[1].content)
 
-    def test_over_budget_redacts_persisted_content(self):
-        from agentica.compression.tool_result_storage import enforce_tool_result_budget, get_tool_result_path
-
+    def test_over_budget_redacts_what_it_writes(self):
+        from agentica.compression.tool_result_storage import (
+            enforce_tool_batch_budget, get_tool_result_path,
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"
             msgs = [
                 Message(role="tool", content="safe", tool_call_id="t1"),
-                Message(role="tool", content=f"{secret} " + ("b" * 500), tool_call_id="t2"),
+                Message(role="tool", content=f"{secret} " + ("beta " * 400), tool_call_id="t2"),
             ]
             with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
-                count = enforce_tool_result_budget(msgs, budget=100, cwd="/test")
+                count = enforce_tool_batch_budget(
+                    msgs, context_window=200, cwd="/test", recoverable=True,
+                )
                 file_path = get_tool_result_path("t2", cwd="/test", session_id="default")
                 persisted = open(file_path, encoding="utf-8").read()
 
         self.assertGreater(count, 0)
         self.assertNotIn(secret, msgs[1].content)
         self.assertNotIn(secret, persisted)
-        self.assertIn("REDACTED", msgs[1].content)
-        self.assertIn("REDACTED", persisted)
 
-    def test_already_persisted_skipped(self):
-        from agentica.compression.tool_result_storage import enforce_tool_result_budget
+    def test_without_a_reader_the_batch_is_truncated_not_spilled(self):
+        from agentica.compression.tool_result_storage import (
+            enforce_tool_batch_budget, get_tool_results_dir,
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            msgs = self._batch()
+            with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
+                count = enforce_tool_batch_budget(
+                    msgs, context_window=400, cwd="/test", recoverable=False,
+                )
+                spill_dir = get_tool_results_dir(cwd="/test", session_id="default")
+
+        self.assertGreater(count, 0)
+        self.assertIn("<truncated-output>", msgs[1].content)
+        self.assertFalse(os.path.isdir(spill_dir))
+
+    def test_an_already_shrunk_result_is_left_alone(self):
+        from agentica.compression.tool_result_storage import enforce_tool_batch_budget
         msgs = [
             Message(role="tool", content="<persisted-output>already</persisted-output>", tool_call_id="t1"),
-            Message(role="tool", content="b" * 500, tool_call_id="t2"),
+            Message(role="tool", content="beta " * 400, tool_call_id="t2"),
         ]
         with tempfile.TemporaryDirectory() as tmpdir:
             with patch.dict(os.environ, {"AGENTICA_PROJECTS_DIR": tmpdir}):
-                count = enforce_tool_result_budget(msgs, budget=100, cwd="/test")
-        # Only the non-persisted one should be targeted
-        self.assertLessEqual(count, 1)
+                count = enforce_tool_batch_budget(
+                    msgs, context_window=200, cwd="/test", recoverable=True,
+                )
+        self.assertEqual(count, 1)
+        self.assertEqual(msgs[0].content, "<persisted-output>already</persisted-output>")
 
     def test_empty_results_no_error(self):
-        from agentica.compression.tool_result_storage import enforce_tool_result_budget
-        count = enforce_tool_result_budget([], budget=1000)
-        self.assertEqual(count, 0)
+        from agentica.compression.tool_result_storage import enforce_tool_batch_budget
+        self.assertEqual(enforce_tool_batch_budget([], context_window=100_000), 0)
 
 
 # ===========================================================================

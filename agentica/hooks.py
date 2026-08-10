@@ -527,7 +527,35 @@ class MemoryExtractHooks(RunHooks):
         if model is None:
             return
 
+        # Aux models are often much smaller than the main context window
+        # (e.g. main 1M, aux 128k). Cap the transcript to the aux window so
+        # extraction fails closed with a truncated recent slice instead of a
+        # silent context_length_exceeded on the side call.
+        conversation_text = self._fit_text_to_model(model, conversation_text)
         await self._extract_and_save(model, workspace, conversation_text)
+
+    # Rough chars/token, and the share of the aux window the transcript may
+    # occupy (the rest pays for the extract prompt and the reply).
+    _CHARS_PER_TOKEN = 4
+    _EXTRACT_INPUT_SHARE = 0.4
+    # Ceiling independent of the window: a million-token aux model would
+    # otherwise be handed millions of characters to mine a handful of facts.
+    _EXTRACT_MAX_CHARS = 200_000
+
+    @classmethod
+    def _fit_text_to_model(cls, model: Any, text: str) -> str:
+        """Keep the most recent characters that fit the model's context window.
+
+        Prefer the tail — recent turns are what extraction should capture.
+        """
+        max_chars = min(
+            int(model.context_window * cls._CHARS_PER_TOKEN * cls._EXTRACT_INPUT_SHARE),
+            cls._EXTRACT_MAX_CHARS,
+        )
+        if len(text) <= max_chars:
+            return text
+        # Indexed from the front: text[-0:] would return the whole string.
+        return text[len(text) - max_chars:]
 
     async def _extract_and_save(self, model: Any, workspace: Any, conversation_text: str) -> None:
         """Run the LLM extraction call and persist results.

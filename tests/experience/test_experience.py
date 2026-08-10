@@ -735,6 +735,9 @@ class TestRunInputCrossRoundFix(unittest.TestCase):
         agent.run_input = None
         agent.auxiliary_model = None  # force fallback to agent.model
         agent.model = MagicMock()
+        # Real Models declare an int window; extraction sizes its transcript
+        # against it, and a bare MagicMock would int() to 1.
+        agent.model.context_window = 128_000
         agent.resolve_auxiliary_model.side_effect = lambda task: agent.auxiliary_model or agent.model
         agent.workspace = MagicMock()
 

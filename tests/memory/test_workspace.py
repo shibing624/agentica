@@ -472,6 +472,41 @@ class TestGitContext:
         assert order[0] == "rev-parse", "the repo check must settle first"
         assert peak == 3, f"the three reads ran {peak}-at-a-time"
 
+    def test_a_non_repo_is_probed_once_per_workspace(self, temp_workspace_path):
+        """A service workspace (~/.agentica/workspace) will not become a repo
+        mid-process, so re-spawning `git rev-parse` every turn buys nothing."""
+        workspace = Workspace(temp_workspace_path)
+        calls = []
+
+        async def fake_git(_self, *args, timeout=5.0):
+            calls.append(args[0])
+            return None
+
+        async def main():
+            with patch.object(Workspace, "_git", fake_git):
+                return [await workspace.get_git_context() for _ in range(3)]
+
+        assert asyncio.run(main()) == [None, None, None]
+        assert calls == ["rev-parse"], f"probed {len(calls)} times"
+
+    def test_a_repo_is_re_read_every_turn(self, temp_workspace_path):
+        """Branch, status and commits are exactly what changes between turns."""
+        workspace = Workspace(temp_workspace_path)
+        calls = []
+
+        async def fake_git(_self, *args, timeout=5.0):
+            calls.append(args[0])
+            return "main" if args[0] == "branch" else "x"
+
+        async def main():
+            with patch.object(Workspace, "_git", fake_git):
+                for _ in range(2):
+                    await workspace.get_git_context()
+
+        asyncio.run(main())
+        assert calls.count("status") == 2
+        assert calls.count("rev-parse") == 2
+
     def test_it_does_not_block_the_event_loop(self, temp_workspace_path):
         """A concurrent coroutine must keep getting scheduled while git runs."""
         workspace = Workspace(temp_workspace_path)

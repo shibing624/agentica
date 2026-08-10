@@ -399,6 +399,24 @@ class Model(ABC):
             merged.update(s.strip().lower() for s in env_extra.split(",") if s.strip())
         return tuple(merged)
 
+    @staticmethod
+    def _spill_session_id(agent: Optional[Any]) -> str:
+        """Directory a spilled tool result belongs to.
+
+        Keyed by session, never by run: a run id is a fresh uuid per turn, so
+        it scatters one conversation's spills across as many directories as it
+        had turns and leaves nothing that can be found again or cleaned up.
+        """
+        return (agent.session_id if agent is not None else None) or "default"
+
+    @staticmethod
+    def _spill_user_id(agent: Optional[Any]) -> Optional[str]:
+        """Tenant partition for spilled results, so two agents sharing a cwd
+        cannot read each other's output. None falls back to "default"."""
+        if agent is None or agent.workspace is None:
+            return None
+        return agent.workspace.user_id
+
     def _learn_context_limit_from_error(self, error_message: str) -> None:
         """Extract context window size from API error messages and update self.context_window."""
         match = self._CONTEXT_LIMIT_PATTERN.search(error_message)
@@ -1077,32 +1095,27 @@ class Model(ABC):
             if function_call.function.show_result and not isinstance(function_call.result, (GeneratorType, collections.abc.Iterator)):
                 yield ModelResponse(content=function_call_output)
 
-            # --- Layer 1: per-tool large result persistence ---
-            # Persist to ~/.agentica/projects/<project-hash>/<session-id>/tool-results/
+            # --- Layer 0: per-result size bound ---
+            # Spills to ~/.agentica/projects/<user>/<project-hash>/<session-id>/tool-results/
+            # when this session can read the file back, otherwise truncates.
             if (
                 function_call_success
                 and isinstance(function_call_output, str)
                 and function_call.function.max_result_size_chars is not None
             ):
                 try:
-                    from agentica.compression.tool_result_storage import maybe_persist_result
-                    _agent = self._agent_ref() if self._agent_ref else None
-                    _sid = _agent.run_id or 'default' if _agent else 'default'
-                    # user_id partitions the persisted-output directory so two
-                    # tenants whose agents share a cwd can't read each other's
-                    # spills. None falls back to "default" inside the helper.
-                    _uid = (
-                        _agent.workspace.user_id
-                        if _agent and _agent.workspace is not None
-                        else None
+                    from agentica.compression.tool_result_storage import (
+                        can_recover_spill, maybe_persist_result,
                     )
+                    _agent = self._agent_ref() if self._agent_ref else None
                     function_call_output = maybe_persist_result(
                         tool_name=function_call.function.name,
                         tool_use_id=function_call.call_id or f"call_{i}",
                         content=function_call_output,
-                        session_id=_sid,
+                        session_id=self._spill_session_id(_agent),
                         max_result_size_chars=function_call.function.max_result_size_chars,
-                        user_id=_uid,
+                        user_id=self._spill_user_id(_agent),
+                        recoverable=can_recover_spill(self.functions or {}),
                     )
                 except Exception as persist_err:
                     logger.debug(f"Tool result persistence skipped: {persist_err}")
@@ -1222,22 +1235,21 @@ class Model(ABC):
         if self.tool_call_limit and len(function_call_stack) >= self.tool_call_limit:
             self.deactivate_function_calls()
 
-        # --- Layer 2: per-message budget enforcement ---
-        # If the total tool results in this batch exceed the budget, persist the
-        # largest ones to disk until under budget.
+        # --- Layer 0: per-batch budget ---
+        # Layer 1 never evicts the trailing batch (the model has not seen it
+        # yet), so a single wide parallel round has nothing else to bound it.
         try:
-            from agentica.compression.tool_result_storage import enforce_tool_result_budget
-            _agent = self._agent_ref() if self._agent_ref else None
-            _sid = _agent.run_id or 'default' if _agent else 'default'
-            _uid = (
-                _agent.workspace.user_id
-                if _agent and _agent.workspace is not None
-                else None
+            from agentica.compression.tool_result_storage import (
+                can_recover_spill, enforce_tool_batch_budget,
             )
-            enforce_tool_result_budget(
-                tool_results=function_call_results,
-                session_id=_sid,
-                user_id=_uid,
+            _agent = self._agent_ref() if self._agent_ref else None
+            enforce_tool_batch_budget(
+                function_call_results,
+                context_window=self.context_window,
+                model_id=self.id,
+                session_id=self._spill_session_id(_agent),
+                user_id=self._spill_user_id(_agent),
+                recoverable=can_recover_spill(self.functions or {}),
             )
         except Exception as budget_err:
             logger.warning(f"Tool result budget enforcement failed: {budget_err}")

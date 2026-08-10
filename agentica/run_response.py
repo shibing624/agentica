@@ -152,6 +152,13 @@ class RunResponse(BaseModel):
     # reply and `model` reflects the fallback that answered; `break_reason`
     # still records why the primary loop was aborted.
     fallback_used: bool = False
+    # How many times this run replaced history with a summary (Layer 2 —
+    # local, provider-native, or the reactive retry after prompt_too_long).
+    # Compaction is irreversible and costs an LLM call, so a caller that sees
+    # a slow turn, an extra charge, or an early exchange it can no longer find
+    # in the transcript has something to attribute all three to. Layer 1
+    # eviction is free and reversible-by-re-running, and is not counted here.
+    context_compactions: int = 0
     created_at: int = Field(default_factory=lambda: int(time()))
     # Cost tracking — populated by Runner after each model.response() call.
     # Excluded from serialisation (avoid heavy / circular dumps).

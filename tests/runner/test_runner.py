@@ -12,6 +12,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from agentica.hooks import RunHooks
 from agentica.run_response import RunResponse, RunEvent
 from agentica.model.loop_state import LoopState
 from agentica.model.message import Message
@@ -394,7 +395,7 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         return agent, cm
 
     def _run_with_compaction(self, agent, cm):
-        with patch.object(cm, "_should_auto_compact", return_value=True), \
+        with patch.object(cm, "should_auto_compact", return_value=True), \
              patch.object(cm, "_summarise_conversation",
                           new_callable=AsyncMock, return_value="a summary of earlier turns"):
             return agent.run_sync("current question")
@@ -429,7 +430,7 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
     def test_uncompacted_run_still_uses_the_prefix_slice(self):
         """No compaction: the existing slice behaviour must be untouched."""
         agent, cm = self._agent_with_history(num_runs=1)
-        with patch.object(cm, "_should_auto_compact", return_value=False):
+        with patch.object(cm, "should_auto_compact", return_value=False):
             agent.run_sync("current question")
 
         self.assertEqual(len(agent.working_memory.runs), 2)
@@ -441,6 +442,29 @@ class TestRunnerPersistsCompactedContext(unittest.TestCase):
         )
         history = agent.working_memory.get_messages_from_last_n_runs()
         self.assertIn("old answer 0", " ".join(str(m.content) for m in history))
+
+    def test_pre_compact_hook_only_fires_on_compacting_turns(self):
+        """on_pre_compact flushes memory buffers through an auxiliary LLM.
+
+        Firing it before the threshold check turned a once-per-many-rounds
+        boundary into a paid side-call on every single turn.
+        """
+        fired = []
+
+        class Hooks(RunHooks):
+            async def on_pre_compact(self, agent, messages=None, **kwargs):
+                fired.append("pre")
+
+        agent, cm = self._agent_with_history(num_runs=1)
+        agent._run_hooks = Hooks()
+        with patch.object(cm, "should_auto_compact", return_value=False):
+            agent.run_sync("current question")
+        self.assertEqual(fired, [])
+
+        agent, cm = self._agent_with_history(num_runs=1)
+        agent._run_hooks = Hooks()
+        self._run_with_compaction(agent, cm)
+        self.assertEqual(fired, ["pre"])
 
     def test_auto_compact_event_exposes_main_agent_scope(self):
         agent, cm = self._agent_with_history()
@@ -559,6 +583,7 @@ class TestRunnerNativeCompaction(unittest.TestCase):
 
         with patch.object(cm, "should_native_compact", return_value=True), \
              patch("agentica.runner.compress.evict_context", return_value=EvictionResult()) as evict, \
+             patch.object(cm, "should_auto_compact", return_value=True), \
              patch.object(cm, "auto_compact", new_callable=AsyncMock, return_value=False) as local_auto:
             asyncio.run(Runner._maybe_compress_messages(messages, agent, model, LoopState()))
 

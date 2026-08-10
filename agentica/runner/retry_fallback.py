@@ -14,6 +14,7 @@ from typing import (
 )
 
 
+from agentica.compression.evict import is_irreducible_prompt_too_long
 from agentica.utils.log import logger
 from agentica.model.base import Model
 from agentica.model.loop_state import LoopState
@@ -353,13 +354,30 @@ class RetryMixin:
 
                     # Reactive compact: prompt_too_long -> emergency compress.
                     # Only attempted on the primary model; fallbacks inherit the
-                    # already-compacted message list.
+                    # already-compacted message list. An oversized *trailing*
+                    # user turn cannot be rescued (Layer 2 keeps it), so surface
+                    # the provider error immediately instead of hiding it behind
+                    # a summary that preserves the same text.
                     is_too_long = any(h in err for h in state.PROMPT_TOO_LONG_HINTS)
-                    if is_too_long and not state.reactive_compact_done and not is_fallback:
-                        state.reactive_compact_done = True
-                        if await CompressMixin._try_reactive_compact(messages, agent, current):
-                            state.context_collapsed = True
-                            continue
+                    if is_too_long:
+                        _window = current.context_window if isinstance(current.context_window, int) else 0
+                        if is_irreducible_prompt_too_long(
+                            messages, context_window=_window, model_id=current.id,
+                        ):
+                            logger.warning(
+                                f"[prompt_too_long] {current.id}: trailing user turn "
+                                f"already fills the context window; surfacing provider error"
+                            )
+                            raise
+                        if not state.reactive_compact_done and not is_fallback:
+                            state.reactive_compact_done = True
+                            if await CompressMixin._try_reactive_compact(messages, agent, current):
+                                state.context_collapsed = True
+                                continue
+                        # Compact already tried (or refused) and the retry still
+                        # does not fit — do not wrap/fallback; raise the original
+                        # BadRequest so the CLI shows the model's limit text.
+                        raise
 
                     # Content filter raised as exception (some providers do this
                     # instead of setting finish_reason). No point retrying same

@@ -194,6 +194,9 @@ class Workspace:
         # Frozen snapshots for prompt cache stability (Hermes-style)
         self._context_snapshot: Optional[str] = None
         self._memory_snapshot: Optional[str] = None
+        # None = not probed yet. Only the False answer is remembered; see
+        # get_git_context().
+        self._is_git_repo: Optional[bool] = None
 
     @property
     def user_id(self) -> str:
@@ -655,9 +658,20 @@ class Workspace:
         with a 5s timeout each can stall the whole event loop — including
         unrelated concurrent tools — for as long as 20s. The three reads are
         independent, so they run together behind the repo check.
+
+        A negative repo check is remembered for the life of the workspace.
+        A service whose workspace is ``~/.agentica/workspace`` is not going to
+        become a repo mid-process, and paying a subprocess spawn per turn to
+        re-learn that is the whole cost of this method for that deployment. A
+        positive answer is not cached: branch, status and commits are exactly
+        what changes between turns.
         """
-        if await self._git("rev-parse", "--git-dir") is None:
+        if self._is_git_repo is False:
             return None
+        if await self._git("rev-parse", "--git-dir") is None:
+            self._is_git_repo = False
+            return None
+        self._is_git_repo = True
 
         branch, status, log = await asyncio.gather(
             self._git("branch", "--show-current"),

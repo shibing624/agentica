@@ -44,7 +44,7 @@ import json
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple, TYPE_CHECKING
 
 from agentica.compression.tool_call_args import shrink_tool_call_arguments_json
-from agentica.utils.tokens import count_message_tokens
+from agentica.utils.tokens import count_message_tokens, count_tokens
 
 if TYPE_CHECKING:
     from agentica.model.message import Message
@@ -84,6 +84,45 @@ def under_pressure(context_tokens: int, context_window: int) -> bool:
     if context_window <= 0:
         return False
     return context_tokens >= context_window * EVICT_THRESHOLD_RATIO
+
+
+# Trailing user-turn share of the window at which reactive compact cannot help:
+# Layer 2 keeps that turn intact, so an oversized single query must surface the
+# provider error instead of burning an LLM summary that preserves the same text.
+IRREDUCIBLE_PROMPT_RATIO = 0.9
+
+
+def trailing_user_turn_start(messages: "List[Message]") -> int:
+    """Index of the last real user message (not an Anthropic tool_result pack)."""
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == "user" and not carries_tool_results(messages[i]):
+            return i
+    return len(messages)
+
+
+def is_irreducible_prompt_too_long(
+    messages: "List[Message]",
+    *,
+    context_window: int,
+    model_id: str = "gpt-4o",
+    ratio: float = IRREDUCIBLE_PROMPT_RATIO,
+) -> bool:
+    """True when the trailing user turn alone already fills the context window.
+
+    Reactive compact / Layer 2 summarisation deliberately keeps that turn so
+    providers do not see an assistant-prefill ending. If the user's message
+    (plus any tool round attached to it) already exceeds ``ratio`` of the
+    window, compacting history cannot make the retry fit — re-raise the
+    provider's ``context_length_exceeded`` instead of hiding it behind a
+    failed compact attempt.
+    """
+    if context_window <= 0 or not messages:
+        return False
+    start = trailing_user_turn_start(messages)
+    if start >= len(messages):
+        return False
+    tokens = count_tokens(messages[start:], None, model_id, None)
+    return tokens >= int(context_window * ratio)
 
 
 def tool_result_blocks(msg: "Message") -> List[dict]:
