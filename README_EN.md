@@ -29,6 +29,7 @@ tool calling, long-running tasks, multi-agent orchestration, cross-session memor
 |------------|---------------|
 | **Runs long, doesn't run away** | `Runner`-driven LLM ↔ tool loop with context compaction, cost budgets, and loop safety — long tasks stay on track |
 | **Does work, not just chat** | Files, execution, search, browser, MCP, multi-agent, Workflow — real actions, not tied to a single IDE |
+| **Multi-session collaboration** | Cross-terminal peer messaging; `delegate` spawns a full process (own context/cwd); `task` stays the cheap in-process subagent |
 | **Remembers and forgets** | Memory stored as indexed entries with relevance recall and drift defense; confirmed preferences sync into global `~/.agentica/AGENTS.md` |
 | **Gets better with use** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` across sessions |
 | **Fully swappable, not locked in** | Models, tools, memory, skills, guardrails, and MCP are replaceable parts — not a closed hosted platform |
@@ -40,6 +41,7 @@ tool calling, long-running tasks, multi-agent orchestration, cross-session memor
 | Async-first agentic loop | ✅ compaction/budget/anti-death-spiral built-in | bolted-on | ✅ | ✅ |
 | Self-evolving skills | ✅ auto-compiles `SKILL.md` | ❌ | ❌ | ❌ |
 | `/goal` long-task loop | ✅ | ❌ | ❌ | ❌ |
+| CLI multi-session collab | ✅ peer + `delegate` / `task` | ❌ | mostly in-process | ❌ |
 | Persistent cross-session memory | ✅ out of the box | DIY | partial | DIY |
 | Ships a CLI + Web Gateway | ✅ | ❌ | ❌ | ❌ |
 

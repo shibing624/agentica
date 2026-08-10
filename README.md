@@ -28,6 +28,7 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 |------|------|
 | **跑得久，不跑飞** | 专门 Agentic loop 驱动的 LLM ↔ Tool 长循环，内置上下文压缩、成本预算、死循环防护，长任务不断链 |
 | **能干活，不只聊天** | 文件、执行、搜索、浏览器、MCP、多智能体、Workflow——真实动手，不绑定单一 IDE |
+| **多会话协作** | 跨终端 peer 互发消息；`delegate` 另起完整进程（独立 context / cwd），`task` 便宜进程内 subagent——三种机制分工明确 |
 | **记得住，会遗忘** | 记忆按条目存储、相关性召回、drift 防御，确认过的偏好同步到全局 `~/.agentica/AGENTS.md` |
 | **越用越强** | 工具失败 / 用户纠正 / 成功序列沉淀为经验卡片，自动编译成可复用的 `SKILL.md`，跨会话生效 |
 | **全可换，不锁死** | 模型、工具、记忆、Skill、Guardrails、MCP 都是可替换部件，而非封闭 SaaS 黑盒 |
@@ -39,20 +40,21 @@ Async-first Python agent harness · 40+ 工具 · 20+ 模型 · MCP · CLI + Web
 | Async-first agentic loop | ✅ 内置压缩/预算/防死循环 | 片段拼装 | ✅ | ✅ |
 | 自进化 Skill | ✅ 自动编译 `SKILL.md` | ❌ | ❌ | ❌ |
 | `/goal` 长任务循环 | ✅ | ❌ | ❌ | ❌ |
+| CLI 多会话协作 | ✅ peer + `delegate` / `task` | ❌ | 进程内为主 | ❌ |
 | 持久跨会话记忆 | ✅ 开箱即用 | 需自行拼装 | 部分 | 需自行拼装 |
 | 开箱 CLI + Web Gateway | ✅ | ❌ | ❌ | ❌ |
 
 ## 🔥 News
 
 
-- [2026/08/10] **v1.4.12**：上下文压缩收敛为两层（约 70%→50% 淘汰旧 tool result → LLM/native 摘要），修掉「读了又读」死循环与 Anthropic 路径失效；Layer 0 按能否取回决定落盘或诚实截断，压缩次数写入 `RunResponse.context_compactions`，CLI 假设不再默认落到 SDK。新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与便宜的进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
+- [2026/08/10] **v1.4.12**：上下文压缩升级：三层上下文压缩收敛为两层（截断旧 tool result → LLM/native 摘要）；新增跨终端 peer 消息（`list_agents` / `send_message`）与进程级 `delegate`（独立 `agentica --query --print`，经 `/ps` `/stop` `wait` 托管），与进程内 `task` 分工明确。详见 [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**：新增 OpenAI Responses API（含原生 compaction）、Markdown 可配置 subagent、`apply_patch` 多文件；CLI resume/状态栏/压缩提示增强；裁减 prompt 与 grep/glob schema；修复 Learned Experiences 污染与 `write_todos` 全量回显。详见 [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**：支持视觉模型原生图片输入与模型能力 catalog 路由；新增 `/rename` 和按名称 `/resume`。详见 [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
-- [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 
 <details>
-<summary>更多版本</summary>
+<summary>更多版本</smmary>
 
+- [2026/07/21] **v1.4.9**：内置 subagent 全部改为只读；`edit_file` 改为 tip 提示而非硬拒；修复 `ask_user_question` CLI 卡死。详见 [Release-v1.4.9](https://github.com/shibing624/agentica/releases/tag/v1.4.9)
 - [2026/07/05] **v1.4.7**：CLI 新增 cron 运行时（`/cron` 命令 + daemon）、自管理（`/upgrade`、`/config set|env`）；统一配置到 `~/.agentica/config.yaml`。详见 [Release-v1.4.7](https://github.com/shibing624/agentica/releases/tag/v1.4.7)
 - [2026/06/03] **v1.4.6**：支持fallback模型可配置，支持多个fallback模型；支持 LSP， CLI 开启 LSP 开关（`--enable-diagnostics`/`--diagnostics-server`）；支持 `agentica doctor`；支持 `/goal` 长程任务。详见 [Release-v1.4.6](https://github.com/shibing624/agentica/releases/tag/v1.4.6)
 - [2026/05/11] **v1.4.4**：MemoryExtractHooks 优化，新增 `auto_extract_memory_background` 后台抽取（不再阻塞 `on_agent_end`），memory 抽取优先走更快更便宜的 `auxiliary_model`。详见 [Release-v1.4.4](https://github.com/shibing624/agentica/releases/tag/v1.4.4)
