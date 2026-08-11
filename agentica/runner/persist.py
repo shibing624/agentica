@@ -271,7 +271,44 @@ class PersistMixin:
         request and its results would otherwise persist a shape the provider
         rejects on *every* later request in the session, not just this one.
         """
-        answered = {m.tool_call_id for m in msgs if m.role == "tool" and m.tool_call_id}
+        def tool_result_ids(message: Message) -> set:
+            if message.role == "tool" and message.tool_call_id:
+                return {message.tool_call_id}
+            if message.role != "user" or not isinstance(message.content, list):
+                return set()
+            return {
+                block.get("tool_use_id")
+                for block in message.content
+                if isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and block.get("tool_use_id")
+            }
+
+        def filter_tool_result_message(message: Message, kept_ids: set) -> Optional[Message]:
+            if message.role == "tool":
+                if message.tool_call_id in kept_ids:
+                    return message
+                return None
+            if message.role != "user" or not isinstance(message.content, list):
+                return message
+            blocks: List[Any] = []
+            for block in message.content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and block.get("tool_use_id") not in kept_ids
+                ):
+                    continue
+                blocks.append(block)
+            if not blocks:
+                return None
+            if len(blocks) == len(message.content):
+                return message
+            return message.model_copy(update={"content": blocks})
+
+        answered = set()
+        for m in msgs:
+            answered.update(tool_result_ids(m))
         kept: List[Message] = []
         kept_ids: set = set()
         for m in msgs:
@@ -281,7 +318,12 @@ class PersistMixin:
                     continue
                 kept_ids |= ids
             kept.append(m)
-        return [m for m in kept if m.role != "tool" or m.tool_call_id in kept_ids]
+        filtered: List[Message] = []
+        for m in kept:
+            filtered_msg = filter_tool_result_message(m, kept_ids)
+            if filtered_msg is not None:
+                filtered.append(filtered_msg)
+        return filtered
 
     def _try_persist_incomplete_turn(self, *args: Any, **kwargs: Any) -> None:
         """Best-effort ``_persist_incomplete_turn``: keeping history is never
@@ -349,7 +391,10 @@ class PersistMixin:
                 last_asst = _m
                 break
         synthesized: Optional[Message] = None
-        if last_asst is not None:
+        if last_asst is not None and last_asst.tool_calls:
+            synthesized = Message(role="assistant", content=persisted)
+            turn_msgs.append(synthesized)
+        elif last_asst is not None:
             last_asst.content = persisted
         else:
             synthesized = Message(role="assistant", content=persisted)
@@ -406,4 +451,3 @@ class PersistMixin:
             _assistant_meta = PersistMixin._provider_replay_meta(last_asst) if last_asst is not None else {}
             _assistant_meta["finish_reason"] = finish_reason
             agent._session_log.append("assistant", persisted, **_assistant_meta)
-

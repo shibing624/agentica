@@ -141,6 +141,55 @@ class TestRunnerInterruptedTurnPersistence(unittest.TestCase):
         self.assertIn("2 + 2 = ", resumed_history[-1].content)
         self.assertIn("[User interrupted the response]", resumed_history[-1].content)
 
+    def test_interrupted_claude_tool_round_keeps_tool_use_blocks(self):
+        """Ctrl+C after a Claude tool result must not overwrite the assistant
+        tool_use message with the interruption marker.
+
+        Anthropic validates each tool_result against the immediately previous
+        assistant content block. Replacing that assistant content with plain
+        marker text leaves an orphan tool_result and 400s the next request.
+        """
+        from agentica.model.anthropic.claude import Claude
+
+        agent = _make_agent()
+        user_msg = Message(role="user", content="check git status")
+        tool_use = Message(
+            role="assistant",
+            content=[{"type": "tool_use", "id": "tu_1", "name": "execute", "input": {}}],
+            tool_calls=[{"id": "tu_1", "type": "function", "function": {"name": "execute"}}],
+        )
+        tool_result = Message(
+            role="user",
+            content=[{"type": "tool_result", "tool_use_id": "tu_1", "content": "clean"}],
+        )
+
+        agent._runner._persist_incomplete_turn(
+            agent,
+            message="check git status",
+            messages=None,
+            user_messages=[user_msg],
+            system_message=None,
+            messages_for_model=[user_msg, tool_use, tool_result],
+            num_input_messages=1,
+            model_response=ModelResponse(content=""),
+            loop_state=LoopState(),
+            input_message_ids={id(user_msg)},
+            marker="[User interrupted the response]",
+            finish_reason="cancelled",
+        )
+
+        history = [m for m in agent.working_memory.get_messages_from_last_n_runs() if m.role != "system"]
+        self.assertEqual([m.role for m in history], ["user", "assistant", "user", "assistant"])
+        self.assertEqual(history[1].content[0]["type"], "tool_use")
+        self.assertEqual(history[2].content[0]["type"], "tool_result")
+        self.assertIn("[User interrupted the response]", history[-1].content)
+
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.enable_cache_control = False
+        chat_messages, _ = asyncio.run(model.format_messages(history))
+        self.assertEqual(chat_messages[1]["content"][0]["type"], "tool_use")
+        self.assertEqual(chat_messages[2]["content"][0]["type"], "tool_result")
+
     def test_persist_interrupted_turn_skips_prebuilt_messages(self):
         """Pre-built ``messages`` runs manage their own history — no persistence."""
         agent = _make_agent()

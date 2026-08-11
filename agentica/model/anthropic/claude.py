@@ -352,6 +352,7 @@ class Claude(Model):
         """
         chat_messages: List[Dict[str, str]] = []
         system_messages: List[str] = []
+        pending_tool_use_ids: set[str] = set()
 
         for idx, message in enumerate(messages):
             content = message.content or ""
@@ -376,6 +377,21 @@ class Claude(Model):
                 else:
                     blocks = [b for b in content if not _is_empty_text_block(b)]
 
+                has_tool_result = any(
+                    isinstance(block, dict) and block.get("type") == "tool_result"
+                    for block in blocks
+                )
+                if message.role == "user" and has_tool_result:
+                    blocks = [
+                        block
+                        for block in blocks
+                        if not (
+                            isinstance(block, dict)
+                            and block.get("type") == "tool_result"
+                            and block.get("tool_use_id") not in pending_tool_use_ids
+                        )
+                    ]
+
                 if message.role == "user" and message.images is not None:
                     self.validate_image_input()
                     for image in message.images:
@@ -387,9 +403,21 @@ class Claude(Model):
                     # Replayed tool-call assistant messages land here: their
                     # tool_use blocks did not survive persistence, so only an
                     # empty string remains.
+                    if message.role == "user" and has_tool_result:
+                        pending_tool_use_ids = set()
                     continue
 
                 chat_messages.append({"role": message.role, "content": blocks})  # type: ignore
+                if message.role == "assistant":
+                    pending_tool_use_ids = {
+                        block.get("id")
+                        for block in blocks
+                        if isinstance(block, dict)
+                        and block.get("type") == "tool_use"
+                        and block.get("id")
+                    }
+                elif message.role == "user":
+                    pending_tool_use_ids = set()
 
         # system_and_3 strategy: cache the system prompt (breakpoint added in
         # prepare_request_kwargs) + the last 3 messages for a rolling cache

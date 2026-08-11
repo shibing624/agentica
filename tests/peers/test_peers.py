@@ -66,6 +66,26 @@ class TestDiscovery:
 
         assert alive.list_peers() == []
 
+    def test_live_record_writes_use_unique_temp_files(self, tmp_path, monkeypatch):
+        """Concurrent publish() calls must not share one fixed .tmp path."""
+        path = tmp_path / "live" / "peer.json"
+        path.parent.mkdir()
+        replace_sources = []
+        original_replace = os.replace
+
+        def record_replace(src, dst):
+            replace_sources.append(os.fspath(src))
+            original_replace(src, dst)
+
+        monkeypatch.setattr(peers.os, "replace", record_replace)
+
+        peers._write_private_json(path, {"task": "one"})
+        peers._write_private_json(path, {"task": "two"})
+
+        assert len(replace_sources) == 2
+        assert len(set(replace_sources)) == 2
+        assert json.loads(path.read_text(encoding="utf-8")) == {"task": "two"}
+
     def test_resolve_accepts_id_name_and_unique_prefix(self):
         me = _session("me")
         target = _session("payments-api")

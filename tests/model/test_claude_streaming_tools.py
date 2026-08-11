@@ -194,6 +194,39 @@ class TestClaudeFormatMessagesToolRole(unittest.TestCase):
         self.assertEqual(roles, ["user", "assistant", "user"])
         self.assertEqual(system, "")
 
+    def test_orphan_tool_result_blocks_are_filtered(self):
+        """A damaged interrupted turn must not send tool_result without tool_use."""
+        model = Claude(id="claude-opus-4-6", api_key="fake")
+        model.enable_cache_control = False
+
+        messages = [
+            Message(role="user", content="run status"),
+            Message(
+                role="assistant",
+                content="[User interrupted the response]",
+                tool_calls=[{"type": "function", "function": {"name": "execute"}, "id": "t1"}],
+            ),
+            Message(role="user", content=[{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]),
+            Message(role="user", content="retry"),
+        ]
+
+        chat_messages, _ = asyncio.run(model.format_messages(messages))
+
+        tool_results = [
+            block
+            for msg in chat_messages
+            for block in msg["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_result"
+        ]
+        texts = [
+            block["text"]
+            for msg in chat_messages
+            for block in msg["content"]
+            if isinstance(block, dict) and block.get("type") == "text"
+        ]
+        self.assertEqual(tool_results, [])
+        self.assertEqual(texts, ["run status", "[User interrupted the response]", "retry"])
+
 
 class TestClaudeCacheControlBudget(unittest.TestCase):
     """cache_control breakpoints must never exceed Anthropic's max of 4.

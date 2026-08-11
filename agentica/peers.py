@@ -322,7 +322,7 @@ class PeerInfo:
 
 
 def _write_private_json(path: Path, payload: Dict[str, Any]) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     try:
         tmp.chmod(0o600)
@@ -828,5 +828,4 @@ def format_for_model(messages: List[PeerMessage]) -> str:
             )
         blocks.append(f"{header}\n{message.text}")
     return "\n\n".join(blocks)
-
 
