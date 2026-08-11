@@ -270,5 +270,56 @@ class TestQueueCommandEditInsert(unittest.TestCase):
         self.assertEqual([p[0] for p in pq.peek_all_with_timestamps()], ["a"])
 
 
+class TestSteerOrQueue(unittest.TestCase):
+    """The mid-run default for plain typed input: steer the live run. Only a
+    refused steer (run ended in the TOCTOU gap, or no agent yet) falls back
+    to the queue — the text is never dropped."""
+
+    def _state(self, *, steer_accepts, with_agent=True):
+        from agentica.cli.interactive.session_state import SessionState
+
+        state = SessionState()
+        state.agent_running = True
+        if with_agent:
+            state.current_agent = MagicMock()
+            state.current_agent.steer.return_value = steer_accepts
+        else:
+            state.current_agent = None
+        return state
+
+    def test_accepted_steer_does_not_touch_the_queue(self):
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _steer_or_queue
+
+        state = self._state(steer_accepts=True)
+        pq = PendingQueue()
+
+        self.assertTrue(_steer_or_queue(state, pq, "not that file", "not that file"))
+
+        state.current_agent.steer.assert_called_once_with("not that file")
+        self.assertTrue(pq.empty())
+
+    def test_refused_steer_falls_back_to_the_queue(self):
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _steer_or_queue
+
+        state = self._state(steer_accepts=False)
+        pq = PendingQueue()
+
+        self.assertFalse(_steer_or_queue(state, pq, "stop rewriting tests", "stop rewriting tests"))
+
+        self.assertEqual(pq.peek_all(), ["stop rewriting tests"])
+
+    def test_no_agent_yet_queues_the_payload(self):
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _steer_or_queue
+
+        state = self._state(steer_accepts=False, with_agent=False)
+        pq = PendingQueue()
+
+        self.assertFalse(_steer_or_queue(state, pq, "hi", "hi"))
+        self.assertEqual(pq.peek_all(), ["hi"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from rich.markup import escape as rich_escape
 
+from agentica.cli.commands.context import queue_ahead_of_goal_continuation
 from agentica.cli.display.tool_format import _wrap_command_lines
 from agentica.cli.runtime import _generate_session_id, get_console
 from agentica.memory.models import AgentRun
@@ -37,11 +38,38 @@ def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
     their own arrival block (a styled peer message, a finished-command report),
     so the raw model-facing text — headers, log tails and all — would be a
     second, uglier copy of what the user just read.
+
+    ``relayed=True`` threads the same provenance through the steer buffer: if
+    the text is accepted during the run's final inference and never drained,
+    ``promote_late_steer`` re-queues it with the tag instead of as plain input.
     """
     agent = state.current_agent
-    if state.agent_running and agent is not None and agent.steer(text):
+    if state.agent_running and agent is not None and agent.steer(text, relayed=True):
         return
     pending_queue.put(("__RELAYED__", text))
+
+
+def promote_late_steer(state: SessionState, pending_queue) -> List[str]:
+    """Re-queue steering that outlived its run; return what was promoted.
+
+    Text accepted by ``steer()`` during a run's final inference was buffered
+    after the last drain, so the model never saw it. ``_end_steer_window``
+    parks it on the agent rather than dropping it; called right after a run
+    finishes, this turns it into ordinary queued input — ahead of any
+    goal-continuation prompt, so the correction runs before the next automated
+    lap. Provenance rides along: typed lines queue as plain ``str`` (the usual
+    queued-turn echo), relayed lines go back tagged ``__RELAYED__`` — without
+    the tag a parked peer/bg line could regain slash-command dispatch.
+    """
+    agent = state.current_agent
+    if agent is None:
+        return []
+    late = agent.pop_undelivered_steer()
+    for text, relayed in late:
+        queue_ahead_of_goal_continuation(
+            pending_queue, ("__RELAYED__", text) if relayed else text
+        )
+    return [text for text, _ in late]
 
 
 def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
@@ -212,4 +240,4 @@ def _run_btw_concurrent(agent, question: str, tui_state: dict):
     _print_boxed_result("BTW", question, result_text, color="cyan")
 
 
-__all__ = ['hand_to_agent', '_background_result_for_agent', '_print_background_completion', '_run_btw_concurrent']
+__all__ = ['hand_to_agent', 'promote_late_steer', '_background_result_for_agent', '_print_background_completion', '_run_btw_concurrent']
