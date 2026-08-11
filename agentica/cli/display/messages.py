@@ -143,7 +143,7 @@ def _echo_panel(body: Text) -> None:
     console.print(Padding(history, (0, 1), style="on rgb(35,35,35)"))
 
 
-def display_peer_messages(messages: List[PeerMessage], *, delivery: str) -> None:
+def display_peer_messages(messages: List[PeerMessage]) -> None:
     """Show messages that just arrived from another session.
 
     The two senders get deliberately different shapes, because the receiver may
@@ -154,10 +154,6 @@ def display_peer_messages(messages: List[PeerMessage], *, delivery: str) -> None
     the message indented beneath — the same visual language as a tool call, so
     agent traffic reads as an incoming event and can never be mistaken for the
     user's own words.
-
-    ``delivery`` is a short clause such as ``starting a turn`` or ``will reach
-    the agent between tool calls`` — the caller knows which path accepted the
-    message; this only renders it.
     """
     console = get_console()
     for message in messages:
@@ -176,7 +172,6 @@ def display_peer_messages(messages: List[PeerMessage], *, delivery: str) -> None
             # row so multi-line replies stay aligned and fold cleanly.
             for line in message.text.splitlines() or [""]:
                 console.print(f"    {line}", style=COLORS["tool"])
-        console.print(f"  {delivery}", style="dim")
 
 
 def get_file_completions(document_text: str) -> List[str]:

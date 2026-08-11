@@ -910,12 +910,7 @@ def run_interactive(
                 app.invalidate()
 
     def _on_peer_drain(messages) -> None:
-        delivery = (
-            "will reach the agent between tool calls"
-            if state.agent_running
-            else "starting a turn"
-        )
-        display_peer_messages(messages, delivery=delivery)
+        display_peer_messages(messages)
         if app.is_running:
             app.invalidate()
 

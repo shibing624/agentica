@@ -21,11 +21,11 @@ from agentica.peers import PeerMessage
 os.environ.setdefault("OPENAI_API_KEY", "fake_openai_key")
 
 
-def _render(messages, delivery="starting a turn") -> str:
+def _render(messages) -> str:
     console = Console(width=100, force_terminal=False, no_color=True)
     with patch("agentica.cli.display.messages.get_console", return_value=console):
         with console.capture() as captured:
-            display_peer_messages(messages, delivery=delivery)
+            display_peer_messages(messages)
     return captured.get()
 
 
@@ -46,7 +46,6 @@ class TestPeerMessageRendering:
         assert "nlp-f1" in out
         assert "💬" in out
         assert "方案A全量+四臂完成" in out
-        assert "starting a turn" in out
 
     def test_an_agent_message_does_not_borrow_the_human_prompt_marker(self):
         """``❯`` means "the user said this"; agent traffic must not wear it."""
@@ -55,10 +54,7 @@ class TestPeerMessageRendering:
         assert "❯" not in out
 
     def test_a_relayed_user_message_is_shown_as_the_user_speaking(self):
-        out = _render(
-            [_message("ship it", from_kind="user")],
-            delivery="will reach the agent between tool calls",
-        )
+        out = _render([_message("ship it", from_kind="user")])
 
         assert "❯" in out
         assert "via nlp-f1" in out
