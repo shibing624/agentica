@@ -2403,16 +2403,33 @@ class TestFileToolRegistrationGuard:
 # ===========================================================================
 
 class TestAskUserQuestionTool:
-    def test_ask_user_question_manages_own_timeout(self):
-        """ask_user_question/confirm must wait indefinitely for the user (CC/Cursor
+    @staticmethod
+    def _fake_agent(parse_reply: str):
+        """Build a parent agent whose auxiliary model returns ``parse_reply``."""
+        async def _invoke(messages):
+            class _Msg:
+                def __init__(self, content):
+                    self.message = type("m", (), {"content": content})()
+            class _Resp:
+                def __init__(self, content):
+                    self.choices = [_Msg(content)]
+            return _Resp(parse_reply)
+
+        fake_model = MagicMock()
+        fake_model.invoke = _invoke
+        agent = MagicMock()
+        agent.resolve_auxiliary_model = MagicMock(return_value=fake_model)
+        return agent
+
+    def test_manages_own_timeout(self):
+        """ask_user_question must wait indefinitely for the user (CC/Cursor
         semantics), not be auto-passed by the outer ~120s tool-executor timeout."""
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         tool = AskUserQuestionTool(input_callback=lambda p, o=None: "ok")
         assert tool.functions["ask_user_question"].manages_own_timeout is True
-        assert tool.functions["confirm"].manages_own_timeout is True
 
-    def test_ask_user_question_uses_callback(self):
+    def test_uses_callback(self):
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
@@ -2424,7 +2441,7 @@ class TestAskUserQuestionTool:
             return "my answer"
 
         tool = AskUserQuestionTool(input_callback=cb)
-        result = json.loads(asyncio.run(tool.ask_user_question(prompt="What now?", mode="text")))
+        result = json.loads(asyncio.run(tool.ask_user_question(prompt="What now?")))
         assert result["response"] == "my answer"
         assert "What now?" in captured["prompt"]
 
@@ -2450,7 +2467,7 @@ class TestAskUserQuestionTool:
         try:
             tool = AskUserQuestionTool()  # no explicit callback
             assert tool.input_callback is None
-            result = json.loads(asyncio.run(tool.ask_user_question(prompt="Pick", mode="text")))
+            result = json.loads(asyncio.run(tool.ask_user_question(prompt="Pick")))
             assert result["response"] == "default answer"
             assert "Pick" in captured["prompt"]
         finally:
@@ -2458,9 +2475,7 @@ class TestAskUserQuestionTool:
 
     def test_no_callback_no_default_falls_back_to_input(self):
         """Without the TUI registered, a callback-less tool keeps the legacy
-        bare-input() behavior (non-interactive scripts). We can't drive input()
-        in a unit test, so we verify the routing decision indirectly: the
-        default holder is None and the instance callback is None."""
+        bare-input() behavior (non-interactive scripts)."""
         from agentica.tools.ask_user_question_tool import (
             AskUserQuestionTool,
             set_default_ask_user_question_callback,
@@ -2470,28 +2485,10 @@ class TestAskUserQuestionTool:
         tool = AskUserQuestionTool()
         assert tool.input_callback is None
 
-    @staticmethod
-    def _fake_agent(parse_reply: str):
-        """Build a parent agent whose auxiliary model returns ``parse_reply``."""
-        async def _invoke(messages):
-            class _Msg:
-                def __init__(self, content):
-                    self.message = type("m", (), {"content": content})()
-            class _Resp:
-                def __init__(self, content):
-                    self.choices = [_Msg(content)]
-            return _Resp(parse_reply)
-
-        fake_model = MagicMock()
-        fake_model.invoke = _invoke
-        agent = MagicMock()
-        agent.resolve_auxiliary_model = MagicMock(return_value=fake_model)
-        return agent
-
-    def test_select_freeform_reply_resolved_by_llm_to_option(self):
+    def test_freeform_reply_resolved_by_llm_to_option(self):
         """User typing "3, because workers=10 is ok" must pick option 3. The
         reply is free-form text; the LLM maps it by meaning. Old rule code
-        (isdigit / startswith) fabricated options[0] when it couldn't match."""
+        (isdigit / regex) fabricated options[0] when it couldn't match."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
@@ -2502,72 +2499,69 @@ class TestAskUserQuestionTool:
         ]
         raw = "3 , 100题, qwen,bge服务支持100并发,我们的workers=10是ok的吧"
         tool = AskUserQuestionTool(input_callback=lambda p, o=None: raw)
-        tool.set_parent_agent(self._fake_agent('{"option_index": 3}'))
+        tool.set_parent_agent(self._fake_agent(options[2]))
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="选哪个规模？", mode="select", options=options)
+            tool.ask_user_question(prompt="选哪个规模？", options=options)
         ))
         assert result["response"] == options[2], "LLM should map to option 3 (100 题)"
         assert result["raw_input"] == raw, "rationale must be preserved for the model"
 
-    def test_select_paraphrase_resolved_by_llm(self):
+    def test_paraphrase_resolved_by_llm(self):
         """A paraphrase is mapped by the LLM, not rules."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         options = ["全量重跑（11h，免费）", "只跑子集（3.5h，免费）", "付费快速通道（1h）"]
         tool = AskUserQuestionTool(input_callback=lambda p, o=None: "用那个便宜的免费的，时间够")
-        tool.set_parent_agent(self._fake_agent('{"option_index": 2}'))
+        tool.set_parent_agent(self._fake_agent(options[1]))
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="选哪个？", mode="select", options=options)
+            tool.ask_user_question(prompt="选哪个？", options=options)
         ))
         assert result["response"] == options[1]
 
-    def test_select_exact_text_match_skips_llm(self):
-        """Typing the option text verbatim resolves without calling the LLM."""
+    def test_confirm_reply_resolved_by_llm(self):
+        """A colloquial yes/no reply ("嗯行吧可以") is resolved by the LLM —
+        confirm is just a question now, no separate mode."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
-        options = ["JSON", "CSV", "XML"]
-        agent = MagicMock()
-        agent.resolve_auxiliary_model = MagicMock(side_effect=AssertionError("LLM must not be called for exact match"))
-        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "CSV")
-        tool.set_parent_agent(agent)
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "嗯行吧可以")
+        tool.set_parent_agent(self._fake_agent("yes"))
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="format?", mode="select", options=options)
+            tool.ask_user_question(prompt="Delete all temp files?")
         ))
-        assert result["response"] == "CSV"
-        assert "raw_input" not in result
+        assert result["response"] == "yes"
+        assert result["raw_input"] == "嗯行吧可以"
 
-    def test_select_llm_returns_null_keeps_raw_input(self):
-        """When the LLM says the reply doesn't clearly pick any option, the raw
-        reply is returned — never fabricated as options[0]."""
+    def test_free_text_reply_returns_answer(self):
+        """No options — the LLM restates the user's answer concisely."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
-        options = ["red", "green", "blue"]
-        raw = "maybe purple?"
-        tool = AskUserQuestionTool(input_callback=lambda p, o=None: raw)
-        tool.set_parent_agent(self._fake_agent('{"option_index": null}'))
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "用 bge-m3，本地跑")
+        tool.set_parent_agent(self._fake_agent("用 bge-m3，本地跑"))
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="color?", mode="select", options=options)
+            tool.ask_user_question(prompt="用哪个 embedding 模型？")
         ))
-        assert result["response"] == raw, "must not fabricate an option"
-        assert "raw_input" not in result
+        assert result["response"] == "用 bge-m3，本地跑"
 
-    def test_select_no_model_keeps_raw_input(self):
-        """Without a bound agent (SDK / cron), the raw reply is returned as-is."""
+    def test_no_model_keeps_raw_input(self):
+        """Without a bound agent (SDK / cron), the raw reply is returned as-is
+        rather than guessing — the model sees what the user actually said."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         options = ["a", "b", "c"]
         tool = AskUserQuestionTool(input_callback=lambda p, o=None: "第二个吧")
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="pick", mode="select", options=options)
+            tool.ask_user_question(prompt="pick", options=options)
         ))
         assert result["response"] == "第二个吧"
+        assert "raw_input" not in result
 
-    def test_select_llm_failure_keeps_raw_input(self):
-        """A broken auxiliary model degrades to returning the raw reply."""
+    def test_llm_failure_keeps_raw_input(self):
+        """A broken auxiliary model degrades to returning the raw reply, not
+        fabricating a choice."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
@@ -2582,44 +2576,20 @@ class TestAskUserQuestionTool:
         tool = AskUserQuestionTool(input_callback=lambda p, o=None: raw)
         tool.set_parent_agent(agent)
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="pick", mode="select", options=options)
+            tool.ask_user_question(prompt="pick", options=options)
         ))
         assert result["response"] == raw
 
-    def test_confirm_keyword_fast_path_skips_llm(self):
-        """Unambiguous yes/no/是/否 don't tax the model."""
+    def test_llm_returns_empty_keeps_raw_input(self):
+        """An empty / whitespace LLM answer keeps the raw reply."""
         import asyncio
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
-        agent = MagicMock()
-        agent.resolve_auxiliary_model = MagicMock(side_effect=AssertionError("LLM must not be called for '是'"))
-        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "是")
-        tool.set_parent_agent(agent)
+        options = ["a", "b", "c"]
+        raw = "maybe none?"
+        tool = AskUserQuestionTool(input_callback=lambda p, o=None: raw)
+        tool.set_parent_agent(self._fake_agent("   "))
         result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="proceed?", mode="confirm")
+            tool.ask_user_question(prompt="pick", options=options)
         ))
-        assert result["response"] == "yes"
-
-    def test_confirm_freeform_resolved_by_llm(self):
-        """A colloquial reply like "嗯行吧可以" is mapped by the LLM."""
-        import asyncio
-        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
-
-        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "嗯行吧可以")
-        tool.set_parent_agent(self._fake_agent('{"answer": "yes"}'))
-        result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="proceed?", mode="confirm")
-        ))
-        assert result["response"] == "yes"
-        assert result["raw_input"] == "嗯行吧可以"
-
-    def test_confirm_no_model_defaults_to_no(self):
-        """Without a model, an unrecognised confirm reply defaults to 'no'."""
-        import asyncio
-        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
-
-        tool = AskUserQuestionTool(input_callback=lambda p, o=None: "嗯行吧可以")
-        result = json.loads(asyncio.run(
-            tool.ask_user_question(prompt="proceed?", mode="confirm")
-        ))
-        assert result["response"] == "no"
+        assert result["response"] == raw

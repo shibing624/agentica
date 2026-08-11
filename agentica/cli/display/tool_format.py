@@ -247,7 +247,7 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     # the TUI's prompt widget the moment this call parks. Repeating a clipped
     # copy on the call line shows the same question twice, neither in full.
     # The lasting record is the result block, which replays both sides.
-    if tool_name in ("ask_user_question", "confirm"):
+    if tool_name == "ask_user_question":
         return ""
 
     # Default format for other tools

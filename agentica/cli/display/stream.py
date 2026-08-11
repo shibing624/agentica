@@ -660,7 +660,7 @@ class StreamDisplayManager:
     # Human-in-the-loop. Their result is the only durable record of the
     # exchange — the question widget lives in the prompt_toolkit layout and is
     # gone the moment the user answers — so it replays both sides in full.
-    _ASK_USER_TOOLS = frozenset({"ask_user_question", "confirm"})
+    _ASK_USER_TOOLS = frozenset({"ask_user_question"})
 
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4

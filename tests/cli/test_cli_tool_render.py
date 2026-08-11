@@ -213,7 +213,7 @@ class TestCLIToolRender(unittest.TestCase):
         dm = StreamDisplayManager(fake)
         dm.display_tool(
             "ask_user_question",
-            {"prompt": self.ASK_PROMPT, "mode": "select", "options": self.ASK_OPTIONS},
+            {"prompt": self.ASK_PROMPT, "options": self.ASK_OPTIONS},
             tool_call_id="ask-1",
         )
 
@@ -233,7 +233,7 @@ class TestCLIToolRender(unittest.TestCase):
         clear_truncated_blocks()
         answer = self.ASK_OPTIONS[0]
         result = json.dumps(
-            {"mode": "select", "prompt": self.ASK_PROMPT, "response": answer},
+            {"prompt": self.ASK_PROMPT, "response": answer},
             ensure_ascii=False,
         )
         fake = MagicMock()
@@ -257,7 +257,7 @@ class TestCLIToolRender(unittest.TestCase):
 
         answer = "先跑方案 A'\n如果 QA 超时再切 B\n预算上限 5 美元"
         result = json.dumps(
-            {"mode": "text", "prompt": "接下来怎么做？", "response": answer},
+            {"prompt": "接下来怎么做？", "response": answer},
             ensure_ascii=False,
         )
         fake = MagicMock()
@@ -284,7 +284,6 @@ class TestCLIToolRender(unittest.TestCase):
         dm.display_tool_result(
             "ask_user_question",
             json.dumps({
-                "mode": "select",
                 "prompt": "选哪个？",
                 "response": "100 题（~3.5 小时）",
                 "raw_input": "3 , 100题, workers=10 is ok",
@@ -298,7 +297,7 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertIn("workers=10 is ok", rendered)
 
     def test_unparseable_ask_result_falls_back_to_generic_rendering(self):
-        """A select-mode error dict has no 'response' — it must still print."""
+        """A payload with no 'response' isn't an exchange — it must still print."""
         from agentica.cli.display import StreamDisplayManager
 
         fake = MagicMock()
@@ -306,13 +305,13 @@ class TestCLIToolRender(unittest.TestCase):
         dm = StreamDisplayManager(fake)
         dm.display_tool_result(
             "ask_user_question",
-            '{"error": "Options required for select mode", "prompt": "pick one"}',
+            '{"error": "user aborted", "prompt": "pick one"}',
             is_error=False,
             elapsed=0.01,
         )
 
         rendered = self._render(dm, fake)
-        self.assertIn("Options required for select mode", rendered)
+        self.assertIn("user aborted", rendered)
 
     def test_ask_exchange_renders_markup_as_literal_text(self):
         """A question or answer mentioning '[bold]' is content, not styling."""
@@ -328,7 +327,6 @@ class TestCLIToolRender(unittest.TestCase):
         dm.display_tool_result(
             "ask_user_question",
             json.dumps({
-                "mode": "text",
                 "prompt": "Should the banner use [bold] or [/red]?",
                 "response": "use [bold]",
             }),
@@ -349,7 +347,7 @@ class TestCLIToolRender(unittest.TestCase):
 
         long_prompt = self.ASK_PROMPT * 3
         tool = AskUserQuestionTool(input_callback=lambda prompt, options: "ok")
-        payload = json.loads(asyncio.run(tool.ask_user_question(prompt=long_prompt, mode="text")))
+        payload = json.loads(asyncio.run(tool.ask_user_question(prompt=long_prompt)))
 
         self.assertEqual(payload["prompt"], long_prompt)
         self.assertEqual(payload["response"], "ok")
