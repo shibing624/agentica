@@ -28,12 +28,12 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.styles import Style as PTStyle
 from prompt_toolkit.widgets import TextArea
-from rich.markup import escape as rich_escape
 
 from agentica.cli.commands.context import CONCURRENT_CMDS, PendingQueue
 from agentica.cli.commands.registry import COMMAND_REGISTRY
 from agentica.cli.display import (
     build_status_bar_fragments,
+    display_user_message,
     get_file_completions,
     get_truncated_blocks,
 )
@@ -70,6 +70,15 @@ def _steer_or_queue(state: SessionState, pending_queue: PendingQueue, text: str,
         return True
     pending_queue.put(payload)
     return False
+
+
+def _queue_next_turn(state: SessionState, pending_queue: PendingQueue, text: str):
+    """Queue the current input as the next turn and consume attachments."""
+    images = _deduplicate_image_attachments(list(state.attached_images))
+    state.attached_images.clear()
+    payload = (text, images) if images else text
+    pending_queue.put(payload)
+    return payload, images
 
 
 class _CleanResizeApplication(Application):
@@ -400,10 +409,8 @@ def _setup_tui(
                 # Honest copy: acceptance only means "buffered for the next
                 # inference boundary" — if the run finishes first, the text is
                 # promoted to a queued turn and app.py says so explicitly then.
-                preview = text[:60] + ("..." if len(text) > 60 else "")
-                get_console().print(
-                    f"  [dim]↪ Guidance added · /queue to always run next: {rich_escape(preview)}[/dim]"
-                )
+                display_user_message(text)
+                get_console().print("  Guidance added to the current task. Tab queues the next turn.")
             event.app.current_buffer.reset(append_to_history=True)
             event.app.invalidate()
             return
@@ -416,6 +423,23 @@ def _setup_tui(
         pending_queue.put(payload)
 
         event.app.current_buffer.reset(append_to_history=True)
+        event.app.invalidate()
+
+    @kb.add("tab", eager=True)
+    def _handle_tab(event):
+        buf = event.current_buffer
+        if buf.complete_state or (buf.suggestion and buf.suggestion.text):
+            _accept_or_complete(event)
+            return
+        raw_text = buf.text
+        text = raw_text.strip()
+        if not state.agent_running or state.input_request is not None or not text:
+            _accept_or_complete(event)
+            return
+        _payload, images = _queue_next_turn(state, pending_queue, text)
+        display_user_message(text, images=images)
+        get_console().print("  Queued as the next turn. Enter steers the current task.")
+        buf.reset(append_to_history=True)
         event.app.invalidate()
 
     def _accept_or_complete(event):
@@ -431,10 +455,6 @@ def _setup_tui(
             buf.insert_text(buf.suggestion.text)
         else:
             buf.start_completion()
-
-    @kb.add("tab", eager=True)
-    def _handle_tab(event):
-        _accept_or_complete(event)
 
     @kb.add("right", eager=True)
     def _handle_right(event):
@@ -540,7 +560,7 @@ def _setup_tui(
         if state.input_request is not None:
             return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
-            return "type + Enter to steer · /queue to run next · Ctrl+C to cancel"
+            return "Enter to steer · Tab to queue next · Ctrl+C to cancel"
         return "Enter to send · Ctrl+J newline · / commands · @ files"
 
     def _get_prompt():

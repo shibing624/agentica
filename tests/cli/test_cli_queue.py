@@ -320,6 +320,25 @@ class TestSteerOrQueue(unittest.TestCase):
         self.assertFalse(_steer_or_queue(state, pq, "hi", "hi"))
         self.assertEqual(pq.peek_all(), ["hi"])
 
+    def test_tab_queue_payload_consumes_attachments(self):
+        from agentica.cli.commands.context import PendingQueue
+        from agentica.cli.interactive.tui import _queue_next_turn
+
+        state = self._state(steer_accepts=True)
+        pq = PendingQueue()
+
+        with tempfile.TemporaryDirectory() as td:
+            image = Path(td) / "a.png"
+            image.write_bytes(b"fake-image")
+            state.attached_images = [image, image]
+
+            payload, images = _queue_next_turn(state, pq, "run after this")
+
+        self.assertEqual(images, [image])
+        self.assertEqual(payload, ("run after this", [image]))
+        self.assertEqual(pq.peek_all(), [payload])
+        self.assertEqual(state.attached_images, [])
+
 
 if __name__ == "__main__":
     unittest.main()
