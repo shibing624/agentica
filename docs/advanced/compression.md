@@ -53,9 +53,8 @@ Context Messages
 
 只扫 `role="tool"` 意味着 Anthropic 路径上这一层从来没生效过——不报错，只是静默失效。所以遍历以「结果」为单位展开，两种形态都覆盖。`tool_result` block 本身不带工具名，占位符通过发起调用的那条 assistant 消息的 `tool_calls` 反查 `tool_use_id` 得到。
 
-同一个形态差异还影响另外两处，都已按同样口径处理：
+同一个形态差异还影响另一处，已按同样口径处理：
 
-- `sanitize_tool_pairs` 只认 `role="tool"` 形态。Anthropic transcript 在它眼里像是每个调用都没有回复，重建会给每个调用插一条占位 `role="tool"` 消息、把本来没坏的 transcript 弄坏，因此这类 transcript 原样返回。
 - Layer 2 保留「最后一条 user 消息之后的整段尾巴」。Anthropic 的工具轮本身就是 user 消息，从那里切会留下一批 `tool_result`，而它们对应的 `tool_use` block 在刚被摘要替换掉的 assistant 消息里——这种孤儿 block 会被 API 直接拒绝。所以判断尾巴时跳过承载工具结果的 user 消息。
 
 ### Layer 2：摘要（`CompressionManager`）

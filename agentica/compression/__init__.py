@@ -15,7 +15,6 @@ from agentica.compression.evict import (
     EVICT_TARGET_RATIO,
 )
 from agentica.compression.manager import CompressionManager
-from agentica.compression.tool_pairs import sanitize_tool_pairs
 from agentica.compression.tool_result_storage import (
     maybe_persist_result,
     enforce_tool_batch_budget,
@@ -38,7 +37,6 @@ __all__ = [
     "tool_result_blocks",
     "is_irreducible_prompt_too_long",
     "EvictionResult",
-    "sanitize_tool_pairs",
     "EVICT_THRESHOLD_RATIO",
     "EVICT_TARGET_RATIO",
     "maybe_persist_result",

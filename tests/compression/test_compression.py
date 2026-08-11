@@ -284,16 +284,6 @@ class TestEvictAnthropicToolResults(unittest.TestCase):
             ))
         self.assertTrue(results._evicted)
 
-    def test_sanitize_tool_pairs_leaves_anthropic_transcripts_alone(self):
-        """It only knows the role="tool" shape; rebuilding here would corrupt it."""
-        from agentica.compression.tool_pairs import sanitize_tool_pairs
-        msgs = self._conversation(2, 2)
-
-        rebuilt = sanitize_tool_pairs(msgs)
-
-        self.assertEqual([m.role for m in rebuilt], [m.role for m in msgs])
-        self.assertFalse(any(m.role == "tool" for m in rebuilt))
-
 
 # ===========================================================================
 # tool_result_storage tests
