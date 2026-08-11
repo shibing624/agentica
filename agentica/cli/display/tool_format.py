@@ -243,6 +243,13 @@ def format_tool_display(tool_name: str, tool_args: dict) -> str:
     if tool_name == "list_agents":
         return ""
 
+    # Human-in-the-loop: the question and its options are rendered in full by
+    # the TUI's prompt widget the moment this call parks. Repeating a clipped
+    # copy on the call line shows the same question twice, neither in full.
+    # The lasting record is the result block, which replays both sides.
+    if tool_name in ("ask_user_question", "confirm"):
+        return ""
+
     # Default format for other tools
     brief_args = []
     for key, value in tool_args.items():

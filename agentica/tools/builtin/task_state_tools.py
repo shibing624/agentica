@@ -193,7 +193,6 @@ class BuiltinMemoryTool(Tool):
     def __init__(self):
         super().__init__(name="builtin_memory_tool")
         self._workspace = None
-        self._sync_memories_to_global_agent_md = False
 
         from agentica.prompts.memory import MEMORY_SYSTEM_PROMPT
 
@@ -205,10 +204,6 @@ class BuiltinMemoryTool(Tool):
     def set_workspace(self, workspace) -> None:
         """Set the workspace reference for memory persistence."""
         self._workspace = workspace
-
-    def set_sync_global_agent_md(self, enabled: bool) -> None:
-        """Enable syncing user/feedback memories into ~/.agentica/AGENTS.md."""
-        self._sync_memories_to_global_agent_md = enabled
 
     def clone(self) -> "BuiltinMemoryTool":
         """Fresh instance so each agent owns its ``_workspace`` slot."""
@@ -222,7 +217,16 @@ class BuiltinMemoryTool(Tool):
         return new
 
     def get_system_prompt(self) -> Optional[str]:
-        return self.MEMORY_SYSTEM_PROMPT
+        # The user-level AGENTS.md path is resolved from the workspace, never
+        # written into the prompt text: AGENTICA_HOME can be moved, and a
+        # multi-user workspace keeps a per-user copy — a hardcoded
+        # ~/.agentica/AGENTS.md would send one tenant's rule into the file
+        # every other tenant reads.
+        if self._workspace is None:
+            return self.MEMORY_SYSTEM_PROMPT
+        return self.MEMORY_SYSTEM_PROMPT.replace(
+            "<user-agents-md>", str(self._workspace.user_agent_md_path())
+        )
 
     async def save_memory(
         self,
@@ -250,9 +254,6 @@ class BuiltinMemoryTool(Tool):
             content=content.strip(),
             memory_type=memory_type,
             description=title.strip(),
-            sync_to_global_agent_md=(
-                self._sync_memories_to_global_agent_md and memory_type in {"user", "feedback"}
-            ),
         )
 
         logger.debug(f"Memory saved: {title} -> {filepath}")

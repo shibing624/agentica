@@ -29,7 +29,6 @@ class CommandContext:
     extra_tool_names: Optional[List[str]] = None
     workspace: Any = None  # Optional[Workspace]
     skills_registry: Any = None
-    shell_mode: bool = False
     tui_state: Optional[dict] = None
     pending_queue: Any = None  # PendingQueue
     agent_running: bool = False

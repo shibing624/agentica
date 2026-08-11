@@ -128,7 +128,7 @@ class AgentService:
     """Agent service wrapping the agentica SDK.
 
     Features:
-    - Workspace config layer (AGENT.md, PERSONA.md, MEMORY.md, etc.)
+    - Workspace config layer (AGENTS.md, MEMORY.md, etc.)
     - Session history management (per session_id)
     - LRU-bounded Agent instance cache (evicts on overflow)
     - Per-session working directory

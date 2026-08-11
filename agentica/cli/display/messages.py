@@ -17,6 +17,7 @@ from rich.table import Table
 from rich.text import Text
 
 from agentica.cli.runtime import get_console
+from agentica.peers import PeerMessage
 
 from .console import (
     COLORS,
@@ -120,19 +121,60 @@ def display_user_message(
             style="dim",
         )
 
-    # Echo historical user queries on a subtle full-width background so they are
-    # easy to find while scanning a long conversation. No trailing blank line here:
-    # the response section (start_tool_section / _start_response) adds its spacing.
-    # A separate content column keeps wrapped and explicit continuation lines aligned.
-    # overflow="fold" is required: Rich Table defaults to ellipsis and silently
-    # truncates long peer-injected (or pasted) turns with "…".
+    _echo_panel(rich_text)
+
+
+def _echo_panel(body: Text) -> None:
+    """The ``❯`` panel that means "the human said this" in the transcript.
+
+    Echoed on a subtle full-width background so it is easy to find while
+    scanning a long conversation. No trailing blank line here: the response
+    section (start_tool_section / _start_response) adds its spacing. A separate
+    content column keeps wrapped and explicit continuation lines aligned.
+    ``overflow="fold"`` is required: Rich Table defaults to ellipsis and
+    silently truncates long (pasted or relayed) turns with "…".
+    """
     history = Table.grid(padding=(0, 1), expand=True)
     history.add_column(no_wrap=True)
     history.add_column(ratio=1, overflow="fold")
-    history.add_row(Text("❯", style="bold bright_yellow"), rich_text)
+    history.add_row(Text("❯", style="bold bright_yellow"), body)
     console = get_console()
     console.print()
     console.print(Padding(history, (0, 1), style="on rgb(35,35,35)"))
+
+
+def display_peer_messages(messages: List[PeerMessage], *, delivery: str) -> None:
+    """Show messages that just arrived from another session.
+
+    The two senders get deliberately different shapes, because the receiver may
+    act on them differently. A relayed *user* message is the human speaking from
+    another terminal, so it reuses the ``❯`` panel — that panel is this CLI's one
+    signal for "the human said this", and a relayed instruction carries exactly
+    that authority. Another session's agent gets an unpanelled, labelled line
+    instead, so agent traffic can never be mistaken for the user's own words.
+
+    ``delivery`` is a short clause such as ``starting a turn`` or ``will reach
+    the agent between tool calls`` — the caller knows which path accepted the
+    message; this only renders it.
+    """
+    console = get_console()
+    for message in messages:
+        if message.from_user:
+            body = Text()
+            body.append(f"via {message.from_name}  ", style="dim")
+            body.append(message.text, style=f"bold {COLORS['user']}")
+            _echo_panel(body)
+        else:
+            block = Table.grid(padding=(0, 1), expand=True)
+            block.add_column(no_wrap=True)
+            block.add_column(ratio=1, overflow="fold")
+            block.add_row(
+                Text(f"Agent {message.from_name} ›", style=f"bold {COLORS['tool']}"),
+                Text(message.text, style=COLORS["tool"]),
+            )
+            console.print()
+            console.print(Padding(block, (0, 1)))
+        console.print(f"  {delivery}", style="dim")
 
 
 def get_file_completions(document_text: str) -> List[str]:

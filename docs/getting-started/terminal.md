@@ -146,17 +146,6 @@ mcp, skill, ...
 
 支持路径补全：输入 `@` 后按 Tab 自动补全文件路径。支持相对路径和绝对路径。
 
-### Shell 命令：`!command`
-
-在消息开头用 `!` 直接执行 Shell 命令，结果显示在终端：
-
-```
-> !git status
-> !pytest tests/ -v
-> !ls -la
-> !cat requirements.txt
-```
-
 ### 多行输入
 
 按 `Esc + Enter` 输入多行内容，适合粘贴代码块：
@@ -290,7 +279,7 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
   Path: ~/.agentica/workspace
   User: default
   Memory entries: 5
-  Context files: AGENTS.md, PERSONA.md
+  Context files: AGENTS.md
 ```
 
 ### `/model [provider/model]`

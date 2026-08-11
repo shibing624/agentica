@@ -58,7 +58,10 @@ Actions:
                                    Optional force=confirm-style via confirm=True to overwrite existing.
 
 Use this to optimize your own setup, e.g. raise max_tokens, switch model, or add an API key.
-Config file edits persist; model changes take effect on next agent rebuild/restart."""
+Config file edits persist; model changes take effect on next agent rebuild/restart.
+
+Standing instructions ("remember: always X") are not a config setting — they live in
+AGENTS.md. See the agentica skill for where that file is and how to edit it."""
 
 
 _SELF_MANAGE_DESCRIPTION = _build_description(DEFAULT_RESTART_HINT)

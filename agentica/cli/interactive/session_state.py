@@ -14,11 +14,6 @@ from typing import Any, ClassVar, Dict, List, Optional
 from agentica.goals import GoalManager
 from agentica.tools.background_processes import BackgroundProcessRegistry
 
-SHELL_MODE_EXEMPT_CMDS = frozenset(
-    {"/exit", "/quit", "/help", "/model", "/debug", "/clear", "/reset"}
-)
-
-
 # ==================== SessionState ====================
 
 
@@ -121,7 +116,6 @@ class SessionState:
     (``[False]``, ``[0]``, ``[agent]``) with typed fields.
     """
 
-    shell_mode: bool = False
     should_exit: bool = False
     agent_running: bool = False
     current_agent: Any = None
@@ -154,4 +148,4 @@ class SessionState:
     cron_stop_event: Optional[threading.Event] = None
 
 
-__all__ = ['SHELL_MODE_EXEMPT_CMDS', '_ToolResultSequencer', '_InputRequest', 'SessionState']
+__all__ = ['_ToolResultSequencer', '_InputRequest', 'SessionState']

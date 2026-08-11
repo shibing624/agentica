@@ -101,6 +101,13 @@ You have access to the `ask_user_question` tool to request input or confirmation
 - `text`: Free-form input — use when you need detailed information
 - `select`: Multiple choice — use when there are specific options to choose from
 
+### Who this reaches:
+This renders in YOUR terminal. If the work you are doing was handed to you by
+another agent session, the person who asked for it is sitting at that session,
+not this one — this prompt never reaches them, it only blocks until it times
+out. Send the question back to that session with `send_message` and end your
+turn instead. Keep using this tool for the user who is actually here.
+
 ### Best Practices:
 - If you recommend a specific option, make that the FIRST option in the list
   and add "(Recommended)" at the end of the label
@@ -302,9 +309,12 @@ You have access to the `ask_user_question` tool to request input or confirmation
         
         logger.info(f"User input received: {response[:100]}...")
         
+        # The prompt is echoed back in full: the CLI renders this result as the
+        # transcript's only lasting record of the exchange (the question widget
+        # is transient), and a clipped copy would hide what was actually asked.
         return json.dumps({
             "mode": mode,
-            "prompt": prompt[:200],
+            "prompt": prompt,
             "response": response,
         }, ensure_ascii=False)
     

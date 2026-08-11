@@ -304,7 +304,6 @@ class MemoryExtractHooks(RunHooks):
 
     def __init__(
         self,
-        sync_memories_to_global_agent_md: bool = False,
         every_n_turns: int = 10,
         min_seconds_between: int = 60,
         background: bool = True,
@@ -312,7 +311,6 @@ class MemoryExtractHooks(RunHooks):
     ):
         """
         Args:
-            sync_memories_to_global_agent_md: Mirror user-type memories into global AGENT.md.
             every_n_turns: Flush the buffer through the LLM every N turns.
                 0 disables periodic extraction (on_pre_compact still flushes).
             min_seconds_between: Cross-process frequency cap; skip when the
@@ -335,7 +333,6 @@ class MemoryExtractHooks(RunHooks):
         flush only writes into the user whose buffer it is draining.
         """
         self._tool_calls: Dict[str, List[str]] = {}  # agent_id -> list of tool names called
-        self._sync_memories_to_global_agent_md = sync_memories_to_global_agent_md
         self._every_n_turns = max(0, int(every_n_turns))
         self._min_seconds_between = max(0, int(min_seconds_between))
         self._background = bool(background)
@@ -601,9 +598,6 @@ class MemoryExtractHooks(RunHooks):
                     content=content,
                     memory_type=mem_type,
                     description=title,
-                    sync_to_global_agent_md=(
-                        self._sync_memories_to_global_agent_md and mem_type == "user"
-                    ),
                     source="auto_extract",
                 )
                 logger.debug(f"Auto-extracted memory: {title} (type: {mem_type})")
@@ -1121,15 +1115,7 @@ class ExperienceCaptureHooks(RunHooks):
                 logger.debug(f"Skill upgrade check failed: {e}")
                 report.mark_error(f"skill_upgrade_failed: {e}")
 
-        # ── 4. Sync to global AGENTS.md ──
-        if self._config.sync_to_global_agent_md:
-            try:
-                global_md = workspace._get_global_agent_md_path()
-                await compiled_store.sync_to_global_agent_md(global_md)
-            except Exception as e:
-                logger.debug(f"Experience sync to global AGENTS.md failed: {e}")
-
-        # ── 5. Emit LearningReport (arch_v5.md Phase 2) ──
+        # ── 4. Emit LearningReport (arch_v5.md Phase 2) ──
         if (
             report.cards_written
             or report.corrections_persisted

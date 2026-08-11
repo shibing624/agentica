@@ -37,19 +37,13 @@ class WorkspaceConfig:
     """Workspace configuration.
 
     Attributes:
-        agent_md: Agent instruction file name
-        persona_md: Persona settings file name
-        tools_md: Tool documentation file name
-        user_md: User information file name
+        agent_md: Instruction file name, used at both workspace and user level
         memory_md: Long-term memory file name
         memory_dir: Daily memory directory name
         skills_dir: Skills directory name
         users_dir: User data directory name (for multi-user isolation)
     """
     agent_md: str = "AGENTS.md"
-    persona_md: str = "PERSONA.md"
-    tools_md: str = "TOOLS.md"
-    user_md: str = "USER.md" # user infomation
     users_dir: str = "users" # for multi-user isolation
     memory_dir: str = "memory" # daily memory, under users/{user_id}/memory
     memory_md: str = "MEMORY.md" # user's long-term memory, under users/{user_id}/
@@ -67,17 +61,15 @@ class Workspace:
     supporting multi-user isolation. All user data is stored under users/ directory.
 
     Directory structure:
-    - AGENTS.md: Agent instructions and constraints (globally shared)
-    - PERSONA.md: Agent persona settings (globally shared)
-    - TOOLS.md: Tool usage documentation (globally shared)
+    - AGENTS.md: instructions shared by every user of this workspace
     - skills/: Custom skills directory (globally shared)
     - users/: User data directory (all users including default)
         - default/: Default user (when no user_id specified)
-            - USER.md: User information
+            - AGENTS.md: this user's own instructions
             - MEMORY.md: Long-term memory
             - memory/: Daily memory directory
         - {user_id}/: Other users
-            - USER.md: User information
+            - AGENTS.md: this user's own instructions
             - MEMORY.md: Long-term memory
             - memory/: Daily memory directory
 
@@ -120,28 +112,30 @@ class Workspace:
             return Workspace.DEFAULT_USER_ID
         return uid.replace("/", "_").replace("\\", "_").replace("..", "_")
 
-    # Global config files (shared across all users)
+    # Instructions shared by every user of this workspace.
     # Templates are intentionally minimal — boilerplate ("Friendly and
     # professional", default code-verification recipes) pollutes every
     # system prompt with zero behavioural signal. Customize the file on
     # disk when you actually have project-specific rules to add.
+    #
+    # There used to be a PERSONA.md and a TOOLS.md next to it, and a USER.md in
+    # each user directory. All three were injected as their own block of the
+    # same prompt, so nothing downstream could tell them apart — they were a
+    # filing system for the author, and four places to look for the reader.
     DEFAULT_GLOBAL_FILES = {
         "AGENTS.md": """# Agent Instructions
 
-<!-- Add project-specific agent rules here. -->
+<!-- Rules shared by every user of this workspace. -->
 <!-- Empty file = no extra rules injected into the system prompt. -->
 """,
-        "PERSONA.md": "",
-        "TOOLS.md": "",
     }
 
-    # Default user file template
-    DEFAULT_USER_MD = """# User Profile
+    # Scaffold for users/{user_id}/AGENTS.md — this user's own instructions,
+    # hand-edited or appended to by the agent with its ordinary file tools.
+    DEFAULT_USER_AGENT_MD = """# User Instructions ({user_id})
 
-## User ID
-{user_id}
-
-<!-- Optional: preferences, context, ongoing projects. -->
+<!-- Who this user is, how they want you to work, standing rules. -->
+<!-- Loaded into the system prompt of every session of this user. -->
 """
 
     # Files whose body matches a default scaffold (just comments or blank
@@ -240,10 +234,6 @@ class Workspace:
         """Get current user's long-term memory file path."""
         return self._get_user_path() / self.config.memory_md
 
-    def _get_user_md(self) -> Path:
-        """Get current user's USER.md file path."""
-        return self._get_user_path() / self.config.user_md
-
     # ── arch_v5.md §"Workspace Logical Partitioning" ──────────────────
     # New first-class folders for reports + archives + memory candidates.
     # Created on demand so existing workspaces don't need migration.
@@ -286,7 +276,7 @@ class Workspace:
         """
         self.path.mkdir(parents=True, exist_ok=True)
 
-        # Create globally shared files (AGENTS.md, PERSONA.md, TOOLS.md)
+        # Create the workspace-shared AGENTS.md
         for filename, content in self.DEFAULT_GLOBAL_FILES.items():
             filepath = self.path / filename
             if not filepath.exists() or force:
@@ -312,11 +302,14 @@ class Workspace:
         user_path = self._get_user_path()
         user_path.mkdir(parents=True, exist_ok=True)
 
-        # Create user's USER.md
-        user_md = user_path / self.config.user_md
-        if not user_md.exists():
-            user_md.write_text(
-                self.DEFAULT_USER_MD.format(user_id=self._user_id),
+        # Create this user's own AGENTS.md. user_agent_md_path() also moves a
+        # pre-existing ~/.agentica/AGENTS.md here, so it must run before the
+        # scaffold is written — otherwise the scaffold wins and the user's
+        # real rules stay behind in the old location.
+        user_agent_md = self.user_agent_md_path()
+        if not user_agent_md.exists():
+            user_agent_md.write_text(
+                self.DEFAULT_USER_AGENT_MD.format(user_id=self._user_id),
                 encoding="utf-8"
             )
 
@@ -397,42 +390,16 @@ class Workspace:
     async def get_context_prompt(self) -> str:
         """Get workspace context (for injecting into System Prompt).
 
-        Reads AGENTS.md, PERSONA.md, TOOLS.md file contents (globally shared),
-        and user-specific USER.md file content.
-
-        Also discovers AGENTS.md files along the directory chain from CWD up to
-        the filesystem root (mirrors CC's multi-level CLAUDE.md merge).
-        The merge order is: global ~/.agentica/AGENTS.md -> ancestor dirs
-        (root first) -> CWD AGENTS.md -> workspace AGENTS.md.
+        Everything comes from one kind of file, AGENTS.md, read from three kinds
+        of place: this user's own (``users/{user_id}/AGENTS.md``), the project
+        chain from CWD up to the repo root (also recognizing other products'
+        CLAUDE.md / .cursorrules), and the workspace-shared one.
 
         Returns:
             Merged context string
         """
-        contents = []
-
-        # 1. Prioritized AGENTS.md chain (global -> project -> local) with 40K budget
         chain_contents = self._load_agent_md_chain()
-        if chain_contents:
-            contents.append(f"<!-- Project AGENTS.md chain -->\n{chain_contents}")
-
-        # 2. Workspace-level files (PERSONA.md, TOOLS.md) — skip empty scaffolds
-        global_files = [
-            self.config.persona_md,
-            self.config.tools_md,
-        ]
-        for f in global_files:
-            content = await self.read_file_async(f)
-            if content and not self._is_empty_template(content):
-                contents.append(f"<!-- {f} -->\n{content}")
-
-        # 3. User-specific USER.md — skip empty scaffolds
-        user_md_path = self._get_user_md()
-        if user_md_path.exists():
-            content = (await async_read_text(user_md_path)).strip()
-            if content and not self._is_empty_template(content):
-                contents.append(f"<!-- USER.md (user: {self._user_id}) -->\n{content}")
-
-        return "\n\n---\n\n".join(contents) if contents else ""
+        return f"<!-- AGENTS.md chain -->\n{chain_contents}" if chain_contents else ""
 
     async def freeze_snapshots(self, query: str = "") -> None:
         """Freeze context + memory + experience snapshots at session start.
@@ -507,38 +474,28 @@ class Workspace:
         return "\n\n---\n\n".join(parts) if parts else ""
 
     def _collect_agent_md_sources(self) -> List[Tuple[str, str]]:
-        """Collect agent config sources from global, project, and workspace locations.
+        """Collect agent config sources from user, project, and workspace locations.
 
         Priority (lowest to highest):
-        1. Global ~/.agentica/AGENTS.md
+        1. This user's own users/{user_id}/AGENTS.md
         2. Project directory chain (git root -> CWD), first-match-wins per dir
            Recognizes: AGENTS.md, CLAUDE.md, .cursorrules (cross-product compat)
-        3. Workspace AGENTS.md
+        3. Workspace AGENTS.md (shared by every user of this workspace)
         """
         cwd = Path(os.getcwd())
         found: List[Tuple[str, str]] = []
         seen_paths: set[Path] = set()
 
-        # Single source of truth for "cross-session AGENTS.md for this
-        # workspace user". Returns ~/.agentica/AGENTS.md only when running
-        # in default single-user mode; otherwise the per-user copy under
-        # workspace_root/users/{user_id}/AGENTS.md. _get_global_agent_md_path
-        # already mkdirs the parent, so we just check is_file() and look
-        # for the .md/.AGENT.md fallback.
-        global_agent_md = self._get_global_agent_md_path()
-        if not global_agent_md.is_file() and self._user_id == self.DEFAULT_USER_ID:
-            # Legacy fallback only applies to the home-global mode where
-            # users may have an old AGENT.md (singular) file.
-            global_agent_md = Path(AGENTICA_HOME) / "AGENT.md"
-        if global_agent_md.is_file():
+        # Single source of truth for "this user's own AGENTS.md".
+        user_agent_md = self.user_agent_md_path()
+        if user_agent_md.is_file():
             try:
-                text = global_agent_md.read_text(encoding="utf-8").strip()
+                text = user_agent_md.read_text(encoding="utf-8").strip()
                 if text and not self._is_empty_template(text):
-                    resolved = global_agent_md.resolve()
-                    found.append((str(global_agent_md), text))
-                    seen_paths.add(resolved)
+                    found.append((str(user_agent_md), text))
+                    seen_paths.add(user_agent_md.resolve())
             except (OSError, UnicodeError) as exc:
-                logger.debug("Skipping unreadable global agent file %s: %s", global_agent_md, exc)
+                logger.debug("Skipping unreadable user agent file %s: %s", user_agent_md, exc)
 
         project_chain: List[Tuple[str, str]] = []
         visited = set()
@@ -647,47 +604,49 @@ class Workspace:
         "If a memory references a specific file path, function, or flag, "
         "verify it still exists before recommending it."
     )
-    _GLOBAL_AGENT_SYNC_START = "<!-- agentica:learned-preferences:start -->"
-    _GLOBAL_AGENT_SYNC_END = "<!-- agentica:learned-preferences:end -->"
-    _GLOBAL_AGENT_SYNC_HEADER = "## Learned Preferences"
-    _GLOBAL_AGENT_SYNC_TYPES = {"user", "feedback"}
     MAX_MEMORY_CHARACTER_COUNT: int = AGENTICA_MAX_MEMORY_CHARACTER_COUNT
-    _DURABLE_RULE_INCLUDE = re.compile(
-        r"(?:\balways\b|\bnever\b|\bprefer\b|\bavoid\b|\bmust\b|\bshould\b|\buse\b|\bkeep\b|\brule\b|"
-        r"\bstyle\b|\bpreference\b|\bformat\b|\bcommunication\b|"
-        r"总是|永远|不要|避免|优先|必须|应该|尽量|禁止|风格|偏好|规则|格式|沟通)",
-        re.IGNORECASE,
-    )
-    _DURABLE_RULE_EXCLUDE = re.compile(
-        r"(?:```|https?://|\btraceback\b|\bstack trace\b|\berror code\b|\bcurrent task\b|"
-        r"\bthis session\b|\btoday\b|\byesterday\b|\bcommit\b|"
-        r"\brag\b|\bpipeline\b|\boracle\b|\bmrr\b|\bp@\d\b|\br@\d\b|\bf1\b|"
-        r"\bprediction samples?\b|\btuning\b)",
-        re.IGNORECASE,
-    )
+    def user_agent_md_path(self) -> Path:
+        """Return this user's own AGENTS.md — ``users/{user_id}/AGENTS.md``.
 
-    def _get_global_agent_md_path(self) -> Path:
-        """Return the cross-session AGENTS.md path for the current workspace user.
+        There is exactly one layout, and the CLI is not an exception to it: it
+        is simply the ``default`` user. Routing the default user to
+        ``~/.agentica/AGENTS.md`` and everyone else under ``users/`` meant two
+        places for one concept, and every SDK caller had to work out which of
+        them a session was on before it could say where a preference lives.
 
-        Semantics: "global" here means "cross-session for THIS user", not
-        "shared across users". Routing:
-
-          - Default workspace (user_id == "default", CLI / single-user
-            install): ``~/.agentica/AGENTS.md`` — preserves the historical
-            CLI behavior where one user installs the SDK on their machine.
-          - Multi-tenant workspace (workspace.user_id explicitly set):
-            ``workspace_root/users/{user_id}/AGENTS.md`` — keeps cross-
-            session preferences isolated per tenant. Critical for SaaS
-            deployments: a user_id A's confirmed preference must never
-            be injected into user_id B's system prompt.
+        Public because prompt text names this file: the agent is told it may
+        append durable instructions to it, and a hardcoded path in a prompt
+        would send one tenant's write into a file every other tenant reads.
         """
-        if self._user_id == self.DEFAULT_USER_ID:
-            global_home = Path(AGENTICA_HOME).expanduser()
-            global_home.mkdir(parents=True, exist_ok=True)
-            return global_home / "AGENTS.md"
         user_dir = self._get_user_path()
         user_dir.mkdir(parents=True, exist_ok=True)
-        return user_dir / "AGENTS.md"
+        path = user_dir / self.config.agent_md
+        self._migrate_home_agent_md(path)
+        return path
+
+    def _migrate_home_agent_md(self, target: Path) -> None:
+        """One-shot move of a pre-1.4.13 ``~/.agentica/AGENTS.md`` into place.
+
+        Temporary migration helper for the 1.4.13 layout change (user-level
+        rules moved under ``users/{id}/``). Keep it until that version has
+        been stable in the wild long enough that leftover home files are
+        rare; then delete — this is not a permanent second read path, and
+        relocating the file is something the user can do by hand.
+
+        A move, not a compatibility read: leaving the old location readable
+        would restore the two-places problem, and simply dropping it would
+        silently retire rules the user hand-wrote.
+        """
+        if self._user_id != self.DEFAULT_USER_ID or target.exists():
+            return
+        legacy = Path(AGENTICA_HOME).expanduser() / self.config.agent_md
+        if not legacy.is_file():
+            return
+        try:
+            legacy.replace(target)
+            logger.info("Moved %s to %s (user-level rules are now per user)", legacy, target)
+        except OSError as exc:
+            logger.warning("Could not move %s to %s: %s", legacy, target, exc)
 
     @staticmethod
     def _parse_frontmatter(content: str) -> Dict[str, str]:
@@ -703,108 +662,6 @@ class Workspace:
             key, value = line.split(":", 1)
             metadata[key.strip()] = value.strip()
         return metadata
-
-    @staticmethod
-    def _summarize_memory_for_global_agent(content: str, max_chars: int = 180) -> str:
-        """Collapse a memory body into one readable line for global steering."""
-        normalized = re.sub(r"\s+", " ", content).strip()
-        if len(normalized) <= max_chars:
-            return normalized
-        return normalized[: max_chars - 3].rstrip() + "..."
-
-    def _is_durable_global_preference(self, memory_type: str, metadata: Dict[str, str], content: str) -> bool:
-        """Keep only concise, reusable rules in user-global AGENTS.md."""
-        normalized = re.sub(r"\s+", " ", strip_frontmatter(content)).strip()
-        if not normalized or len(normalized) > 240:
-            return False
-        combined = " ".join(
-            part for part in [metadata.get("name", ""), metadata.get("description", ""), normalized] if part
-        )
-        if self._DURABLE_RULE_EXCLUDE.search(combined):
-            return False
-        if memory_type == "user":
-            return True
-        return bool(self._DURABLE_RULE_INCLUDE.search(combined))
-
-    async def sync_memories_to_global_agent_md(self, limit: int = 30) -> str:
-        """Compile user/feedback memories into ~/.agentica/AGENTS.md.
-
-        This keeps long-lived preferences in the same global instruction chain
-        that `get_context_prompt()` already loads on every run.
-        """
-        self._initialize_user_dir()
-        memory_dir = self._get_user_memory_dir()
-
-        synced_entries: List[str] = []
-        if memory_dir.exists():
-            memory_files = sorted(
-                memory_dir.glob("*.md"),
-                key=lambda path: path.stat().st_mtime,
-                reverse=True,
-            )
-            for memory_file in memory_files:
-                raw = (await async_read_text(memory_file)).strip()
-                if not raw:
-                    continue
-
-                metadata = self._parse_frontmatter(raw)
-                memory_type = metadata.get("type", "project")
-                if memory_type not in self._GLOBAL_AGENT_SYNC_TYPES:
-                    continue
-                if not self._is_durable_global_preference(memory_type, metadata, raw):
-                    continue
-
-                title = metadata.get("name", memory_file.stem)
-                summary = self._summarize_memory_for_global_agent(strip_frontmatter(raw))
-                if not summary:
-                    continue
-
-                synced_entries.append(f"- [{memory_type}] {title}: {summary}")
-                if len(synced_entries) >= limit:
-                    break
-
-        # When there are no synced entries we still write an empty marker block
-        # so subsequent runs can find/replace it, but we keep the block compact
-        # (no placeholder bullet). The empty block is later stripped from prompt
-        # injection by `_is_empty_template`.
-        if synced_entries:
-            block = "\n".join(
-                [
-                    self._GLOBAL_AGENT_SYNC_HEADER,
-                    self._GLOBAL_AGENT_SYNC_START,
-                    *synced_entries,
-                    self._GLOBAL_AGENT_SYNC_END,
-                ]
-            )
-        else:
-            block = "\n".join(
-                [
-                    self._GLOBAL_AGENT_SYNC_HEADER,
-                    self._GLOBAL_AGENT_SYNC_START,
-                    self._GLOBAL_AGENT_SYNC_END,
-                ]
-            )
-
-        global_agent_md = self._get_global_agent_md_path()
-        existing = ""
-        if global_agent_md.exists():
-            existing = (await async_read_text(global_agent_md)).strip()
-
-        if existing:
-            pattern = (
-                rf"{re.escape(self._GLOBAL_AGENT_SYNC_HEADER)}\n"
-                rf"{re.escape(self._GLOBAL_AGENT_SYNC_START)}[\s\S]*?"
-                rf"{re.escape(self._GLOBAL_AGENT_SYNC_END)}"
-            )
-            if re.search(pattern, existing):
-                updated = re.sub(pattern, block, existing)
-            else:
-                updated = existing.rstrip() + "\n\n" + block
-        else:
-            updated = "# Agent Instructions\n\n" + block
-
-        await async_write_text(global_agent_md, updated.strip() + "\n")
-        return str(global_agent_md)
 
     async def get_relevant_memories(
         self,
@@ -904,7 +761,6 @@ class Workspace:
         content: str,
         memory_type: str = "project",
         description: str = "",
-        sync_to_global_agent_md: bool = False,
         *,
         source: str = "verified",
         evidence_refs: Optional[List[str]] = None,
@@ -931,8 +787,6 @@ class Workspace:
             content: Full memory content (why + how to apply)
             memory_type: One of "user", "feedback", "project", "reference"
             description: One-line hook for relevance scoring (defaults to title)
-            sync_to_global_agent_md: If True, recompile synced memories into
-                ~/.agentica/AGENTS.md after this write. Ignored for candidates.
             source: Provenance string — controls which folder the entry lands in.
             evidence_refs: Optional list of supporting references (file paths,
                 URLs, run_ids). Persisted in the frontmatter so reviewers can
@@ -993,8 +847,6 @@ class Workspace:
                 title=title,
                 hook=hook,
             )
-            if sync_to_global_agent_md and memory_type in self._GLOBAL_AGENT_SYNC_TYPES:
-                await self.sync_memories_to_global_agent_md()
         else:
             logger.debug(
                 f"memory entry quarantined to candidates (source={source}): {filepath}"
@@ -1050,7 +902,6 @@ class Workspace:
     async def promote_memory_candidate(
         self,
         filename: str,
-        sync_to_global_agent_md: bool = False,
     ) -> Optional[str]:
         """Promote a quarantined candidate into the canonical memory folder.
 
@@ -1062,7 +913,6 @@ class Workspace:
         Args:
             filename: bare filename inside `memory_candidates/` (e.g.
                 `feedback_python_style.md`).
-            sync_to_global_agent_md: forward to the underlying writer.
 
         Returns:
             Absolute path to the canonical entry, or None if the candidate
@@ -1096,7 +946,6 @@ class Workspace:
             content=body,
             memory_type=mtype,
             description=description,
-            sync_to_global_agent_md=sync_to_global_agent_md,
             source="user_confirmed",
             evidence_refs=evidence,
         )
@@ -1259,13 +1108,7 @@ class Workspace:
             Dictionary with file names as keys and existence status as values.
             Note: Only lists globally shared files, not user-specific files.
         """
-        # Only list globally shared config files
-        files = [
-            self.config.agent_md,
-            self.config.persona_md,
-            self.config.tools_md,
-        ]
-        return {f: (self.path / f).exists() for f in files}
+        return {self.config.agent_md: (self.path / self.config.agent_md).exists()}
 
     def get_all_memory_files(self) -> List[Path]:
         """Get all memory file paths for current user.

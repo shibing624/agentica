@@ -10,7 +10,8 @@ import sys
 import tempfile
 import shutil
 from datetime import date, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -56,6 +57,30 @@ class TestBuiltinMemoryTool:
         assert "feedback" in prompt
         assert "project" in prompt
         assert "reference" in prompt
+
+    def test_system_prompt_names_this_users_own_rules_file(self):
+        """Durable rules have no tool, so the prompt must give the real path.
+
+        Hardcoding ~/.agentica/AGENTS.md would make a multi-tenant agent append
+        one user's standing instruction to the file every other user reads, and
+        would miss the file entirely when AGENTICA_HOME is moved.
+        """
+        tenant = Workspace(self.temp_dir, user_id="tenant-a")
+        tenant.initialize()
+        tool = BuiltinMemoryTool()
+        tool.set_workspace(tenant)
+
+        prompt = tool.get_system_prompt()
+        assert str(tenant.user_agent_md_path()) in prompt
+        assert "users/tenant-a/AGENTS.md" in prompt
+        assert "<user-agents-md>" not in prompt
+
+    def test_system_prompt_routes_standing_instructions_to_the_file(self):
+        """No `remember` tool exists: the prompt is what routes a rule."""
+        prompt = self.tool.get_system_prompt()
+        assert "AGENTS.md" in prompt
+        assert "edit_file" in prompt
+        assert "next session" in prompt
 
     def test_save_memory(self):
         """Test saving a memory entry."""
@@ -471,32 +496,6 @@ class TestMemoryExtractHooks:
 
         agent.model.response.assert_awaited_once()
 
-    def test_extract_and_save_passes_global_sync_flag(self):
-        """Extracted user memories should pass global sync when enabled."""
-        hooks = MemoryExtractHooks(sync_memories_to_global_agent_md=True)
-        workspace = MagicMock()
-        workspace.write_memory_entry = AsyncMock()
-        model = MagicMock()
-        model.response = AsyncMock(return_value=MagicMock(content=json.dumps([
-            {
-                "title": "user_role",
-                "content": "User is a senior ML engineer.",
-                "type": "user",
-            }
-        ])))
-
-        asyncio.run(hooks._extract_and_save(model, workspace, "User: test\n\nAssistant: ok"))
-
-        workspace.write_memory_entry.assert_awaited_once_with(
-            title="user_role",
-            content="User is a senior ML engineer.",
-            memory_type="user",
-            description="user_role",
-            sync_to_global_agent_md=True,
-            source="auto_extract",
-        )
-
-
 class TestWorkspaceMemoryConfig:
     """Test that auto_archive and auto_extract_memory are separate configs."""
 
@@ -506,7 +505,6 @@ class TestWorkspaceMemoryConfig:
         config = WorkspaceMemoryConfig()
         assert config.auto_archive is False
         assert config.auto_extract_memory is False
-        assert config.sync_memories_to_global_agent_md is False
         assert config.load_workspace_context is True
         assert config.load_workspace_memory is True
         assert config.max_memory_entries == 5

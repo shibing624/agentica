@@ -309,7 +309,7 @@ from agentica import Workspace
 agent = Agent(
     workspace=Workspace("./workspace"),
     long_term_memory_config=WorkspaceMemoryConfig(
-        load_workspace_context=True,   # 加载 AGENTS.md/PERSONA.md 等上下文文件
+        load_workspace_context=True,   # 加载 AGENTS.md 链（user 级 / 项目 / workspace 级）
         load_workspace_memory=True,    # 加载相关记忆到 System Prompt
         max_memory_entries=5,          # 最多注入 5 条最相关的记忆
         auto_archive=True,             # 每次 run 后自动归档对话（无 LLM 成本）

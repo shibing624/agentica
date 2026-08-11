@@ -172,8 +172,6 @@ def main():
         "debug": args.debug > 0,
         "work_dir": args.work_dir,
         "enable_experience_capture": not args.no_experience,
-        "sync_memories_to_global_agent_md": args.sync_memories_to_global_agent_md,
-        "sync_experience_to_global_agent_md": args.sync_experience_to_global_agent_md,
         "enable_skill_upgrade": args.enable_skill_upgrade,
         "skill_upgrade_mode": args.skill_upgrade_mode,
         "permissions": "allow-all" if args.allow_all else args.permissions,

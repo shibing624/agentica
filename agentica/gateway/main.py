@@ -27,6 +27,7 @@ from agentica.version import __version__
 from .config import settings
 from .services.agent_service import AgentService
 from .services.channel_manager import ChannelManager
+from .services.peer_bridge import PeerBridge
 from .services.router import MessageRouter
 from .routes import chat, settings as settings_routes, scheduler as scheduler_routes, channels, ws, plugins as plugins_routes
 
@@ -97,6 +98,15 @@ async def lifespan(app: FastAPI):
     # Channels (IM integrations: WeChat / WeCom / Feishu / QQ / ... )
     await _setup_channels()
 
+    # Peer bridge: `@list` / `@<session> <text>` from a chat app reaches the
+    # agentica CLI sessions running on this machine. Started after the channels
+    # because it sends through them.
+    if settings.peer_bridge_enabled:
+        deps.peer_bridge = PeerBridge(deps.channel_manager)
+        deps.peer_bridge.start()
+    else:
+        logger.info("Peer bridge disabled (set PEER_BRIDGE=true to command local CLI sessions from a chat)")
+
     # Distinguish the always-on Web service from any optional IM channels the
     # user enabled via config, so the startup log makes it obvious which
     # surfaces are live.
@@ -117,6 +127,8 @@ async def lifespan(app: FastAPI):
             await cron_task
         except (asyncio.CancelledError, Exception):
             pass
+    if deps.peer_bridge:
+        await deps.peer_bridge.stop()
     if deps.channel_manager:
         await deps.channel_manager.disconnect_all()
     logger.info("Goodbye!")
@@ -322,6 +334,12 @@ async def _handle_channel_message(message) -> None:
     so rapid-fire messages from the same user never hit the session run-lock.
     """
     logger.info(f"[{message.channel.value}] {message.sender_id}: {message.content[:500]}")
+
+    # Relaying to a CLI session runs no agent here, so it skips the queue: a
+    # `@session stop` typed while the gateway's own agent is mid-turn must not
+    # wait behind that turn — being able to interrupt is the whole point of it.
+    if deps.peer_bridge is not None and await deps.peer_bridge.handle(message):
+        return
 
     if not deps.agent_service:
         logger.error("Agent service not ready")

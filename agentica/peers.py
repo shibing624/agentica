@@ -484,8 +484,18 @@ class PeerSession:
         self._recent_sends.clear()
 
     def drain(self) -> List[PeerMessage]:
-        """Take every pending message and notify ``on_drain`` about them."""
+        """Take every pending message and notify ``on_drain`` about them.
+
+        A ``from_kind="user"`` message releases the brakes exactly as a line
+        typed here does: the human has joined in — from another terminal, or
+        through a chat app relaying for them — and a brake built for an
+        unattended loop must never refuse what the user just asked for. Without
+        this, answering a relayed instruction hits "you already sent this" from
+        an exchange the user has since moved past.
+        """
         messages = drain_inbox(self.peer_id)
+        if any(message.from_user for message in messages):
+            self.note_user_turn()
         if messages and self.on_drain is not None:
             self.on_drain(messages)
         return messages
@@ -820,18 +830,3 @@ def format_for_model(messages: List[PeerMessage]) -> str:
     return "\n\n".join(blocks)
 
 
-def format_for_cli(messages: List[PeerMessage], *, delivery: str) -> str:
-    """Render drained messages for the receiving terminal.
-
-    ``delivery`` is a short clause such as ``starting a turn`` or
-    ``will reach the agent between tool calls`` — the CLI knows which path
-    accepted the message; this helper only formats it.
-    """
-    blocks = []
-    for message in messages:
-        who = "your user via" if message.from_user else "agent"
-        blocks.append(
-            f"✉ Accepted peer message from {who} {message.from_name} — {delivery}\n"
-            f"  {message.text}"
-        )
-    return "\n".join(blocks)

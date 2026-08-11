@@ -187,6 +187,144 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertNotIn("more lines", rendered)
         self.assertEqual(get_truncated_blocks(), [])
 
+    ASK_PROMPT = (
+        "实测发现 storage 不可复用（v2 用完即删，316 题记忆只剩 3 个残留）。"
+        "方案 A 必须改为重跑 ingest。修正成本：方案 A' = 重跑 qwen ingest"
+        "（~2880 次，本地免费）+ venus QA（~84 次，~0.5M tok，~1-2h 并行）；"
+        "方案 B = 全链路 ds-v4（~5880 次付费，~25M tok）。选哪个？"
+    )
+    ASK_OPTIONS = [
+        "方案 A'（qwen 重跑 ingest + venus QA，~2880 免费 + ~84 付费，推荐）",
+        "方案 B（全链路 ds-v4，~5880 次付费）",
+    ]
+
+    def _render(self, dm, fake) -> str:
+        return "\n".join(
+            str(call.args[0]) for call in fake.print.call_args_list if call.args
+        )
+
+    def test_ask_user_question_call_line_does_not_repeat_the_question(self):
+        """The TUI prompt widget already shows the question; the call line
+        used to print a clipped second copy plus 'options=[3 items]'."""
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool(
+            "ask_user_question",
+            {"prompt": self.ASK_PROMPT, "mode": "select", "options": self.ASK_OPTIONS},
+            tool_call_id="ask-1",
+        )
+
+        rendered = self._render(dm, fake)
+        self.assertIn("ask_user_question", rendered)
+        self.assertNotIn("items]", rendered)
+        self.assertNotIn("实测发现", rendered)
+        self.assertNotIn("...", rendered)
+
+    def test_ask_user_question_result_replays_question_and_answer_in_full(self):
+        """The question widget is transient, so the result block is the only
+        record left to scroll back to."""
+        import json
+
+        from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks
+
+        clear_truncated_blocks()
+        answer = self.ASK_OPTIONS[0]
+        result = json.dumps(
+            {"mode": "select", "prompt": self.ASK_PROMPT, "response": answer},
+            ensure_ascii=False,
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "ask_user_question", result, is_error=False, elapsed=12.5,
+            tool_args={"prompt": self.ASK_PROMPT}, tool_call_id="ask-1",
+        )
+
+        rendered = self._render(dm, fake)
+        self.assertIn(self.ASK_PROMPT, rendered.replace("\n", "").replace("   ", ""))
+        self.assertIn(answer, rendered)
+        self.assertNotIn("more lines", rendered)
+        self.assertEqual(get_truncated_blocks(), [])
+
+    def test_multiline_answer_keeps_every_line(self):
+        import json
+
+        from agentica.cli.display import StreamDisplayManager
+
+        answer = "先跑方案 A'\n如果 QA 超时再切 B\n预算上限 5 美元"
+        result = json.dumps(
+            {"mode": "text", "prompt": "接下来怎么做？", "response": answer},
+            ensure_ascii=False,
+        )
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result("ask_user_question", result, is_error=False, elapsed=3.0)
+
+        rendered = self._render(dm, fake)
+        for line in answer.splitlines():
+            self.assertIn(line, rendered)
+
+    def test_unparseable_ask_result_falls_back_to_generic_rendering(self):
+        """A select-mode error dict has no 'response' — it must still print."""
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        dm = StreamDisplayManager(fake)
+        dm.display_tool_result(
+            "ask_user_question",
+            '{"error": "Options required for select mode", "prompt": "pick one"}',
+            is_error=False,
+            elapsed=0.01,
+        )
+
+        rendered = self._render(dm, fake)
+        self.assertIn("Options required for select mode", rendered)
+
+    def test_ask_exchange_renders_markup_as_literal_text(self):
+        """A question or answer mentioning '[bold]' is content, not styling."""
+        import json
+        from io import StringIO
+
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=False, color_system=None)
+        dm = StreamDisplayManager(console)
+        dm.display_tool_result(
+            "ask_user_question",
+            json.dumps({
+                "mode": "text",
+                "prompt": "Should the banner use [bold] or [/red]?",
+                "response": "use [bold]",
+            }),
+            is_error=False,
+            elapsed=0.5,
+        )
+
+        rendered = output.getvalue()
+        self.assertIn("[bold]", rendered)
+        self.assertIn("[/red]", rendered)
+
+    def test_tool_returns_the_whole_prompt(self):
+        """The result JSON is what the CLI replays, so it can't clip at 200."""
+        import json
+
+        from agentica.tools.ask_user_question_tool import AskUserQuestionTool
+
+        long_prompt = self.ASK_PROMPT * 3
+        tool = AskUserQuestionTool(input_callback=lambda prompt, options: "ok")
+        payload = json.loads(tool.ask_user_question(prompt=long_prompt, mode="text"))
+
+        self.assertEqual(payload["prompt"], long_prompt)
+        self.assertEqual(payload["response"], "ok")
+
     def test_wait_result_shows_full_command(self):
         """wait's Command: line is the whole reason you looked — never ellipsis it."""
         from agentica.cli.display import StreamDisplayManager, clear_truncated_blocks, get_truncated_blocks

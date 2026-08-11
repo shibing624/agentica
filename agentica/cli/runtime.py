@@ -394,17 +394,7 @@ def parse_args():
         help="Additional tools to enable (on top of built-in tools)",
     )
     parser.add_argument(
-        "--sync-memories-to-global-agent-md",
-        action="store_true",
-        help="Sync durable memories into ~/.agentica/AGENTS.md",
-    )
-    parser.add_argument(
         "--no-experience", action="store_true", help="Disable DeepAgent experience capture and self-evolution hooks"
-    )
-    parser.add_argument(
-        "--sync-experience-to-global-agent-md",
-        action="store_true",
-        help="Sync confirmed experiences into ~/.agentica/AGENTS.md",
     )
     parser.add_argument(
         "--enable-skill-upgrade", action="store_true", help="Enable automatic experience-to-skill upgrade"
@@ -670,7 +660,6 @@ def _build_cli_experience_config(agent_config: dict) -> ExperienceConfig:
         # Batch the LLM judge: 1 call per 10 turns instead of per turn.
         judge_every_n_turns=10,
         judge_min_seconds_between=60,
-        sync_to_global_agent_md=bool(agent_config.get("sync_experience_to_global_agent_md")),
         skill_upgrade=skill_upgrade,
     )
 
@@ -686,7 +675,6 @@ def _build_cli_memory_config(agent_config: dict) -> WorkspaceMemoryConfig:
         load_workspace_context=True,
         load_workspace_memory=True,
         max_memory_entries=10,
-        sync_memories_to_global_agent_md=bool(agent_config.get("sync_memories_to_global_agent_md")),
     )
 
 

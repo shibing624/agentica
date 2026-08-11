@@ -174,21 +174,6 @@ class TestQueueItemPreview(unittest.TestCase):
         self.assertEqual(queue_item_preview("/status"), "/status")
         self.assertEqual(queue_item_preview("normal follow-up"), "normal follow-up")
 
-    def test_shell_mode_items_are_marked(self):
-        from agentica.cli.interactive.attachments import queue_item_preview
-
-        self.assertEqual(queue_item_preview("pwd", shell_mode=True), "$ pwd")
-        self.assertEqual(queue_item_preview("pwd", shell_mode=False), "pwd")
-
-    def test_shell_mode_exempt_commands_are_not_marked(self):
-        from agentica.cli.interactive.attachments import queue_item_preview
-
-        self.assertEqual(queue_item_preview("/model", shell_mode=True), "/model")
-        self.assertEqual(
-            queue_item_preview("/requesting-code-review x", shell_mode=True),
-            "$ /requesting-code-review x",
-        )
-
     def test_image_payload_previews_its_text(self):
         from agentica.cli.interactive.attachments import queue_item_preview
 

@@ -6,8 +6,6 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
 from typing import Optional
 
 from rich.markup import escape as rich_escape
@@ -25,32 +23,6 @@ from agentica.tools.background_processes import (
 from .console_io import _print_boxed_result
 from .session_state import SessionState
 
-# ==================== Shell command ====================
-
-
-def _handle_shell_command(user_input: str, work_dir: Optional[str] = None) -> None:
-    """Execute a shell command directly."""
-    con = get_console()
-    con.print(f"[dim]$ {user_input}[/dim]")
-    try:
-        result = subprocess.run(
-            user_input,
-            shell=True,
-            capture_output=True,
-            text=True,
-            cwd=work_dir or os.getcwd(),
-        )
-        if result.stdout:
-            con.print(result.stdout, end="")
-        if result.stderr:
-            con.print(result.stderr, style="red", end="")
-        if result.returncode != 0:
-            con.print(f"[dim]Exit code: {result.returncode}[/dim]")
-    except Exception as e:
-        con.print(f"[red]Error: {e}[/red]")
-    con.print()
-
-
 def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
     """Give the agent text nobody typed, without interrupting its work.
 
@@ -59,11 +31,17 @@ def hand_to_agent(state: SessionState, pending_queue, text: str) -> None:
     returning False means the run ended between the check and the call — the
     TOCTOU window ``Agent.steer`` documents — so the text falls through to the
     queue instead of being dropped.
+
+    The queued form is tagged ``__RELAYED__`` because a queued turn is echoed as
+    if the user had typed it, and nobody typed this. Both callers already print
+    their own arrival block (a styled peer message, a finished-command report),
+    so the raw model-facing text — headers, log tails and all — would be a
+    second, uglier copy of what the user just read.
     """
     agent = state.current_agent
     if state.agent_running and agent is not None and agent.steer(text):
         return
-    pending_queue.put(text)
+    pending_queue.put(("__RELAYED__", text))
 
 
 def _background_result_for_agent(event: BackgroundProcessCompleted) -> str:
@@ -234,4 +212,4 @@ def _run_btw_concurrent(agent, question: str, tui_state: dict):
     _print_boxed_result("BTW", question, result_text, color="cyan")
 
 
-__all__ = ['_handle_shell_command', 'hand_to_agent', '_background_result_for_agent', '_print_background_completion', '_run_btw_concurrent']
+__all__ = ['hand_to_agent', '_background_result_for_agent', '_print_background_completion', '_run_btw_concurrent']

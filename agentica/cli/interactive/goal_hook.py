@@ -11,6 +11,7 @@ from agentica.cli.commands.goal import _detach_goal_tool, _sync_goal_budget_tui
 from agentica.cli.commands.helpers import _run_async_safe
 from agentica.goals import is_goal_generated_prompt
 
+from .attachments import unpack_queue_payload
 from .console_io import _cprint
 from .session_state import SessionState
 
@@ -51,10 +52,11 @@ def _maybe_continue_goal(
     # User real input takes priority.
     loop_prompt_pending = False
     for item, _ts in pending_queue.peek_all_with_timestamps():
-        if isinstance(item, tuple):
-            text = str(item[0]) if item[0] != "__BTW__" else ""
-        else:
-            text = str(item)
+        queued = unpack_queue_payload(item)
+        # An ephemeral side question runs beside the goal, so the loop does not
+        # stand aside for it. Anything else pending — including a peer message or
+        # a finished job's report — outranks another lap.
+        text = "" if queued.is_btw else queued.text
         if not text or text.startswith("__"):
             continue
         if is_goal_generated_prompt(text):

@@ -258,11 +258,6 @@ def _setup_tui(
                 tui_state["spinner_text"] = "Press Ctrl+C again to exit; summary appears below"
                 event.app.invalidate()
 
-    @kb.add("c-x")
-    def _toggle_shell(event):
-        pending_queue.put("__TOGGLE_SHELL_MODE__")
-        event.app.current_buffer.reset()
-
     @kb.add("escape", "p")
     def _toggle_transcript_pause(event):
         paused, buffered_lines = _toggle_output_pause()
@@ -482,13 +477,11 @@ def _setup_tui(
             return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
             return "type + Enter to queue, Ctrl+C to cancel"
-        return "Enter to send · Ctrl+J newline · / commands · @ files · Ctrl+X shell"
+        return "Enter to send · Ctrl+J newline · / commands · @ files"
 
     def _get_prompt():
         if state.agent_running:
             return [("class:prompt-working", "~ ")]
-        if state.shell_mode:
-            return [("class:shell-prompt", "$ ")]
         return [("class:prompt", "❯ ")]
 
     def _get_status_bar():
@@ -653,7 +646,7 @@ def _setup_tui(
             return []
         frags = [("class:queue-label", f"  Queued ({len(pairs)}): ")]
         for i, (item, ts) in enumerate(pairs[:3]):
-            text = queue_item_preview(item, shell_mode=state.shell_mode)
+            text = queue_item_preview(item)
             preview = text[:40] + ("..." if len(text) > 40 else "")
             ts_str = time.strftime("%H:%M:%S", time.localtime(ts))
             if i > 0:
@@ -693,7 +686,6 @@ def _setup_tui(
             "placeholder": "#555555 italic",
             "prompt": "#FFD700 bold",
             "prompt-working": "#888888 italic",
-            "shell-prompt": "ansigreen bold",
             "hint": "#555555 italic",
             "queue-label": "#FFD700 bold",
             "queue-dim": "#8B8682 italic",

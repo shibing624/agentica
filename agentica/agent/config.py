@@ -142,9 +142,6 @@ class WorkspaceMemoryConfig:
     # hangs or the network breaks, the task is cancelled and the buffer
     # is forfeited (will retry on the next boundary). 0 disables the cap.
     extract_timeout: float = 60.0
-    # Recompile confirmed user/feedback memories into ~/.agentica/AGENTS.md so
-    # future sessions automatically inherit long-lived preferences.
-    sync_memories_to_global_agent_md: bool = False
 
 
 @dataclass
@@ -258,9 +255,6 @@ class ExperienceConfig:
 
     # Injection
     max_experiences_in_prompt: int = 5
-
-    # Sync confirmed experiences to ~/.agentica/AGENTS.md
-    sync_to_global_agent_md: bool = False
 
     # Skill upgrade pipeline (None = disabled)
     skill_upgrade: Optional["SkillUpgradeConfig"] = None

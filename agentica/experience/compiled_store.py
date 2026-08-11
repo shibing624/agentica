@@ -62,11 +62,6 @@ class CompiledExperienceStore:
 
     _INDEX_MAX_LINES = 200
 
-    # Sync markers for global AGENTS.md
-    _SYNC_HEADER = "## Learned Experiences"
-    _SYNC_START = "<!-- agentica:experiences:start -->"
-    _SYNC_END = "<!-- agentica:experiences:end -->"
-
     def __init__(
         self,
         exp_dir: Path,
@@ -416,87 +411,6 @@ class CompiledExperienceStore:
                     stats["archived"] += 1
 
         return stats
-
-    # ── Sync to global AGENTS.md ──────────────────────────────────────────
-
-    async def sync_to_global_agent_md(
-        self,
-        global_agent_md: Path,
-        limit: int = 30,
-    ) -> str:
-        """Compile HOT-tier experiences into global AGENTS.md.
-
-        One-way sync: EXPERIENCE.md -> AGENTS.md block.
-        Only HOT-tier with repeat_count >= 2.
-
-        Args:
-            global_agent_md: Path to the global AGENTS.md file.
-            limit: Max lines in the sync block.
-
-        Returns:
-            Path to the global AGENTS.md file.
-        """
-        synced_entries: List[str] = []
-
-        if self._exp_dir.exists():
-            for filepath in sorted(self._exp_dir.glob("*.md"), reverse=True):
-                try:
-                    raw = (await async_read_text(filepath)).strip()
-                except (FileNotFoundError, OSError):
-                    continue
-
-                tier = extract_frontmatter_value(raw, "tier") or "hot"
-                if tier != "hot":
-                    continue
-                repeat_count = extract_frontmatter_int(raw, "repeat_count", 1)
-                if repeat_count < 2:
-                    continue
-
-                title = extract_frontmatter_value(raw, "title") or filepath.stem
-                exp_type = extract_frontmatter_value(raw, "type") or "unknown"
-                body = strip_frontmatter(raw)
-                summary = body.split("\n")[0][:100].strip() if body else title
-                synced_entries.append(f"- [{exp_type}] {title}: {summary}")
-                if len(synced_entries) >= limit:
-                    break
-
-        # Empty marker block stays parseable for find/replace on next sync,
-        # but carries no placeholder text that would balloon the system prompt.
-        if synced_entries:
-            block = "\n".join([
-                self._SYNC_HEADER,
-                self._SYNC_START,
-                *synced_entries,
-                self._SYNC_END,
-            ])
-        else:
-            block = "\n".join([
-                self._SYNC_HEADER,
-                self._SYNC_START,
-                self._SYNC_END,
-            ])
-
-        existing = ""
-        if global_agent_md.exists():
-            existing = (await async_read_text(global_agent_md)).strip()
-
-        if existing:
-            pattern = (
-                rf"{re.escape(self._SYNC_HEADER)}\n"
-                rf"{re.escape(self._SYNC_START)}[\s\S]*?"
-                rf"{re.escape(self._SYNC_END)}"
-            )
-            if re.search(pattern, existing):
-                updated = re.sub(pattern, block, existing)
-            else:
-                updated = existing.rstrip() + "\n\n" + block
-        else:
-            updated = "# Agent Instructions\n\n" + block
-
-        global_agent_md.parent.mkdir(parents=True, exist_ok=True)
-        await async_write_text(global_agent_md, updated.strip() + "\n")
-        return str(global_agent_md)
-
 
 # ── Module-level helpers (experience-specific, not shared) ────────────────
 

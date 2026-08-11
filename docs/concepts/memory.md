@@ -41,12 +41,10 @@ agent = Agent(
 
 ```
 workspace/
-+-- AGENTS.md         # Agent 全局指令（共享）
-+-- PERSONA.md       # Agent 人格设定（共享）
-+-- TOOLS.md         # 工具使用说明（共享）
++-- AGENTS.md         # 本 workspace 所有 user 共享的指令
 +-- users/
     +-- {user_id}/   # 多用户隔离
-        +-- USER.md          # 用户个人信息
+        +-- AGENTS.md        # 这个 user 自己的指令（人可改，agent 也可用 edit_file 改）
         +-- MEMORY.md        # 记忆索引（仅存条目链接，≤200行/25KB）
         +-- memory/          # 记忆内容文件（每条独立 .md）
             +-- feedback_python_style.md
@@ -82,7 +80,6 @@ await workspace.write_memory_entry(
     content="User prefers concise, typed Python. Avoid unnecessary comments.",
     memory_type="feedback",           # user | feedback | project | reference
     description="python coding style typed concise",  # 相关性匹配关键词
-    sync_to_global_agent_md=True,     # 可选：同步到 ~/.agentica/AGENTS.md
 )
 
 # 写入项目上下文
@@ -119,45 +116,22 @@ User prefers concise, typed Python. Avoid unnecessary comments.
 
 ---
 
-## 全局偏好同步：`~/.agentica/AGENTS.md`
+## 常驻规则：直接改 AGENTS.md，没有专门工具
 
-`learn-from-experience` 这类学习型 workflow 的一个关键优点，是把“已经确认、值得长期保留的偏好”编译进每个新 session 都会加载的全局 steering 文件。Agentica 现在也支持这条轻量链路。
+「记住：以后都要 X」和「记住这件事 X」不是一回事，落盘位置不同：
 
-同步方式有两层：
+| | 常驻规则 | 一个事实 |
+|---|---|---|
+| 落盘位置 | 用户级：`~/.agentica/workspace/users/{user_id}/AGENTS.md`（CLI 的 user_id 是 `default`）；项目级：`<repo 根>/AGENTS.md` | `memory/*.md` + `MEMORY.md` 索引 |
+| 何时进 system prompt | **下个会话起**全量注入（见下）；本会话靠对话历史 | 只在后续提问与它相关时被召回 |
+| 谁来写 | 人手写，或 agent 用 `edit_file` / `write_file` | `save_memory` |
+| 适合 | "always ..." / "never ..." / "从现在开始 ..." | 用户是谁、某个决定为什么这么定、环境怎么搭的 |
 
-1. 单次写入时显式同步：
+规则这一侧**没有专门的工具**，也不需要固定格式：`AGENTS.md` 就是一个 markdown 文件，人和 agent 用同一种方式改它。写法说明在 bundled `agentica` skill 里（`self_manage` 只管 `config.yaml` / `.env` / 升级，不管常驻规则）。
 
-```python
-await workspace.write_memory_entry(
-    title="Python Style",
-    content="Prefer concise, typed Python. Avoid unnecessary getattr.",
-    memory_type="feedback",
-    description="python style concise typed",
-    sync_to_global_agent_md=True,
-)
-```
-
-2. Agent 运行时默认开启同步：
-
-```python
-from agentica import DeepAgent, Workspace
-from agentica.agent.config import WorkspaceMemoryConfig
-
-agent = DeepAgent(
-    workspace=Workspace("./workspace"),
-    long_term_memory_config=WorkspaceMemoryConfig(
-        sync_memories_to_global_agent_md=True,
-    ),
-)
-```
-
-行为说明：
-- 只同步 `user` 和 `feedback` 类型
-- 同步目标是 `~/.agentica/AGENTS.md` 的 `## Learned Preferences` 区块
-- 这个区块是编译产物，应编辑原始 memory entry，而不是直接改同步块
-- `Workspace.get_context_prompt()` 会自动加载全局 `AGENTS.md`，所以下一个 session 会自然继承这些偏好
-
-这不是完整的 HOT/WARM/COLD 分层系统，而是一个更轻量、对现有框架更友好的落地方式。
+外部 workflow（如 `learn-from-experience`）要把确认偏好写成常驻规则时，直接往  
+`~/.agentica/workspace/users/{user_id}/AGENTS.md`  
+追加普通行即可。经验卡片若进 prompt，是直接从 EXPERIENCE 相关性召回注入（`## Learned Experiences`），和 AGENTS.md 无关；事实记忆同理，走 `get_relevant_memories`，也不写进 AGENTS.md。
 
 ---
 
@@ -283,10 +257,7 @@ agent = Agent(session_id="my-session-001")
 from agentica.workspace import Workspace, WorkspaceConfig
 
 config = WorkspaceConfig(
-    agent_md="AGENTS.md",
-    persona_md="PERSONA.md",
-    tools_md="TOOLS.md",
-    user_md="USER.md",
+    agent_md="AGENTS.md",        # workspace 级与 user 级共用同一个文件名
     memory_md="MEMORY.md",      # 记忆索引文件
     memory_dir="memory",         # 记忆内容文件目录
     users_dir="users",

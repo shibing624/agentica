@@ -30,7 +30,7 @@ tool calling, long-running tasks, multi-agent orchestration, cross-session memor
 | **Runs long, doesn't run away** | `Runner`-driven LLM ↔ tool loop with context compaction, cost budgets, and loop safety — long tasks stay on track |
 | **Does work, not just chat** | Files, execution, search, browser, MCP, multi-agent, Workflow — real actions, not tied to a single IDE |
 | **Multi-session collaboration** | Cross-terminal peer messaging; `delegate` spawns a full process (own context/cwd); `task` stays the cheap in-process subagent |
-| **Remembers and forgets** | Memory stored as indexed entries with relevance recall and drift defense; confirmed preferences sync into global `~/.agentica/AGENTS.md` |
+| **Remembers and forgets** | Memory stored as indexed entries with relevance recall and drift defense; standing rules live in `users/{user_id}/AGENTS.md` (editable by human and agent) |
 | **Gets better with use** | Tool failures, user corrections, and success sequences become experience cards that auto-compile into reusable `SKILL.md` across sessions |
 | **Fully swappable, not locked in** | Models, tools, memory, skills, guardrails, and MCP are replaceable parts — not a closed hosted platform |
 
@@ -47,6 +47,7 @@ tool calling, long-running tasks, multi-agent orchestration, cross-session memor
 
 ## 🔥 News
 
+- [2026/08/11] **v1.4.13** (accumulating, not published): standing rules via plain `AGENTS.md` edits (no `remember` tool); user-level rules under `users/{user_id}/AGENTS.md` (CLI = `default`); dropped `PERSONA.md`/`TOOLS.md`/`USER.md`; IM→CLI via `PEER_BRIDGE`; peer display distinguishes human vs agent; shell mode removed. See [CHANGELOG](https://github.com/shibing624/agentica/blob/main/CHANGELOG.md)
 - [2026/08/10] **v1.4.12**: Two-layer context compression (~70%→50% tool-result eviction → LLM/native summarise); fixes the read-and-reread loop and Anthropic paths where eviction never ran; Layer 0 spills or truncates based on recoverability; compaction counts on `RunResponse`; CLI-only assumptions no longer dump on SDK. Adds cross-terminal peer messaging (`list_agents` / `send_message`) and process-level `delegate` (full `agentica --query --print`, managed via `/ps` `/stop` `wait`) vs cheap in-process `task`. See [Release-v1.4.12](https://github.com/shibing624/agentica/releases/tag/v1.4.12)
 - [2026/08/04] **v1.4.11**: Adds OpenAI Responses API (with provider-native compaction), Markdown-configurable subagents, and multi-file `apply_patch`; improves CLI resume/status/compaction feedback; trims prompt and grep/glob schema cost; fixes Learned Experiences corruption and `write_todos` full-list echo. See [Release-v1.4.11](https://github.com/shibing624/agentica/releases/tag/v1.4.11)
 - [2026/07/24] **v1.4.10**: Adds native image input with catalog-driven model capability routing; introduces `/rename` and name-based `/resume`; fixes Pillow core dependency metadata. See [Release-v1.4.10](https://github.com/shibing624/agentica/releases/tag/v1.4.10)
@@ -120,7 +121,7 @@ agent.run_sync("Search Python 3.13 new features and write them to features.md")
 - **Guardrails** — Input / output / tool-level guardrails, streaming real-time detection
 - **MCP / ACP** — Model Context Protocol and Agent Communication Protocol support
 - **Skill System** — Markdown-based skill injection with project, user, and managed external skill directories
-- **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense, optional sync into global `AGENTS.md`
+- **Persistent Memory** — Index/content separation, relevance-based recall, four-type classification, drift defense; standing rules in `users/{user_id}/AGENTS.md` (human and agent both edit)
 - **Multi-Modal** — Text, image, audio, video understanding
 - **Self-Evolution** — Experience cards auto-compile into reusable `SKILL.md` across sessions (pipeline below)
 

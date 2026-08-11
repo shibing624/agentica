@@ -31,6 +31,7 @@ from agentica.cli.commands.session import (
 )
 from agentica.cli.session_resume import prepare_startup_resume
 from agentica.cli.display import (
+    display_peer_messages,
     display_user_message,
     inject_file_contents,
     parse_file_mentions,
@@ -45,7 +46,7 @@ from agentica.cli.runtime import (
 from agentica import config
 from agentica.cli.setup import session_profile
 from agentica.global_config import get_setting
-from agentica.peers import PeerSession, format_for_cli, format_for_model
+from agentica.peers import PeerSession, format_for_model
 from agentica.run_response import AgentCancelledError
 from agentica.skills import get_skill_registry, load_skills
 from agentica.subagent_loader import load_all_agents
@@ -59,10 +60,10 @@ from agentica.workspace import Workspace
 from .attachments import (
     _deduplicate_image_attachments,
     _detect_file_drop,
+    unpack_queue_payload,
 )
 from .btw import (
     _background_result_for_agent,
-    _handle_shell_command,
     _print_background_completion,
     _run_btw_concurrent,
     hand_to_agent,
@@ -81,7 +82,6 @@ from .console_io import (
 )
 from .goal_hook import _maybe_continue_goal
 from .session_state import (
-    SHELL_MODE_EXEMPT_CMDS,
     SessionState,
     _InputRequest,
 )
@@ -327,7 +327,6 @@ def run_interactive(
         agent_config["model_name"],
         work_dir=agent_config.get("work_dir"),
         extra_tools=extra_tool_names,
-        shell_mode=False,
     )
 
     if workspace and workspace.exists():
@@ -441,7 +440,6 @@ def run_interactive(
             extra_tool_names=extra_tool_names,
             workspace=workspace,
             skills_registry=skills_registry,
-            shell_mode=state.shell_mode,
             tui_state=tui_state,
             pending_queue=pending_queue,
             agent_running=state.agent_running,
@@ -596,17 +594,6 @@ def run_interactive(
             if payload == "__CANCEL__":
                 continue
 
-            if payload == "__TOGGLE_SHELL_MODE__":
-                state.shell_mode = not state.shell_mode
-                mode_str = (
-                    "Shell Mode ON - Commands execute directly"
-                    if state.shell_mode
-                    else "Agent Mode ON - AI processes your input"
-                )
-                _cprint(f"\n{mode_str}")
-                app.invalidate()
-                continue
-
             # If agent is currently running, re-queue
             if state.agent_running:
                 pending_queue.put(payload)
@@ -614,17 +601,14 @@ def run_interactive(
                 continue
 
             # Unpack payload
-            submit_images = []
-            is_btw = False
+            queued = unpack_queue_payload(payload)
+            user_input = queued.text
+            submit_images = list(queued.images)
+            is_btw = queued.is_btw
+            # Text nobody typed here: already printed on arrival, and none of
+            # the input line's affordances apply to it.
+            already_shown = queued.is_relayed
             skill_to_invoke = None
-            if isinstance(payload, tuple):
-                if payload[0] == "__BTW__":
-                    is_btw = True
-                    user_input = payload[1]
-                else:
-                    user_input, submit_images = payload
-            else:
-                user_input = str(payload)
 
             user_input = user_input.strip()
             if not user_input and not submit_images:
@@ -642,23 +626,18 @@ def run_interactive(
                 else:
                     user_input = f"@{dropped['path']} {dropped['remainder']}".strip()
 
-            # Shell mode
-            if state.shell_mode:
-                if (
-                    user_input.startswith("/")
-                    and user_input.split()[0].lower() in SHELL_MODE_EXEMPT_CMDS
-                ):
-                    pass
-                else:
-                    _handle_shell_command(user_input, agent_config.get("work_dir"))
-                    tui_state["git_branch"] = _read_git_branch(tui_state["work_dir"])
-                    app.invalidate()
-                    continue
-
             # Slash commands
             first_word = user_input.split()[0].lower() if user_input else ""
             skill_cmds = skills_registry.auto_commands() if skills_registry else {}
-            is_command = first_word in COMMAND_HANDLERS or first_word in skill_cmds
+            # A slash command is a shortcut for the human at this keyboard, so
+            # only typed input dispatches one. Relayed text (a peer message, a
+            # finished job's report) stays plain text — the single place that
+            # enforces what PEER_MESSAGING_POLICY promises the sender. Until now
+            # it held only by accident: `format_for_model` happens to prefix an
+            # authority header, so the first word was never `/compact`.
+            is_command = not already_shown and (
+                first_word in COMMAND_HANDLERS or first_word in skill_cmds
+            )
             if is_command:
                 cmd_parts = user_input.split(maxsplit=1)
                 cmd = cmd_parts[0].lower()
@@ -739,7 +718,7 @@ def run_interactive(
 
             submit_images = _deduplicate_image_attachments(submit_images)
 
-            if not is_btw:
+            if not is_btw and not already_shown:
                 display_user_message(
                     user_input,
                     pasted_blocks=n_pasted_blocks,
@@ -936,7 +915,7 @@ def run_interactive(
             if state.agent_running
             else "starting a turn"
         )
-        _cprint("\n" + format_for_cli(messages, delivery=delivery))
+        display_peer_messages(messages, delivery=delivery)
         if app.is_running:
             app.invalidate()
 

@@ -313,7 +313,6 @@ def create_llm_os(
             load_workspace_context=True,
             load_workspace_memory=True,
             max_memory_entries=10,
-            sync_memories_to_global_agent_md=False,
         ),
         # 敏感词监控：命中后 _streamlit_alert_sink 把告警塞进 session_state；
         # 线上换成发邮件 / 推飞书 / 上报监控即可。

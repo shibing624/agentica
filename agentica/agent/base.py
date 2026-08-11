@@ -493,10 +493,14 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
 
         self.session_id = session_id
         # A session_id normally implies a transcript on disk — the CLI needs it
-        # for /resume, /fork and /export. A service that already stores its own
-        # conversations sets enable_session_log=False: there the JSONL is a
-        # second copy of the same data, growing per turn under the process's
-        # home directory, that nothing in that deployment ever reads back.
+        # for /resume, /fork and /export. `enable_session_log=False` drops it,
+        # but "my service has its own conversation store" is not on its own a
+        # reason to: the runner also replays this file into working_memory on
+        # the process's first run (see `runner/loop.py`), so for a caller that
+        # relies on the agent's own history it is what carries a conversation
+        # across a restart. It is a genuinely dead second copy only for a caller
+        # that passes `messages=` every turn — that path neither writes it nor
+        # needs the replay.
         self._session_log = None
         if session_id is not None and enable_session_log:
             # Scope session storage by project (work_dir) + user so the same
@@ -702,9 +706,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             if self.long_term_memory_config.auto_extract_memory:
                 auto_hooks.append(
                     MemoryExtractHooks(
-                        sync_memories_to_global_agent_md=(
-                            self.long_term_memory_config.sync_memories_to_global_agent_md
-                        ),
                         every_n_turns=self.long_term_memory_config.extract_every_n_turns,
                         min_seconds_between=self.long_term_memory_config.extract_min_seconds_between,
                         background=self.long_term_memory_config.extract_background,
@@ -764,7 +765,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
                 tool.set_parent_agent(self)
             elif isinstance(tool, BuiltinMemoryTool):
                 tool.set_workspace(self.workspace)
-                tool.set_sync_global_agent_md(self.long_term_memory_config.sync_memories_to_global_agent_md)
             elif isinstance(tool, SkillTool):
                 tool._agent = self
 

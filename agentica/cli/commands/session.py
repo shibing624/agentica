@@ -369,7 +369,6 @@ def _cmd_newchat(ctx: CommandContext, cmd_args: str = ""):
         ctx.agent_config.get("model_name", ""),
         work_dir=ctx.agent_config.get("work_dir"),
         extra_tools=ctx.extra_tool_names,
-        shell_mode=ctx.shell_mode,
     )
     # Drop any goal manager — the new session has a new SessionLog.
     return {
@@ -745,7 +744,6 @@ def _cmd_clear(ctx: CommandContext, cmd_args: str = ""):
         ctx.agent_config["model_name"],
         work_dir=ctx.agent_config.get("work_dir"),
         extra_tools=ctx.extra_tool_names,
-        shell_mode=ctx.shell_mode,
     )
     con.print("[info]Screen cleared and conversation reset.[/info]")
     return {"current_agent": current_agent, "goal_manager": None}

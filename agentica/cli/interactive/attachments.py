@@ -10,12 +10,10 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 from agentica.cli.commands.context import IMAGE_EXTENSIONS
 from agentica.utils.log import logger
-
-from .session_state import SHELL_MODE_EXEMPT_CMDS
 
 try:
     from imgocr import ImgOcr
@@ -86,31 +84,49 @@ def _resolve_attachment_path(raw_path: str) -> Optional[Path]:
     return resolved
 
 
-def queue_item_preview(item, shell_mode: bool = False) -> str:
-    """Render one pending-queue payload for the TUI ``Queued (N):`` bar.
+class QueuedInput(NamedTuple):
+    """One pending-queue payload, classified by who put it there."""
 
-    Every queued payload is shown, including slash commands and skill
-    invocations — hiding them made a queued ``/requesting-code-review ...``
-    look like it never entered the queue.
+    text: str
+    images: List[Path]
+    is_btw: bool
+    is_relayed: bool
 
-    In shell mode a queued line executes as a shell command rather than an LLM
-    turn, so it is prefixed with ``$``. The prompt's own ``$`` indicator is
-    replaced by the working marker while the agent runs, which is exactly when
-    items get queued.
+
+def unpack_queue_payload(item) -> QueuedInput:
+    """Classify a pending-queue payload into text plus how it got there.
+
+    ``is_relayed`` marks text nobody typed in this terminal — a peer message or
+    a finished job's report, both queued by ``hand_to_agent``. It decides two
+    things, and both are one rule: **the input line's affordances belong to
+    whoever typed on it.** Relayed text is not echoed as a user turn (its arrival
+    was already printed in its own shape) and never dispatches a slash command.
+
+    Single source for the three readers of the queue (the process loop, the TUI
+    queue bar, the goal loop's "is real work waiting" check), which each used to
+    unpack the tuple forms themselves and disagreed about the markers.
     """
     if isinstance(item, tuple):
         if item and item[0] == "__BTW__":
-            body = str(item[1]) if len(item) > 1 else ""
-            return f"__BTW__: {body}" if body else "__BTW__"
-        text = str(item[0]) if item else str(item)
-    else:
-        text = str(item)
+            return QueuedInput(str(item[1]) if len(item) > 1 else "", [], True, False)
+        if item and item[0] == "__RELAYED__":
+            return QueuedInput(str(item[1]) if len(item) > 1 else "", [], False, True)
+        text, images = item
+        return QueuedInput(str(text), list(images or []), False, False)
+    return QueuedInput(str(item), [], False, False)
 
-    if shell_mode and not text.startswith("__"):
-        first_word = text.split()[0].lower() if text.split() else ""
-        if first_word not in SHELL_MODE_EXEMPT_CMDS:
-            return f"$ {text}"
-    return text
+
+def queue_item_preview(item) -> str:
+    """Render one pending-queue payload for the TUI ``Queued (N):`` bar.
+
+    Every queued payload is shown as it was entered, including slash commands
+    and skill invocations — hiding them made a queued
+    ``/requesting-code-review ...`` look like it never entered the queue.
+    """
+    queued = unpack_queue_payload(item)
+    if queued.is_btw:
+        return f"__BTW__: {queued.text}" if queued.text else "__BTW__"
+    return queued.text
 
 
 def _detect_file_drop(user_input: str) -> Optional[dict]:

@@ -61,7 +61,6 @@ class TestExperienceConfig(unittest.TestCase):
         self.assertEqual(config.demotion_days, 30)
         self.assertEqual(config.archive_days, 90)
         self.assertEqual(config.max_experiences_in_prompt, 5)
-        self.assertFalse(config.sync_to_global_agent_md)
         self.assertEqual(config.feedback_confidence_threshold, 0.8)
 
     def test_custom_values(self):
@@ -129,9 +128,7 @@ class TestExperienceCaptureHooks(unittest.TestCase):
         mock_compiled_store = MagicMock()
         mock_compiled_store.write = AsyncMock(return_value="/tmp/exp.md")
         mock_compiled_store.run_lifecycle = AsyncMock(return_value={"promoted": 0, "demoted": 0, "archived": 0})
-        mock_compiled_store.sync_to_global_agent_md = AsyncMock(return_value="/tmp/AGENTS.md")
         agent.workspace.get_compiled_experience_store = MagicMock(return_value=mock_compiled_store)
-        agent.workspace._get_global_agent_md_path = MagicMock(return_value="/tmp/AGENTS.md")
         agent.workspace._get_user_generated_skills_dir = MagicMock(return_value=Path("/tmp/gen_skills"))
         agent.workspace._get_user_experience_dir = MagicMock(return_value=Path("/tmp/experiences"))
         # Mock working_memory with empty messages (no previous assistant)
@@ -463,28 +460,6 @@ class TestExperienceCaptureHooks(unittest.TestCase):
 
         compiled_store = agent.workspace.get_compiled_experience_store()
         compiled_store.run_lifecycle.assert_called_once()
-
-    def test_sync_called_when_configured(self):
-        """on_agent_end should sync to global AGENTS.md when configured."""
-        hooks = self._make_hooks(capture_user_corrections=False, sync_to_global_agent_md=True)
-        agent = self._mock_agent()
-
-        asyncio.run(hooks.on_agent_start(agent))
-        asyncio.run(hooks.on_agent_end(agent, output="Done"))
-
-        compiled_store = agent.workspace.get_compiled_experience_store()
-        compiled_store.sync_to_global_agent_md.assert_called_once()
-
-    def test_sync_not_called_when_disabled(self):
-        """on_agent_end should NOT sync when sync_to_global_agent_md=False."""
-        hooks = self._make_hooks(capture_user_corrections=False, sync_to_global_agent_md=False)
-        agent = self._mock_agent()
-
-        asyncio.run(hooks.on_agent_start(agent))
-        asyncio.run(hooks.on_agent_end(agent, output="Done"))
-
-        compiled_store = agent.workspace.get_compiled_experience_store()
-        compiled_store.sync_to_global_agent_md.assert_not_called()
 
     def test_reads_run_input_at_agent_end_time(self):
         """Should read agent.run_input at on_agent_end time, not on_agent_start."""
@@ -888,37 +863,6 @@ class TestWorkspaceExperience(unittest.TestCase):
         stats = asyncio.run(self.store.run_lifecycle(promotion_count=3, archive_days=90))
         self.assertEqual(stats["archived"], 1)
         self.assertIn("tier: cold", filepath.read_text())
-
-    def test_sync_experiences_to_global_agent_md(self):
-        """sync should compile HOT experiences."""
-        card = self._card(title="hot_rule", content="Always validate inputs", etype="correction")
-        asyncio.run(self.store.write(card))
-        asyncio.run(self.store.write(card))  # bump to repeat_count >= 2
-
-        global_md = self.workspace._get_global_agent_md_path()
-        result_path = asyncio.run(self.store.sync_to_global_agent_md(global_md))
-        self.assertTrue(os.path.exists(result_path))
-        with open(result_path) as f:
-            content = f.read()
-        self.assertIn("Learned Experiences", content)
-        self.assertIn("hot_rule", content)
-
-    def test_sync_skips_non_hot(self):
-        """Sync should skip WARM/COLD tier experiences."""
-        asyncio.run(self.store.write(
-            self._card(title="warm_rule", content="Some warm content", etype="tool_error"),
-        ))
-        exp_dir = self.workspace._get_user_experience_dir()
-        filepath = exp_dir / "tool_error_warm_rule.md"
-        content = filepath.read_text()
-        content = content.replace("tier: hot", "tier: warm")
-        filepath.write_text(content)
-
-        global_md = self.workspace._get_global_agent_md_path()
-        result_path = asyncio.run(self.store.sync_to_global_agent_md(global_md))
-        with open(result_path) as f:
-            global_content = f.read()
-        self.assertNotIn("warm_rule", global_content)
 
     def test_get_relevant_experiences_filters_cold(self):
         """Cold tier experiences should not appear in retrieval."""

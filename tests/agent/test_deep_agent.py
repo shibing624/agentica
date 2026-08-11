@@ -59,12 +59,10 @@ class TestDeepAgentDefaults(unittest.TestCase):
         self.assertTrue(agent.experience_config.capture_tool_errors)
         self.assertTrue(agent.experience_config.capture_user_corrections)
         self.assertFalse(agent.experience_config.capture_success_patterns)
-        self.assertFalse(agent.experience_config.sync_to_global_agent_md)
         self.assertIsNone(agent.experience_config.skill_upgrade)
         # auto_extract_memory: fallback memory extraction after each run.
         self.assertTrue(agent.long_term_memory_config.auto_extract_memory)
         self.assertTrue(agent.long_term_memory_config.auto_archive)
-        self.assertFalse(agent.long_term_memory_config.sync_memories_to_global_agent_md)
 
     def test_deep_agent_respects_explicit_experience_false(self):
         """Passing enable_experience_capture=False must override the default."""
@@ -124,6 +122,70 @@ class TestDeepAgentDefaults(unittest.TestCase):
             )
 
         self.assertIs(agent.auxiliary_model, custom_auxiliary)
+
+
+class TestDeepAgentSignature(unittest.TestCase):
+    """DeepAgent forwards to Agent by name, not through **kwargs."""
+
+    def test_deep_agent_declares_every_agent_parameter(self):
+        """Parity is the reason **kwargs could be dropped without losing reach.
+
+        Adding a parameter to Agent without adding it here silently makes it
+        unreachable through the preset, which is why this asserts the set
+        difference rather than a hand-picked sample.
+        """
+        import inspect
+        from agentica.agent.base import Agent
+        from agentica.agent.deep import DeepAgent
+
+        agent_params = set(inspect.signature(Agent.__init__).parameters) - {"self"}
+        deep_params = set(inspect.signature(DeepAgent.__init__).parameters) - {"self"}
+
+        self.assertEqual(agent_params - deep_params, set())
+        self.assertFalse(
+            any(
+                p.kind is inspect.Parameter.VAR_KEYWORD
+                for p in inspect.signature(DeepAgent.__init__).parameters.values()
+            ),
+            "DeepAgent must not take **kwargs: a forwarded typo then fails "
+            "inside Agent.__init__ with no mention of DeepAgent",
+        )
+
+    def test_unknown_parameter_raises_naming_deep_agent(self):
+        from agentica.agent.deep import DeepAgent
+
+        # Built at runtime so the static keyword-arg checker does not flag the
+        # deliberate typo this test exists to catch.
+        bad_kwargs = {"model": MagicMock(), "include_web_serch": False}
+        with self.assertRaises(TypeError) as ctx:
+            DeepAgent(**bad_kwargs)
+
+        message = str(ctx.exception)
+        self.assertIn("DeepAgent", message)
+        self.assertIn("include_web_serch", message)
+
+    def test_passthrough_agent_parameters_take_effect(self):
+        """The params in-repo callers rely on must reach Agent, not vanish."""
+        from agentica.agent.deep import DeepAgent
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch(
+            "agentica.agent.base.Agent._load_mcp_tools"
+        ), patch(
+            "agentica.agent.base.Agent._merge_tool_system_prompts"
+        ):
+            agent = DeepAgent(
+                model=MagicMock(),
+                workspace=tmpdir,
+                description="a description",
+                instructions=["do the thing"],
+                session_id="sig-smoke",
+                session_base_dir=tmpdir,
+                enable_session_log=False,
+            )
+
+        self.assertEqual(agent.description, "a description")
+        self.assertEqual(agent.instructions, ["do the thing"])
+        self.assertIsNone(agent._session_log)
 
 
 if __name__ == "__main__":

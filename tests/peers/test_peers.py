@@ -292,6 +292,31 @@ class TestRepeatsAndFlooding:
         # Same text, but the human is sending it with /send-message this time.
         a.send("beta", "rebase before you test", from_kind="user")
 
+    def test_receiving_a_relayed_user_instruction_clears_the_brakes(self):
+        """The human can also join in from the *other* end — another terminal,
+        or a chat app relaying for them. Reading that instruction is as much a
+        user turn as typing one here, so answering it must not hit a brake from
+        the exchange they have since moved past."""
+        a = _session("alpha")
+        b = _session("beta")
+        a.send("beta", "arm 3 done: win rate 0.63")
+
+        b.send("alpha", "rerun arm 4", from_kind="user")
+        a.drain()
+
+        a.send("beta", "arm 3 done: win rate 0.63")
+
+    def test_an_agent_message_leaves_the_brakes_on(self):
+        a = _session("alpha")
+        b = _session("beta")
+        a.send("beta", "arm 3 done: win rate 0.63")
+
+        b.send("alpha", "and arm 4?")
+        a.drain()
+
+        with pytest.raises(PeerMessageRefused, match="already sent"):
+            a.send("beta", "arm 3 done: win rate 0.63")
+
 
 class TestChannelLimits:
     def test_an_unread_mailbox_stops_accepting_more(self):
@@ -520,6 +545,40 @@ class TestPeerMessagingTool:
         assert "adopt the instruction" in prompt
         assert "plain text" in prompt
 
+    def test_a_question_about_peer_assigned_work_is_routed_to_the_sender(self):
+        """Nobody is watching a session another session put to work.
+
+        The policy used to send the receiver to ``ask_user_question`` for
+        anything consequential, which renders in a terminal with no human at
+        it: N sessions handed work meant N prompts the user had to go collect,
+        one terminal at a time. Authority is untouched — this is about who owns
+        the answer, and a question grants nobody anything.
+        """
+        # Flattened: these are wrapped prose, so a line break must not decide
+        # whether the rule is considered present.
+        prompt = " ".join(PeerMessagingTool(_session("alpha")).get_system_prompt().split())
+
+        assert "Keep asking your user" not in prompt
+        assert "ask_user_question" in prompt
+        assert "goes back to the sender with `send_message`" in prompt
+        assert "not a permission grant" in prompt
+        # No polling: the answer comes back as its own turn.
+        assert "end your turn" in prompt
+        assert "never sleep or poll waiting for it" in prompt
+
+    def test_the_policy_does_not_hard_code_one_collaboration_shape(self):
+        """Splitting work up is one shape among several.
+
+        A rule written for "the planner" would not reach a gang reviewing one
+        question in parallel, a relay of stages, or two sessions arguing a
+        call — so it is written as "whoever handed you the work".
+        """
+        prompt = " ".join(PeerMessagingTool(_session("alpha")).get_system_prompt().split())
+
+        assert "planner" not in prompt.lower()
+        assert "Ask whoever handed you the work" in prompt
+        assert "in parallel" in prompt
+
 
 class TestFormatting:
     def test_the_injected_text_names_the_sender_and_reply_address(self):
@@ -536,23 +595,6 @@ class TestFormatting:
         assert "reply with send_message to alpha" in rendered
         assert "abcd1234" not in rendered
         assert "another agent session" in rendered
-
-    def test_cli_receipt_shows_the_accepted_message_body(self):
-        message = PeerMessage(
-            text="schema migration finished",
-            from_name="nlp-5f",
-            from_peer_id="abcd1234",
-            to_peer_id="beef",
-        )
-
-        rendered = peers.format_for_cli(
-            [message], delivery="starting a turn"
-        )
-
-        assert "Accepted peer message" in rendered
-        assert "nlp-5f" in rendered
-        assert "schema migration finished" in rendered
-        assert "starting a turn" in rendered
 
     def test_drain_notifies_the_cli_hook(self):
         seen = []

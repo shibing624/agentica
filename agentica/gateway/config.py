@@ -95,6 +95,12 @@ class Settings:
     slack_allowed_users: List[str] = field(default_factory=list)
     slack_allowed_channels: List[str] = field(default_factory=list)
 
+    # Peer bridge: let an IM user address this machine's live CLI sessions
+    # (`@list`, `@<session> <text>`). Off by default — a relayed line carries
+    # the user's own authority in that terminal, so it is opt-in per install,
+    # and it still refuses to relay for a channel with no allowed_users.
+    peer_bridge_enabled: bool = False
+
     # Model / path settings — loaded from the active config.yaml profile at
     # startup (see Settings.from_env), with env vars as fallback. Routes
     # update these at runtime (profile switch, base_dir change).
@@ -265,6 +271,9 @@ class Settings:
             slack_allowed_channels=[
                 u.strip() for u in os.getenv("SLACK_ALLOWED_CHANNELS", "").split(",") if u.strip()
             ],
+
+            # Peer bridge (IM -> this machine's CLI sessions)
+            peer_bridge_enabled=os.getenv("PEER_BRIDGE", "").lower() in ("1", "true", "yes"),
 
             # Model / path — profile first, env fallback, built-in default last.
             # When a config.yaml profile is present it wins (gateway is a

@@ -55,21 +55,25 @@ Usage:
     from agentica import SandboxConfig
     agent = DeepAgent(sandbox_config=SandboxConfig(enabled=True, writable_dirs=["./output"]))
 
-    # Any Agent parameter works via **kwargs
+    # Every Agent parameter is declared explicitly — a typo raises TypeError here
     agent = DeepAgent(debug=True, enable_tracing=True, response_model=MyModel)
 """
 import os
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Type, Union
 
 from agentica.agent.base import Agent
 from agentica.config import AGENTICA_NUM_HISTORY_TURNS
 from agentica.agent.config import (
     ExperienceConfig,
+    HistoryConfig,
     PromptConfig,
     SandboxConfig,
     ToolConfig,
     WorkspaceMemoryConfig,
 )
+from agentica.agent.history_filter import HistoryFilter
+from agentica.hooks import AgentHooks
+from agentica.memory import WorkingMemory
 from agentica.model.base import Model
 from agentica.tools.base import Tool, ModelTool, Function
 from agentica.workspace import Workspace
@@ -91,7 +95,7 @@ class DeepAgent(Agent):
       falls back to auxiliary_model to extract memories when the LLM did
       not call save_memory during the run.
     - Workspace memory stays per-workspace by default; syncing memories into
-      the user-global ~/.agentica/AGENTS.md remains opt-in
+      the user-global AGENTS.md remains opt-in
     - auxiliary_model: defaults to the main model (same instance), so the
       whole stack runs on one API key without DeepAgent picking a hardcoded
       OpenAI sibling. Pass an explicit auxiliary_model (any provider, any
@@ -104,7 +108,14 @@ class DeepAgent(Agent):
       global AGENTS sync and skill auto-upgrade stay opt-in
 
     All parameters are optional — sensible defaults are applied.
-    Any Agent parameter can be overridden via **kwargs.
+
+    Every Agent parameter is declared explicitly in ``__init__``; there is no
+    ``**kwargs``. An unknown or misspelled name therefore raises a TypeError
+    naming DeepAgent at construction, instead of being forwarded into
+    ``Agent.__init__`` and failing there without mentioning this class. The
+    flip side is that the ``include_*`` toggles are not a stable contract to
+    build kwargs against — a whitelist surface that disables all of them wants
+    plain ``Agent`` plus the presets it actually needs.
     """
 
     def __init__(
@@ -144,7 +155,37 @@ class DeepAgent(Agent):
         task_model: Optional[Model] = None,
         custom_skill_dirs: Optional[List[str]] = None,
         ask_user_question_callback: Optional[Callable] = None,
-        **kwargs,
+        # ---- Plain Agent parameters, forwarded unchanged ----
+        # Declared one by one instead of collected in **kwargs. Agent.__init__
+        # is keyword-only with no **kwargs of its own, so a forwarded typo (or
+        # a parameter this class renames) used to die inside Agent with a
+        # message that never mentioned DeepAgent.
+        agent_id: Optional[str] = None,
+        description: Optional[str] = None,
+        instructions: Optional[Union[str, List[str], Callable]] = None,
+        knowledge: Optional[Any] = None,
+        auxiliary_task_models: Optional[Dict[str, Model]] = None,
+        fallback_models: Optional[List[Model]] = None,
+        fallback_on_break: bool = False,
+        max_api_retry: int = 1,
+        response_model: Optional[Type[Any]] = None,
+        use_structured_outputs: bool = False,
+        # DeepAgent is the self-evolving preset: on by default, unlike Agent.
+        enable_experience_capture: bool = True,
+        debug: bool = False,
+        enable_tracing: bool = False,
+        hooks: Optional[Union[AgentHooks, List[AgentHooks]]] = None,
+        session_base_dir: Optional[str] = None,
+        enable_session_log: bool = True,
+        history_config: Optional[HistoryConfig] = None,
+        history_filter: Optional[HistoryFilter] = None,
+        tool_input_guardrails: Optional[List[Any]] = None,
+        tool_output_guardrails: Optional[List[Any]] = None,
+        input_guardrails: Optional[List[Any]] = None,
+        output_guardrails: Optional[List[Any]] = None,
+        working_memory: Optional[WorkingMemory] = None,
+        context: Optional[Dict[str, Any]] = None,
+        environment_context: Optional[str] = None,
     ):
         if model is None:
             from agentica.model.defaults import create_default_model
@@ -244,7 +285,6 @@ class DeepAgent(Agent):
                 load_workspace_context=True,
                 load_workspace_memory=True,
                 max_memory_entries=10,
-                sync_memories_to_global_agent_md=False,
             )
 
         # DeepAgent is the product preset: capture errors + corrections only.
@@ -261,12 +301,8 @@ class DeepAgent(Agent):
                 # extract_every_n_turns above.
                 judge_every_n_turns=10,
                 judge_min_seconds_between=60,
-                sync_to_global_agent_md=False,
                 skill_upgrade=None,
             )
-        # Honor an explicit enable_experience_capture=False override if passed via kwargs;
-        # otherwise DeepAgent enables experience capture by default.
-        kwargs.setdefault("enable_experience_capture", True)
 
         super().__init__(
             model=model,
@@ -285,5 +321,29 @@ class DeepAgent(Agent):
             long_term_memory_config=long_term_memory_config,
             experience_config=experience_config,
             sandbox_config=sandbox_config,
-            **kwargs,
+            agent_id=agent_id,
+            description=description,
+            instructions=instructions,
+            knowledge=knowledge,
+            auxiliary_task_models=auxiliary_task_models,
+            fallback_models=fallback_models,
+            fallback_on_break=fallback_on_break,
+            max_api_retry=max_api_retry,
+            response_model=response_model,
+            use_structured_outputs=use_structured_outputs,
+            enable_experience_capture=enable_experience_capture,
+            debug=debug,
+            enable_tracing=enable_tracing,
+            hooks=hooks,
+            session_base_dir=session_base_dir,
+            enable_session_log=enable_session_log,
+            history_config=history_config,
+            history_filter=history_filter,
+            tool_input_guardrails=tool_input_guardrails,
+            tool_output_guardrails=tool_output_guardrails,
+            input_guardrails=input_guardrails,
+            output_guardrails=output_guardrails,
+            working_memory=working_memory,
+            context=context,
+            environment_context=environment_context,
         )

@@ -142,7 +142,8 @@ class TestHandToAgent:
         hand_to_agent(state, pending, "report")
 
         state.current_agent.steer.assert_not_called()
-        assert pending.peek_all() == ["report"]
+        # Tagged, so the turn is not echoed as if the user had typed the report.
+        assert pending.peek_all() == [("__RELAYED__", "report")]
 
     def test_a_refused_steer_falls_back_to_the_queue(self):
         # steer() returns False when the run ended between the check and the
@@ -155,7 +156,7 @@ class TestHandToAgent:
 
         hand_to_agent(state, pending, "report")
 
-        assert pending.peek_all() == ["report"]
+        assert pending.peek_all() == [("__RELAYED__", "report")]
 
     def test_text_is_kept_even_before_the_first_agent_exists(self):
         state = SessionState()
@@ -165,4 +166,4 @@ class TestHandToAgent:
 
         hand_to_agent(state, pending, "report")
 
-        assert pending.peek_all() == ["report"]
+        assert pending.peek_all() == [("__RELAYED__", "report")]

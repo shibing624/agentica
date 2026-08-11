@@ -15,7 +15,7 @@ from agentica.model.usage import Usage
 from agentica.version import __version__
 
 def print_header(model_provider: str, model_name: str, work_dir: Optional[str] = None,
-                 extra_tools: Optional[List[str]] = None, shell_mode: bool = False):
+                 extra_tools: Optional[List[str]] = None):
     """Print the application header with version and model information"""
     console = get_console()
     box_width = min(console.width, 80)
@@ -54,7 +54,6 @@ def print_header(model_provider: str, model_name: str, work_dir: Optional[str] =
     console.print()
     # Keyboard shortcuts
     console.print("  [bright_green]Enter[/bright_green]       Submit your message")
-    console.print("  [bright_green]Ctrl+X[/bright_green]      Toggle Agent/Shell mode")
     console.print("  [bright_green]Ctrl+J[/bright_green]      Insert newline (Alt+Enter also works)")
     console.print("  [bright_green]Ctrl+D[/bright_green]      Exit and show session summary")
     console.print("  [bright_green]Ctrl+C[/bright_green]      Interrupt current operation (press twice to exit)")
@@ -181,7 +180,6 @@ def show_help(skills_registry=None):
     console.print()
     shortcuts = {
         "Enter":             "Submit your message",
-        "Ctrl+X":            "Toggle Agent/Shell mode ($ = shell, > = agent)",
         "Ctrl+J, Alt+Enter": "Insert newline for multi-line input",
         "Ctrl+D":            "Exit and show session summary",
         "Ctrl+C":            "Interrupt current operation; press twice to exit",

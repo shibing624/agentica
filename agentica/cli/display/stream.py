@@ -37,6 +37,22 @@ def _is_background_execute(tool_args: Optional[dict], result_str: str = "") -> b
     return str(result_str).startswith("Started background command")
 
 
+def _parse_ask_user_exchange(result_str: str) -> Optional[Tuple[str, str]]:
+    """Pull ``(prompt, response)`` out of an ask_user_question result.
+
+    Returns None for anything that isn't that payload — a select-mode error
+    dict, or a tool of the same name from elsewhere — so the caller can fall
+    back to the generic result renderer instead of showing a blank exchange.
+    """
+    try:
+        payload = json.loads(result_str)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or "response" not in payload:
+        return None
+    return str(payload.get("prompt", "")), str(payload.get("response", ""))
+
+
 class StreamDisplayManager:
     """Manages CLI output display state for streaming responses.
 
@@ -637,6 +653,11 @@ class StreamDisplayManager:
     # briefs already share ``_format_handoff_display`` with delegate.
     _FULL_RESULT_TOOLS = frozenset({"list_agents", "send_message", "wait", "delegate"})
 
+    # Human-in-the-loop. Their result is the only durable record of the
+    # exchange — the question widget lives in the prompt_toolkit layout and is
+    # gone the moment the user answers — so it replays both sides in full.
+    _ASK_USER_TOOLS = frozenset({"ask_user_question", "confirm"})
+
     # Max result lines shown inline before folding (per-tool overrides below).
     _DEFAULT_MAX_RESULT_LINES = 4
     # execute: show up to this many lines inline; beyond that, a head+tail
@@ -782,6 +803,12 @@ class StreamDisplayManager:
             self._display_full_result_lines(lines, is_error=is_error, elapsed_str=elapsed_str)
             return
 
+        if tool_name in self._ASK_USER_TOOLS and not is_error:
+            exchange = _parse_ask_user_exchange(result_str)
+            if exchange is not None:
+                self._display_ask_user_exchange(*exchange, elapsed_str=elapsed_str)
+                return
+
         style = "dim red" if is_error else "dim"
         prefix = "    ⎿ " if not is_error else "    ⎿ ⚠ "
         cont_prefix = "      "
@@ -802,6 +829,30 @@ class StreamDisplayManager:
                 f"{cont_prefix}... ({remaining} more lines · Ctrl+O to expand)", style="dim italic"
             )
             remember_truncated(f"Tool output · {tool_name}", result_str)
+        if elapsed_str:
+            self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
+
+    def _display_ask_user_exchange(
+        self, prompt: str, response: str, *, elapsed_str: str
+    ) -> None:
+        """Replay a human-in-the-loop question and the user's answer, unclipped.
+
+        Both sides go into the transcript so scrolling back weeks later still
+        shows what the agent asked and what the user chose to do about it.
+        """
+        cont_prefix = "      "
+        # Both sides are free text — a model-written question or a typed answer
+        # containing "[bold]" is content, not styling, and rich would eat it.
+        for label, body in (("Q", prompt), ("A", response)):
+            body_lines = body.splitlines() or [""]
+            head = "    ⎿ " if label == "Q" else cont_prefix
+            self._assistant_console.print(
+                f"{head}{label}: {body_lines[0]}", style="dim", highlight=False, markup=False
+            )
+            for line in body_lines[1:]:
+                self._assistant_console.print(
+                    f"{cont_prefix}   {line}", style="dim", highlight=False, markup=False
+                )
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 

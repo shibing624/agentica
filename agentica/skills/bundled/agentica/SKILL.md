@@ -3,9 +3,10 @@ name: agentica
 description: >-
   How to answer questions about the agentica product you are running inside —
   CLI flags, config.yaml profiles, API keys, models, sessions, resume,
-  workspace, skills, logs, upgrade, and self_manage. Use when asked how
-  agentica works, how to configure or upgrade it, where state lives on disk,
-  or how to change your own settings.
+  workspace, AGENTS.md standing rules, skills, logs, upgrade, and
+  self_manage. Use when asked how agentica works, how to configure or upgrade
+  it, where state lives on disk, where to write "remember: always X", or how
+  to change your own settings.
 metadata:
   version: "1.0"
 ---
@@ -51,7 +52,7 @@ Everything agentica keeps is under `~/.agentica` (or `$AGENTICA_HOME`):
 | `config.yaml` | named profiles + `active_profile`; the file is hand-editable and comments survive writes |
 | `.env` | hand-maintained keys, loaded in addition to `config.yaml` |
 | `logs/` | one log per CLI process; often the fastest way to see what another session actually did |
-| `workspace/` | long-term memory (`AGENT.md`, `MEMORY.md`, daily notes) |
+| `workspace/` | long-term memory and this user's `AGENTS.md` (see below) |
 | `skills/` | user-installed skills, one directory per skill with a `SKILL.md` |
 | `projects/` | session transcripts as JSONL, partitioned per working directory |
 | `cache/peers/` | the live-session directory and mailboxes behind `list_agents` / `send_message` |
@@ -95,6 +96,31 @@ where you look up what to pass.
 - **`/config` and `/upgrade` are the human's version of this tool.** Point the
   user at them when they want to drive; use the tool when you are the one doing
   it.
+
+## Standing rules: AGENTS.md (not `self_manage`)
+
+When the user says "remember: always X" / "from now on ..." / "never ...", that
+is a **standing instruction**, not a config.yaml field and not a `save_memory`
+fact. There is no dedicated tool: append a line with `edit_file` (or
+`write_file` if the file is missing).
+
+| Scope | File | Who sees it |
+|---|---|---|
+| This user, every project | `~/.agentica/workspace/users/<user_id>/AGENTS.md` (CLI is `default`, so `.../users/default/AGENTS.md`) | every later session of this user |
+| This repository only | `<repo root>/AGENTS.md` | sessions started anywhere under that repo; the user may commit it |
+
+The path of every file already in the system prompt appears as `<!-- /abs/path -->`
+above it — reuse that path, do not guess. There is no `~/.agentica/AGENTS.md`
+anymore; that location is dead.
+
+**This session:** the user's request (and your write) are already in the
+conversation history, so follow the rule for the rest of the turn/session
+without waiting for the system prompt to change.
+**Next session:** the AGENTS.md chain is read once at session start into the
+system prompt, so the new line is there automatically.
+
+Facts ("I am a data scientist", "the deploy target is X") still go to
+`save_memory` — they are recalled by relevance, not injected every turn.
 
 ## Answering well
 

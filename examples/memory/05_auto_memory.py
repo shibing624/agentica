@@ -185,8 +185,8 @@ async def demo_combined():
          only fires after N turns or right before context compaction.
          ``extract_min_seconds_between`` provides a cross-process frequency
          cap. Together these slash extraction cost vs the old per-turn path.
-      3. ``sync_memories_to_global_agent_md=True``: confirmed user-type memories
-         get mirrored into ~/.agentica/AGENTS.md so future sessions inherit them.
+      Standing rules belong in ``users/{user_id}/AGENTS.md`` (edit_file), not
+      a memory→AGENTS.md compile step — that path was deleted.
     """
     print("\n" + "=" * 60)
     print("Demo 4: Production Full Stack (auxiliary_model + background extract)")
@@ -215,7 +215,6 @@ async def demo_combined():
             auto_extract_memory=True,
             extract_every_n_turns=2,  # demo only; default in production is 10
             extract_min_seconds_between=0,  # demo only; default 60
-            sync_memories_to_global_agent_md=True,
         ),
         working_memory=WorkingMemory.with_summary(),
         add_history_to_context=True,
@@ -225,7 +224,7 @@ async def demo_combined():
     print(
         "Config: long-term memory + SessionSummary + auto memory "
         f"(auxiliary={'deepseek' if auxiliary_model else 'main-model fallback'}, "
-        "extract_every_n_turns=2, sync_to_global_AGENTS.md=True)"
+        "extract_every_n_turns=2)"
     )
 
     await agent.print_response(
@@ -297,10 +296,10 @@ async def main():
 
 Storage Layout:
   long_term_memory_root/
-  +-- AGENTS.md            # Agent instructions
+  +-- AGENTS.md            # instructions shared by every user
   +-- users/
   |   +-- {user_id}/
-  |       +-- USER.md     # User profile
+  |       +-- AGENTS.md   # this user's own instructions
   |       +-- MEMORY.md   # Memory index (links to files)
   |       +-- memory/
   |       |   +-- user_alice_role.md

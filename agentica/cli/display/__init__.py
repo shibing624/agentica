@@ -20,6 +20,7 @@ from agentica.cli.display.help_header import (
 )
 from agentica.cli.display.messages import (
     display_diff,
+    display_peer_messages,
     display_user_message,
     get_file_completions,
     inject_file_contents,
@@ -45,6 +46,7 @@ __all__ = [
     "context_pct_style",
     "display_agent_execution_error",
     "display_diff",
+    "display_peer_messages",
     "display_token_stats",
     "display_tool_call",
     "display_user_message",

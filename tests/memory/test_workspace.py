@@ -22,9 +22,6 @@ class TestWorkspaceConfig:
         """Test default configuration values."""
         config = WorkspaceConfig()
         assert config.agent_md == "AGENTS.md"
-        assert config.persona_md == "PERSONA.md"
-        assert config.tools_md == "TOOLS.md"
-        assert config.user_md == "USER.md"
         assert config.memory_md == "MEMORY.md"
         assert config.memory_dir == "memory"
         assert config.skills_dir == "skills"
@@ -54,8 +51,9 @@ class TestWorkspaceConfig:
         assert Workspace._is_empty_template(agents_md), (
             "default AGENTS.md should look empty to the prompt assembler"
         )
-        assert Workspace._is_empty_template(Workspace.DEFAULT_GLOBAL_FILES["PERSONA.md"])
-        assert Workspace._is_empty_template(Workspace.DEFAULT_GLOBAL_FILES["TOOLS.md"])
+        assert Workspace._is_empty_template(
+            Workspace.DEFAULT_USER_AGENT_MD.format(user_id="default")
+        ), "a fresh user AGENTS.md must not inject its own scaffold"
 
 
 class TestWorkspace:
@@ -87,14 +85,12 @@ class TestWorkspace:
         result = workspace.initialize()
 
         assert result is True
-        # Global shared files
+        # Shared by every user of this workspace
         assert (temp_workspace_path / "AGENTS.md").exists()
-        assert (temp_workspace_path / "PERSONA.md").exists()
-        assert (temp_workspace_path / "TOOLS.md").exists()
         assert (temp_workspace_path / "skills").is_dir()
-        # User-specific files under users/default/
+        # This user's own instructions live with the rest of their data
         user_path = temp_workspace_path / "users" / "default"
-        assert (user_path / "USER.md").exists()
+        assert (user_path / "AGENTS.md").exists()
         assert (user_path / "memory").is_dir()
 
     def test_workspace_exists(self, temp_workspace_path):
@@ -248,67 +244,6 @@ class TestWorkspace:
         memory_prompt_python = asyncio.run(workspace.get_relevant_memories(query="python coding"))
         assert "Python preference" in memory_prompt_python or len(memory_prompt_python) > 0
 
-    def test_write_memory_entry_syncs_feedback_to_global_agent_md(self, temp_workspace_path):
-        """Confirmed user/feedback memories can be compiled into ~/.agentica/AGENTS.md."""
-        workspace = Workspace(temp_workspace_path)
-        workspace.initialize()
-
-        global_home = temp_workspace_path / "global-home"
-        global_home.mkdir()
-
-        with patch("agentica.workspace.AGENTICA_HOME", str(global_home)):
-            asyncio.run(
-                workspace.write_memory_entry(
-                    title="Python Style",
-                    content="Prefer concise, typed Python. Avoid unnecessary getattr.",
-                    memory_type="feedback",
-                    description="python style concise typed",
-                    sync_to_global_agent_md=True,
-                )
-            )
-
-        global_agent_md = global_home / "AGENTS.md"
-        assert global_agent_md.exists()
-        content = global_agent_md.read_text(encoding="utf-8")
-        assert "Learned Preferences" in content
-        assert "Python Style" in content
-        assert "Avoid unnecessary getattr" in content
-
-    def test_write_memory_entry_sync_skips_non_durable_feedback(self, temp_workspace_path):
-        """Global AGENTS sync should keep durable rules and skip task-specific notes."""
-        workspace = Workspace(temp_workspace_path)
-        workspace.initialize()
-
-        global_home = temp_workspace_path / "global-home"
-        global_home.mkdir()
-
-        with patch("agentica.workspace.AGENTICA_HOME", str(global_home)):
-            asyncio.run(
-                workspace.write_memory_entry(
-                    title="Python Style",
-                    content="Prefer concise, typed Python. Avoid unnecessary getattr.",
-                    memory_type="feedback",
-                    description="durable python coding preference",
-                    sync_to_global_agent_md=True,
-                )
-            )
-            asyncio.run(
-                workspace.write_memory_entry(
-                    title="RAG Oracle Flow",
-                    content="RAG pipeline: inspect prediction samples first, then compare MRR / P@3 / R@3 / F1 before tuning.",
-                    memory_type="feedback",
-                    description="oracle style rag debugging note",
-                    sync_to_global_agent_md=True,
-                )
-            )
-
-        global_agent_md = global_home / "AGENTS.md"
-        content = global_agent_md.read_text(encoding="utf-8")
-        assert "Python Style" in content
-        assert "Avoid unnecessary getattr" in content
-        assert "RAG Oracle Flow" not in content
-        assert "MRR / P@3 / R@3 / F1" not in content
-
     def test_get_context_prompt_prioritizes_high_priority_agents_with_budget(self, temp_workspace_path):
         """AGENTS context should cap at 40K chars and preserve higher-priority files."""
         repo_root = temp_workspace_path / "repo"
@@ -337,6 +272,75 @@ class TestWorkspace:
         assert "C" * 500 in context
         assert "B" * 500 in context
 
+    def test_user_rules_live_under_users_never_in_agentica_home(self, temp_workspace_path):
+        """One layout for everyone: the CLI is just the ``default`` user.
+
+        Routing the default user to ~/.agentica/AGENTS.md and everyone else
+        under users/ meant two places for one concept, and an SDK caller had to
+        know which mode a session was in before it could say where a
+        preference lives.
+        """
+        home = temp_workspace_path / "home"
+        home.mkdir()
+        with patch("agentica.workspace.AGENTICA_HOME", str(home)):
+            default_user = Workspace(temp_workspace_path).user_agent_md_path()
+            tenant = Workspace(temp_workspace_path, user_id="tenant-a").user_agent_md_path()
+
+        root = temp_workspace_path.resolve()
+        assert default_user == root / "users" / "default" / "AGENTS.md"
+        assert tenant == root / "users" / "tenant-a" / "AGENTS.md"
+        assert not (home / "AGENTS.md").exists()
+
+    def test_existing_home_rules_are_moved_to_the_default_user(self, temp_workspace_path):
+        """A move, not a second read path: two readable locations is the bug."""
+        home = temp_workspace_path / "home"
+        home.mkdir()
+        legacy = home / "AGENTS.md"
+        legacy.write_text("Always write a CHANGELOG entry.", encoding="utf-8")
+
+        with patch("agentica.workspace.AGENTICA_HOME", str(home)):
+            workspace = Workspace(temp_workspace_path)
+            target = workspace.user_agent_md_path()
+
+        assert target.read_text(encoding="utf-8") == "Always write a CHANGELOG entry."
+        assert not legacy.exists()
+
+    def test_migration_never_overwrites_and_never_crosses_users(self, temp_workspace_path):
+        home = temp_workspace_path / "home"
+        home.mkdir()
+        (home / "AGENTS.md").write_text("home rules", encoding="utf-8")
+
+        with patch("agentica.workspace.AGENTICA_HOME", str(home)):
+            tenant = Workspace(temp_workspace_path, user_id="tenant-a")
+            assert not tenant.user_agent_md_path().exists()
+            assert (home / "AGENTS.md").is_file(), "another user's session must not move it"
+
+            default_user = Workspace(temp_workspace_path)
+            existing = default_user.user_agent_md_path()
+            existing.write_text("already mine", encoding="utf-8")
+            assert default_user.user_agent_md_path().read_text(encoding="utf-8") == "already mine"
+
+    def test_one_users_rules_never_reach_another(self, temp_workspace_path):
+        """The whole point of keeping rules per user rather than in HOME."""
+        outside = temp_workspace_path / "cwd"
+        outside.mkdir()
+        alice = Workspace(temp_workspace_path, user_id="alice")
+        alice.initialize()
+        alice.user_agent_md_path().write_text("Alice ships on Fridays.", encoding="utf-8")
+        bob = Workspace(temp_workspace_path, user_id="bob")
+        bob.initialize()
+
+        previous_cwd = os.getcwd()
+        try:
+            os.chdir(outside)
+            alice_context = asyncio.run(alice.get_context_prompt())
+            bob_context = asyncio.run(bob.get_context_prompt())
+        finally:
+            os.chdir(previous_cwd)
+
+        assert "Alice ships on Fridays." in alice_context
+        assert "Alice" not in bob_context
+
     def test_get_skills_dir(self, temp_workspace_path):
         """Test getting skills directory."""
         workspace = Workspace(temp_workspace_path)
@@ -353,11 +357,8 @@ class TestWorkspace:
 
         files = workspace.list_files()
 
-        # list_files only returns globally shared files
-        assert "AGENTS.md" in files
-        assert files["AGENTS.md"] is True
-        assert "PERSONA.md" in files
-        assert "TOOLS.md" in files
+        # list_files only reports the workspace-shared file
+        assert files == {"AGENTS.md": True}
 
     def test_search_memory(self, temp_workspace_path):
         """Test searching memory."""

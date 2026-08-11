@@ -116,10 +116,9 @@ class TestWorkspaceInitialize(unittest.TestCase):
             ws = Workspace(path=tmpdir)
             ws.initialize()
             self.assertTrue((Path(tmpdir) / "AGENTS.md").exists())
-            self.assertTrue((Path(tmpdir) / "PERSONA.md").exists())
-            self.assertTrue((Path(tmpdir) / "TOOLS.md").exists())
             self.assertTrue((Path(tmpdir) / "skills").exists())
             self.assertTrue((Path(tmpdir) / "users").exists())
+            self.assertTrue((Path(tmpdir) / "users" / "default" / "AGENTS.md").exists())
 
     def test_initialize_returns_true(self):
         with tempfile.TemporaryDirectory() as tmpdir:

@@ -192,7 +192,6 @@ def _cmd_config(ctx: CommandContext, cmd_args: str = ""):
     else:
         user_id = ctx.agent_config.get("user_id")
     con.print(f"  Project Dir: {project_base_dir(work_dir, user_id=user_id)}")
-    con.print(f"  Mode:        {'Shell' if ctx.shell_mode else 'Agent'}")
     if ctx.current_agent:
         con.print(f"  Permissions: {ctx.current_agent.tool_config.permission_mode}")
 
