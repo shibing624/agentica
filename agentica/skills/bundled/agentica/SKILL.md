@@ -52,7 +52,7 @@ Everything agentica keeps is under `~/.agentica` (or `$AGENTICA_HOME`):
 | `config.yaml` | named profiles + `active_profile`; the file is hand-editable and comments survive writes |
 | `.env` | hand-maintained keys, loaded in addition to `config.yaml` |
 | `logs/` | one log per CLI process; often the fastest way to see what another session actually did |
-| `workspace/` | long-term memory and this user's `AGENTS.md` (see below) |
+| `workspace/` | long-term memory; standing rules in `users/<id>/AGENTS.md` (see below) |
 | `skills/` | user-installed skills, one directory per skill with a `SKILL.md` |
 | `projects/` | session transcripts as JSONL, partitioned per working directory |
 | `cache/peers/` | the live-session directory and mailboxes behind `list_agents` / `send_message` |
@@ -110,8 +110,9 @@ fact. There is no dedicated tool: append a line with `edit_file` (or
 | This repository only | `<repo root>/AGENTS.md` | sessions started anywhere under that repo; the user may commit it |
 
 The path of every file already in the system prompt appears as `<!-- /abs/path -->`
-above it — reuse that path, do not guess. There is no `~/.agentica/AGENTS.md`
-anymore; that location is dead.
+above it — reuse that path, do not guess. There is no workspace-root
+`~/.agentica/workspace/AGENTS.md` and no `~/.agentica/AGENTS.md` — those
+locations are dead. User rules live only under `users/<id>/AGENTS.md`.
 
 **This session:** the user's request (and your write) are already in the
 conversation history, so follow the rule for the rest of the turn/session

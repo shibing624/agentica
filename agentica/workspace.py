@@ -37,7 +37,7 @@ class WorkspaceConfig:
     """Workspace configuration.
 
     Attributes:
-        agent_md: Instruction file name, used at both workspace and user level
+        agent_md: Per-user instruction file name (``users/{id}/AGENTS.md``)
         memory_md: Long-term memory file name
         memory_dir: Daily memory directory name
         skills_dir: Skills directory name
@@ -61,17 +61,19 @@ class Workspace:
     supporting multi-user isolation. All user data is stored under users/ directory.
 
     Directory structure:
-    - AGENTS.md: instructions shared by every user of this workspace
     - skills/: Custom skills directory (globally shared)
     - users/: User data directory (all users including default)
         - default/: Default user (when no user_id specified)
-            - AGENTS.md: this user's own instructions
+            - AGENTS.md: this user's own standing instructions
             - MEMORY.md: Long-term memory
             - memory/: Daily memory directory
         - {user_id}/: Other users
-            - AGENTS.md: this user's own instructions
+            - AGENTS.md: this user's own standing instructions
             - MEMORY.md: Long-term memory
             - memory/: Daily memory directory
+
+    There is no workspace-root ``AGENTS.md``. Standing rules live in
+    ``users/{user_id}/AGENTS.md``; project rules live in the repo-root chain.
 
     Default user mode:
         >>> workspace = Workspace("~/.agentica/workspace")  # user_id='default'
@@ -112,26 +114,10 @@ class Workspace:
             return Workspace.DEFAULT_USER_ID
         return uid.replace("/", "_").replace("\\", "_").replace("..", "_")
 
-    # Instructions shared by every user of this workspace.
-    # Templates are intentionally minimal — boilerplate ("Friendly and
-    # professional", default code-verification recipes) pollutes every
-    # system prompt with zero behavioural signal. Customize the file on
-    # disk when you actually have project-specific rules to add.
-    #
-    # There used to be a PERSONA.md and a TOOLS.md next to it, and a USER.md in
-    # each user directory. All three were injected as their own block of the
-    # same prompt, so nothing downstream could tell them apart — they were a
-    # filing system for the author, and four places to look for the reader.
-    DEFAULT_GLOBAL_FILES = {
-        "AGENTS.md": """# Agent Instructions
-
-<!-- Rules shared by every user of this workspace. -->
-<!-- Empty file = no extra rules injected into the system prompt. -->
-""",
-    }
-
     # Scaffold for users/{user_id}/AGENTS.md — this user's own instructions,
     # hand-edited or appended to by the agent with its ordinary file tools.
+    # Intentionally empty of behavioural rules: boilerplate in the scaffold
+    # would pollute every system prompt with zero signal.
     DEFAULT_USER_AGENT_MD = """# User Instructions ({user_id})
 
 <!-- Who this user is, how they want you to work, standing rules. -->
@@ -263,26 +249,22 @@ class Workspace:
         path.mkdir(parents=True, exist_ok=True)
         return path
 
-    def initialize(self, force: bool = False) -> bool:
-        """Initialize workspace.
+    def initialize(self) -> bool:
+        """Initialize workspace directories and this user's scaffold files.
 
-        Creates workspace directory, global configuration files, and user data directory.
-
-        Args:
-            force: Whether to overwrite existing files
+        Never overwrites an existing file: the only file written here is a
+        missing ``users/{id}/AGENTS.md`` scaffold. There used to be a ``force``
+        flag for rewriting the workspace-root ``AGENTS.md`` template; that file
+        is gone, so the flag governed nothing.
 
         Returns:
             Whether initialization was successful
         """
         self.path.mkdir(parents=True, exist_ok=True)
 
-        # Create the workspace-shared AGENTS.md
-        for filename, content in self.DEFAULT_GLOBAL_FILES.items():
-            filepath = self.path / filename
-            if not filepath.exists() or force:
-                filepath.write_text(content, encoding="utf-8")
-
-        # Create global directories
+        # Create global directories (no workspace-root AGENTS.md — that role is
+        # users/{id}/AGENTS.md for standing rules and the project chain for
+        # repo rules).
         (self.path / self.config.skills_dir).mkdir(exist_ok=True)
         (self.path / self.config.users_dir).mkdir(exist_ok=True)
 
@@ -325,9 +307,9 @@ class Workspace:
         """Check if workspace exists.
 
         Returns:
-            Whether both workspace directory and AGENTS.md file exist
+            Whether the workspace directory and its ``users/`` tree exist.
         """
-        return self.path.exists() and (self.path / self.config.agent_md).exists()
+        return self.path.exists() and (self.path / self.config.users_dir).is_dir()
 
     async def read_file_async(self, filename: str) -> Optional[str]:
         """Read workspace file asynchronously.
@@ -390,10 +372,11 @@ class Workspace:
     async def get_context_prompt(self) -> str:
         """Get workspace context (for injecting into System Prompt).
 
-        Everything comes from one kind of file, AGENTS.md, read from three kinds
-        of place: this user's own (``users/{user_id}/AGENTS.md``), the project
-        chain from CWD up to the repo root (also recognizing other products'
-        CLAUDE.md / .cursorrules), and the workspace-shared one.
+        Everything comes from one kind of file, AGENTS.md, read from two kinds
+        of place: this user's own (``users/{user_id}/AGENTS.md``) and the
+        project chain from CWD up to the repo root (also recognizing other
+        products' CLAUDE.md / .cursorrules). There is no workspace-root
+        AGENTS.md.
 
         Returns:
             Merged context string
@@ -474,13 +457,16 @@ class Workspace:
         return "\n\n---\n\n".join(parts) if parts else ""
 
     def _collect_agent_md_sources(self) -> List[Tuple[str, str]]:
-        """Collect agent config sources from user, project, and workspace locations.
+        """Collect AGENTS.md sources: this user first, then the project chain.
 
-        Priority (lowest to highest):
-        1. This user's own users/{user_id}/AGENTS.md
+        Order is budget priority (earlier entries keep the character budget):
+        1. This user's own ``users/{user_id}/AGENTS.md``
         2. Project directory chain (git root -> CWD), first-match-wins per dir
            Recognizes: AGENTS.md, CLAUDE.md, .cursorrules (cross-product compat)
-        3. Workspace AGENTS.md (shared by every user of this workspace)
+
+        A workspace-root ``AGENTS.md`` is intentionally not read: that file
+        used to inject shared scaffolding into every tenant's prompt, and
+        standing rules already have a home under ``users/``.
         """
         cwd = Path(os.getcwd())
         found: List[Tuple[str, str]] = []
@@ -538,21 +524,6 @@ class Workspace:
 
         project_chain.reverse()
         found.extend(project_chain)
-
-        workspace_agent_md = self.path / self.config.agent_md
-        if workspace_agent_md.is_file():
-            try:
-                workspace_content = workspace_agent_md.read_text(encoding="utf-8").strip()
-                workspace_resolved = workspace_agent_md.resolve()
-                if (
-                    workspace_content
-                    and workspace_resolved not in seen_paths
-                    and not self._is_empty_template(workspace_content)
-                ):
-                    found.append((str(workspace_agent_md), workspace_content))
-            except (OSError, UnicodeError) as exc:
-                logger.debug("Skipping unreadable workspace agent file %s: %s", workspace_agent_md, exc)
-
         return found
 
     @staticmethod
@@ -571,26 +542,30 @@ class Workspace:
         sources: List[Tuple[str, str]],
         max_chars: int,
     ) -> List[Tuple[str, str]]:
-        """Apply a character budget while preserving the highest-priority AGENTS files."""
-        selected_reversed: List[Tuple[str, str]] = []
+        """Apply a character budget, keeping earlier (higher-priority) sources first.
+
+        ``_collect_agent_md_sources`` puts the user's AGENTS.md first, so a
+        tight budget truncates or drops the project chain — never the user's
+        standing rules — unless the user file alone exceeds the budget.
+        """
+        selected: List[Tuple[str, str]] = []
         remaining = max_chars
 
-        for path, content in reversed(sources):
+        for path, content in sources:
             formatted = f"<!-- {path} -->\n{content}"
             if len(formatted) <= remaining:
-                selected_reversed.append((path, content))
+                selected.append((path, content))
                 remaining -= len(formatted)
                 continue
-            if not selected_reversed and remaining > 0:
+            if not selected and remaining > 0:
                 prefix_length = len(f"<!-- {path} -->\n")
                 truncated = self._truncate_agent_md_content(content, remaining - prefix_length)
                 if truncated:
-                    selected_reversed.append((path, truncated))
+                    selected.append((path, truncated))
                 break
             break
 
-        selected_reversed.reverse()
-        return selected_reversed
+        return selected
 
     # =========================================================================
     # Memory index constants (mirrors CC's MEMORY.md limits)
@@ -1102,13 +1077,13 @@ class Workspace:
         return self.path / self.config.skills_dir
 
     def list_files(self) -> Dict[str, bool]:
-        """List workspace global file status.
+        """List standing-instruction file status for the current user.
 
         Returns:
             Dictionary with file names as keys and existence status as values.
-            Note: Only lists globally shared files, not user-specific files.
+            Reports this user's ``AGENTS.md`` (not a workspace-root copy).
         """
-        return {self.config.agent_md: (self.path / self.config.agent_md).exists()}
+        return {self.config.agent_md: self.user_agent_md_path().is_file()}
 
     def get_all_memory_files(self) -> List[Path]:
         """Get all memory file paths for current user.

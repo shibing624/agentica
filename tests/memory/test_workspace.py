@@ -35,22 +35,8 @@ class TestWorkspaceConfig:
         assert config.agent_md == "CUSTOM_AGENT.md"
         assert config.memory_dir == "memories"
 
-    def test_default_global_templates_are_minimal_scaffolds(self):
-        """Default scaffolds carry no behavioural rules — empty by design.
-
-        Previous templates injected ~1KB of "Friendly and professional" /
-        "Run lint then typecheck then tests" boilerplate into every system
-        prompt with zero project-specific signal. The new defaults are
-        deliberately minimal so the prompt only grows when the user adds
-        real rules to AGENTS.md.
-        """
-        agents_md = Workspace.DEFAULT_GLOBAL_FILES["AGENTS.md"]
-        assert "Use shell tool to run" not in agents_md
-        assert "Friendly and professional" not in agents_md
-        # Marker comments are fine — they're stripped by _is_empty_template.
-        assert Workspace._is_empty_template(agents_md), (
-            "default AGENTS.md should look empty to the prompt assembler"
-        )
+    def test_default_user_agent_scaffold_is_empty_of_rules(self):
+        """User AGENTS scaffold carries no behavioural rules — empty by design."""
         assert Workspace._is_empty_template(
             Workspace.DEFAULT_USER_AGENT_MD.format(user_id="default")
         ), "a fresh user AGENTS.md must not inject its own scaffold"
@@ -85,8 +71,8 @@ class TestWorkspace:
         result = workspace.initialize()
 
         assert result is True
-        # Shared by every user of this workspace
-        assert (temp_workspace_path / "AGENTS.md").exists()
+        # No workspace-root AGENTS.md — standing rules live per user
+        assert not (temp_workspace_path / "AGENTS.md").exists()
         assert (temp_workspace_path / "skills").is_dir()
         # This user's own instructions live with the rest of their data
         user_path = temp_workspace_path / "users" / "default"
@@ -151,15 +137,14 @@ class TestWorkspace:
         environments. The test now controls all three discovery sources
         (global home / cwd chain / workspace) so the outcome is deterministic.
         """
-        # Seed a real AGENTS.md in the workspace so _load_agent_md_chain has
-        # non-empty content regardless of host filesystem state.
-        (temp_workspace_path / "AGENTS.md").write_text(
+        # Seed this user's AGENTS.md so _load_agent_md_chain has non-empty
+        # content regardless of host filesystem state.
+        workspace = Workspace(temp_workspace_path)
+        workspace.initialize()
+        workspace.user_agent_md_path().write_text(
             "# Project Agent\nProject-specific agent instructions go here.\n",
             encoding="utf-8",
         )
-
-        workspace = Workspace(temp_workspace_path)
-        workspace.initialize()
 
         # Isolate cwd + AGENTICA_HOME so host pollution can't influence merge.
         prev_cwd = os.getcwd()
@@ -244,33 +229,54 @@ class TestWorkspace:
         memory_prompt_python = asyncio.run(workspace.get_relevant_memories(query="python coding"))
         assert "Python preference" in memory_prompt_python or len(memory_prompt_python) > 0
 
-    def test_get_context_prompt_prioritizes_high_priority_agents_with_budget(self, temp_workspace_path):
-        """AGENTS context should cap at 40K chars and preserve higher-priority files."""
+    def test_get_context_prompt_prioritizes_user_agents_with_budget(self, temp_workspace_path):
+        """User AGENTS is first in budget; workspace-root leftovers are ignored."""
+        ws_root = temp_workspace_path / "ws"
         repo_root = temp_workspace_path / "repo"
         cwd = repo_root / "nested"
         cwd.mkdir(parents=True)
+        ws_root.mkdir()
         (repo_root / ".git").mkdir()
-        (repo_root / "AGENTS.md").write_text("# Project\n" + ("B" * 19000), encoding="utf-8")
-        (cwd / "AGENTS.md").write_text("# Nested\n" + ("C" * 19000), encoding="utf-8")
+        (repo_root / "AGENTS.md").write_text("# Project\n" + ("B" * 2000), encoding="utf-8")
+        (cwd / "AGENTS.md").write_text("# Nested\n" + ("C" * 2000), encoding="utf-8")
+        (ws_root / "AGENTS.md").write_text("# WorkspaceRoot\nSHOULD_NOT_APPEAR\n", encoding="utf-8")
 
-        global_home = temp_workspace_path / "global-home"
-        global_home.mkdir()
-        (global_home / "AGENTS.md").write_text("# Global\n" + ("A" * 30000), encoding="utf-8")
+        workspace = Workspace(ws_root)
+        workspace.initialize()
+        workspace.user_agent_md_path().write_text(
+            "# User\n" + ("A" * 2000),
+            encoding="utf-8",
+        )
 
-        workspace = Workspace(repo_root)
         previous_cwd = os.getcwd()
         try:
             os.chdir(cwd)
-            with patch("agentica.workspace.AGENTICA_HOME", str(global_home)):
-                context = asyncio.run(workspace.get_context_prompt())
+            context = asyncio.run(workspace.get_context_prompt())
         finally:
             os.chdir(previous_cwd)
 
+        assert "# User" in context
         assert "# Nested" in context
         assert "# Project" in context
-        assert "# Global" not in context
-        assert "C" * 500 in context
-        assert "B" * 500 in context
+        assert "SHOULD_NOT_APPEAR" not in context
+
+        # When the user's own rules alone fill the budget, they are what
+        # survives: standing rules are the reason this block exists, and the
+        # project chain is one `read_file` away in the repo.
+        workspace.user_agent_md_path().write_text(
+            "# User\n" + ("A" * Workspace.MAX_MEMORY_CHARACTER_COUNT),
+            encoding="utf-8",
+        )
+        try:
+            os.chdir(cwd)
+            tight = asyncio.run(workspace.get_context_prompt())
+        finally:
+            os.chdir(previous_cwd)
+
+        assert "# User" in tight
+        assert "# Nested" not in tight
+        assert "# Project" not in tight
+        assert len(tight) <= Workspace.MAX_MEMORY_CHARACTER_COUNT + 80
 
     def test_user_rules_live_under_users_never_in_agentica_home(self, temp_workspace_path):
         """One layout for everyone: the CLI is just the ``default`` user.
@@ -357,7 +363,7 @@ class TestWorkspace:
 
         files = workspace.list_files()
 
-        # list_files only reports the workspace-shared file
+        # list_files reports this user's AGENTS.md
         assert files == {"AGENTS.md": True}
 
     def test_search_memory(self, temp_workspace_path):

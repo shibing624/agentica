@@ -41,10 +41,9 @@ agent = Agent(
 
 ```
 workspace/
-+-- AGENTS.md         # 本 workspace 所有 user 共享的指令
 +-- users/
-    +-- {user_id}/   # 多用户隔离
-        +-- AGENTS.md        # 这个 user 自己的指令（人可改，agent 也可用 edit_file 改）
+    +-- {user_id}/   # 多用户隔离（CLI 的 user_id 是 default）
+        +-- AGENTS.md        # 这个 user 的常驻规则（人可改，agent 也可用 edit_file 改）
         +-- MEMORY.md        # 记忆索引（仅存条目链接，≤200行/25KB）
         +-- memory/          # 记忆内容文件（每条独立 .md）
             +-- feedback_python_style.md
@@ -54,6 +53,7 @@ workspace/
             +-- 2026-04-01.md
 ```
 
+没有 workspace 根目录的 `AGENTS.md`。常驻规则只在 `users/{user_id}/AGENTS.md`；项目规则在 repo 根的 `AGENTS.md` 链。
 ### 基本用法
 
 ```python
@@ -131,7 +131,7 @@ User prefers concise, typed Python. Avoid unnecessary comments.
 
 外部 workflow（如 `learn-from-experience`）要把确认偏好写成常驻规则时，直接往  
 `~/.agentica/workspace/users/{user_id}/AGENTS.md`  
-追加普通行即可。经验卡片若进 prompt，是直接从 EXPERIENCE 相关性召回注入（`## Learned Experiences`），和 AGENTS.md 无关；事实记忆同理，走 `get_relevant_memories`，也不写进 AGENTS.md。
+追加普通行即可。经验卡片若进 prompt，是直接从 EXPERIENCE 相关性召回注入（`## Learned Experiences`），**只保留用户纠正类**（`correction`）；`tool_error` / `success_pattern` 不进 system prompt。事实记忆同理，走 `get_relevant_memories`，也不写进 AGENTS.md。
 
 ---
 

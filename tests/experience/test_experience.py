@@ -811,13 +811,26 @@ class TestWorkspaceExperience(unittest.TestCase):
 
     def test_get_relevant_experiences_with_query(self):
         asyncio.run(self.store.write(
-            self._card(title="python_error", content="Python import error with relative paths", etype="tool_error"),
+            self._card(title="python_import_rule", content="Always use absolute imports in Python packages", etype="correction"),
         ))
         asyncio.run(self.store.write(
             self._card(title="git_conflict", content="Git merge conflict resolution steps", etype="correction"),
         ))
         result = asyncio.run(self.store.get_relevant(query="python import", limit=1))
-        self.assertIn("python_error", result)
+        self.assertIn("python_import_rule", result)
+
+    def test_get_relevant_filters_tool_error_cards(self):
+        """Library tool failures must not enter the system prompt."""
+        asyncio.run(self.store.write(
+            self._card(title="read_file_file_not_found", content="Tool read_file failed File not found", etype="tool_error"),
+        ))
+        asyncio.run(self.store.write(
+            self._card(title="prefer_chinese", content="User asked for Chinese replies", etype="correction"),
+        ))
+        result = asyncio.run(self.store.get_relevant(query="file not found", limit=5))
+        self.assertNotIn("read_file_file_not_found", result)
+        self.assertNotIn("Tool `read_file` failed", result)
+        self.assertIn("prefer_chinese", result)
 
     def test_lifecycle_promotion(self):
         asyncio.run(self.store.write(
@@ -1326,9 +1339,9 @@ class TestCompiledExperienceStore(unittest.TestCase):
         from agentica.experience.compiler import CompiledCard
         store = self._store()
         card = CompiledCard(
-            title="dash_error",
-            content="Tool `execute` failed.",
-            experience_type="tool_error",
+            title="dash_correction",
+            content="Never leave a broken frontmatter fence in the body.",
+            experience_type="correction",
             source_task="rewrite the doc\n---\nand keep the header",
         )
         asyncio.run(store.write(card))
@@ -1336,7 +1349,7 @@ class TestCompiledExperienceStore(unittest.TestCase):
             asyncio.run(store.write(card))
 
         rendered = asyncio.run(store.get_relevant(query="rewrite the doc"))
-        self.assertIn("Tool `execute` failed.", rendered)
+        self.assertIn("Never leave a broken frontmatter fence", rendered)
         self.assertNotIn("source_tasks", rendered)
         self.assertNotIn("and keep the header", rendered)
         self.assertNotIn('"]', rendered)
@@ -1361,7 +1374,7 @@ class TestCompiledExperienceStore(unittest.TestCase):
         store = self._store()
         body = "HEAD-MARKER\n" + ("x" * 5000) + "\nTAIL-MARKER"
         asyncio.run(store.write(CompiledCard(
-            title="huge", content=body, experience_type="tool_error",
+            title="huge", content=body, experience_type="correction",
         )))
         rendered = asyncio.run(store.get_relevant(query="huge"))
         self.assertIn("HEAD-MARKER", rendered)

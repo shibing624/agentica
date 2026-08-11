@@ -357,12 +357,13 @@ class TestGitStateStaysOutOfThePrompt:
             subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, capture_output=True, check=True)
         except (FileNotFoundError, subprocess.CalledProcessError):
             pytest.skip("git is unavailable")
-        # Workspace.exists() is gated on AGENTS.md; without it the prompt would
+        # Workspace.exists() is gated on users/; without it the prompt would
         # skip the whole workspace zone and the assertions below prove nothing.
-        (tmp_path / "AGENTS.md").write_text("# Rules\n- be brief\n")
+        workspace = Workspace(tmp_path)
+        workspace.initialize()
+        workspace.user_agent_md_path().write_text("# Rules\n- be brief\n")
         (tmp_path / "dirty.py").write_text("x = 1\n")
 
-        workspace = Workspace(tmp_path)
         agent = Agent(
             name="A",
             model=OpenAIChat(id="gpt-4o-mini", api_key="fake_openai_key"),

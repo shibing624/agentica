@@ -248,12 +248,15 @@ class CompiledExperienceStore:
             except (FileNotFoundError, OSError):
                 continue
 
-            # Defense-in-depth: pure success patterns (e.g. "read_file x76",
-            # "execute x5") teach nothing actionable and just inflate the
-            # prompt. They're no longer captured by default (see ExperienceConfig),
-            # but legacy cards on disk could still leak through; skip them here.
+            # Capturing is not injecting. `tool_error` and `success_pattern`
+            # cards exist for the skill-upgrade pipeline, which grounds a
+            # generated SKILL.md's gotchas in real failures — but neither
+            # belongs in a system prompt: "read_file failed: file not found"
+            # is telemetry about our own tools, and it used to crowd out the
+            # user corrections that actually change behaviour. The prompt gets
+            # `correction` cards only; the files stay on disk for the pipeline.
             card_type = extract_frontmatter_value(raw, "type") or entry.get("type", "")
-            if card_type == "success_pattern":
+            if card_type in ("success_pattern", "tool_error"):
                 continue
 
             repeat_count = extract_frontmatter_int(raw, "repeat_count", 1)

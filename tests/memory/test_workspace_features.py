@@ -111,11 +111,11 @@ class TestWorkspaceArchiveRedaction(unittest.TestCase):
 class TestWorkspaceInitialize(unittest.TestCase):
     """Workspace.initialize creates the directory structure."""
 
-    def test_creates_global_files(self):
+    def test_creates_user_files_not_workspace_root_agents(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ws = Workspace(path=tmpdir)
             ws.initialize()
-            self.assertTrue((Path(tmpdir) / "AGENTS.md").exists())
+            self.assertFalse((Path(tmpdir) / "AGENTS.md").exists())
             self.assertTrue((Path(tmpdir) / "skills").exists())
             self.assertTrue((Path(tmpdir) / "users").exists())
             self.assertTrue((Path(tmpdir) / "users" / "default" / "AGENTS.md").exists())
@@ -125,23 +125,25 @@ class TestWorkspaceInitialize(unittest.TestCase):
             ws = Workspace(path=tmpdir)
             self.assertTrue(ws.initialize())
 
-    def test_initialize_idempotent(self):
+    def test_initialize_idempotent_preserves_user_agents(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ws = Workspace(path=tmpdir)
             ws.initialize()
-            # Write custom content
-            (Path(tmpdir) / "AGENTS.md").write_text("custom", encoding="utf-8")
+            user_agents = Path(tmpdir) / "users" / "default" / "AGENTS.md"
+            user_agents.write_text("custom", encoding="utf-8")
             ws.initialize()  # Without force, should not overwrite
-            self.assertEqual((Path(tmpdir) / "AGENTS.md").read_text(encoding="utf-8"), "custom")
+            self.assertEqual(user_agents.read_text(encoding="utf-8"), "custom")
 
-    def test_initialize_force_overwrites(self):
+    def test_initialize_recreates_a_deleted_user_scaffold(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             ws = Workspace(path=tmpdir)
             ws.initialize()
-            (Path(tmpdir) / "AGENTS.md").write_text("custom", encoding="utf-8")
-            ws.initialize(force=True)
-            content = (Path(tmpdir) / "AGENTS.md").read_text(encoding="utf-8")
-            self.assertNotEqual(content, "custom")
+            user_agents = Path(tmpdir) / "users" / "default" / "AGENTS.md"
+            user_agents.unlink()
+            ws._user_initialized = False
+            ws.initialize()
+            self.assertTrue(user_agents.exists())
+            self.assertFalse((Path(tmpdir) / "AGENTS.md").exists())
 
 
 class TestWorkspaceReadWriteFile(unittest.TestCase):

@@ -288,8 +288,11 @@ class DeepAgent(Agent):
             )
 
         # DeepAgent is the product preset: capture errors + corrections only.
+        # Capturing a tool error is not the same as injecting it: the cards and
+        # events are what the skill-upgrade pipeline grounds gotchas in, while
+        # `CompiledExperienceStore.get_relevant` keeps them out of the prompt.
         # Pure success sequences are intentionally dropped — they don't carry
-        # actionable lessons and just inflate the prompt with telemetry.
+        # actionable lessons and just inflate the telemetry.
         # Users can pass their own experience_config to override.
         if experience_config is None:
             experience_config = ExperienceConfig(

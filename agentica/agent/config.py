@@ -214,6 +214,13 @@ class ExperienceConfig:
     Tool error and success pattern capture is deterministic (zero LLM cost).
     User correction classification uses auxiliary_model.
 
+    **Capturing is not injecting.** These switches decide what lands on disk
+    (events.jsonl + experience cards), which is what the skill-upgrade pipeline
+    reads. Only ``correction`` cards ever reach the system prompt — see
+    ``CompiledExperienceStore.get_relevant``, which filters ``tool_error`` and
+    ``success_pattern`` out: a prompt full of "read_file failed" is telemetry
+    about our own tools, and it crowds out what the user actually said.
+
     Lifecycle:
         1. Capture: tool errors, correction classification, success sequences
         2. Promote: repeat_count >= promotion_count within promotion_window_days → tier=hot
