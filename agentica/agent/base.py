@@ -25,6 +25,7 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Tuple,
     Type,
     TypeVar,
     TYPE_CHECKING,
@@ -601,7 +602,17 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # Mid-run steering: guidance pushed (possibly from another thread) while
         # the agent is inside its tool loop. Drained between tool batches and
         # injected as a user message so the model sees it on the next inference.
-        self._pending_steer: List[str] = []
+        # Each entry is (text, relayed): relayed marks text nobody typed on
+        # this terminal (a peer message, a finished job's report) so the
+        # re-queue path can re-tag it __RELAYED__ — without that tag a parked
+        # relayed line would regain slash-command dispatch, which the peer
+        # policy forbids.
+        self._pending_steer: List[Tuple[str, bool]] = []
+        # Guidance accepted during a run's final inference — buffered after the
+        # last drain, so the model never saw it. Parked here by
+        # _end_steer_window() (instead of being dropped) for the caller to
+        # recover via pop_undelivered_steer() and re-queue as the next turn.
+        self._undelivered_steer: List[Tuple[str, bool]] = []
         self._steer_lock = threading.Lock()
 
         # Cross-session peer channel (``agentica.peers.PeerSession``), set by the
@@ -937,7 +948,7 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         if self._session_guidance_snapshot is None:
             self._session_guidance_snapshot = "\n\n---\n\n".join(self._session_guidance_prompts)
 
-    def steer(self, guidance: str) -> bool:
+    def steer(self, guidance: str, *, relayed: bool = False) -> bool:
         """Inject guidance into a running tool loop without interrupting it.
 
         Unlike a queued message (which runs as a fresh turn after the current
@@ -953,6 +964,25 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         A False return means the caller MUST fall back to queuing a fresh turn
         rather than silently dropping the text: the guidance is not buffered
         here, so it can never leak into an unrelated later run.
+
+        A True return means the guidance WILL be delivered — but not
+        necessarily to this run's model: text accepted during the run's final
+        inference (after the last drain) is parked on the agent by
+        ``_end_steer_window`` and recoverable via ``pop_undelivered_steer()``,
+        so an interactive caller can re-queue it as the next turn. Either way
+        it is never dropped.
+
+        ``pop_undelivered_steer()`` is part of this API contract: a caller that
+        drives ``run()`` in a loop and lets users steer MUST pop after each run
+        end and decide what to do with the texts (the interactive CLI re-queues
+        them). A caller that steers but never pops leaks nothing into later
+        runs — the texts simply accumulate, awaiting an owner.
+
+        ``relayed=True`` marks text nobody typed on this terminal (a peer
+        message, a finished job's report). It only matters if the text ends
+        up parked: the re-queue path re-tags it ``__RELAYED__`` so a relayed
+        line can never regain slash-command dispatch (what the peer policy
+        promises senders).
         """
         if not guidance or not guidance.strip():
             return False
@@ -963,15 +993,20 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
             # `agent_running` check but before we append.
             if not self._running:
                 return False
-            self._pending_steer.append(guidance.strip())
+            self._pending_steer.append((guidance.strip(), relayed))
         return True
 
     def _drain_steer(self) -> List[str]:
-        """Atomically take and clear any buffered steering guidance."""
+        """Atomically take and clear any buffered steering guidance (texts only).
+
+        The delivery path (``_inject_steering``) folds everything into one
+        user-facing marker regardless of provenance, so the relayed flag is
+        projected away here; it is only preserved on the parked path.
+        """
         with self._steer_lock:
             if not self._pending_steer:
                 return []
-            drained = self._pending_steer
+            drained = [text for text, _relayed in self._pending_steer]
             self._pending_steer = []
             return drained
 
@@ -981,6 +1016,11 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         Flips ``_running`` True under ``_steer_lock`` so ``steer()`` observes a
         consistent state, and drops any guidance left over from a prior run so
         stale steering can never bleed into this one.
+
+        It must NOT touch ``_undelivered_steer``. Clearing parked guidance here
+        would silently lose texts that ``steer()`` already accepted — the exact
+        failure the parked buffer exists to prevent. Only the owner popping
+        ``pop_undelivered_steer()`` may retire them.
         """
         with self._steer_lock:
             self._running = True
@@ -990,12 +1030,37 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         """Close the steering window at run end (called by the Runner).
 
         After this, ``steer()`` returns False so the CLI falls back to queuing
-        a fresh turn. Also clears any guidance that arrived too late to be
-        drained by an inference, preventing leakage into the next run.
+        a fresh turn. Guidance that arrived too late to be drained by an
+        inference (the user typed during the final model call) is NOT dropped:
+        it moves to ``_undelivered_steer`` so the caller can recover it via
+        ``pop_undelivered_steer()`` and run it as the next turn.
         """
         with self._steer_lock:
             self._running = False
-            self._pending_steer = []
+            if self._pending_steer:
+                self._undelivered_steer.extend(self._pending_steer)
+                self._pending_steer = []
+
+    def pop_undelivered_steer(self) -> List[Tuple[str, bool]]:
+        """Take steering that outlived its run, so the caller can re-queue it.
+
+        This is the contract counterpart of ``steer()`` returning True (see its
+        docstring): every accepted-but-undrained text is retrievable here,
+        exactly once, in order. The interactive CLI pops right after each run
+        finishes and turns the entries into queued next-turn input, ahead of
+        any goal-continuation prompt. Each entry is ``(text, relayed)`` —
+        relayed entries must go back tagged ``__RELAYED__``, not as plain
+        input. Outside an interactive loop there is nobody to pop it and that
+        is deliberate: texts accumulate unboundedly only for callers who steer
+        without honoring the contract, and they are never delivered to (or
+        silently dropped from) a later run either way.
+        """
+        with self._steer_lock:
+            if not self._undelivered_steer:
+                return []
+            drained = self._undelivered_steer
+            self._undelivered_steer = []
+            return drained
 
     def _merge_tool_system_prompts(self) -> None:
         """Collect tool prompts and split them into static vs dynamic sections."""

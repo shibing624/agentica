@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from agentica.goals import is_goal_generated_prompt
+
 
 
 @dataclass
@@ -185,6 +187,24 @@ CONCURRENT_CMDS = frozenset(
 
 
 # ==================== Helpers ====================
+
+
+def queue_ahead_of_goal_continuation(pending_queue: PendingQueue, payload) -> None:
+    """Enqueue ``payload``, but ahead of any prompt the goal loop queued itself.
+
+    A continuation prompt is written by the goal loop, not typed by the user,
+    so letting it go first would spend a whole turn before the agent ever sees
+    the correction. ``payload`` is any queue payload (plain text, a tagged
+    relay, or a text+images tuple).
+    """
+    for idx, item in enumerate(pending_queue.peek_all()):
+        body = item[0] if isinstance(item, tuple) else item
+        if isinstance(body, str) and is_goal_generated_prompt(body):
+            if pending_queue.insert_index(idx, payload):
+                return
+            break
+    pending_queue.put(payload)
+
 
 IMAGE_EXTENSIONS = frozenset(
     {

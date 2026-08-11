@@ -67,6 +67,7 @@ from .btw import (
     _print_background_completion,
     _run_btw_concurrent,
     hand_to_agent,
+    promote_late_steer,
 )
 from .console_io import (
     ChatConsole,
@@ -759,6 +760,19 @@ def run_interactive(
                 except Exception:
                     pass
                 state.input_request = None
+
+            # Steering typed during the run's final inference never reached the
+            # model — the window closed before the next drain. Promote it to a
+            # queued next turn (never drop it). Runs BEFORE the goal hook so
+            # the user's text preempts an automated continuation lap, same as
+            # any other queued user input.
+            promoted = promote_late_steer(state, pending_queue)
+            if promoted:
+                count = f"({len(promoted)} messages) " if len(promoted) > 1 else ""
+                con.print(
+                    f"  [dim]↪ Current task finished before using the guidance "
+                    f"{count}· queued next.[/dim]"
+                )
 
             # Standing-goal hook: decide whether to enqueue a continuation
             # for the next turn. Honors user-priority and cancel semantics.

@@ -200,14 +200,14 @@ while True:
 
 | 想做的事 | 用什么 | 生效范围 |
 |---|---|---|
-| 立刻纠偏正在跑的这一轮 | `/steer <指引>` | 当前 run，在下一次推理前注入 |
+| 立刻纠偏正在跑的这一轮 | 直接打字（普通消息）或 `/steer <指引>` | 当前 run，在下一次推理前注入 |
 | 加一条长期约束 / 验收条件 | `/subgoal <文本>` | 持久化到 `GoalState`，每轮 continuation prompt 都带上 |
-| 插一个完整的新任务 | 直接打字（普通消息） | 排到队列，抢在续跑之前执行 |
+| 插一个完整的新任务 | `/queue <prompt>` | 排到队列，抢在续跑之前执行 |
 | 停下来 | `/goal pause` 或 Ctrl+C | 停止自动续跑，`/goal resume` 恢复 |
 
 `/steer` 只影响当前这一轮：它以 user 消息的形式进入对话历史，后续轮次靠上下文延续。要让约束在整个循环里都成立，用 `/subgoal`——它会渲染进每一轮的 continuation prompt。
 
-`/steer` 不会丢词。agent 不在 run 中时（典型场景：一轮刚结束、goal 正在跑 judge 的那几秒），它会自动降级成"下一轮消息"，并插在待执行的 continuation prompt **之前**，这样纠偏不会被一整轮无关工作挡在后面。
+普通输入默认 steer 不会丢词。agent 不在 run 中时（典型场景：一轮刚结束、goal 正在跑 judge 的那几秒），它会自动降级成"下一轮消息"，并插在待执行的 continuation prompt **之前**，这样纠偏不会被一整轮无关工作挡在后面；在 run 的最后一次推理期间输入、没被消费到的 steer 也一样，会在 run 结束时自动转成下一轮输入。带图片的输入和 `/requesting-code-review ...` 这类 skill 调用仍按新任务排队。
 
 CLI 行为：
 

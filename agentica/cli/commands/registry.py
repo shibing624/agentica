@@ -80,7 +80,7 @@ COMMAND_REGISTRY = {
     "/bg": (_cmd_background, "Run now in a parallel independent agent (alias)"),
     "/ps": (_cmd_ps, "List background agents and terminal commands"),
     "/stop": (_cmd_stop, "Stop background tasks: /stop <id|#n|pid> | all (Ctrl+C stops the current run)"),
-    "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (injected between tool batches)"),
+    "/steer": (_cmd_steer, "Course-correct the CURRENT run mid-task (plain text typed mid-run steers by default)"),
     "/list-agents": (_cmd_list_agents, "List your other live CLI sessions this one can message"),
     "/peers": (_cmd_list_agents, "List messageable live sessions (alias for /list-agents)"),
     "/send-message": (_cmd_send_message, "Send a message yourself: /send-message <session> <text>"),

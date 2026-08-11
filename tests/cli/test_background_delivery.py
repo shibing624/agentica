@@ -7,8 +7,13 @@ import time
 from unittest.mock import MagicMock
 
 from agentica.cli.commands.context import PendingQueue
-from agentica.cli.interactive.btw import _background_result_for_agent, hand_to_agent
+from agentica.cli.interactive.btw import (
+    _background_result_for_agent,
+    hand_to_agent,
+    promote_late_steer,
+)
 from agentica.cli.interactive.session_state import SessionState
+from agentica.goals import CONTINUATION_PROMPT_PREFIX
 from agentica.tools.background_processes import BackgroundProcessCompleted
 
 
@@ -130,7 +135,9 @@ class TestHandToAgent:
 
         hand_to_agent(state, pending, "report")
 
-        state.current_agent.steer.assert_called_once_with("report")
+        # relayed=True marks provenance so a parked (undrained) report can be
+        # re-queued with the __RELAYED__ tag instead of as plain typed input.
+        state.current_agent.steer.assert_called_once_with("report", relayed=True)
         assert pending.empty()
 
     def test_an_idle_agent_gets_a_queued_turn(self):
@@ -167,3 +174,69 @@ class TestHandToAgent:
         hand_to_agent(state, pending, "report")
 
         assert pending.peek_all() == [("__RELAYED__", "report")]
+
+
+class TestPromoteLateSteer:
+    """Steering accepted during a run's final inference never reached the
+    model; after the run it must become queued input, never vanish."""
+
+    def test_late_steer_becomes_queued_input_in_order(self):
+        state = SessionState()
+        state.agent_running = False
+        state.current_agent = MagicMock()
+        state.current_agent.pop_undelivered_steer.return_value = [
+            ("first", False),
+            ("second", False),
+        ]
+        pending = PendingQueue()
+
+        promoted = promote_late_steer(state, pending)
+
+        assert promoted == ["first", "second"]
+        # Plain str payloads: the user typed these, so the queued turn echoes
+        # like any other typed input.
+        assert pending.peek_all() == ["first", "second"]
+
+    def test_parked_relayed_text_goes_back_tagged(self):
+        # A peer/bg line accepted by steer() during the final inference was
+        # never shown to the model. When it is promoted, the __RELAYED__ tag
+        # must ride along — without it the queued turn regains the user-
+        # message echo and slash-command dispatch, which the peer policy bans.
+        state = SessionState()
+        state.current_agent = MagicMock()
+        state.current_agent.pop_undelivered_steer.return_value = [
+            ("#3 (term_2) finished: exit=0", True),
+        ]
+        pending = PendingQueue()
+
+        promote_late_steer(state, pending)
+
+        assert pending.peek_all() == [("__RELAYED__", "#3 (term_2) finished: exit=0")]
+
+    def test_promotion_jumps_ahead_of_a_goal_continuation(self):
+        state = SessionState()
+        state.current_agent = MagicMock()
+        state.current_agent.pop_undelivered_steer.return_value = [("user correction", False)]
+        pending = PendingQueue()
+        pending.put(f"{CONTINUATION_PROMPT_PREFIX} keep going")
+
+        promote_late_steer(state, pending)
+
+        assert pending.peek_all()[0] == "user correction"
+
+    def test_nothing_parked_is_a_noop(self):
+        state = SessionState()
+        state.current_agent = MagicMock()
+        state.current_agent.pop_undelivered_steer.return_value = []
+        pending = PendingQueue()
+
+        assert promote_late_steer(state, pending) == []
+        assert pending.empty()
+
+    def test_no_agent_yet_is_a_noop(self):
+        state = SessionState()
+        state.current_agent = None
+        pending = PendingQueue()
+
+        assert promote_late_steer(state, pending) == []
+        assert pending.empty()

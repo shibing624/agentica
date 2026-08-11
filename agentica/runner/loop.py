@@ -901,9 +901,13 @@ class LoopMixin:
                                     tool_call_dict = tool_resp.tool_call
                                     if tool_call_dict is not None and agent.run_response.tools:
                                         target_id = tool_call_dict.get("tool_call_id")
+                                        persisted_tool_call = {
+                                            key: value for key, value in tool_call_dict.items()
+                                            if key != "tool_display_meta"
+                                        }
                                         for tool_call in agent.run_response.tools:
                                             if target_id is not None and tool_call.get("tool_call_id") == target_id:
-                                                tool_call.update(tool_call_dict)
+                                                tool_call.update(persisted_tool_call)
                                                 break
                                     if agent.stream_intermediate_steps:
                                         yield self.generic_run_response(
@@ -1383,9 +1387,10 @@ class LoopMixin:
                 raise
             finally:
                 # Close the steering window under _steer_lock: flips _running
-                # False and drops late-arriving guidance so it can't leak into
-                # the next run. After this, steer() returns False and the CLI
-                # falls back to queuing a fresh turn.
+                # False and parks late-arriving guidance on the agent (see
+                # pop_undelivered_steer) so it can't leak into the next run
+                # and is never dropped. After this, steer() returns False and
+                # the CLI falls back to queuing a fresh turn.
                 agent._end_steer_window()
                 agent._run_loop = None
                 agent._run_task = None

@@ -20,13 +20,17 @@ from agentica.cli.runtime import (
 from agentica.cli.display import (
     show_help,
 )
-from agentica.goals import GoalManager, is_goal_generated_prompt
+from agentica.goals import GoalManager
 from agentica.memory.models import AgentRun
 from agentica.peers import PeerMessageRefused
 from agentica.model.message import Message
 from agentica.run_response import RunResponse
 
-from agentica.cli.commands.context import CommandContext, IMAGE_EXTENSIONS
+from agentica.cli.commands.context import (
+    CommandContext,
+    IMAGE_EXTENSIONS,
+    queue_ahead_of_goal_continuation,
+)
 from agentica.cli.commands.session import display_resumed_transcript, hydrate_resumed_session
 
 
@@ -193,23 +197,6 @@ def _cmd_queue(ctx: CommandContext, cmd_args: str = ""):
 
 
 
-def _queue_ahead_of_goal_continuation(pending_queue, text: str) -> None:
-    """Enqueue ``text``, but ahead of any prompt the goal loop queued itself.
-
-    A continuation prompt is written by the goal loop, not typed by the user,
-    so letting it go first would spend a whole turn before the agent ever sees
-    the correction.
-    """
-    for idx, item in enumerate(pending_queue.peek_all()):
-        body = item[0] if isinstance(item, tuple) else item
-        if isinstance(body, str) and is_goal_generated_prompt(body):
-            if pending_queue.insert_index(idx, text):
-                return
-            break
-    pending_queue.put(text)
-
-
-
 def _cmd_steer(ctx: CommandContext, cmd_args: str = ""):
     """Inject guidance into the running agent's tool loop (mid-task).
 
@@ -236,7 +223,7 @@ def _cmd_steer(ctx: CommandContext, cmd_args: str = ""):
     if ctx.pending_queue is None:
         con.print("  [yellow]Agent isn't running — use /queue to send this as the next message instead.[/yellow]")
         return
-    _queue_ahead_of_goal_continuation(ctx.pending_queue, guidance)
+    queue_ahead_of_goal_continuation(ctx.pending_queue, guidance)
     con.print("  [green]Agent isn't mid-run — queued as the next turn.[/green]")
 
 

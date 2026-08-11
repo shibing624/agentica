@@ -36,9 +36,11 @@ class SteerMixin:
         - When there is no trailing tool result to fold into (e.g. the very first
           inference of a run), we fall back to appending a user message.
 
-        Draining here — right before each inference — guarantees delivery: if a
-        run ends before the buffer is flushed, the leftover guidance survives on
-        the agent and is delivered at the start of the next run.
+        Draining here — right before each inference — is what makes delivery
+        timely. Guidance that arrives after the LAST inference of a run is
+        never shown to this run's model; ``_end_steer_window`` parks it on the
+        agent (``pop_undelivered_steer``) so the interactive caller can
+        re-queue it as the next turn rather than dropping it.
         """
         drained = agent._drain_steer()
         if not drained:

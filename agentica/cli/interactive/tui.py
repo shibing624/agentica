@@ -28,6 +28,7 @@ from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import Processor, Transformation
 from prompt_toolkit.styles import Style as PTStyle
 from prompt_toolkit.widgets import TextArea
+from rich.markup import escape as rich_escape
 
 from agentica.cli.commands.context import CONCURRENT_CMDS, PendingQueue
 from agentica.cli.commands.registry import COMMAND_REGISTRY
@@ -36,7 +37,7 @@ from agentica.cli.display import (
     get_file_completions,
     get_truncated_blocks,
 )
-from agentica.cli.runtime import history_file
+from agentica.cli.runtime import get_console, history_file
 from agentica.utils.log import logger
 
 from .attachments import (
@@ -54,6 +55,21 @@ from .console_io import (
 from .session_state import SessionState
 
 # ==================== TUI setup ====================
+
+
+def _steer_or_queue(state: SessionState, pending_queue: PendingQueue, text: str, payload) -> bool:
+    """Route plain text typed mid-run: steer the live run, queue on refusal.
+
+    Returns True when the text was accepted as steering. A False from
+    ``steer()`` means the run ended between the UI's ``agent_running`` check
+    and the call (the TOCTOU gap ``Agent.steer`` documents) — the text falls
+    back to the queue rather than being dropped.
+    """
+    agent = state.current_agent
+    if agent is not None and agent.steer(text):
+        return True
+    pending_queue.put(payload)
+    return False
 
 
 class _CleanResizeApplication(Application):
@@ -340,15 +356,41 @@ def _setup_tui(
                 event.app.invalidate()
                 return
 
-        # Any non-command message — including a follow-up typed while the agent
-        # is still running — is queued as a new turn and shown live in the bottom
-        # ``Queued (N):`` bar (the old default behavior). The queue bar already
-        # renders queued items with timestamps, so we deliberately do NOT also
-        # print a notice into the chat stream — that would interleave with the
-        # running AI response box. Explicit mid-flight nudges are still available
-        # via the ``/steer`` command.
-        # Skill auto-commands (``/requesting-code-review ...``) also go here —
-        # they are next-turn prompts, not concurrent CLI ops.
+        # Mid-run default: plain text STEERS the current run. Most follow-ups
+        # typed while the agent works are corrections or extra context ("not
+        # that file", "the error is actually 503") — queueing them until the
+        # run ends means the agent finishes on stale assumptions and the next
+        # turn is rework. Steering lands at the next tool-batch boundary
+        # instead. Boundaries:
+        # - slash input keeps its meaning: skill auto-commands and non-
+        #   concurrent commands stay queued as next-turn prompts (concurrent
+        #   commands and /btw already returned above)
+        # - image attachments queue — the steer channel is text-only
+        # - steer() refused (run ended in the TOCTOU gap) falls back to the
+        #   queue; steer accepted but never drained (typed during the final
+        #   inference) is promoted to a queued turn when the run ends. The
+        #   message is never lost either way.
+        # Gate on the post-dedup ``images`` (the payload ground truth), not the
+        # earlier ``has_images`` snapshot: if another image source is ever added
+        # between the two, an accepted steer would silently drop it.
+        if state.agent_running and not images and not text.startswith("/"):
+            if _steer_or_queue(state, pending_queue, text, payload):
+                # Honest copy: acceptance only means "buffered for the next
+                # inference boundary" — if the run finishes first, the text is
+                # promoted to a queued turn and app.py says so explicitly then.
+                preview = text[:60] + ("..." if len(text) > 60 else "")
+                get_console().print(
+                    f"  [dim]↪ Guidance added · /queue to always run next: {rich_escape(preview)}[/dim]"
+                )
+            event.app.current_buffer.reset(append_to_history=True)
+            event.app.invalidate()
+            return
+
+        # Idle agent (or queued fallback): the message runs as a new turn and
+        # is shown live in the bottom ``Queued (N):`` bar. The queue bar
+        # already renders queued items with timestamps, so we deliberately do
+        # NOT also print a notice into the chat stream — that would interleave
+        # with the running AI response box.
         pending_queue.put(payload)
 
         event.app.current_buffer.reset(append_to_history=True)
@@ -476,7 +518,7 @@ def _setup_tui(
         if state.input_request is not None:
             return "Type your answer, then Enter · Ctrl+C to abort"
         if state.agent_running:
-            return "type + Enter to queue, Ctrl+C to cancel"
+            return "type + Enter to steer · /queue to run next · Ctrl+C to cancel"
         return "Enter to send · Ctrl+J newline · / commands · @ files"
 
     def _get_prompt():

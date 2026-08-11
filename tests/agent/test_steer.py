@@ -51,6 +51,70 @@ class TestSteerBuffer(unittest.TestCase):
         self.assertEqual(agent._drain_steer(), ["first", "second"])
 
 
+class TestUndeliveredSteer(unittest.TestCase):
+    """Steering accepted during a run's final inference is never dropped: the
+    run ends before another inference can drain it, so _end_steer_window parks
+    it and the interactive caller re-queues it as the next turn."""
+
+    def test_end_window_parks_undrained_steer(self):
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("typed during the final inference")
+        agent._end_steer_window()
+        self.assertEqual(
+            agent.pop_undelivered_steer(),
+            [("typed during the final inference", False)],
+        )
+
+    def test_pop_drains_once(self):
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("a")
+        agent.steer("b")
+        agent._end_steer_window()
+        self.assertEqual(agent.pop_undelivered_steer(), [("a", False), ("b", False)])
+        self.assertEqual(agent.pop_undelivered_steer(), [])
+
+    def test_parked_steer_keeps_relayed_provenance(self):
+        # A peer/bg line parked mid-flight must go back tagged, not as plain
+        # input — otherwise it could regain slash-command dispatch.
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("typed by the user")
+        agent.steer("#3 (term_2) finished: ok", relayed=True)
+        agent._end_steer_window()
+        self.assertEqual(
+            agent.pop_undelivered_steer(),
+            [("typed by the user", False), ("#3 (term_2) finished: ok", True)],
+        )
+
+    def test_drained_steer_is_not_parked(self):
+        # Guidance that DID reach an inference was delivered — it must not
+        # resurface as a queued next turn.
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("delivered")
+        agent._drain_steer()  # what the Runner does before each inference
+        agent._end_steer_window()
+        self.assertEqual(agent.pop_undelivered_steer(), [])
+
+    def test_parked_steer_never_leaks_into_the_next_run(self):
+        from agentica.runner import Runner
+
+        agent = Agent()
+        agent._begin_steer_window()
+        agent.steer("too late")
+        agent._end_steer_window()
+        # A new run opens: the parked text must not be injected into its
+        # messages — only the CLI's explicit re-queue may deliver it.
+        agent._begin_steer_window()
+        messages = [Message(role="user", content="next task")]
+        Runner._inject_steering(messages, agent)
+        self.assertFalse(any("too late" in (m.content or "") for m in messages))
+        # ...and it is still waiting for the caller to pop it.
+        self.assertEqual(agent.pop_undelivered_steer(), [("too late", False)])
+
+
 class TestSteerInjection(unittest.TestCase):
     """The Runner flushes pending steering right before each model inference."""
 
