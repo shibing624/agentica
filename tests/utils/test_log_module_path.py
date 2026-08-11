@@ -15,7 +15,10 @@ import unittest
 from agentica.utils.log import (
     LoguruStyleFormatter,
     _PlainLoguruStyleFormatter,
+    _console_formatter_for,
     _dotted_module_from_path,
+    logger,
+    restore_console_logging,
 )
 
 
@@ -140,6 +143,82 @@ class TestPlainLoguruStyleFormatter(unittest.TestCase):
         out = self.formatter.format(rec)
         # left-justified width 8 — preserves grep-friendly column alignment
         self.assertIn(" INFO     | ", out)
+
+
+class TestConsoleFormatterSelection(unittest.TestCase):
+    """Console handler must colorize only when the stream can render ANSI.
+
+    A pipe / capture / IDE run pane can't render ``[32m`` — a colored
+    formatter there leaks raw escape sequences into the output (the "debug
+    log garble" bug). The plain file formatter already existed for log files;
+    this locks in the same rule for console streams.
+    """
+
+    def setUp(self):
+        self.repo_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
+
+    def test_tty_stream_gets_colored_formatter(self):
+        from unittest.mock import Mock
+
+        tty = Mock()
+        tty.isatty.return_value = True
+        self.assertIsInstance(_console_formatter_for(tty), LoguruStyleFormatter)
+
+    def test_tui_can_force_plain_even_when_stdout_is_a_tty(self):
+        from unittest.mock import Mock
+
+        tty = Mock()
+        tty.isatty.return_value = True
+        self.assertIsInstance(_console_formatter_for(tty, color=False), _PlainLoguruStyleFormatter)
+
+    def test_color_can_be_forced_for_plain_streams(self):
+        stream = io.StringIO()
+        self.assertIsInstance(_console_formatter_for(stream, color=True), LoguruStyleFormatter)
+
+    def test_non_tty_stream_gets_plain_formatter(self):
+        stream = io.StringIO()
+        formatter = _console_formatter_for(stream)
+        self.assertIsInstance(formatter, _PlainLoguruStyleFormatter)
+
+        rec = _RecordFactory.make(
+            os.path.join(self.repo_root, "agentica", "runner.py"),
+            funcName="_run_core",
+            lineno=855,
+            level=logging.DEBUG,
+            message="probe",
+        )
+        self.assertNotIn("\x1b[", formatter.format(rec))
+
+    def test_stream_without_isatty_falls_back_to_plain(self):
+        stream = object()  # no isatty() attribute at all
+        self.assertIsInstance(_console_formatter_for(stream), _PlainLoguruStyleFormatter)
+
+    def test_stream_whose_isatty_raises_falls_back_to_plain(self):
+        from unittest.mock import Mock
+
+        broken = Mock()
+        broken.isatty.side_effect = OSError("not a terminal")
+        self.assertIsInstance(_console_formatter_for(broken), _PlainLoguruStyleFormatter)
+
+    def test_restore_console_logging_reformats_existing_handler(self):
+        old_handlers = list(logger.handlers)
+        old_level = logger.level
+        buf = io.StringIO()
+        handler = logging.StreamHandler(buf)
+        handler.setFormatter(LoguruStyleFormatter())
+        logger.handlers[:] = [handler]
+        logger.setLevel(logging.DEBUG)
+        try:
+            restore_console_logging("DEBUG", color=False)
+            self.assertEqual(logger.level, logging.DEBUG)
+            self.assertIsInstance(handler.formatter, _PlainLoguruStyleFormatter)
+            logger.debug("plain debug probe")
+            self.assertNotIn("\x1b[", buf.getvalue())
+        finally:
+            logger.handlers[:] = old_handlers
+            logger.setLevel(old_level)
 
 
 class TestLoggerEndToEnd(unittest.TestCase):

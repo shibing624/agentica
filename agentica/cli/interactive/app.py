@@ -54,7 +54,7 @@ from agentica.tools.ask_user_question_tool import (
     set_default_ask_user_question_callback,
 )
 from agentica.tools.background_processes import BackgroundProcessCompleted
-from agentica.utils.log import logger, suppress_console_logging
+from agentica.utils.log import logger, restore_console_logging, suppress_console_logging
 from agentica.workspace import Workspace
 
 from .attachments import (
@@ -162,7 +162,9 @@ def run_interactive(
 ):
     """Run the interactive CLI with fixed-bottom input area TUI."""
 
-    if not agent_config.get("debug"):
+    if agent_config.get("debug"):
+        restore_console_logging("DEBUG", color=False)
+    else:
         suppress_console_logging()
 
     perm_mode = agent_config.get("permissions", "allow-all")
@@ -770,8 +772,8 @@ def run_interactive(
             if promoted:
                 count = f"({len(promoted)} messages) " if len(promoted) > 1 else ""
                 con.print(
-                    f"  [dim]↪ Current task finished before using the guidance "
-                    f"{count}· queued next.[/dim]"
+                    f"  Current task finished before using the guidance "
+                    f"{count}· queued as the next turn."
                 )
 
             # Standing-goal hook: decide whether to enqueue a continuation

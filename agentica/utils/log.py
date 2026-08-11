@@ -241,6 +241,27 @@ class _PlainLoguruStyleFormatter(logging.Formatter):
         )
 
 
+def _console_formatter_for(stream, *, color: Optional[bool] = None) -> logging.Formatter:
+    """Pick a console formatter that matches what the stream can render.
+
+    ``color=None`` means auto-detect from the stream. Callers embedded inside
+    prompt_toolkit (interactive TUI) must pass ``color=False`` even when stdout
+    is a TTY: patch_stdout does not parse arbitrary ANSI records reliably and
+    leaked ESC bytes show up as ``?[32m`` in the transcript.
+    """
+    if color is True:
+        return LoguruStyleFormatter()
+    if color is False:
+        return _PlainLoguruStyleFormatter()
+    try:
+        is_tty = bool(stream.isatty())
+    except Exception:  # noqa: BLE001 — streams without isatty() can't colorize
+        is_tty = False
+    if is_tty:
+        return LoguruStyleFormatter()
+    return _PlainLoguruStyleFormatter()
+
+
 def get_agentica_logger(log_level: str = "INFO", log_file: Optional[str] = None) -> logging.Logger:
     """Get agentica-specific logger that doesn't interfere with user's logging."""
     # Create a logger specifically for agentica
@@ -258,7 +279,7 @@ def get_agentica_logger(log_level: str = "INFO", log_file: Optional[str] = None)
     if not has_console_handler:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-        console_handler.setFormatter(LoguruStyleFormatter())
+        console_handler.setFormatter(_console_formatter_for(sys.stdout))
         logger.addHandler(console_handler)
 
     # Add file handler if specified and not exists
@@ -379,19 +400,26 @@ def suppress_console_logging():
             logger.removeHandler(handler)
 
 
-def restore_console_logging(log_level: str = "INFO"):
+def restore_console_logging(log_level: str = "INFO", *, color: Optional[bool] = None):
     """Restore console logging for agentica logger.
     
     Args:
         log_level: Log level for the console handler
+        color: True forces ANSI, False forces plain text, None auto-detects.
     """
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    logger.setLevel(level)
+
     # Check if a non-file console handler already exists
-    has_console = any(
-        isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
-        for h in logger.handlers
-    )
-    if not has_console:
+    console_handlers = [
+        h for h in logger.handlers
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
+    ]
+    if not console_handlers:
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, log_level.upper(), logging.INFO))
-        console_handler.setFormatter(LoguruStyleFormatter())
         logger.addHandler(console_handler)
+        console_handlers.append(console_handler)
+    for handler in console_handlers:
+        handler.setLevel(level)
+        stream = getattr(handler, "stream", sys.stdout)
+        handler.setFormatter(_console_formatter_for(stream, color=color))

@@ -770,7 +770,7 @@ def _cmd_debug(ctx: CommandContext, cmd_args: str = ""):
         ctx.current_agent.debug = enable
 
     if enable:
-        restore_console_logging("DEBUG")
+        restore_console_logging("DEBUG", color=False)
         set_log_level_to_debug()
         con.print("  [green]Debug logging: ON[/green]")
         con.print("  [dim]DEBUG records now print to the console; subagent output turns verbose next turn.[/dim]")

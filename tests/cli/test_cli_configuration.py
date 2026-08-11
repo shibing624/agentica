@@ -827,7 +827,7 @@ class TestDebugToggle(unittest.TestCase):
         self.assertTrue(ctx.agent_config["debug"])
         self.assertTrue(ctx.tui_state["debug"])
         self.assertTrue(ctx.current_agent.debug)
-        restore.assert_called_once()
+        restore.assert_called_once_with("DEBUG", color=False)
         to_debug.assert_called_once()
         suppress.assert_not_called()
         to_info.assert_not_called()
@@ -849,7 +849,7 @@ class TestDebugToggle(unittest.TestCase):
         restore, _suppress, to_debug, _to_info = self._run(ctx, "on")
 
         self.assertTrue(ctx.agent_config["debug"])
-        restore.assert_called_once()
+        restore.assert_called_once_with("DEBUG", color=False)
         to_debug.assert_called_once()
 
     def test_explicit_off(self):
