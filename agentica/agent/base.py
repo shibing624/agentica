@@ -1246,8 +1246,8 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
         # explicit re-init, ``copy.copy`` aliases them, so ``clone.enable_tool``
         # / ``clone.disable_tool`` would silently mutate the source agent's
         # tool gating. Same for skill runtime configs.
-        clone._tool_runtime_configs = dict(getattr(self, "_tool_runtime_configs", {}))
-        clone._skill_runtime_configs = dict(getattr(self, "_skill_runtime_configs", {}))
+        clone._tool_runtime_configs = dict(self._tool_runtime_configs)
+        clone._skill_runtime_configs = dict(self._skill_runtime_configs)
         # Fresh Runner bound to the clone
         clone._runner = Runner(clone)
         # Tool isolation: stateful tools (todos, parent_agent, workspace, skill
