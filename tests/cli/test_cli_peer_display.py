@@ -43,7 +43,8 @@ class TestPeerMessageRendering:
     def test_an_agent_message_is_labelled_with_the_sender(self):
         out = _render([_message("方案A全量+四臂完成")])
 
-        assert "Agent nlp-f1 ›" in out
+        assert "nlp-f1" in out
+        assert "💬" in out
         assert "方案A全量+四臂完成" in out
         assert "starting a turn" in out
 

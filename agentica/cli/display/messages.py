@@ -150,8 +150,10 @@ def display_peer_messages(messages: List[PeerMessage], *, delivery: str) -> None
     act on them differently. A relayed *user* message is the human speaking from
     another terminal, so it reuses the ``❯`` panel — that panel is this CLI's one
     signal for "the human said this", and a relayed instruction carries exactly
-    that authority. Another session's agent gets an unpanelled, labelled line
-    instead, so agent traffic can never be mistaken for the user's own words.
+    that authority. Another session's agent gets a ``↳ 💬 <name>`` header with
+    the message indented beneath — the same visual language as a tool call, so
+    agent traffic reads as an incoming event and can never be mistaken for the
+    user's own words.
 
     ``delivery`` is a short clause such as ``starting a turn`` or ``will reach
     the agent between tool calls`` — the caller knows which path accepted the
@@ -165,15 +167,15 @@ def display_peer_messages(messages: List[PeerMessage], *, delivery: str) -> None
             body.append(message.text, style=f"bold {COLORS['user']}")
             _echo_panel(body)
         else:
-            block = Table.grid(padding=(0, 1), expand=True)
-            block.add_column(no_wrap=True)
-            block.add_column(ratio=1, overflow="fold")
-            block.add_row(
-                Text(f"Agent {message.from_name} ›", style=f"bold {COLORS['tool']}"),
-                Text(message.text, style=COLORS["tool"]),
-            )
             console.print()
-            console.print(Padding(block, (0, 1)))
+            # Header line mirrors a tool call: `  ↳ 💬 <session>` in bold cyan.
+            console.print(
+                f"  ↳ 💬 {message.from_name}", style=f"bold {COLORS['tool']}"
+            )
+            # Message body indented under the header; each line kept on its own
+            # row so multi-line replies stay aligned and fold cleanly.
+            for line in message.text.splitlines() or [""]:
+                console.print(f"    {line}", style=COLORS["tool"])
         console.print(f"  {delivery}", style="dim")
 
 
