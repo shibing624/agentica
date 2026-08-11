@@ -20,7 +20,9 @@ Example:
     )
     ```
 """
+import asyncio
 import json
+import re
 from typing import Optional, List, Callable, Literal
 
 from agentica.tools.base import Tool, StopAgentRun
@@ -135,7 +137,11 @@ turn instead. Keep using this tool for the user who is actually here.
         self.input_callback = input_callback
         self.timeout = timeout
         self.default_on_timeout = default_on_timeout
-        
+        # Bound to the owning agent at wire time so ``ask_user_question`` can
+        # resolve an auxiliary model for parsing free-form replies. None for
+        # SDK callers that never bind the tool to an agent.
+        self._parent_agent = None
+
         # Register the ask_user_question function
         self.register(self.ask_user_question)
         self.register(self.confirm)
@@ -144,6 +150,27 @@ turn instead. Keep using this tool for the user who is actually here.
         # and silently continue without an answer.
         self.functions["ask_user_question"].manages_own_timeout = True
         self.functions["confirm"].manages_own_timeout = True
+
+    def set_parent_agent(self, agent) -> None:
+        """Bind to the owning agent so the tool can resolve an auxiliary model
+        for LLM-based reply parsing."""
+        self._parent_agent = agent
+
+    def clone(self) -> "AskUserQuestionTool":
+        """Fresh instance so each agent owns its ``_parent_agent`` slot."""
+        new = AskUserQuestionTool(
+            input_callback=self.input_callback,
+            timeout=self.timeout,
+            default_on_timeout=self.default_on_timeout,
+        )
+        from collections import OrderedDict
+        if set(new.functions) != set(self.functions):
+            new.functions = OrderedDict(
+                (name, new.functions[name])
+                for name in self.functions
+                if name in new.functions
+            )
+        return new
     
     def get_system_prompt(self) -> Optional[str]:
         """Get the system prompt for user input tool usage guidance."""
@@ -195,13 +222,6 @@ turn instead. Keep using this tool for the user who is actually here.
         
         try:
             user_input = input("Your response: ").strip()
-            
-            # Handle option number input
-            if options and user_input.isdigit():
-                idx = int(user_input) - 1
-                if 0 <= idx < len(options):
-                    user_input = options[idx]
-            
             print("=" * 60 + "\n")
             return user_input
         except EOFError:
@@ -211,7 +231,145 @@ turn instead. Keep using this tool for the user who is actually here.
                 return self.default_on_timeout
             return ""
     
-    def ask_user_question(
+    def _resolve_parse_model(self):
+        """Get a cheap model for parsing free-form replies, or None.
+
+        Uses the parent agent's auxiliary model (the same cheap tier that
+        memory extraction / compression run on). Returns None when the tool
+        was never bound to an agent (SDK callers, cron jobs) — callers must
+        then fall back to returning the raw reply rather than guessing.
+        """
+        agent = self._parent_agent
+        if agent is None:
+            return None
+        try:
+            return agent.resolve_auxiliary_model("ask_user_question")
+        except Exception:
+            return None
+
+    async def _llm_parse(self, model, instruction: str) -> Optional[str]:
+        """One-shot LLM call returning the model's text, or None on failure.
+
+        Runs on the agent's event loop (this tool is async, so ``invoke`` is
+        awaited directly — no loop juggling). A short hard timeout bounds a
+        slow/broken auxiliary model so the user's turn never hangs on the
+        parse after they already answered.
+        """
+        try:
+            resp = await asyncio.wait_for(
+                model.invoke([Message(role="user", content=instruction)]),
+                timeout=30.0,
+            )
+        except Exception as e:
+            logger.warning(f"ask_user_question LLM parse failed: {e}")
+            return None
+        # Extract text from common response shapes (mirrors compression manager).
+        text = None
+        if hasattr(resp, "choices") and resp.choices:
+            try:
+                text = resp.choices[0].message.content
+            except (AttributeError, IndexError):
+                pass
+        if text is None and hasattr(resp, "content") and isinstance(resp.content, str):
+            text = resp.content
+        if text is None and isinstance(resp, str):
+            text = resp
+        return text
+
+    async def _parse_select(self, prompt: str, options: List[str], raw_input: str) -> str:
+        """Map a free-form reply to one of ``options`` via the auxiliary LLM.
+
+        The user's reply is never enumerable: "3, because workers=10 is ok",
+        "第二个吧", "嗯用那个便宜的", a conditional, a typo. Rule matching
+        (isdigit / startswith) is exactly what fabricated a choice the user
+        never made. The LLM reads the reply in context and returns an option
+        index, or null when the reply does not clearly pick one — in which
+        case we return the raw reply so the model sees what the user said.
+
+        Falls back to the raw reply (no guessing) when no model is available
+        or the call fails.
+        """
+        if not options or raw_input in options:
+            return raw_input
+        model = self._resolve_parse_model()
+        if model is None:
+            logger.info("ask_user_question: no auxiliary model; returning raw reply")
+            return raw_input
+
+        lines = [f"The user was asked a question and given numbered options."]
+        lines.append(f"Question: {prompt}")
+        lines.append("Options:")
+        for i, opt in enumerate(options, 1):
+            lines.append(f"{i}. {opt}")
+        lines.append("")
+        lines.append(f"The user's reply: {raw_input}")
+        lines.append("")
+        lines.append(
+            "Map the reply to the option the user intended by meaning, not "
+            "wording. The reply may be a number, a paraphrase, a partial "
+            "description, or carry a rationale after the choice. Reply with "
+            'ONLY a JSON object: {"option_index": <1-based number of the chosen '
+            'option, or null if the reply does not clearly choose any>}. No '
+            "other text."
+        )
+        text = await self._llm_parse(model, "\n".join(lines))
+        if not text:
+            return raw_input
+        # The model may wrap JSON in prose or fences; scan for the first
+        # {"option_index": ...} object, then fall back to the first integer.
+        m = re.search(r'"option_index"\s*:\s*(\d+|null)', text)
+        if m:
+            val = m.group(1)
+            if val == "null":
+                return raw_input
+            idx = int(val) - 1
+            if 0 <= idx < len(options):
+                return options[idx]
+            return raw_input
+        m = re.search(r"\b(\d+)\b", text)
+        if m:
+            idx = int(m.group(1)) - 1
+            if 0 <= idx < len(options):
+                return options[idx]
+        return raw_input
+
+    async def _parse_confirm(self, prompt: str, raw_input: str) -> str:
+        """Resolve a yes/no reply via the auxiliary LLM.
+
+        A short keyword fast-path covers the unambiguous common cases so a
+        reachable model isn't taxed for "yes"/"no"/"是". Anything else
+        ("嗯行吧可以", "不要", "go ahead") goes to the LLM. Without a model,
+        an unrecognised reply defaults to "no" (the safe refusal) rather than
+        fabricating consent.
+        """
+        lower = raw_input.lower().strip()
+        if lower in ("yes", "y", "是", "确认", "ok", "确定", "好", "好的", "可以"):
+            return "yes"
+        if lower in ("no", "n", "否", "取消", "cancel", "不要", "不行"):
+            return "no"
+        model = self._resolve_parse_model()
+        if model is None:
+            logger.warning(f"Unrecognised confirm reply, no model to parse: {raw_input}; defaulting to 'no'")
+            return "no"
+        instruction = (
+            f"The user was asked a yes/no question. Map their reply to yes or no.\n"
+            f"Question: {prompt}\n"
+            f"User's reply: {raw_input}\n\n"
+            'Reply with ONLY a JSON object: {"answer": "yes" | "no"}. No other text.'
+        )
+        text = await self._llm_parse(model, instruction)
+        if not text:
+            return "no"
+        m = re.search(r'"answer"\s*:\s*"(yes|no)"', text, re.IGNORECASE)
+        if m:
+            return m.group(1).lower()
+        if re.search(r"\byes\b", text, re.IGNORECASE):
+            return "yes"
+        if re.search(r"\bno\b", text, re.IGNORECASE):
+            return "no"
+        return "no"
+
+    async def ask_user_question(
         self,
         prompt: str,
         mode: Literal["confirm", "text", "select"] = "text",
@@ -261,14 +419,14 @@ turn instead. Keep using this tool for the user who is actually here.
             )
         """
         logger.info(f"User input requested: mode={mode}, prompt={prompt[:100]}...")
-        
+
         # Validate mode and options
         if mode == "select" and not options:
             return json.dumps({
                 "error": "Options required for select mode",
                 "prompt": prompt,
             }, ensure_ascii=False)
-        
+
         # Build the full prompt based on mode
         if mode == "confirm":
             full_prompt = f"{prompt}\n\nPlease respond with 'yes' or 'no'."
@@ -279,46 +437,44 @@ turn instead. Keep using this tool for the user who is actually here.
         else:  # text mode
             full_prompt = prompt
             valid_options = None
-        
-        # Get user input
-        response = self._get_input(full_prompt, valid_options if mode == "select" else None)
-        
-        # Normalize confirmation responses
+
+        # The input callback is sync and may block indefinitely (the CLI's
+        # prompt_toolkit callback parks on a queue until the user types).
+        # Run it in a thread so the event loop stays live to service the UI
+        # that will deliver the answer.
+        loop = asyncio.get_running_loop()
+        raw_input = await loop.run_in_executor(
+            None, lambda: self._get_input(full_prompt, valid_options if mode == "select" else None)
+        )
+
+        # Parse the reply. The user's wording is never enumerable, so select
+        # and confirm go through the auxiliary LLM. Text mode is the user's
+        # verbatim reply — nothing to resolve.
         if mode == "confirm":
-            response_lower = response.lower().strip()
-            if response_lower in ["yes", "y", "是", "确认", "ok", "确定"]:
-                response = "yes"
-            elif response_lower in ["no", "n", "否", "取消", "cancel"]:
-                response = "no"
-            else:
-                # Invalid response, ask again or default to no
-                logger.warning(f"Invalid confirmation response: {response}, defaulting to 'no'")
-                response = "no"
-        
-        # Validate selection
-        if mode == "select" and options and response not in options:
-            # Try to find a close match
-            response_lower = response.lower()
-            for opt in options:
-                if opt.lower() == response_lower or opt.lower().startswith(response_lower):
-                    response = opt
-                    break
-            else:
-                logger.warning(f"Invalid selection: {response}, using first option")
-                response = options[0] if options else response
-        
+            response = await self._parse_confirm(prompt, raw_input)
+        elif mode == "select":
+            response = await self._parse_select(prompt, options or [], raw_input)
+        else:
+            response = raw_input
+
         logger.info(f"User input received: {response[:100]}...")
-        
+
         # The prompt is echoed back in full: the CLI renders this result as the
         # transcript's only lasting record of the exchange (the question widget
         # is transient), and a clipped copy would hide what was actually asked.
-        return json.dumps({
+        # ``raw_input`` preserves the user's full typed reply when it was
+        # resolved to an option (e.g. "3, because workers=10 is ok" → option 3),
+        # so the model still sees the rationale the user attached.
+        result = {
             "mode": mode,
             "prompt": prompt,
             "response": response,
-        }, ensure_ascii=False)
-    
-    def confirm(self, prompt: str) -> str:
+        }
+        if mode in ("select", "confirm") and raw_input != response:
+            result["raw_input"] = raw_input
+        return json.dumps(result, ensure_ascii=False)
+
+    async def confirm(self, prompt: str) -> str:
         """
         Quick confirmation method - shorthand for ask_user_question with mode="confirm".
         

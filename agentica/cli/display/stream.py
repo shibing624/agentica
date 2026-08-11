@@ -50,7 +50,11 @@ def _parse_ask_user_exchange(result_str: str) -> Optional[Tuple[str, str]]:
         return None
     if not isinstance(payload, dict) or "response" not in payload:
         return None
-    return str(payload.get("prompt", "")), str(payload.get("response", ""))
+    return (
+        str(payload.get("prompt", "")),
+        str(payload.get("response", "")),
+        payload.get("raw_input"),
+    )
 
 
 class StreamDisplayManager:
@@ -833,12 +837,16 @@ class StreamDisplayManager:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")
 
     def _display_ask_user_exchange(
-        self, prompt: str, response: str, *, elapsed_str: str
+        self, prompt: str, response: str, raw_input: Optional[str] = None,
+        *, elapsed_str: str
     ) -> None:
         """Replay a human-in-the-loop question and the user's answer, unclipped.
 
         Both sides go into the transcript so scrolling back weeks later still
         shows what the agent asked and what the user chose to do about it.
+        ``raw_input`` is the user's full typed reply when it was resolved to an
+        option (e.g. "3, because workers=10 is ok" → option 3); showing it
+        preserves the rationale that would otherwise vanish.
         """
         cont_prefix = "      "
         # Both sides are free text — a model-written question or a typed answer
@@ -852,6 +860,16 @@ class StreamDisplayManager:
             for line in body_lines[1:]:
                 self._assistant_console.print(
                     f"{cont_prefix}   {line}", style="dim", highlight=False, markup=False
+                )
+        if raw_input and raw_input != response:
+            raw_lines = raw_input.splitlines() or [""]
+            self._assistant_console.print(
+                f"{cont_prefix}   (your input: {raw_lines[0]})",
+                style="dim italic", highlight=False, markup=False,
+            )
+            for line in raw_lines[1:]:
+                self._assistant_console.print(
+                    f"{cont_prefix}   {line}", style="dim italic", highlight=False, markup=False
                 )
         if elapsed_str:
             self._assistant_console.print(f"{cont_prefix}{elapsed_str.lstrip()}", style="dim")

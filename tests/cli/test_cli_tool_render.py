@@ -269,6 +269,34 @@ class TestCLIToolRender(unittest.TestCase):
         for line in answer.splitlines():
             self.assertIn(line, rendered)
 
+    def test_raw_input_rationale_is_shown_in_transcript(self):
+        """When the user typed "3, because workers=10 is ok" and it resolved to
+        option 3, scrolling back must still show the rationale the user gave."""
+        import json
+        from io import StringIO
+
+        from rich.console import Console
+        from agentica.cli.display import StreamDisplayManager
+
+        output = StringIO()
+        console = Console(file=output, force_terminal=False, color_system=None)
+        dm = StreamDisplayManager(console)
+        dm.display_tool_result(
+            "ask_user_question",
+            json.dumps({
+                "mode": "select",
+                "prompt": "选哪个？",
+                "response": "100 题（~3.5 小时）",
+                "raw_input": "3 , 100题, workers=10 is ok",
+            }, ensure_ascii=False),
+            is_error=False,
+            elapsed=5.0,
+        )
+
+        rendered = output.getvalue()
+        self.assertIn("100 题（~3.5 小时）", rendered)
+        self.assertIn("workers=10 is ok", rendered)
+
     def test_unparseable_ask_result_falls_back_to_generic_rendering(self):
         """A select-mode error dict has no 'response' — it must still print."""
         from agentica.cli.display import StreamDisplayManager
@@ -314,13 +342,14 @@ class TestCLIToolRender(unittest.TestCase):
 
     def test_tool_returns_the_whole_prompt(self):
         """The result JSON is what the CLI replays, so it can't clip at 200."""
+        import asyncio
         import json
 
         from agentica.tools.ask_user_question_tool import AskUserQuestionTool
 
         long_prompt = self.ASK_PROMPT * 3
         tool = AskUserQuestionTool(input_callback=lambda prompt, options: "ok")
-        payload = json.loads(tool.ask_user_question(prompt=long_prompt, mode="text"))
+        payload = json.loads(asyncio.run(tool.ask_user_question(prompt=long_prompt, mode="text")))
 
         self.assertEqual(payload["prompt"], long_prompt)
         self.assertEqual(payload["response"], "ok")
