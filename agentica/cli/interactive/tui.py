@@ -302,7 +302,7 @@ def _setup_tui(
                 event.app.exit()
             else:
                 state.last_ctrl_c = now
-                tui_state["spinner_text"] = "Press Ctrl+C again to exit; summary appears below"
+                tui_state["spinner_text"] = "Press Ctrl+C again to exit"
                 event.app.invalidate()
 
     @kb.add("escape", "p")
