@@ -258,6 +258,21 @@ CLI 对 `task` / `delegate` / `send_message` 的调用行会**完整展示**任�
 - 子进程用的是 `agentica --query "..." --print`，`--print` 只把最终回答写到 stdout（没有 banner、没有日志），你也可以在脚本里直接这么用；失败时退出码非 0。
 - **小活用 `task`**。读代码、搜仓库、查资料——`task` 便宜得多；只有工作大到值得独立 context（或必须换目录）时才 `delegate`。
 
+### `/ps` 与 `/stop`
+
+`/ps` 列出后台终端命令（`execute(background=True)`、`delegate`）和后台 agent 任务（`/background`）。
+`/stop` 停掉它们，**必须显式给目标**：
+
+- `Ctrl+C` —— 中止你正在等的这一轮（空输入时连按两次退出）。当前这一轮只由它负责。
+- `/stop <id>`（也接受 `pid` 或 `/ps` 里的 `#n`）—— 停掉指定的那个后台任务。
+- `/stop all` —— 停掉全部后台任务。
+- `/stop`（不带参数）—— 只打印用法并列出可选目标，**什么都不停**。
+
+两条边界是刻意的：
+
+1. **`/stop` 不碰当前这一轮。** Ctrl+C 做的事比 `Agent.cancel()` 多：唤醒卡在 `ask_user_question` 上的线程、把常驻 goal 置为 `paused`（否则轮次结束的钩子会立刻续跑一轮）、连按第二次升级为强制退出。而且 agent 正等你回答问题时，输入框里的任何一行都会被当成**答案**提交，`/stop` 根本到不了命令处理器——最需要停的时候它恰好不可用。
+2. **空参数的 `/stop` 不再默认停掉全部。** 它和 `/stop <id>` 只差一个 token，又常常在别的后台任务正跑时被敲下；"全停"要用 `/stop all` 说出口。
+
 ### `/config`
 
 显示模型、终端和工作区配置。其中 `Project Dir` 是该 cwd 在

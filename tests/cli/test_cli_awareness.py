@@ -247,6 +247,103 @@ class TestCLIAwareness(unittest.TestCase):
             finally:
                 registry.stop()
 
+    def _stop_ctx(self, registry):
+        """CommandContext with one background terminal and one background agent."""
+        bg_agent = MagicMock()
+        ctx = CommandContext(
+            agent_config={},
+            current_agent=None,
+            background_processes=registry,
+            bg_tasks={"bg_1": {"thread": None, "agent": bg_agent, "prompt": "audit deps", "num": 1}},
+        )
+        return ctx, bg_agent
+
+    def test_cmd_stop_without_target_stops_nothing(self):
+        """A bare /stop is usage output, never a bulk kill.
+
+        It is one keystroke away from `/stop <id>` and arrives while unrelated
+        work is running, so "stop everything" must be typed on purpose.
+        """
+        import shlex
+
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        with tempfile.TemporaryDirectory() as td:
+            registry = BackgroundProcessRegistry(user_id="stop-needs-target")
+            command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+            item = registry.start(command, cwd=td)
+            ctx, bg_agent = self._stop_ctx(registry)
+            fake_console = MagicMock()
+            try:
+                with patch.object(cli_runtime_commands, "get_console", return_value=fake_console):
+                    cli_runtime_commands._cmd_stop(ctx, "")
+                rendered = "\n".join(
+                    str(call.args[0]) for call in fake_console.print.call_args_list if call.args
+                )
+                self.assertIn("needs a target", rendered)
+                self.assertNotIn("Stopped", rendered)
+                # The running targets are listed so the user can copy an id,
+                # and Ctrl+C is named as the way to stop the current run.
+                self.assertIn(item.id, rendered)
+                self.assertIn("Ctrl+C", rendered)
+                self.assertEqual(registry.running_count(), 1)
+                bg_agent.cancel.assert_not_called()
+            finally:
+                registry.stop()
+
+    def test_cmd_stop_all_stops_terminals_and_agent_tasks(self):
+        """`/stop all` is the explicit bulk form the bare command used to be."""
+        import shlex
+
+        from agentica.tools.background_processes import BackgroundProcessRegistry
+
+        with tempfile.TemporaryDirectory() as td:
+            registry = BackgroundProcessRegistry(user_id="stop-all")
+            command = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+            registry.start(command, cwd=td)
+            ctx, bg_agent = self._stop_ctx(registry)
+            fake_console = MagicMock()
+            try:
+                with patch.object(cli_runtime_commands, "get_console", return_value=fake_console):
+                    cli_runtime_commands._cmd_stop(ctx, "all")
+                rendered = "\n".join(
+                    str(call.args[0]) for call in fake_console.print.call_args_list if call.args
+                )
+                self.assertIn("Stopped 1 terminal(s), 1 agent task(s).", rendered)
+                self.assertEqual(registry.running_count(), 0)
+                bg_agent.cancel.assert_called_once_with()
+            finally:
+                registry.stop()
+
+    def test_cmd_stop_targets_one_agent_task_only(self):
+        """`/stop #n` must not spill over to the other background agent."""
+        first, second = MagicMock(), MagicMock()
+        ctx = CommandContext(
+            agent_config={},
+            current_agent=None,
+            bg_tasks={
+                "bg_1": {"thread": None, "agent": first, "prompt": "a", "num": 1},
+                "bg_2": {"thread": None, "agent": second, "prompt": "b", "num": 2},
+            },
+        )
+        fake_console = MagicMock()
+        with patch.object(cli_runtime_commands, "get_console", return_value=fake_console):
+            cli_runtime_commands._cmd_stop(ctx, "#2")
+        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        self.assertIn("Stopped 1 agent task(s).", rendered)
+        first.cancel.assert_not_called()
+        second.cancel.assert_called_once_with()
+
+    def test_cmd_stop_with_nothing_running_points_at_ctrl_c(self):
+        """With no background work, /stop explains it is not the run's stop key."""
+        ctx = CommandContext(agent_config={}, current_agent=None)
+        fake_console = MagicMock()
+        with patch.object(cli_runtime_commands, "get_console", return_value=fake_console):
+            cli_runtime_commands._cmd_stop(ctx, "")
+        rendered = "\n".join(str(call.args[0]) for call in fake_console.print.call_args_list if call.args)
+        self.assertIn("No active background tasks.", rendered)
+        self.assertIn("Ctrl+C interrupts the current run", rendered)
+
     def _make_apply_profile_ctx(self):
         """Build a CommandContext whose mock agent survives a profile switch.
 

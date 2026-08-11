@@ -209,9 +209,9 @@ def build_status_bar_fragments(
         noun = "terminal" if background_terminal_count == 1 else "terminals"
         bg_full = (
             f"{background_terminal_count} background {noun} running"
-            " · /ps to view · /stop to close"
+            " · /ps to view · /stop <id> to close"
         )
-        bg_short = f"{background_terminal_count} bg · /ps · /stop"
+        bg_short = f"{background_terminal_count} bg · /ps"
     goal_text = ""
     if goal_token_budget is not None:
         used_s = _format_tokens_short(int(goal_tokens_used or 0))

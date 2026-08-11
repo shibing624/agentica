@@ -370,7 +370,8 @@ class TestCLIStatusBar(unittest.TestCase):
 
         self.assertIn("1 background terminal running", text)
         self.assertIn("/ps to view", text)
-        self.assertIn("/stop to close", text)
+        # The hint must carry the argument: a bare /stop no longer stops anything.
+        self.assertIn("/stop <id> to close", text)
 
 
     def test_status_bar_idle_keeps_base_classes(self):

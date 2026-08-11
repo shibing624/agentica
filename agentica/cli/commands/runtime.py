@@ -634,7 +634,7 @@ def _cmd_ps(ctx: CommandContext, cmd_args: str = ""):
             for line in prompt.splitlines() or [""]:
                 con.print(f"      {line}")
 
-    con.print("  [dim]Use /stop <id|pid|#n> or /stop to stop all.[/dim]")
+    con.print("  [dim]Stop one with /stop <id|pid|#n>, or every one with /stop all.[/dim]")
 
 
 
@@ -727,13 +727,49 @@ def _cmd_background(ctx: CommandContext, cmd_args: str = ""):
 
 
 def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
+    """Stop BACKGROUND work only — an explicit target is required.
+
+    Two deliberate boundaries:
+
+    - ``/stop`` never touches the run you are waiting on. Ctrl+C owns that,
+      and it does strictly more than ``Agent.cancel()``: it wakes a thread
+      parked in ``ask_user_question``, pauses a standing goal so the post-turn
+      hook doesn't immediately re-queue a continuation, and escalates to a
+      force exit on a second press. A second, weaker way to cancel the current
+      run would only differ from Ctrl+C in the cases that matter — and while
+      the agent is blocked on ``ask_user_question`` a typed line is consumed
+      as the *answer*, so ``/stop`` cannot even reach this handler there.
+    - A bare ``/stop`` prints usage instead of stopping everything. It is one
+      keystroke away from ``/stop <id>``, it arrives while other work is
+      running, and killing every background task is not a plausible default
+      for a missing argument. ``/stop all`` says it on purpose.
+    """
     con = get_console()
     target = cmd_args.strip()
     stopped_agents = 0
     stopped_terms = 0
 
+    if not target:
+        # "Is anything running" must agree with what /ps shows, so a task whose
+        # agent object hasn't been constructed yet (the thread is still starting)
+        # still counts — otherwise /ps lists one and /stop says there are none.
+        running_agents = list(ctx.bg_tasks)
+        running_terms = (
+            ctx.background_processes.list(include_finished=False)
+            if ctx.background_processes is not None
+            else []
+        )
+        if not running_agents and not running_terms:
+            con.print("  [dim]No active background tasks.[/dim]")
+            con.print("  [dim]Ctrl+C interrupts the current run; /stop is only for background tasks.[/dim]")
+            return
+        con.print("  [yellow]/stop needs a target — nothing was stopped.[/yellow]")
+        _cmd_ps(ctx, "")
+        con.print("  [dim]Ctrl+C interrupts the current run; /stop is only for background tasks.[/dim]")
+        return
+
     def _matches_agent(tid: str, info: dict) -> bool:
-        if not target or target.lower() in {"all", "*"}:
+        if target.lower() in {"all", "*"}:
             return True
         return target in {tid, str(info.get("num")), f"#{info.get('num')}"}
 
@@ -746,13 +782,10 @@ def _cmd_stop(ctx: CommandContext, cmd_args: str = ""):
             stopped_agents += 1
 
     if ctx.background_processes is not None:
-        stopped_terms = len(ctx.background_processes.stop(target or None))
+        stopped_terms = len(ctx.background_processes.stop(target))
 
     if stopped_agents == 0 and stopped_terms == 0:
-        if target:
-            con.print(f"  [dim]No running background task matched '{target}'.[/dim]")
-        else:
-            con.print("  [dim]No running background tasks.[/dim]")
+        con.print(f"  [dim]No running background task matched '{target}'.[/dim]")
         return
     parts = []
     if stopped_terms:
