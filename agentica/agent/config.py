@@ -11,7 +11,6 @@ Provides layered configuration:
 
 from dataclasses import dataclass, field
 
-from agentica.config import AGENTICA_NUM_HISTORY_TURNS
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -20,7 +19,6 @@ from typing import (
     List,
     Literal,
     Optional,
-    Type,
     Union,
 )
 
@@ -349,62 +347,3 @@ class SandboxConfig:
     ])
     allowed_commands: Optional[List[str]] = None
     max_execution_time: int = 300
-
-
-@dataclass
-class AgentDefinition:
-    """Identity and capability definition for an Agent.
-
-    This groups the "what this agent is" fields into one object so callers do
-    not need to pass a long flat constructor for common structured setups.
-    """
-
-    model: Optional[Any] = None
-    auxiliary_model: Optional[Any] = None
-    auxiliary_task_models: Optional[Dict[str, Any]] = None
-    name: Optional[str] = None
-    agent_id: Optional[str] = None
-    description: Optional[str] = None
-    instructions: Optional[Union[str, List[str], Callable]] = None
-    tools: Optional[List[Any]] = None
-    knowledge: Optional[Any] = None
-    workspace: Optional[Any] = None
-    work_dir: Optional[str] = None
-    response_model: Optional[Type[Any]] = None
-
-
-@dataclass
-class AgentExecutionConfig:
-    """Execution behavior for an Agent."""
-
-    add_history_to_context: bool = False
-    num_history_turns: int = AGENTICA_NUM_HISTORY_TURNS
-    use_structured_outputs: bool = False
-    debug: bool = False
-    enable_tracing: bool = False
-    max_api_retry: int = 1
-    session_id: Optional[str] = None
-    hooks: Optional[Any] = None
-
-
-@dataclass
-class AgentMemoryConfig:
-    """Memory and experience behavior for an Agent."""
-
-    enable_long_term_memory: bool = False
-    enable_experience_capture: bool = False
-    long_term_memory_config: WorkspaceMemoryConfig = field(default_factory=WorkspaceMemoryConfig)
-    experience_config: ExperienceConfig = field(default_factory=ExperienceConfig)
-    working_memory: Optional[Any] = None
-    context: Optional[Dict[str, Any]] = None
-
-
-@dataclass
-class AgentSafetyConfig:
-    """Guardrail and sandbox configuration for an Agent."""
-
-    sandbox_config: Optional[SandboxConfig] = None
-    tool_input_guardrails: List[Any] = field(default_factory=list)
-    tool_output_guardrails: List[Any] = field(default_factory=list)
-    input_guardrails: List[Any] = field(default_factory=list)
-    output_guardrails: List[Any] = field(default_factory=list)

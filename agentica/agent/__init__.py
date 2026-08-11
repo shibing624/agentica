@@ -19,10 +19,6 @@ from agentica.agent.config import (
     PromptConfig,
     ToolConfig,
     WorkspaceMemoryConfig,
-    AgentDefinition,
-    AgentExecutionConfig,
-    AgentMemoryConfig,
-    AgentSafetyConfig,
 )
 from agentica.hooks import AgentHooks, RunHooks
 
@@ -32,10 +28,6 @@ __all__ = [
     "PromptConfig",
     "ToolConfig",
     "WorkspaceMemoryConfig",
-    "AgentDefinition",
-    "AgentExecutionConfig",
-    "AgentMemoryConfig",
-    "AgentSafetyConfig",
     "AgentHooks",
     "RunHooks",
 ]

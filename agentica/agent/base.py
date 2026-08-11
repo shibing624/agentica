@@ -63,10 +63,6 @@ from agentica.agent.config import (
     ToolRuntimeConfig,
     SkillRuntimeConfig,
     ExperienceConfig,
-    AgentDefinition,
-    AgentExecutionConfig,
-    AgentMemoryConfig,
-    AgentSafetyConfig,
 )
 from agentica.agent.history_filter import HistoryFilter
 from agentica.agent.permissions import (
@@ -1061,57 +1057,6 @@ class Agent(PromptsMixin, AsToolMixin, ToolsMixin, PrinterMixin, GoalMixin):
     @property
     def identifier(self) -> Optional[str]:
         return self.name or self.agent_id
-
-    @classmethod
-    def from_parts(
-        cls,
-        definition: Optional[AgentDefinition] = None,
-        execution: Optional[AgentExecutionConfig] = None,
-        memory: Optional[AgentMemoryConfig] = None,
-        safety: Optional[AgentSafetyConfig] = None,
-    ) -> "Agent":
-        """Create an Agent from grouped config parts.
-
-        This provides a compact alternative to the flat 40+ parameter
-        constructor without breaking the existing `Agent(...)` call style.
-        """
-        definition = definition or AgentDefinition()
-        execution = execution or AgentExecutionConfig()
-        memory = memory or AgentMemoryConfig()
-        safety = safety or AgentSafetyConfig()
-        return cls(
-            model=definition.model,
-            auxiliary_model=definition.auxiliary_model,
-            auxiliary_task_models=definition.auxiliary_task_models,
-            name=definition.name,
-            agent_id=definition.agent_id,
-            description=definition.description,
-            instructions=definition.instructions,
-            tools=definition.tools,
-            knowledge=definition.knowledge,
-            workspace=definition.workspace,
-            work_dir=definition.work_dir,
-            response_model=definition.response_model,
-            add_history_to_context=execution.add_history_to_context,
-            num_history_turns=execution.num_history_turns,
-            use_structured_outputs=execution.use_structured_outputs,
-            debug=execution.debug,
-            enable_tracing=execution.enable_tracing,
-            max_api_retry=execution.max_api_retry,
-            hooks=execution.hooks,
-            session_id=execution.session_id,
-            enable_long_term_memory=memory.enable_long_term_memory,
-            enable_experience_capture=memory.enable_experience_capture,
-            long_term_memory_config=memory.long_term_memory_config,
-            experience_config=memory.experience_config,
-            working_memory=memory.working_memory,
-            context=memory.context,
-            sandbox_config=safety.sandbox_config,
-            tool_input_guardrails=safety.tool_input_guardrails,
-            tool_output_guardrails=safety.tool_output_guardrails,
-            input_guardrails=safety.input_guardrails,
-            output_guardrails=safety.output_guardrails,
-        )
 
     @classmethod
     def from_workspace(

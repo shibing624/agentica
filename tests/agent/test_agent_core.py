@@ -16,13 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from agentica.agent import (
-    Agent,
-    AgentDefinition,
-    AgentExecutionConfig,
-    AgentMemoryConfig,
-    AgentSafetyConfig,
-)
+from agentica.agent import Agent
 from agentica.hooks import AgentHooks, RunHooks
 from agentica.model.openai import OpenAIChat
 from agentica.model.message import Message
@@ -549,40 +543,6 @@ class TestAgentFromParts:
         assert model.user_id == "user-1"
         assert model.session_id == "session-1"
         assert model.agent_name == "A"
-
-    def test_from_parts_groups_constructor_surface(self):
-        agent = Agent.from_parts(
-            definition=AgentDefinition(
-                name="Planner",
-                model=_make_model(),
-                instructions="Plan carefully",
-            ),
-            execution=AgentExecutionConfig(
-                add_history_to_context=True,
-                max_api_retry=2,
-                session_id="session-1",
-            ),
-            memory=AgentMemoryConfig(
-                enable_long_term_memory=True,
-                enable_experience_capture=True,
-                context={"mode": "planning"},
-            ),
-            safety=AgentSafetyConfig(
-                input_guardrails=["input-check"],
-                output_guardrails=["output-check"],
-            ),
-        )
-
-        assert agent.name == "Planner"
-        assert agent.instructions == "Plan carefully"
-        assert agent.add_history_to_context is True
-        assert agent.max_api_retry == 2
-        assert agent.session_id == "session-1"
-        assert agent.enable_long_term_memory is True
-        assert agent.enable_experience_capture is True
-        assert agent.context == {"mode": "planning"}
-        assert agent.input_guardrails == ["input-check"]
-        assert agent.output_guardrails == ["output-check"]
 
 
 class TestPrintResponseStreamParallelToolResults:
