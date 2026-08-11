@@ -55,6 +55,19 @@ def test_format_session_summary_keeps_zero_usage_visible():
     assert "Token usage: total=0 input=0 output=0" in rendered
 
 
+def test_format_session_summary_brief_omits_usage_and_resume_hint():
+    rendered = format_session_summary(
+        elapsed_seconds=905,
+        usage=Usage(input_tokens=10, output_tokens=2, total_tokens=12),
+        session_id="session-123",
+        brief=True,
+    ).plain
+
+    assert "Worked for 15m 05s" in rendered
+    assert "Token usage" not in rendered
+    assert "agentica resume" not in rendered
+
+
 def test_newchat_prints_summary_then_header_and_resets_session_state(monkeypatch):
     usage = Usage(input_tokens=10, output_tokens=2, total_tokens=12)
     model = SimpleNamespace(usage=usage)

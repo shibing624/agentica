@@ -314,6 +314,21 @@ class TestBuiltinFileToolReadCorrectness:
 
 
 class TestBuiltinFileToolWriteFile:
+    def test_write_result_carries_actual_file_change(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "existing.txt")
+        Path(fp).write_text("before\n")
+
+        result = asyncio.run(file_tool.write_file(fp, "after\n"))
+
+        assert result.display_meta == {
+            "files": [{
+                "path": str(Path(fp).resolve()),
+                "action": "update",
+                "before": "before\n",
+                "after": "after\n",
+            }]
+        }
+
     def test_write_new_file(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "new.txt")
         result = asyncio.run(file_tool.write_file(fp, "hello world"))
@@ -461,6 +476,38 @@ class TestBuiltinFileToolRequestPathAccess:
 
 
 class TestBuiltinFileToolApplyPatch:
+    def test_result_carries_actual_changes_for_all_actions(self, file_tool, tmp_dir):
+        Path(tmp_dir, "update.py").write_text("VALUE = 1\n")
+        Path(tmp_dir, "delete.py").write_text("obsolete\n")
+        patch_text = """*** Begin Patch
+*** Update File: update.py
+@@
+-VALUE = 1
++VALUE = 2
+*** Add File: add.py
++created = True
+*** Delete File: delete.py
+*** End Patch"""
+
+        result = asyncio.run(file_tool.apply_patch(patch_text))
+
+        assert result.display_meta == {
+            "files": [
+                {
+                    "path": "update.py", "action": "update",
+                    "before": "VALUE = 1\n", "after": "VALUE = 2\n",
+                },
+                {
+                    "path": "add.py", "action": "add",
+                    "before": None, "after": "created = True",
+                },
+                {
+                    "path": "delete.py", "action": "delete",
+                    "before": "obsolete\n", "after": None,
+                },
+            ]
+        }
+
     def test_registered_as_serial_destructive_raw_string_tool(self, file_tool):
         function = file_tool.functions["apply_patch"]
         function.process_entrypoint(strict=False)
@@ -739,6 +786,21 @@ class TestBuiltinFileToolEditFile:
         result = asyncio.run(file_tool.edit_file(fp, "world", "python"))
         assert "Successfully" in result
         assert Path(fp).read_text() == "hello python"
+
+    def test_edit_result_carries_the_exact_change_executed(self, file_tool, tmp_dir):
+        fp = os.path.join(tmp_dir, "edit.txt")
+        Path(fp).write_text("first = 1\nsecond = 1\n")
+
+        result = asyncio.run(file_tool.edit_file(fp, "second = 1", "second = 2"))
+
+        assert result.display_meta == {
+            "files": [{
+                "path": str(Path(fp).resolve()),
+                "action": "update",
+                "before": "first = 1\nsecond = 1\n",
+                "after": "first = 1\nsecond = 2\n",
+            }]
+        }
 
     def test_multiple_edits_via_separate_calls(self, file_tool, tmp_dir):
         fp = os.path.join(tmp_dir, "multi.txt")

@@ -91,6 +91,108 @@ class TestCLIToolRender(unittest.TestCase):
         self.assertEqual(diff_text.count("pkg/sample.py"), 1)
         self.assertNotIn("#1", diff_text)
 
+    def test_same_file_edit_batch_renders_each_tool_result_snapshot(self):
+        """Each completion renders the exact change reported by its tool call."""
+        from agentica.cli.display import StreamDisplayManager
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "sample.py"
+            target.write_text("first = 1\nsecond = 1\n", encoding="utf-8")
+            first = {
+                "file_path": "sample.py",
+                "old_string": "first = 1",
+                "new_string": "first = 2",
+            }
+            second = {
+                "file_path": "sample.py",
+                "old_string": "second = 1",
+                "new_string": "second = 2",
+            }
+            fake = MagicMock()
+            fake.width = 80
+            manager = StreamDisplayManager(fake, work_dir=root)
+
+            manager.display_tool("edit_file", first, tool_call_id="edit-1")
+            manager.display_tool("edit_file", second, tool_call_id="edit-2")
+            target.write_text("first = 2\nsecond = 2\n", encoding="utf-8")
+
+            manager.display_tool_result(
+                "edit_file", "Successfully replaced 1 occurrence", elapsed=0.1,
+                tool_args=first, tool_call_id="edit-1",
+                tool_display_meta={"files": [{
+                    "path": str(target), "action": "update",
+                    "before": "first = 1\nsecond = 1\n",
+                    "after": "first = 2\nsecond = 1\n",
+                }]},
+            )
+            manager.display_tool_result(
+                "edit_file", "Successfully replaced 1 occurrence", elapsed=0.1,
+                tool_args=second, tool_call_id="edit-2",
+                tool_display_meta={"files": [{
+                    "path": str(target), "action": "update",
+                    "before": "first = 2\nsecond = 1\n",
+                    "after": "first = 2\nsecond = 2\n",
+                }]},
+            )
+
+            diffs = [
+                str(call.args[0].code)
+                for call in fake.print.call_args_list
+                if call.args and hasattr(call.args[0], "code")
+            ]
+
+        self.assertEqual(len(diffs), 2)
+        self.assertIn("-first = 1", diffs[0])
+        self.assertIn("+first = 2", diffs[0])
+        self.assertNotIn("-second = 1", diffs[0])
+        self.assertNotIn("+second = 2", diffs[0])
+        self.assertIn("-second = 1", diffs[1])
+        self.assertIn("+second = 2", diffs[1])
+        self.assertNotIn("-first = 1", diffs[1])
+        self.assertNotIn("+first = 2", diffs[1])
+
+    def test_write_file_uses_tool_result_snapshot_not_arguments(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        manager = StreamDisplayManager(fake)
+        manager.display_tool_result(
+            "write_file",
+            "Updated file",
+            tool_args={"file_path": "sample.py", "content": "stale argument\n"},
+            tool_display_meta={"files": [{
+                "path": "sample.py", "action": "update",
+                "before": "@old\n", "after": "@new\n",
+            }]},
+        )
+
+        diff_text = str(fake.print.call_args_list[-1].args[0].code)
+        self.assertIn("-@old", diff_text)
+        self.assertIn("+@new", diff_text)
+        self.assertNotIn("stale argument", diff_text)
+
+    def test_apply_patch_uses_all_tool_result_snapshots(self):
+        from agentica.cli.display import StreamDisplayManager
+
+        fake = MagicMock()
+        fake.width = 80
+        manager = StreamDisplayManager(fake)
+        manager.display_tool_result(
+            "apply_patch",
+            "Successfully applied patch to 2 files (+1 -1):\nM a.py (+1 -1)\nA b.py (+1 -0)",
+            tool_args={"patch": "not needed by the renderer"},
+            tool_display_meta={"files": [
+                {"path": "a.py", "action": "update", "before": "a = 1\n", "after": "a = 2\n"},
+                {"path": "b.py", "action": "add", "before": None, "after": "b = 1\n"},
+            ]},
+        )
+
+        diff_text = str(fake.print.call_args_list[-1].args[0].code)
+        self.assertIn("diff -- a.py", diff_text)
+        self.assertIn("diff -- b.py", diff_text)
+
 
     def test_write_file_summary_uses_configured_work_dir(self):
         from agentica.cli.display import StreamDisplayManager

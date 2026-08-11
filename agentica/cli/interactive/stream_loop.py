@@ -405,6 +405,7 @@ def _process_stream_response(
                             "is_error": is_error,
                             "tool_args": tool_args,
                             "tool_call_id": info.get("tool_call_id"),
+                            "tool_display_meta": info.get("tool_display_meta"),
                         }
                         if elapsed is not None:
                             display_kwargs["elapsed"] = float(elapsed)
@@ -505,6 +506,7 @@ def _process_stream_response(
                 elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
                 usage=current_agent.model.usage,
                 session_id=resumable_session_id(current_agent),
+                brief=True,
             )
         )
     except AgentCancelledError:
@@ -517,6 +519,7 @@ def _process_stream_response(
                 elapsed_seconds=time.monotonic() - tui_state["session_started_at"],
                 usage=current_agent.model.usage,
                 session_id=resumable_session_id(current_agent),
+                brief=True,
             )
         )
     except Exception as e:

@@ -6,7 +6,48 @@
 Eliminates boilerplate json.dumps across all tool implementations.
 """
 import json
-from typing import Any
+from typing import Any, Dict, List, Optional
+
+
+class ToolDisplayOutput(str):
+    """A tool result string that also carries display-only metadata.
+
+    Write tools know their own before/after content at execution time. A
+    renderer that instead re-reads the file after the fact cannot reconstruct
+    per-call diffs, because a batch of writes to one file has already reached
+    its final state by the time the first result is rendered.
+
+    Subclassing ``str`` keeps this transparent to every consumer that treats a
+    tool result as text (LLM payload, logging, persistence, ``startswith``
+    soft-error checks); only the presentation layer looks at ``display_meta``.
+    """
+
+    display_meta: Dict[str, Any]
+
+    def __new__(cls, value: str, display_meta: Dict[str, Any]) -> "ToolDisplayOutput":
+        obj = super().__new__(cls, value)
+        obj.display_meta = display_meta
+        return obj
+
+
+def file_change_meta(
+        path: str,
+        action: str,
+        before: Optional[str],
+        after: Optional[str],
+) -> Dict[str, Any]:
+    """Describe one file change for display-only rendering."""
+    return {"path": path, "action": action, "before": before, "after": after}
+
+
+def file_display_meta(changes: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Wrap one or more file changes as a write tool's display metadata.
+
+    A single envelope shape covers all three write tools: ``edit_file`` and
+    ``write_file`` report one file, ``apply_patch`` reports every file it
+    mutated atomically.
+    """
+    return {"files": changes}
 
 
 def tool_error(message: str, **extra) -> str:
