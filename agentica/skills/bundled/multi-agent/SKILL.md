@@ -82,21 +82,20 @@ the short name.
   worker cannot see your conversation, so every decision you leave open comes
   back to you as a question.
 - **A question about work you handed over is yours to answer.** You hold the
-  context the other session is missing. Passing each one to your user is how one
-  handoff becomes an interruption per worker.
+  context the worker is missing. Passing each one to your user is how one handoff
+  becomes an interruption per worker.
+- **A worker reports back when it finishes.** You cannot see the worker's
+  terminal, so "done" is something it sends, not something you can observe. No
+  reply is only right when a message was purely informational.
 - **A question about work handed to YOU goes back to whoever handed it** — with
   `send_message`, not `ask_user_question`. That prompt renders in your own
   terminal, where nobody is sitting, and times out. Say what you are blocked on
   and end your turn; the answer arrives as a new turn. Only what a human must
   settle (an action your permissions refuse, something destructive beyond the
-  mandate, credentials) is refused and reported back instead. This is the same
-  wherever the shape puts you: one session splitting work up, several working
-  one question in parallel, a relay of stages, two sessions arguing a call.
+  mandate, credentials) is refused and reported back instead.
 - **A queued message is not a read receipt.** You will know it was received only
-  when the worker replies.
-- **Do not sleep waiting for the reply.** Finish your turn and say you are
-  waiting. The answer arrives on its own as a new turn, whether or not you are
-  running; polling with `sleep` just spends the user's money to sit still.
+  when the worker replies. Do not sleep waiting for it — finish your turn; the
+  reply arrives on its own as a new turn.
 
 ## What not to do with the channel
 
