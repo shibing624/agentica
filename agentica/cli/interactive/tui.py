@@ -582,6 +582,7 @@ def _setup_tui(
             thinking_mode=tui_state.get("thinking_mode", ""),
             work_dir=tui_state.get("work_dir", ""),
             git_branch=tui_state.get("git_branch", ""),
+            peer_name=tui_state.get("peer_name", ""),
             context_tokens=tui_state.get("context_tokens", 0),
             context_window=tui_state.get("context_window", 128000),
             cost_usd=tui_state.get("cost_usd", 0.0),

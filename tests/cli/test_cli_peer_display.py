@@ -4,6 +4,7 @@
 @description: How an arriving peer message is rendered in the receiving terminal.
 """
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from rich.console import Console
@@ -84,6 +85,57 @@ class TestPeerMessageRendering:
 
         assert "item-79" in out
         assert "…" not in out
+
+
+class _FakeSessionLog:
+    def __init__(self, forked_from=None):
+        self._forked_from = forked_from
+
+    def get_forked_from(self):
+        return self._forked_from
+
+
+class _FakePeerSession:
+    def __init__(self, *, name="agentica-aa", cwd="/repo", peers=None):
+        self.name = name
+        self.info = SimpleNamespace(cwd=cwd)
+        self._peers = peers or []
+
+    def list_peers(self):
+        return self._peers
+
+
+class TestPeerNameStatusBarVisibility:
+    def test_hidden_without_peer_session(self):
+        from agentica.cli.interactive.app import _visible_peer_name_for_status_bar
+
+        agent = SimpleNamespace(_session_log=_FakeSessionLog())
+
+        assert _visible_peer_name_for_status_bar(None, agent) == ""
+
+    def test_shown_when_another_live_peer_uses_the_same_work_dir(self):
+        from agentica.cli.interactive.app import _visible_peer_name_for_status_bar
+
+        peer_session = _FakePeerSession(peers=[SimpleNamespace(cwd="/repo")])
+        agent = SimpleNamespace(_session_log=_FakeSessionLog())
+
+        assert _visible_peer_name_for_status_bar(peer_session, agent) == "agentica-aa"
+
+    def test_hidden_when_live_peers_are_from_other_work_dirs(self):
+        from agentica.cli.interactive.app import _visible_peer_name_for_status_bar
+
+        peer_session = _FakePeerSession(peers=[SimpleNamespace(cwd="/other")])
+        agent = SimpleNamespace(_session_log=_FakeSessionLog())
+
+        assert _visible_peer_name_for_status_bar(peer_session, agent) == ""
+
+    def test_shown_for_a_forked_session_even_before_another_peer_is_seen(self):
+        from agentica.cli.interactive.app import _visible_peer_name_for_status_bar
+
+        peer_session = _FakePeerSession(peers=[])
+        agent = SimpleNamespace(_session_log=_FakeSessionLog("source-session"))
+
+        assert _visible_peer_name_for_status_bar(peer_session, agent) == "agentica-aa"
 
 
 class TestRelayedTurnsAreNotEchoedTwice:

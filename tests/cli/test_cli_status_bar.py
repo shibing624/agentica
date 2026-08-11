@@ -234,6 +234,46 @@ class TestCLIStatusBar(unittest.TestCase):
         self.assertNotIn("░", text)
 
 
+    def test_build_status_bar_fragments_shows_peer_identity_between_branch_and_context(self):
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-5",
+            model_provider="openai",
+            work_dir="/repo",
+            git_branch="main",
+            peer_name="agentica-aa",
+            context_tokens=9_000,
+            context_window=100_000,
+            cost_usd=0.13,
+            terminal_width=120,
+        )
+        text = "".join(v for _, v in frags)
+
+        self.assertIn("openai/gpt-5 │ /repo · main │ agentica-aa │ 9K/100K 9% │ $0.13", text)
+        self.assertLess(text.index("main"), text.index("agentica-aa"))
+        self.assertLess(text.index("agentica-aa"), text.index("9K/100K"))
+
+
+    def test_build_status_bar_fragments_hides_peer_identity_when_narrow(self):
+        from agentica.cli.display import build_status_bar_fragments
+
+        frags = build_status_bar_fragments(
+            model_name="gpt-5",
+            model_provider="openai",
+            work_dir="/repo",
+            git_branch="main",
+            peer_name="agentica-aa",
+            context_tokens=9_000,
+            context_window=100_000,
+            cost_usd=0.13,
+            terminal_width=42,
+        )
+        text = "".join(v for _, v in frags)
+
+        self.assertNotIn("agentica-aa", text)
+
+
     def test_build_status_bar_fragments_compacts_project_to_fit(self):
         from agentica.cli.display import build_status_bar_fragments
 

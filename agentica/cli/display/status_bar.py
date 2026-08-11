@@ -148,6 +148,7 @@ def build_status_bar_fragments(
     thinking_mode: str = "",
     work_dir: str = "",
     git_branch: str = "",
+    peer_name: str = "",
     context_tokens: int = 0,
     context_window: int = 0,
     cost_usd: float = 0.0,
@@ -233,6 +234,7 @@ def build_status_bar_fragments(
         show_cost: bool = True,
         background_detail: bool = True,
         show_goal: bool = True,
+        show_peer: bool = True,
     ):
         frags = [("class:sb", " ▸ ")]
         if profile:
@@ -250,6 +252,11 @@ def build_status_bar_fragments(
             frags.extend([
                 ("class:sb-dim", separator),
                 ("class:sb", branch),
+            ])
+        if show_peer and peer_name:
+            frags.extend([
+                ("class:sb-dim", " │ "),
+                ("class:sb", peer_name),
             ])
         if show_context:
             frags.append(("class:sb-dim", " │ "))
@@ -299,21 +306,21 @@ def build_status_bar_fragments(
         ),
         compose(
             profile=profile_name, context_detail=False, show_cost=False,
-            background_detail=False,
+            background_detail=False, show_peer=False,
         ),
         compose(
             profile=profile_name, show_context=False, show_cost=False,
-            background_detail=False,
+            background_detail=False, show_peer=False,
         ),
         compose(
             show_context=False, show_cost=False, background_detail=False,
-            show_goal=False,
+            show_goal=False, show_peer=False,
         ),
     ]
     if terminal_width < 52:
         candidates.insert(
             0,
-            compose(show_context=False, show_cost=False, background_detail=False),
+            compose(show_context=False, show_cost=False, background_detail=False, show_peer=False),
         )
     spinner_width = len(spinner_text) + 2 if agent_running and spinner_text else 0
     available_width = max(1, terminal_width - spinner_width)

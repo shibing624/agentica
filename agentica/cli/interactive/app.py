@@ -113,6 +113,28 @@ def _cli_log_file() -> Tuple[Optional[str], Optional[str]]:
     return path, config.AGENTICA_LOG_LEVEL if path else None
 
 
+def _visible_peer_name_for_status_bar(peer_session: Optional[PeerSession], agent) -> str:
+    """Return this session's short peer name only when it disambiguates windows.
+
+    A single ordinary CLI does not need another always-on identifier. The name
+    becomes useful when another live session is in the same working directory,
+    or when this session is a forked conversation that the user is likely to
+    compare side-by-side with its source.
+    """
+    if peer_session is None:
+        return ""
+
+    if agent is not None and agent._session_log is not None:
+        if agent._session_log.get_forked_from():
+            return peer_session.name
+
+    current_cwd = peer_session.info.cwd
+    for peer in peer_session.list_peers():
+        if peer.cwd == current_cwd:
+            return peer_session.name
+    return ""
+
+
 def _maybe_start_cron(state: SessionState, agent_config, extra_tools,
                       workspace, skills_registry) -> None:
     """Start the cron scheduler daemon thread if settings.cron.enabled is true.
@@ -377,6 +399,7 @@ def run_interactive(
         "thinking_mode": _status_thinking_mode(current_agent, agent_config),
         "work_dir": status_work_dir,
         "git_branch": _read_git_branch(status_work_dir),
+        "peer_name": _visible_peer_name_for_status_bar(state.peer_session, current_agent),
         "context_tokens": 0,
         "context_window": current_agent.model.context_window if current_agent.model else 128000,
         "cost_usd": 0.0,
@@ -520,6 +543,9 @@ def run_interactive(
             if "work_dir" in result:
                 peer_updates["cwd"] = result["work_dir"]
             state.peer_session.publish(**peer_updates)
+            tui_state["peer_name"] = _visible_peer_name_for_status_bar(
+                state.peer_session, state.current_agent
+            )
         if "session_started_at" in result:
             tui_state["session_started_at"] = result["session_started_at"]
             tui_state["active_seconds"] = 0.0
@@ -910,6 +936,7 @@ def run_interactive(
                     context_tokens=tui_state["context_tokens"],
                     context_window=tui_state["context_window"],
                 )
+                tui_state["peer_name"] = _visible_peer_name_for_status_bar(peers, agent)
             except OSError:
                 logger.warning("peer heartbeat failed", exc_info=True)
             if state.agent_running:
