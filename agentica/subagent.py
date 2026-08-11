@@ -182,7 +182,6 @@ class SubagentRegistry:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._runs: Dict[str, SubagentRun] = {}
-            cls._instance._listeners: List[Callable[[SubagentRun], None]] = []
         return cls._instance
     
     def register(self, run: SubagentRun) -> None:
@@ -240,17 +239,6 @@ class SubagentRegistry:
             run.error = error
         if token_usage is not None:
             run.token_usage = token_usage
-        
-        # Notify listeners
-        for listener in self._listeners:
-            try:
-                listener(run)
-            except Exception as e:
-                logger.error(f"Subagent listener error: {e}")
-    
-    def on_complete(self, callback: Callable[[SubagentRun], None]) -> None:
-        """Register a callback for when a subagent completes."""
-        self._listeners.append(callback)
     
     def cleanup_completed(self, max_age_seconds: int = 3600) -> int:
         """Remove completed/cancelled runs older than max_age_seconds."""
