@@ -44,7 +44,7 @@ class TestPeerMessageRendering:
         out = _render([_message("方案A全量+四臂完成")])
 
         assert "nlp-f1" in out
-        assert "💬" in out
+        assert "🖥️" in out
         assert "方案A全量+四臂完成" in out
 
     def test_an_agent_message_does_not_borrow_the_human_prompt_marker(self):

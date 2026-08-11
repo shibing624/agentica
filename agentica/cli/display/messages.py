@@ -164,9 +164,9 @@ def display_peer_messages(messages: List[PeerMessage]) -> None:
             _echo_panel(body)
         else:
             console.print()
-            # Header line mirrors a tool call: `  ↳ 💬 <session>` in bold cyan.
+            # Header line mirrors a tool call: `  ↳ 🖥️ <session>` in bold cyan.
             console.print(
-                f"  ↳ 💬 {message.from_name}", style=f"bold {COLORS['tool']}"
+                f"  ↳ 🖥️ {message.from_name}", style=f"bold {COLORS['tool']}"
             )
             # Message body indented under the header; each line kept on its own
             # row so multi-line replies stay aligned and fold cleanly.
